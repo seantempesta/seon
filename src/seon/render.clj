@@ -1,74 +1,20 @@
 (ns seon.render
-  "THE ONE PROJECTION ROUTER. Any value reaches one bounded projection.
+  "The one typed projection selector and guarded SCI invocation boundary.
 
-  Resolution is one ordered chain, most specific first:
+  AI and HTML each follow the same ordered chain: an explicit producer on the
+  value, the unique contract-fitting function in the value's explicitly owned
+  namespace, a matching schema's declared property, then the prepared value
+  floor. Zero matches is ordinary. Multiple matches are one deterministic flat
+  error. Selected failures do not fall through to another producer.
 
-  1. a declaration on the value itself;
-  2. the requesting namespace's `render-<kind>` defn;
-  3. the most-specific matching schema's attached declaration;
-  4. the one admission-backed structural floor.
+  Every selected qualified symbol resolves to the live SCI Var in the cluster
+  context and executes through `seon.sci.kernel`; there is no compiled renderer
+  lane. A redefinition therefore changes the next call and a cold context
+  re-derives the same symbol from its database program row.
 
-  A unit may wrap arbitrary data under `:seon.render/value`; declarations
-  on that raw value outrank declarations on the wrapper. A requesting
-  namespace is an explicit `:seon.render/namespace` symbol, never ambient
-  `*ns*`, so the same database value renders reproducibly. Namespace and
-  schema projection symbols remain late-resolved vars. There is no
-  registration table, dispatch map, protocol, or consumer-side branch.
-
-  WHY THIS EXISTS AS ITS OWN TINY NAMESPACE. The render contract
-  (`docs/seon/architecture/ui.md`, \"The block and its two renders\")
-  already had exactly this shape for exactly two kinds: `:seon.render/ai`
-  → prompt text, `:seon.render/html` → a surface, selected by key
-  presence with no stored discriminator, the symbol \"late-resolved each
-  render\". The owner's direction is to admit that this was never about
-  the UI: an error fact wants an `ai` projection (steering prose) and a
-  `log` projection (a line), a failover notice wants `ai`, a metric
-  wants something else. So the two-render rule becomes the special case
-  of one open kind set, and the render contract keeps its two keys
-  unchanged. Each new kind names its consumer; nothing here changes.
-
-  RESOLUTION IS LATE AND VAR-BACKED, and that is load-bearing rather
-  than incidental. `requiring-resolve` returns the VAR, and this
-  namespace INVOKES the var rather than a fn it dereferenced earlier:
-  re-evaluating the projection's `defn` against the running system
-  changes the next render with no re-registration, which is the same
-  hot-reload property `:seon.source/populate`,
-  `:seon.cluster.loop/evaluate` and the schema gate's predicate-owner
-  rule already rely on. A cached fn value would silently serve the old
-  projection after a reload — the failure would look like a stale UI, so
-  it is stated as a prohibition: NOTHING here memoizes a resolution.
-
-  IT IS TOTAL, because it is on the error path. `seon.error`'s notices
-  route through this router, so a router that threw would turn recording
-  an error into a second error — the quarry's recursion fence
-  (`src-old/seon/error.cljc:738-745`) restated for this owner. Every
-  failure is therefore a flat `:seon.error/value`, and there is no
-  `:seon.config/on-core-error` key: this namespace never panics, in any
-  mode. A projection that throws is reported as a value naming its
-  class, with the unit's declared symbol, so the broken projection is
-  named rather than the caller.
-
-  THE EXPLICIT KIND SET IS COMPUTED, never listed. `kinds` derives what a
-  value explicitly declares — every key in the `seon.render`
-  namespace whose value is a qualified symbol — so adding a kind to a
-  producer makes it discoverable everywhere with no edit here. This is
-  the no-hand-maintained-lists rule applied to the one place a registry
-  would have been the obvious design.
-
-  LITERALS ARE DECLARATIONS. An AI render may be a verbatim string and
-  an HTML render may be a hiccup vector rather than a symbol.
-  `declaration?` admits those two narrow runtime shapes, and `render`
-  returns a non-symbol declaration as its own output.
-
-  The structural floor is chosen by the requested boundary: HTML receives
-  hiccup; every textual/open kind receives the AI text projection. The
-  floor is deliberately not reported by `kinds`: it is universal capability,
-  not a declaration stored redundantly on every value.
-
-  Crash walk: pure resolution plus one call. Nothing here opens,
-  commits, or holds anything, so a kill during a render loses a value
-  that was never durable. Whether the PROJECTION is pure is the
-  projection's own contract; the ones this repository ships are."
+  The generic router below remains only while its already-scheduled callers are
+  converted to the two typed outputs. No new caller may use it; the final debris
+  wave deletes it together with the obsolete generic-kind schemas and tests."
   (:require [seon.config :as config]
             [seon.db :as db]
             [seon.render.hiccup :as hiccup]
@@ -95,8 +41,12 @@
   (let [value (render-value request)
         context (select-keys request
                              [:seon.db/db
+                              :seon.sci.eval/ctx
                               :seon.cluster.agent/id
                               :seon.sci.admit/caps
+                              :seon.sci.eval/time-limit-ms
+                              :seon.config/on-core-error
+                              :seon.store/branch-connection
                               :seon.render/distance
                               :seon.cluster.run/live-processes
                               :seon.ai/partial])]
@@ -104,7 +54,7 @@
       (assoc (merge value context) :seon.render/value value)
       (assoc context :seon.render/value value))))
 
-(defn candidates
+(defn- candidates
   "Contract-fitting public functions in the explicit owning namespace.
 
   The acquired database snapshot bounds candidates by explicit namespace and

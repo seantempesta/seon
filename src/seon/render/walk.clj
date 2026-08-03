@@ -445,6 +445,32 @@
              connections)
     connections))
 
+(defn- namespace-name-at
+  [db eid]
+  (:seon.ns/name (db/pull db [:seon.ns/name] eid)))
+
+(defn- entity-lookup
+  [db eid]
+  (let [entity (concrete-entity db eid)]
+    (if-let [namespace-name (:seon.ns/name entity)]
+      [:seon.ns/name namespace-name]
+      eid)))
+
+(defn- owning-namespace
+  "The one namespace explicitly named by the value or one of its direct refs.
+
+  This deliberately does not inspect keyword text. An entity with no explicit
+  namespace edge has no owning namespace at this boundary and therefore falls
+  through to its matching schema property and the structural floor."
+  [db entity]
+  (let [names (cond-> (into #{}
+                            (keep (fn [[_attribute target]]
+                                    (namespace-name-at db target)))
+                            (forward-refs entity))
+                (:seon.ns/name entity) (conj (:seon.ns/name entity)))]
+    (when (= 1 (count names))
+      (first names))))
+
 (defn neighborhood
   "One entity and its neighbours, rendered, as a VALUE.
 
@@ -497,6 +523,9 @@
                                    :data-walk-elided "true"}
                             "… " message]
                            message)}
+                  (:seon.render/output request)
+                  (assoc :seon.error/value failure)
+
                   attribute (assoc :seon.render.walk/attribute attribute))))
             (marker [lookup attribute hops failure]
               (if (= ::elided (:seon.error/kind failure))
@@ -559,7 +588,10 @@
                      failure :seon.error/value} connection]
                 (cond
                   failure (marker (or lookup attribute) attribute hops failure)
-                  target (node target target attribute hops)
+                  target (node (if (:seon.render/output request)
+                                 (entity-lookup db target)
+                                 target)
+                               target attribute hops)
                   lookup (node lookup (eid-of db lookup) attribute hops)
                   :else
                   (marker attribute attribute hops
@@ -616,17 +648,44 @@
                                    viewer-namespace
                                    (assoc :seon.render/namespace
                                           viewer-namespace))
-                            specific (specific-projection unit kind overrides)
-                            resolved (render/resolve-unit
-                                      {:seon.render/unit
-                                       (cond-> unit specific (assoc kind specific))
-                                       :seon.render/kind kind})
-                            floor? (:seon.render/would-fall-to-floor? resolved)
-                            resolved (cond-> resolved floor? (assoc kind floor))
-                            chosen (get resolved kind)
-                            rendered (render/render
-                                      {:seon.render/unit resolved
-                                       :seon.render/kind kind})
+                            typed-output (:seon.render/output request)
+                            owner (owning-namespace db pulled)
+                            legacy-resolution
+                            (when-not typed-output
+                              (let [specific
+                                    (specific-projection unit kind overrides)
+                                    resolved
+                                    (render/resolve-unit
+                                     {:seon.render/unit
+                                      (cond-> unit specific
+                                        (assoc kind specific))
+                                      :seon.render/kind kind})
+                                    floor?
+                                    (:seon.render/would-fall-to-floor? resolved)]
+                                {:seon.render/unit
+                                 (cond-> resolved floor? (assoc kind floor))
+                                 :seon.render/projection (get resolved kind)
+                                 :seon.render/would-fall-to-floor? floor?}))
+                            rendered
+                            (if typed-output
+                              ((if (= typed-output :seon.render/html)
+                                 render/render-html
+                                 render/render-ai)
+                               (cond-> (assoc request
+                                              :seon.render/value pulled
+                                              :seon.render/distance
+                                              render-distance)
+                                 owner
+                                 (assoc :seon.render/namespace owner)))
+                              (render/render
+                               {:seon.render/unit
+                                (:seon.render/unit legacy-resolution)
+                                :seon.render/kind kind}))
+                            rendered-output
+                            (if typed-output rendered
+                                (:seon.render/output rendered))
+                            render-failure
+                            (when (:seon.error/kind rendered) rendered)
                             connections
                             (visible-connections
                              pulled
@@ -640,16 +699,18 @@
                                             "connections: "
                                             (.getMessage failure))}}])))
                             with-render
-                            (cond-> (assoc render-base
-                                           :seon.render/projection chosen
-                                           :seon.render/would-fall-to-floor?
-                                           floor?)
-                              (:seon.error/kind rendered)
-                              (assoc :seon.error/value rendered)
+                            (cond-> render-base
+                              legacy-resolution
+                              (assoc :seon.render/projection
+                                     (:seon.render/projection legacy-resolution)
+                                     :seon.render/would-fall-to-floor?
+                                     (:seon.render/would-fall-to-floor?
+                                      legacy-resolution))
+                              render-failure
+                              (assoc :seon.error/value render-failure)
 
-                              (not (:seon.error/kind rendered))
-                              (assoc :seon.render/output
-                                     (:seon.render/output rendered)))]
+                              (not render-failure)
+                              (assoc :seon.render/output rendered-output))]
                         (cond
                           (pos? hops)
                           (assoc with-render :seon.render.walk/neighbours
@@ -711,12 +772,16 @@
                   here (when present?
                          [(cond->
                            {:seon.render.walk/node node
+                            :seon.render.walk/lookup
+                            (:seon.render.walk/lookup node)
                             :seon.render.walk/path path
                             :seon.render.walk/found-depth depth
                             :seon.render.walk/changed-at
                             (:seon.render.walk/changed-at node)}
                             branch
                             (assoc :seon.render.walk/branch branch)
+                            failure
+                            (assoc :seon.error/value failure)
                             (some? output)
                             (assoc :seon.render/output output))])]
               (into (or here [])

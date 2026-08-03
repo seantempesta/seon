@@ -92,13 +92,29 @@
            result (render-ai
                    (render-request database ctx fixture-ambiguous
                                    {:seon.ns/name fixture-ambiguous}))
+           walked (walk/neighborhood
+                   {:seon.db/db database
+                    :seon.sci.eval/ctx ctx
+                    :seon.render.walk/lookup
+                    [:seon.ns/name fixture-ambiguous]
+                    :seon.render/output :seon.render/ai
+                    :seon.sci.admit/caps caps
+                    :seon.sci.eval/time-limit-ms 2000
+                    :seon.config/on-core-error :panic
+                    :seon.render/distance 0})
            expected #{"seon.render-simplification.fixture-ambiguous/first-ai"
                       "seon.render-simplification.fixture-ambiguous/second-ai"}]
        (is (= :seon.render/ambiguous (:seon.error/kind result)))
        (is (= expected
               (set (:seon.render/candidates (:seon.error/data result)))))
        (is (= (sort expected)
-              (:seon.render/candidates (:seon.error/data result))))))))
+              (:seon.render/candidates (:seon.error/data result))))
+       (is (= :seon.render/ambiguous
+              (get-in walked [:seon.error/value :seon.error/kind])))
+       (is (= expected
+              (set (get-in walked [:seon.error/value
+                                   :seon.error/data
+                                   :seon.render/candidates]))))))))
 
 (deftest renderer-invocation-is-sci-only-and-live-var-backed
   (support/with-database

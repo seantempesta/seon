@@ -220,7 +220,10 @@
      {'dir dir-var
       'doc doc-var
       'help help-var})
-    (kernel/attach ctx guard)))
+    (assoc ctx
+           ::kernel/guard guard
+           ::kernel/installed-functions (atom #{})
+           ::kernel/program-snapshot (atom {:functions {} :namespaces {}}))))
 
 (defn agent-namespace
   "The ONE namespace name for an agent: `my.agents.<id>`.
@@ -822,24 +825,6 @@
                   [local-name (sci/copy-var* host-var sci-namespace)]))
            intern-map))))
 
-(defn- isolate-function-vars!
-  [ctx function-symbols]
-  (doseq [function-symbol function-symbols
-          :let [namespace-name (symbol (namespace function-symbol))
-                local-name (symbol (name function-symbol))
-                host-namespace
-                (or (find-ns namespace-name)
-                    (try
-                      (require namespace-name)
-                      (find-ns namespace-name)
-                      (catch java.io.FileNotFoundException _ nil)))
-                host-var (when host-namespace
-                           (ns-resolve host-namespace local-name))]
-          :when host-var]
-    (install-host-namespace! ctx namespace-name
-                             (ns-interns host-namespace)))
-  ctx)
-
 (defn- program-documentation
   "Public function documentation derived from one database value."
   [db]
@@ -922,13 +907,6 @@
         agent-authored?
         (fn [source-tx]
           (= :agent (source-for-transaction source-tx)))
-        declared-renderer-symbols
-        (into #{}
-              (comp
-               (mapcat (fn [row]
-                         (keep row [:seon.render/ai :seon.render/html])))
-               (filter qualified-symbol?))
-              (vals (:seon.schema.projection/shape-rows projection)))
         all-function-rows
         (db/q '[:find ?sym ?source ?namespace-name ?source-tx ?private
                 :where
@@ -941,11 +919,9 @@
         function-rows
         (into []
               (filter
-               (fn [[sym _ _ source-tx _]]
-                 (or (agent-authored? source-tx)
-                     (contains? declared-renderer-symbols (symbol sym)))))
+               (fn [[_sym _ _ source-tx _]]
+                 (agent-authored? source-tx)))
               all-function-rows)
-        interpreted-symbols (into #{} (map (comp symbol first)) function-rows)
         _ (install-program-doc! ctx db)
         selected-namespace-names
         (into (into #{} (map #(nth % 2)) function-rows)
@@ -1076,7 +1052,6 @@
     ;; declaration install. Selected definitions overwrite only their own Vars.
     (install-loaded-first-party-namespaces!
      ctx namespace-assertions source-for-transaction)
-    (isolate-function-vars! ctx interpreted-symbols)
     (let [functions-installed
           (reduce
            (fn [state namespace-name]

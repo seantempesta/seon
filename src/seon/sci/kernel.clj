@@ -89,24 +89,14 @@
      :host-interop-observer (::host-interop-observer guard)
      :built-in-call-observer (::built-in-call-observer guard)}))
 
-(defn attach
-  "Attach `guard` to a freshly initialized SCI context."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :map]
-                  :seon.sci.eval/ctx]}
-  [ctx guard]
-  (assoc ctx
-         ::guard guard
-         ::installed-functions (atom #{})
-         ::program-snapshot (atom {:functions {} :namespaces {}})))
-
 (defn cache-program!
   "Publish immutable function and namespace rows used by lazy installation."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :map :map]
-                  :seon.sci.eval/ctx]}
+                  :nil]}
   [ctx functions namespaces]
   (reset! (::program-snapshot ctx)
           {:functions functions :namespaces namespaces})
-  ctx)
+  nil)
 
 (defn program-function
   "Return one cached function row from the acquired program snapshot."
