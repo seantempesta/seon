@@ -1996,6 +1996,47 @@ may reintroduce a shadow build into the dev feedback path.
   child JVM that never exits, an undrained pipe) is fixed on its own
   merits, because isolation prevents collision between runs and does
   nothing for a run that wedges alone.
+  **Ruling 2026-08-02 #46 (owner, night): AGENT RENDERERS RUN THROUGH
+  ONE GUARDED KERNEL, AND FAILURE SPEAKS DIFFERENTLY TO EACH AUDIENCE.**
+  (1) EVERY agent-driven render — first-party and agent-authored alike —
+  goes through one small guarded SCI invocation kernel. Definitions
+  install once; the live Var is invoked per cache miss; every result
+  passes bounded admission and kind validation. This closes the last
+  audit blocker (`agent-renderers-never-enter-the-sci-program-context`),
+  where the router's JVM-only `requiring-resolve` meant an agent could
+  not author a renderer at all. Measured and decidable, not asserted:
+  a guarded trivial render is 10.250 us p50 / 34.042 us p95; a guarded
+  250-event Hiccup render is 2.448 ms p50; an interpreted infinite loop
+  under a 10 ms limit was interrupted at 13.25 ms. ONE execution path,
+  not two — the alternative (guard only agent-authored renderers) was
+  rejected because it leaves two shapes for one concept and leaves the
+  `raw` hazard alive on the compiled side.
+  (2) `raw` DISSOLVES rather than needing a rule: admitted output is
+  ordinary data and fails Hiccup validation, so `raw` carries no
+  authority across the guarded boundary and survives only for trusted
+  post-admission serializer composition. That answers the audit's
+  coupled finding (`render/hiccup.clj:68-77` assumed unreachability that
+  ruling #20 forbids).
+  (3) RENDERERS LIVE IN THE CLUSTER'S SHARED CONTEXT, like every other
+  agent-authored function — one ctx per cluster (ruling #27), so a
+  renderer written by one agent is immediately callable by another and
+  nothing crosses clusters.
+  (4) FAILURE DISPLAY, owner verbatim: "to the user a loading screen to
+  the agent a screaming error they can't ignore." The two projections
+  DIVERGE BY AUDIENCE and that is the point: `:seon.render/html` shows a
+  loading state so a human never sees our internals, while
+  `:seon.render/ai` carries a loud unignorable error so the owning agent
+  fixes its own renderer. This also settles the two filed defects where
+  render failures are swallowed and where a render failure puts itself
+  into agent context wrongly. STANDING CAUTION to design against: a
+  loading state is HONEST only while something is actually working on
+  it — if an agent never repairs its renderer the human waits forever on
+  a lie, so the design must say what happens when the failure persists.
+  (5) CRASH SEMANTICS, unchanged and load-bearing here: `evaluate` never
+  throws, failures return flat `:seon.error` values, presence is the
+  state, and NOTHING ROLLS BACK — a def an eval made stays live even
+  when its terminal transaction is refused (ruling #30). There is no
+  restart-from-before-the-crash; the agent adapts from what it is told.
   **Ruling 2026-08-02 #42 (owner, afternoon): WE OWN SCI — DESIGN WITH
   THE INTERNALS ON THE TABLE, AND SUPERVISION IS A FEATURE NOT A LEAK.**
   (1) Owner verbatim: "we OWN sci now with our fork. Design with the
