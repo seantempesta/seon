@@ -1846,7 +1846,29 @@ may reintroduce a shadow build into the dev feedback path.
   suspicion by name: "I worry it's yet another unnecessary system."
   (6) SEQUENCING: render implementation goes LAST; overnight is a
   research-only simplification audit; no render production code moves
-  before the owner rules on the audit. Also ruled this batch:
+  before the owner rules on the audit.
+  AMENDED same night (owner, verbatim): "I want agents to pull in
+  related context so this distance walk based rendering system is
+  important and it helps solidify a what do we do when we have
+  multiple render functions problem and it allows agents to just
+  define functions and have them automatically wire themselves up for
+  any data that is rendered in their namespace and from other
+  namespaces. So namespace A doesn't need to know how to render
+  widgets." THE MODEL THIS NAMES: (a) the distance walk is the
+  CONTEXT-PULL mechanism and is load-bearing, not up for
+  simplification — it is what the collapse converges TOWARD; (b) the
+  multiple-render-functions problem resolves by NAMESPACE OWNERSHIP —
+  data renders through its OWNING namespace's renderer wherever it
+  appears, so a walk crossing into namespace B's data delegates to B's
+  renderer and namespace A never learns to render B's widgets; (c)
+  wiring is AUTOMATIC from an agent's ordinary defn — defining a
+  function whose declared contract fits (input accepts the shape,
+  output is one of the two projections) makes it that namespace's
+  renderer with no registration ceremony. Auto-wiring must still be
+  COMPUTED from declared contracts (ruling #33's input/output refs),
+  never from names (ruling #47 stands). The audit resolves the open
+  edge: two qualifying functions in ONE namespace for one shape —
+  most-specific-input wins, or loud, but proposed with evidence. Also ruled this batch:
   alter-meta! immutability IS restored (SCI fork change); the 4,096
   blob threshold is DERIVED not tuned (recorded-cost comparison per the
   resume precedent); lane cap is 3 implementation + 1 research
