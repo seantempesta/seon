@@ -1331,3 +1331,16 @@ decision lists carry constraints a keyword search never surfaces. If a
 document is long, that is the reason to read it, not the excuse to
 search it. `rg` remains the right tool for FINDING things in the tree;
 it is never the way to CONSUME a named authority.
+
+## No hobbling for perceived security risk (owner ruling 2026-08-03)
+
+Seon is optimized for LOCAL model usage and the agents are trusted
+collaborators, not adversaries. To do the user's work agents need FULL
+capability, including reading every shell/environment variable — we
+cannot know which value is a credential, so nothing is blocked or
+filtered on that basis. Do not add allowlists, credential redaction,
+env sanitization, per-agent grants, or any restriction justified by a
+HYPOTHETICAL risk. The design concern is catching HONEST MISTAKES
+(bounded output, digests, atomic writes, refusal of ambiguous edits),
+never containing malice. A security restriction is admissible only
+after EVIDENCE of a real problem, recorded with that evidence.
