@@ -207,6 +207,60 @@
 (defn- analysis-error [analysis]
   (when (= :unavailable (:seon.hook.analysis/status analysis))
     (str "clj-kondo analysis failed: "
+     (:seon.hook.analysis/reason analysis))))
+
+(defn- schema-resource-path?
+  "True for one flat split-registry EDN resource."
+  [file-path]
+  (when-let [absolute (absolute-file-path file-path)]
+    (let [file (io/file absolute)
+          schema-directory (.getCanonicalFile
+                            (root-file "resources/seon/schemas"))]
+      (and (str/ends-with? (str/lower-case (.getName file)) ".edn")
+           (= schema-directory (.getCanonicalFile (.getParentFile file)))))))
+
+(defn- run-schema-admission
+  "Run the JVM admission owner for split schema paths or prospective source."
+  [{:seon.hook/keys [file-paths prospective-content]}]
+  (try
+    (let [absolute-paths (mapv absolute-file-path file-paths)
+          request
+          (cond-> {:seon.schema.admission/paths absolute-paths}
+            prospective-content
+            (assoc :seon.schema.admission/sources
+                   {(first absolute-paths) prospective-content}))
+          result
+          (process/sh
+           {:cmd ["clojure" "-M:dev" "-m" "seon.schema.admission"]
+            :dir repo-root
+            :in (pr-str request)
+            :out :string
+            :err :string
+            :continue true})
+          findings
+          (when (zero? (:exit result))
+            (try (some->> (:out result)
+                          str/split-lines
+                          (remove str/blank?)
+                          last
+                          edn/read-string)
+                 (catch Exception _ nil)))]
+      (if (vector? findings)
+        {:seon.hook.analysis/status :available
+         :seon.hook.analysis/findings findings}
+        {:seon.hook.analysis/status :unavailable
+         :seon.hook.analysis/reason
+         (str "schema admission returned no findings result"
+              (when-not (str/blank? (:err result))
+                (str ": " (str/trim (:err result)))))}))
+    (catch Exception error
+      {:seon.hook.analysis/status :unavailable
+       :seon.hook.analysis/reason (.getMessage error)})))
+
+(defn- schema-admission-error
+  [analysis]
+  (when (= :unavailable (:seon.hook.analysis/status analysis))
+    (str "schema admission failed: "
          (:seon.hook.analysis/reason analysis))))
 
 (declare clip-feedback)
@@ -260,6 +314,59 @@
                           (format-clj-kondo-findings errors))}
 
             :else nil))))))
+
+(defn- validate-schema-edit
+  "Block a reconstructed split-schema edit on admission errors."
+  [event]
+  (let [file-path (get-file-path event)]
+    (when (and (= (:hook_event_name event) "PreToolUse")
+               (schema-resource-path? file-path))
+      (when-let [new-content (reconstruct-file-content event)]
+        (let [analysis
+              (run-schema-admission
+               {:seon.hook/file-paths [file-path]
+                :seon.hook/prospective-content new-content})
+              errors (filterv #(= :error (:level %))
+                              (:seon.hook.analysis/findings analysis))]
+          (cond
+            (schema-admission-error analysis)
+            {:decision "block"
+             :reason (str "BLOCKED: " (schema-admission-error analysis))}
+
+            (seq errors)
+            {:decision "block"
+             :reason
+             (str "BLOCKED: schema admission found error-level issues in the "
+                  "prospective schema edit:\n"
+                  (format-clj-kondo-findings errors))}
+
+            :else nil))))))
+
+(defn- schema-admission-feedback
+  "Return the post-edit split-schema findings and whether publication may run."
+  [event config]
+  (let [paths (->> (event-file-paths event)
+                   (filter schema-resource-path?)
+                   (filter #(some-> % absolute-file-path io/file .isFile))
+                   vec)]
+    (when (and (= (:hook_event_name event) "PostToolUse") (seq paths))
+      (let [analysis (run-schema-admission {:seon.hook/file-paths paths})
+            findings (:seon.hook.analysis/findings analysis)
+            errors? (or (schema-admission-error analysis)
+                        (some #(= :error (:level %)) findings))]
+        {:seon.hook.schema-admission/errors? (boolean errors?)
+         :seon.hook.schema-admission/feedback
+         (cond
+           (schema-admission-error analysis)
+           (str "ADVISORY — " (schema-admission-error analysis))
+
+           (seq findings)
+           (clip-feedback
+            config
+            (str "schema admission findings:\n"
+                 (format-clj-kondo-findings findings)))
+
+           :else nil)}))))
 
 (defn- clj-kondo-feedback
   "Return one advisory clj-kondo result for all resulting edited files."
@@ -792,8 +899,7 @@
                  (str/ends-with? lower ".cljc"))
              (or (beneath? (root-file "src") file-path)
                  (beneath? (root-file "test") file-path)))
-        (= (absolute-file-path (root-file "resources/seon/schema.edn"))
-           (absolute-file-path file-path)))))
+        (schema-resource-path? file-path))))
 
 (defn- current-source-feedback
   "Publish edited first-party source through the live operator when possible."
@@ -941,27 +1047,37 @@
                 (str "session=" (or (:session_id event) "orchestrator"))
                 (str "files=" (str/join "," file-paths)))
           (if (= event-name "PreToolUse")
-            (if (get-in config [:lint :enabled] true)
-              (let [blocked (some validate-clojure-edit
-                                  (map #(assoc event :seon.hook/file-path %)
-                                       file-paths))]
-                (if blocked
-                  (do
-                    (log! "CLOJURE_BLOCK" (:reason blocked))
-                    (output! blocked))
-                  (output! {:continue true})))
-              (output! {:continue true}))
             (let [path-events (map #(assoc event :seon.hook/file-path %)
                                    file-paths)
+                  schema-blocked (some validate-schema-edit path-events)
+                  lint-blocked
+                  (when (get-in config [:lint :enabled] true)
+                    (some validate-clojure-edit path-events))
+                  blocked (or schema-blocked lint-blocked)]
+              (if blocked
+                (do
+                  (log! "CLOJURE_BLOCK" (:reason blocked))
+                  (output! blocked))
+                (output! {:continue true})))
+            (let [path-events (map #(assoc event :seon.hook/file-path %)
+                                   file-paths)
+                  schema-admission (schema-admission-feedback event config)
                   feedback (mapcat
                              (fn [path-event]
                                [(markdown-feedback path-event config)
                                 (docstring-feedback path-event config)])
                              path-events)
-                  feedback (into [(clj-kondo-feedback event config)] feedback)
+                  feedback
+                  (into [(clj-kondo-feedback event config)
+                         (:seon.hook.schema-admission/feedback
+                          schema-admission)]
+                        feedback)
                   _ (schedule-gemini-review! event config)
-                  feedback (conj (vec feedback)
-                                 (current-source-feedback event config))
+                  feedback
+                  (cond-> (vec feedback)
+                    (not (:seon.hook.schema-admission/errors?
+                          schema-admission))
+                    (conj (current-source-feedback event config)))
                   clojure-event (some #(when (clojure-file? (get-file-path %)) %)
                                       path-events)
                   gate (when clojure-event (core-fault-gate! clojure-event))]

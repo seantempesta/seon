@@ -3,7 +3,7 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is testing]]))
 
 (def ^:private repo-root
   (.getCanonicalFile (io/file (System/getProperty "user.dir"))))
@@ -53,6 +53,64 @@
         (is (str/includes? (:reason response) "[error/syntax]")))
       (finally
         (delete-files! [config directory])))))
+
+(deftest split-schema-edits-run-admission-before-publication
+  (let [directory (fixture-directory)
+        config (io/file directory "hook.edn")
+        schema-file
+        (io/file repo-root
+                 "resources/seon/schemas/seon.admission.hook.fixture.edn")
+        invoke
+        (fn [event]
+          (run-process
+           {::command [(str (io/file repo-root "bin/seon-hook"))]
+            ::directory repo-root
+            ::environment {"SEON_HOOK_CONFIG" (str config)}
+            ::input (json/generate-string event)}))]
+    (try
+      (spit config
+            (str "{:seon.config/on-core-error :log\n"
+                 " :lint {:enabled false}\n"
+                 " :markdown-lint {:enabled false}\n"
+                 " :docstring-lint {:enabled false}\n"
+                 " :current-source {:enabled false}\n"
+                 " :changed-tests {:enabled false}\n"
+                 " :review {:enabled false}}\n"))
+      (testing "error findings block a reconstructed schema edit"
+        (let [result
+              (invoke
+               {:hook_event_name "PreToolUse"
+                :tool_name "Write"
+                :tool_input
+                {:file_path (str schema-file)
+                 :content
+                 "{:wrong.namespace/value [:map {:closed true}]}"}})
+              response (json/parse-string (str/trim (::stdout result)) true)]
+          (is (zero? (::exit result)) (::stderr result))
+          (is (= "block" (:decision response)))
+          (is (str/includes? (:reason response)
+                             "[error/schema-misplaced-key]"))
+          (is (str/includes? (:reason response)
+                             "[error/schema-closed-map]"))))
+      (testing "reuse similarity rides the ordinary post-edit feedback"
+        (spit schema-file
+              (str "{:seon.admission.hook.fixture/positive-count "
+                   "[:int {:min 1}]}\n"))
+        (let [result
+              (invoke
+               {:hook_event_name "PostToolUse"
+                :tool_name "Edit"
+                :tool_input {:file_path (str schema-file)}})
+              response (json/parse-string (str/trim (::stdout result)) true)
+              feedback
+              (get-in response [:hookSpecificOutput :additionalContext])]
+          (is (zero? (::exit result)) (::stderr result))
+          (is (true? (:continue response)))
+          (is (str/includes? feedback
+                             "[warning/schema-exact-reuse]"))
+          (is (str/includes? feedback "same shape exists as"))))
+      (finally
+        (delete-files! [schema-file config directory])))))
 
 (deftest post-edit-reports-valid-sibling-findings-after-a-syntax-error
   (let [directory (fixture-directory)
