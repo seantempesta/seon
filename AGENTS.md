@@ -829,17 +829,13 @@ to assume the current database of the calling agent's cluster.
 Failures return as flat `:seon.error` values; returns are
 SCI-admit-clean. It is not a "facade" — never use that word for it; it
 is the db namespace, intercepting Datahike's calls only for
-error-value and ambient-custody semantics. All first-party code calls
-`seon.db`, never `datahike.api` directly; only `seon.db` itself plus
-the store/registry custody owners (flock, open/release, branch
-management) require `datahike.api`. MIGRATION IN FLIGHT: until the
-34-namespace call-site sweep lands
-(`docs/seon/issues/seon-db-is-not-the-one-database-namespace.md`), old
-first-party direct `datahike.api` calls remain. The core namespace wave
-has landed: `transact!` moved out of `seon.cluster.store`, and `seon.db`
-owns `q`/`pull`/`pull-many`/`entity`/`datoms`/`db`/`history`/`as-of`/
-`since`/`transact!`. New code never adds a direct `datahike.api` call
-site. There is no pod, remote replica, or second writer.
+error-value and ambient-custody semantics. All first-party core data
+reads and writes call `seon.db`; `transact!` lives there rather than in
+`seon.cluster.store`. Direct `datahike.api` calls remain only inside
+`seon.db`, the store/registry and explicitly classified branch-custody
+owners, and the system-side listeners ruling #41 keeps out of the agent
+surface. New code never adds another direct core read/write call site.
+There is no pod, remote replica, or second writer.
 
 An explicitly selected config manifest reconciles its declared subset into
 database facts. Runtime reads the database, not environment variables or the

@@ -34,8 +34,11 @@ protected implementation or invent a second tool protocol.
   what those facts already establish.
 - Generated identities come from `seon.db.id/allocate!`. Callers do not invent
   timestamp IDs; human-visible agent IDs are readable word IDs.
-- `seon.db` is the sole database API. Reads use the injected frozen database
-  value; writes call the co-located transaction owner in the cluster JVM.
+- `seon.db` is the sole core database namespace. Reads and writes accept an
+  explicit immutable database value or connection, or elide custody inside a
+  guarded agent evaluation and use that agent's cluster. The store and
+  registry namespaces retain only physical connection, branch, and flock
+  custody; system listeners remain outside the agent surface.
 - Exact contracts remain colocated with code and enter context through the
   program graph. This document owns namespace purpose and boundary, not a
   signature copy that can drift.
@@ -146,9 +149,11 @@ before that schema is admitted.
 
 ### Database and program graph
 
-`seon.db` owns query, pull, eager entity data, index cursors, ordinary database
-values, native-shaped transaction reports, and Datahike `:db.fn/cas` work
-fences. `:db.fn/cas` is reserved for facts two processes race to win exactly
+`seon.db` owns `q`, `pull`, `pull-many`, eager entity and datom data, ordinary
+database values, time-travel reads, and native-shaped transaction reports.
+Each function preserves Datahike's positional and argument-map forms, using
+the dependency's own keys, and returns a flat error value on failure.
+Datahike `:db.fn/cas` is reserved for facts two processes race to win exactly
 once: plan freeze from absent to digest, and run claim from no process to the
 process record (CAS-on-absence). `seon.schema` owns
 registered shapes and the
@@ -156,7 +161,7 @@ Malli-to-Datahike bridge. `seon.eval`, `seon.ns`, and the program graph own code
 lookup and evaluation. `my.kb`, `my.ns`, and `my.plan` compose those contracts;
 they do not bypass them.
 
-Every `seon.db/query` and `seon.db/pull` runs with hard synchronous work,
+Every `seon.db/q` and `seon.db/pull` runs with hard synchronous work,
 result-node, and shallow-weight ceilings at the maintained Datahike executor.
 Namespaced request options can lower those bounds for a deliberately small
 operation but cannot raise the application ceiling. Budget exhaustion is a

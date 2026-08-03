@@ -38,8 +38,11 @@ own their projections. [[observability]] owns forensic use of the receipts.
 - A Clojure symbol stored as a scalar is a value, not a database ref. Program
   relationships use refs to the canonical `:seon.fn`, `:seon.ns`,
   `:seon.schema`, and `:seon.test` entities.
-- The cluster JVM reads an immutable database value and calls co-located
-  Datahike directly. There is no remote database protocol, replica, or wire on
+- The cluster JVM reads an immutable database value and routes every core data
+  read and write through `seon.db`, which calls co-located Datahike. Callers
+  may supply the database value or connection explicitly; guarded agent
+  evaluation may elide it and use that agent's cluster custody. Failures are
+  flat error values. There is no remote database protocol, replica, or wire on
   the database path.
 
 ## The durable graph
