@@ -1,5 +1,6 @@
 (ns seon.dev.dependency-cache-test
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [dev-cache :as dev-cache]
@@ -38,7 +39,21 @@
   (let [first-file (io/file source-root "cache_probe/first.clj")
         second-file (io/file source-root "cache_probe/second.clj")]
     (.mkdirs (.getParentFile first-file))
-    (spit first-file "(ns cache-probe.first)\n(def value :first-loaded)\n")
+    (spit first-file
+          (str "(ns cache-probe.first)\n"
+               "(def value :first-loaded)\n"
+               "(defn exhaust-soft-references! []\n"
+               "  (let [held (java.util.ArrayList.)]\n"
+               "    (try\n"
+               "      (loop []\n"
+               "        (.add held (byte-array (* 1024 1024)))\n"
+               "        (recur))\n"
+               "      (catch OutOfMemoryError _))\n"
+               "    (.clear held)\n"
+               "    (dotimes [_ 4]\n"
+               "      (System/gc)\n"
+               "      (System/runFinalization))))\n"
+               "(defn lazy-value [] ((fn [] :first-lazy-loaded)))\n"))
     (spit second-file "(ns cache-probe.second)\n(def value :second-loaded)\n")
     ;; Loader classes must be strictly newer than source under RT/load.
     (.setLastModified first-file 1)
@@ -78,7 +93,7 @@
    (doto
     (ProcessBuilder.
      ^java.util.List
-     ["java" "-cp"
+     ["java" "-Xmx96m" "-XX:SoftRefLRUPolicyMSPerMB=0" "-cp"
       (str cache-path java.io.File/pathSeparator
            (System/getProperty "java.class.path"))
       "clojure.main" "-e"
@@ -88,8 +103,10 @@
           (println :first-loaded)
           (flush)
           (read-line)
+          (cache-probe.first/exhaust-soft-references!)
           (require 'cache-probe.second)
-          (println cache-probe.second/value)
+          (prn [(cache-probe.first/lazy-value)
+                cache-probe.second/value])
           (flush)))])
     (.directory project-root)
     (.redirectErrorStream true))))
@@ -117,7 +134,7 @@
         (file-seq (io/file root))))
 
 (deftest ^{:seon.test/long
-           "Publishes a second real loader directory while a child uses the first."}
+           "Preserves delayed AOT classes across refresh and heap pressure."}
   refresh-preserves-a-recorded-jvms-exact-cache-directory
   (let [root (fresh-root)
         source-root (io/file root "source")
@@ -173,10 +190,12 @@
                                  (:seon.dev-cache/reaped reaped)))))
                 (.write ^java.io.Writer writer "load-second\n")
                 (.flush ^java.io.Writer writer)
-                (is (= ":second-loaded"
-                       (test-support/await-event!
-                        (future (.readLine ^java.io.BufferedReader reader))
-                        :second-loader-after-refresh)))
+                (testing "the old cache remains loadable after maximal soft-reference pressure"
+                  (is (= [:first-lazy-loaded :second-loaded]
+                         (edn/read-string
+                          (test-support/await-event!
+                           (future (.readLine ^java.io.BufferedReader reader))
+                           :lazy-classes-after-pressure-and-refresh)))))
                 (is (.waitFor process 10 TimeUnit/SECONDS))
                 (let [after-exit (dev-cache/reap nil)]
                   (is (some #{first-cache}
