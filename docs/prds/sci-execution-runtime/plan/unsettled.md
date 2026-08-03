@@ -176,8 +176,16 @@ stays authoritative (started immediately; unaffected by in-flight
 monolith hunks), (2) the one loader swaps to the split set only when
 the monolith is quiet, gated on a parse-set-equality falsifier +
 init + fresh-root READY, (3) the monolith is deleted in the same
-commit that proves the swap. Files nest like Clojure namespaces;
-declarations stay FULLY NAMESPACED — layout is organization only.
+commit that proves the swap. AMENDED BY OWNER (same day): the layout is a FLAT directory with one
+file per key namespace named by the full namespace verbatim
+(`a.b.c.edn`) — placement is strict (every key lives in the file named
+by its exact namespace, so misplacement is mechanically detectable),
+and there is NO underscore munging (that rule belongs to the classpath
+loader for `.clj` paths; these are plain resources). The directory is
+`resources/seon/schemas/` because `resources/seon/schema/` collides on
+the classpath with the `src/seon/schema/` source package — the phase-2
+loader's first failure broke tree-wide publication exactly there.
+Declarations stay FULLY NAMESPACED — layout is organization only.
 This deliberately reverses part of the July one-file consolidation
 (ruling #14's glob deletion): the collision economics changed (three
 cross-lane schema.edn collisions on 2026-08-03 alone); the merged
