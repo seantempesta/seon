@@ -8,6 +8,7 @@
             [datahike.connector :as connector]
             [datahike.db.utils :as db.utils]
             [datahike.query :as query]
+            [datahike.store :as datahike.store]
             [clojure.test.check.generators :as gen]
             [seon.error.refusal :as error.refusal]
             [seon.schema :as schema]
@@ -110,6 +111,23 @@
      "No current cluster connection is bound to seon.db/*conn*."
      {::binding 'seon.db/*conn*})
     *conn*))
+
+(defn- connection-id
+  [connection]
+  (datahike.store/connection-id (:config @connection)))
+
+(defn- foreign-connection-error
+  [connection]
+  (when (some? *conn*)
+    (let [ambient-connection-id (connection-id *conn*)
+          explicit-connection-id (connection-id connection)]
+      (when-not (= ambient-connection-id explicit-connection-id)
+        (error-value
+         ::foreign-connection
+         (str "The explicit transaction connection does not belong to "
+              "the calling agent's cluster.")
+         {::ambient-connection-id ambient-connection-id
+          ::explicit-connection-id explicit-connection-id})))))
 
 (defn- append-read-evidence!
   [evidence]
@@ -499,7 +517,11 @@
               failure)))))))
 
 (defn transact!
-  "Commit a transaction through an explicit or ambient connection."
+  "Commit a transaction through an explicit or ambient connection.
+
+  When `*conn*` is bound, an explicit connection must have the same Datahike
+  connection ID. An absent binding means the caller is outside an agent
+  evaluation, so a live explicit connection is allowed."
   {:malli/schema
    [:function
     [:=> [:cat :seon.store/transaction]
@@ -509,9 +531,13 @@
   ([transaction]
    (transact-call (current-connection) transaction))
   ([connection transaction]
-   (if (connection? connection)
-     (transact-call connection transaction)
+   (cond
+     (not (connection? connection))
      (dependency-error
       ::transact!
       (ex-info "The explicit transaction connection is not live."
-               {::connection connection})))))
+               {::connection connection}))
+
+     :else
+     (or (foreign-connection-error connection)
+         (transact-call connection transaction)))))

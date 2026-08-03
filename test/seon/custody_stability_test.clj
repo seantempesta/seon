@@ -8,6 +8,7 @@
             [sci.core :as sci]
             [sci.impl.utils :as sci.utils]
             [seon.config :as config]
+            [seon.db :as db]
             [seon.schema :as schema]
             [seon.sci.eval :as eval]
             [seon.test-support :as test-support]))
@@ -212,3 +213,42 @@
                          sources))))))))
         check (tc/quick-check 10 property :seed 4303020260802)]
     (is (:result check) (pr-str check))))
+
+(deftest cross-cluster-write-isolation
+  (test-support/with-database
+    (fn [connection-a]
+      (test-support/with-database
+        (fn [connection-b]
+          (let [ctx-a (eval/cluster-ctx @connection-a connection-a)
+                _ (sci/intern ctx-a 'user 'own-connection connection-a)
+                _ (sci/intern ctx-a 'user 'foreign-connection connection-b)
+                own
+                (evaluate-in
+                 ctx-a
+                 (str "(seon.db/transact! own-connection "
+                      "[{:seon.cluster.message/id \"custody-own\"}])"))
+                ambient
+                (evaluate-in
+                 ctx-a
+                 (str "(seon.db/transact! "
+                      "[{:seon.cluster.message/id \"custody-ambient\"}])"))
+                foreign
+                (evaluate-in
+                 ctx-a
+                 (str "(seon.db/transact! foreign-connection "
+                      "[{:seon.cluster.message/id \"custody-foreign\"}])"))
+                message-ids
+                (fn [connection]
+                  (set
+                   (db/q
+                    '[:find [?id ...]
+                      :where [_ :seon.cluster.message/id ?id]]
+                    @connection)))]
+            (is (nil? (:seon.cluster.eval/error own)))
+            (is (nil? (:seon.cluster.eval/error ambient)))
+            (is (= :seon.db/foreign-connection
+                   (get-in foreign
+                           [:seon.sci.admit/value :seon.error/kind])))
+            (is (= #{"custody-own" "custody-ambient"}
+                   (message-ids connection-a)))
+            (is (empty? (message-ids connection-b)))))))))

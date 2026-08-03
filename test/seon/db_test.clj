@@ -173,29 +173,35 @@
 (deftest transact-supports-both-native-interfaces-and-ambient-custody
   (test-support/with-database
    (fn [connection]
-     (binding [db/*conn* connection]
-       (let [positional
-             (db/transact!
-              [{:seon.cluster.message/id "db-test-positional"}])
-             argument-map
-             (db/transact!
-              {:tx-data
-               [{:seon.cluster.message/id "db-test-argument-map"}]
-               :tx-meta {:seon.db/user "db-test"}})
-             explicit
+     (let [system-explicit
+           (binding [db/*conn* nil]
              (db/transact!
               connection
-              {:tx-data
-               [{:seon.cluster.message/id "db-test-explicit-map"}]})]
-         (is (every? #(contains? % :db-after)
-                     [positional argument-map explicit]))
-         (is (= #{"db-test-positional"
-                  "db-test-argument-map"
-                  "db-test-explicit-map"}
-                (set
-                 (db/q
-                  '[:find [?id ...]
-                    :where [_ :seon.cluster.message/id ?id]])))))))))
+              [{:seon.cluster.message/id "db-test-system-explicit"}]))]
+       (binding [db/*conn* connection]
+         (let [positional
+               (db/transact!
+                [{:seon.cluster.message/id "db-test-positional"}])
+               argument-map
+               (db/transact!
+                {:tx-data
+                 [{:seon.cluster.message/id "db-test-argument-map"}]
+                 :tx-meta {:seon.db/user "db-test"}})
+               explicit
+               (db/transact!
+                connection
+                {:tx-data
+                 [{:seon.cluster.message/id "db-test-explicit-map"}]})]
+           (is (every? #(contains? % :db-after)
+                       [system-explicit positional argument-map explicit]))
+           (is (= #{"db-test-system-explicit"
+                    "db-test-positional"
+                    "db-test-argument-map"
+                    "db-test-explicit-map"}
+                  (set
+                   (db/q
+                    '[:find [?id ...]
+                      :where [_ :seon.cluster.message/id ?id]]))))))))))
 
 (deftest temporal-reads-use-explicit-and-ambient-database-values
   (test-support/with-database
