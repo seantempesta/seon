@@ -61,6 +61,12 @@
         ;; no-follow traversal, bounds, preconditions, and flat errors.
         babashka/fs {:local/root "reference-code/babashka/fs"}
 
+        ;; Lossless structural source selection and transformation. The edit
+        ;; core additionally fences rewrite-clj's normalized render against an
+        ;; exact splice into the original UTF-8 source.
+        rewrite-clj/rewrite-clj
+        {:local/root "reference-code/rewrite-clj"}
+
         ;; The render pipeline's wire: Datastar SSE morphs over http-kit
         ;; (N4 — the web layer is system code; the block morph rides SSE).
         dev.data-star.clojure/sdk
@@ -101,9 +107,7 @@
   ;; in-memory Datahike, seconds per cycle.
   :test
   {:extra-paths ["test" "script" "target/dev-dependency-classes"]
-   :extra-deps {rewrite-clj/rewrite-clj
-                {:local/root "reference-code/rewrite-clj"}
-                ;; JVM-only testbed dependency; the Seon fork is published
+   :extra-deps {;; JVM-only testbed dependency; the Seon fork is published
                 ;; v0.1.5@376d6ec + 1 commit. fbff842 publishes the bound port.
                 io.github.clojure/core.async.flow-monitor
                 {:local/root "reference-code/core.async.flow-monitor"}}
