@@ -202,6 +202,17 @@ never block. MCP DOOR ISSUE RESOLVED and archived with live proof
 (`a54b8bddb`, orchestrator-verified 304,265 → ~4,332 bytes,
 get_value paging proven).
 
+SCHEMA SPLIT COMPLETE (2026-08-03 afternoon, `2b091b239`): the
+monolith is DELETED; 80 flat namespace-named files under
+`resources/seon/schemas/` with the one merging loader, strict
+placement, duplicate refusal, and the order-independent merged-set
+digest. Deletion-boundary equality proven at 691 keys; init green
+post-deletion; fresh isolated root booted READY on the identical
+digest; AGENTS.md carries the registry-query-first rule. Queue item 6
+CLOSES. Next dependency-ready: the schema ADMISSION GATE + similarity
+warnings (one admission function, two entrances), then the
+get_value→read-chunk convergence after mcp-noise lands.
+
 MCP RENDER CONVERGENCE (owner-directed, same afternoon): door
 evaluations now project the REPL TEXT FACE through the one seon.print
 text sink the transcript uses (`ca93bf40f`, live-proven: the
