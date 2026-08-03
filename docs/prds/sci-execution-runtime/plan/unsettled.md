@@ -95,6 +95,86 @@ value tier refuses the nested closure and cold restore reconstructs it from
 the pure form. This closes 1C/1C-prime; the next Lane 1 boundary is 1D, not
 another resume mechanism.
 
+**ADDENDUM 22 — 2026-08-03, SESSION CLOSE AFTER THE OVERNIGHT RUN AND
+THE MORNING TOOLS DESIGN. START A FRESH SESSION FROM HERE.**
+
+FIRST ACTIONS: (1) `bin/seon status` — a live `default` cluster is up
+and MCP `eval_clj` works in BOTH `jvm` and `door` modes (verified this
+session; door mode reaches the agents' shared SCI ctx). (2) `bin/test`
+is now the FAST tier (~3 min, 813 tests); `bin/test --full` is the
+checkpoint gate (883/4,405, ~11.6 min). (3) Resume the two stopped
+lanes below.
+
+TWO LANES STOPPED MID-FLIGHT, both resumable with full context:
+- `cache-economics` — landed `0a9204c8c` (retain renderer calls,
+  stabilize AI context) and `1cf84e3c7` (thread context demand into
+  the web service); still owed: the byte-stable LLM prefix measured
+  with live DeepSeek `prompt_cache_hit_tokens` before/after.
+- `effect-capability` — building `:seon.effect/capability` indexing +
+  `seon.effect/request!` per the tools design. Its in-flight work is
+  UNCOMMITTED in `test/seon/fn_test.clj` (134 added lines of capability
+  refusal fixtures). Resume it; do not delete that diff.
+
+WHAT THIS SESSION LANDED (all pushed): the suite 36m -> 3m fast tier
+with declared long tests; ruling #41's seon.db sweep closed (zero
+non-exempt datahike.api calls); the render collapse landed end to end
+with a live nine-falsifier proof, then independently verified;
+history-off graduated with a completed live model turn; MCP's value
+chain proven; the blob 343 refutation and the per-value rule; four
+crash-model edges closed with measurements; the per-cluster launcher
+(cluster B's boot no longer kills A's work); the SCI fork's
+alter-meta! closure, integrated and pushed on one branch.
+
+RULINGS #49-#51 plus amendments are in `plan/README.md`: test hygiene
+and suite speed; the render model (namespace-anchored auto-wiring,
+walk-convergent, floor-not-missing-declaration, database facts run
+from SCI never compiled vars); shared-surface minimization and the
+no-crash model. New AGENTS.md standing rules: read-the-whole-spec,
+neutral lane wording, full-path links in owner reports, and NO
+HOBBLING for perceived security risk (full capability, evidence-based
+restrictions only).
+
+THE QUEUE, ordered, every item ruled and specced:
+1. `effect-capability` finishes -> `seon.effect/request!` exists.
+2. Background work slice 1 —
+   `docs/prds/background-work/README.md` (APPROVED, with the
+   orchestrator's four additions: teaching-at-return, duration
+   feedback instead of auto-backgrounding, the bootstrap tail pane
+   AFTER the cache boundary, additive-only keys).
+3. Tools spine from
+   `research/agent-tools-design-2026-08-03.md`: blob binary/chunk API,
+   then `my.fs`, `my.edit` (form/exact/lines), `my.shell`. Env is
+   UNFILTERED per the no-hobbling ruling — the spec's sanitization
+   section must be rewritten before implementation.
+4. Kernel merge (render kernel + evaluate converge on one guarded
+   owner) — dissolves the top-scored issue cluster.
+5. Blob unification (one per-value rule; delete the 65,536 dial).
+6. Schema split (domain files, one merging loader, registry-query-first
+   discovery rule in AGENTS.md).
+7. 1000-agent synthetic load test (owner: synthetic only for now).
+8. SCI migration waves (`my.*` first), each stating what left the
+   shared surface and its measured cost.
+9. Accretion-testing pipeline: test-call-edge implementation ->
+   candidate-context testing of function+tests TOGETHER before install
+   (owner's own derivation), with results rendered as agent feedback.
+
+OPEN FOR THE OWNER: the three render dispositions (universal ownership
+fact, agentless-namespace stakeholders, repair-acceptance events); web
+slice timing and the search-provider choice; the schema-split go-ahead
+after render settled.
+
+RESEARCH INDEX (all pushed, all under
+`docs/prds/sci-execution-runtime/research/` unless noted):
+render-simplification-audit-2026-08-03, render-verification-2026-08-03,
+suite-speed-2026-08-03, test-defect-analysis-2026-08-03,
+test-call-edge-design-2026-08-03, blob-threshold-derivation-2026-08-03,
+union-codec-2026-08-03, seon-db-sweep-plan-2026-08-03,
+adversarial-pass-2026-08-03, issues-triage-2026-08-03,
+agent-tools-quarry-2026-08-03, agent-tools-design-2026-08-03,
+llm-provider-research-2026-08-03 (+ the `llm-providers` skill),
+operator-integration-2026-08-03 (+ three supporting audits),
+per-cluster-history-2026-08-02, and `docs/prds/background-work/README.md`.
+
 **ADDENDUM 21 — 2026-08-03 OVERNIGHT SESSION OPEN. THE OWNER-DECISION
 BATCH FOR THE RENDER MODEL IS READY.**
 
