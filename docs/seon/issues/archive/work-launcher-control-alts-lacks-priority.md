@@ -79,8 +79,8 @@ on stop from the pinned dependency
 (`reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:243-323`).
 The stop transition interrupts the launcher's owned task executor.
 
-`launcher-stop-precedes-ready-submissions`
-(`test/seon/flow_test.clj:520-577`) acknowledges pause, fills the configured
+`launcher-stop-precedes-a-flood-of-ready-submissions`
+(`test/seon/flow_test.clj:541`) acknowledges pause, fills the configured
 queue depth, orders resume then stop on Flow's control channel, observes the
 standard step's stop transition, and proves the queued submission remains
 queued and unrealized. The proof waits on the transition event with only the
