@@ -130,9 +130,9 @@ literal lives in the handler.
 ## Verification boundary
 
 The implementation namespaces load successfully with jsoup `1.22.2` on the
-classpath. The focused test run reached the two public-entry metadata/schema
-falsifiers (13 passing assertions), then failed during every file-database
-fixture before a web handler ran. The concurrent program-indexing change
+classpath. The focused test run passed the two public-entry metadata/schema
+falsifiers (nine assertions), then produced four fixture errors before a web
+handler ran. The concurrent program-indexing change
 attempted to transact `[:seon.cluster.agent/id
 :seon.config/agent-overlay]` as one value of `:seon.fn/keywords`; the installed
 attribute accepts a keyword, not a vector. The exact refusing boundary is
