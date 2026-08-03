@@ -622,7 +622,7 @@ Use discoverable code names, not umbrella nouns or synonyms:
 | every `fn` body entrance | safepoint | where sci calls the `:interrupt-fn`. A JVM safepoint is a different real thing (GC); `reference-code/sci/doc/interrupt.md:50` |
 | `ctx`, `fork` | warm base, sandbox, the agent's world | sci's own names; `reference-code/sci/src/sci/core.cljc:318` |
 | `:io` / `:compute` / `:mixed` | eval pool, wait pool | core.async's workload tags: `:io` may block but must not compute, `:compute` must not block; `reference-code/core.async/.../impl/dispatch.clj:122-134` |
-| `:seon.cluster.run/process` | **claimant** | the process holding a run; the run section of `resources/seon/schema.edn` + `src/seon/cluster/run.clj` ↔ `src/seon/cluster/process.clj` and JDK `ProcessHandle` |
+| `:seon.cluster.run/process` | **claimant** | the process holding a run; `resources/seon/schemas/seon.cluster.run.edn` + `src/seon/cluster/run.clj` ↔ `src/seon/cluster/process.clj` and JDK `ProcessHandle` |
 | accretion / breakage | graduation, nursery, graduated | a change that requires no more and provides no less. **Attribution to Rich Hickey's Spec-ulation is UNVERIFIED** — do not cite it as established |
 | initialization rows, transaction data | seed bundle, sidecar | one admitted source population; `src/seon/cluster.clj` (`populate-source!`) + `src/seon/fn.clj` (`index!`) ↔ Datahike tx-data |
 | process record, generation, (pid, start-instant) identity | orphan registry, liveness flag | operator-managed process descriptors; `script/seon/fresh_operator.clj` + `script/seon/dev/state.clj` ↔ `src/seon/cluster/process.clj` and JDK `ProcessHandle` |
@@ -636,8 +636,8 @@ Use discoverable code names, not umbrella nouns or synonyms:
 | `(sliding-buffer 1)` tap | latest-wins mailbox | core.async's own newest-only delivery; `reference-code/core.async/src/main/clojure/clojure/core/async/impl/buffers.clj` |
 | tuple (`:db/tupleType`) | small limited vector, ordered many | Datahike's single-value ordered construct — one datom, whole-value replace; homogeneous cap 8 (fork lift queued); cardinality-many is a SET (`reference-code/datahike/src/datahike/index/persistent_set.cljc:133`) |
 | `my.agents.<id>` | agent workspace, sandbox ns | the DEFAULT namespace for a temp/undifferentiated agent only (owner ruling 2026-07-31); real agents own namespaces anywhere in the tree, including seon core, and any namespace has at most one assigned agent (`:seon.cluster.agent/namespace`, unique) |
-| `:seon.render/ai` | prose, text render, AI projection | the string consumed by agent context OR a fully qualified symbol naming a function that returns that string; the symbol is the declared producer arm, while its resolved Var is only an execution artifact and never crosses the contract (`resources/seon/schema.edn` ↔ `src/seon/render.clj`) |
-| `:seon.render/html` | hiccup, HTML projection, human render | the Hiccup consumed by the web UI OR a fully qualified symbol naming a function that returns that Hiccup; Hiccup is this schema's definition, never a second `:seon.render/hiccup` contract (`resources/seon/schema.edn` ↔ `src/seon/render/hiccup.clj`) |
+| `:seon.render/ai` | prose, text render, AI projection | the string consumed by agent context OR a fully qualified symbol naming a function that returns that string; the symbol is the declared producer arm, while its resolved Var is only an execution artifact and never crosses the contract (`resources/seon/schemas/seon.render.edn` ↔ `src/seon/render.clj`) |
+| `:seon.render/html` | hiccup, HTML projection, human render | the Hiccup consumed by the web UI OR a fully qualified symbol naming a function that returns that Hiccup; Hiccup is this schema's definition, never a second `:seon.render/hiccup` contract (`resources/seon/schemas/seon.render.edn` ↔ `src/seon/render/hiccup.clj`) |
 | wire (external crossings only) | wire for anything in-process | "wire" is reserved for a crossing that LEAVES the process to an external service — the provider HTTP request, the browser SSE connection (owner ruling 2026-07-29). Internal transport is channels, flow, and database facts, and is never called a wire; this refactor deleted the internal wire protocols and nothing may reintroduce the word for them |
 | namespace page | page, screen, view, dashboard | one namespace's web surface (owner ruling 2026-07-31): the route resolves the namespace → its owner agent → the walk rendered in the `:seon.render/html` projection; `/` is root's namespace page; the debug variant is the same walk, two panes (exact AI context left, all walked units right). Adding a namespace page is adding a route line — never per-page render code |
 | block | widget, component, panel | ONE render function's identified output: the function + its stable element id + its current bytes — the unit of rendering, morph targeting, equality suppression, and churn ranking (owner ruling 2026-07-29). The ONE render unit in both projections — `:seon.render/ai` into agent context and `:seon.render/html` to the page are two projections of the same block; there is no static scaffold path — system message and global instruction files are blocks rendered from instruction facts reached through the cluster entity (owner ruling 2026-07-31) |
@@ -714,6 +714,13 @@ mistake wearing different clothes: a hand-maintained list, a naming convention
 (`render-<kind>` built from a namespace name), and a regex over text — each one
 is reaching for a substitute because the fact was never recorded.
 
+Schema discovery is registry-query-first. Before declaring a key, search the
+merged schema registry for the attribute or value shape the work needs; reuse
+the existing globally identified declaration when it already expresses that
+meaning, and create a new declaration only when the query proves the fact is
+absent. Files under `resources/seon/schemas/` organize the one registry; their
+names never scope declarations or shorten fully qualified keys.
+
 Worked examples, all measured on 2026-08-02:
 
 - "Which functions need cluster custody?" — 9 declare
@@ -741,7 +748,7 @@ The compact invariants are:
 - immutable data and pure transformations first;
 - derive projections instead of storing them;
 - fully namespaced map keys and database attributes, without exceptions;
-- globally identified schemas declared once in `resources/seon/schema.edn`;
+- globally identified schemas declared once under `resources/seon/schemas/`;
 - errors as values at agent/runtime boundaries;
 - one namespaced map in/out for API-like functions, or fully named/spec'd
   positional arguments for ordinary functions;
@@ -762,7 +769,7 @@ then `foo` and `bar` are validated RIGOROUSLY, and a supplied `bat` is simply
 IGNORED.** Never refused. This holds for function arguments and for entity and
 value shapes alike — functions accrete for the same reason data does.
 
-So `{:closed true}` does not appear in `resources/seon/schema.edn`, and a
+So `{:closed true}` does not appear under `resources/seon/schemas/`, and a
 reviewer treats a new one as a defect. Malli's maps are already open by
 default (`reference-code/malli/README.md:294`); the strictness was ours and it
 contradicted everything else here — an entity IS its attributes, extra ones
@@ -795,7 +802,7 @@ WITHOUT failing a single validation. So:
   still validates;
 - needing different semantics means a NEW KEY WITH A NEW NAME, never a
   redefinition of the old one. Globally identified keys are declared once
-  (`resources/seon/schema.edn`), so editing a declaration IS changing every
+  (`resources/seon/schemas/`), so editing a declaration IS changing every
   consumer's contract at once — treat such an edit as a design decision, not
   a correction.
 

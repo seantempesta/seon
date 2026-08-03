@@ -1819,12 +1819,13 @@
               store# source# (get instances# ~name))))]
     (pr-str
      `(do
-        ;; The live JVM owns the process-root store lock. Reload only the
+        ;; The live JVM owns the process-root store lock. Reload the
         ;; source-analysis owners before asking that JVM to publish
         ;; `current-src`; the running clusters and their program facts remain
-        ;; untouched. Reload the schema loader before any namespace whose
-        ;; top-level forms call `load!`, then reload predicate registration
-        ;; owners before admission runs during publication.
+        ;; untouched because their process state is held in defonce Vars.
+        ;; Reload the schema loader before any namespace whose top-level forms
+        ;; call `load!`, then reload predicate registration owners before
+        ;; admission runs during publication.
         (require 'seon.schema.edn :reload)
         (require 'seon.fn.analyzer :reload)
         (require 'seon.fn :reload)
@@ -1833,8 +1834,10 @@
         ;; during schema admission.
         (require 'seon.db :reload)
         (require 'seon.cluster.source :reload)
-        (require 'seon.cluster
-                 'seon.cluster.registry
+        ;; Reload the publication owner too: its source-root value changes
+        ;; when schema resources move or the monolithic resource is removed.
+        (require 'seon.cluster :reload)
+        (require 'seon.cluster.registry
                  'seon.cluster.store)
         ~(if source-process?
            `(println
