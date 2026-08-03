@@ -32,6 +32,21 @@ Four surfaces share Clojure syntax but not an execution contract:
 If a generic REPL probe behaves differently from an agent turn, that is not a
 contradiction; first name which surface you are on.
 
+### Operating clusters from a REPL session
+
+`seon.operator` is the sanctioned control surface on the `io-prepl`/`eval_clj`
+jvm surface: eight thin-delegation verbs — `start!`, `stop!`, `restart!`,
+`status`, `banner`, `clusters`, `publish!`, `refork!` — each an ordinary
+function whose readiness output is derived per call, never stored
+(`src/seon/operator.clj`; verified live 2026-08-03: `(seon.operator/clusters)`
+returns the current advertisement census). `start!` REFUSES a running name
+with a flat `:seon.boot/refused` error rather than implicitly halting, and a
+failed boot deliberately leaves the degraded instance up for diagnosis. There
+is no `reset` verb: var-level hot reload is automatic, and destructive refork
+is the explicit `refork!`. Terminal attach is `rlwrap nc` against the
+advertised prepl port (the namespace docstring documents the flow); no nREPL
+server exists.
+
 ### Prove the agent session boundary
 
 Use an actual agent turn when the claim concerns the shared SCI context,
