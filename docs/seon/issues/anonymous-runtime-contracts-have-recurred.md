@@ -45,7 +45,7 @@ copied from the render-vocabulary lane:
   (selected submodule commit
   `dc35f3e0d7bc2eef502e77982f48641f025c8051`).
 
-The current counts are:
+The pre-fix census baseline counts were:
 
 | Scope | `:any` | `:some` |
 |---|---:|---:|
@@ -94,11 +94,11 @@ not repaired in this lane.
   literal schema tag in `undefined-types` at
   `src/seon/schema/internal.cljc:20`, beside a literal `:any`; neither is a
   function contract.
-- The numerical `58 :any` total still matches, but its current instance set
-  does not match the lane's detailed log. The current tree additionally has a
-  connection input on `config/apply-compiled!` at `src/seon/config.clj:242`
-  and the synthetic schema-reference registry's `:any` at
-  `src/seon/render/ns.clj:102`; neither appears in that log's source listing.
+- The numerical `58 :any` baseline total matched, but its instance set did not
+  match the lane's detailed log. At census time the tree additionally had a
+  connection input on `config/apply-compiled!` (fixed by `6763616f4`) and the
+  synthetic schema-reference registry's `:any` at `src/seon/render/ns.clj:102`;
+  neither appeared in that log's source listing.
 - All five named concrete defects are confirmed: `raw` returns `:any`
   (`src/seon/render/hiccup.clj:75`), instrumentation returns `[:set :any]`
   (`src/seon/instrument.clj:108`), database inputs use `:any`
