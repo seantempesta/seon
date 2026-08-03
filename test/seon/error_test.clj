@@ -41,7 +41,7 @@
             [seon.schema]
             [seon.sci.admit :as admit]
             [seon.test-support :as test-support]
-            [datahike.api :as d]))
+            [seon.db :as db]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Fixtures — the three families, plus the hostile values
@@ -455,7 +455,7 @@
   [body]
   (test-support/with-database
     (fn [connection]
-      (d/transact connection [{:seon.cluster.agent/id "root"}
+      (db/transact! connection [{:seon.cluster.agent/id "root"}
                               {:seon.cluster.agent/id "agent-3"}])
       (body connection))))
 
@@ -473,16 +473,16 @@
 (defn- commit!
   "Commit one error and return [fact-count messages-by-recipient]."
   [connection source extra]
-  (d/transact connection
+  (db/transact! connection
               (error/commit-tx @connection (commit-request source extra)))
   (let [db @connection]
-    [(count (d/q '[:find ?e :where [?e :seon.error/id _]] db))
+    [(count (db/q '[:find ?e :where [?e :seon.error/id _]] db))
      ;; ?message is bound so two messages to one recipient are two
      ;; rows: a `[?to ...]` find returns a SET and would have counted
      ;; a four-message storm as one
      (frequencies
       (map second
-           (d/q '[:find ?message ?to
+           (db/q '[:find ?message ?to
                   :where
                   [?message :seon.cluster.message/about _]
                   [?message :seon.cluster.message/to ?agent]
@@ -583,11 +583,11 @@
             tx (error/commit-tx @connection request)]
         ;; the SAME request committed twice: re-execution after a crash
         ;; must upsert, never double-send
-        (d/transact connection tx)
-        (d/transact connection tx)
+        (db/transact! connection tx)
+        (db/transact! connection tx)
         (let [db @connection]
-          (is (= 1 (count (d/q '[:find ?e :where [?e :seon.error/id _]] db))))
-          (is (= 1 (count (d/q '[:find ?m :where
+          (is (= 1 (count (db/q '[:find ?e :where [?e :seon.error/id _]] db))))
+          (is (= 1 (count (db/q '[:find ?m :where
                                  [?m :seon.cluster.message/about _]]
                                db))))))))) 
 
@@ -596,7 +596,7 @@
     (fn [connection]
       (commit! connection (transform-error (ex-info "boom" {})) {})
       (let [db @connection
-            about (d/q '[:find ?id .
+            about (db/q '[:find ?id .
                          :where
                          [?message :seon.cluster.message/about ?error]
                          [?error :seon.error/id ?id]]

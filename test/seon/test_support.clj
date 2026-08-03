@@ -5,6 +5,7 @@
             [clojure.java.io :as io]
             [clojure.test :as test]
             [datahike.api :as d]
+            [seon.db :as db]
             [seon.cluster :as cluster]
             [seon.fs :as fs]
             [seon.fn :as seon.fn])
@@ -71,7 +72,7 @@
   ;; following transaction. Keep this canonical fixture on the same side of
   ;; that provenance boundary so indexed core contracts are not misclassified
   ;; as agent-authored rows.
-  (d/transact
+  (db/transact!
    connection
    {:tx-data [{:seon.source/digest (apply str (repeat 64 "0"))}]})
   nil)
@@ -200,7 +201,7 @@
   "Read every value of a file-store test's synthetic marker attribute."
   [connection marker-attribute]
   (set
-   (d/q
+   (db/q
     '[:find [?marker ...]
       :in $ ?marker-attribute
       :where
@@ -209,11 +210,13 @@
     marker-attribute)))
 
 (defn refusal-data
-  "Return deepest thrown ex-data, `committed`, or `unknown-refusal`."
+  "Return a flat error value, deepest thrown ex-data, or `committed`."
   [thunk]
   (try
-    (thunk)
-    committed
+    (let [result (thunk)]
+      (if (and (map? result) (keyword? (:seon.error/kind result)))
+        result
+        committed))
     (catch Throwable error
       (loop [throwable error
              found nil]
@@ -233,7 +236,7 @@
 (defn- run-database-body
   [connection extra-schema body]
   (when (seq extra-schema)
-    (d/transact connection {:tx-data extra-schema}))
+    (db/transact! connection {:tx-data extra-schema}))
   (body connection))
 
 (defn- with-fresh-database
@@ -297,7 +300,7 @@
 (defn seed-cluster!
   "Seed one complete cluster/config path for tests that create agents."
   [connection cluster-name]
-  (d/transact connection [{:seon.config/cluster cluster-name}])
+  (db/transact! connection [{:seon.config/cluster cluster-name}])
   (cluster/ensure-cluster-entity!
    connection cluster-name cluster/boot-process-identity)
   nil)

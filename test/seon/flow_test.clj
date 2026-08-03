@@ -7,6 +7,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [seon.db :as db]
             [datahike.core :as datahike]
             [malli.core :as m]
             [malli.generator :as mg]
@@ -223,8 +224,8 @@
         _ (d/create-database configuration)
         connection (d/connect configuration)]
     (try
-      (d/transact connection fault-schema)
-      (d/transact
+      (db/transact! connection fault-schema)
+      (db/transact!
        connection
        [{::core-error-config-id "testbed"
          ::on-core-error :record}
@@ -237,7 +238,7 @@
 
 (defn- core-error-mode
   [connection]
-  (d/q
+  (db/q
    '[:find ?mode .
      :where
      [?config :seon.flow-test/core-error-config-id "testbed"]
@@ -246,7 +247,7 @@
 
 (defn- commit-fault!
   [connection fault]
-  (d/transact
+  (db/transact!
    connection
    [{::fault-id (random-uuid)
      ::fault-proc (::flow/pid fault)
@@ -255,20 +256,20 @@
 (defn- commit-fault-drop!
   [connection _fault]
   (let [count
-        (d/q
+        (db/q
          '[:find ?count .
            :where
            [?counter :seon.flow-test/fault-drop-id "fault-committer"]
            [?counter :seon.flow-test/fault-drop-count ?count]]
          @connection)]
-    (d/transact
+    (db/transact!
      connection
      [{::fault-drop-id "fault-committer"
        ::fault-drop-count (inc count)}])))
 
 (defn- committed-faults
   [database]
-  (d/q
+  (db/q
    '[:find ?proc ?message
      :where
      [?fault :seon.flow-test/fault-id]
@@ -278,7 +279,7 @@
 
 (defn- committed-drop-count
   [database]
-  (d/q
+  (db/q
    '[:find ?count .
      :where
      [?counter :seon.flow-test/fault-drop-id "fault-committer"]
@@ -1464,7 +1465,7 @@
         (let [connection (d/connect configuration)]
           (try
             (is (= 1
-                   (d/q
+                   (db/q
                     '[:find ?count .
                       :where
                       [?entity :seon.flow.kill/id "durable-step"]

@@ -25,7 +25,7 @@
   (:require [clojure.core.async :as async]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.ai :as ai]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
@@ -75,7 +75,7 @@
               :seon.config.flow.compute/concurrency 2}})]
       (try
        (test-support/seed-cluster! connection "generate-code-v0")
-       (d/transact connection
+       (db/transact! connection
                    (conj cast-rows
                          (:seon.config/desired-row
                           (config/compile-manifest
@@ -109,7 +109,7 @@
 
 (defn- agent-ids
   [db]
-  (sort (d/q '[:find [?id ...] :where [?e :seon.cluster.agent/id ?id]] db)))
+  (sort (db/q '[:find [?id ...] :where [?e :seon.cluster.agent/id ?id]] db)))
 
 (defn- drive!
   "Run each agent's own pass until nobody has work, or `limit` passes.
@@ -209,7 +209,7 @@
   A re-triggered planner attempts again, and asserting over \"the\"
   planner run would quietly change subject when it does."
   [db]
-  (->> (d/q '[:find ?id ?opened
+  (->> (db/q '[:find ?id ?opened
               :where
               [?run :seon.cluster.run/id ?id]
               [?run :seon.cluster.run/opened-at ?opened]
@@ -223,7 +223,7 @@
   "Ordinal → parse-time namespace, for the forms that carry one."
   [db run-id]
   (into {}
-        (d/q '[:find ?ordinal ?namespace-name
+        (db/q '[:find ?ordinal ?namespace-name
                :in $ ?run-id
                :where
                [?run :seon.cluster.run/id ?run-id]
@@ -236,7 +236,7 @@
 (defn- assignments
   "Messages about one run's problems: #{[recipient problem-id]}."
   [db run-id]
-  (set (d/q '[:find ?to-id ?problem-id
+  (set (db/q '[:find ?to-id ?problem-id
               :in $ ?run-id
               :where
               [?run :seon.cluster.run/id ?run-id]
@@ -266,7 +266,7 @@
        ;; THE SURFACE: no new agent-facing construct — root's goal is an
        ;; ordinary message, and everything after it is the system's own
        ;; doing.
-       (d/transact connection
+       (db/transact! connection
                    [{:seon.cluster.message/id "goal-1"
                      :seon.cluster.message/to
                      [:seon.cluster.agent/id "planner"]
@@ -299,7 +299,7 @@
                 call moved the namespace is what erased most of the
                 program graph (2026-07-29); only a form that mentions
                 `ns`/`in-ns` below its head clears attribution.")
-           (is (= 7 (count (d/q '[:find ?f
+           (is (= 7 (count (db/q '[:find ?f
                                   :in $ ?run-id
                                   :where
                                   [?run :seon.cluster.run/id ?run-id]
@@ -309,7 +309,7 @@
 
          (testing "execution honours parse-time attribution"
            (is (str/includes?
-                (d/q '[:find ?edn .
+                (db/q '[:find ?edn .
                        :in $ ?run-id
                        :where
                        [?run :seon.cluster.run/id ?run-id]
@@ -322,7 +322,7 @@
                 attributed to its form"))
 
          (testing "the fold CONTINUES past a red form — nothing halts"
-           (is (= 7 (count (d/q '[:find ?r
+           (is (= 7 (count (db/q '[:find ?r
                                   :in $ ?run-id
                                   :where
                                   [?run :seon.cluster.run/id ?run-id]
@@ -341,7 +341,7 @@
 
          (testing "an assignment rides the terminal transaction of the
                    very form that produced it"
-           (let [assignment-tx (d/q '[:find ?tx .
+           (let [assignment-tx (db/q '[:find ?tx .
                                       :in $ ?problem-id
                                       :where
                                       [?about :seon.problems/id ?problem-id]
@@ -349,7 +349,7 @@
                                        ?tx]]
                                     db (work/problem-id run-id 2))]
              (is (= [2]
-                    (d/q '[:find [?ordinal ...]
+                    (db/q '[:find [?ordinal ...]
                            :in $ ?tx
                            :where
                            [?r :seon.cluster.eval/error _ ?tx]
@@ -365,7 +365,7 @@
                "an owner's later prose does not mutate the red receipt"))
 
          (testing "the red evidence survives the settlement"
-           (is (some? (d/q '[:find ?error .
+           (is (some? (db/q '[:find ?error .
                              :in $ ?run-id
                              :where
                              [?run :seon.cluster.run/id ?run-id]
@@ -378,7 +378,7 @@
                    can make it so"
            (is (false? (:seon.cluster.work/settled?
                         (work/plan-settlement db run-id))))
-           (is (some? (d/q '[:find ?closed .
+           (is (some? (db/q '[:find ?closed .
                              :in $ ?run-id
                              :where
                              [?run :seon.cluster.run/id ?run-id]
@@ -401,7 +401,7 @@
          (testing "the goal scopes the whole conversation by cause alone"
            (is (= 1 (message/chain-depth
                      db
-                     (d/q '[:find ?id .
+                     (db/q '[:find ?id .
                             :in $ ?problem-id
                             :where
                             [?about :seon.problems/id ?problem-id]
@@ -422,7 +422,7 @@
   (with-gen-cluster
    (fn [cluster]
      (let [connection (:seon.store/branch-connection cluster)]
-       (d/transact connection
+       (db/transact! connection
                    [{:seon.cluster.message/id "goal-1"
                      :seon.cluster.message/to
                      [:seon.cluster.agent/id "planner"]
@@ -461,7 +461,7 @@
   (with-gen-cluster
    (fn [cluster]
      (let [connection (:seon.store/branch-connection cluster)]
-       (d/transact connection
+       (db/transact! connection
                    [{:seon.cluster.message/id "goal-1"
                      :seon.cluster.message/to
                      [:seon.cluster.agent/id "planner"]
@@ -482,7 +482,7 @@
        (let [db @connection
              run-id (planner-run db)]
          (is (= "the program is built"
-                (d/q '[:find ?content .
+                (db/q '[:find ?content .
                        :where
                        [?m :seon.cluster.message/to ?to]
                        [?to :seon.cluster.agent/id "root"]

@@ -4,6 +4,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [seon.db :as db]
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.oversight :as oversight]
@@ -50,7 +51,7 @@
         (await-fact
          (:seon.boot/cluster-connection instance)
          (fn [db]
-           (d/q '[:find ?closed-at .
+           (db/q '[:find ?closed-at .
                   :in $ ?run-id
                   :where
                   [?run :seon.cluster.run/id ?run-id]

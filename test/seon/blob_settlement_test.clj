@@ -3,6 +3,7 @@
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
             [datahike.api :as d]
+            [seon.db :as db]
             [seon.blob :as blob]
             [seon.cluster.loop :as loop]
             [seon.cluster.registry :as registry]
@@ -14,7 +15,7 @@
   (let [root (str "tmp/blob-settlement-test/" (random-uuid))
         opened (store/open-store! {:seon.store/dir (str root "/store")})]
     (try
-      (d/transact
+      (db/transact!
        (:seon.store/connection opened)
        [{:db/ident :seon.config.eval.result/blob-threshold
          :db/valueType :db.type/long
@@ -27,7 +28,7 @@
                          :seon.store/branch :settlement-test})
       (let [connection (store/open-branch! opened :settlement-test)]
         (try
-          (d/transact connection
+          (db/transact! connection
                       [{:seon.config.eval.result/blob-threshold 65536
                         :seon.render.value/max-collection 3}])
           (let [caps (config/result-caps (config/defaults))

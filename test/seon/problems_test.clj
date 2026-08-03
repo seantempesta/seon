@@ -22,7 +22,7 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.config :as config]
             [seon.error :as error]
             [seon.problems :as problems]
@@ -42,7 +42,7 @@
   [body]
   (test-support/with-database
     (fn [connection]
-      (d/transact connection [{:seon.cluster.agent/id "agent-a"}])
+      (db/transact! connection [{:seon.cluster.agent/id "agent-a"}])
       (body connection))))
 
 (defn problems-surface
@@ -70,7 +70,7 @@
   ;; it pretended otherwise (it did, first time round).
   ([connection] (commit-error! connection :seon.db/rejected))
   ([connection kind]
-   (d/transact
+   (db/transact!
     connection
     (error/commit-tx
      @connection
@@ -79,7 +79,7 @@
       ;; random id would make a shrunk counterexample unreplayable even
       ;; though nothing here reads the id (review-caught)
       :seon.error/id (str "err-" (name kind) "-"
-                          (count (d/q '[:find ?e :where [?e :seon.error/id _]]
+                          (count (db/q '[:find ?e :where [?e :seon.error/id _]]
                                       @connection)))
       :seon.error/at now
       :seon.error/process live
@@ -90,7 +90,7 @@
 
 (defn- commit-wedged-run!
   [connection]
-  (d/transact connection
+  (db/transact! connection
               [{:seon.cluster.run/id "run-wedged"
                 :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
                 :seon.cluster.run/opened-at now
@@ -98,7 +98,7 @@
 
 (defn- commit-failed-run!
   [connection]
-  (d/transact connection
+  (db/transact! connection
               [{:seon.cluster.run/id "run-failed"
                 :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
                 :seon.cluster.run/opened-at now
@@ -107,7 +107,7 @@
 
 (defn- commit-errored-receipt!
   [connection]
-  (d/transact connection
+  (db/transact! connection
               [{:seon.cluster.run/id "run-with-receipt"
                 :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
                :seon.cluster.run/opened-at now

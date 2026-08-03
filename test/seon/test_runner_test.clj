@@ -2,7 +2,7 @@
   "The opt-in JVM test-result fact sink."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.test-runner-failure-fixture]
@@ -51,8 +51,8 @@
     (fn [connection]
       (let [run-result (captured-run)]
         (test-support/seed-cluster! connection "test")
-        (d/transact connection (runner/record-tx run-result))
-        (d/transact
+        (db/transact! connection (runner/record-tx run-result))
+        (db/transact!
          connection
          (agent/creation-tx
           {:seon.cluster.agent/id "fixture-owner"
@@ -64,7 +64,7 @@
                 "the deliberate broken-test evidence\nexpected: (= 5 (+ 2 2))\nactual: (not (= 5 4))"
                 at
                 git-sha]}
-            (d/q
+            (db/q
              '[:find ?test-symbol ?agent-id ?message ?at ?git-sha
                :where
                [?result :seon.test.result/outcome :fail]

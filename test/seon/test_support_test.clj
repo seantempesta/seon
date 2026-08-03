@@ -5,7 +5,7 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.cluster :as cluster]
             [seon.config :as config]
             [seon.fn :as seon.fn]
@@ -28,7 +28,7 @@
              (keep :seon.schema/key)
              (seon.fn/rows {:seon.fn/roots seon.fn/source-roots}))
             actual-schema-keys
-            (d/q
+            (db/q
              '[:find [?key ...]
                :where
                [_ :seon.schema/key ?key]]
@@ -42,7 +42,7 @@
         (is (= #{cluster/boot-process-identity
                  config/managing-process-identity}
                (set
-                (d/q
+                (db/q
                  '[:find [?process-id ...]
                    :where
                    [?process :seon.db.process/id ?process-id]]
@@ -57,7 +57,7 @@
   (test-support/with-database
     (fn [connection]
       (let [before
-            (d/q
+            (db/q
              '[:find [?key ...]
                :where
                [_ :seon.schema/key ?key]]
@@ -68,7 +68,7 @@
               :seon.config/manifest (config/defaults)
               :seon.boot/cluster-name "fixture-proof"})
             after
-            (d/q
+            (db/q
              '[:find [?key ...]
                :where
                [_ :seon.schema/key ?key]]
@@ -84,7 +84,7 @@
            [(test-support/with-database
               options
               (fn [connection]
-                (d/transact connection [{::marker "installed"}])
+                (db/transact! connection [{::marker "installed"}])
                 (test-support/file-store-markers connection ::marker)))
             (test-support/with-database
               (fn [connection]
@@ -105,6 +105,9 @@
     (is (= {::rule ::refused}
            (test-support/refusal-data
             #(throw (ex-info "refused" {::rule ::refused})))))
+    (is (= {:seon.error/kind ::flat-refusal}
+           (test-support/refusal-data
+            (constantly {:seon.error/kind ::flat-refusal}))))
     (test-support/delete-recursively! path)
     (is (not (.exists (java.io.File. path))))))
 

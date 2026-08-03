@@ -4,7 +4,6 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [datahike.api :as d]
             [sci.core :as sci]
             [sci.impl.utils :as sci.utils]
             [seon.config :as config]
@@ -75,7 +74,7 @@
              (when (and (= :core (:seon.schema.admission/source admission))
                         (find-ns namespace-name))
                [namespace-name (find-ns namespace-name)]))))
-        (d/q namespace-assertions-query db)))
+        (db/q namespace-assertions-query db)))
 
 (defn- var-root
   [value]
@@ -117,13 +116,13 @@
     (fn [connection]
       (let [db @connection
             public-contracted-functions
-            (d/q '[:find (count ?function) .
+            (db/q '[:find (count ?function) .
                    :where
                    [?function :seon.fn/private? false]
                    [?function :seon.fn/arities]]
                  db)
             actual
-            (d/q custody-returning-query db custody-output-schema-keys)]
+            (db/q custody-returning-query db custody-output-schema-keys)]
         (is (pos? public-contracted-functions)
             "a missing program graph is failure, never a healthy empty census")
         ;; Exact is deliberate: a maximum would let one of today's custody

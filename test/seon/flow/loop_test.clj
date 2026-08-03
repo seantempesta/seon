@@ -8,6 +8,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
+            [seon.db :as db]
             [seon.flow :as sut]
             [seon.test-support :as test-support]))
 
@@ -125,7 +126,7 @@
         _ (d/create-database configuration)
         connection (d/connect configuration)]
     (try
-      (d/transact connection prototype-schema)
+      (db/transact! connection prototype-schema)
       (body connection)
       (finally
         (d/release connection)
@@ -136,7 +137,7 @@
   (let [config-id (str plan-id "/budget")
         fix-run-ids
         (mapv (fn [owner] (str plan-id "/" (name owner))) owners)]
-    (d/transact
+    (db/transact!
      connection
      (into
       [{::config-id config-id
@@ -152,14 +153,14 @@
           ::fix-run-namespace owner})
        owners
        fix-run-ids)))
-    (d/transact
+    (db/transact!
      connection
      [{::plan-id plan-id
        ::plan-fix-runs (mapv #(vector ::fix-run-id %) fix-run-ids)}])))
 
 (defn- plan-eid
   [database plan-id]
-  (:db/id (d/pull database [:db/id] [::plan-id plan-id])))
+  (:db/id (db/pull database [:db/id] [::plan-id plan-id])))
 
 (defn- fix-run-id
   [plan-id owner]
@@ -167,7 +168,7 @@
 
 (defn- successful-owners
   [database plan-id]
-  (d/q
+  (db/q
    '[:find [?owner ...]
      :in $ ?plan
      :where
@@ -178,7 +179,7 @@
 
 (defn- owner-count
   [database plan-id]
-  (d/q
+  (db/q
    '[:find (count ?run) .
      :in $ ?plan
      :where
@@ -189,7 +190,7 @@
 (defn- escalated?
   [database plan-id]
   (boolean
-   (d/q
+   (db/q
     '[:find ?escalation .
       :in $ ?plan
       :where
@@ -200,7 +201,7 @@
 (defn- admitted?
   [database plan-id]
   (= ::accepted
-     (d/q
+     (db/q
       '[:find ?verdict .
         :in $ ?plan
         :where
@@ -219,7 +220,7 @@
 (defn- attempt-count
   [database plan-id]
   (or
-   (d/q
+   (db/q
     '[:find (count ?attempt) .
       :in $ ?plan
       :where
@@ -232,7 +233,7 @@
 (defn- failure-count
   [database plan-id]
   (or
-   (d/q
+   (db/q
     '[:find (count ?attempt) .
       :in $ ?plan ?success
       :where
@@ -247,7 +248,7 @@
 
 (defn- budget
   [database plan-id]
-  (d/q
+  (db/q
    '[:find [?turns ?failures]
      :in $ ?plan
      :where
@@ -259,7 +260,7 @@
 
 (defn- commit-attempt!
   [connection plan-id owner ordinal outcome]
-  (d/transact
+  (db/transact!
    connection
    (cond->
     [{::attempt-id (str plan-id "/" (name owner) "/" ordinal)
@@ -275,7 +276,7 @@
 
 (defn- commit-wake!
   [connection plan-id target source reason ordinal]
-  (d/transact
+  (db/transact!
    connection
    [{::wake-id (str plan-id "/" (name target) "/" (name reason) "/" ordinal)
      ::wake-plan [::plan-id plan-id]
@@ -294,7 +295,7 @@
           ::sut/max-turns max-turns
           ::sut/max-failures max-failures})]
     (when (and exhausted? (not (escalated? database plan-id)))
-      (d/transact
+      (db/transact!
        connection
        [{::escalation-id (str plan-id "/escalation")
          ::escalation-plan [::plan-id plan-id]}
@@ -315,7 +316,7 @@
 
 (defn- self-wakes
   [database plan-id]
-  (d/q
+  (db/q
    '[:find ?target ?source
      :in $ ?plan
      :where
@@ -332,7 +333,7 @@
         open-owners
         (set/difference
          (set
-          (d/q
+          (db/q
            '[:find [?owner ...]
              :in $ ?plan
              :where
@@ -341,7 +342,7 @@
            database plan))
          (set (successful-owners database plan-id)))
         fault-routes
-        (d/q
+        (db/q
          '[:find ?source ?target
            :in $ ?plan ?success
            :where
@@ -372,16 +373,16 @@
             observed
             (if since-basis
               (set
-               (d/q
+               (db/q
                 '[:find [?owner ...]
                   :in $ ?plan
                   :where
                   [?success :seon.flow.loop-test/success-plan ?plan]
                   [?success :seon.flow.loop-test/success-namespace ?owner]]
-                (d/since database since-basis)
+                (db/since database since-basis)
                 (plan-eid database plan-id)))
               #{})]
-        (d/transact
+        (db/transact!
          connection
          (cond->
           [{::plan-id plan-id
@@ -397,7 +398,7 @@
         {::accepted? true
          ::observed-success observed})
       (let [consumers (set (::consumers verdict))]
-        (d/transact
+        (db/transact!
          connection
          [{::plan-id plan-id
            ::plan-admission ::rejected
@@ -495,7 +496,7 @@
          check
          "Seeded terminal property failed.")
         (is (= ::sut/iterating (derived-status @connection plan-id)))
-        (d/transact
+        (db/transact!
          connection
          (into
           [{::plan-id plan-id
@@ -605,7 +606,7 @@
               (is (= [{::action ::wake-planner}]
                      (next-actions @connection plan-id :owner-b 3)))
               (is (= 2
-                     (d/q
+                     (db/q
                       '[:find (count ?attempt) .
                         :where
                         [?run :seon.flow.loop-test/fix-run-namespace
@@ -616,7 +617,7 @@
               (is (empty? (derived-fault-wakes
                            @connection plan-id)))
               (is (= 1
-                     (d/q
+                     (db/q
                       '[:find (count ?wake) .
                         :in $ ?plan ?owner
                         :where
@@ -636,14 +637,14 @@
                     ::since-basis before-a-success})
                   since-successes
                   (set
-                   (d/q
+                   (db/q
                     '[:find [?owner ...]
                       :in $ ?plan
                       :where
                       [?success :seon.flow.loop-test/success-plan ?plan]
                       [?success
                        :seon.flow.loop-test/success-namespace ?owner]]
-                    (d/since @connection before-a-success)
+                    (db/since @connection before-a-success)
                     (plan-eid @connection plan-id)))]
               (is (= #{:owner-a} since-successes))
               (is (= #{:owner-a}
@@ -651,7 +652,7 @@
                              [::sut/result ::observed-success])))
               (is (= #{:owner-a}
                      (set
-                      (d/q
+                      (db/q
                        '[:find [?owner ...]
                          :in $ ?plan
                          :where
@@ -690,7 +691,7 @@
                   ::planner-attempt 1})
                 result (::sut/result report)
                 plan
-                (d/pull
+                (db/pull
                  @connection
                  [::plan-admission ::plan-choice-point ::plan-consumers]
                  [::plan-id plan-id])]

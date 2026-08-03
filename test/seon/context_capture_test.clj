@@ -2,7 +2,7 @@
   "Projection boundaries for durable context-capture evidence."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.context :as context]
             [seon.render.hiccup :as hiccup]
             [seon.render.walk :as walk]
@@ -39,8 +39,8 @@
 (deftest captures-are-html-evidence-and-never-ai-context
   (support/with-database
     (fn [connection]
-      (d/transact connection [{:seon.cluster.run/id "capture-run"}])
-      (d/transact
+      (db/transact! connection [{:seon.cluster.run/id "capture-run"}])
+      (db/transact!
        connection
        [{:seon.context.capture/id "capture-1"
          :seon.context.capture/run [:seon.cluster.run/id "capture-run"]
@@ -80,7 +80,7 @@
 (deftest one-walk-capture-transacts-without-a-legacy-band
   (support/with-database
     (fn [connection]
-      (d/transact connection [{:seon.cluster.run/id "one-walk-run"}])
+      (db/transact! connection [{:seon.cluster.run/id "one-walk-run"}])
       (let [db @connection
             rendered
             {:seon.cluster.prompt/text "one fresh walk"
@@ -97,9 +97,9 @@
             (context/capture-tx
              {:seon.cluster.run/id "one-walk-run"
               :seon.cluster.prompt/rendered-context rendered})]
-        (d/transact connection tx-data)
+        (db/transact! connection tx-data)
         (let [capture
-              (d/pull @connection
+              (db/pull @connection
                       [{:seon.context.capture/contributions
                         '[*]}]
                       [:seon.context.capture/id

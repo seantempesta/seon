@@ -28,7 +28,7 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [datahike.api :as d]
+            [seon.db :as db]
             [org.httpkit.server :as http]
             [seon.ai :as ai]
             [seon.blob :as blob]
@@ -330,7 +330,7 @@
             "the JDK value remains an Integer until the transaction boundary")
         (support/with-database
           (fn [connection]
-            (d/transact connection
+            (db/transact! connection
                         [{:seon.cluster.agent/id "status-agent"}
                          {:seon.cluster.run/id "status-run"}])
             ((ns-resolve 'seon.cluster.loop 'record-attempt!)
@@ -345,7 +345,7 @@
               :seon.ai.attempt/ordinal 0}
              (Date. 1785319000000))
             (let [attempt
-                  (d/pull @connection '[*]
+                  (db/pull @connection '[*]
                           [:seon.ai.attempt/id "status-run-attempt-0"])]
               (is (= 502 (:seon.ai/http-status attempt)))
               (is (some? (:seon.ai.attempt/error attempt))
@@ -355,7 +355,7 @@
   (support/with-database
     {::support/fresh-store? true}
     (fn [connection]
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.config.eval.result/blob-threshold 65536}
                    {:seon.cluster.agent/id "reasoning-agent"}
                    {:seon.cluster.run/id "reasoning-run"}])
@@ -378,10 +378,10 @@
                   :seon.ai.attempt/ordinal ordinal
                   :seon.ai/reasoning-content reasoning)
            (Date. 1785319000000)))
-        (let [inline (d/pull @connection '[*]
+        (let [inline (db/pull @connection '[*]
                              [:seon.ai.attempt/id
                               "reasoning-run-attempt-0"])
-              oversized (d/pull @connection '[*]
+              oversized (db/pull @connection '[*]
                                 [:seon.ai.attempt/id
                                  "reasoning-run-attempt-1"])]
           (is (= inline-reasoning (:seon.ai.attempt/reasoning inline)))

@@ -1,7 +1,7 @@
 (ns seon.program-test
   "Recurring proof for the one build/runtime declaration contract."
   (:require [clojure.test :refer [deftest is testing]]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.cluster.run :as run]
             [seon.program :as program]
             [seon.schema :as schema]
@@ -127,17 +127,17 @@
             (merge {:seon.fn/sym function-symbol
                     :seon.fn/spec (pr-str new-spec)}
                    (parsed-contract function-symbol new-spec {}))]
-        (d/transact connection [old-row])
-        (let [current (d/pull @connection '[*]
+        (db/transact! connection [old-row])
+        (let [current (db/pull @connection '[*]
                               [:seon.fn/sym function-symbol])
               old-components
               (into #{(get-in current [:seon.fn/ast :db/id])}
                     (map :db/id)
                     (:seon.fn/arities current))]
-          (d/transact connection
+          (db/transact! connection
                       (program/exact-replacement-tx current new-row))
           (let [redefined
-                (d/pull @connection
+                (db/pull @connection
                         [:seon.fn/spec
                          {:seon.fn/arities
                           [:seon.fn.arity/order :seon.fn.arity/min
@@ -148,7 +148,7 @@
                      :seon.fn.arity/min 1
                      :seon.fn.arity/max 1}]
                    (:seon.fn/arities redefined)))
-            (is (every? #(empty? (d/datoms @connection :eavt %))
+            (is (every? #(empty? (db/datoms @connection :eavt %))
                         old-components))))))))
 
 (deftest reader-events-have-one-canonical-declaration-row
@@ -268,7 +268,7 @@
              :seon.cluster.eval/ns
              [:seon.ns/name 'my.agents.someone-else]
              :seon.sci.eval/program-row deletion}]
-        (d/transact
+        (db/transact!
          connection
          [{:seon.ns/name namespace-name
            :seon.ns/source "(ns my.agents.registration-test)"}
@@ -285,13 +285,13 @@
           {:seon.test/sym function-sym
            :seon.test/ns namespace-ref
            :seon.test/source "(clojure.test/deftest same-name)"}])
-        (d/transact
+        (db/transact!
          connection
          (run/open-tx {:seon.cluster.run/id "registration-delete"
                        :seon.cluster.run/agent
                        [:seon.cluster.agent/id "registration-test"]
                        :seon.cluster.run/opened-at now}))
-        (d/transact
+        (db/transact!
          connection
          (run/receipt-start-tx
           {:seon.cluster.run/id "registration-delete"
@@ -304,10 +304,10 @@
                 "(ns-unmap 'my.agents.registration-test 'same-name)"
                 :seon.program/ns namespace-ref}
                deletion))
-        (d/transact connection (run/receipt-settle-tx settlement))
-        (is (nil? (d/pull @connection [:db/id]
+        (db/transact! connection (run/receipt-settle-tx settlement))
+        (is (nil? (db/pull @connection [:db/id]
                           [:seon.fn/sym function-sym])))
-        (is (nil? (d/pull @connection [:db/id]
+        (is (nil? (db/pull @connection [:db/id]
                           [:seon.test/sym function-sym])))))))
 
 (deftest schema-unregister-is-one-global-typed-deletion

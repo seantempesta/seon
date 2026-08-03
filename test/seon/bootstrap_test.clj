@@ -2,7 +2,7 @@
   "The fact-authored bootstrap plan, seeding seam, and REPL help."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.work :as work]
@@ -21,13 +21,13 @@
 
 (defn- run-row
   [db run-id]
-  (d/pull db
+  (db/pull db
           '[* {:seon.cluster.run/forms [*]}]
           [:seon.cluster.run/id run-id]))
 
 (defn- ordered-run-forms
   [db run-id]
-  (d/q
+  (db/q
    {:query
     '[:find ?ordinal ?source ?namespace-name
       :in $ ?run-id
@@ -43,7 +43,7 @@
 
 (defn- ordered-plan-forms
   [db cluster-name]
-  (d/q
+  (db/q
    {:query
     '[:find ?form ?ordinal ?source
       :in $ ?cluster-name
@@ -101,7 +101,7 @@
             "the source population is digest-guarded and idempotent")
         (is (= {:seon.bootstrap.plan/id bootstrap/plan-id}
                (:seon.cluster/bootstrap-plan
-                (d/pull @connection
+                (db/pull @connection
                         '[{:seon.cluster/bootstrap-plan
                            [:seon.bootstrap.plan/id]}]
                         [:seon.cluster/name "bootstrap"]))))
@@ -119,7 +119,7 @@
         (is (= #{['help 'seon.bootstrap 'help]
                  ['dir 'seon.bootstrap 'dir]
                  ['doc 'seon.bootstrap 'doc]}
-               (d/q '[:find ?local ?target-ns ?target-name
+               (db/q '[:find ?local ?target-ns ?target-name
                       :in $ ?namespace-name
                       :where
                       [?namespace :seon.ns/name ?namespace-name]
@@ -191,7 +191,7 @@
               [:seon.bootstrap.plan/id bootstrap/plan-id]
               :seon.bootstrap.plan/forms
               "inserted-bootstrap-form"]]]
-        (d/transact connection {:tx-data (into renumber-tx edit-tx)})
+        (db/transact! connection {:tx-data (into renumber-tx edit-tx)})
         (is (nil? (:seon.error/kind
                    (cluster/ensure-entity!
                     connection process later-request))))

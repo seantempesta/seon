@@ -16,7 +16,7 @@
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [datahike.api :as d]
+            [seon.db :as db]
             [malli.core :as m]
             [malli.generator :as mg]
             [seon.ai :as ai]
@@ -354,7 +354,7 @@
 (deftest agent-overlay-reads-only-derived-per-agent-attributes
   (test-support/with-database
     (fn [connection]
-      (d/transact connection
+      (db/transact! connection
                   [{:seon.cluster.agent/id "planner"
                     :seon.config.ai/model "planner-model"
                     :seon.config.ai/thinking :high}])
