@@ -145,16 +145,23 @@
       (when (and (map? node) (:seon.print/face node))
         node))))
 
+(defn- text-face
+  ; Both evaluation modes render their compact inline value through the one
+  ; printer used by the transcript. The complete admitted artifact is retained
+  ; separately by `mcp-project`.
+  [node effective details]
+  (assoc details
+         :seon.dev.mcp/text
+         (print/emit-text
+          node
+          {:seon.print/length (:seon.print/length effective)
+           :seon.print/level (:seon.print/level effective)})))
+
 (defn- evaluation-face
-  ; The REPL text face of one door evaluation, rendered by the one printer
-  ; the transcript uses, with the effective config print dials.
   [value node effective]
-  (let [text (print/emit-text
-              node
-              {:seon.print/length (:seon.print/length effective)
-               :seon.print/level (:seon.print/level effective)})]
-    (cond-> {:seon.dev.mcp/text text
-             :seon.cluster.eval/ns (:seon.cluster.eval/ns value)
+  (text-face
+   node effective
+   (cond-> {:seon.cluster.eval/ns (:seon.cluster.eval/ns value)
              :seon.sci.eval/ending-ns (:seon.sci.eval/ending-ns value)
              :seon.sci.admit/capped?
              (boolean (:seon.sci.admit/capped? value))
@@ -164,12 +171,64 @@
       (contains? value :seon.cluster.eval/output)
       (assoc :seon.cluster.eval/output (:seon.cluster.eval/output value)))))
 
+(defn- prepl-exception-envelope?
+  [value]
+  (and (map? value)
+       (vector? (:via value))
+       (vector? (:trace value))
+       (contains? value :cause)))
+
+(defn- program-namespaces
+  [connection]
+  (if connection
+    (let [names
+          (db/q '[:find [?name ...]
+                  :where
+                  [?namespace :seon.ns/name ?name]
+                  [?namespace :seon.ns/source _]]
+                @connection)]
+      (if (sequential? names) (set names) #{}))
+    #{}))
+
+(defn- namespace-frame?
+  [namespace-names frame]
+  (let [class-name (str (first frame))]
+    (boolean
+     (some
+      (fn [namespace-name]
+        (let [prefix (munge (str namespace-name))]
+          (or (= prefix class-name)
+              (str/starts-with? class-name (str prefix "$")))))
+      namespace-names))))
+
+(defn- exception-face
+  [value connection effective]
+  (let [cause (or (:cause value) (:message (last (:via value))))
+        exception-class (:type (last (:via value)))
+        frame (first (filter (partial namespace-frame?
+                                      (program-namespaces connection))
+                             (:trace value)))
+        summary
+        (cond-> {:seon.dev.mcp/exception-class (str exception-class)
+                 :seon.dev.mcp/exception-message (str cause)}
+          frame (assoc :seon.dev.mcp/frame frame))
+        admitted-summary
+        (admit/admit-value
+         {:seon.sci.admit/value summary
+          :seon.sci.admit/interrupt-fn (fn [])
+          :seon.sci.admit/caps (config/result-caps effective)
+          :seon.config/on-core-error
+          (:seon.config/on-core-error effective)})]
+    (text-face (:seon.sci.admit/print-node admitted-summary)
+               effective summary)))
+
 (defn- mcp-project
   [cluster-name bootstrap-effective value]
   (let [instance (mcp-instance cluster-name)
         connection (:seon.boot/cluster-connection instance)
         effective (mcp-effective cluster-name bootstrap-effective)
         evaluation-print-node (evaluation-node value)
+        exception-envelope? (prepl-exception-envelope? value)
         admitted
         (if evaluation-print-node
           {:seon.sci.admit/print-node evaluation-print-node
@@ -186,6 +245,7 @@
         content-digest (blob/digest content)
         threshold (:seon.config.eval.result/blob-threshold effective)
         oversized? (> (count content) threshold)
+        artifact-backed? (or oversized? exception-envelope?)
         page-size (min (:seon.render.value/max-collection effective)
                        (:seon.print/length effective))
         print-node (:seon.sci.admit/print-node artifact)
@@ -194,21 +254,27 @@
                           print-node page-size threshold
                           (:seon.print/level effective))
                          print-node)
-        stored-digest (when (and oversized? connection)
+        stored-digest (when (and artifact-backed? connection)
                         (blob/put! connection content))]
     (cond-> {:seon.dev.mcp/value
-             (if evaluation-print-node
+             (cond
+               evaluation-print-node
                (evaluation-face value evaluation-print-node effective)
+
+               exception-envelope?
+               (exception-face value connection effective)
+
+               :else
                (admit/semantic-value projected-node))
              :seon.sci.admit/capped?
              (:seon.sci.admit/capped? artifact)
-             :seon.dev.mcp/windowed? oversized?}
-      oversized?
+             :seon.dev.mcp/windowed? artifact-backed?}
+      artifact-backed?
       (assoc :seon.blob/digest content-digest
              :seon.blob/size (count content)
              :seon.dev.mcp/retrievable? (boolean stored-digest))
 
-      (and oversized? (nil? stored-digest))
+      (and artifact-backed? (nil? stored-digest))
       (assoc :seon.dev.mcp/remainder
              "The cluster has no database connection; the remainder is not retrievable."))))
 

@@ -5,6 +5,7 @@
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
             [seon.config :as config]
+            [seon.db :as db]
             [seon.operator.runtime :refer [running-instances]]
             [seon.sci.admit :as admit]
             [seon.test-support :as support]))
@@ -84,6 +85,59 @@
         "evaluation diagnostics stay inline beside the text face")
     (is (false? (:seon.dev.mcp/windowed? result)))
     (is (not (contains? result :seon.blob/digest)))))
+
+(deftest jvm-exceptions-use-the-shared-text-face-and-retain-the-full-artifact
+  (let [cluster-name "mcp-jvm-exception-face-test"
+        effective (config/defaults)
+        dependency-frame
+        ['malli.core$_map_schema$reify__1 'invoke "core.cljc" 1289]
+        first-party-frame
+        ['seon.cluster.mcp_test$explode 'invokeStatic "mcp_test.clj" 99]
+        envelope
+        {:via [{:type 'clojure.lang.ExceptionInfo
+                :message "The wrapper."
+                :at dependency-frame}
+               {:type 'java.lang.IllegalArgumentException
+                :message "The contract value was wrong."
+                :at first-party-frame}]
+         :trace (into [dependency-frame first-party-frame]
+                      (repeat 500 dependency-frame))
+         :cause "The contract value was wrong."
+         :phase :execution}]
+    (support/with-database
+      {:seon.test-support/fresh-store? true}
+      (fn [connection]
+        (config/apply! {:seon.config/connection connection
+                        :seon.boot/cluster-name cluster-name})
+        (support/seed-cluster! connection cluster-name)
+        (db/transact! connection
+                      [{:seon.ns/name 'seon.cluster.mcp-test
+                        :seon.ns/source "(ns seon.cluster.mcp-test)"}])
+        (swap! running-instances assoc cluster-name
+               {:seon.boot/cluster-connection connection})
+        (try
+          (let [result (projected cluster-name effective envelope)
+                face (:seon.dev.mcp/value result)
+                retained-cause
+                (cluster/mcp-get-value
+                 cluster-name (:seon.blob/digest result) [:cause] 0)]
+            (is (string? (:seon.dev.mcp/text face)))
+            (is (str/includes? (or (:seon.dev.mcp/text face) "")
+                               "java.lang.IllegalArgumentException"))
+            (is (str/includes? (or (:seon.dev.mcp/text face) "")
+                               "The contract value was wrong."))
+            (is (str/includes? (or (:seon.dev.mcp/text face) "")
+                               "mcp_test.clj"))
+            (is (not (contains? face :trace))
+                "the trace is absent from the inline response")
+            (is (< (utf8-size result) 2048)
+                "the complete Throwable->map does not become the inline face")
+            (is (true? (:seon.dev.mcp/retrievable? result)))
+            (is (= "The contract value was wrong."
+                   (:seon.render.value/window retained-cause))
+                "the complete envelope remains available by digest"))
+          (finally
+            (swap! running-instances dissoc cluster-name)))))))
 
 (deftest oversized-values-share-one-digest-across-storeless-and-stored-modes
   (let [cluster-name "mcp-value-test"
