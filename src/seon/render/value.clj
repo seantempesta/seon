@@ -288,16 +288,20 @@
     :seon.print/map :seon.print/record :seon.print/throwable})
 
 (defn- window-string
+  ; A nil bound means no string clipping: the structural 2-arity window
+  ; keeps strings whole and only the budgeted 4-arity clips them.
   [node max-string]
-  (let [value (:seon.print/value node)
-        retained (min (count value) max-string)
-        original-length (or (:seon.print/length node) (count value))]
-    (if (and (= :seon.print/string (:seon.print/face node))
-             (= retained (count value)))
-      node
-      {:seon.print/face :seon.print/truncated-string
-       :seon.print/value (subs value 0 retained)
-       :seon.print/length original-length})))
+  (if (nil? max-string)
+    node
+    (let [value (:seon.print/value node)
+          retained (min (count value) max-string)
+          original-length (or (:seon.print/length node) (count value))]
+      (if (and (= :seon.print/string (:seon.print/face node))
+               (= retained (count value)))
+        node
+        {:seon.print/face :seon.print/truncated-string
+         :seon.print/value (subs value 0 retained)
+         :seon.print/length original-length}))))
 
 (declare window-node)
 
@@ -356,7 +360,7 @@
     [:=> [:cat :seon.print/node :int] :seon.print/node]
     [:=> [:cat :seon.print/node :int :int :int] :seon.print/node]]}
   ([node size]
-   (window-node node size nil 0 0))
+   (window-node node size nil nil 0))
   ([node size max-size level]
    (loop [string-limit max-size
           level level]

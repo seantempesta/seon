@@ -58,6 +58,10 @@
    {:mode :live
     :consumer '[seon.cluster.loop/settlement-result
                 seon.render.web/data-response]}
+   :seon.print/length
+   {:mode :live :consumer 'seon.cluster/mcp-project}
+   :seon.print/level
+   {:mode :live :consumer 'seon.cluster/mcp-project}
    :seon.config.ai/endpoint
    {:mode :live :consumer 'seon.cluster.loop/turn}
    :seon.config.ai/model
