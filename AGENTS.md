@@ -198,6 +198,34 @@ earliest dependency-ready work. A bug becomes an interrupt only when it
 invalidates current proof, threatens data or shared-tree safety, or prevents
 the next ordered boundary from being implemented.
 
+## A FOREIGN LANE'S BREAKAGE NEVER BLOCKS YOUR COMMIT
+
+Shared-tree work means another lane's in-flight edits will break your
+gate, your publication, or your fixture population. That blocks
+VERIFICATION only. It never blocks holding or committing your own
+coherent, path-limited work — and it never justifies deleting your own
+diff. Six lanes hit this on 2026-08-03; one deleted its finished
+falsifier and launcher changes at a foreign boundary and had to redo
+them. The correct moves are: commit your coherent slice path-limited
+(noting in the message that final verification awaits the foreign fix),
+name whose breakage it is, and stop. Report it — a foreign blocker is
+information the orchestrator needs, and it is usually a real defect in
+the other lane worth fixing in minutes.
+
+## Verify the claim before you name the cause
+
+An attribution is a hypothesis until a probe confirms it. On
+2026-08-03 the orchestrator attributed a suite hang to a missing
+completion delivery (a lane refuted it with a virtual-thread-aware
+dump: the turn was still running), attributed a stale-class incident to
+a cache refresh (a later probe found soft-reference eviction explains
+it with no refresh involved), and named a wrong commit as a wedge's
+lead (the vulnerable code predated it). Each wrong attribution cost a
+lane real time. THREAD DUMPS THAT OMIT VIRTUAL THREADS LIE — use a
+virtual-thread-aware dump. A lane that refutes its assignment with
+evidence has done its job well; say so, and redispatch on what the
+evidence actually shows.
+
 ## Instruction discovery and localization
 
 Before changing a subtree, find and read the closest nested `AGENTS.md`, and

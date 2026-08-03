@@ -553,3 +553,45 @@ direction; never let a lane keep working on a dead premise.
 one step. Small path-limited commits are what make any of this
 reversible, and they are the only honest heartbeat — judge lanes by git
 log, never by the process table.
+
+**Rejecting a dependency is not the end of the analysis — mine it.**
+Integrant and clj-reload were both evaluated at source and rejected on
+measured grounds, and both rejections still paid: Integrant's ecosystem
+gave the reloaded-workflow verb set and the queryable-event logging
+argument (Duct's own README justifies event keywords over English
+prose — our law arriving from outside), and clj-reload gave the
+dependency-ordered reload idea, rebuilt natively on program-graph facts
+because its `remove-ns` engine severs the Var identity our live SCI
+contexts and flow procs depend on. Take the ergonomics, not the
+machinery. A rejection that produces no design is usually an
+under-read.
+
+**Ask what the analysis already computes before adding a mechanism.**
+"Which tests exercise this function?" was unanswerable for months, and
+the fix was not a new analyzer — the one clj-kondo pass had computed
+the caller set all along and the producer discarded it. Same for
+keyword usage, which then dissolved a hand-maintained config ledger
+into a query with dead-dial detection for free. Standing rule: index
+what the analysis computes; DISCARDING is the decision that needs
+justification.
+
+**A count you did not produce is a guess.** A single-line regex said
+~31 error kinds; the real census found 160, because seven local error
+constructors hid their kinds from a text search. The catalog agent's
+count changed the shape of the wave. Numbers in reports — including
+your own from an hour ago — are hypotheses until reproduced.
+
+**Fixture drift looks exactly like a regression.** Two separate
+"failures" on 2026-08-03 were hand-built test fixtures that had fallen
+behind the live boot shape (a missing render context channel), not
+broken runtime code. Before bisecting, diff the fixture against what
+the live path actually constructs — and prefer fixtures that build
+themselves from the live shape over ones that hand-assemble it.
+
+**Long-lived JVMs go stale in more than one way.** Three incidents in
+one day: a mutated class cache, a stale first-party Var that silently
+discarded index data, and soft-reference eviction that PERMANENTLY
+loses rarely-executed dynamically-defined classes. When correct code
+fails in a long-lived process, suspect the process before the code —
+and prefer on-disk, content-addressed caches so eviction is
+recoverable rather than fatal.
