@@ -117,11 +117,21 @@ Agent code never transacts a delivery side channel.
 
 ## SCI interruption and admission
 
-Agent-driven evaluation uses the cluster's one live SCI `ctx`. Every invocation
-installs one zero-argument `:interrupt-fn`; SCI calls it at every interpreted
-function-body entrance. The configured `:seon.sci.eval/time-limit-ms` is the
-only execution limit. Expiry invokes SCI's uncatchable `interrupt!` and returns
-a flat error value; no exception escapes into a proc.
+Agent-driven evaluation uses the cluster's one live SCI `ctx`. `seon.sci.kernel`
+is the one guarded owner, with exactly two entrances: `seon.sci.eval/evaluate`
+for a form, and `seon.sci.kernel/invoke` for a named live Var — the entrance
+every renderer call takes. They share one process guard, one arming rule, one
+deadline, one admission, and one failure classifier, so their semantics cannot
+drift; the invoked symbol is the only difference between the two error faces.
+
+The context carries one stable zero-argument `:interrupt-fn`; SCI calls it at
+every interpreted function-body entrance. The configured
+`:seon.sci.eval/time-limit-ms` is the only execution limit. Arming is
+per-thread: work reached while the identical context is already armed on that
+thread inherits the governing arm and its deadline, so nested work can never
+restart the clock, and a different context on an armed thread is refused.
+Expiry invokes SCI's uncatchable `interrupt!` and returns a flat error value;
+no exception escapes into a proc, including the arming refusal itself.
 
 The admission record's `:seon.eval/fn-entries`, `/host-interop-count`,
 `/duration-ms`, `/allocated-bytes`, and `/outcome` are in-memory diagnostics,
