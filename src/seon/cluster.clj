@@ -16,6 +16,7 @@
   `stop!` idempotently unwinds only the addressed instance and releases
   the shared store when its last holder stops."
   (:require [clojure.core.async :as async]
+            [clojure.core.async.impl.protocols :as async.protocols]
             [clojure.core.async.flow :as flow.core]
             [clojure.core.server]
             [seon.blob :as blob]
@@ -1654,18 +1655,21 @@
   (when-let [handle (:seon.cluster.loop/cluster instance)]
     (let [armer-channel (:seon.cluster.wake/channel handle)
           quiesced (async/promise-chan)]
-      (when-not (async/>!! armer-channel
-                           {::cluster.agent/quiesce quiesced})
-        (throw
-         (ex-info "The cluster armer input closed before quiescence."
-                  {:seon.error/kind
-                   :seon.cluster.agent/armer-quiescence-undeliverable})))
-      (async/close! armer-channel)
-      (when-not (= ::cluster.agent/quiesced (async/<!! quiesced))
-        (throw
-         (ex-info "The cluster armer did not publish quiescence."
-                  {:seon.error/kind
-                   :seon.cluster.agent/armer-quiescence-undeliverable})))))
+      (when-not (async.protocols/closed? armer-channel)
+        (when-not (async/>!! armer-channel
+                             {::cluster.agent/quiesce quiesced})
+          (throw
+           (ex-info "The cluster armer input closed before quiescence."
+                    {:seon.error/kind
+                     :seon.cluster.agent/armer-quiescence-undeliverable})))
+        (when-not (= ::cluster.agent/quiesced (async/<!! quiesced))
+          (throw
+           (ex-info "The cluster armer did not publish quiescence."
+                    {:seon.error/kind
+                     :seon.cluster.agent/armer-quiescence-undeliverable})))
+        ;; Closure is the observable completion fact a later stop derives
+        ;; from. Publish it only after the armer acknowledged quiescence.
+        (async/close! armer-channel))))
   (when-let [routing (:seon.cluster.agent/routing instance)]
     (doseq [agent-id (sort (keys (:seon.cluster.agent/armed @routing)))]
       (cluster.agent/disarm! {:seon.cluster.agent/id agent-id

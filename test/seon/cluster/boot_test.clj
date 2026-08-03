@@ -549,7 +549,9 @@
   a-failed-stop-remains-addressable-and-retryable
   (let [root (published-root)
         cluster-name "retry-stop"
-        original-release-store! store/release-store!]
+        original-release-store! store/release-store!
+        root-store-key (.getCanonicalPath (io/file root "store"))
+        retry-release-calls (atom 0)]
     (try
       (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
                                       :seon.boot/root root})
@@ -587,7 +589,18 @@
                             {:seon.boot/cluster-name cluster-name
                              :seon.boot/root root})))))
           (testing "a later stop retries the remaining release"
-            (is (nil? (cluster/stop! instance)))
+            (with-redefs
+              [store/release-store!
+               (fn [held-store]
+                 (swap! retry-release-calls inc)
+                 (original-release-store! held-store))]
+              (is (nil? (cluster/stop! instance))))
+            (is (= 1 @retry-release-calls)
+                "the retry reaches the root-store release that failed")
+            (is (nil? (get @(var-get (ns-resolve 'seon.cluster
+                                                 'root-store-holder))
+                           root-store-key))
+                "the retry releases the final process-root store holder")
             (is (nil? (cluster/read-advertisement root cluster-name)))
             (is (nil? (get @registered-instances cluster-name))))
           (testing "the released name and flock admit a replacement"
@@ -599,14 +612,18 @@
           (finally
             ;; Keep a red test from leaking a live socket or flock into the
             ;; rest of the suite. Both releases are no-ops after a green retry.
-            (cluster/stop! instance)
-            (original-release-store! (:seon.store/store instance))
-            (when-not (.isClosed
+            (try
+              (cluster/stop! instance)
+              (finally
+                (try
+                  (original-release-store! (:seon.store/store instance))
+                  (finally
+                    (when-not (.isClosed
+                               ^java.net.ServerSocket
+                               (:seon.boot/prepl-server instance))
+                      (.close
                        ^java.net.ServerSocket
-                       (:seon.boot/prepl-server instance))
-              (.close
-               ^java.net.ServerSocket
-               (:seon.boot/prepl-server instance))))))
+                       (:seon.boot/prepl-server instance))))))))))
       (finally
         (delete-recursively! root)))))
 
