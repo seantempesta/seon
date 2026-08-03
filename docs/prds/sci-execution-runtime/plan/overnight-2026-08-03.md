@@ -56,6 +56,20 @@ own source for is the known integration-bug generator.
    GB → 384 MB), default root reset and rebuilt from current source,
    dead experiment clusters destroyed. bin/test gains bounded reaping
    via the suite-speed lane.
+7. LATE-NIGHT STATE: ruling #41 CLOSED — the sweep landed in 18
+   path-limited commits (ending `cced8d9a9`), zero non-exempt
+   datahike.api calls, exemption census exact (68 calls / 10
+   namespaces), live SCI ambient proof green, full suite 883/4,405/0
+   in 697.5 s. The history-off graduation is LIVE-PROVEN (completed
+   DeepSeek run on a non-temporal root). MCP's value chain landed
+   (ruling #44 decisions 1-3 proven). The quiet-gate regressions were
+   fixed at cause (`8f8c4d72d`). The parked renderer prototype was
+   REMOVED from the working tree after byte-identity verification
+   against `tmp/renderer-kernel-prototype-2026-08-02.patch` — its
+   admit half lives in the MCP commits; its eval half is reference
+   only. RENDER IMPLEMENTATION LAUNCHED as the sole lane on the clean
+   fully-green tree, executing the audit's nine steps with full gates
+   at steps 3/6/9 and the final live proof.
 6. MID-NIGHT STATE (post suite-speed + adversarial pass): tier 0 fix
    LANDED — 586 fixtures each rebuilt the source manifest, ~23 of 36
    minutes; now one immutable in-memory base per JVM, a branch per
