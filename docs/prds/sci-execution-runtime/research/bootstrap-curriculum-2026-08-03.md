@@ -67,8 +67,10 @@ Everything below is graded on this filter, honestly, including recipes I like.
  :caps    (seon.db/q '[:find (count ?f) . :where [?f :seon.effect/capability _]])
  :schemas (seon.db/q '[:find (count ?s) . :where [?s :seon.schema/key _]])
  :tests   (seon.db/q '[:find (count ?t) . :where [?t :seon.test/sym _]])}
-;; => {:fns 2238, :caps 10, :schemas 1475, :tests 915}      11 ms
+{:fns 2238, :caps 10, :schemas 1475, :tests 915}
 ```
+
+The measured evaluation took 11 ms.
 
 | Fact | Count |
 |---|---|
@@ -132,8 +134,8 @@ positionally:
                      :where [?f :seon.effect/capability _]
                             [?f :seon.fn/sym ?sym] [?f :seon.fn/doc ?doc]]
             :args [] :order-by '?sym :limit 3})
-;; => #:seon.error{:kind :seon.db/invalid-read
-;;                 :message "nth not supported on this type: PersistentArrayMap"}
+#:seon.error{:kind :seon.db/invalid-read
+             :message "nth not supported on this type: PersistentArrayMap"}
 ```
 
 The maintained fork repairs the stage order in commit `574c5f0f`: ordering
@@ -144,10 +146,8 @@ offset/limit branch still returns correctly named maps.
 
 Naming the `:keys` alias instead fails earlier, with a genuinely good message:
 
-```clojure
-;; :order-by 'seon.fn/sym
-;; => ":order-by variable seon.fn/sym not found in :find [?sym ?doc]"
-```
+Using `:order-by 'seon.fn/sym` instead produced the actual string value
+`:order-by variable seon.fn/sym not found in :find [?sym ?doc]`.
 
 The same query was re-run through the live `default` cluster's door after
 hot-reloading the repaired Var and returned the first three capability rows as
@@ -168,10 +168,12 @@ is "all values of one attribute", `datoms` on `:aevt` beats a query:
 (->> (seon.db/datoms {:index :aevt :components [:seon.effect/capability]})
      (map :v)
      frequencies)
-;; => {seon.edit.jvm/edit 3, seon.fs.jvm/read 1, seon.fs.jvm/write 1,
-;;     seon.fs.jvm/glob 1, seon.fs.jvm/stat 1, seon.shell.jvm/run 1,
-;;     seon.web.jvm/fetch 1, seon.web.jvm/search 1}          2 ms
+{seon.edit.jvm/edit 3, seon.fs.jvm/read 1, seon.fs.jvm/write 1,
+ seon.fs.jvm/glob 1, seon.fs.jvm/stat 1, seon.shell.jvm/run 1,
+ seon.web.jvm/fetch 1, seon.web.jvm/search 1}
 ```
+
+The measured evaluation took 2 ms.
 
 Fastest probe in this document, and the output is *actionable*: it shows one
 owner (`seon.edit.jvm/edit`) serving three agent-facing functions, which is
@@ -327,15 +329,18 @@ into the function table:
                   :where [?e :seon.ns/name ?n] [?f :seon.fn/ns ?e]
                          [?f :seon.fn/private? false]] 'my.fs)
      (sort-by :seon.fn/sym))
-;; 5 ms
-;; |                :seon.fn/sym | :seon.fn/arglists |
-;; |            "my.fs/content?" |       "([value])" |
-;; |                "my.fs/glob" |     "([request])" |
-;; |                "my.fs/read" |     "([request])" |
-;; |                "my.fs/stat" |     "([request])" |
-;; |               "my.fs/write" |     "([request])" |
-;; | "my.fs/write-precondition?" |       "([value])" |
 ```
+
+The measured evaluation took 5 ms and produced:
+
+|                :seon.fn/sym | :seon.fn/arglists |
+|-----------------------------|--------------------|
+|            "my.fs/content?" |        "([value])" |
+|                "my.fs/glob" |      "([request])" |
+|                "my.fs/read" |      "([request])" |
+|                "my.fs/stat" |      "([request])" |
+|               "my.fs/write" |      "([request])" |
+| "my.fs/write-precondition?" |        "([value])" |
 
 The schema half is where this recipe earns its place — it resolves schemas
 **wherever declared**, not just same-namespace ones:
@@ -402,7 +407,7 @@ each output already readable. **One helper total.**
 
 ## 5. The curriculum
 
-Priority: **W** = worked example (form + `;;` comments in the bootstrap),
+Priority: **W** = worked example (form followed by its actual value),
 **H** = one-form hint, **D** = defer, **CUT** = fails the actionable filter.
 
 Stability is for prefix-cache ordering (measured 67 % hit rate): stable
@@ -410,7 +415,7 @@ content precedes volatile.
 
 | # | Lesson | What the agent DOES differently | Form | Stability | Pri |
 |---|---|---|---|---|---|
-| 1 | Session contract: forms, `;;` comments, batching | Batches forms; writes comments that survive | the session's own shape + `(in-ns '…)` | stable | **W** |
+| 1 | Session contract: forms, input-side comments, batching | Batches forms; may write comments that survive in its source | the session's own shape + `(in-ns '…)` | stable | **W** |
 | 2 | Orientation / self | Knows which namespace it owns | `(in-ns '{{seon.ns/name}})` | stable | **W** |
 | 3 | Finding capabilities | Picks the right door and `(doc …)`s it | capability recipe (§3) | stable | **W** |
 | 4 | Finding the callable surface | Calls `my.*` functions instead of inventing them | `my.*` recipe | stable | **W** |
@@ -445,23 +450,27 @@ Re-grades against the filter, stated honestly:
 ### Cache ordering
 
 Lessons 1–9 are stable (outputs do not move as the graph grows); 10–13 are
-volatile. The draft diff's `;; Volatile … stay after this boundary` marker is
-the right idea and should be carried forward — it is the one part of that
-draft I would keep unchanged.
+volatile. That boundary belongs in the bootstrap plan's data and ordering, not
+as a displayed comment marker.
 
-### Top three lessons, drafted
+### Top three lessons, restyled for decision 11
 
-Written as an exemplary REPL session; the `;;` style is itself the lesson, and
-the reply parser preserves it verbatim (verified in §6).
+Each code block below is only the submitted form; this design document does
+not fabricate or annotate its future result. In the running bootstrap the form
+is followed by its actual computed value. The teaching text moves into the
+db-resident `(help)` prose. Recommended `(help)` additions:
+
+- Every function is callable; capabilities are the functions that reach out of
+  the process, and querying them gives the agent a menu to inspect with `doc`.
+- Read a function's input and output schemas before calling it; nested pull
+  follows the arity's schema refs directly.
+- A `defn` with a complete Malli schema becomes durable. Required keys and
+  declared values validate rigorously, while extra open-map data is ignored.
+  Contract failures are ordinary values to inspect and repair.
 
 **Lesson 3 — finding what you can do:**
 
 ```clojure
-;; Nothing here is a fixed toolkit. Every function this cluster knows is a
-;; fact in one graph, so "what can I do?" is a query, not a list to memorize.
-;; Capabilities are the functions that reach OUT of the process — filesystem,
-;; shell, network. Pulling inside :find gives you maps instead of tuples, and
-;; a uniform sequence of maps renders as a table.
 (->> (seon.db/q '[:find [(pull ?f [:seon.fn/sym :seon.fn/doc]) ...]
                   :where [?f :seon.effect/capability _]])
      (sort-by :seon.fn/sym))
@@ -470,10 +479,6 @@ the reply parser preserves it verbatim (verified in §6).
 **Lesson 5 — reading a contract before calling:**
 
 ```clojure
-;; Before calling anything, ask what it accepts and what it can return.
-;; A function's arity points at its input and output schemas, and `pull`
-;; descends those refs for you — so one expression gets the whole contract,
-;; already grouped. Two output shapes here: the result, or an error value.
 (->> (seon.db/q '[:find [(pull ?a [{:seon.fn.arity/input-refs  [:seon.schema/key :seon.schema/form]}
                                    {:seon.fn.arity/output-refs [:seon.schema/key :seon.schema/form]}]) ...]
                   :in $ ?sym
@@ -484,14 +489,6 @@ the reply parser preserves it verbatim (verified in §6).
 **Lesson 7 — writing something that lasts:**
 
 ```clojure
-;; A defn with a complete :malli/schema becomes a durable fact: other agents
-;; find it with the same queries you just ran. Without a schema it lives only
-;; in this session.
-;;
-;; Write the contract honestly. Declared keys are validated rigorously and a
-;; missing required key fails — but maps stay OPEN, so a caller that supplies
-;; extra keys is fine and its data is ignored. That is what lets a contract
-;; grow without breaking the callers already written against it.
 (defn largest
   "The row with the largest :amount."
   {:malli/schema [:=> [:cat [:sequential [:map [:label :string] [:amount :int]]]]
@@ -501,15 +498,11 @@ the reply parser preserves it verbatim (verified in §6).
 ```
 
 ```clojure
-;; The second row carries a key the contract never declared. It is ignored,
-;; not refused — accretion in one line.
 (largest [{:label "a" :amount 3}
           {:label "b" :amount 9 :note "extra data is fine"}])
 ```
 
 ```clojure
-;; Break it on purpose. A contract violation comes back as a VALUE you can
-;; read and repair; nothing throws into your run and nothing is wedged.
 (largest)
 ```
 
@@ -541,9 +534,9 @@ the reply parser preserves it verbatim (verified in §6).
 ### Gap 1 — `jvm` mode has no ambient cluster, and `q` swallows the error
 
 ```clojure
-(seon.db/db)   ; jvm mode
-;; => {:seon.error/kind :seon.db/missing-connection-binding
-;;     :seon.error/message "No current cluster connection is bound to seon.db/*conn*."}
+(seon.db/db)
+{:seon.error/kind :seon.db/missing-connection-binding
+ :seon.error/message "No current cluster connection is bound to seon.db/*conn*."}
 ```
 
 That error value is then **accepted by `seon.db/q` as its `db` argument**, and
@@ -568,7 +561,8 @@ a test to the capability it exercises through the door.
 
 ```clojure
 (System/nanoTime)
-;; => :seon.sci.eval/evaluation-failed "Unable to resolve symbol: System/nanoTime"
+{:seon.error/kind :seon.sci.eval/evaluation-failed
+ :seon.error/message "Unable to resolve symbol: System/nanoTime"}
 ```
 
 The `:seon.sci.admit/record` returned with every evaluation already carries
@@ -621,7 +615,7 @@ helper must pull `:seon.fn/arglists`, not `:seon.fn/doc`.
                   :where [?f :seon.fn/keywords ?kw]] :seon.cluster.run/process)
      (map :seon.fn/sym)
      (remove #(clojure.string/includes? % "-test/")))
-;; => "Cannot invoke \"Object.toString()\" because \"s\" is null"
+"Cannot invoke \"Object.toString()\" because \"s\" is null"
 ```
 
 Test rows match the keyword but have no `:seon.fn/sym`, so `map` yields nils.
@@ -644,17 +638,20 @@ information (which clause, which attribute, what was expected) is absent.
   that standard: it exposed an implementation type and named neither the
   option nor the incompatible stage. The fork repair eliminates that internal
   mismatch rather than adding a refusal for a valid query.
-- **`(doc …)` renders in the agent's own comment grammar**, so its output can
-  be pasted straight back into a reply:
+- **Target `doc` and `dir` results use strict REPL display.** The form is
+  followed by an ordinary computed value, never docstrings prefixed as source
+  comments. For example, the function facts may be returned as data:
 
+  ```clojure
+  (doc my.run/complete)
+  {:seon.fn/sym "my.run/complete"
+   :seon.fn/arglists "([result])"
+   :seon.fn/doc "Finish this run with the reply the agent wants delivered.\n\nReturns a completion value the run loop records with the final receipt. Blank text returns a flat error value the agent can inspect and repair."}
   ```
-  my.run/complete
-  ([result])
-  ; Finish this run with the reply the agent wants delivered.
-  ;
-  ;   Returns a completion value the run loop records with the final receipt.
-  ;   Blank text returns a flat error value the agent can inspect and repair.
-  ```
+
+  Current `program-doc-var` still prefixes docstring lines with `;`
+  (`src/seon/sci/eval.clj:838-855`); that is a decision-11 implementation
+  defect, not a display convention to teach.
 
 - **Top-level map-sequence tables are genuinely good** and are the reason
   pull-in-`:find` is recommended throughout.
