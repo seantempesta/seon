@@ -236,6 +236,45 @@
    {}
    (::analyzer/var-usages analysis)))
 
+(defn- keywords-by-holder
+  "Qualified keywords read literally inside each analyzed declaration body.
+
+  clj-kondo resolves `::kw` and `::alias/kw` to their real namespaces before
+  reporting them, so the projection is the keyword an editor would see, not
+  the source text. Unqualified keywords are discarded: they are `:keys`
+  destructuring, option names, and `cond` branches rather than declared
+  attributes, and they carried 4,821 of the 19,469 measured edges without
+  naming anything the schema registry owns."
+  [analysis]
+  (reduce
+   (fn [used entry]
+     (let [holder
+           (when (and (::analyzer/from entry) (::analyzer/from-var entry))
+             (str (symbol (str (::analyzer/from entry))
+                          (str (::analyzer/from-var entry)))))
+           keyword-namespace (::analyzer/ns entry)
+           keyword-name (::analyzer/name entry)]
+       (if (and holder keyword-namespace keyword-name)
+         (update used holder (fnil conj #{})
+                 (keyword (str keyword-namespace) (str keyword-name)))
+         used)))
+   {}
+   (::analyzer/keywords analysis)))
+
+;; A SET, because cardinality-many is a set by construction
+;; (`reference-code/datahike/src/datahike/index/persistent_set.cljc:133`).
+;; The set NEVER reaches Datahike inside a map: `maybe-wrap-multival` reads any
+;; two-element collection whose first element is a unique-identity keyword as a
+;; lookup ref (`reference-code/datahike/src/datahike/db/transaction.cljc:730-735`),
+;; and a declaration reading exactly `:seon.cluster.agent/id` plus one other
+;; keyword hit that branch and was refused. `keyword-datoms` below is the one
+;; transaction shape; `:seon.fn/calls` escapes the same trap only because its
+;; elements are themselves vectors.
+(defn- keyword-facts
+  [keywords-by-holder qualified]
+  (when-let [used (seq (get keywords-by-holder (str qualified)))]
+    (into (sorted-set) used)))
+
 (defn- capability-symbol
   [value]
   (if (and (seq? value)
@@ -244,7 +283,7 @@
     (second value)
     value))
 
-(defn- var-row [analysis calls-by-caller entry]
+(defn- var-row [analysis calls-by-caller used-keywords entry]
   (let [namespace-name (::analyzer/ns entry)
         qualified (symbol (str namespace-name) (str (::analyzer/name entry)))
         metadata (::analyzer/meta entry)
@@ -271,7 +310,9 @@
         (seq (get calls-by-caller (str qualified)))
         (assoc :seon.fn/calls
                (mapv (fn [target] [:seon.fn/sym target])
-                     (sort (get calls-by-caller (str qualified))))))
+                     (sort (get calls-by-caller (str qualified)))))
+        (keyword-facts used-keywords qualified)
+        (assoc :seon.fn/keywords (keyword-facts used-keywords qualified)))
 
       (and (seq (::analyzer/arglist-strs entry))
            (not (::analyzer/macro entry)))
@@ -292,6 +333,8 @@
         (assoc :seon.fn/calls
                (mapv (fn [target] [:seon.fn/sym target])
                      (sort (get calls-by-caller (str qualified)))))
+        (keyword-facts used-keywords qualified)
+        (assoc :seon.fn/keywords (keyword-facts used-keywords qualified))
         (contains? #{:io :compute} (:seon.workload metadata))
         (assoc :seon.fn/workload (:seon.workload metadata))
         capability-declared?
@@ -314,11 +357,12 @@
 (defn- analysis-rows-by-file
   [analysis first-party-functions]
   (let [calls-by-caller
-        (call-targets-by-caller analysis first-party-functions)]
+        (call-targets-by-caller analysis first-party-functions)
+        used-keywords (keywords-by-holder analysis)]
     (reduce
      (fn [rows entry]
        (if-let [row (if (::analyzer/ns entry)
-                      (var-row analysis calls-by-caller entry)
+                      (var-row analysis calls-by-caller used-keywords entry)
                       (namespace-row entry))]
          (update rows (::analyzer/filename entry) (fnil conj []) row)
          rows))
@@ -379,6 +423,26 @@
          sort
          vec)
     []))
+
+(defn functions-using
+  "Function symbols whose indexed source reads `keyword` literally.
+
+  This is the query the program graph exists to answer: an attribute's
+  consumers are found by asking the database, never by maintaining a list.
+  Membership is literal usage only — a caller that builds the keyword at
+  runtime is absent, so an empty result means \"no declaration names it\",
+  not \"nothing reaches it\"."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword]
+                  [:vector :seon.fn/sym]]}
+  [database keyword]
+  (->> (db/q '[:find [?function-symbol ...]
+               :in $ ?keyword
+               :where
+               [?function :seon.fn/keywords ?keyword]
+               [?function :seon.fn/sym ?function-symbol]]
+             database keyword)
+       sort
+       vec))
 
 (defn- capability-refused!
   [rule function-symbol data]
@@ -908,7 +972,18 @@
                 namespaces)
           declarations (filterv #(not (:seon.ns/name %)) program-rows)
           declaration-bases
-          (mapv #(dissoc % :seon.fn/calls :seon.test/subject) declarations)
+          (mapv #(dissoc % :seon.fn/calls :seon.test/subject :seon.fn/keywords)
+                declarations)
+          keyword-rows
+          (into []
+                (mapcat (fn [row]
+                          (when (seq (:seon.fn/keywords row))
+                            (let [program-identity (program/row-identity row)]
+                              (map (fn [used]
+                                     [:db/add program-identity
+                                      :seon.fn/keywords used])
+                                   (:seon.fn/keywords row))))))
+                declarations)
           subject-rows
           (into []
                 (keep (fn [row]
@@ -943,6 +1018,7 @@
                      (into namespace-bases namespace-relations))
       (commit-phase! :seon.fn/declarations declaration-bases)
       (commit-phase! :seon.test/subject subject-rows)
+      (commit-phase! :seon.fn/keywords keyword-rows)
       (commit-phase! :seon.fn/calls call-rows)
       {:seon.reconcile/converged? false
        :seon.reconcile/operations (count program-rows)})))

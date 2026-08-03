@@ -1,5 +1,6 @@
 (ns seon.fn-test
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
             [seon.fn :as seon.fn]
@@ -623,6 +624,75 @@
       (is (= :seon.fn/namespaces (:seon.fn/index-phase result)))
       (is (= 1 @attempts)
           "a refused identity phase prevents dependent transactions"))))
+
+(deftest keyword-usage-is-indexed-per-declaration
+  (let [root (fixture-root)
+        source
+        (str "(ns sample.keys\n"
+             "  (:require [clojure.test :refer [deftest is]]\n"
+             "            [seon.error :as-alias error]))\n"
+             "(defn refuse [reason]\n"
+             "  {:seon.error/kind :sample.keys/refused\n"
+             "   ::error/message reason\n"
+             "   ::local true})\n"
+             "(defn built [n] (keyword \"seon.error\" (str \"kind\" n)))\n"
+             "(defn destructured [{:sample.keys/keys [depth] :keys [plain]}]\n"
+             "  [depth plain])\n"
+             "(deftest refusal-test\n"
+             "  (is (= :sample.keys/refused (:seon.error/kind (refuse \"why\")))))\n")]
+    (write-source! root "sample/keys.clj" source)
+    (write-source! root "seon/error.clj" "(ns seon.error)\n(def message :m)\n")
+    (let [rows (seon.fn/rows {:seon.fn/roots [(.getPath root)]})
+          by-id (into {} (map (juxt program/row-identity identity)) rows)
+          used (fn [program-identity]
+                 (:seon.fn/keywords (get by-id program-identity)))]
+      (testing "literal qualified keywords land on the declaration that reads them"
+        (is (= #{:sample.keys/local :sample.keys/refused
+                 :seon.error/kind :seon.error/message}
+               (used [:seon.fn/sym "sample.keys/refuse"]))
+            "::kw, ::alias/kw, and :fully/qualified resolve to one honest form"))
+      (testing "unqualified keywords stay out; qualified ones are kept verbatim"
+        (is (= #{:sample.keys/depth :sample.keys/keys}
+               (used [:seon.fn/sym "sample.keys/destructured"]))
+            (str ":keys and :plain never enter the index. The namespaced "
+                 ":sample.keys/keys marker does, because it IS written "
+                 "literally — the fact is source usage, not declaredness")))
+      (testing "a keyword built at runtime is invisible to static analysis"
+        (is (nil? (used [:seon.fn/sym "sample.keys/built"]))
+            "the honest boundary: only literal keyword usage is a fact"))
+      (testing "test rows carry their own keyword usage"
+        (is (= #{:sample.keys/refused :seon.error/kind}
+               (used [:seon.test/sym "sample.keys/refusal-test"]))
+            "a test's keywords are the ones it reads, never its subject's"))
+      (testing "the indexed facts answer the motivating query"
+        (test-support/with-database
+          (fn [connection]
+            (db/transact!
+             connection
+             (into (mapv #(dissoc % :seon.fn/keywords :seon.fn/calls)
+                         (filter #(or (:seon.ns/name %) (:seon.fn/sym %)
+                                      (:seon.test/sym %))
+                                 rows))
+                   (mapcat (fn [row]
+                             (map (fn [used]
+                                    [:db/add (program/row-identity row)
+                                     :seon.fn/keywords used])
+                                  (:seon.fn/keywords row))))
+                   rows))
+            ;; Keywords transact as explicit datoms: inside a map, Datahike
+            ;; reads a two-element collection whose first element is a
+            ;; unique-identity keyword as a lookup ref and refuses the entity.
+            (is (= #{:sample.keys/depth :sample.keys/keys}
+                   (set (:seon.fn/keywords
+                         (db/pull @connection [:seon.fn/keywords]
+                                  [:seon.fn/sym "sample.keys/destructured"])))))
+            (is (= ["sample.keys/refuse"]
+                   (filterv #(str/starts-with? % "sample.keys/")
+                            (seon.fn/functions-using @connection
+                                                     :seon.error/kind)))
+                "a test reading the keyword is never a function consumer")
+            (is (= [] (seon.fn/functions-using @connection
+                                               :sample.keys/never-written)))))))))
 
 (deftest tests-reaching-follows-calls-and-explicit-subjects
   (test-support/with-database

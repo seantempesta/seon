@@ -22,6 +22,7 @@
    :analysis
    {:arglists true
     :var-usages true
+    :keywords true
     :var-definitions {:shallow false
                       :meta true}
     :namespace-definitions {:shallow false
@@ -81,6 +82,21 @@
      [:from :from-var :to :name :alias :refer :arity :macro :private
       :fixed-arities :varargs-min-arity :lang]))))
 
+;; clj-kondo's analysis README documents `:keywords` without naming `:from`
+;; or `:from-var`, but the implementation emits both for every keyword read
+;; inside a var body (probed 2026-08-03 over `src/` + `test/`: 27,863 of
+;; 34,968 keyword occurrences carry `:from-var`). The remainder sit in `ns`
+;; forms and in var metadata, which clj-kondo attributes to the namespace
+;; rather than to the var the metadata decorates.
+(defn- keyword-usage
+  [entry]
+  (merge
+   (location entry)
+   (present-values
+    entry
+    [:ns :name :from :from-var :alias :auto-resolved :keys-destructuring
+     :lang])))
+
 (defn- entry-order
   [entry]
   [(get entry ::filename "")
@@ -126,6 +142,7 @@
      [::namespace-usages [:vector :map]]
      [::var-definitions [:vector :map]]
      [::var-usages [:vector :map]]
+     [::keywords [:vector :map]]
      [::findings [:vector :map]]]]}
   [{::keys [paths]}]
   ;; A trusted diagnostic must preserve each call as one coherent record.
@@ -146,6 +163,9 @@
      ::var-usages
      (filterv jvm-entry?
               (normalized-entries analysis :var-usages var-usage))
+     ::keywords
+     (filterv jvm-entry?
+              (normalized-entries analysis :keywords keyword-usage))
      ::findings
      (->> (:findings result)
           (map finding)

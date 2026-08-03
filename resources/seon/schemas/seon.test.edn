@@ -11,4 +11,5 @@
              [:seon.test/ns {:optional true} :seon.test/ns]
              [:seon.test/source {:optional true} :seon.test/source]
              [:seon.fn/calls {:optional true} :seon.fn/calls]
+             [:seon.fn/keywords {:optional true} :seon.fn/keywords]
              [:seon.test/subject {:optional true} :seon.test/subject]]}
