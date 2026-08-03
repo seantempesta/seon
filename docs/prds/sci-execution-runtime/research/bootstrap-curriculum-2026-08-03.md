@@ -10,323 +10,355 @@ Research for the redesign of `resources/seon/bootstrap.edn` — the ordered
 form series every agent receives, re-evaluated every turn so its outputs are
 always current.
 
-## Method and honesty statement
+## Method
 
-Every number and every output in this document was produced by a live
-`eval_clj` probe on 2026-08-03. The forms are recorded verbatim; outputs are
-abridged only by eliding list tails, always marked `...`.
+Every number, form, and output below was measured on **2026-08-03 against the
+live `default` cluster**, reforked from today's published `current-src`
+(commit `6a70fed1`, carrying the keyword edges, error-class schemas, and the
+`my.*` tools). All probes ran in **`door` mode** — `seon.sci.eval/evaluate`
+against the cluster's shared SCI ctx, which is the agent's real evaluation
+environment and differs from `jvm` mode in ways the curriculum depends on
+(see [Gap 1](#gap-1-jvm-mode-has-no-ambient-cluster-and-q-swallows-the-error)).
+Every probe was read-only: `q`, `pull`, `datoms`, `doc`, `dir`. Nothing was
+transacted and no cluster was reset.
 
-The shared `default` cluster is **degraded** and could not be used. Every
-query against it returns a flat error value:
+Latencies are the `:seon.eval/duration-ms` the evaluation record returns with
+every form, so they measure the work an agent would actually pay for.
+
+Query-shape recommendations are grounded in the Datahike engine source under
+`reference-code/datahike/`, cited by `file:line`, and every recommended shape
+was then confirmed live.
+
+Read end to end: `resources/seon/bootstrap.edn`,
+`tmp/bootstrap-forms-lane-draft-2026-08-03.diff`, `src/seon/cluster/reply.clj`,
+and the relevant spans of `reference-code/datahike/src/datahike/query.cljc`.
+
+(History, one line: an earlier pass of this research ran against an isolated
+operator root because the shared cluster's Datahike was temporarily broken.
+That cluster has been reforked and every measurement here is fresh against it.)
+
+## 0. The actionable-output filter
+
+One test governs every recipe and every lesson in this document:
+
+> **What would the agent DO differently, having seen this output?**
+
+A form earns a place in the bootstrap only if its output changes the agent's
+next action. Output that merely informs is cut, because the bootstrap is
+re-evaluated every turn and every form spends context forever.
+
+The filter's two poles, both measured:
+
+- **PASSES — the capability query.** Ten rows, each a name plus a one-line
+  contract. The agent's next action is immediate and specific: `(doc my.fs/read)`
+  on the one that matches its task. The output *is* a menu.
+- **FAILS — the census.** `{:fns 2238, :caps 10, :schemas 1475, :tests 915}`
+  is a wall of counts. Knowing there are 2238 functions tells an agent nothing
+  it can act on; it cannot call a number. **The census is cut from the
+  bootstrap** and survives in this document only as background for the
+  designer.
+
+Everything below is graded on this filter, honestly, including recipes I like.
+
+## 1. Census (background for the designer, NOT a bootstrap form)
 
 ```clojure
-(seon.db/q '[:find (count ?f) . :where [?f :seon.fn/sym _]])
-;; => {:seon.error/kind :seon.db/invalid-read
-;;     :seon.error/message "datahike/query$_resolve_clause$fn__49979"
-;;     :seon.error/data {:seon.db/operation :seon.db/q
-;;                       :seon.db/exception-class "java.lang.NoClassDefFoundError"}}
-```
-
-All measurements below therefore come from an **isolated operator root**
-booted for this research and shut down afterwards:
-
-```bash
-mkdir -p tmp/bootstrap-research-root
-bin/seon --root tmp/bootstrap-research-root init      # 50s, commit 6a70f3ed…
-bin/seon --root tmp/bootstrap-research-root start research   # 6.5s
-```
-
-Probes run in **`door` mode** (`seon.sci.eval/evaluate` against the cluster's
-shared SCI ctx). This matters: door mode is the agent's real evaluation
-environment, and it differs from `jvm` mode in ways the curriculum depends on
-(see [Gap 1](#gap-1-jvm-mode-has-no-ambient-cluster-and-q-swallows-it)).
-
-I read `resources/seon/bootstrap.edn`, `tmp/bootstrap-forms-lane-draft-2026-08-03.diff`,
-and `src/seon/cluster/reply.clj` end to end.
-
-## 1. The census
-
-One form, door mode:
-
-```clojure
-{:fns          (seon.db/q '[:find (count ?f) . :where [?f :seon.fn/sym _]])
- :public-fns   (seon.db/q '[:find (count ?f) . :where [?f :seon.fn/sym _]
-                            (not [?f :seon.fn/private? true])])
- :ns-distinct  (seon.db/q '[:find (count-distinct ?n) . :where [?f :seon.fn/ns ?n]])
- :ns-rows      (seon.db/q '[:find (count ?n) . :where [?n :seon.ns/name _]])
- :schemas      (seon.db/q '[:find (count ?s) . :where [?s :seon.schema/key _]])
- :tests        (seon.db/q '[:find (count ?t) . :where [?t :seon.test/sym _]])
- :caps         (seon.db/q '[:find (count ?f) . :where [?f :seon.effect/capability _]])
- :fns-with-keywords (seon.db/q '[:find (count ?f) . :where [?f :seon.fn/keywords _]])
- :fns-with-calls    (seon.db/q '[:find (count ?f) . :where [?f :seon.fn/calls _]])}
-```
-
-Actual output (53 ms):
-
-```clojure
-{:caps 10, :fns 2195, :fns-with-keywords 2251, :tests 906, :ns-distinct 167,
- :fns-with-calls 2230, :schemas 1454, :ns-rows 262, :public-fns 588}
+{:fns     (seon.db/q '[:find (count ?f) . :where [?f :seon.fn/sym _]])
+ :caps    (seon.db/q '[:find (count ?f) . :where [?f :seon.effect/capability _]])
+ :schemas (seon.db/q '[:find (count ?s) . :where [?s :seon.schema/key _]])
+ :tests   (seon.db/q '[:find (count ?t) . :where [?t :seon.test/sym _]])}
+;; => {:fns 2238, :caps 10, :schemas 1475, :tests 915}      11 ms
 ```
 
 | Fact | Count |
 |---|---|
-| `:seon.fn` rows | 2195 |
-| — of which private | 1607 |
-| — of which public | 588 |
-| namespaces holding functions | 167 |
-| `:seon.ns` rows | 262 |
-| `:seon.schema` keys | 1454 |
-| `:seon.test` rows | 906 |
-| — carrying `:seon.fn/calls` edges | 856 |
+| `:seon.fn` rows | 2238 |
+| — public | 607 |
+| namespaces holding functions | 170 |
+| `:seon.schema` keys | 1475 |
+| `:seon.test` rows | 915 |
+| — carrying `:seon.fn/calls` edges | 865 |
 | capability functions | **10** |
+| public `my.*` functions | **22** |
+| functions returning `:seon.error/value` | 56 |
+| tests reaching `my.fs/read` | **0** |
 
-`:fns-with-keywords` (2251) and `:fns-with-calls` (2230) exceed the 2195
-function rows because **test rows carry `:seon.fn/keywords` and
-`:seon.fn/calls` too** — verified by pulling a `:seon.test` row, which has
-both attributes alongside `:seon.test/sym`. That is what makes
-tests-for-a-function answerable at all, and it means keyword search spans
-tests and functions in one query.
+Two of these numbers *are* actionable, and they are the ones that shape the
+curriculum rather than appearing in it: the capability surface is **10**, and
+the whole agent-facing `my.*` surface is **22**. Both fit on one screen, which
+is why the bootstrap can teach *finding* instead of *enumerating*.
 
-### The capability surface, by name
+## 2. Query efficiency, grounded in the Datahike engine
 
-```clojure
-(sort-by first
-  (seon.db/q '[:find ?sym ?cap ?doc
-               :where [?f :seon.effect/capability ?cap]
-                      [?f :seon.fn/sym ?sym]
-                      [(get-else $ ?f :seon.fn/doc "(no docstring)") ?doc]]))
+I read the engine's post-processing pipeline to find out what work can be
+pushed into the query rather than done in Clojure afterwards.
+
+### The pipeline, and what it means
+
+`post-process-result` (`reference-code/datahike/src/datahike/query.cljc:4185-4200`)
+applies, in this fixed order:
+
+```
+:with truncation → aggregate → pull → -post-process → return-maps → order-by → offset/limit
 ```
 
-Complete, unabridged output:
+Three consequences that decide every recipe below:
 
-| Function | Capability | Docstring |
-|---|---|---|
-| `my.edit/exact` | `seon.edit.jvm/edit` | Replace one exact string occurrence, or all occurrences when explicit. |
-| `my.edit/form` | `seon.edit.jvm/edit` | Edit one unambiguous named top-level Clojure form. |
-| `my.edit/lines` | `seon.edit.jvm/edit` | Replace an exact, digest-fenced one-based inclusive line window. |
-| `my.fs/glob` | `seon.fs.jvm/glob` | Find a bounded set of paths without following symbolic links. |
-| `my.fs/read` | `seon.fs.jvm/read` | Read one bounded byte window and digest through the filesystem owner. |
-| `my.fs/stat` | `seon.fs.jvm/stat` | Read no-follow attributes for one filesystem path. |
-| `my.fs/write` | `seon.fs.jvm/write` | Conditionally replace one file through the filesystem owner. |
-| `my.shell/run` | `seon.shell.jvm/run` | Run one foreground argv vector and return complete process evidence. |
-| `my.web/fetch` | `seon.web.jvm/fetch` | Fetch one bounded HTTP(S) URL through the protected web owner. |
-| `my.web/search` | `seon.web.jvm/search` | Search the configured provider and return source rows plus raw evidence. |
+1. **`pull` inside `:find` runs after dedup** (`query.cljc:4194`, implementation
+   at `:2398-2411`). The engine resolves each pull spec once
+   (`dpp/parse-pull` at `:2402`) and applies it across the deduped result set.
+   Pulling in-query therefore beats mapping `seon.db/pull` over query results:
+   same attribute fetch, one parsed spec, no per-row call overhead, and it
+   composes with the rest of the pipeline.
+2. **`:keys` is a post-hoc `zipmap`** (`convert-to-return-maps`,
+   `query.cljc:3121-3128`) — literally `(mapv #(zipmap mkeys %) resultset)`.
+   It costs a map allocation per row and buys naming. Useful, but it is not an
+   index optimization, and it has a real interaction bug (below).
+3. **`:order-by`/`:limit`/`:offset` are engine-side** (accepted as query-map
+   keys at `query.cljc:112`, applied at `:4197-4200`). When they work, they
+   truncate before returning.
 
-**Answer to the owner's question: yes, decisively.** Ten rows, each one line,
-each naming both the agent-facing function and the system owner behind the
-door. The docstrings are genuinely good — every one states the bound
-("one bounded byte window", "without following symbolic links", "one
-foreground argv vector"). An agent reading this table learns the *shape* of
-the effect model (every capability is bounded, singular, and owned) before it
-learns any individual call. This one query replaces the rejected
-`(dir my.fs)`/`(dir my.edit)`/`(dir my.web)` enumeration and teaches strictly
-more.
+### Confirmed bug: `:keys` and `:order-by` cannot be combined
 
-### The whole agent-facing surface is 21 functions
+Because `convert-to-return-maps` runs at `:4196` and `apply-order-by` at
+`:4197`, ordering receives **maps** and tries to index into them positionally:
 
 ```clojure
-(sort (seon.db/q '[:find [?sym ...]
-                   :where [?f :seon.fn/ns ?e] [?e :seon.ns/name ?n]
-                          [(clojure.string/starts-with? ?n "my.")]
-                          [?f :seon.fn/private? false] [?f :seon.fn/sym ?sym]]))
+(seon.db/q {:query '[:find ?sym ?doc
+                     :keys seon.fn/sym seon.fn/doc
+                     :where [?f :seon.effect/capability _]
+                            [?f :seon.fn/sym ?sym] [?f :seon.fn/doc ?doc]]
+            :args [] :order-by '?sym :limit 3})
+;; => #:seon.error{:kind :seon.db/invalid-read
+;;                 :message "nth not supported on this type: PersistentArrayMap"}
 ```
+
+Naming the `:keys` alias instead fails earlier, with a genuinely good message:
 
 ```clojure
-;; 7 namespaces: my.background my.edit my.fs my.message my.run my.shell my.web
-;; 23 function rows, 21 public:
-("my.background/await" "my.background/poll" "my.edit/exact" "my.edit/form"
- "my.edit/lines" "my.edit/valid-form-operation?" "my.fs/content?" "my.fs/glob"
- "my.fs/read" "my.fs/stat" "my.fs/write" "my.fs/write-precondition?"
- "my.message/decline" "my.message/send" "my.run/complete" "my.run/wait"
- "my.shell/output?" "my.shell/run" "my.shell/stdin?" "my.web/fetch"
- "my.web/search")
+;; :order-by 'seon.fn/sym
+;; => ":order-by variable seon.fn/sym not found in :find [?sym ?doc]"
 ```
 
-This is the single most important census fact for the curriculum. The entire
-`my.*` surface fits in one screen, and **one form finds all of it**. There is
-no reason to enumerate namespaces in the bootstrap when a query that teaches
-the ref-walk returns the same list and stays correct as the surface grows.
+**Recommendation: do not teach `:keys` + `:order-by`.** Use pull-in-`:find`
+for naming and Clojure's `sort-by` for ordering — which is also the
+composition style this curriculum wants.
 
-`seon.db`'s public surface is comparably small — 16 functions:
+### Index-direct access
+
+`datoms`, `seek-datoms`, `rseek-datoms`, and `index-range` are first-class
+(`reference-code/datahike/src/datahike/api/specification.cljc:712-772`;
+`rseek-datoms` is documented at `:739` as "the primitive for windowed
+backwards pagination"). `seon.db` exposes **`datoms` only**. Where a question
+is "all values of one attribute", `datoms` on `:aevt` beats a query:
 
 ```clojure
-("seon.db/as-of" "seon.db/commit-id" "seon.db/committed-value-identity"
- "seon.db/connection?" "seon.db/database-value?" "seon.db/datoms" "seon.db/db"
- "seon.db/entity" "seon.db/history" "seon.db/pull" "seon.db/pull-many"
- "seon.db/q" "seon.db/read-evidence" "seon.db/read-evidence-current?"
- "seon.db/since" "seon.db/transact!")
+(->> (seon.db/datoms {:index :aevt :components [:seon.effect/capability]})
+     (map :v)
+     frequencies)
+;; => {seon.edit.jvm/edit 3, seon.fs.jvm/read 1, seon.fs.jvm/write 1,
+;;     seon.fs.jvm/glob 1, seon.fs.jvm/stat 1, seon.shell.jvm/run 1,
+;;     seon.web.jvm/fetch 1, seon.web.jvm/search 1}          2 ms
 ```
 
-## 2. The query recipes
+Fastest probe in this document, and the output is *actionable*: it shows one
+owner (`seon.edit.jvm/edit`) serving three agent-facing functions, which is
+the door model in one line. `index-range`/`seek-datoms` are **not reachable
+from `seon.db`** — recorded as [Gap 5](#gap-5-seondb-exposes-no-ranged-index-access).
 
-### The data model the recipes teach
+### Recipe grades, all re-measured live
 
-Three facts about the shape, all discovered by probing and all of which an
-agent must internalize:
-
-1. **`:seon.fn/ns` is a ref**, not a string. `[?f :seon.fn/ns ?n]` binds an
-   entity id; you must walk `[?e :seon.ns/name ?n]` to get the name. My first
-   namespace query returned empty precisely because I assumed a string.
-2. **`:seon.fn/sym` is a string; `:seon.ns/name` is a symbol.** Passing
-   `"my.fs"` where a symbol is required throws a `ClassCastException` inside
-   the query (returned as a flat error value). See [Gap 3](#gap-3-symns-inconsistency).
-3. **Schema rows are flat and readable**: `:seon.schema/key` (keyword) plus
-   `:seon.schema/form` (string).
-
-```clojure
-(seon.db/pull '[*] (first (seon.db/q '[:find [?s ...]
-                                       :where [?s :seon.schema/key :my.fs/read-request]])))
-;; => {:db/id 1140
-;;     :seon.schema/key :my.fs/read-request
-;;     :seon.schema/form "[:map [:my.fs/path :my.fs/path] [:my.fs/byte-offset {:optional true} …]]"
-;;     :seon.schema.admission/source :core}
-```
-
-### Recipe grades
-
-| Recipe | Latency | Teachability | Ergonomics raw |
+| Recipe | Best form | ms | Actionable? |
 |---|---|---|---|
-| All capabilities | 3 ms | **Very high** — teaches the effect door exists and is small | Fine; 3-clause query |
-| All `my.*` public functions | 10 ms | **Very high** — teaches the ns-is-a-ref walk | Fine |
-| All schemas in a namespace | 6 ms | Medium — teaches `namespace` as a Datalog predicate | Fine |
-| One function's full contract | 13 ms | High — teaches arity→refs→schema chain | **Poor** (see below) |
-| Which functions accept/return a schema key | 11 ms | **Very high** — teaches the graph is bidirectional | Fine |
-| Tests for one function | 12 ms | **Very high** — teaches tests are graph citizens | Fine |
-| Tests for a namespace | ~14 ms | High | Fine |
-| Keyword usage search | 5 ms | **Very high** — the find-me-code-touching-X query | Fine |
-| Docstring substring search | 6 ms | High — teaches Datalog predicates over strings | Fine |
+| All capabilities | pull-in-`:find` + `sort-by` | **5** | **Yes** — a menu you `(doc …)` into |
+| Attribute value census | `datoms` `:aevt` + `frequencies` | **2** | **Yes** — reveals shared owners |
+| All `my.*` public functions | pull-in-`:find` + `sort-by` | 7 | **Yes** — the callable surface |
+| One function's contract | **nested pull** (see below) | **4** | **Yes** — tells you what to pass |
+| Namespace overview | 3 queries, narrow pulls | 5–37 | **Yes** — orientation before editing |
+| Docstring search | `q` + `map` first-line + `sort-by` | 9 | **Yes** — finds the function to call |
+| Keyword usage search | pull + `group-by` | 18 | **Yes** — what to read before changing X |
+| Tests for a function | `:seon.fn/calls` reverse walk | 12 | **Yes** — the spec to satisfy |
+| Counting anything | `(count …)` aggregate | 11 | **No** — cut |
 
-**Latency is a non-issue.** The most expensive recipe is 19 ms and the full
-docstring scan across all 2195 rows is 6 ms. No helper can be justified on
-performance grounds — only on repetition.
+`count-distinct`, `count`, `min`, `max`, `sum`, `avg`, `median`, `stddev`,
+`sample` are all built in (`query.cljc:632-668`) — worth knowing, but they
+produce numbers, and numbers mostly fail the filter.
 
-### Keyword search — the highest-value recipe
+## 3. The recipes, in the composition style
 
-```clojure
-(sort (seon.db/q '[:find [?sym ...] :in $ ?kw
-                   :where [?f :seon.fn/keywords ?kw] [?f :seon.fn/sym ?sym]]
-                 :seon.cluster.run/process))
-```
+The house style: **query for rows, then massage with ordinary Clojure**. The
+engine finds; `->>`, `sort-by`, `keep`, `group-by`, and `frequencies` shape.
 
-5 ms, 30+ hits spanning implementation and tests:
+### Capabilities — the flagship
 
 ```clojure
-("seon.bootstrap/seed-tx" "seon.cluster.agent-test/handle" "seon.cluster.agent/held-run-id"
- "seon.cluster.agent/turn-step" "seon.cluster.loop/call-turn" "seon.cluster.loop/close-turn"
- "seon.cluster.run/claim-call" "seon.cluster.run/held-run" "seon.cluster.run/held?"
- "seon.cluster.run/recover-call" "seon.cluster.run/retract-custody" ...)
+(->> (seon.db/q '[:find [(pull ?f [:seon.fn/sym :seon.fn/doc]) ...]
+                  :where [?f :seon.effect/capability _]])
+     (sort-by :seon.fn/sym))
 ```
 
-This is the query that answers *"what code touches attribute X?"* — the
-question an agent asks constantly when modifying an unfamiliar subsystem, and
-the one with no other honest answer. It deserves a worked example.
+5 ms. The renderer turns a uniform sequence of maps into a clean table:
 
-### Docstring / name substring search
+```
+|    :seon.fn/sym |                                                               :seon.fn/doc |
+|-----------------+----------------------------------------------------------------------------|
+| "my.edit/exact" |   "Replace one exact string occurrence, or all occurrences when explicit." |
+|  "my.edit/form" |                       "Edit one unambiguous named top-level Clojure form." |
+| "my.edit/lines" |         "Replace an exact, digest-fenced one-based inclusive line window." |
+|    "my.fs/glob" |            "Find a bounded set of paths without following symbolic links." |
+|    "my.fs/read" |    "Read one bounded byte window and digest through the filesystem owner." |
+|    "my.fs/stat" |                       "Read no-follow attributes for one filesystem path." |
+|   "my.fs/write" |             "Conditionally replace one file through the filesystem owner." |
+|  "my.shell/run" |     "Run one foreground argv vector and return complete process evidence." |
+|  "my.web/fetch" |           "Fetch one bounded HTTP(S) URL through the protected web owner." |
+| "my.web/search" | "Search the configured provider and return source rows plus raw evidence." |
+```
 
-Because `:seon.fn/sym` is a **string**, name search needs no coercion:
+This is the whole effect surface, sorted, in ten rows. Every docstring states
+its bound ("one bounded byte window", "without following symbolic links"), so
+the agent learns the *shape* of the effect model — bounded, singular, owned —
+before any individual call. It passes the filter outright: the next action is
+`(doc …)` on the matching row.
+
+### One function's contract — nested pull replaces `or-join`
+
+The obvious query needs `or-join` + `ground` to tag inputs against outputs, and
+returns an ungrouped set with the spec repeated on every row. **A nested pull
+over the arity's ref attributes does the whole job**, because pull descends
+refs natively (`query.cljc:2398-2411` → `dpa/pull-spec`):
 
 ```clojure
-(seon.db/q '[:find [?sym ...]
-             :where [?f :seon.fn/doc ?d] [(clojure.string/includes? ?d "digest")]
-                    [?f :seon.fn/sym ?sym]])
-;; => 16 hits, 6 ms
+(->> (seon.db/q '[:find [(pull ?a [{:seon.fn.arity/input-refs  [:seon.schema/key :seon.schema/form]}
+                                   {:seon.fn.arity/output-refs [:seon.schema/key :seon.schema/form]}]) ...]
+                  :in $ ?sym
+                  :where [?f :seon.fn/sym ?sym] [?f :seon.fn/arities ?a]]
+                "my.fs/read"))
 ```
 
-### Function contract — the one recipe with bad ergonomics
+4 ms, no `or-join`, and inputs/outputs arrive already grouped:
 
 ```clojure
-(seon.db/q '[:find ?sym ?spec ?dir ?key ?form
-             :in $ ?sym
-             :where
-             [?f :seon.fn/sym ?sym]
-             [?f :seon.fn/spec ?spec]
-             [?f :seon.fn/arities ?a]
-             (or-join [?a ?s ?dir]
-               (and [?a :seon.fn.arity/input-refs ?s]  [(ground :in) ?dir])
-               (and [?a :seon.fn.arity/output-refs ?s] [(ground :out) ?dir]))
-             [?s :seon.schema/key ?key]
-             [?s :seon.schema/form ?form]]
-           "my.fs/read")
+[#:seon.fn.arity{:input-refs  [#:seon.schema{:key :my.fs/read-request
+                                             :form "[:map [:my.fs/path :my.fs/path] …]"}]
+                 :output-refs [#:seon.schema{:key :my.fs/read-result  :form "[:map …]"}
+                               #:seon.schema{:key :seon.error/value   :form "[:map …]"}]}]
 ```
 
-Output (13 ms), abridged:
+This is both the most efficient and the most readable form of the recipe, and
+it is maximally actionable — it tells the agent exactly what map to construct
+and exactly which two shapes can come back.
+
+### Docstring search — massage the output
 
 ```clojure
-#{["my.fs/read" "[:=> [:cat :my.fs/read-request] [:or :my.fs/read-result :seon.error/value]]"
-   :in  :my.fs/read-request "[:map [:my.fs/path :my.fs/path] …]"]
-  ["my.fs/read" "[:=> …]" :out :my.fs/read-result "[:map [:my.fs/path …] [:my.fs/digest …] …]"]
-  ["my.fs/read" "[:=> …]" :out :seon.error/value "[:map [:seon.error/kind …] …]"]}
+(->> (seon.db/q '[:find ?sym ?doc
+                  :where [?f :seon.fn/doc ?doc]
+                         [(clojure.string/includes? ?doc "digest")]
+                         [?f :seon.fn/sym ?sym]])
+     (map (fn [[sym doc]] {:seon.fn/sym sym
+                           :first-line (first (clojure.string/split-lines doc))}))
+     (sort-by :seon.fn/sym)
+     (take 6))
 ```
 
-The query is correct and the `or-join`/`ground` pairing genuinely teaches
-something. But the flat relation **repeats `?spec` on every row**, and the
-result is a set, so nothing groups. This is the one place where the raw form
-is meaningfully worse than a shaped result — and the strongest argument for
-the function-view helper.
+9 ms across all 2238 rows. Taking the first line is what makes it readable —
+see [Ugly 2](#ugly-2-one-long-docstring-destroys-a-table):
 
-### Errors are queryable and pervasive
+```
+|                 :seon.fn/sym |                                                             :first-line |
+|------------------------------+-------------------------------------------------------------------------|
+|              "my.edit/lines" |      "Replace an exact, digest-fenced one-based inclusive line window." |
+|                 "my.fs/read" | "Read one bounded byte window and digest through the filesystem owner." |
+|           "seon.blob/digest" |         "Return the content-addressed SHA-256 digest of UTF-8 content." |
+|              "seon.blob/get" |                      "Read and verify UTF-8 content by SHA-256 digest." |
+|             "seon.blob/put!" |               "Store UTF-8 content once and return its SHA-256 digest." |
+| "seon.bootstrap/plan-digest" |        "The stable digest of a cluster's ordered bootstrap-plan facts." |
+```
+
+Note the predicate `[(clojure.string/includes? ?doc "digest")]` sits inside
+the `:where` clause, so the engine filters during the scan rather than
+materializing all 2238 docstrings into Clojure first.
+
+### Keyword usage — separate the code from its tests
+
+Test rows carry `:seon.fn/keywords` and `:seon.fn/calls` alongside
+`:seon.test/sym`, so one query spans implementation and specification. Split
+them with `group-by`:
 
 ```clojure
-(count (seon.db/q '[:find [?sym ...] :in $ ?k
-                    :where [?s :seon.schema/key ?k] [?a :seon.fn.arity/output-refs ?s]
-                           [?f :seon.fn/arities ?a] [?f :seon.fn/sym ?sym]]
-                  :seon.error/value))
-;; => 56
+(->> (seon.db/q '[:find [(pull ?f [:seon.fn/sym :seon.test/sym]) ...] :in $ ?kw
+                  :where [?f :seon.fn/keywords ?kw]] :seon.cluster.run/process)
+     (group-by #(if (:seon.test/sym %) :tests :functions))
+     (reduce-kv (fn [m k v]
+                  (assoc m k (sort (keep (some-fn :seon.fn/sym :seon.test/sym) v))))
+                {}))
 ```
 
-**56 functions declare `:seon.error/value` as a return arm.** That single
-number teaches errors-as-values better than any prose sentence could, and it
-is a one-line form. Strong curriculum candidate.
+18 ms. Returns `:functions` (`seon.cluster.run/claim-call`, `…/held?`,
+`…/retract-custody`, `seon.cluster.loop/call-turn`, …) and `:tests`
+(`…/a-non-holder-refuses-every-held-run-transition`,
+`…/recovery-preserves-terminal-receipts-exactly`, …).
 
-## 3. Helper verdicts
+This is the highest-value *advanced* recipe: it answers "what must I read
+before I change attribute X?", and the `:tests` half doubles as the behavioral
+spec, because Seon test names are full sentences. `keep` + `some-fn` is
+load-bearing — see [Ugly 3](#ugly-3-a-nil-from-a-heterogeneous-pull-npes-with-no-location).
+
+### Namespace overview
+
+Three narrow queries. Pull **only** `:seon.fn/sym` and `:seon.fn/arglists`
+into the function table:
+
+```clojure
+(->> (seon.db/q '[:find [(pull ?f [:seon.fn/sym :seon.fn/arglists]) ...]
+                  :in $ ?n
+                  :where [?e :seon.ns/name ?n] [?f :seon.fn/ns ?e]
+                         [?f :seon.fn/private? false]] 'my.fs)
+     (sort-by :seon.fn/sym))
+;; 5 ms
+;; |                :seon.fn/sym | :seon.fn/arglists |
+;; |            "my.fs/content?" |       "([value])" |
+;; |                "my.fs/glob" |     "([request])" |
+;; |                "my.fs/read" |     "([request])" |
+;; |                "my.fs/stat" |     "([request])" |
+;; |               "my.fs/write" |     "([request])" |
+;; | "my.fs/write-precondition?" |       "([value])" |
+```
+
+The schema half is where this recipe earns its place — it resolves schemas
+**wherever declared**, not just same-namespace ones:
+
+```clojure
+(->> (seon.db/q '[:find [(pull ?s [:seon.schema/key :seon.schema/form]) ...]
+                  :in $ ?n
+                  :where [?e :seon.ns/name ?n] [?f :seon.fn/ns ?e] [?f :seon.fn/arities ?a]
+                         (or [?a :seon.fn.arity/input-refs ?s]
+                             [?a :seon.fn.arity/output-refs ?s])] 'my.run)
+     (sort-by :seon.schema/key))
+```
+
+```
+|  :seon.schema/key |                                                             :seon.schema/form |
+| :my.run/completed |    "[:map [:my.run/disposition [:= :completed]] [:my.run/result :my.run/result]]" |
+|      :my.run/note |                                                            "[:string {:min 1}]" |
+|    :my.run/result |                                                            "[:string {:min 1}]" |
+|      :my.run/wait | "[:map [:my.run/disposition [:= :wait]] [:my.run/note :my.run/note] …]" |
+| :seon.error/value | "[:map [:seon.error/kind …] [:seon.error/message …] [:seon.error/data …]]" |
+```
+
+`:seon.error/value` is declared in `error.edn`, not `my.run` — that is the
+data-flow reach a namespace-scoped schema query would miss.
+
+## 4. Helper verdicts
 
 The bar: *"anything we find ourselves doing twice is not teaching anything and
-is likely common."* Every helper is one less fishing lesson, so I only count
-compositions I actually reached for twice while doing this research.
+is likely common."* I count only compositions I actually reached for twice.
 
 ### (a) Namespace overview — **EARNS A HELPER**
 
-I ran this composition three times unprompted (`my.fs`, `my.run`, and again
-for `seon.db`/`seon.schema` in modified form). Raw prototype:
-
-```clojure
-(let [n 'my.run]
-  {:functions    (sort (seon.db/q '[:find [?sym ...] :in $ ?n
-                                    :where [?e :seon.ns/name ?n] [?f :seon.fn/ns ?e]
-                                           [?f :seon.fn/private? false] [?f :seon.fn/sym ?sym]] n))
-   :schemas-used (sort (seon.db/q '[:find [?key ...] :in $ ?n
-                                    :where [?e :seon.ns/name ?n] [?f :seon.fn/ns ?e]
-                                           [?f :seon.fn/arities ?a]
-                                           (or [?a :seon.fn.arity/input-refs ?s]
-                                               [?a :seon.fn.arity/output-refs ?s])
-                                           [?s :seon.schema/key ?key]] n))
-   :tests        (sort (seon.db/q '[:find [?t ...] :in $ ?n
-                                    :where [?e :seon.ns/name ?n] [?f :seon.fn/ns ?e]
-                                           [?tt :seon.fn/calls ?f] [?tt :seon.test/sym ?t]] n))})
-```
-
-Actual output for `my.run` (14 ms) — this is the shape, unabridged:
-
-```clojure
-{:functions ("my.run/complete" "my.run/wait")
- :schemas-used (:my.run/completed :my.run/note :my.run/result :my.run/wait :seon.error/value)
- :tests ("my.run-test/a-blank-completion-is-an-error-value-not-a-throw"
-         "my.run-test/a-disposition-is-an-ordinary-value"
-         "my.run-test/a-wrong-type-is-the-same-error-value-never-a-throw"
-         "seon.cluster.loop-test/a-disposition-is-read-only-when-it-really-is-one"
-         "seon.cluster.turn-test/a-completing-disposition-closes-in-the-terminal-transaction"
-         "seon.cluster.turn-test/a-waiting-disposition-frees-the-agent-and-keeps-its-note" …17 total)}
-```
-
-**Verdict: earns it.** Three separate queries with a shared `:in` binding,
-run together every time, and the crucial property the owner asked for holds —
-`:schemas-used` reaches schemas *wherever declared*, so `:seon.error/value`
-(declared in `error.edn`, not `my.run`) appears. That is the data-flow
-understanding a namespace-scoped schema query would miss. Note also what the
-test list teaches for free: Seon test names are full sentences, so the
-overview doubles as a behavioral specification.
-
-Honest name and contract:
+Ran it four times (`my.fs`, `my.run`, `seon.db`, `seon.schema`). Three queries
+sharing one `:in` binding, always run together, and the schema half reaches
+across namespaces. Honest contract:
 
 ```clojure
 (defn overview
@@ -339,138 +371,115 @@ Honest name and contract:
   [request] …)
 ```
 
-One namespaced map in, one namespaced map out. The name `overview` is honest;
-`describe`/`explore` would be vaguer nouns for the same thing.
+It must **not** include full docstrings in its function table
+([Ugly 2](#ugly-2-one-long-docstring-destroys-a-table)).
 
-### (b) Function view — **EARNS A HELPER, and fixes a real ergonomic defect**
+### (b) Function contract view — **VERDICT REVERSED: NO HELPER**
 
-I ran the contract query twice (`my.fs/read`, then the accepts/returns variant
-for `:seon.error/value`), and the flat-relation problem above is genuine, not
-cosmetic. A composed result would be:
-
-```clojure
-{:seon.fn/sym "my.fs/read"
- :seon.fn/spec "[:=> [:cat :my.fs/read-request] [:or :my.fs/read-result :seon.error/value]]"
- :seon.fn/doc "Read one bounded byte window and digest through the filesystem owner."
- :seon.schema/inputs  {:my.fs/read-request "[:map …]"}
- :seon.schema/outputs {:my.fs/read-result "[:map …]" :seon.error/value "[:map …]"}
- :seon.test/syms []}
-```
-
-**Verdict: earns it** — on ergonomics, not on repetition alone. The raw query
-needs `or-join` + `ground`, which is the single most advanced Datalog
-construct in the whole recipe set, and it still returns an ungrouped set with
-a duplicated spec column. Honest name: `contract`, taking
-`{:seon.fn/sym "…"}`.
-
-Caveat worth recording: it surfaced that **capability functions have no tests
-reaching them**:
-
-```clojure
-(seon.db/q '[:find [?t ...] :in $ ?sym
-             :where [?f :seon.fn/sym ?sym] [?tt :seon.fn/calls ?f] [?tt :seon.test/sym ?t]]
-           "my.fs/read")
-;; => []
-```
-
-versus `"seon.db/q"` which returns 30+. A helper that renders an empty
-`:seon.test/syms` prominently makes that gap visible to every agent that looks
-at a capability, which is a feature.
+An earlier pass of this research recommended a helper here because the
+`or-join` form was painful. **The nested pull dissolves that problem** — 4 ms,
+one expression, naturally grouped, no advanced Datalog. Wrapping it would now
+hide a genuinely elegant use of pull's ref-descent, which is exactly the
+fishing lesson the curriculum wants to teach. The structure removed the need
+for the helper; that is the better outcome.
 
 ### (c) Everything else — **NO HELPER**
 
-Capability listing, `my.*` listing, keyword search, docstring search,
-accepts/returns-a-schema: each is a single 2–4 clause query, each runs in
-under 11 ms, each output is already readable, and each teaches a distinct
-piece of the data model. Wrapping any of them would trade a fishing lesson for
-nothing. **Two helpers total, both compositions of three-or-more queries.**
+Each remaining recipe is one query plus a short `->>` tail, each under 18 ms,
+each output already readable. **One helper total.**
 
-## 4. The curriculum
+## 5. The curriculum
 
-Priority key: **W** = worked example (a form with `;;` comments in the
-bootstrap), **H** = one-form hint (present, uncommented), **D** = defer until
-its mechanism lands.
+Priority: **W** = worked example (form + `;;` comments in the bootstrap),
+**H** = one-form hint, **D** = defer, **CUT** = fails the actionable filter.
 
-Stability is for prefix-cache ordering (measured 67 % hit rate): **stable**
-content must precede **volatile** content.
+Stability is for prefix-cache ordering (measured 67 % hit rate): stable
+content precedes volatile.
 
-| # | Lesson | Why it matters | Candidate form | What its live output teaches | Stability | Pri |
-|---|---|---|---|---|---|---|
-| 1 | Session contract: forms, `;;` comments, batching | Everything else is written in this medium; round trips are the scarce resource | the shape of the bootstrap session itself + `(in-ns '…)` | that comments survive, that forms return values, that batching is normal | stable | **W** |
-| 2 | Orientation / self | An agent must know which namespace it owns and that it is one of many | `(in-ns '{{seon.ns/name}})` | its own name, that namespaces are owned | stable | **W** |
-| 3 | The graph is the map: census | Converts "what exists?" from prose into a query habit | the census form (§1) | 2195 fns / 1454 schemas / 906 tests — the system is big and countable | volatile | **W** |
-| 4 | Finding capabilities | The effect door is the only way out; 10 rows is memorable | capability query (§1) | the complete door surface + that each capability is bounded and owned | stable | **W** |
-| 5 | Finding the agent surface | Replaces enumerating `my.*` namespaces | `my.*` public query (§1) | 21 functions, and the ns-is-a-ref walk | stable | **W** |
-| 6 | `doc` / `dir` from graph facts | The cheap drill-down after a query narrows the field | `(doc my.run/complete)` | docstrings are graph facts, rendered in the comment grammar | stable | **W** |
-| 7 | Writing a durable defn with an honest open contract | The one persistence rule; currently taught **wrongly** | open-map `defn` + a call with an extra key | that declared keys validate and extra keys are ignored | stable | **W** |
-| 8 | Contract violation is a value, not a crash | Agents must not fear experimenting | `(largest)` / `(largest [])` | a flat error value it can read and repair | stable | **W** |
-| 9 | Errors-as-values are pervasive | Generalizes lesson 8 from anecdote to law | the 56-count form (§2) | 56 functions declare `:seon.error/value` | volatile | **W** |
-| 10 | Keyword search | The "what touches attribute X?" question | keyword query (§2) | code and tests both indexed by the attributes they use | volatile | **H** |
-| 11 | Tests are graph citizens | Enables test-first and behavioral reading | tests-for-a-function query | test names are sentences = a spec | volatile | **H** |
-| 12 | Registry-first schema declaration | Prevents duplicate schema keys | `seon.schema/registered?` probe before `register!` | 1454 keys already exist; look first | stable | **H** |
-| 13 | `seon.db` facts | Durable memory across runs | `seon.db/q` in the census already demonstrates reads | reads need no ceremony | stable | **H** |
-| 14 | `my.message` / `my.run` lifecycle | How a run ends; how agents reach each other | `(dir my.message)` + `(doc my.run/complete)` | the two terminal dispositions | stable | **W** |
-| 15 | Capabilities through the door | Actually using a capability once | one small `my.fs/read` | the request/result map shape and its digest | volatile | **H** |
-| 16 | `my.background` await/wake | Long work without blocking a run | `my.background/await` in a hint | 3 functions: `await`, `poll` | stable | **D** |
-| 17 | Self-improvement: editing one's own starting forms | The accretion endgame | prose-in-db hint only | — | stable | **D** |
+| # | Lesson | What the agent DOES differently | Form | Stability | Pri |
+|---|---|---|---|---|---|
+| 1 | Session contract: forms, `;;` comments, batching | Batches forms; writes comments that survive | the session's own shape + `(in-ns '…)` | stable | **W** |
+| 2 | Orientation / self | Knows which namespace it owns | `(in-ns '{{seon.ns/name}})` | stable | **W** |
+| 3 | Finding capabilities | Picks the right door and `(doc …)`s it | capability recipe (§3) | stable | **W** |
+| 4 | Finding the callable surface | Calls `my.*` functions instead of inventing them | `my.*` recipe | stable | **W** |
+| 5 | Reading a contract before calling | Constructs the right request map first try | nested-pull contract recipe | stable | **W** |
+| 6 | `doc` from graph facts | Drills into one row after a query narrows | `(doc my.run/complete)` | stable | **W** |
+| 7 | Writing a durable defn with an open contract | Writes contracts that accrete instead of refusing | open-map `defn` + call with an extra key | stable | **W** |
+| 8 | Contract violation is a value | Experiments freely; repairs instead of fearing | `(largest)` | stable | **W** |
+| 9 | `my.message` / `my.run` lifecycle | Ends its run correctly; writes a usable note | `(doc my.run/wait)` | stable | **W** |
+| 10 | Keyword usage search | Reads the right code before changing an attribute | keyword recipe (§3) | volatile | **H** |
+| 11 | Tests as specification | Satisfies existing tests; writes test-first | tests-for-a-function | volatile | **H** |
+| 12 | Using a capability once | Knows the request/result shape concretely | one small `my.fs/read` | volatile | **H** |
+| 13 | Errors-as-values are pervasive | Stops writing try/catch | the 56-count form | volatile | **CUT→H** |
+| 14 | Registry-first schema declaration | Reuses an existing key instead of duplicating | prose fact in db | stable | **H** |
+| 15 | `seon.db` durable facts | Remembers across runs | prose fact in db | stable | **H** |
+| 16 | `my.background` await/wake | Does long work without blocking | — | stable | **D** |
+| 17 | Self-improvement: editing its own forms | — | — | stable | **D** |
+| — | ~~Census~~ | ~~nothing~~ | ~~counts~~ | — | **CUT** |
 
-Lessons 12, 13 and 17 are the ones I judge genuinely **undemonstrable as a
-useful live form today**: a `register!` demo would mutate the shared cluster
-ctx from the bootstrap, a `transact!` demo would write junk facts every turn,
-and the self-improvement mechanism is still under design. These belong in the
-database as instruction facts, not as forms.
+Re-grades against the filter, stated honestly:
+
+- **Census: CUT.** Counts change no action.
+- **Lesson 13 demoted W→H.** "56 functions return `:seon.error/value`" is a
+  striking fact, but it is still a number; lesson 8's *lived* error value
+  teaches the same thing actionably. Keep it as an uncommented hint.
+- **Lessons 14 and 15 demoted to prose facts.** A `register!` or `transact!`
+  demo would mutate the shared cluster ctx or write junk facts every turn.
+  Undemonstrable as a live form; they belong in the database as instruction
+  facts.
+- **Lesson 5 promoted to W.** Reading a contract before calling is the single
+  highest-leverage habit: it converts a failed call into a correct first call.
 
 ### Cache ordering
 
-Stable-first ordering falls out cleanly: lessons 1, 2, 4, 5, 6, 7, 8, 14 are
-all stable (their outputs do not change between turns as the graph grows), and
-lessons 3, 9, 10, 11, 15 are volatile (counts and hit lists move). The current
-bootstrap already interleaves them; the draft diff correctly identified this
-and introduced a `;; Volatile … stay after this boundary` marker. **Keep that
-idea** — it is the one part of the draft I would carry forward unchanged.
+Lessons 1–9 are stable (outputs do not move as the graph grows); 10–13 are
+volatile. The draft diff's `;; Volatile … stay after this boundary` marker is
+the right idea and should be carried forward — it is the one part of that
+draft I would keep unchanged.
 
 ### Top three lessons, drafted
 
-These are written as an exemplary REPL session — the `;;` style is itself the
-lesson, and the reply parser preserves it verbatim (verified below).
+Written as an exemplary REPL session; the `;;` style is itself the lesson, and
+the reply parser preserves it verbatim (verified in §6).
 
-**Lesson 4 + 5 merged — finding what you can do:**
+**Lesson 3 — finding what you can do:**
 
 ```clojure
 ;; Nothing here is a fixed toolkit. Every function this cluster knows is a
 ;; fact in one graph, so "what can I do?" is a query, not a list to memorize.
 ;; Capabilities are the functions that reach OUT of the process — filesystem,
-;; shell, network. Each declares the system owner standing behind its door.
-(seon.db/q '[:find ?sym ?doc
-             :where [?f :seon.effect/capability _]
-                    [?f :seon.fn/sym ?sym]
-                    [?f :seon.fn/doc ?doc]])
+;; shell, network. Pulling inside :find gives you maps instead of tuples, and
+;; a uniform sequence of maps renders as a table.
+(->> (seon.db/q '[:find [(pull ?f [:seon.fn/sym :seon.fn/doc]) ...]
+                  :where [?f :seon.effect/capability _]])
+     (sort-by :seon.fn/sym))
 ```
 
+**Lesson 5 — reading a contract before calling:**
+
 ```clojure
-;; Everything else you call is an ordinary function. The `my.*` namespaces are
-;; the ones written for you. Note `:seon.fn/ns` is a REF to a namespace
-;; entity, so the query walks one hop to reach the name — that hop is how most
-;; of this graph is shaped.
-(sort (seon.db/q '[:find [?sym ...]
-                   :where [?f :seon.fn/ns ?e]
-                          [?e :seon.ns/name ?n]
-                          [(clojure.string/starts-with? ?n "my.")]
-                          [?f :seon.fn/private? false]
-                          [?f :seon.fn/sym ?sym]]))
+;; Before calling anything, ask what it accepts and what it can return.
+;; A function's arity points at its input and output schemas, and `pull`
+;; descends those refs for you — so one expression gets the whole contract,
+;; already grouped. Two output shapes here: the result, or an error value.
+(->> (seon.db/q '[:find [(pull ?a [{:seon.fn.arity/input-refs  [:seon.schema/key :seon.schema/form]}
+                                   {:seon.fn.arity/output-refs [:seon.schema/key :seon.schema/form]}]) ...]
+                  :in $ ?sym
+                  :where [?f :seon.fn/sym ?sym] [?f :seon.fn/arities ?a]]
+                "my.fs/read"))
 ```
 
 **Lesson 7 — writing something that lasts:**
 
 ```clojure
 ;; A defn with a complete :malli/schema becomes a durable fact: other agents
-;; can find it by the same queries you just ran. Without a schema it lives
-;; only in this session.
+;; find it with the same queries you just ran. Without a schema it lives only
+;; in this session.
 ;;
 ;; Write the contract honestly. Declared keys are validated rigorously and a
 ;; missing required key fails — but maps stay OPEN, so a caller that supplies
-;; extra keys is fine and its data is simply ignored. That is what lets a
-;; contract grow without breaking the callers already written against it.
+;; extra keys is fine and its data is ignored. That is what lets a contract
+;; grow without breaking the callers already written against it.
 (defn largest
   "The row with the largest :amount."
   {:malli/schema [:=> [:cat [:sequential [:map [:label :string] [:amount :int]]]]
@@ -492,209 +501,144 @@ lesson, and the reply parser preserves it verbatim (verified below).
 (largest)
 ```
 
-## 5. The gaps
+## 6. Verified claims
 
-### Gap 1 — `jvm` mode has no ambient cluster, and `q` swallows it
+- **The reply parser preserves leading comments verbatim.**
+  `src/seon/cluster/reply.clj:77-84`: `prose-line` returns a line unchanged
+  when it already starts with `;`, prefixing `; ` otherwise. `plan-sources`
+  (`:217-244`) prepends the coalesced prose to the following form's source. So
+  `;;` comments survive exactly.
 
-In `jvm` mode `(seon.db/db)` returns a flat error value:
+- **The current bootstrap's `{:closed true}` instruction is a defect against
+  ruling #48.** Open maps define successfully. The prose at
+  `resources/seon/bootstrap.edn:21-22` and both `largest` worked examples must
+  change. The draft diff's prose replacement is correct; its
+  `(dir my.fs)`/`(dir my.edit)`/`(dir my.web)` enumeration is not — §3's
+  capability recipe replaces it and teaches more.
+
+- **`:seon.fn/ns` is a ref; `:seon.ns/name` is a symbol; `:seon.fn/sym` is a
+  string.** Walking `[?f :seon.fn/ns ?e] [?e :seon.ns/name ?n]` is required,
+  and passing `"my.fs"` where a symbol belongs returns a cast error.
+
+- **Inside an already-quoted query, `'my.run` reads as `(quote my.run)`** and
+  fails the same cast; the bare symbol `my.run` works, as does passing it
+  through `:in`. Teach `:in`.
+
+## 7. Gaps — missing facts and behaviors
+
+### Gap 1 — `jvm` mode has no ambient cluster, and `q` swallows the error
 
 ```clojure
-{:seon.error/kind :seon.db/missing-connection-binding
- :seon.error/message "No current cluster connection is bound to seon.db/*conn*."}
+(seon.db/db)   ; jvm mode
+;; => {:seon.error/kind :seon.db/missing-connection-binding
+;;     :seon.error/message "No current cluster connection is bound to seon.db/*conn*."}
 ```
 
 That error value is then **accepted by `seon.db/q` as its `db` argument**, and
-`q` returns `nil` instead of propagating it. My entire first census returned
-`{:fns nil, :schemas nil, …}` with no indication of why. An error value
-passed where a database value is required must return an error value, never
-`nil`. **Missing behavior, not a missing fact** — and a silent one, which is
-the worst kind.
+`q` returns `nil` rather than propagating it. An error value passed where a
+database value is required must return an error value, never `nil`. Silent,
+and therefore the worst failure mode available.
 
-### Gap 2 — the first contracted `defn` in a fresh cluster fails with a 274 KB internal error
+### Gap 2 — `:keys` + `:order-by` is broken in the engine
 
-This is the most serious finding in this document, because it lands exactly
-where the bootstrap puts its most important lesson.
+Root-caused above to pipeline order at `query.cljc:4196-4197`. Upstream defect
+in our pinned Datahike; worth an issue and a candidate upstream fix (order-by
+before return-maps, or index-by-name when rows are maps).
 
-The first `defn` I evaluated in the freshly booted cluster:
+### Gap 3 — no test-for-capability coverage is visible as a fact
 
-```clojure
-(defn largest-open
-  "The row with the largest :amount; an explicit empty arm when there are none."
-  {:malli/schema [:=> [:cat [:sequential [:map [:label :string] [:amount :int]]]]
-                  [:or [:map [:label :string] [:amount :int]] [:map [:empty? [:= true]]]]]}
-  [rows]
-  (or (last (sort-by :amount rows)) {:empty? true}))
-```
+`my.fs/read` has **0** tests reaching it via `:seon.fn/calls`; `seon.db/q` has
+30+. Whether that means "untested" or "tested through a layer the call edges
+do not cross" is **not answerable by query**. The missing fact is an edge from
+a test to the capability it exercises through the door.
 
-returned **276,363 characters** with `:seon.eval/allocated-bytes 264841944`
-(264 MB) and:
-
-```
-seon.schema.internal/assert-non-nilable-value-schema! violated its contract
-(invalid-input): [nil nil [{:value [:map {:seon.db/entity true, …
-```
-
-— followed by a dump of what appears to be the entire schema registry
-(`:seon.ai.model/*` forms, print-face trees) as the error payload.
-
-I isolated it. The shape is **not** the cause:
-
-| Probe | Result |
-|---|---|
-| closed maps, plain map return (current bootstrap) | `:DEFINED-OK` |
-| **open** maps, plain map return | `:OPEN-MAPS-OK` |
-| closed maps, `[:or …]` return | `:CLOSED-OR-OK` |
-| open maps, `[:or …]` return | `:OPEN-OR-OK` |
-| **the identical failing form, re-run** | `:RERUN-OK` (1.1 MB, 1 ms) |
-
-The same source that allocated 264 MB and failed now succeeds in 1 ms. So this
-is a **first-contracted-`defn`-in-a-fresh-cluster-ctx** failure, not a schema-shape
-failure. Root cause not isolated — the assertion lives at
-`src/seon/schema/internal.cljc:313`, called from `src/seon/schema.clj:941` and
-`:1092`.
-
-Two defects, both needing issue notes:
-
-1. the first contracted `defn` in a fresh cluster ctx fails; every fresh
-   cluster's first agent hits this on the bootstrap's own lesson 7;
-2. **an internal contract violation renders its entire candidate-forms
-   registry into the error payload.** 274 KB is not a diagnostic, it is a
-   denial of service against the agent's context window.
-
-Related but distinct existing issue:
-[contracted-defn-rebuilds-the-whole-schema-projection.md](docs/seon/issues/contracted-defn-rebuilds-the-whole-schema-projection.md)
-records that every contracted `defn` costs 21–30 ms because
-`projection-with-function-contract` is O(registry). Same hot spot, different
-symptom — and the 264 MB allocation suggests the two share a root cause.
-
-### Gap 3 — `:seon.fn/sym` is a string but `:seon.ns/name` is a symbol
-
-```clojure
-;; works
-[?e :seon.ns/name ?n] [(clojure.string/starts-with? ?n "my.")]
-;; ClassCastException: String cannot be cast to Symbol
-(seon.db/q '[… [?e :seon.ns/name ?n] …] "my.fs")
-```
-
-Every other identity in the graph is a string (`:seon.fn/sym`,
-`:seon.test/sym`), which makes name-substring search pleasantly uniform. The
-namespace name being a symbol is the one exception, and it cost me a probe.
-Either is defensible; the inconsistency is not.
-
-### Gap 4 — quoting trap with no guard rail
-
-Inside an already-quoted query, `'my.run` reads as `(quote my.run)` — a
-`PersistentList` — and fails the same cast. The bare symbol works:
-
-```clojure
-[?e :seon.ns/name my.run]     ;; => works, 2 results
-[?e :seon.ns/name 'my.run]    ;; => ClassCastException error value
-```
-
-This will bite every agent that writes queries. It is a curriculum item (pass
-constants through `:in`), but it is also an argument for the error message
-naming the offending clause rather than only the Java classes.
-
-### Gap 5 — no test-for-capability coverage is visible as a fact
-
-`my.fs/read` has zero tests reaching it via `:seon.fn/calls`, while `seon.db/q`
-has 30+. Whether that means "untested" or "tested through a layer the call
-edges do not cross" is **not answerable by query**. The missing fact is an
-edge from a test to the capability it exercises through the door.
-
-### Gap 6 — `System/nanoTime` is unavailable in door mode
+### Gap 4 — `System/nanoTime` is unavailable, and nothing points at the alternative
 
 ```clojure
 (System/nanoTime)
 ;; => :seon.sci.eval/evaluation-failed "Unable to resolve symbol: System/nanoTime"
 ```
 
-Agents cannot time their own work with the obvious form. The
-`:seon.sci.admit/record` returned with every evaluation *does* carry
-`:seon.eval/duration-ms` and `:seon.eval/allocated-bytes`, which is the better
-answer — but nothing tells the agent that, and the refusal does not point at
-it. A one-line curriculum hint would close this.
+The `:seon.sci.admit/record` returned with every evaluation already carries
+`:seon.eval/duration-ms` and `:seon.eval/allocated-bytes` — the better answer,
+which nothing surfaces and the refusal does not mention.
 
-## 6. Ugly output — tool and render feedback
+### Gap 5 — `seon.db` exposes no ranged index access
 
-Per the standing order, every probe output I found noisy, unreadable, or
-misleading:
+Datahike ships `seek-datoms`, `rseek-datoms`, and `index-range`
+(`api/specification.cljc:712-772`), with `rseek-datoms` documented as the
+primitive for windowed backwards pagination. `seon.db` exposes `datoms` only,
+so "the latest N messages" has no efficient form for an agent. Missing
+surface, not a missing fact.
 
-1. **The 274 KB `defn` error (Gap 2).** Worst offender by three orders of
-   magnitude. An internal contract failure should render its own assertion and
-   arguments, never the whole schema registry.
+## 8. Ugly output — tool and render feedback
 
-2. **`seon.db/pull '[*]` on a `:seon.fn` row is unreadable.** Refs come back
-   unresolved (`:seon.fn/ns #:db{:id 1803}`), children elide to `[#]`, and —
-   worst — a cardinality-many ref set renders as an inline **Markdown table**
-   in the middle of an EDN map:
+### Ugly 1 — nested pull results splice a markdown table inside a map
 
-   ```
-   :seon.fn.arity/output-refs
-   | :db/id |
-   |--------|
-   |    587 |
-   |    949 |
-   , :seon.fn.arity/max 1, …
-   ```
+The renderer turns any uniform sequence of maps into a markdown table,
+**including nested ones**, producing output that is neither valid EDN nor
+readable prose:
 
-   A markdown table spliced inside a map literal is not valid EDN and not
-   readable prose. This is the single ugliest render I met.
+```
+[#:seon.fn.arity{:input-refs [#:seon.schema{:key :my.fs/read-request, :form "…"}],
+    :output-refs
+|   :seon.schema/key |   :seon.schema/form |
+|--------------------+---------------------|
+|  :seon.error/value |                 "…" |
+}]
+```
 
-3. **Error values get shredded by ordinary collection functions.** When
-   `seon.db/q` returned an error value and I passed it to `sort`, the map was
-   destructured into key/value pairs and sorted:
+At top level the same mechanism is excellent. The fix is to fire only at top
+level, or to render nested uniform sequences inline. Workaround an agent can
+use today: flatten first, e.g. `(->> … first :seon.fn.arity/output-refs
+(sort-by :seon.schema/key))`.
 
-   ```clojure
-   ([:seon.error/data #:seon.db{…}] [:seon.error/kind :seon.db/invalid-read]
-    [:seon.error/message "class java.lang.String cannot be cast to …"])
-   ```
+### Ugly 2 — one long docstring destroys a table
 
-   The error survived but became much harder to recognize as an error. This is
-   inherent to errors-as-values over maps, but it argues that
-   `:seon.error/value` should carry a declared `:seon.render/ai` producer so it
-   renders as an error even after a collection function has mangled it.
+Pulling `:seon.fn/doc` for `my.run` produced rows padded to ~900 characters,
+because the renderer pads every column to its widest cell and
+`my.run/wait`'s docstring is a 20-line essay. One long value makes the entire
+table unreadable. Either cap column width with an ellipsis or fall back to
+non-table rendering past a threshold. This is why the namespace-overview
+helper must pull `:seon.fn/arglists`, not `:seon.fn/doc`.
 
-4. **The `ClassCastException` messages are pure JVM noise.** "class
-   java.lang.String cannot be cast to class clojure.lang.Symbol
-   (java.lang.String is in module java.base of loader 'bootstrap'; …)" — the
-   module/loader clause is 60 % of the message and helps nobody. The useful
-   information (which clause, which attribute, what was expected) is absent.
+### Ugly 3 — a nil from a heterogeneous pull NPEs with no location
 
-5. **`(doc …)` is good.** Recording the positive for calibration:
+```clojure
+(->> (seon.db/q '[:find [(pull ?f [:seon.fn/sym]) ...] :in $ ?kw
+                  :where [?f :seon.fn/keywords ?kw]] :seon.cluster.run/process)
+     (map :seon.fn/sym)
+     (remove #(clojure.string/includes? % "-test/")))
+;; => "Cannot invoke \"Object.toString()\" because \"s\" is null"
+```
 
-   ```
-   -------------------------
-   my.run/complete
-   ([result])
-   ; Finish this run with the reply the agent wants delivered.
-   ;
-   ;   Returns a completion value the run loop records with the final receipt.
-   ;   Blank text returns a flat error value the agent can inspect and repair.
-   ```
+Test rows match the keyword but have no `:seon.fn/sym`, so `map` yields nils.
+The message names neither the value, the attribute, nor the form position.
+`keep` + `some-fn` is the fix, but the error should have said so.
 
-   Rendering the docstring in the agent's own comment grammar is a genuinely
-   nice touch — the output is already valid to paste back into a reply.
+### Ugly 4 — `ClassCastException` messages are JVM noise
 
-## 7. Verified claims from the brief
+"class java.lang.String cannot be cast to class clojure.lang.Symbol
+(java.lang.String is in module java.base of loader 'bootstrap'; …)" — the
+module/loader clause is most of the message and helps nobody, while the useful
+information (which clause, which attribute, what was expected) is absent.
 
-- **The reply parser preserves leading comments verbatim.** Confirmed at
-  `src/seon/cluster/reply.clj:77-84`: `prose-line` returns a line unchanged
-  when it already starts with `;`, and prefixes `; ` otherwise. `plan-sources`
-  (`:217-244`) then prepends the coalesced prose to the following form's
-  source. So `;;` comments written by an agent survive exactly, and `;;;`
-  would too.
+### Positive calibration
 
-- **The current bootstrap teaches `{:closed true}`, which is a defect against
-  ruling #48.** Confirmed: open maps define successfully
-  (`:OPEN-MAPS-OK` above). The prose at `resources/seon/bootstrap.edn:21-22`
-  ("input maps must say `{:closed true}`") should be replaced, and the two
-  `largest` worked-example forms with it. The draft diff's prose replacement
-  is correct; its enumeration of `(dir my.fs)`/`(dir my.edit)`/`(dir my.web)`
-  is not, and §1 above gives the query that replaces it.
+- **`:order-by` refusals are excellent**: ":order-by variable seon.fn/sym not
+  found in :find [?sym ?doc]" names the value, the expectation, and the
+  context. This is the standard the others should meet.
+- **`(doc …)` renders in the agent's own comment grammar**, so its output can
+  be pasted straight back into a reply:
 
-## Cleanup
+  ```
+  my.run/complete
+  ([result])
+  ; Finish this run with the reply the agent wants delivered.
+  ;
+  ;   Returns a completion value the run loop records with the final receipt.
+  ;   Blank text returns a flat error value the agent can inspect and repair.
+  ```
 
-The isolated research root was shut down with
-`bin/seon --root tmp/bootstrap-research-root down`. No shared cluster was
-written to, and `resources/seon/bootstrap.edn` was not modified.
+- **Top-level map-sequence tables are genuinely good** and are the reason
+  pull-in-`:find` is recommended throughout.
