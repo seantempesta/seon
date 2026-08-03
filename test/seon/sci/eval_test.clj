@@ -1246,6 +1246,14 @@
         (is (some? (:seon.cluster.eval/error evaluation))
             "presence is the state, so a preserved refusal still carries the
              message the loop reads — it must never store a nil there"))
+      ;; `sci/fork` is `(update ctx :env …)`, so it PRESERVES the guard key
+      ;; and shares the parent's ThreadLocal
+      ;; (reference-code/sci/src/sci/core.cljc:318-323). Two contexts sharing
+      ;; one arm on one thread cannot both be honoured, so the fork is refused
+      ;; loudly rather than silently borrowing the parent's deadline.
+      (let [forked (run-in (sci/fork armed-ctx) "(+ 1 2)" 1000)]
+        (is (= :seon.sci.kernel/already-armed
+               (:seon.error/kind (:seon.sci.admit/value forked)))))
       (finally (stop!)))))
 
 (deftest both-entrances-classify-one-failure-identically

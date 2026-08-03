@@ -1,9 +1,44 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, sci, runtime]
 ---
+
+## Resolution (2026-08-03, `04fe5f247` + `db0d78368`)
+
+The cause was not a missing catch: `evaluate` and `kernel/invoke` each
+carried their OWN arming rule, and only one of them was written to survive
+a re-entrant call. `seon.sci.kernel/arm` is now the single rule for both
+entrances — an identical context inherits the governing arm and its
+deadline, a different context is refused — and `evaluate` arms INSIDE its
+boundary so that refusal leaves as an ordinary flat value.
+
+Falsified before, verified after, on the live default cluster JVM:
+
+- re-entrant `evaluate` on an armed context returned `3` where it
+  previously threw `:seon.sci.kernel/already-armed`;
+- a nested evaluation asking for a 600,000 ms limit under an outer 50 ms
+  arm was cut at 54 ms — the previous throw hid a real hole, because
+  nested work that did NOT throw would have restarted the clock;
+- a foreign context on an armed thread returns
+  `:seon.sci.kernel/already-armed` as a value, with the message the run
+  loop reads (a preserved refusal used to store a nil there).
+
+Acceptance, item by item:
+
+1. **Done.** Regressions `a-re-entrant-evaluation-inherits-the-governing-arm`,
+   `an-inherited-arm-keeps-the-governing-deadline`, and
+   `a-foreign-armed-context-is-refused-as-a-value` in
+   `test/seon/sci/eval_test.clj`.
+2. **Done, by refusal rather than by relocation.** `sci/fork` still shares
+   the guard, so the invariant chosen is the loud one: a forked context is
+   not `identical?` to its parent and is refused on an armed thread. The
+   third assertion of `a-foreign-armed-context-is-refused-as-a-value` pins
+   it, and `kernel/arm`'s docstring states the rule.
+3. **Already covered** by `agent-context-exposes-no-concurrency-capability`,
+   which proves the base context exposes no class that can create or carry
+   thread work — the dependency the per-thread guard rests on.
 
 # A re-armed SCI context throws out of `evaluate`, and `sci/fork` shares its guard
 

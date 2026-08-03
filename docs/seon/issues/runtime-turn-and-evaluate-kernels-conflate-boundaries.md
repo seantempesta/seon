@@ -31,6 +31,20 @@ Several open issues already land at branches inside these functions
 `terminal-refusal-error-fact-fails-on-oversized-data.md`). That concentration
 is the refactor signal; another conditional at either site is not a class fix.
 
+## Progress 2026-08-03 (`04fe5f247`, `db0d78368`) — the `evaluate` half, partly
+
+Arming, the deadline, the interrupt question, and error normalization are no
+longer inside `evaluate`: `seon.sci.kernel` owns them for BOTH guarded
+entrances (`evaluate` for a form, `kernel/invoke` for a named live Var, which
+is how every renderer runs). `evaluate` lost its arm re-keying wrapper, its
+`failure-value` copy, its `invoke` pass-through, and its `interrupted?`
+pass-through. `sci-evaluate-throws-when-a-guarded-context-is-re-armed.md`,
+named above as part of the concentration signal, is resolved and archived.
+
+Still open here: the reader, session-delta, schema-publication, and admission
+boundaries inside `evaluate` remain inline, and `turn` is untouched — that
+half was outside the kernel-merge lane's owned paths.
+
 ## Owner
 
 The existing `seon.cluster.loop/turn` and `seon.sci.eval/evaluate` mechanisms,
