@@ -26,7 +26,6 @@
             [seon.config :as config]
             [seon.error :as error]
             [seon.problems :as problems]
-            [seon.render :as render]
             [seon.render.hiccup :as hiccup]
             [seon.schema]
             [seon.test-support :as test-support]))
@@ -142,8 +141,6 @@
         (is (= {} value)
             "not an empty vector per family, not :healthy? true, not a
              count of zero — nothing, because nothing is wrong")
-        (is (empty? (render/kinds value))
-            "and it declares no projection: there is nothing to say")
         (is (seon.schema/valid-candidate-value? :seon.problems/problems value))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -216,9 +213,7 @@
         (is (= "(widgets)" (:seon.cluster.run.form/source entry)))
         (is (= :seon.sci.eval/evaluation-failed (:seon.error/kind entry)))
         (is (str/includes?
-             (:seon.render/output
-              (render/render {:seon.render/unit value
-                              :seon.render/kind :seon.render/ai}))
+             (problems/ai-prose value)
              "Form 0 failed during evaluation"))
         (is (nil? (:seon.problems/error-signatures value))
             "an agent's own mistake never became an error FACT, and the
@@ -243,16 +238,7 @@
                  (every? (fn [family] (seq (get value family))) present)
                  ;; and NOTHING else appears — this is the half that a
                  ;; stored status would fail
-                 ;; `log` and `html` ride together — anything wrong is
-                 ;; worth a line AND worth a surface; `ai` only rides
-                 ;; when there is something to steer
-                 (empty? (remove (cond-> (conj present
-                                               :seon.render/log
-                                               :seon.render/html)
-                                   (contains? present
-                                              :seon.problems/errored-receipts)
-                                   (conj :seon.render/ai))
-                                 (keys value)))
+                 (empty? (remove present (keys value)))
                  ;; empty means empty: `{}`, never `{family []}`
                  (= (empty? present) (= {} value))
                  (seon.schema/valid-candidate-value? :seon.problems/problems
@@ -281,14 +267,8 @@
           (let [value (found connection)
                 log (problems/log-report value)
                 html (problems/html-report value)
-                routed-log
-                (:seon.render/output
-                 (render/render {:seon.render/unit value
-                                 :seon.render/kind :seon.render/log}))
-                routed-html
-                (:seon.render/output
-                 (render/render {:seon.render/unit value
-                                 :seon.render/kind :seon.render/html}))
+                routed-log (problems/log-report value)
+                routed-html (problems/html-report value)
                 rows
                 (filter
                  (fn [node]

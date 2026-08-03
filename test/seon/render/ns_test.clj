@@ -10,7 +10,6 @@
             [seon.render.block :as block]
             [seon.render.hiccup :as hiccup]
             [seon.render.ns :as sut]
-            [seon.render.walk :as walk]
             [seon.test-support :as support])
   (:import [java.io PushbackReader StringReader]))
 
@@ -84,18 +83,11 @@
             ai0 (sut/render-ai d0)
             ai1 (sut/render-ai d1)
             ai2 (sut/render-ai d2)
-            routed-ai1
-            (walk/projection
-             (select-keys d1 [:db/id :seon.ns/name :seon.ns/source])
-             {:seon.render/kind :seon.render/ai
-              :seon.render/floor 'seon.render.block/data-prose})
             html1-text (hiccup/->string (sut/render-html d1))
             html2-text (hiccup/->string (sut/render-html d2))]
         (testing "distance zero is only the namespace name"
           (is (= "seon.flow" ai0)))
         (testing "distance one composes every authoritative source row"
-          (is (= `sut/render-ai routed-ai1)
-              "the namespace entity map owns the family default")
           (is (str/starts-with? ai1 source))
           (is (= 1 (count (re-seq (re-pattern (java.util.regex.Pattern/quote source))
                                   ai1))))
@@ -168,11 +160,6 @@
             unit (namespace-unit db 'my.agents.fresh 1 256)
             ai (sut/render-ai unit)
             html-text (hiccup/->string (sut/render-html unit))]
-        (is (= `sut/render-ai
-               (walk/projection
-                (select-keys unit [:db/id :seon.ns/name])
-                {:seon.render/kind :seon.render/ai
-                 :seon.render/floor 'seon.render.block/data-prose})))
         (is (str/includes? ai "(ns my.agents.fresh)"))
         (is (str/includes? ai "no definitions yet"))
         (is (str/includes? ai "owned by agent fresh"))

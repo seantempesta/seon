@@ -1005,7 +1005,10 @@
             (render/call-with-walk-context
              {:seon.store/branch-connection connection
               :seon.cluster.agent/id "host-walker"
-              :seon.sci.admit/caps caps}
+              :seon.sci.admit/caps caps
+              :seon.sci.eval/ctx ctx
+              :seon.sci.eval/time-limit-ms 5000
+              :seon.config/on-core-error :panic}
              #(run-in ctx "(seon.render/walk)" 5000))
             value (:seon.sci.admit/value evaluation)]
         (is (ok? evaluation))

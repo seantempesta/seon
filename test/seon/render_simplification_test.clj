@@ -9,8 +9,8 @@
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
             [seon.render.walk :as walk]
-            [seon.render.web :as web]
             [seon.sci.eval :as eval]
+            [seon.sci.kernel :as kernel]
             [seon.test-support :as support]))
 
 (def ^:private caps (config/result-caps (config/defaults)))
@@ -46,9 +46,7 @@
 
 (defn- flat-units
   [neighborhood]
-  (if (vector? neighborhood)
-    neighborhood
-    (walk/units neighborhood)))
+  neighborhood)
 
 (deftest floor-totality-uses-one-prepared-value
   (support/with-database
@@ -151,7 +149,52 @@
           ctx
           '(defn namespace-ai [value]
              (str "B2:" (:seon.ns/name value)))))
-       (is (= (str "B2:" fixture-b) (render-ai request)))))))
+       (is (= (str "B2:" fixture-b) (render-ai request)))
+       (sci/binding [sci/ns (sci/create-ns fixture-b)]
+         (sci/eval-form
+          ctx
+          '(defn namespace-ai [_value]
+             [:div (seon.render.hiccup/raw
+                    "<script>raw-agent-bytes</script>")])))
+       (let [raw-result
+             (render-html
+              (assoc (render-request database ctx fixture-b {:fixture/value 1})
+                     :seon.render/html
+                     'seon.render-simplification.fixture-b/namespace-ai))]
+         (is (hiccup/hiccup? raw-result))
+         (is (not
+              (hiccup/raw?
+               (get-in raw-result
+                       [1]))))
+         (is (str/includes? (hiccup/->string raw-result)
+                            "&lt;script&gt;raw-agent-bytes&lt;/script&gt;"))
+         (is (not (str/includes? (hiccup/->string raw-result)
+                                 "<script>raw-agent-bytes</script>"))))
+       (let [evaluation
+             (eval/evaluate
+              {:seon.cluster.run.form/source
+               (str "(defn live-html "
+                    "{:malli/schema [:=> [:cat :map] :seon.render/html]} "
+                    "[_value] [:article {:class \"live-html\"} \"live\"])")
+               :seon.cluster.run.form/ns [:seon.ns/name fixture-a]
+               :seon.sci.eval/ctx ctx
+               :seon.sci.admit/caps caps
+               :seon.sci.eval/time-limit-ms 2000
+               :seon.config/on-core-error :panic})
+             row (:seon.sci.eval/program-row evaluation)]
+         (db/transact! connection [(dissoc row :seon.sci.eval/evaluated?)])
+         (eval/install-program-row!
+          {:seon.sci.eval/ctx ctx
+           :seon.db/db @connection
+           :seon.sci.eval/program-row row})
+         (is (some #{'seon.render-simplification.fixture-a/live-html}
+                   (kernel/public-functions-in ctx fixture-a))
+             "the terminal install publishes a new renderer candidate")
+         (is (= [:article {:class "live-html"} "live"]
+                (render-html
+                 (render-request @connection ctx fixture-a
+                                 {:seon.ns/name fixture-a})))
+             "an ordinary durable defn auto-wires onto the next render"))))))
 
 (deftest cold-context-reacquires-the-same-program-row
   (support/with-database
@@ -226,9 +269,7 @@
                  :seon.render.package/delta {"one" keyframe}
                  :seon.render.package/delta-bytes keyframe-bytes
                  :seon.render.package/delta-size (alength keyframe-bytes)}]
-    (with-redefs [web/page-of (fn [& _]
-                               (throw (ex-info "rerendered on join" {})))
-                  hiccup/->string (fn [& _]
+    (with-redefs [hiccup/->string (fn [& _]
                                    (throw (ex-info "serialized on join" {})))]
       (is (identical? package
                       (target-call 'seon.render.web 'join-package package)))

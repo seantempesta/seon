@@ -334,10 +334,12 @@
          (testing "each red form is addressed to the agent that owns the
                    namespace it was written in"
            (is (= #{["alpha" (work/problem-id run-id 2)]
-                    ["beta" (work/problem-id run-id 5)]}
+                    ["beta" (work/problem-id run-id 5)]
+                    ["planner" (work/problem-id run-id 5)]}
                   (assignments db run-id))
-               "two red forms, two owners, and neither went to the
-                author — the parse-time namespace decided both"))
+               "the two repairs follow parse-time ownership; beta's
+                ordinary transcript includes the problem identity, so its
+                explicit decline also reaches the planner about that fact"))
 
          (testing "an assignment rides the terminal transaction of the
                    very form that produced it"
@@ -358,11 +360,11 @@
                  "no window in which an assignment exists and the red
                   receipt explaining it does not")))
 
-         (testing "an owner that cannot see the elided problem identity
-                   cannot manufacture a declination join"
-           (is (= :routed (get (states db run-id) 5)))
+         (testing "an owner sees the problem through the ordinary transcript
+                   renderer and may make a real declination join"
+           (is (= :owner-declared-cant (get (states db run-id) 5)))
            (is (= :routed (get (states db run-id) 2))
-               "an owner's later prose does not mutate the red receipt"))
+               "alpha's repair prose does not mutate the red receipt"))
 
          (testing "the red evidence survives the settlement"
            (is (some? (db/q '[:find ?error .

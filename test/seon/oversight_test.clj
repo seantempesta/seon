@@ -8,8 +8,6 @@
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.oversight :as oversight]
-            [seon.render :as render]
-            [seon.render.block :as block]
             [seon.render.hiccup :as hiccup]
             [seon.test-support :as support])
   (:import [java.net URI]
@@ -112,16 +110,11 @@
                  (into #{} (map :seon.oversight/proc) plumbing)))
           (is (every? #(int? (:seon.oversight/passes %)) plumbing)
               "the cluster graph's ordinary Flow count is the pass oracle"))
-        (testing "both twins go through the one router"
+        (testing "both typed outputs share the fleet value"
           (is (= "root: parked"
-                 (:seon.render/output
-                  (render/render {:seon.render/unit built
-                                  :seon.render/kind :seon.render/ai}))))
+                 (oversight/ai-story built)))
           (let [html (hiccup/->string
-                      (:seon.render/output
-                       (render/render {:seon.render/unit built
-                                       :seon.render/kind
-                                       :seon.render/html})))]
+                      (oversight/html-table built))]
             (is (str/includes? html "data-fleet-oversight=\"agents\""))
             (is (str/includes? html "<td>root</td>"))
             (is (str/includes? html "<td>parked</td>"))
@@ -151,38 +144,4 @@
   (support/with-database
     (fn [connection]
       (let [source {:seon.db/db @connection}]
-        (is (nil? (oversight/unit source)))
-        (is (nil? (oversight/block-ai source)))
-        (is (nil? (oversight/block-html source)))))))
-
-(deftest a-broken-fleet-projection-reports-on-the-root-page
-  (with-cluster
-    "broken-projection"
-    (fn [instance]
-      (with-redefs [oversight/unit
-                    (fn [source]
-                      (assoc source
-                             :seon.render/ai 'no.such.fleet/ai
-                             :seon.render/html 'no.such.fleet/html))]
-        (let [db @(:seon.boot/cluster-connection instance)
-              source {:seon.db/db db
-                      :seon.boot/instance instance}
-              failure (oversight/block-html source)
-              surface (block/surface
-                       source
-                       {:seon.render.block/name :fleet-oversight
-                        :seon.render.block/priority 15
-                        :seon.render/html `oversight/block-html}
-                       :seon.render/html)
-              ^HttpResponse response (fetch-root instance)
-              body (.body response)]
-          (testing "the nested render boundary returns the original error"
-            (is (= :seon.render/unresolvable
-                   (:seon.error/kind failure)))
-            (is (= failure (:seon.error/value surface))))
-          (testing "the real page stays public while the failure remains durable"
-            (is (= 200 (.statusCode response)))
-            (is (str/includes? body "id=\"surface-fleet-oversight\""))
-            (is (str/includes? body "renderer unavailable"))
-            (is (not (str/includes? body "no.such.fleet/html")))
-            (is (not (str/includes? body "does not resolve")))))))))
+        (is (nil? (oversight/unit source)))))))

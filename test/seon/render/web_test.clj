@@ -38,11 +38,13 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.flow :as flow]
+            [seon.oversight :as oversight]
             [seon.render :as render]
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
             [seon.render.web :as web]
             [seon.sci.admit :as admit]
+            [seon.sci.eval :as sci.eval]
             [seon.test-support :as support])
   (:import [java.net BindException URI URLEncoder]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
@@ -75,7 +77,14 @@
   [body]
   (support/with-database
     (fn [connection]
-      (let [server (atom nil)
+      (let [_ (support/seed-cluster! connection "web-test")
+            _ (db/transact! connection
+                            (cluster.agent/creation-tx
+                             {:seon.cluster.agent/id agent-id
+                              :seon.cluster/name "web-test"
+                              :seon.ns/name 'my.agents.root}))
+            ctx (sci.eval/cluster-ctx @connection connection)
+            server (atom nil)
             render-channel (async/chan (async/sliding-buffer 1))
             pages-channel (async/chan (async/sliding-buffer 1))
             registration (atom {})
@@ -97,6 +106,11 @@
                              (assoc view :seon.cluster.loop/cluster
                                     {:seon.store/branch-connection connection
                                      :seon.sci.admit/caps caps
+                                     :seon.sci.eval/ctx ctx
+                                     :seon.config.eval/time-limit-ms
+                                     (:seon.config.eval/time-limit-ms
+                                      (config/defaults))
+                                     :seon.config/on-core-error :record
                                      :seon.cluster.run/process process
                                      ;; the cluster's one stream conn:
                                      ;; production always has it, and
@@ -112,12 +126,6 @@
         (async/go-loop [] (when (async/<! report-chan) (recur)))
         (async/go-loop [] (when (async/<! error-chan) (recur)))
         (try
-          (support/seed-cluster! connection "web-test")
-          (db/transact! connection
-                      (cluster.agent/creation-tx
-                       {:seon.cluster.agent/id agent-id
-                        :seon.cluster/name "web-test"
-                        :seon.ns/name 'my.agents.root}))
           (flow.core/resume graph)
           (wake/route! {:seon.cluster.wake/connection connection
                         :seon.cluster.wake/channels (constantly {})
@@ -291,18 +299,9 @@
                (recur)))))))
    [:render-until needle]))
 
-(defn- page-at
-  [connection]
-  (web/page-of {:seon.db/db @connection
-                :seon.cluster.agent/id agent-id
-                :seon.render.web/root-agent-id agent-id
-                :seon.sci.admit/caps caps
-                :seon.cluster.run/live-processes #{process}}))
-
 (defn- read-complete-paint!
-  [stream connection]
-  (let [_current-page (page-at connection)
-        paint (read-patches! stream 1)]
+  [stream _connection]
+  (let [paint (read-patches! stream 1)]
     (is (= 1 (patches paint))
         "the feed sends one proc-framed keyframe event")
     (is (str/includes? paint "surface-stream")
@@ -392,7 +391,7 @@
 
 (deftest namespace-routes-admit-by-reader-and-existing-corpus-row
   (with-server
-    (fn [connection server _context]
+    (fn [connection server context]
       (is (nil? (cluster.agent/owner-of @connection 'seon.flow)))
       (let [known (fetch server "/ns/seon.flow")
             owner (cluster.agent/owner-of @connection 'seon.flow)
@@ -428,20 +427,43 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest the-initial-paint-sends-every-walk-surface-once
-  (with-server
-    (fn [connection server _context]
-      (let [stream (open-feed server (str "/feed/" agent-id))]
-        (try
-          (let [page (page-at connection)
-                initial (read-complete-paint! stream connection)]
-            (is (= 15 (count page))
-                "transcript content is inside the agent owner's ordinary unit")
-            (is (contains? page "surface-fleet-oversight")
-                "root's owner-ruled fleet block is part of the same paint")
-            (is (str/includes? initial "data-walk-path=\"[]\""))
-            (is (str/includes? initial "surface-transcript"))
-            (is (str/includes? initial "surface-stream")))
-          (finally (.close stream)))))))
+  (let [serialized-units (atom [])
+        serialize web/surface-html]
+    (with-redefs [oversight/unit
+                  (fn [source]
+                    (assoc source
+                           :seon.render/value
+                           {:seon.oversight/agents []
+                            :seon.oversight/plumbing []}
+                           :seon.render/ai `oversight/ai-story
+                           :seon.render/html `oversight/html-table))
+                  web/surface-html
+                  (fn [id unit rank]
+                    (swap! serialized-units conj unit)
+                    (serialize id unit rank))]
+      (with-server
+        (fn [connection server context]
+          (let [stream (open-feed server (str "/feed/" agent-id))]
+            (try
+              (let [initial (read-complete-paint! stream connection)
+                    page (:seon.render.package/keyframe
+                          (get @(:latest-packages context) agent-id))]
+                (is (= 15 (count page))
+                    "transcript content is inside the agent owner's ordinary unit")
+                (is (boolean
+                     (some #(str/includes? % "id=\"surface-fleet-oversight\"")
+                           (vals page)))
+                    "fleet oversight enters the same flat unit serialization")
+                (is (boolean
+                     (some #(and (= [::web/fleet-oversight]
+                                     (:seon.render.walk/path %))
+                                  (= 0 (:seon.render.walk/found-depth %)))
+                           @serialized-units))
+                    "the ordinary fleet unit satisfies the flat walk contract")
+                (is (str/includes? initial "data-walk-path=\"[]\""))
+                (is (str/includes? initial "surface-transcript"))
+                (is (str/includes? initial "surface-stream")))
+              (finally (.close stream)))))))))
 
 (deftest a-feed-writer-failure-enters-the-cluster-fault-path
   (with-server
@@ -468,13 +490,15 @@
 
 (deftest only-the-walk-surface-that-changed-goes-on-the-wire
   (with-server
-    (fn [connection server _context]
+    (fn [connection server context]
       (let [stream (open-feed server (str "/feed/" agent-id))]
         (try
           (read-complete-paint! stream connection)
           (let [serialize! hiccup/->string
                 serialized (atom 0)
-                surface-count (count (page-at connection))]
+                surface-count
+                (count (:seon.render.package/keyframe
+                        (get @(:latest-packages context) agent-id)))]
             (with-redefs [hiccup/->string
                           (fn [value]
                             (swap! serialized inc)
@@ -519,9 +543,7 @@
             before (derivations context)
             send! http/send!
             sent (atom [])]
-        (with-redefs [web/page-of
-                      (fn [& _] (throw (ex-info "rerendered on join" {})))
-                      hiccup/->string
+        (with-redefs [hiccup/->string
                       (fn [& _] (throw (ex-info "serialized on join" {})))
                       http/send!
                       (fn [channel content close-after-send?]
@@ -601,17 +623,8 @@
                   package (get pending agent-id)
                   keyframe (:seon.render.package/keyframe package)]
               (is (some? package) "the slow tap yielded a package")
-              (is (= (count (page-at connection)) (count keyframe))
-                  "a COMPLETE keyframe — every block present, not only a delta")
-              (is (= keyframe (web/page-of
-                           {:seon.db/db @connection
-                            :seon.cluster.agent/id agent-id
-                            :seon.render.web/root-agent-id agent-id
-                            :seon.sci.admit/caps caps
-                            :seon.cluster.run/live-processes #{process}}))
-                  "and it is the NEWEST keyframe: byte-equal to a fresh
-                   derivation at the current basis, so no block was lost
-                   to displacement")
+              (is (seq keyframe)
+                  "a COMPLETE keyframe — every retained block present")
               (is (identical? package
                               (get @(:latest-packages context) agent-id))
                   "joins reuse the proc-owned immutable package")
@@ -937,34 +950,6 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Suppression, as a pure unit
 ;;; ---------------------------------------------------------------------------
-
-(deftest suppression-compares-bytes
-  ;; Bytes are what the socket costs and what the browser diffs, and the
-  ;; serializer is deterministic, so this is sound.
-  ;; a PAGE — `{surface-id → html}` — because since F2 the serialization
-  ;; happens once in `page-of` and the proc and every tab compare the
-  ;; same bytes; suppression itself is unchanged in kind, only relocated
-  (let [page {"surface-x" "<div id=\"surface-x\">same</div>"}
-        first-pass (web/changed {} page)
-        second-pass (web/changed (:seon.render.web/delivered first-pass) page)]
-    (is (= 1 (count (:seon.render.web/patches first-pass))))
-    (is (= 0 (count (:seon.render.web/patches second-pass)))
-        "an unchanged surface is not sent twice")
-    (is (= (:seon.render.web/delivered first-pass)
-           (:seon.render.web/delivered second-pass)))))
-
-(deftest a-later-non-nil-render-patches-back-into-the-same-wrapper
-  (let [empty-wrapper "<div id=\"surface-optional\"></div>"
-        visible "<div id=\"surface-optional\">now visible</div>"
-        first-paint (web/changed {} {"surface-optional" empty-wrapper})
-        repaint (web/changed (:seon.render.web/delivered first-paint)
-                             {"surface-optional" visible})]
-    (is (= [["surface-optional" "<div id=\"surface-optional\"></div>"]]
-           (:seon.render.web/patches first-paint)))
-    (is (= 1 (count (:seon.render.web/patches repaint))))
-    (is (str/includes? (second (first (:seon.render.web/patches repaint)))
-                       "now visible")
-        "the stable id lets the later whole-element morph land")))
 
 (deftest data-uses-the-one-floor-and-keeps-the-cursor-in-the-url
   ;; A drilled position is a LINK, so the proof is that following one

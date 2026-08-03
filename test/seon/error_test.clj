@@ -37,8 +37,8 @@
             [clojure.test.check.properties :as prop]
             [seon.config :as config]
             [seon.error :as error]
-            [seon.render :as render]
             [seon.render.walk :as walk]
+            [seon.sci.eval :as sci.eval]
             [seon.schema]
             [seon.sci.admit :as admit]
             [seon.test-support :as test-support]
@@ -365,10 +365,10 @@
                              :seon.cluster.agent/id "agent-3"})))
 
 (defn- rendered
-  [notice kind]
-  (:seon.render/output
-   (render/render {:seon.render/unit notice
-                   :seon.render/kind kind})))
+  [notice output]
+  (if (= output :ai)
+    (error/ai-prose notice)
+    (error/log-line notice)))
 
 (deftest notices-carry-structured-projection-evidence
   (test-support/assert-check!
@@ -381,19 +381,14 @@
             notice (error/notice
                     (cond-> {:seon.error/fact fact}
                       reason (assoc :seon.error/reason reason)))
-            human (rendered notice :seon.render/ai)
-            line (rendered notice :seon.render/log)]
+            human (rendered notice :ai)
+            line (rendered notice :log)]
         (and
          (seon.schema/valid-candidate-value? :seon.error/notice notice)
          (= (:seon.error/kind fact) (:seon.error/kind notice))
          (= [:seon.error/id (:seon.error/id fact)]
             (:seon.error/evidence notice))
-         (= #{:seon.render/ai :seon.render/log}
-            (:seon.render/kinds notice)
-            (render/kinds notice))
-         (= (:seon.error/presentation notice)
-            (:seon.render/ai notice))
-         (qualified-symbol? (:seon.error/presentation notice))
+         (qualified-symbol? (:seon.render/ai notice))
          (and (string? human) (not (str/blank? human)))
          (and (string? line) (not (str/blank? line)))
          (not (str/includes? line "\n")))))
@@ -402,9 +397,7 @@
 
 (deftest the-projection-keys-are-derived-never-stored
   (let [fact (fact)]
-    (is (not (contains? fact :seon.render/ai)))
-    (is (not (contains? fact :seon.render/log))
-        "a symbol identical on every row is stored-derived data")))
+    (is (not (contains? fact :seon.render/ai)))))
 
 (deftest instrumentation-evidence-survives-normalization
   (let [violation {:seon.error/kind :seon.instrument/contract-violated
@@ -422,16 +415,13 @@
     (is (= ":seon.error/fact" (:seon.instrument/expected fact)))
     (is (= "[\"not a fact\"]" (:seon.instrument/args fact)))
     (let [notice (error/notice {:seon.error/fact fact})
-          prose (rendered notice :seon.render/ai)]
+          prose (rendered notice :ai)]
       (is (= 'seon.error/instrumentation-prose (:seon.render/ai notice)))
-      (is (= 'seon.error/instrumentation-prose
-             (:seon.error/presentation notice)))
       (is (not (str/blank? prose))))))
 
 (deftest the-log-line-is-one-line-and-derived
   (let [fact (fact)
-        line (rendered (error/notice {:seon.error/fact fact})
-                       :seon.render/log)]
+        line (rendered (error/notice {:seon.error/fact fact}) :log)]
     (is (not (str/includes? line "\n")) "a log line that wraps is two log lines")
     (is (not (str/blank? line)))))
 
@@ -501,16 +491,17 @@
          (transform-error (ex-info "walk evidence" {}))
          {:seon.cluster.agent/id "agent-3"})))
       (let [db @connection
-            node (walk/neighborhood
+            units (walk/neighborhood
                   {:seon.db/db db
+                   :seon.sci.eval/ctx (sci.eval/cluster-ctx db connection)
                    :seon.render.walk/lookup
                    [:seon.cluster.agent/id "agent-3"]
-                   :seon.render/kind :seon.render/ai
-                   :seon.render/floor 'seon.render.block/data-prose
-                   :seon.render/overrides {}
+                   :seon.render/output :seon.render/ai
                    :seon.render/distance 1
-                   :seon.sci.admit/caps caps})
-            text (walk/prose db node)]
+                   :seon.sci.admit/caps caps
+                   :seon.sci.eval/time-limit-ms 2000
+                   :seon.config/on-core-error :panic})
+            text (walk/prose db units)]
         (is (str/includes? text "The loop :step failed"))
         (is (str/includes? text "Inspect error"))
         (is (not (str/includes? text "projection threw")))

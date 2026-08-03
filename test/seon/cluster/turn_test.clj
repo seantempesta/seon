@@ -25,7 +25,6 @@
             [seon.cluster :as cluster]
             [seon.cluster.loop :as cluster.loop]
             [seon.error :as error]
-            [seon.render :as render]
             [seon.cluster.message :as message]
             [seon.cluster.prompt :as prompt]
             [seon.cluster.run :as run]
@@ -94,6 +93,7 @@
             {:seon.config.flow.compute/queue-depth 10
              :seon.config.flow.compute/concurrency 2}})]
      (try
+      (test-support/seed-cluster! connection "turn-test")
       (db/transact! connection
                   [{:seon.ns/name 'clojure.set}
                    {:seon.ns/name 'clojure.test}
@@ -137,7 +137,8 @@
                :seon.cluster/name "turn-test"
                :seon.flow/work-launcher launcher
                :seon.cluster.run/process process
-               :seon.sci.eval/ctx (sci.eval/build-base-ctx)
+               :seon.sci.eval/ctx
+               (sci.eval/cluster-ctx @connection connection)
                :seon.cluster.wake/channel
                (clojure.core.async/chan (clojure.core.async/sliding-buffer 1))
              :seon.cluster.loop/evaluate 'seon.cluster.turn-test/fake-evaluate
@@ -1760,7 +1761,13 @@
                                        {:seon.cluster.run/id "run-next"
                                         :seon.cluster.agent/id "agent-a"
                                         :seon.sci.admit/caps
-                                        (:seon.sci.admit/caps cluster)})))))))))
+                                        (:seon.sci.admit/caps cluster)
+                                        :seon.sci.eval/ctx
+                                        (:seon.sci.eval/ctx cluster)
+                                        :seon.sci.eval/time-limit-ms
+                                        (:seon.config.eval/time-limit-ms cluster)
+                                        :seon.config/on-core-error
+                                        (:seon.config/on-core-error cluster)})))))))))
 
 (deftest a-real-evaluation-that-runs-away-is-stopped-and-recorded
   ;; the loop's honest failure path, end to end: an agent writes an
@@ -2245,12 +2252,9 @@
                                            [?e :seon.error/id _]]
                                          @connection)))
                   fact (durable-fact @connection error-id)]
-              (is (= (:seon.render/output
-                      (render/render
-                       {:seon.render/unit
-                        (error/notice {:seon.error/fact fact
-                                       :seon.error/reason :failover})
-                        :seon.render/kind :seon.render/ai}))
+              (is (= (error/ai-prose
+                      (error/notice {:seon.error/fact fact
+                                     :seon.error/reason :failover}))
                      (:seon.ai/system backup-request)))))
           (testing "two attempt rows tell the whole story"
             (is (= 2 (count rows)))

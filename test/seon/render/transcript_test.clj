@@ -13,6 +13,7 @@
             [seon.render.hiccup :as hiccup]
             [seon.render.transcript :as transcript]
             [seon.render.walk :as walk]
+            [seon.sci.eval :as sci.eval]
             [seon.test-support :as support])
   (:import [java.io PushbackReader StringReader]))
 
@@ -34,6 +35,9 @@
    (unit db token-budget caps))
   ([db token-budget render-caps]
    {:seon.db/db db
+    :seon.sci.eval/ctx (sci.eval/cluster-ctx db)
+    :seon.sci.eval/time-limit-ms 1000
+    :seon.config/on-core-error :record
     :seon.cluster.agent/id agent-id
     :seon.render.transcript/token-budget token-budget
     :seon.sci.admit/caps render-caps}))
@@ -45,10 +49,11 @@
    (walk/neighborhood
     {:seon.db/db db
      :seon.render.walk/lookup [:seon.cluster.agent/id agent-id]
-     :seon.render/kind :seon.render/ai
-     :seon.render/floor `block/data-prose
-     :seon.render/overrides {}
+     :seon.render/output :seon.render/ai
      :seon.render/distance 2
+     :seon.sci.eval/ctx (sci.eval/cluster-ctx db)
+     :seon.sci.eval/time-limit-ms 1000
+     :seon.config/on-core-error :record
      :seon.sci.admit/caps caps})))
 
 (defn- reader-valid?

@@ -6,6 +6,7 @@
             [seon.cluster.agent :as agent]
             [seon.cluster.prompt :as prompt]
             [seon.render :as render]
+            [seon.sci.eval :as sci.eval]
             [seon.test-support :as support])
   (:import [java.util Date]))
 
@@ -43,27 +44,34 @@
                     [:seon.cluster.run/id "walk-run"]}])
       (body connection))))
 
-(def ^:private request
+(defn- request
+  [connection]
   {:seon.cluster.run/id "walk-run"
    :seon.cluster.agent/id "walker"
-   :seon.sci.admit/caps caps})
+   :seon.sci.admit/caps caps
+   :seon.sci.eval/ctx (sci.eval/cluster-ctx @connection connection)
+   :seon.sci.eval/time-limit-ms 2000
+   :seon.config/on-core-error :panic})
 
 (deftest prompt-is-one-fresh-labeled-walk
   (planted
    (fn [connection]
-     (let [rendered (prompt/prompt @connection request)
+     (let [render-request (request connection)
+           rendered (prompt/prompt @connection render-request)
            text (:seon.cluster.prompt/text rendered)
            direct (render/call-with-walk-context
                    {:seon.db/db @connection
                     :seon.cluster.agent/id "walker"
-                    :seon.sci.admit/caps caps}
+                    :seon.sci.admit/caps caps
+                    :seon.sci.eval/ctx (:seon.sci.eval/ctx render-request)
+                    :seon.sci.eval/time-limit-ms 2000
+                    :seon.config/on-core-error :panic}
                    render/walk)
            contribution (first (:seon.context/contributions rendered))
            lines (str/split-lines text)]
        (is (= direct text)
            "prompt assembly calls the same public function agents call")
        (is (= text (:seon.context.contribution/text contribution)))
-       (is (= 'seon.render/walk (:seon.render/projection contribution)))
        (is (= :walk (:seon.render.block/name contribution)))
        (is (= 1 (count (re-seq #";; \(seon\.render/walk" text)))
            "assembly opens exactly one walk")
@@ -77,7 +85,10 @@
             (render/call-with-walk-context
              {:seon.db/db @connection
               :seon.cluster.agent/id "walker"
-              :seon.sci.admit/caps caps}
+              :seon.sci.admit/caps caps
+              :seon.sci.eval/ctx (:seon.sci.eval/ctx render-request)
+              :seon.sci.eval/time-limit-ms 2000
+              :seon.config/on-core-error :panic}
              #(render/walk {:depth 2 :branch []}))
             "branch=[]")
            "branch is the labeled get-in drill handle")
@@ -92,7 +103,7 @@
   (planted
    (fn [connection]
      (let [before (:seon.cluster.prompt/text
-                   (prompt/prompt @connection request))]
+                   (prompt/prompt @connection (request connection)))]
        (db/transact! connection
                    [{:seon.cluster.message/id "later"
                      :seon.cluster.message/to
@@ -100,7 +111,7 @@
                      :seon.cluster.message/content "new durable fact"
                      :seon.cluster.message/at (Date. 1700000002000)}])
        (let [after (:seon.cluster.prompt/text
-                    (prompt/prompt @connection request))]
+                    (prompt/prompt @connection (request connection)))]
          (is (not= before after))
          (is (str/includes? after "new durable fact")))))))
 
@@ -122,4 +133,4 @@
         (is (= :seon.cluster.prompt/no-trigger
                (:seon.cluster.prompt/rule
                 (support/refusal-data
-                 #(prompt/prompt @connection request)))))))))
+                 #(prompt/prompt @connection (request connection))))))))))

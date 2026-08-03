@@ -33,8 +33,6 @@
             [seon.ai :as ai]
             [seon.blob :as blob]
             [seon.cluster.loop]
-            [seon.render.hiccup :as hiccup]
-            [seon.render.root :as root]
             [seon.test-support :as support])
   (:import [java.util Date]))
 
