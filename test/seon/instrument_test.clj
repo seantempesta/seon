@@ -114,6 +114,21 @@
            "the single positional input is identified, not Malli's cat wrapper")
        (is (re-find #"invalid-input" (ex-message failure)))))))
 
+(deftest projection-gates-inspect-the-complete-candidate-population
+  (instrumented!
+   (fn [_]
+     (let [base-key :seon.instrument-test.local/base
+           alias-key :seon.instrument-test.local/alias
+           forms (assoc (schema/snapshot)
+                        base-key :string
+                        alias-key base-key)
+           projection (schema/build-projection forms)]
+       (is (= base-key
+              (get (:seon.schema.projection/forms projection) alias-key))
+           "a projection gate inspects candidate data against the population
+            it was given; instrumentation must not prevalidate that data
+            against the process-global registry")))))
+
 (deftest interpreted-contracts-use-the-active-registry-and-core-error-dial
   (let [projection (or (schema/current-projection)
                        (schema/build-projection (schema/snapshot)))

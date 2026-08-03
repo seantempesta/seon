@@ -178,7 +178,7 @@
    kind. The derived id-attr makes a declared schema self-describing for
    the renderer's discovery walk — no per-row `:seon.entity/kind` stamp."
   {:malli/schema
-   [:=> [:cat :map :seon.schema/definition] [:maybe :keyword]]}
+   [:=> [:cat :map :seon.schema/value] [:maybe :keyword]]}
   [schemas v]
   (when (:seon.db/entity (form/schema-properties v))
     (map-identity-entry-key schemas v)))
@@ -190,8 +190,8 @@
    entries and Malli's default sentinel are excluded."
   {:malli/schema
    [:function
-    [:=> [:cat :seon.schema/definition] [:maybe [:vector :keyword]]]
-    [:=> [:cat :map :seon.schema/definition]
+    [:=> [:cat :seon.schema/value] [:maybe [:vector :keyword]]]
+    [:=> [:cat :map :seon.schema/value]
      [:maybe [:vector :keyword]]]]}
   ([v]
    (map-required-attrs {} v))
@@ -229,7 +229,7 @@
    DECLARED entity kind with an identity-attr entry; preserves existing
    props (`:seon.render/ai`, etc). Pass-through otherwise."
   {:malli/schema
-   [:=> [:cat :map :seon.schema/definition] :seon.schema/definition]}
+   [:=> [:cat :map :seon.schema/value] :seon.schema/value]}
   [schemas v]
   (if-let [id-attr (derive-entity-id-attr schemas v)]
     (let [head     (first v)
@@ -319,9 +319,12 @@
    the base type, then mark the FIELD optional at its map site.
 
    `schemas` is accepted because projection validation passes the complete
-   population through the same gate; the decision depends only on `v`."
+   population through the same gate; the decision depends only on `v`.
+   `v` is candidate data here, not an independently compiled definition:
+   [[assert-compilable-schema!]] owns validity against that complete
+   population."
   {:malli/schema
-   [:=> [:cat :map :keyword :seon.schema/definition] :nil]}
+   [:=> [:cat :map :keyword :seon.schema/value] :nil]}
   [_schemas k v]
   (when (form/nilable-value-schema? v)
     (let [body (rest v)
