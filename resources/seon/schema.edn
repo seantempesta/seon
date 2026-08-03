@@ -2293,9 +2293,11 @@
    :seon.reconcile/adopt-identities]]
 
  :seon.reconcile/result
- [:map
-  [:seon.reconcile/converged? :seon.reconcile/converged?]
-  [:seon.reconcile/operations :seon.reconcile/operations]]
+ [:or
+  [:map
+   [:seon.reconcile/converged? :seon.reconcile/converged?]
+   [:seon.reconcile/operations :seon.reconcile/operations]]
+  :seon.error/value]
 
 ;; ===========================================================================
 ;; REGISTRY

@@ -242,13 +242,19 @@
    [:=> [:cat :seon.store/branch-connection :seon.config/compiled]
     :seon.reconcile/result]}
   [connection compiled]
-  (reconcile/reconcile!
-   connection
-   {::reconcile/desired [(:seon.config/desired-row compiled)]
-    ::reconcile/process managing-process-identity
-    ::reconcile/adopt-identities
-    #{[:seon.config/cluster
-       (:seon.config/cluster (:seon.config/desired-row compiled))]}}))
+  (let [result
+        (reconcile/reconcile!
+         connection
+         {::reconcile/desired [(:seon.config/desired-row compiled)]
+          ::reconcile/process managing-process-identity
+          ::reconcile/adopt-identities
+          #{[:seon.config/cluster
+             (:seon.config/cluster (:seon.config/desired-row compiled))]}})]
+    (when (:seon.error/kind result)
+      (refuse! ::reconcile-refused
+               {:seon.config/reconcile-result result}
+               nil))
+    result))
 
 (defn apply!
   "Compile once and exact-reconcile the one desired config row."

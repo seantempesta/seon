@@ -37,6 +37,7 @@
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.wake :as wake]
             [seon.config :as config]
+            [seon.db :as db]
             [seon.flow :as flow]
             [seon.render :as render]
             [seon.render.value :as value]
@@ -1068,6 +1069,48 @@
                                     "datastar-patch-elements"))
                 "the HTTP refusal is text, never a competing morph"))
           (finally (.close stream)))))))
+
+(deftest transaction-refusals-map-to-http-without-success
+  (support/with-database
+    (fn [connection]
+      (support/seed-cluster! connection "web-write-refusal")
+      (d/transact connection
+                  (cluster.agent/creation-tx
+                   {:seon.cluster.agent/id agent-id
+                    :seon.cluster/name "web-write-refusal"
+                    :seon.ns/name 'my.agents.root}))
+      (let [service {:seon.store/connection connection
+                     :seon.cluster.agent/id agent-id
+                     :seon.sci.admit/caps caps
+                     :seon.cluster.run/process process}
+            inbound {:seon.cluster.agent/id agent-id
+                     :seon.cluster.message/inbound-content "accepted"}]
+        (doseq [[result expected-status]
+                [[{:seon.error/kind :seon.db/rejected
+                   :seon.error/message "dependency refusal"}
+                  422]
+                 [{:seon.error/kind :seon.db/unknown-failure
+                   :seon.error/message "core failure"}
+                  500]]]
+          (let [response (with-redefs [db/transact! (fn [& _] result)]
+                           (web/inbound service inbound))]
+            (is (= expected-status (:status response)))
+            (is (= (:seon.error/message result) (:body response)))))))))
+
+(deftest start-refuses-a-flat-process-write-before-binding
+  (support/with-database
+    (fn [connection]
+      (let [result
+            (with-redefs [db/q (fn [& _] nil)
+                          db/transact!
+                          (fn [& _]
+                            {:seon.error/kind :seon.db/rejected
+                             :seon.error/message "injected process refusal"})]
+              (support/refusal-data
+               #(web/start! {:seon.store/connection connection
+                             :seon.cluster.run/process process})))]
+        (is (= :seon.db/rejected (:seon.error/kind result)))
+        (is (= "injected process refusal" (:seon.error/message result)))))))
 
 (deftest a-cross-origin-inbound-is-refused-test
   ;; seed 2026072906 — one state-changing branch, one same-origin check.

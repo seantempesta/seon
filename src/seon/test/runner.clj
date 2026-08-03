@@ -3,7 +3,8 @@
   (:refer-clojure :exclude [run!])
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :as test])
+            [clojure.test :as test]
+            [seon.db :as db])
   (:import (java.lang ProcessHandle Runtime Thread)
            (java.lang.management ManagementFactory ThreadInfo)
            (java.time Instant)
@@ -370,9 +371,14 @@
        :seon.boot/cluster-name cluster-name})))
   (let [instance (start-cluster! cluster-name root)]
     (try
-      ((requiring-resolve 'datahike.api/transact)
-       (:seon.boot/cluster-connection instance)
-       (record-tx run-result))
+      (let [result
+            (db/transact!
+             (:seon.boot/cluster-connection instance)
+             (record-tx run-result))]
+        (when (:seon.error/kind result)
+          (throw
+           (ex-info "The test result transaction was refused."
+                    {:seon.test.runner/refusal result}))))
       {:seon.boot/cluster-name cluster-name
        :seon.test.run/id (:seon.test.run/id run-result)
        :seon.test.runner/recorded-count

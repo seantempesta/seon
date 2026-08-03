@@ -86,10 +86,16 @@
     (when-not (vector? before)
       (throw (ex-info "The objective message was refused."
                       {:seon.eval.drive/refusal before})))
-    (d/transact connection
-                {:tx-data [[:db.fn/call #'message/inbound-tx request]]
-                 :tx-meta {:seon.db/process
-                           [:seon.db.process/id process]}})
+    (let [result
+          (db/transact!
+           connection
+           {:tx-data [[:db.fn/call #'message/inbound-tx request]]
+            :tx-meta {:seon.db/process
+                      [:seon.db.process/id process]}})]
+      (when (:seon.error/kind result)
+        (throw
+         (ex-info "The objective message transaction was refused."
+                  {:seon.eval.drive/refusal result}))))
     (or (db/q '[:find ?id .
                :in $ ?agent-id ?content
                :where

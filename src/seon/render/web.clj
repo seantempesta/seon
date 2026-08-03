@@ -50,7 +50,6 @@
             [clojure.string :as str]
             [clojure.test.check.generators :as gen]
             [clojure.walk :as cwalk]
-            [datahike.api :as d]
             [org.httpkit.server :as http]
             [reitit.ring :as ring]
             [seon.blob :as blob]
@@ -942,12 +941,24 @@
          (:seon.config.eval.result/max-string caps)}
         decision (message/inbound-tx @connection request)]
     (if (vector? decision)
-      (do
-        (d/transact
-         connection
-         {:tx-data [[:db.fn/call #'message/inbound-tx request]]
-          :tx-meta (inbound-tx-meta @connection process id)})
-        {:status 204 :headers {} :body nil})
+      (let [result
+            (db/transact!
+             connection
+             {:tx-data [[:db.fn/call #'message/inbound-tx request]]
+              :tx-meta (inbound-tx-meta @connection process id)})]
+        (cond
+          (not (:seon.error/kind result))
+          {:status 204 :headers {} :body nil}
+
+          (= :seon.db/unknown-failure (:seon.error/kind result))
+          {:status 500
+           :headers {"content-type" "text/plain; charset=utf-8"}
+           :body (:seon.error/message result)}
+
+          :else
+          {:status 422
+           :headers {"content-type" "text/plain; charset=utf-8"}
+           :body (:seon.error/message result)}))
       {:status 422
        :headers {"content-type" "text/plain; charset=utf-8"}
        :body (:seon.error/message decision)})))
@@ -1357,7 +1368,12 @@
                   :in $ ?id
                   :where [?process :seon.db.process/id ?id]]
                 @connection process)
-            (d/transact connection [{:seon.db.process/id process}]))
+            (let [result
+                  (db/transact! connection [{:seon.db.process/id process}])]
+              (when (:seon.error/kind result)
+                (throw
+                 (ex-info "The web service process transaction was refused."
+                          result)))))
         workers (Executors/newVirtualThreadPerTaskExecutor)
         wanted (or (:seon.render.web/port service) 0)
         bind! (fn [port]

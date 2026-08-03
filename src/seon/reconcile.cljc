@@ -43,7 +43,6 @@
   a kill leaves it fully applied or absent, and re-apply converges
   either way."
   (:require [clojure.set :as set]
-            [datahike.api :as d]
             [seon.db :as seon.db]
             [seon.schema :as schema]))
 
@@ -420,15 +419,17 @@
     (if (zero? operations)
       {::converged? true
        ::operations 0}
-      (do
-        (d/transact
-         connection
-         {:tx-data [[:db.fn/call #'reconcile-call request]]
-          :tx-meta
-          {:seon.db/process
-           [:seon.db.process/id (::process request)]}})
-        {::converged? false
-         ::operations operations}))))
+      (let [result
+            (seon.db/transact!
+             connection
+             {:tx-data [[:db.fn/call #'reconcile-call request]]
+              :tx-meta
+              {:seon.db/process
+               [:seon.db.process/id (::process request)]}})]
+        (if (:seon.error/kind result)
+          result
+          {::converged? false
+           ::operations operations})))))
 
 (defn reconcile-call
   "The in-writer recomputation — the N2 transition idiom.

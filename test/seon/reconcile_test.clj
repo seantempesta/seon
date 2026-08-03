@@ -7,6 +7,7 @@
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
             [seon.cluster :as cluster]
+            [seon.db :as db]
             [seon.reconcile :as reconcile]
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
@@ -114,6 +115,18 @@
                second-result))
         (is (= after-first after-second)
             "converged means no transaction entity and unchanged :max-tx")))))
+
+(deftest a-flat-write-refusal-is-the-reconcile-result
+  (with-model-database
+    (fn [connection]
+      (let [refusal {:seon.error/kind :seon.db/rejected
+                     :seon.error/message "injected reconcile refusal"}
+            result
+            (with-redefs [db/transact! (fn [& _] refusal)]
+              (reconcile/reconcile!
+               connection
+               (request [(config-row "refused" 10)])))]
+        (is (= refusal result))))))
 
 (deftest reconciliation-uses-current-provenance-without-history
   (with-non-temporal-database
