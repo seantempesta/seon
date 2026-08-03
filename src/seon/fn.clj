@@ -236,6 +236,14 @@
    {}
    (::analyzer/var-usages analysis)))
 
+(defn- capability-symbol
+  [value]
+  (if (and (seq? value)
+           (= 'quote (first value))
+           (nil? (next (next value))))
+    (second value)
+    value))
+
 (defn- var-row [analysis calls-by-caller entry]
   (let [namespace-name (::analyzer/ns entry)
         qualified (symbol (str namespace-name) (str (::analyzer/name entry)))
@@ -245,7 +253,8 @@
                        (::analyzer/namespace-definitions analysis)))
         source (exact-source entry)
         capability-declared? (contains? metadata :seon.effect/capability)
-        capability (:seon.effect/capability metadata)]
+        capability (capability-symbol
+                    (:seon.effect/capability metadata))]
     (when (and capability-declared? (not (qualified-symbol? capability)))
       (throw
        (ex-info

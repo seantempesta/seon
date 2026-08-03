@@ -81,6 +81,27 @@
       (is (nil? (:seon.effect/capability
                  (get by-symbol "sample.capability/blocking-helper")))))))
 
+(deftest quoted-private-handler-symbol-is-indexed-as-the-runtime-symbol
+  (let [root
+        (capability-fixture!
+         (fixture-root)
+         (str "(ns sample.capability\n"
+              "  (:require [seon.effect :as effect]))\n"
+              "(defn- handler\n"
+              "  {:malli/schema [:=> [:cat :map :map] :map]}\n"
+              "  [request effective] (assoc request :effective effective))\n"
+              "(defn leaf\n"
+              "  {:malli/schema [:=> [:cat :map] :map]\n"
+              "   :seon.workload :io\n"
+              "   :seon.effect/capability 'sample.capability/handler}\n"
+              "  [request] (effect/request! #'leaf request))\n"))
+        rows (seon.fn/rows {:seon.fn/roots [(.getPath root)]})
+        leaf (first (filter #(= "sample.capability/leaf"
+                                (:seon.fn/sym %))
+                            rows))]
+    (is (= 'sample.capability/handler
+           (:seon.effect/capability leaf)))))
+
 (deftest capability-indexing-refuses-every-malformed-declaration
   (let [base
         (fn [handler owner]
