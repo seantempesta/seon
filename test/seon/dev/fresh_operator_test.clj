@@ -1334,6 +1334,45 @@
       (finally
         (delete-recursively! root)))))
 
+(deftest ^{:seon.test/long "Carries boot refusal and readiness over the cached phase protocol."}
+  isolated-cached-boot-reports-refusal-then-reaches-readiness
+  (let [root (fresh-root)
+        name "cached-readiness"]
+    (try
+      (let [refused (run-operator root "start" name)]
+        (is (= 1 (::exit refused)) (::output refused))
+        (is (str/includes?
+             (::output refused)
+             "No `current-src` branch is published; run `bin/seon init` first.")
+            (::output refused))
+        (is (not (str/includes? (::output refused) "malformed readiness"))
+            (::output refused))
+        (is (str/includes? (::output refused)
+                           (str "● " name " boot: store"))
+            "phase progress remains visible before the terminal refusal"))
+      (let [initialized (run-operator root "init")
+            started (run-operator root "start" name)]
+        (is (= 0 (::exit initialized)) (::output initialized))
+        (is (= 0 (::exit started)) (::output started))
+        (is (str/includes? (::output started) "#:seon.dev-cache{")
+            "the isolated launch selected the dependency cache")
+        (doseq [phase ["namespaces" "repl" "store" "branch" "recovery"
+                       "config" "program" "work-launcher" "agents" "web"]]
+          (is (str/includes? (::output started)
+                             (str "● " name " boot: " phase))
+              (str "missing readiness phase " phase " from "
+                   (::output started))))
+        (let [advertisement
+              (edn/read-string
+               (slurp (io/file root "data" "clusters" name "prepl.edn")))]
+          (is (= name (:seon.boot/cluster-name advertisement)))
+          (is (string? (:seon.render.web/url advertisement)))))
+      (finally
+        (try
+          (run-operator root "down")
+          (catch Throwable _))
+        (delete-recursively! root)))))
+
 (deftest child-environment-loads-dotenv-beneath-shell-overrides
   (let [root (fresh-root)
         dotenv (io/file root ".env")]

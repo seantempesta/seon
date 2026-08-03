@@ -1480,27 +1480,41 @@
                     writer# (java.io.OutputStreamWriter.
                              (.getOutputStream socket#)
                              java.nio.charset.StandardCharsets/UTF_8)]
-          (let [progress!#
-                (fn [phase#]
-                  (.write writer# (str (clojure.core/name phase#) "\n"))
-                  (.flush writer#))]
-            (progress!# :seon.boot.phase/namespaces)
-            (require 'seon.cluster 'seon.config 'seon.instrument)
-            (let [progress-var#
-                  (ns-resolve 'seon.cluster (symbol "*boot-progress!*"))
-                  ~instance
-                  (with-bindings
-                    {progress-var# progress!#}
-                    ((ns-resolve 'seon.cluster (symbol "start!"))
-                     {:seon.boot/root ~(str (cluster-root root))
-                      :seon.boot/cluster-name ~name
-                      :seon.config/manifest ~manifest}))
-                  applied# ~(instrument-form instance name)]
-              (println "seon" ~name "ready — instrumented"
-                       (:seon.instrument/instrumented applied#) "vars")
-              (flush)
-              (.write writer# "ready\n")
-              (.flush writer#))))
+          (try
+            (let [progress!#
+                  (fn [phase#]
+                    (.write writer# (str (clojure.core/name phase#) "\n"))
+                    (.flush writer#))]
+              (progress!# :seon.boot.phase/namespaces)
+              (require 'seon.cluster 'seon.config 'seon.instrument)
+              (let [progress-var#
+                    (ns-resolve 'seon.cluster (symbol "*boot-progress!*"))
+                    ~instance
+                    (with-bindings
+                      {progress-var# progress!#}
+                      ((ns-resolve 'seon.cluster (symbol "start!"))
+                       {:seon.boot/root ~(str (cluster-root root))
+                        :seon.boot/cluster-name ~name
+                        :seon.config/manifest ~manifest}))
+                    applied# ~(instrument-form instance name)]
+                (println "seon" ~name "ready — instrumented"
+                         (:seon.instrument/instrumented applied#) "vars")
+                (flush)
+                (.write writer# "ready\n")
+                (.flush writer#)))
+            (catch Throwable failure#
+              (.write
+               writer#
+               (str
+                (clojure.core/pr-str
+                 {:seon.fresh-operator/event :failure
+                  :seon.fresh-operator/message
+                  (or (clojure.core/ex-message failure#) (str failure#))
+                  :seon.fresh-operator/error-kind
+                  (:seon.error/kind (clojure.core/ex-data failure#))})
+                "\n"))
+              (.flush writer#)
+              (throw failure#))))
         @(promise)))))
 
 (defn- add-form
@@ -1647,6 +1661,17 @@
       :seon.dev.process/log ""}))
   nil)
 
+(defn- readiness-failure
+  [value]
+  (try
+    (let [event (edn/read-string value)]
+      (when (and (map? event)
+                 (= :failure (:seon.fresh-operator/event event))
+                 (string? (:seon.fresh-operator/message event)))
+        event))
+    (catch Throwable _
+      nil)))
+
 (defn- process-path-label
   [path]
   (case path
@@ -1673,7 +1698,8 @@
                                   (.getInputStream socket)
                                   java.nio.charset.StandardCharsets/UTF_8))]
                (loop []
-                 (let [value (.readLine reader)]
+                 (let [value (.readLine reader)
+                       failure (readiness-failure value)]
                    (cond
                      (nil? value)
                      {:seon.fresh-operator/event :closed}
@@ -1681,6 +1707,9 @@
                      (= "ready" value)
                      {:seon.fresh-operator/event :ready
                       :seon.fresh-operator/value value}
+
+                     failure
+                     failure
 
                      :else
                      (do
@@ -1710,6 +1739,14 @@
       (fail! "The cluster JVM exited before readiness."
              {:seon.fresh-operator/name name
               :seon.boot/pid pid}))
+    (when (= :failure (:seon.fresh-operator/event winner))
+      (fail! (:seon.fresh-operator/message winner)
+             (cond->
+              {:seon.fresh-operator/name name
+               :seon.boot/pid pid}
+               (:seon.fresh-operator/error-kind winner)
+               (assoc :seon.error/kind
+                      (:seon.fresh-operator/error-kind winner)))))
     (when-not (and (= :ready (:seon.fresh-operator/event winner))
                    (= "ready" (:seon.fresh-operator/value winner)))
       (fail! "The cluster JVM sent malformed readiness."
