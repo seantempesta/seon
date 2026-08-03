@@ -239,7 +239,7 @@
 (defn apply-compiled!
   "Exact-reconcile one already-compiled desired config row."
   {:malli/schema
-   [:=> [:cat :any :seon.config/compiled]
+   [:=> [:cat :seon.store/branch-connection :seon.config/compiled]
     :seon.reconcile/result]}
   [connection compiled]
   (reconcile/reconcile!
@@ -268,8 +268,9 @@
   "Read the effective config for one cluster; absent cluster means `default`."
   {:malli/schema
    [:function
-    [:=> [:cat :any] [:or :seon.config/effective [:map {:closed true}]]]
-    [:=> [:cat :any :seon.boot/cluster-name]
+    [:=> [:cat :seon.db/database-value]
+     [:or :seon.config/effective [:map {:closed true}]]]
+    [:=> [:cat :seon.db/database-value :seon.boot/cluster-name]
      [:or :seon.config/effective [:map {:closed true}]]]]}
   ([db]
    (effective db "default"))
