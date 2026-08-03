@@ -236,25 +236,33 @@
   []
   (:seon.config/effective (compile-manifest {})))
 
+(defn apply-compiled!
+  "Exact-reconcile one already-compiled desired config row."
+  {:malli/schema
+   [:=> [:cat :any :seon.config/compiled]
+    :seon.reconcile/result]}
+  [connection compiled]
+  (reconcile/reconcile!
+   connection
+   {::reconcile/desired [(:seon.config/desired-row compiled)]
+    ::reconcile/process managing-process-identity
+    ::reconcile/adopt-identities
+    #{[:seon.config/cluster
+       (:seon.config/cluster (:seon.config/desired-row compiled))]}}))
+
 (defn apply!
   "Compile once and exact-reconcile the one desired config row."
   {:malli/schema
    [:=> [:cat :seon.config/apply-request] :seon.reconcile/result]}
   [request]
-  (let [compiled
-        (compile-manifest
-         (select-keys
-          request
-          [:seon.config/manifest
-           :seon.config/environment
-           :seon.boot/cluster-name]))]
-    (reconcile/reconcile!
-     (:seon.config/connection request)
-     {::reconcile/desired [(:seon.config/desired-row compiled)]
-      ::reconcile/process managing-process-identity
-      ::reconcile/adopt-identities
-      #{[:seon.config/cluster
-         (:seon.config/cluster (:seon.config/desired-row compiled))]}})))
+  (apply-compiled!
+   (:seon.config/connection request)
+   (compile-manifest
+    (select-keys
+     request
+     [:seon.config/manifest
+      :seon.config/environment
+      :seon.boot/cluster-name]))))
 
 (defn effective
   "Read the effective config for one cluster; absent cluster means `default`."
