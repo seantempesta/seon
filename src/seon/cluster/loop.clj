@@ -335,14 +335,14 @@
             nil))))
 
 (defn- capability-free-references?
-  "True when no referenced program-graph function reaches a workload leaf.
+  "True when no referenced program-graph function reaches a capability leaf.
   A called SCI Var absent from the program graph fails closed; SCI's
   independent host-interop observation closes the host-resolution side."
   [db roots unproven-called-vars]
   (let [program-row
         (fn [function-symbol]
           (db/pull db
-                  [:seon.fn/sym :seon.fn/workload
+                  [:seon.fn/sym :seon.effect/capability
                    {:seon.fn/calls [:seon.fn/sym]}]
                   [:seon.fn/sym (str function-symbol)]))]
     (if (some #(nil? (:seon.fn/sym (program-row %)))
@@ -356,7 +356,7 @@
             (let [row (program-row function-symbol)
                   called (map (comp symbol :seon.fn/sym)
                               (:seon.fn/calls row))]
-              (if (:seon.fn/workload row)
+              (if (:seon.effect/capability row)
                 false
                 (recur (concat (next pending) called)
                        (conj visited function-symbol)))))
