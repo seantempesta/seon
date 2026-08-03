@@ -418,6 +418,7 @@
 (def ^:private schema-row-pattern
   [:seon.schema/key
    :seon.schema/form
+   :seon.schema.admission/source
    :seon.db.id/generator])
 
 (defn- incompatible-declaration-message

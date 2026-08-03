@@ -2131,7 +2131,9 @@
         :seon.render/ai seon.render.ns/render-ai
         :seon.render/html seon.render.ns/render-html}
   [:seon.ns/name :seon.ns/name]
-  [:seon.schema.admission/source :seon.schema.admission/source]
+  [:seon.schema.admission/source
+   {:optional true}
+   :seon.schema.admission/source]
   [:seon.ns/source {:optional true} :seon.ns/source]
   [:seon.ns/doc {:optional true} :seon.ns/doc]
   [:seon.ns/requires {:optional true} :seon.ns/requires]
