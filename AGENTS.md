@@ -862,6 +862,24 @@ Cross-agent visibility follows naturally from queries that do not filter by
 agent. Cache measured expensive derivations; do not bifurcate the architecture
 into stored-fast and derived-slow paths.
 
+**Important schemas declare their render producers** (owner-directed
+2026-08-03): a shape that reaches agent context or a page deserves a
+declared `:seon.render/ai` and `:seon.render/html` producer rather than
+the generic value floor. Static prose may be inline (the string form);
+anything computed is a NAMED function in the owning namespace referenced
+by its fully qualified symbol (ruling #50's producer representation —
+never an inline anonymous function). The floor is the honest fallback,
+not the destination for shapes people actually read.
+
+**UGLY OUTPUT IS A DEFECT — standing order** (owner, 2026-08-03): every
+agent and lane that meets an ugly, noisy, cryptic, or unreadable rendered
+result — a REPL face, an error value, a context block, an envelope —
+reports it in its summary or files the issue, naming the shape and where
+it surfaced. Render quality improves through this feedback loop
+continuously, never through periodic cleanup campaigns. The dogfood
+precedent: every MCP envelope fix on 2026-08-03 came from an agent
+reporting its own friction.
+
 Live/streaming-style updates stay on the ONE database path, made cheap by
 construction rather than by a side channel:
 
