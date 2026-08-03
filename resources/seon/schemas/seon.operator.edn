@@ -1,0 +1,29 @@
+#:seon.operator{:advertisements [:vector :seon.boot/advertisement],
+                 :branches :seon.cluster.registry/roster,
+                 :census
+                 [:map
+                  [:seon.operator/advertisements
+                   :seon.operator/advertisements]
+                  [:seon.operator/branches :seon.operator/branches]],
+                 :changed-paths [:vector :string],
+                 :clusters [:vector :seon.operator/observation],
+                 :flow [:or [:enum :unknown] :map],
+                 :health [:enum :observed :unknown],
+                 :observation
+                 [:map
+                  [:seon.boot/cluster-name :seon.boot/cluster-name]
+                  [:seon.operator/health :seon.operator/health]
+                  [:seon.operator/flow :seon.operator/flow]
+                  [:seon.operator/readiness
+                   {:optional true}
+                   :seon.operator/readiness]],
+                 :publish-request
+                 [:map
+                  [:seon.boot/root :seon.boot/root]
+                  [:seon.operator/changed-paths
+                   {:optional true}
+                   :seon.operator/changed-paths]],
+                 :readiness :seon.boot/readiness,
+                 :status
+                 [:map
+                  [:seon.operator/clusters :seon.operator/clusters]]}
