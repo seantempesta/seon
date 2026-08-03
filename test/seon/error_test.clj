@@ -421,6 +421,64 @@
       (is (= 'seon.error/instrumentation-prose (:seon.render/ai notice)))
       (is (not (str/blank? prose))))))
 
+(deftest the-default-renderers-accept-an-attribute-shaped-error
+  (let [value {:my.fs/not-found "/tmp/missing.edn"
+               :my.fs/path "/tmp/missing.edn"
+               :seon.error/message "No file exists at that path."}
+        ai (error/render-ai value)
+        html (error/render-html value)]
+    (testing "the AI face carries the human line, class subject, and evidence"
+      (is (str/includes? ai "No file exists at that path."))
+      (is (str/includes? ai ":my.fs/not-found=\"/tmp/missing.edn\""))
+      (is (str/includes? ai ":my.fs/path=\"/tmp/missing.edn\""))
+      (is (str/includes? ai "Re-read the current facts")))
+    (testing "the HTML face is a readable card rather than the value floor"
+      (is (= :article (first html)))
+      (is (seon.schema/valid-candidate-value? :seon.render/hiccup html))
+      (is (= "No file exists at that path." (get-in html [2 2])))
+      (is (str/includes? (pr-str html) ":my.fs/not-found")))))
+
+(deftest the-default-html-face-links-committed-evidence
+  (let [html (error/render-html
+              {:seon.error/unclassified true
+               :seon.error/id "err-42"
+               :seon.error/message "Nothing recognized this error."})
+        href (get-in html [4 2 1 :href])]
+    (is (str/starts-with? href "/data?"))
+    (is (str/includes? href "%3Aseon.error%2Fid"))))
+
+(deftest specialist-class-renderers-accept-flat-error-values
+  (testing "instrumentation names the failed arm and received value"
+    (let [prose (error/instrumentation-prose
+                 {:seon.instrument/contract-violated true
+                  :seon.instrument/fn "my.fs/read"
+                  :seon.instrument/arm :input
+                  :seon.instrument/expected ":my.fs/read-request"
+                  :seon.instrument/args "[{:my.fs/path 42}]"
+                  :seon.error/message "The call violated its contract."})]
+      (is (str/includes? prose "Contract violation in my.fs/read input"))
+      (is (str/includes? prose "path 42"))))
+  (testing "refusal names the transition, rule, and atomic result"
+    (let [prose (error/refusal-prose
+                 {:seon.cluster.run/refused true
+                  :seon.cluster.run/id "run-7"
+                  :seon.cluster.run/rule :seon.cluster.run/not-holder
+                  :seon.cluster.run/transition :seon.cluster.run/close
+                  :seon.error/message "The run is held elsewhere."})]
+      (is (str/includes? prose "close of run-7"))
+      (is (str/includes? prose "Nothing from this close committed"))))
+  (testing "AI attempt prose exposes the decision attributes"
+    (let [prose (error/ai-prose
+                 {:seon.ai/transport-failure true
+                  :seon.ai/request-transmitted? false
+                  :seon.ai/response-started? false
+                  :seon.ai/output-observed? false
+                  :seon.error/message "The provider connection failed."})]
+      (is (str/includes? prose "request transmitted: false"))
+      (is (str/includes? prose "response started: false"))
+      (is (str/includes? prose "output observed: false"))
+      (is (str/includes? prose "configured failover may be safe")))))
+
 (deftest the-log-line-is-one-line-and-derived
   (let [fact (fact)
         line (rendered (error/notice {:seon.error/fact fact}) :log)]

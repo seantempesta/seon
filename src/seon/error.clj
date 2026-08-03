@@ -143,6 +143,7 @@
             [clojure.string :as str]
             [seon.db :as db]
             [seon.error.refusal :as error.refusal]
+            [seon.render.route :as render.route]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -403,25 +404,37 @@
        ", kind " (:seon.error/kind fact)
        ", signature " (:seon.error/signature fact) "."))
 
-(defn- refusal-prose
-  [fact]
-  (let [source (fact-source fact)
+(defn refusal-prose
+  "`:seon.render/ai` — a refused transition and its atomic outcome."
+  {:malli/schema
+   [:=> [:cat [:or :seon.error/value :seon.error/notice]]
+    [:string {:min 1}]]}
+  [error-value]
+  (let [fact (or (:seon.error/fact error-value) error-value)
+        source (if (:seon.error/data-edn fact)
+                 (fact-source fact)
+                 fact)
         request (:seon.cluster.run/request source)
         transition (:seon.cluster.run/transition source)
-        operation (some-> transition name (str/replace #"-call$" ""))
+        operation (or (some-> transition name) "transition")
         run-id (or (:seon.cluster.run/id request)
+                   (:seon.cluster.run/id source)
                    (second (:seon.error/run fact)))
         rule (:seon.cluster.run/rule source)]
-    (str "The " operation " of " run-id " was refused atomically by " rule
+    (str "The " operation (when run-id (str " of " run-id))
+         " was refused atomically by " rule
          ". Nothing from this " operation " committed. Re-read the run before"
-         " deciding whether a new transition is eligible. "
-         (evidence-prose fact))))
+         " deciding whether a new transition is eligible."
+         (when (:seon.error/id fact)
+           (str " " (evidence-prose fact))))))
 
 (defn instrumentation-prose
   "`:seon.render/ai` — detailed steering for a validation failure."
-  {:malli/schema [:=> [:cat :seon.error/notice] [:string {:min 1}]]}
-  [notice]
-  (let [fact (:seon.error/fact notice)
+  {:malli/schema
+   [:=> [:cat [:or :seon.error/value :seon.error/notice]]
+    [:string {:min 1}]]}
+  [error-value]
+  (let [fact (or (:seon.error/fact error-value) error-value)
         {instrument-fn :seon.instrument/fn
          arm :seon.instrument/arm
          expected :seon.instrument/expected
@@ -431,15 +444,18 @@
                            (first admitted-value)
                            admitted-value)
                          pr-str)]
-    (str "Contract violation in " instrument-fn " " (name arm)
+    (str "Contract violation"
+         (when instrument-fn (str " in " instrument-fn))
+         (when arm (str " " (name arm)))
          ": expected " expected
          (when received (str ", received " received))
          (if (= :input arm)
            ". The call was stopped before the function ran. "
            ". The function returned an invalid value. ")
-         (evidence-prose fact))))
+         (when (:seon.error/id fact)
+           (evidence-prose fact)))))
 
-(defn ai-prose
+(defn- notice-ai-prose
   "`:seon.render/ai` — the steering prose an agent is told, from a notice.
   Answers the four questions in order: WHAT happened, WHY it is being
   told, WHAT that means for its work, and WHERE the evidence is. Every
@@ -464,7 +480,6 @@
   Called by the router, by the explanation message's content at commit
   time (where the string becomes a historical fact), by the `problems`
   block, and by the failover notice. One derivation, four consumers."
-  {:malli/schema [:=> [:cat :seon.error/notice] [:string {:min 1}]]}
   [notice]
   (let [{:seon.error/keys [fact reason]} notice
         {:seon.error/keys [id kind message proc op run process signature]} fact
@@ -525,6 +540,46 @@
                 "the proc survived and no work was re-executed."
                 "nothing was retried.")
               " Signature: " signature ".")])))))
+
+(defn ai-prose
+  "`:seon.render/ai` — AI-attempt evidence or a legacy error notice.
+
+  Class schemas for every `:seon.ai/*` attempt failure declare this producer.
+  The notice arm remains through slice 1 so existing committed facts and the
+  failover context retain their current face until their emission sweep."
+  {:malli/schema
+   [:=> [:cat [:or :seon.error/value :seon.error/notice]]
+    [:string {:min 1}]]}
+  [error-value]
+  (if (:seon.error/fact error-value)
+    (notice-ai-prose error-value)
+    (let [{:seon.ai/keys [request-transmitted? response-started?
+                          output-observed? http-status]} error-value]
+      (str/join
+       " "
+       (remove
+        nil?
+        [(:seon.error/message error-value)
+         (not-empty
+          (str/join
+           ", "
+           (remove nil?
+                   [(when (contains? error-value :seon.ai/request-transmitted?)
+                      (str "request transmitted: " request-transmitted?))
+                    (when (contains? error-value :seon.ai/response-started?)
+                      (str "response started: " response-started?))
+                    (when (contains? error-value :seon.ai/output-observed?)
+                      (str "output observed: " output-observed?))
+                    (when http-status (str "HTTP status: " http-status))])))
+         (cond
+           (false? request-transmitted?)
+           "No request was transmitted; a configured failover may be safe."
+
+           output-observed?
+           "Output may have been observed; do not retry automatically."
+
+           :else
+           "Inspect the attempt evidence before deciding what to do next.")])))))
 
 (defn log-line
   "One structured line for a human reading stderr.
@@ -805,43 +860,96 @@
 ;;; The family default render
 ;;; ---------------------------------------------------------------------------
 
-(defn render-ai
-  "`:seon.render/ai` — one STORED error fact, as steering prose.
+(def ^:private render-context-attributes
+  #{:seon.db/db
+    :seon.sci.eval/ctx
+    :seon.sci.admit/caps
+    :seon.sci.eval/time-limit-ms
+    :seon.config/on-core-error
+    :seon.store/branch-connection
+    :seon.render/distance
+    :seon.render/value})
 
-  Declared on `:seon.error/fact` in `resources/seon/schema.edn`, so an
-  agent that reaches a recorded error by walking its own neighbourhood
-  is told what a notice would have told it — WHAT happened, WHAT it
-  means for its work, WHERE the evidence is. There is no second prose
-  owner: this normalizes the pulled entity back to the shape `notice`
-  expects and hands it to the landed selection, so an instrumentation
-  fact still gets `instrumentation-prose` and everything else still gets
-  `ai-prose`. A second implementation here would be the drift the whole
-  router exists to prevent.
+(defn- rendered-error-value
+  [unit]
+  (let [value (if (map? (:seon.render/value unit))
+                (:seon.render/value unit)
+                unit)]
+    (render.value/transacted value)))
+
+(defn- error-evidence
+  [value]
+  (->> value
+       (remove (fn [[attribute _]]
+                 (or (= :seon.error/message attribute)
+                     (contains? render-context-attributes attribute))))
+       (sort-by (comp str key))))
+
+(defn- default-ai-prose
+  [value]
+  (let [evidence (error-evidence value)]
+    (str/join
+     "\n"
+     (remove
+      nil?
+      [(:seon.error/message value)
+       (when (seq evidence)
+         (str "Evidence: "
+              (str/join ", "
+                        (map (fn [[attribute evidence-value]]
+                               (str attribute "=" (pr-str evidence-value)))
+                             evidence))
+              "."))
+       "Re-read the current facts before retrying or changing state."]))))
+
+(defn- evidence-path
+  [id]
+  (render.route/path :seon.render.route/data
+                     {}
+                     {:entity (pr-str [:seon.error/id id])
+                      :offset "0"}))
+
+(defn render-ai
+  "`:seon.render/ai` — one error value as honest steering prose.
+
+  Every class schema declares this producer unless it earns a specialist.
+  New class values render their required message, then every present evidence
+  attribute, then one conservative next step. A legacy committed fact retains
+  its existing notice prose until slice 2 converts the fact emission path.
 
   `d/pull` wraps refs as `{:db/id N}` and adds `:db/id`, neither of
   which the fact schema admits — `seon.render.value/transacted` is the
-  one place that unwrapping is written.
-
-  Nil for a unit that is not an error fact: presence of the kind is the
-  whole test, and a projection with nothing to say says nothing."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  one place that unwrapping is written."
+  {:malli/schema [:=> [:cat :seon.error/value] [:string {:min 1}]]}
   [unit]
-  (when (and (:seon.error/kind unit) (:seon.error/id unit))
-    (let [fact (dissoc (render.value/transacted unit)
-                       :seon.db/db :seon.sci.admit/caps :seon.render/distance)]
+  (let [value (rendered-error-value unit)]
+    (if (and (:seon.error/kind value) (:seon.error/id value))
       (try
-        (ai-prose (notice {:seon.error/fact fact}))
+        (ai-prose (notice {:seon.error/fact value}))
         (catch Throwable _
           ;; TOTAL, because this runs on the error path: a fact the
           ;; notice builder cannot accept still says what it is, rather
           ;; than faulting the render that was reporting a fault.
-          (str (:seon.error/kind unit) ": " (:seon.error/message unit)))))))
+          (str (:seon.error/kind value) ": " (:seon.error/message value))))
+      (default-ai-prose value))))
 
 (defn render-html
-  "`:seon.render/html` — one error, with the same facts as its AI twin."
-  {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:maybe :seon.render/hiccup]]}
+  "`:seon.render/html` — one readable error card for debug surfaces."
+  {:malli/schema [:=> [:cat :seon.error/value] :seon.render/hiccup]}
   [unit]
-  (when-let [text (render-ai unit)]
-    [:article {:class "seon-family-entry seon-error-entry"}
-     [:p text]]))
+  (let [value (rendered-error-value unit)
+        evidence (error-evidence value)]
+    (into
+     [:article {:class "seon-family-entry seon-error-entry"}
+      [:h3 {:class "seon-error-message"} (:seon.error/message value)]]
+     (concat
+      (when (seq evidence)
+        [(into [:dl {:class "seon-error-evidence"}]
+               (map (fn [[attribute evidence-value]]
+                      [:div {:class "seon-error-evidence-row"}
+                       [:dt (str attribute)]
+                       [:dd (pr-str evidence-value)]]))
+               evidence)])
+      (when-let [id (:seon.error/id value)]
+        [[:p {:class "seon-error-link"}
+          [:a {:href (evidence-path id)} "Inspect durable evidence"]]])))))
