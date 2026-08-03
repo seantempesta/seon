@@ -71,6 +71,16 @@
          (nth [0 195 40 255 128 127 1 254] (mod % 8)))
         (range size))))
 
+(deftest generated-tier-local-binary-values-satisfy-the-registry
+  (let [input-streams (gen/sample blob/input-stream-generator 20)
+        octet-arrays (gen/sample blob/octet-array-generator 20)]
+    (is (every? #(schema/valid-candidate-value?
+                  :seon.blob/input-stream %)
+                input-streams))
+    (is (every? #(schema/valid-candidate-value?
+                  :seon.blob/octet-array %)
+                octet-arrays))))
+
 (deftest binary-content-round-trips-on-both-sides-of-the-inline-threshold
   (with-file-blob-store
     "tmp/blob-binary-boundary-test"

@@ -2,17 +2,16 @@
   "Content-addressed result blobs in Seon's already-open Konserve store."
   (:refer-clojure :exclude [get])
   (:require [clojure.java.io :as io]
+            [clojure.test.check.generators :as gen]
             [konserve.core :as k]
             [seon.db :as db]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn])
-  (:import [java.io File InputStream OutputStream]
+  (:import [java.io ByteArrayInputStream File InputStream OutputStream]
            [java.nio.charset StandardCharsets]
            [java.nio.file Files]
            [java.security DigestOutputStream MessageDigest]
            [java.util Arrays HexFormat]))
-
-(schema.edn/load! {})
 
 (defn- konserve-store
   [connection]
@@ -27,6 +26,15 @@
 (defonce ^:private _input-stream-predicate
   (schema/register-core-predicate!
    'seon.blob/input-stream? input-stream?))
+
+(def input-stream-generator
+  (gen/fmap (fn [octets]
+              (ByteArrayInputStream. ^bytes octets))
+            gen/bytes))
+
+(def octet-array-generator gen/bytes)
+
+(schema.edn/load! {})
 
 (defn- binary-threshold
   [connection]
@@ -147,11 +155,8 @@
   written to one staging file under the process root before publication."
   {:malli/schema
    [:=>
-    [:cat :seon.store/branch-connection [:fn seon.blob/input-stream?]]
-    [:map
-     [:seon.blob/digest :seon.blob/digest]
-     [:seon.blob/size [:int {:min 0}]]
-     [:seon.blob/inline-prefix [:fn seon.schema/byte-array?]]]]}
+    [:cat :seon.store/branch-connection :seon.blob/input-stream]
+    :seon.blob/write-result]}
   [connection ^InputStream input]
   (let [store (konserve-store connection)
         threshold (binary-threshold connection)
@@ -204,8 +209,8 @@
   {:malli/schema
    [:=>
     [:cat :seon.store/branch-connection :seon.blob/digest
-     [:int {:min 0}] [:int {:min 0}]]
-    [:maybe [:fn seon.schema/byte-array?]]]}
+     :seon.blob/offset :seon.blob/length]
+    [:maybe :seon.blob/octet-array]]}
   [connection content-digest offset length]
   (k/bget-range (konserve-store connection)
                 content-digest offset length {:sync? true}))

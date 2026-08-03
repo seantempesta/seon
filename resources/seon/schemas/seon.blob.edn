@@ -1,1 +1,19 @@
-#:seon.blob{:content :string, :digest :seon.cluster.eval/result-blob}
+#:seon.blob{:content :string,
+            :digest :seon.cluster.eval/result-blob,
+            :inline-prefix :seon.blob/octet-array,
+            :input-stream
+            [:fn
+             #:gen{:gen seon.blob/input-stream-generator}
+             seon.blob/input-stream?],
+            :length [:int {:min 0}],
+            :octet-array
+            [:fn
+             #:gen{:gen seon.blob/octet-array-generator}
+             seon.schema/byte-array?],
+            :offset [:int {:min 0}],
+            :size [:int {:min 0}],
+            :write-result
+            [:map
+             [:seon.blob/digest :seon.blob/digest]
+             [:seon.blob/size :seon.blob/size]
+             [:seon.blob/inline-prefix :seon.blob/inline-prefix]]}
