@@ -568,7 +568,9 @@
              :seon.fn/ns [:seon.ns/name 'prebuilt]
              :seon.fn/source "(defn value [] 1)"
              :seon.fn/arglists "([])"
-             :seon.fn/private? false}
+             :seon.fn/private? false
+             :seon.fn/keywords
+             #{:seon.cluster.agent/id :seon.config/agent-overlay}}
             {:seon.test/sym "prebuilt/value-test"
              :seon.test/ns [:seon.ns/name 'prebuilt]
              :seon.test/source "(deftest value-test (value))"
@@ -595,17 +597,26 @@
                     {:seon.store/branch-connection (atom :database)
                      :seon.fn/manifest manifest})]
         (is (pos? (:seon.reconcile/operations result)))
-        (is (= 4 (count @transactions)))
+        (is (= 5 (count @transactions)))
         (is (= 'prebuilt
                (-> @transactions first :tx-data first :seon.ns/name)))
         (is (some #(= "prebuilt/value" (:seon.fn/sym %))
                   (-> @transactions second :tx-data)))
+        (is (nil? (-> @transactions second :tx-data second
+                      :seon.fn/keywords))
+            "a keyword collection never enters an entity-map transaction")
         (is (= [{:seon.test/sym "prebuilt/value-test"
                  :seon.test/subject [:seon.fn/sym "prebuilt/value"]}]
                (-> @transactions (nth 2) :tx-data)))
+        (is (= [[:db/add [:seon.fn/sym "prebuilt/value"]
+                  :seon.fn/keywords :seon.cluster.agent/id]
+                [:db/add [:seon.fn/sym "prebuilt/value"]
+                 :seon.fn/keywords :seon.config/agent-overlay]]
+               (-> @transactions (nth 3) :tx-data))
+            "the lookup-ref-shaped pair is emitted as two keyword facts")
         (is (= [{:seon.test/sym "prebuilt/value-test"
                  :seon.fn/calls [[:seon.fn/sym "prebuilt/value"]]}]
-               (-> @transactions (nth 3) :tx-data)))))
+               (-> @transactions (nth 4) :tx-data)))))
     (let [attempts (atom 0)
           result
           (with-redefs [db/q (fn [& _] nil)

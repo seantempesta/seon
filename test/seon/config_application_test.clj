@@ -53,6 +53,14 @@
    :seon.config.message/max-chain :arm-time
    :seon.config.run/max-episode-runs :live
    :seon.config.web/port :arm-time
+   :seon.config.web/timeout-ms :live
+   :seon.config.web/max-response-bytes :live
+   :seon.config.web/max-inline-bytes :live
+   :seon.config.web/max-redirects :live
+   :seon.config.web/max-search-results :live
+   :seon.config.web/search-endpoint :live
+   :seon.config.web/search-api-key-variable :live
+   :seon.config.web/search-result-projection :live
    :seon.config.render/coalesce-ms :live
    :seon.render.value/max-collection :live
    :seon.print/length :live
@@ -94,6 +102,8 @@
   {:seon.config.db/keep-history? true
    :seon.config.flow.compute/queue-depth 3
    :seon.config.flow.compute/concurrency 1
+   :seon.config.flow.io/queue-depth 5
+   :seon.config.flow.io/concurrency 2
    :seon.config.flow/ping-timeout-ms 11
    :seon.config.eval.result/max-depth 2
    :seon.config.eval.result/max-collection 3
@@ -232,7 +242,9 @@
           (testing "flow structure consumes its applied values"
             (is (= (select-keys applied
                                 [:seon.config.flow.compute/queue-depth
-                                 :seon.config.flow.compute/concurrency])
+                                 :seon.config.flow.compute/concurrency
+                                 :seon.config.flow.io/queue-depth
+                                 :seon.config.flow.io/concurrency])
                    (::flow/configuration launcher))))
           (testing "eval, error, and message structure consumes applied values"
             (is (= (config/result-caps applied)

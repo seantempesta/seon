@@ -263,17 +263,23 @@
 
 ;; A SET, because cardinality-many is a set by construction
 ;; (`reference-code/datahike/src/datahike/index/persistent_set.cljc:133`).
-;; The set NEVER reaches Datahike inside a map: `maybe-wrap-multival` reads any
-;; two-element collection whose first element is a unique-identity keyword as a
-;; lookup ref (`reference-code/datahike/src/datahike/db/transaction.cljc:730-735`),
-;; and a declaration reading exactly `:seon.cluster.agent/id` plus one other
-;; keyword hit that branch and was refused. `keyword-datoms` below is the one
-;; transaction shape; `:seon.fn/calls` escapes the same trap only because its
-;; elements are themselves vectors.
-(defn- keyword-facts
+(defn- keyword-values
   [keywords-by-holder qualified]
   (when-let [used (seq (get keywords-by-holder (str qualified)))]
     (into (sorted-set) used)))
+
+;; Emit one fact per keyword. Datahike reads a two-element collection beginning
+;; with a unique-identity attribute as one lookup ref
+;; (`reference-code/datahike/src/datahike/db/transaction.cljc:717-735`). The
+;; honest two-edge set on `seon.ai/agent-overlay` therefore cannot travel as a
+;; collection-valued entity-map entry: its two analyzer-produced keywords are
+;; two independent cardinality-many facts.
+(defn- keyword-facts
+  [row]
+  (let [program-identity (program/row-identity row)]
+    (mapv (fn [used]
+            [:db/add program-identity :seon.fn/keywords used])
+          (:seon.fn/keywords row))))
 
 (defn- capability-symbol
   [value]
@@ -311,8 +317,8 @@
         (assoc :seon.fn/calls
                (mapv (fn [target] [:seon.fn/sym target])
                      (sort (get calls-by-caller (str qualified)))))
-        (keyword-facts used-keywords qualified)
-        (assoc :seon.fn/keywords (keyword-facts used-keywords qualified)))
+        (keyword-values used-keywords qualified)
+        (assoc :seon.fn/keywords (keyword-values used-keywords qualified)))
 
       (and (seq (::analyzer/arglist-strs entry))
            (not (::analyzer/macro entry)))
@@ -333,8 +339,8 @@
         (assoc :seon.fn/calls
                (mapv (fn [target] [:seon.fn/sym target])
                      (sort (get calls-by-caller (str qualified)))))
-        (keyword-facts used-keywords qualified)
-        (assoc :seon.fn/keywords (keyword-facts used-keywords qualified))
+        (keyword-values used-keywords qualified)
+        (assoc :seon.fn/keywords (keyword-values used-keywords qualified))
         (contains? #{:io :compute} (:seon.workload metadata))
         (assoc :seon.fn/workload (:seon.workload metadata))
         capability-declared?
@@ -975,15 +981,7 @@
           (mapv #(dissoc % :seon.fn/calls :seon.test/subject :seon.fn/keywords)
                 declarations)
           keyword-rows
-          (into []
-                (mapcat (fn [row]
-                          (when (seq (:seon.fn/keywords row))
-                            (let [program-identity (program/row-identity row)]
-                              (map (fn [used]
-                                     [:db/add program-identity
-                                      :seon.fn/keywords used])
-                                   (:seon.fn/keywords row))))))
-                declarations)
+          (into [] (mapcat keyword-facts) declarations)
           subject-rows
           (into []
                 (keep (fn [row]
