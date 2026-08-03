@@ -607,8 +607,7 @@
 (def source-roots
   "The complete file roots whose content identifies `current-src`."
   (into seon.fn/source-roots
-        ["resources/seon/schema.edn"
-         "resources/seon/bootstrap.edn"]))
+        ["resources/seon/bootstrap.edn"]))
 
 (defonce ^:private source-refresh-monitor
   ;; One JVM may receive overlapping editor events. Serialize analysis,
@@ -622,9 +621,29 @@
   ;; roots should not re-run clj-kondo for identical bytes.
   (atom nil))
 
+(defn source-snapshot
+  "Snapshot source plus the merged schema declaration set."
+  {:malli/schema [:=> [:cat] :seon.source/snapshot]}
+  []
+  (let [tree-snapshot
+        (source/snapshot {:seon.source/roots source-roots})
+        schema-digest (schema.edn/declaration-digest)
+        schema-path (.getCanonicalPath (io/file "resources/seon/schemas"))
+        file-digests
+        (assoc (:seon.source/file-digests tree-snapshot)
+               schema-path schema-digest)
+        digest
+        (schema/sha-256
+         [(.getBytes (str "source\u0000"
+                          (:seon.source/digest tree-snapshot) "\n"
+                          "schema\u0000" schema-digest "\n")
+                    StandardCharsets/UTF_8)])]
+    {:seon.source/digest digest
+     :seon.source/file-digests (into (sorted-map) file-digests)}))
+
 (defn- current-source-snapshot
   []
-  (source/snapshot {:seon.source/roots source-roots}))
+  (source-snapshot))
 
 (defn- publish-current-source!
   [store source-digest manifest]

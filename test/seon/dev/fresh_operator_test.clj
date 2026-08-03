@@ -968,7 +968,7 @@
         store-dir (str (io/file root "data" "clusters" "store"))
         name "init-command"
         current-digest
-        (source/digest {:seon.source/roots cluster/source-roots})]
+        (:seon.source/digest (cluster/source-snapshot))]
     (try
       (let [bare (run-operator root "init")]
         (is (::completed? bare) (::output bare))

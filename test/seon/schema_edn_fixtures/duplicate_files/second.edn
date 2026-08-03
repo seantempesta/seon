@@ -1,0 +1,1 @@
+{:seon.schema.edn.fixture/across-files [:string {:min 1}]}

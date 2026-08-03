@@ -788,7 +788,7 @@
         request {:seon.boot/cluster-name cluster-name
                  :seon.boot/root root}
         current-digest
-        (source/digest {:seon.source/roots cluster/source-roots})]
+        (:seon.source/digest (cluster/source-snapshot))]
     (try
       (let [instance (cluster/start! request)
             connection (:seon.boot/cluster-connection instance)]
@@ -833,7 +833,7 @@
   incremental-source-refresh-publishes-without-touching-existing-clusters
   (let [root (published-root)
         current-digest
-        (source/digest {:seon.source/roots cluster/source-roots})
+        (:seon.source/digest (cluster/source-snapshot))
         old-world
         (cluster/start!
          {:seon.boot/cluster-name "old-world"
@@ -963,13 +963,16 @@
                           (assoc published "/repo/src/new.clj" "n1")
                           ["/repo/src/a.clj"])))))
 
-(deftest current-source-digest-names-the-one-schema-resource
-  (is (some #{"resources/seon/schema.edn"} cluster/source-roots)
-      "the ancestor hashes the one schema resource")
+(deftest current-source-digest-names-the-merged-schema-declarations
+  (let [schema-path (.getCanonicalPath (io/file "resources/seon/schemas"))]
+    (is (= (schema.edn/declaration-digest)
+           (get (:seon.source/file-digests (cluster/source-snapshot))
+                schema-path))
+        "the ancestor hashes the merged schema declaration set"))
   (is (some #{"resources/seon/bootstrap.edn"} cluster/source-roots)
       "the ancestor hashes the bootstrap forms installed as source facts")
-  (is (not-any? #{"resources"} cluster/source-roots)
-      "the ancestor never discovers schema through a resource-directory walk"))
+  (is (not-any? #{"resources" "resources/seon/schemas"} cluster/source-roots)
+      "schema directory organization is not part of the ancestor digest"))
 
 (deftest incremental-source-refresh-preserves-agreement-across-real-edits
   (let [root (bare-root)

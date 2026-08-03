@@ -27,8 +27,8 @@
 (deftest production-schema-edn-is-a-resource-not-source
   (let [loaded (schema.edn/load! {})
         file (:seon.schema.edn/file loaded)]
-    (is (str/includes? file "/resources/seon/schema.edn")
-        "production schema EDN is the one named resource")))
+    (is (= "seon/schemas" file)
+        "production schema EDN is the one named resource directory")))
 
 (deftest one-resource-is-one-population
   (let [resource "seon/schema_edn_fixtures/valid.edn"
@@ -40,8 +40,8 @@
                         (swap! calls conj name)
                         (resolve-resource name))]
           (schema.edn/load! {:seon.schema.edn/resource resource}))]
-    (testing "one lookup contributes all three keys"
-      (is (= [resource] @calls))
+    (testing "one resource contributes all three keys"
+      (is (= #{resource} (set @calls)))
       (is (= 3 (:seon.schema.edn/keys loaded))))
     (testing "a cross-section alias is a candidate like any other"
       (is (schema/registered? :seon.schema.edn.fixture/label)))
@@ -62,6 +62,54 @@
         "the refusal names the colliding key")
     (is (str/ends-with? (:seon.schema.edn/file data) "/duplicate.edn")
         "the refusal names the one resource")))
+
+(deftest duplicates-across-files-refuse-with-both-file-names
+  (let [failure
+        (try
+          (schema.edn/load!
+           {:seon.schema.edn/resource
+            "seon/schema_edn_fixtures/duplicate_files"})
+          nil
+          (catch clojure.lang.ExceptionInfo error
+            error))
+        data (ex-data failure)
+        files (::schema.edn/files data)]
+    (is (= :seon.schema.edn.fixture/across-files
+           (::schema.edn/attribute data)))
+    (is (= 2 (count files)))
+    (is (some #(str/ends-with? % "/first.edn") files))
+    (is (some #(str/ends-with? % "/second.edn") files))
+    (is (every? #(str/includes? (ex-message failure) %)
+                files)
+        "the loud collision message names both files")))
+
+(deftest declaration-digest-is-independent-of-resource-order
+  (let [resource-paths-var #'schema.edn/schema-resource-paths
+        resource-paths @resource-paths-var
+        expected (schema.edn/declaration-digest)]
+    (with-redefs-fn
+      {resource-paths-var
+       (fn [resource]
+         (reverse (resource-paths resource)))}
+      #(is (= expected (schema.edn/declaration-digest))
+           "the ancestor digest hashes merged declarations, not file order"))))
+
+(deftest an-empty-resource-directory-refuses-loudly
+  (let [directory (io/file "tmp/schema-edn-test" (str (random-uuid)))
+        enumerate @#'schema.edn/directory-resource-paths]
+    (.mkdirs directory)
+    (try
+      (let [failure
+            (try
+              (enumerate "empty-schema-directory" (.toURL (.toURI directory)))
+              nil
+              (catch clojure.lang.ExceptionInfo error
+                error))]
+        (is (= ::schema.edn/unreadable-file
+               (::schema.edn/error (ex-data failure))))
+        (is (str/includes? (ex-message failure) "contains no EDN files")))
+      (finally
+        (.delete directory)))))
 
 (deftest unreadable-files-refuse-by-name
   (let [data (test-support/refusal-data
