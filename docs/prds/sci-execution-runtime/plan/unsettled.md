@@ -3322,6 +3322,46 @@ queries. The keyword edges land BEFORE the error-conversion wave so the
 wave can verify its own completeness by query (zero functions still
 touching :seon.error/kind).
 
+**ADDENDUM 25 — 2026-08-03 NIGHT, NEW SESSION OPEN: publication green,
+design batch ruled.** The ADDENDUM 24 first actions are done: the
+property-lift correction is verified green (`f08d79e96`; 62 tests /
+1,565 assertions across bridge/error/fixture gates); the silent
+keyword-edges WIP was gated and fixed at `bd4494239` — root cause was
+DATAHIKE MISREADING a sorted two-keyword cardinality-many collection
+beginning with `:seon.cluster.agent/id` as a lookup ref; the fix emits
+one native fact per keyword; fresh isolated `bin/seon init` green
+(2,213 rows with keywords, 14,083 edges, +20.6% store). `my-web`
+landed the owner's no-hobbling deletion (`e99b7c2ea`: blocked-hostnames
++ private-address? + DNS pre-resolution deleted, bounds kept, jsoup in
+deps, through-`effect/request!` receipt proof green). `wave-close` and
+`cache-economics` resumed on the green publication; `operator-stale-vars`
+(operator PRD slice 3) and `render-coverage` (audit) launched. The
+shared root's old JVM has a DEAD Datahike writer (NoClassDefFoundError,
+the known soft-reference eviction class) — wave-close owns the
+down/start + refork.
+
+OWNER RULINGS (this session, design batch): (1) ERROR WAVE APPROVED —
+the §2.3 merge table as recommended AND the `:seon.ai/error-class`
+second-taxonomy conversion in the same wave; the executable wave spec
+is carved at `docs/prds/error-model/README.md` (W1 may start now; W2–W5
+wait for wave-close's frozen checkpoint). (2) MODEL REGISTRY designed
+iteratively with the owner: full descriptor rows TAILORED per model
+(open attribute sets, shared attributes reused), config keeps the
+model STRING resolved by query (missing row = derived problem finding,
+never breakage), truth upkeep is declared/best-effort, and
+LAST-OBSERVATION GAUGES (tokens/s on last use, last latency) are
+`:db/noHistory` attributes on the model row — design at
+`research/model-registry-design-2026-08-03.md`; Muse protocol facts
+fetched from dev.meta.ai (muse-spark-1.1, OpenAI- and
+Anthropic-compatible endpoints at api.meta.ai/v1, $1.25/$4.25/$0.15
+per Mtok, 1M context) pending one cheap streaming/usage probe.
+(3) OPERATIONAL EVENTS PRD approved and carved at
+`docs/prds/operational-events/README.md`: significant events = durable
+facts; last-observation gauges = `:db/noHistory`; text logs keep
+everything and carry the event fact id back-reference. (4) The
+background-work PRD already existed and is owner-approved — no new
+design needed; wave-close owns its proof.
+
 **ADDENDUM 24 — 2026-08-03 NIGHT, SESSION CLOSE. START A FRESH SESSION
 FROM HERE.** Sol credits hit zero; the owner is switching to an account
 with full credits. All lanes stopped at coherent boundaries; every lane
