@@ -3321,3 +3321,43 @@ schema-to-schema reference edges for reuse-similarity and impact
 queries. The keyword edges land BEFORE the error-conversion wave so the
 wave can verify its own completeness by query (zero functions still
 touching :seon.error/kind).
+
+**ADDENDUM 24 — 2026-08-03 NIGHT, SESSION CLOSE. START A FRESH SESSION
+FROM HERE.** Sol credits hit zero; the owner is switching to an account
+with full credits. All lanes stopped at coherent boundaries; every lane
+below resumes BY NAME with full context (`bin/codex-agent resume <name>
+"<correction>"`).
+
+TREE STATE: 17 tracked files carry UNCOMMITTED work from two stopped
+units — do NOT discard them:
+- `error-schemas` (Sol, stopped mid-slice): error-class markers, the
+  `:seon.error/class` -> `:seon.error/throwable-class` rename (owner
+  approved), and the PROPERTY-LIFT DISCRIMINATION correction it was
+  applying when stopped: a Malli property lifts to a stored row
+  attribute exactly when its own declaration exists AND is
+  bridge-storable; non-storable declarations (`:gen/*`) stay
+  compile-time properties. That correction is REQUIRED — the blanket
+  lift broke tree-wide fixture population.
+- the keyword-edges opus agent (completed slice 2 into the tree):
+  `:seon.fn/keywords` indexing plus the config ledger conversion
+  (`test/seon/config_application_test.clj` — the hand-maintained
+  consumer map is GONE, replaced by a graph query; `:mode` stays
+  declared; dead dials now fail the test; family-grain assertion with
+  its tightening issue filed).
+
+FIRST ACTIONS: (1) `bin/codex-agent status` + `git log --oneline -30`;
+(2) resume `error-schemas` with the property-lift correction restated;
+(3) once publication is green, resume `wave-close` — it owns the whole
+cascade: `seon.cluster.armed-test`, background-work's isolated
+await/wake proof, my-edit's fresh-root receipt proof, my-shell's
+commits, the TIMED fast tier, then `bin/test --full`, then refork the
+live `default` so the running system serves the day's work, then verify
+one door eval and one operator verb.
+
+OWNER RULING PENDING IMPLEMENTATION (my.web): DELETE the SSRF-style
+blocking `my-web` shipped — the hand-maintained `blocked-hostnames` set
+and the `private-address?` per-hop refusal in `src/seon/web/jvm.clj`
+both violate the no-hobbling ruling (no evidence of a real problem) and
+break legitimate local fetches, including our own web UI. Keep the
+honest-mistake bounds: size ceilings, redirect depth, timeouts. Resume
+`my-web` with this correction.
