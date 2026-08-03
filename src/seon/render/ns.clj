@@ -199,7 +199,10 @@
 
 (defn- schema-definition-text
   [{::keys [schema-source schema-form]}]
-  (if (some? schema-form) (pr-str schema-form) schema-source))
+  (if (some? schema-form)
+    (binding [*print-namespace-maps* false]
+      (pr-str schema-form))
+    schema-source))
 
 (defn- schema-registration-line
   [schema-key definition]
