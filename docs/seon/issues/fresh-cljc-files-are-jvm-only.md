@@ -87,3 +87,14 @@ reports 0 errors / 32 warnings. Current owned source, tests, conventions,
 architecture, reference docs, and `AGENTS.md` contain no stale path for a
 converted file. `resources/seon/schema.edn:2443` still names
 `seon.schema.cljc`; that file was explicitly protected from this wave.
+
+## Triage 2026-08-03
+
+The production portability change is complete, but the resolution's claim
+that current documentation contains no converted path was too broad. Live
+skills still cite deleted `.cljc` owners, including the data-oriented,
+data-modeling, REPL, context-config, Datastar web UI, and Flow architecture
+skills. Because those citations guide current work and carry repository-wide
+blast radius, repair and independently verify them before archiving this note.
+Historical PRDs and archived research remain archaeology and do not block
+closure.
