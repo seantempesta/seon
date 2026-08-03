@@ -739,6 +739,34 @@ keys are still validated against their declared shapes. The only thing given
 up is that a misspelled OPTIONAL key is ignored as extra data rather than
 refused.
 
+**Ignored today, validated tomorrow.** An extra key is ignored only because
+nothing has declared it yet. The moment `bat` IS declared it is validated like
+any other — so ignoring is provisional, never permission for junk. That is
+what makes growth safe: today's unknown key is tomorrow's contract, and
+nothing had to break in between.
+
+**The other half of the contract, and the one that constrains us: A KEY'S
+DEFINITION AND ITS RELATIONSHIP TO THE OUTPUT NEVER CHANGE** (owner, same
+ruling). Adding is free. Changing is breakage, and the silent kind is the
+worst: a key that keeps its name while its meaning, its shape, or its effect
+on the result drifts will break every caller written against the old meaning
+WITHOUT failing a single validation. So:
+
+- widening what an input ACCEPTS is accretion — it requires no more;
+- narrowing an input, or making an optional key required, is BREAKAGE;
+- promising less in an output, or making an output's shape depend on an
+  existing key differently than it did, is BREAKAGE even when the schema
+  still validates;
+- needing different semantics means a NEW KEY WITH A NEW NAME, never a
+  redefinition of the old one. Globally identified keys are declared once
+  (`resources/seon/schema.edn`), so editing a declaration IS changing every
+  consumer's contract at once — treat such an edit as a design decision, not
+  a correction.
+
+(The accretion/breakage framing is often attributed to Rich Hickey's
+Spec-ulation talk; that attribution is UNVERIFIED here and should not be cited
+as established.)
+
 The hazard this dissolved, as the worked example of why closedness costs more
 than it gives: `matching-shapes-in` (`src/seon/schema.clj`) selects schemas
 that VALIDATE a value, so under closed maps a render unit carrying extra
