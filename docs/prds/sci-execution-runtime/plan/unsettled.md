@@ -55,6 +55,46 @@ value tier refuses the nested closure and cold restore reconstructs it from
 the pure form. This closes 1C/1C-prime; the next Lane 1 boundary is 1D, not
 another resume mechanism.
 
+**ADDENDUM 21 — 2026-08-03 OVERNIGHT SESSION OPEN. THE OWNER-DECISION
+BATCH FOR THE RENDER MODEL IS READY.**
+
+Session state at open: ADDENDUM 20's three actions done. The four
+evening lanes (open-maps, opaque-test-fix, renderer-kernel,
+per-cluster-history) collected and verified — open-maps' zero
+`{:closed true}` claim confirmed by direct count, `bin/seon init`
+green on the quiet tree (commit `6a6ff268`). Full suite re-running in
+the background at session open. Three lanes occupied per ruling #44:
+`suite-speed` (tier 0, mid-flight — it owns the uncommitted
+`src/seon/test/runner.clj` timestamp change), `union-codec` (tier 1A),
+`any-audit` (tier 1B).
+
+TREE NOTE: `src/seon/sci/admit.clj` and `src/seon/sci/eval.clj` carry
+the renderer-kernel lane's DELIBERATE uncommitted prototype
+(`invocation-arm`, `admit-value`) — referenced by
+`research/render-model-2026-08-02.md` as "not landed evidence".
+Preserved as `tmp/renderer-kernel-prototype-2026-08-02.patch`. Tier 2's
+kernel group must take an explicit handoff of those files; no other
+lane touches them.
+
+OWNER-DECISION BATCH (tier 2 stays stopped until ruled):
+`research/render-model-2026-08-02.md` was read whole by the
+orchestrator. It carries EIGHT open decisions (§Open owner decisions,
+each with options and a recommendation): (1) missing-declaration-with-
+candidates behavior; (2) symbol-only producers vs in-process function
+arms; (3) what the floor is; (4) declaration-time validation seam;
+(5) whether `nil` omission stays legal; (6) per-call cache before or
+after the kernel switch; (7) repair-run causality mechanism; (8) what
+a non-owning agent sees. Plus ELEVEN behavior changes needing explicit
+acceptance (§Behavior changes), the sharpest being: output-only
+identity makes all 33 Hiccup producers renderer candidates (helpers
+included); every first-party render pays guarded SCI admission; HTML
+stops exposing internal error cards. Two findings escalate beyond
+render: `error.clj:602` has a production regex (regex law); and
+finding 12 confirms tier 1A's codec gap as the prerequisite for
+decision (2). The orchestrator endorses every §recommended option —
+they are each the simplest constraint consistent with rulings #46-#48
+— but none is implemented ahead of the ruling.
+
 **ADDENDUM 20 — 2026-08-02 SESSION CLOSE. START A FRESH SESSION FROM
 HERE, THEN READ `plan/overnight-2026-08-03.md`.**
 
