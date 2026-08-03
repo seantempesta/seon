@@ -3252,3 +3252,17 @@ owner review, then ONE cut-first wave executes via reviewed per-class
 seon.edit transform templates (structural, never textual); hands touch
 only the 5 dispatch sites and irregular emissions. This dissolves the
 kernel-merge's eval-vs-kernel kind-unification question entirely.
+
+**AMENDMENT to the error-model ruling (owner, same night): ERRORS GET
+RENDERERS.** One DEFAULT error renderer — a declared producer accepting
+any registered error-schema value, emitting BOTH :seon.render/ai (the
+honest agent face) and :seon.render/html (the readable debug card) — so
+no error ever falls to the generic value floor; per-class overrides are
+ordinary declared renderers for that class's schema, discovered by the
+render model's output-declaration query, earned only where a class
+deserves richer display (contract violations showing the offending
+key/value; deadline cuts showing the spin diagnostic). Public
+namespace-page failure handling stays loading/unavailable per ruling
+#50 — the rich faces serve agent context, eval results, MCP envelopes,
+and owner/debug surfaces. The error-catalog research includes a
+default-vs-override column per class.
