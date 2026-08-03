@@ -1309,3 +1309,12 @@ Write every lane/agent prompt in neutral software-engineering language:
 safety filters reject the latter (a verification lane was refused
 launch for exactly this on 2026-08-03), and neutral wording is the
 accurate description anyway: this is defect-finding, not offense.
+
+## Reporting to the owner (owner-directed 2026-08-03)
+
+When naming any document in a report to the owner — research, PRDs,
+issues, plans — always give the FULL repository-relative path as a
+markdown link (e.g. `[title](docs/prds/.../file.md)`), never a bare
+filename or an abbreviated path. The owner reads the details and
+iterates on designs from those links; an unlinkable mention forces a
+search. Lane summaries follow the same rule.
