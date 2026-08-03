@@ -202,6 +202,22 @@ never block. MCP DOOR ISSUE RESOLVED and archived with live proof
 (`a54b8bddb`, orchestrator-verified 304,265 → ~4,332 bytes,
 get_value paging proven).
 
+POST-RESTART PLAN, OWNER-APPROVED (2026-08-03 evening): after the app
+restart (which activates the MCP caller-form echo), the three slots
+fill with (1) BACKGROUND WORK SLICE 1
+(`docs/prds/background-work/README.md`, all prerequisites landed),
+(2) `my.edit` (rewrite-clj form editing per the tools design, with the
+edit-hook quarry convergence — the pure `seon.edit` core is a plain
+library the hook loads without a cluster), and (3) OPERATOR SLICE 1
+(`docs/prds/operator-integration/README.md` — the seon.operator verb
+namespace, with the stale-var problem query right behind it). The
+heavier operator slices and the get_value→read-chunk convergence
+queue behind those. The operator-integration PRD is carved and its
+ruling recorded: ergonomics-not-machinery supersedes the 2026-07-26
+Integrant conditional adoption; clj-reload evaluated and rejected at
+source (`research/clj-reload-evaluation-2026-08-03.md`);
+integrant-repl vendored at 0.5.1.
+
 SCHEMA SPLIT COMPLETE (2026-08-03 afternoon, `2b091b239`): the
 monolith is DELETED; 80 flat namespace-named files under
 `resources/seon/schemas/` with the one merging loader, strict
