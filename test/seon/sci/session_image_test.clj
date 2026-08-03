@@ -3,7 +3,7 @@
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [datahike.api :as d]
+            [seon.db :as db]
             [sci.core :as sci]
             [sci.impl.vars :as sci.vars]
             [seon.config :as config]
@@ -78,7 +78,7 @@
 (defn- commit-evaluation!
   [connection evaluation ordinal]
   (let [stored (#'loop/store-session-values! connection evaluation)]
-    (d/transact
+    (db/transact!
      connection
      {:tx-data (#'loop/session-image-tx @connection stored ordinal)})))
 
@@ -86,7 +86,7 @@
   (with-memory-database
    (fn [connection]
      (let [namespace-name 'my.agents.session-macro
-           _ (d/transact connection
+           _ (db/transact! connection
                          {:tx-data
                           [{:seon.config.eval.result/blob-threshold 32768}
                            {:seon.ns/name namespace-name
@@ -112,7 +112,7 @@
   (with-memory-database
    (fn [connection]
      (let [namespace-name 'my.agents.session-built-ins
-           _ (d/transact connection
+           _ (db/transact! connection
                          {:tx-data
                           [{:seon.config.eval.result/blob-threshold 32768}
                            {:seon.ns/name namespace-name
@@ -151,13 +151,13 @@
          (is (false? (sci.vars/hasRoot replay-print)))
          (is (= "Defining form called a nondeterministic SCI built-in."
                 (:seon.code.def/unrestorable
-                 (d/pull @connection
+                 (db/pull @connection
                          [:seon.code.def/unrestorable]
                          [:seon.code.def/id
                           "my.agents.session-built-ins/replay-symbol"]))))
          (is (= "Defining form called an effectful SCI built-in."
                 (:seon.code.def/unrestorable
-                 (d/pull @connection
+                 (db/pull @connection
                          [:seon.code.def/unrestorable]
                          [:seon.code.def/id
                           "my.agents.session-built-ins/replay-print"]))))
@@ -169,7 +169,7 @@
   (with-memory-database
    (fn [connection]
      (let [namespace-name 'my.agents.failed-session
-           _ (d/transact connection
+           _ (db/transact! connection
                          {:tx-data
                           [{:seon.config.eval.result/blob-threshold 32768}
                            {:seon.ns/name namespace-name
@@ -197,7 +197,7 @@
          (is (false? (sci.vars/hasRoot lost)))
          (is (= "Defining evaluation did not complete successfully."
                 (:seon.code.def/unrestorable
-                 (d/pull @connection
+                 (db/pull @connection
                          [:seon.code.def/unrestorable]
                          [:seon.code.def/id
                           "my.agents.failed-session/lost"])))))))))
@@ -226,7 +226,7 @@
   (with-memory-database
    (fn [connection]
      (let [namespace-name 'my.agents.session-image
-           _ (d/transact connection
+           _ (db/transact! connection
                          {:tx-data [{:seon.config.eval.result/blob-threshold
                                      32768}
                                     {:seon.ns/name namespace-name
@@ -273,25 +273,25 @@
                 (resolved 'my.agents.session-image/effectful-data))
              "a faithful value touched host interop but is bound, never replayed")
          (is (some? (:seon.code.def/blob
-                     (d/pull @connection
+                     (db/pull @connection
                              [:seon.code.def/blob]
                              [:seon.code.def/id
                               "my.agents.session-image/big"])))
              "the 200k value takes the database-configured blob path")
          (is (some? (:seon.code.def/value-edn
-                     (d/pull @connection
+                     (db/pull @connection
                              [:seon.code.def/value-edn]
                              [:seon.code.def/id
                               "my.agents.session-image/tagged"])))
              "metadata-faithful small values bind before forms")
          (is (some? (:seon.code.def/value-edn
-                     (d/pull @connection
+                     (db/pull @connection
                              [:seon.code.def/value-edn]
                              [:seon.code.def/id
                               "my.agents.session-image/effectful-data"]))))
          (is (= {:seon.code.def/source
                  "(def function-map {:scale (fn [v] (* v limit))})"}
-                (d/pull @connection
+                (db/pull @connection
                         [:seon.code.def/source
                          :seon.code.def/value-edn
                          :seon.code.def/blob]
@@ -303,7 +303,7 @@
              "an unrestorable name is pre-interned, never marker-bound")
          (is (= "Defining form touched host interop."
                 (:seon.code.def/unrestorable
-                 (d/pull @connection
+                 (db/pull @connection
                          [:seon.code.def/unrestorable]
                          [:seon.code.def/id
                           "my.agents.session-image/dropped"]))))
@@ -325,7 +325,7 @@
                          (str "(def n" ordinal " " ordinal ")")
                          :seon.code.def/ordinal ordinal}))
                  (range 200))
-           _ (d/transact connection {:tx-data rows})
+           _ (db/transact! connection {:tx-data rows})
            ctx (eval/build-base-ctx)
            _ (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db @connection})
            evaluated (atom [])
@@ -352,7 +352,7 @@
 (deftest equal-large-values-share-the-content-addressed-blob
   (with-memory-database
    (fn [connection]
-     (d/transact connection
+     (db/transact! connection
                  [{:seon.config.eval.result/blob-threshold 16}])
      (let [value (vec (range 1000))
            evaluation

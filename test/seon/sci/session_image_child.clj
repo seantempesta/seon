@@ -1,6 +1,7 @@
 (ns seon.sci.session-image-child
   "Foreign-JVM half of the session-image restart regression."
   (:require [datahike.api :as d]
+            [seon.db :as db]
             [sci.core :as sci]
             [seon.cluster :as cluster]
             [seon.cluster.loop :as loop]
@@ -27,7 +28,7 @@
   (let [connection (d/connect configuration)]
     (try
       (cluster/populate-source! {:seon.store/branch-connection connection})
-      (d/transact connection
+      (db/transact! connection
                   {:tx-data
                    [{:seon.source/digest (apply str (repeat 64 "0"))}
                     {:seon.config.eval.result/blob-threshold 32768}
@@ -41,7 +42,7 @@
         (doseq [[ordinal source] (map-indexed vector sources)]
           (let [evaluated (evaluation ctx source)
                 stored (#'loop/store-session-values! connection evaluated)]
-            (d/transact
+            (db/transact!
              connection
              {:tx-data (#'loop/session-image-tx
                         @connection stored ordinal)}))))

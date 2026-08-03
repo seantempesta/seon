@@ -16,7 +16,6 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [datahike.api :as d]
             [seon.config :as config]
             [seon.cluster.agent :as agent]
             [seon.cluster.work :as work]
@@ -708,7 +707,7 @@
             _ (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db db})
             directory (run-in ctx "(dir my.message)" 2000)
             documentation (run-in ctx "(doc my.message/send)" 2000)
-            row (d/pull db '[:seon.fn/sym :seon.fn/doc
+            row (db/pull db '[:seon.fn/sym :seon.fn/doc
                              :seon.fn/arglists]
                         [:seon.fn/sym "my.message/send"])
             expected-output
@@ -808,11 +807,11 @@
 (deftest an-acquired-function-uses-the-current-evaluation-limit
   (test-support/with-database
     (fn [connection]
-      (d/transact
+      (db/transact!
        connection
        [{:seon.ns/name 'authored.interrupt
          :seon.ns/source "(ns authored.interrupt)"}])
-      (d/transact
+      (db/transact!
        connection
        [{:seon.fn/sym "authored.interrupt/spin"
          :seon.fn/ns [:seon.ns/name 'authored.interrupt]
@@ -837,7 +836,7 @@
 (deftest agent-contracts-apply-on-acquire-and-cold-recovery
   (test-support/with-database
     (fn [connection]
-      (d/transact
+      (db/transact!
        connection
        [(merge {:seon.config/cluster "contract-acquire"
                 :seon.config/on-core-error :panic}
@@ -873,7 +872,7 @@
 (deftest acquisition-uses-the-effective-config-projection-when-instrumented
   (test-support/with-database
     (fn [connection]
-      (d/transact
+      (db/transact!
        connection
        [(merge {:seon.config/cluster "instrumented-acquire"
                 :seon.config/on-core-error :panic
@@ -920,8 +919,8 @@
     (fn [connection-a]
       (test-support/with-database
         (fn [connection-b]
-          (d/transact connection-a [{:seon.cluster/name "ambient-a"}])
-          (d/transact connection-b [{:seon.cluster/name "ambient-b"}])
+          (db/transact! connection-a [{:seon.cluster/name "ambient-a"}])
+          (db/transact! connection-b [{:seon.cluster/name "ambient-b"}])
           (let [uncustodied-ctx (eval/build-base-ctx)
                 _ (eval/acquire! {:seon.sci.eval/ctx uncustodied-ctx
                                   :seon.db/db @connection-a})
@@ -996,7 +995,7 @@
   (test-support/with-database
     (fn [connection]
       (test-support/seed-cluster! connection "host-walk")
-      (d/transact connection
+      (db/transact! connection
                   (agent/creation-tx
                    {:seon.cluster.agent/id "host-walker"
                     :seon.cluster/name "host-walk"

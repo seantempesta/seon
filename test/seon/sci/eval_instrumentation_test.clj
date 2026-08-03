@@ -3,6 +3,7 @@
   (:require [clojure.core.async :as async]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [seon.db :as db]
             [seon.ai :as ai]
             [seon.cluster :as cluster]
             [seon.instrument :as instrument]
@@ -34,7 +35,7 @@
 (defn- completed-turn
   [db message-id]
   (when-let [run-id
-             (d/q '[:find ?run-id .
+             (db/q '[:find ?run-id .
                     :in $ ?message-id
                     :where
                     [?message :seon.cluster.message/id ?message-id]
@@ -43,9 +44,9 @@
                     [?run :seon.cluster.run/closed-at _]]
                   db
                   message-id)]
-    (let [run (d/pull db '[*] [:seon.cluster.run/id run-id])
+    (let [run (db/pull db '[*] [:seon.cluster.run/id run-id])
           receipts
-          (d/q '[:find [(pull ?receipt [*]) ...]
+          (db/q '[:find [(pull ?receipt [*]) ...]
                  :in $ ?run-id
                  :where
                  [?run :seon.cluster.run/id ?run-id]
@@ -91,7 +92,7 @@
                         (await-fact!
                          connection
                          #(completed-turn % message-id)
-                         #(d/transact
+                         #(db/transact!
                            connection
                            [{:seon.cluster.message/id message-id
                              :seon.cluster.message/to
@@ -108,7 +109,7 @@
                           "the terminal transaction released custody"))
                     (testing "the armed path emitted no contract fault"
                       (is (empty?
-                           (d/q '[:find ?error
+                           (db/q '[:find ?error
                                   :where
                                   [?error :seon.error/kind
                                    :seon.instrument/contract-violated]]
