@@ -30,7 +30,7 @@ See `README.md` for the convention.
 | [Prevent one cluster from exhausting every co-hosted cluster's heap](cohosted-clusters-share-one-unbounded-agent-heap.md) | blocker | no-crash architecture design gate |
 | [Make a cold cluster reopen acquire every published first-party binding](cold-cluster-reopen-refuses-bootstrap-help-binding.md) | blocker | render recovery repair wave |
 
-## Friction (67)
+## Friction (68)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -42,6 +42,7 @@ See `README.md` for the convention.
 | [Derive render-walk connections without a function hand list](render-walk-maintains-a-derived-edge-hand-list.md) | friction | render connection-model wave |
 | [Skip unchanged renderer invocations in the package proc](render-package-proc-reruns-unchanged-renderers.md) | friction | render package economics wave |
 | [Give AI context rendering the retained-bytes render path](ai-context-bypasses-render-proc-retained-bytes.md) | friction | render context cache wave |
+| [Make the provider descriptor own its output-token wire key](provider-output-token-wire-key-is-hard-coded.md) | friction | AI provider protocol wave |
 | [Give eval episode backstops one declared owner](eval-drives-duplicate-a-four-minute-run-clock.md) | friction | eval-driver lifecycle wave |
 | [Replace recurring anonymous runtime contracts with named predicates](anonymous-runtime-contracts-have-recurred.md) | friction | contract-gate repair |
 | [Derive operator process identity without command substring lists](operator-classifies-processes-by-command-substrings.md) | friction | operator process-identity wave |
