@@ -254,7 +254,7 @@
          (prop/for-all [overrides overrides-gen]
            (let [config (cluster/resolve-bootstrap overrides)]
              (and
-              ;; complete and valid against the closed schema
+              ;; complete and valid against the declared requirements
               (seon.schema/valid-candidate-value? :seon.boot/config config)
               ;; every supplied override wins verbatim
               (every? (fn [[k v]] (= v (get config k))) overrides)
@@ -271,9 +271,10 @@
         (str "bootstrap resolution failed: " (pr-str check)))))
 
 (deftest bootstrap-refuses-what-it-must
-  (testing "an unknown key is refused, not ignored"
-    (is (thrown? Exception
-                 (cluster/resolve-bootstrap {:seon.boot/store-backend :file}))))
+  (testing "an unused key accretes without changing the resolved config"
+    (is (= :file
+           (:seon.boot/store-backend
+            (cluster/resolve-bootstrap {:seon.boot/store-backend :file})))))
   (testing "an invalid value is refused"
     (is (thrown? Exception
                  (cluster/resolve-bootstrap {:seon.boot/cluster-name ""})))

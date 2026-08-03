@@ -87,7 +87,7 @@
         (is (= {"type" "enabled"} (get body "thinking")))
         (is (= (name effort) (get body "reasoning_effort")))))))
 
-(deftest no-auth-is-an-explicit-exclusive-target-shape
+(deftest no-auth-targets-accrete-unused-authentication-data
   (let [target {:seon.ai/endpoint "http://127.0.0.1:8090/v1/chat/completions"
                 :seon.ai/model "local-model"
                 :seon.ai/max-tokens 8192
@@ -97,10 +97,10 @@
     (is (schema/valid-candidate-value?
          :seon.ai/request
          (assoc target :seon.ai/prompt "hello")))
-    (is (not (schema/valid-candidate-value?
-              :seon.ai/target
-              (assoc target :seon.ai/api-key-variable "DUMMY")))
-        "a descriptor cannot declare both authentication shapes")
+    (is (schema/valid-candidate-value?
+         :seon.ai/target
+         (assoc target :seon.ai/api-key-variable "DUMMY"))
+        "each open union arm ignores data it does not declare")
     (is (not (schema/valid-candidate-value?
               :seon.ai/target
               (dissoc target :seon.config.ai/no-auth)))
