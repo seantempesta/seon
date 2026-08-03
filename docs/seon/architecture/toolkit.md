@@ -156,15 +156,20 @@ Malli-to-Datahike bridge. `seon.eval`, `seon.ns`, and the program graph own code
 lookup and evaluation. `my.kb`, `my.ns`, and `my.plan` compose those contracts;
 they do not bypass them.
 
-`seon.search` owns one full-text contract over declared program facts:
-function symbols and docstrings, schema keys, and test symbols. Its request
-always carries fact-family scope, an optional namespace-prefix scope, a token
-or substring match, and a result limit. Apache Lucene is a per-cluster derived
-index under that cluster's derived-artifact path, tagged with its database
-basis and advanced from the existing transaction listener. Missing, wiped, or
-non-contiguous index state rebuilds from the database value. Lucene objects
-remain process-local; the public function returns only ordinary result data or
-a flat error, and no recovery reads the index as truth.
+`seon.search` owns one full-text contract over fields whose attribute schemas
+declare `:seon.search/index :text` or `:symbol`. Its document roster is the
+query over those property-lifted schema rows; the identity attribute present on
+an entity is its search family. The initial declarations cover function and
+namespace names/docs, schema keys and predicate constraint messages, test
+names, instruction text, message content, and durable fault messages. Source
+bodies, blobs, and rendered output remain deliberately outside the index. A
+request always carries identity-family scope, an optional namespace-prefix
+scope, a token or substring match, and a result limit. Apache Lucene is a
+per-cluster derived index under that cluster's derived-artifact path, tagged
+with its database basis and advanced from the existing transaction listener.
+Missing, wiped, or non-contiguous index state rebuilds from the database value.
+Lucene objects remain process-local; the public function returns only ordinary
+result data or a flat error, and no recovery reads the index as truth.
 
 Every `seon.db/q` and `seon.db/pull` runs with hard synchronous work,
 result-node, and shallow-weight ceilings at the maintained Datahike executor.

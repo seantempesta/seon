@@ -30,7 +30,7 @@ See `README.md` for the convention.
 | [Prevent one cluster from exhausting every co-hosted cluster's heap](cohosted-clusters-share-one-unbounded-agent-heap.md) | blocker | no-crash architecture design gate |
 | [Bound internal contract violations before they retain the schema registry](internal-contract-violation-renders-whole-registry.md) | blocker | contract error-construction wave |
 
-## Friction (76)
+## Friction (78)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -78,6 +78,8 @@ See `README.md` for the convention.
 | [Close the 2026-08-01 unlogged findings (interop policy, agent write surface, rot)](unlogged-findings-2026-08-01.md) | friction | general |
 | [Stop rebuilding the whole schema projection on every contracted `defn`](contracted-defn-rebuilds-the-whole-schema-projection.md) | friction | per-cluster live-graph wave |
 | [Give offline roster discovery a current read-only helper](give-offline-roster-discovery-a-current-read-only-helper.md) | friction | operator artifact follow-up |
+| [Separate declared search metadata from the process index ID](search-index-property-collides-with-process-index-id.md) | friction | cluster search wiring wave |
+| [Teach the live split schema registry in schema skills](schema-skills-teach-deleted-monolithic-resource.md) | friction | skill dependency-ledger repair |
 | [Make the debug left pane the exact bytes the agent received](debug-left-pane-is-not-the-exact-prompt.md) | friction | visual-QA fix wave |
 | [Bind first-party namespaces so value-position reads deref](host-bound-first-party-vars-break-in-value-position.md) | friction | SCI eval-context owner design gate |
 | [Create the store with the write-amplification options it already has](file-store-commits-pay-five-times-the-fsyncs-they-need.md) | friction | store/perf fix lane |

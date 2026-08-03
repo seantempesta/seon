@@ -1,11 +1,12 @@
 (ns seon.search
-  "One per-cluster Lucene index derived from declared program facts.
+  "One per-cluster Lucene index derived from declared database fields.
 
   The database is truth. The index records the database basis it reflects,
   rebuilds whenever that basis cannot be advanced exactly, and exposes only
   ordinary data through `search`. Lucene objects remain process-local here."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [seon.db :as db]
             [seon.schema.edn :as schema.edn])
@@ -13,7 +14,8 @@
            [java.util HashMap]
            [java.util.concurrent.locks ReentrantLock]
            [org.apache.lucene.analysis.standard StandardAnalyzer]
-           [org.apache.lucene.document Document Field$Store StringField TextField]
+           [org.apache.lucene.document Document Field$Store StoredField
+            StringField TextField]
            [org.apache.lucene.index DirectoryReader IndexCommit IndexWriter
             IndexWriterConfig Term]
            [org.apache.lucene.search BooleanClause$Occur BooleanQuery$Builder
@@ -79,63 +81,103 @@
          (take limit)
          vec)))
 
-(defn- namespace-text
+(def ^:private document-specs-query
+  '[:find ?field ?mode
+    :where
+    [?schema :seon.schema/key ?field]
+    [?schema :seon.search/index ?mode]])
+
+(def ^:private identity-attributes-query
+  '[:find [?identity-attribute ...]
+    :where
+    [?schema :seon.schema/key ?identity-attribute]
+    [?schema :seon.db/identity true]])
+
+(defn- document-specs
+  [database]
+  (->> (db/q document-specs-query database)
+       (map (fn [[field mode]]
+              {:seon.search/field field
+               :seon.search/index mode}))
+       (sort-by (juxt (comp str :seon.search/field)
+                      :seon.search/index))
+       vec))
+
+(defn- search-roster
+  [database]
+  {:seon.search/document-specs (document-specs database)
+   :seon.search/identity-attributes
+   (->> (db/q identity-attributes-query database)
+        (sort-by str)
+        vec)})
+
+(defn- identity-namespace
   [identity-value]
-  (or (namespace identity-value) ""))
+  (cond
+    (keyword? identity-value)
+    (namespace identity-value)
+
+    (symbol? identity-value)
+    (or (namespace identity-value) (str identity-value))
+
+    (string? identity-value)
+    (try
+      (namespace (symbol identity-value))
+      (catch Throwable _ nil))
+
+    :else nil))
 
 (defn- document
-  [family eid field identity-value namespace-name text]
-  (let [doc-id (str (name family) "|" eid "|" (name field))
+  [family eid field mode identity-value namespace-name value]
+  (let [text (str value)
+        indexed-text (case mode
+                       :symbol (str/join " " (tokens value))
+                       :text text)
+        ^String namespace-text (str (or namespace-name ""))
+        doc-id (str family "|" eid "|" field)
         result (Document.)]
     (.add result (StringField. "doc-id" doc-id Field$Store/YES))
     (.add result (StringField. "entity-id" (str eid) Field$Store/YES))
-    (.add result (StringField. "family" (name family) Field$Store/YES))
-    (.add result (StringField. "namespace" (str namespace-name) Field$Store/YES))
-    (.add result (StringField. "field" (name field) Field$Store/YES))
-    (.add result (StringField. "identity" (str identity-value) Field$Store/YES))
-    (.add result (TextField. "text" text Field$Store/YES))
+    (.add result (StringField. "family" (str family) Field$Store/YES))
+    (.add result (StringField. "namespace" namespace-text
+                               Field$Store/YES))
+    (.add result (StringField. "field" (str field) Field$Store/YES))
+    (.add result (StoredField. "identity" (pr-str identity-value)))
+    (.add result (StoredField. "text-value" text))
+    (.add result (TextField. "text" indexed-text Field$Store/NO))
     (.add result (StringField. "normalized" (str/join " " (tokens text))
                                Field$Store/NO))
     result))
 
 (defn- entity-documents
-  [database eid]
-  (let [row (db/pull database
-                     '[* {:seon.fn/ns [:seon.ns/name]}
-                         {:seon.test/ns [:seon.ns/name]}]
-                     eid)]
-    (cond
-      (:seon.fn/sym row)
-      (let [identity-value (:seon.fn/sym row)
-            namespace-name (get-in row [:seon.fn/ns :seon.ns/name])]
-        (cond-> [(document :function eid :symbol identity-value namespace-name
-                           identity-value)]
-          (seq (:seon.fn/doc row))
-          (conj (document :function eid :docstring identity-value namespace-name
-                          (:seon.fn/doc row)))))
-
-      (:seon.schema/key row)
-      (let [identity-value (:seon.schema/key row)]
-        [(document :schema eid :key identity-value
-                   (symbol (namespace-text identity-value))
-                   (str identity-value))])
-
-      (:seon.test/sym row)
-      (let [identity-value (:seon.test/sym row)
-            namespace-name (get-in row [:seon.test/ns :seon.ns/name])]
-        [(document :test eid :symbol identity-value namespace-name
-                   identity-value)])
-
-      :else [])))
+  [database roster eid]
+  (let [row (db/pull database '[*] eid)]
+    (into
+     []
+     (mapcat
+      (fn [family]
+        (when-let [identity-value (get row family)]
+          (let [namespace-name (identity-namespace identity-value)]
+            (keep
+             (fn [{field :seon.search/field
+                   mode :seon.search/index}]
+               (when-let [value (get row field)]
+                 (document family eid field mode identity-value
+                           namespace-name value)))
+             (:seon.search/document-specs roster))))))
+     (:seon.search/identity-attributes roster))))
 
 (defn- declared-entity-ids
-  [database]
-  (db/q '[:find [?e ...]
-          :where
-          (or [?e :seon.fn/sym _]
-              [?e :seon.schema/key _]
-              [?e :seon.test/sym _])]
-        database))
+  [database roster]
+  (into
+   #{}
+   (mapcat
+    (fn [{field :seon.search/field}]
+      (db/q '[:find [?e ...]
+              :in $ ?field
+              :where [?e ?field _]]
+            database field)))
+   (:seon.search/document-specs roster)))
 
 (defn- set-basis!
   [owner basis-t]
@@ -148,27 +190,25 @@
 
 (defn- rebuild!
   [owner database]
-  (let [writer ^IndexWriter (:writer owner)]
+  (let [writer ^IndexWriter (:writer owner)
+        roster (search-roster database)]
     (.lock ^ReentrantLock (:lock owner))
     (try
       (.deleteAll writer)
-      (doseq [eid (declared-entity-ids database)
-              doc (entity-documents database eid)]
+      (doseq [eid (declared-entity-ids database roster)
+              doc (entity-documents database roster eid)]
         (.addDocument writer ^Iterable doc))
       (set-basis! owner (:max-tx database))
       (finally
         (.unlock ^ReentrantLock (:lock owner)))))
   owner)
 
-(defn- relevant-datom?
-  [datom]
-  (contains? #{:seon.fn/sym :seon.fn/doc :seon.fn/ns
-               :seon.schema/key :seon.test/sym :seon.test/ns}
-             (nth datom 1)))
-
-(defn- namespace-datom?
-  [datom]
-  (= :seon.ns/name (nth datom 1)))
+(defn- roster-attributes
+  [roster]
+  (into
+   (set (:seon.search/identity-attributes roster))
+   (map :seon.search/field)
+   (:seon.search/document-specs roster)))
 
 (defn apply-report!
   "Advance one derived index by one exact transaction report. A coalesced
@@ -181,21 +221,27 @@
                       {:seon.search/index-id index-id})))
     (let [before (:db-before report)
           after (:db-after report)
-          datoms (:tx-data report)]
+          datoms (:tx-data report)
+          before-roster (search-roster before)
+          after-roster (search-roster after)
+          relevant-attributes (roster-attributes after-roster)]
       (if (or (not= @(:basis owner) (long (:max-tx before)))
-              (some namespace-datom? datoms))
+              (not= before-roster after-roster))
         (rebuild! owner after)
         (do
           (.lock ^ReentrantLock (:lock owner))
           (try
             (let [writer ^IndexWriter (:writer owner)]
               (doseq [eid (into #{}
-                                (comp (filter relevant-datom?) (map first))
+                                (comp
+                                 (filter
+                                  #(contains? relevant-attributes (nth % 1)))
+                                 (map first))
                                 datoms)]
                 (let [^"[Lorg.apache.lucene.index.Term;" terms
                       (into-array Term [(Term. "entity-id" (str eid))])]
                   (.deleteDocuments writer terms))
-                (doseq [doc (entity-documents after eid)]
+                (doseq [doc (entity-documents after after-roster eid)]
                   (.addDocument writer ^Iterable doc)))
               (set-basis! owner (:max-tx after)))
             (finally
@@ -275,7 +321,7 @@
   [families]
   (let [builder (BooleanQuery$Builder.)]
     (doseq [family (sort families)]
-      (.add builder (TermQuery. (Term. "family" (name family)))
+      (.add builder (TermQuery. (Term. "family" (str family)))
             BooleanClause$Occur/SHOULD))
     (.setMinimumNumberShouldMatch builder 1)
     (.build builder)))
@@ -331,18 +377,19 @@
                  (mapv
                   (fn [^ScoreDoc score-doc]
                     (let [stored (.document stored-fields (.-doc score-doc))
-                          family (keyword (.get stored "family"))
-                          identity-value (.get stored "identity")]
-                      {:seon.search/family family
-                       :seon.search/namespace-prefix
-                       (symbol (.get stored "namespace"))
-                       :seon.search/field (keyword (.get stored "field"))
-                       :seon.search/identity
-                       (if (= :schema family)
-                         (keyword (subs identity-value 1))
-                         identity-value)
-                       :seon.search/text (.get stored "text")
-                       :seon.search/score (double (.-score score-doc))}))
+                          family (edn/read-string (.get stored "family"))
+                          namespace-name (.get stored "namespace")]
+                      (cond->
+                       {:seon.search/family family
+                        :seon.search/field
+                        (edn/read-string (.get stored "field"))
+                        :seon.search/identity
+                        (edn/read-string (.get stored "identity"))
+                        :seon.search/text (.get stored "text-value")
+                        :seon.search/score (double (.-score score-doc))}
+                        (seq namespace-name)
+                        (assoc :seon.search/namespace-prefix
+                               (symbol namespace-name)))))
                   (->> (.-scoreDocs hits)
                        (sort-by (juxt (comp - #(double (.-score ^ScoreDoc %)))
                                       #(.-doc ^ScoreDoc %)))
@@ -353,9 +400,11 @@
             (.unlock ^ReentrantLock (:lock owner))))))))
 
 (defn search
-  "Search declared function, schema, and test text through the current
-  cluster's one derived index. Fact family and namespace scoping are query
-  arguments; results are bounded ordinary data and failures are flat values."
+  "Search declared database fields through the current cluster's index.
+
+  The identity attribute is the fact family. Family and optional namespace
+  scoping are query arguments; results are bounded ordinary data and failures
+  are flat values."
   {:malli/schema [:=> [:cat :seon.search/request] :seon.search/response]}
   [request]
   (if-let [owner (some-> (get-in @owners

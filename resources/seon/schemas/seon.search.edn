@@ -1,6 +1,6 @@
-#:seon.search{:family [:enum :function :schema :test],
+#:seon.search{:family :qualified-keyword,
               :path :string,
-              :index :string,
+              :index [:enum :text :symbol],
               :channel :seon.flow/channel,
               :completion :seon.flow/channel,
               :families [:set {:min 1} :seon.search/family],
@@ -9,14 +9,16 @@
               :query [:string {:min 1}],
               :namespace-prefix :symbol,
               :basis-t [:int {:min 0}],
-              :field [:enum :symbol :docstring :key],
-              :identity [:or [:string {:min 1}] :qualified-keyword],
+              :field :qualified-keyword,
+              :identity [:or [:string {:min 1}] :symbol :keyword],
               :text [:string {:min 1}],
               :score :double,
               :result
               [:map
                [:seon.search/family :seon.search/family]
-               [:seon.search/namespace-prefix :seon.search/namespace-prefix]
+               [:seon.search/namespace-prefix
+                {:optional true}
+                :seon.search/namespace-prefix]
                [:seon.search/field :seon.search/field]
                [:seon.search/identity :seon.search/identity]
                [:seon.search/text :seon.search/text]

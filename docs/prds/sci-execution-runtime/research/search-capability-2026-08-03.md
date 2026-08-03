@@ -39,6 +39,117 @@ multi-module build while this owner uses three published modules. Exact Maven
 coordinates plus the exact source tag/commit give the reproducible pin without
 pretending that an unused full checkout is maintained reference code.
 
+## Declared index metadata addendum — 2026-08-03 late night
+
+The owner-approved roster is now schema data. An attribute opts into Lucene by
+declaring exactly one Malli property:
+
+```clojure
+[:string {:seon.search/index :text}]
+[:string {:seon.search/index :symbol}]
+```
+
+`:text` is analyzed prose. `:symbol` first splits identifiers with
+`seon.search/tokens`, so dots, slashes, hyphens, and other natural separators
+become token boundaries before Lucene analysis. The property itself is declared
+as `[:enum :text :symbol]` and therefore lifts as a keyword-valued Datahike
+attribute. Commit `f08d79e96` established the general lift: a storable
+namespaced Malli property is copied directly onto the canonical schema row. A
+declaration carrying the property therefore becomes ordinary queryable data:
+
+```clojure
+{:seon.schema/key :seon.cluster.message/content
+ :seon.search/index :text}
+```
+
+The roster is this query, not a field list in `seon.search`:
+
+```clojure
+[:find ?field ?mode
+ :where
+ [?schema :seon.schema/key ?field]
+ [?schema :seon.search/index ?mode]]
+```
+
+Document family is also derived, not classified. It is the declared identity
+attribute present on the same entity, found through schema rows carrying the
+already-lifted `:seon.db/identity true`. Thus `:error/message` on a predicate
+schema row belongs to the `:seon.schema/key` family, while
+`:seon.error/message` on a durable fault belongs to `:seon.error/id`. No
+keyword-namespace convention or identity-to-family map sits between those
+facts. An open entity carrying more than one identity legitimately produces a
+document under each identity family.
+
+### Initial declaration roster
+
+| Identity-attribute family | Declared fields | Agent question answered |
+|---|---|---|
+| `:seon.fn/sym` | `:seon.fn/sym` (`:symbol`), `:seon.fn/doc` (`:text`) | Which function name or documentation discusses this? |
+| `:seon.ns/name` | `:seon.ns/name` (`:symbol`), `:seon.ns/doc` (`:text`) | Which namespace owns or explains this area? |
+| `:seon.schema/key` | `:seon.schema/key` (`:symbol`), predicate `:error/message` properties (`:text`) | Which declared shape or predicate constraint matches this need? |
+| `:seon.test/sym` | `:seon.test/sym` (`:symbol`) | Which recurring proof names this behavior? |
+| `:seon.cluster.instruction/id` | `:seon.cluster.instruction/text` (`:text`) | Which cluster or agent instruction says this? |
+| `:seon.cluster.message/id` | `:seon.cluster.message/content` (`:text`) | Which recorded message discusses this? |
+| `:seon.error/id` | `:seon.error/message` (`:text`) | Which durable fault reports this problem? |
+
+### Explicit holds
+
+- Work-item goals wait for the work PRD because that domain has not yet settled
+  its declaration or search question.
+- Source bodies stay out. They are bulky retrieval targets, while declared
+  calls, keywords, schemas, namespace ownership, and exact `doc`/`pull` remain
+  the more honest structural discovery path.
+- Blobs stay out. They are payload storage reached by digest, not another
+  textual authority; indexing them would duplicate arbitrary large content and
+  blur the field that asserted its meaning.
+- Rendered output stays out. It is derived, may churn at presentation cadence,
+  and would index a duplicate projection instead of its declaring facts.
+
+### Re-measurement after data-backed declarations
+
+The reproducible script now states its growth case and records the declared
+roster plus indexed value/character counts. The exact command remains:
+
+```bash
+clojure -M:dev:test \
+  -i docs/prds/sci-execution-runtime/research/scripts/search-lucene-measure-2026-08-03.clj \
+  -m search-lucene-measure-2026-08-03
+```
+
+On OpenJDK `26.0.1` and Lucene `10.5.0`, with 1,000 deterministic synthetic
+messages and ten deterministic synthetic instructions added before timing:
+
+- the message field held 1,001 values / 148,920 characters and the instruction
+  field held 11 values / 1,498 characters;
+- three wiped-index rebuilds measured 265.67 ms minimum, 303.83 ms median, and
+  699.18 ms p95/maximum;
+- one message append advanced the exact report in 28.85 ms, and one instruction
+  replacement advanced it in 18.75 ms; and
+- 100 family-scoped message token queries measured 0.19 ms median / 0.32 ms
+  p95, while the retained program query measured 0.53 ms median / 1.07 ms p95.
+
+The immediately preceding same-machine fixed-program baseline was 258.53 ms
+minimum / 285.72 ms median / 629.23 ms maximum for three builds and 25.47 ms
+for one function update. Three rebuild samples are noisy, so the difference is
+not presented as a fitted scaling curve. The honest result is narrower: the
+index now includes cluster data as well as the program graph, and this explicit
+1,010-row growth case kept rebuilds in the same sub-second band. Update timings
+exclude the already-completed database transaction but include Lucene commit
+and reader refresh.
+
+### Tool and render feedback for the addendum
+
+- The measurement's one bounded EDN map made the roster, corpus conditions,
+  and latency distributions readable together; the previous number-only map
+  made it too easy to forget what the index contained.
+- Lucene's vector-provider `INFO` line is harmless but noisy relative to the
+  focused result. The useful operational fact is already captured once as the
+  128-bit preferred vector size.
+- The live door query returned an honest empty roster before republishing and
+  reforking because existing clusters are sovereign. That was useful feedback:
+  a schema-resource edit is not a live database mutation, and the proof must
+  name the fresh published cluster it exercised.
+
 Both existing Datahike/Lucene examples were read end to end before this design:
 
 - Scriptum at

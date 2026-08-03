@@ -625,7 +625,8 @@
 (defonce ^:private _canonical-schema-row-types
   (update-candidate-forms!
    merge
-   {:seon.schema/key [:keyword {:seon.db/identity true}]
+   {:seon.schema/key
+    [:keyword {:seon.db/identity true, :seon.search/index :symbol}]
     :seon.schema/form :string
     :seon.schema.admission/source [:enum :core :agent]}))
 

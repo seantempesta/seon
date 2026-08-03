@@ -1,7 +1,9 @@
 #:seon.ns{:aliases [:set #:seon.db{:component true} :seon.db/ref],
-          :doc :string,
+          :doc [:string #:seon.search{:index :text}],
           :imports [:set #:seon.db{:component true} :seon.db/ref],
-          :name [:symbol #:seon.db{:identity true}],
+          :name
+          [:symbol
+           {:seon.db/identity true, :seon.search/index :symbol}],
           :name-designation [:enum :agent :user],
           :ns
           [:map

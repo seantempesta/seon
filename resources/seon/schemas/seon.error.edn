@@ -72,7 +72,7 @@
                :seon.instrument/args]],
              :id [:string {:min 1, :seon.db/identity true}],
              :kind :keyword,
-             :message [:string {:min 1}],
+             :message [:string {:min 1, :seon.search/index :text}],
              :normalize-request
              [:map
               [:seon.error/source :seon.error/source]

@@ -1,7 +1,9 @@
 #:seon.test{:ns :seon.db/ref,
             :source :string,
             :subject :seon.db/ref,
-            :sym [:string {:min 1, :seon.db/identity true}],
+            :sym
+            [:string
+             {:min 1, :seon.db/identity true, :seon.search/index :symbol}],
             :test
             [:map
              #:seon.db{:entity true}

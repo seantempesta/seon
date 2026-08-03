@@ -4,7 +4,10 @@
                        :caused-by
                        [:and #:seon.db{:index true} :seon.db/ref],
                        :content
-                       [:string {:min 1, :seon.db/no-history? true}],
+                       [:string
+                        {:min 1,
+                         :seon.db/no-history? true,
+                         :seon.search/index :text}],
                        :delivery
                        [:map
                         [:seon.cluster.message/rows [:vector :map]]

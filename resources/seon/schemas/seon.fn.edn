@@ -2,7 +2,7 @@
           :arities [:vector #:seon.db{:component true} :seon.db/ref],
           :ast [:and #:seon.db{:component true} :seon.db/ref],
           :calls [:set :seon.db/ref],
-          :doc :string,
+          :doc [:string #:seon.search{:index :text}],
           :keywords
           [:set
            {:description
@@ -41,7 +41,9 @@
           :roots [:vector [:string {:min 1}]],
           :source [:string {:min 1}],
           :spec :string,
-          :sym [:string {:min 1, :seon.db/identity true}],
+          :sym
+          [:string
+           {:min 1, :seon.db/identity true, :seon.search/index :symbol}],
           :workload [:enum :io :compute],
           :index-phase :keyword,
           :capability-rule :keyword,

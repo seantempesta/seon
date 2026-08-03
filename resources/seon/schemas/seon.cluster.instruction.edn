@@ -13,4 +13,5 @@
                            :seed-rows
                            [:vector
                             :seon.cluster.instruction/instruction],
-                           :text [:string {:min 1}]}
+                           :text
+                           [:string {:min 1, :seon.search/index :text}]}

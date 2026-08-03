@@ -1,1 +1,1 @@
-#:error{:message [:string {:min 1}]}
+#:error{:message [:string {:min 1, :seon.search/index :text}]}

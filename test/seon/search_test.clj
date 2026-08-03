@@ -26,20 +26,45 @@
   (is (= ["seon" "search" "search"]
          (search/tokens 'seon.search/search))))
 
+(deftest document-roster-is-the-declared-search-property-query
+  (test-support/with-database
+   (fn [connection]
+     (is (= #{{:seon.search/field :error/message
+               :seon.search/index :text}
+              {:seon.search/field :seon.cluster.instruction/text
+               :seon.search/index :text}
+              {:seon.search/field :seon.cluster.message/content
+               :seon.search/index :text}
+              {:seon.search/field :seon.error/message
+               :seon.search/index :text}
+              {:seon.search/field :seon.fn/doc
+               :seon.search/index :text}
+              {:seon.search/field :seon.fn/sym
+               :seon.search/index :symbol}
+              {:seon.search/field :seon.ns/doc
+               :seon.search/index :text}
+              {:seon.search/field :seon.ns/name
+               :seon.search/index :symbol}
+              {:seon.search/field :seon.schema/key
+               :seon.search/index :symbol}
+              {:seon.search/field :seon.test/sym
+               :seon.search/index :symbol}}
+            (set (#'search/document-specs @connection)))))))
+
 (deftest search-scopes-by-declared-fact-family-and-namespace-prefix
   (with-index
     (fn [_ _]
       (let [response
             (search/search
              {:seon.search/query "search"
-              :seon.search/families #{:function}
+              :seon.search/families #{:seon.fn/sym}
               :seon.search/namespace-prefix 'seon.search
               :seon.search/match :substring
               :seon.search/limit 20})
             results (:seon.search/results response)]
         (is (seq results))
         (is (<= (count results) 20))
-        (is (every? #(= :function (:seon.search/family %)) results))
+        (is (every? #(= :seon.fn/sym (:seon.search/family %)) results))
         (is (every?
              #(let [namespace-name
                     (str (:seon.search/namespace-prefix %))]
@@ -65,7 +90,7 @@
         (let [response
               (search/search
                {:seon.search/query "uniquelyincrementalneedle"
-                :seon.search/families #{:function}
+                :seon.search/families #{:seon.fn/sym}
                 :seon.search/namespace-prefix 'fixture.search
                 :seon.search/match :token
                 :seon.search/limit 5})]
@@ -75,12 +100,56 @@
                  (mapv :seon.search/identity
                        (:seon.search/results response)))))))))
 
+(deftest message-and-instruction-content-are-searchable-by-family
+  (with-index
+    (fn [connection index]
+      (let [report
+            (db/transact!
+             connection
+             [{:db/id "fixture-search-agent"
+               :seon.cluster.agent/id "fixture-search-agent"}
+              {:seon.cluster.instruction/id :fixture-search-instruction
+               :seon.cluster.instruction/text "crossfamilysearchneedle"}
+              {:seon.cluster.message/id "fixture-search-message"
+               :seon.cluster.message/to "fixture-search-agent"
+               :seon.cluster.message/content "crossfamilysearchneedle"
+               :seon.cluster.message/at (java.util.Date. 0)}])]
+        (search/apply-report! index report)
+        (let [request
+              {:seon.search/query "crossfamilysearchneedle"
+               :seon.search/match :token
+               :seon.search/limit 5}
+              instruction-results
+              (:seon.search/results
+               (search/search
+                (assoc request :seon.search/families
+                       #{:seon.cluster.instruction/id})))
+              message-results
+              (:seon.search/results
+               (search/search
+                (assoc request :seon.search/families
+                       #{:seon.cluster.message/id})))]
+          (is (= [{:seon.search/family :seon.cluster.instruction/id
+                   :seon.search/field :seon.cluster.instruction/text
+                   :seon.search/identity :fixture-search-instruction}]
+                 (mapv #(select-keys % [:seon.search/family
+                                        :seon.search/field
+                                        :seon.search/identity])
+                       instruction-results)))
+          (is (= [{:seon.search/family :seon.cluster.message/id
+                   :seon.search/field :seon.cluster.message/content
+                   :seon.search/identity "fixture-search-message"}]
+                 (mapv #(select-keys % [:seon.search/family
+                                        :seon.search/field
+                                        :seon.search/identity])
+                       message-results))))))))
+
 (deftest search-is-an-ordinary-door-mode-function
   (with-index
     (fn [connection _]
       (let [ctx (eval/cluster-ctx @connection connection)
             request {:seon.search/query "search"
-                     :seon.search/families #{:function}
+                     :seon.search/families #{:seon.fn/sym}
                      :seon.search/namespace-prefix 'seon.search
                      :seon.search/match :token
                      :seon.search/limit 3}
@@ -97,5 +166,5 @@
             result (:seon.sci.admit/value evaluation)]
         (is (nil? (:seon.cluster.eval/error evaluation)))
         (is (seq (:seon.search/results result)))
-        (is (every? #(= :function (:seon.search/family %))
+        (is (every? #(= :seon.fn/sym (:seon.search/family %))
                     (:seon.search/results result)))))))
