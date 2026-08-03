@@ -3266,3 +3266,18 @@ namespace-page failure handling stays loading/unavailable per ruling
 #50 — the rich faces serve agent context, eval results, MCP envelopes,
 and owner/debug surfaces. The error-catalog research includes a
 default-vs-override column per class.
+
+**ERROR-CATALOG RULINGS (owner, 2026-08-03 night):** (1) the schema
+projection emits ARBITRARY namespaced Malli properties as :seon.schema
+row attributes — the one enabling change, serving :seon.error/class,
+generatability, and every future declared property; (2) subjectless
+class markers hold boolean true, never false, never a nested map;
+(3) REFUSALS (owner delegated the shape, orchestrator decided per his
+hint): per-namespace refusal classes, each schema carrying the Malli
+property {:seon.error/refusal true} so "all refusals" is one query,
+all referencing ONE shared registered shape (rule/transition
+attributes) as the value-level check, handler/renderer declared on the
+class schema; (4) :seon.error/message stays REQUIRED on every value.
+Orchestrator-endorsed pending owner veto (recommendations he did not
+individually rule): the §2.3 merge table as recommended, and
+converting the :seon.ai/error-class second taxonomy in the same wave.
