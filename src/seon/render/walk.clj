@@ -69,7 +69,6 @@
             [seon.db :as db]
             [seon.ai.tokens :as tokens]
             [seon.render :as render]
-            [seon.render.transcript :as transcript]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
@@ -356,74 +355,6 @@
             (db/datoms db :eavt eid))
     0))
 
-(defn- transcript-entity-ids
-  "The agent, message, run, attempt, eval, and matched form entities used by a transcript."
-  [db agent-eid]
-  (into #{agent-eid}
-        (map first)
-        (concat
-         (db/q '[:find ?message
-                :in $ ?agent
-                :where [?message :seon.cluster.message/to ?agent]]
-              db agent-eid)
-         (db/q '[:find ?message
-                :in $ ?agent
-                :where [?message :seon.cluster.message/from ?agent]]
-              db agent-eid)
-         (db/q '[:find ?run
-                :in $ ?agent
-                :where [?run :seon.cluster.run/agent ?agent]]
-              db agent-eid)
-         (db/q '[:find ?receipt
-                :in $ ?agent
-                :where
-                [?run :seon.cluster.run/agent ?agent]
-                [?receipt :seon.cluster.eval/run ?run]]
-              db agent-eid)
-         (db/q '[:find ?attempt
-                :in $ ?agent
-                :where
-                [?run :seon.cluster.run/agent ?agent]
-                [?attempt :seon.ai.attempt/run ?run]]
-              db agent-eid)
-         (db/q '[:find ?form
-                :in $ ?agent
-                :where
-                [?run :seon.cluster.run/agent ?agent]
-                [?form :seon.cluster.run.form/run ?run]
-                [?form :seon.cluster.run.form/ordinal ?ordinal]
-                [?receipt :seon.cluster.eval/run ?run]
-                [?receipt :seon.cluster.eval/ordinal ?ordinal]]
-              db agent-eid))))
-
-(defn- transcript-member-eids
-  "Entities whose agent-facing facts are represented by the transcript block.
-
-  Runs remain ordinary walk units: the transcript uses their identity only to
-  find receipts. Messages, receipts, and the matching source forms are the
-  facts the transcript actually projects, so their ordinary units would be a
-  second rendering of the same facts."
-  [db entity-ids]
-  (into #{}
-        (keep (fn [entity]
-                (when (or (:seon.cluster.message/id entity)
-                          (:seon.ai.attempt/id entity)
-                          (:seon.cluster.eval/id entity)
-                          (:seon.cluster.run.form/id entity))
-                  (:db/id entity))))
-        (db/pull-many db
-                     [:db/id
-                      :seon.cluster.message/id
-                      :seon.ai.attempt/id
-                      :seon.cluster.eval/id
-                      :seon.cluster.run.form/id]
-                     entity-ids)))
-
-(defn- transcript-last-changed
-  [db entity-ids]
-  (reduce max 0 (map #(entity-last-changed db %)
-                     entity-ids)))
-
 (defn- assigned-namespace-eid
   [db root-eid]
   (db/q '[:find ?namespace .
@@ -470,6 +401,8 @@
                 (:seon.ns/name entity) (conj (:seon.ns/name entity)))]
     (when (= 1 (count names))
       (first names))))
+
+(declare units)
 
 (defn neighborhood
   "One entity and its neighbours, rendered, as a VALUE.
@@ -535,54 +468,6 @@
                          :seon.render.walk/changed-at 0
                          :seon.error/value failure}
                   attribute (assoc :seon.render.walk/attribute attribute))))
-            (transcript-node [agent-id agent-eid hops]
-              (if (neg? (vswap! remaining dec))
-                (marker [::transcript agent-id]
-                        :seon.cluster.agent/transcript
-                        hops
-                        {:seon.error/kind ::elided
-                         :seon.error/message
-                         "elided transcript at the configured node cap"})
-                (let [transcript-eids (transcript-entity-ids db agent-eid)
-                      unit (cond-> {:seon.db/db db
-                            :seon.cluster.agent/id agent-id
-                            :seon.sci.admit/caps caps
-                            :seon.render.transcript/token-budget
-                            (quot (long (:seon.config.eval.result/max-string
-                                         caps))
-                                  tokens/chars-per-token)}
-                             viewer-namespace
-                             (assoc :seon.render/namespace viewer-namespace)
-                             (:seon.store/branch-connection request)
-                             (assoc :seon.store/branch-connection
-                                    (:seon.store/branch-connection request)))
-                      declaration (if (= kind :seon.render/html)
-                                    `transcript/render-html
-                                    `transcript/render-ai)]
-                  {:seon.render.walk/lookup [::transcript agent-id]
-                   :seon.render.walk/attribute
-                   :seon.cluster.agent/transcript
-                   :seon.render/distance hops
-                   :seon.render.walk/changed-at
-                   (transcript-last-changed db transcript-eids)
-                   :seon.render/projection declaration
-                   :seon.render/output
-                   ((if (= kind :seon.render/html)
-                      transcript/render-html
-                      transcript/render-ai)
-                    unit)
-                   ;; Structural membership lets the one assembly sorter
-                   ;; suppress the ordinary projection of facts this block
-                   ;; already rendered. These nodes intentionally have no
-                   ;; output and therefore cost no context of their own.
-                   :seon.render.walk/neighbours
-                   (mapv (fn [eid]
-                           {:seon.render.walk/lookup eid
-                            :seon.render/distance hops
-                            :seon.render.walk/changed-at
-                            (entity-last-changed db eid)
-                            :seon.render.walk/back-reference? true})
-                         (sort (transcript-member-eids db transcript-eids)))})))
             (child [connection hops]
               (let [{:seon.render.walk/keys [attribute target lookup]
                      failure :seon.error/value} connection]
@@ -729,24 +614,20 @@
                                     "elided connections at the requested distance cap"})])
 
                           :else with-render)))))))]
-      (if root-eid
-        (let [root (node lookup root-eid nil hops)
-              agent-id (db/q '[:find ?id .
-                              :in $ ?agent
-                              :where [?agent :seon.cluster.agent/id ?id]]
-                            db root-eid)]
-          (if (and agent-id (pos? hops))
-            (update root :seon.render.walk/neighbours
-                    (fnil conj [])
-                    (transcript-node agent-id root-eid (dec hops)))
-            root))
-        {:seon.render.walk/lookup lookup
-         :seon.render/distance hops
-         :seon.render.walk/changed-at 0
-         :seon.error/value
-         {:seon.error/kind ::no-such-entity
-          :seon.error/message (str "Nothing in the database answers to "
-                                   (pr-str lookup) ".")}}))))
+      (let [tree
+            (if root-eid
+              (node lookup root-eid nil hops)
+              {:seon.render.walk/lookup lookup
+               :seon.render/distance hops
+               :seon.render.walk/changed-at 0
+               :seon.error/value
+               {:seon.error/kind ::no-such-entity
+                :seon.error/message
+                (str "Nothing in the database answers to "
+                     (pr-str lookup) ".")}})]
+        (if (:seon.render/output request)
+          (units tree)
+          tree)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Assembly — the ai kind
@@ -755,13 +636,11 @@
 (defn units
   "Flatten a rendered neighbourhood into one deterministically ordered vector.
 
-  This is the shared membership and ordering seam for every projection. The
-  node remains present so a consumer can inspect render provenance, while the
-  keys used by page assembly are lifted onto the unit value. The root is the
-  stable head, ordinary branches retain grouped last-changed order, and the
-  synthetic transcript is the stable tail. Repeated logical lookups and
-  back-references contribute no second unit; distinct entities remain distinct
-  even when their projections happen to produce identical bytes."
+  Each result is the direct renderer-call unit: address, path, distance,
+  changed basis, output or error. Consumers never unwrap a recursive node.
+  The root is the stable head and ordinary branches retain grouped
+  last-changed order. Repeated logical lookups and back-references contribute
+  no second unit."
   {:malli/schema
    [:=> [:cat :seon.render.walk/node] :seon.render.walk/units]}
   [node]
@@ -775,19 +654,15 @@
                                     (not (string? output))))
                   here (when present?
                          [(cond->
-                           {:seon.render.walk/node node
-                            :seon.render.walk/lookup
-                            (:seon.render.walk/lookup node)
-                            :seon.render.walk/path path
-                            :seon.render.walk/found-depth depth
-                            :seon.render.walk/changed-at
-                            (:seon.render.walk/changed-at node)}
+                           (assoc (dissoc node :seon.render.walk/neighbours)
+                                  :seon.render.walk/path path
+                                  :seon.render.walk/found-depth depth)
                             branch
                             (assoc :seon.render.walk/branch branch)
-                            failure
-                            (assoc :seon.error/value failure)
-                            (some? output)
-                            (assoc :seon.render/output output))])]
+                            (nil? failure)
+                            (dissoc :seon.error/value)
+                            (nil? output)
+                            (dissoc :seon.render/output))])]
               (into (or here [])
                     (mapcat
                      (fn [[index child]]
@@ -798,48 +673,19 @@
                                         (or branch child-path))))
                      (map-indexed vector
                                   (:seon.render.walk/neighbours node))))))]
-    (letfn [(transcript-node? [node]
-              (let [lookup (:seon.render.walk/lookup node)]
-                (and (vector? lookup)
-                     (= ::transcript (first lookup)))))
-            (transcript-unit? [unit]
-              (let [lookup (get-in unit [:seon.render.walk/node
-                                         :seon.render.walk/lookup])]
-                (and (vector? lookup)
-                     (= ::transcript (first lookup)))))
-            (sort-key [unit]
+    (letfn [(sort-key [unit]
               (let [path (:seon.render.walk/path unit)]
-                [(cond
-                   (empty? path) 0
-                   (transcript-unit? unit) 2
-                   :else 1)
+                [(if (empty? path) 0 1)
                  (:seon.render.walk/changed-at unit)
                  (:seon.render.walk/branch unit)
                  path]))
             (logical-key [unit]
-              (let [node (:seon.render.walk/node unit)]
-                (when-not (= 'seon.render.walk/elision
-                             (:seon.render/projection node))
-                  [:seon.render.walk/lookup
-                   (:seon.render.walk/lookup node)])))]
-      (let [transcript-members
-            (into #{}
-                  (mapcat (fn [transcript]
-                            (map :seon.render.walk/lookup
-                                 (:seon.render.walk/neighbours transcript))))
-                  (filter transcript-node?
-                          (tree-seq
-                           #(seq (:seon.render.walk/neighbours %))
-                           :seon.render.walk/neighbours
-                           node)))]
-        (->> (flatten-units node [] 0 nil)
-             (remove (fn [unit]
-                       (let [unit-node (:seon.render.walk/node unit)]
-                         (or (:seon.render.walk/back-reference? unit-node)
-                             (and (not (transcript-unit? unit))
-                                  (contains?
-                                   transcript-members
-                                   (:seon.render.walk/lookup unit-node)))))))
+              (when-not (= 'seon.render.walk/elision
+                           (:seon.render/projection unit))
+                [:seon.render.walk/lookup
+                 (:seon.render.walk/lookup unit)]))]
+      (->> (flatten-units node [] 0 nil)
+             (remove :seon.render.walk/back-reference?)
              (sort-by sort-key)
              (reduce
               (fn [{seen-values :seen accumulated :units :as state} unit]
@@ -851,7 +697,7 @@
                              logical-value (conj logical-value))
                      :units (conj accumulated unit)})))
               {:seen #{} :units []})
-             :units)))))
+             :units))))
 
 (defn prose
   "A rendered neighbourhood as text. THE `:seon.render/ai` ASSEMBLY.
@@ -894,19 +740,17 @@
                         (subvec path 0 (count requested-branch))))))
           (elision-unit? [unit]
             (= 'seon.render.walk/elision
-               (get-in unit [:seon.render.walk/node
-                             :seon.render/projection])))
+               (:seon.render/projection unit)))
           (unit-lines [unit]
-            (let [node (:seon.render.walk/node unit)
-                  path (:seon.render.walk/path unit)
+            (let [path (:seon.render.walk/path unit)
                   depth (:seon.render.walk/found-depth unit)
-                  failure (:seon.error/value node)
+                  failure (:seon.error/value unit)
                   output (:seon.render/output unit)
                   text (cond
                          failure (:seon.error/message failure)
                          (string? output) output
                          (some? output) (pr-str output))]
-              [(str ";; d" depth " · " (pr-str (provenance node))
+              [(str ";; d" depth " · " (pr-str (provenance unit))
                     (when (= path (:seon.render.walk/branch unit))
                       (str " · :branch " (pr-str path))))
                text]))]

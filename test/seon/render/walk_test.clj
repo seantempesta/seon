@@ -341,43 +341,6 @@
           (walk-agent @connection "caps-agent" base-caps 1))
         (is (= base-caps @observed))))))
 
-(deftest transcript-is-the-single-rendering-of-its-facts
-  (support/with-database
-    (fn [connection]
-      (seed-agents! connection "transcript-dedupe" ["speaker"])
-      (let [message-text "UNIQUE-MESSAGE-CONTENT"
-            form-source "(identity \"UNIQUE-FORM-SOURCE\")"
-            result-edn "\"UNIQUE-EVAL-RESULT\""
-            instant (java.util.Date. 1)]
-        (db/transact!
-         connection
-         [{:seon.cluster.message/id "one-message"
-           :seon.cluster.message/from [:seon.cluster.agent/id "speaker"]
-           :seon.cluster.message/to [:seon.cluster.agent/id "speaker"]
-           :seon.cluster.message/content message-text
-           :seon.cluster.message/at instant}
-          {:seon.cluster.run/id "one-run"
-           :seon.cluster.run/agent [:seon.cluster.agent/id "speaker"]
-           :seon.cluster.run/opened-at instant
-           :seon.cluster.run/forms
-           [{:seon.cluster.run.form/id "one-form"
-             :seon.cluster.run.form/run [:seon.cluster.run/id "one-run"]
-             :seon.cluster.run.form/ordinal 0
-             :seon.cluster.run.form/source form-source}]}
-          {:seon.cluster.eval/id "one-receipt"
-           :seon.cluster.eval/run [:seon.cluster.run/id "one-run"]
-           :seon.cluster.eval/ordinal 0
-           :seon.cluster.eval/at instant
-           :seon.cluster.eval/result-edn result-edn}])
-        (let [text (walk/prose
-                    @connection
-                    (walk-agent @connection "speaker" base-caps 2))]
-          (doseq [sentinel [message-text
-                            "UNIQUE-FORM-SOURCE"
-                            "UNIQUE-EVAL-RESULT"]]
-            (is (= 1 (count (re-seq (re-pattern sentinel) text)))
-                (str sentinel " is rendered once by the transcript"))))))))
-
 (deftest reverse-reads-never-match-equal-non-ref-longs
   (support/with-database
     (fn [connection]
@@ -461,27 +424,26 @@
                     :seon.render/distance 1
                     :seon.render.walk/changed-at 11
                     :seon.render.walk/back-reference? true}
-                   {:seon.render.walk/lookup
-                    [:seon.render.walk/transcript "root"]
+                   {:seon.render.walk/lookup [:example/id "history"]
                     :seon.render/distance 1
                     :seon.render.walk/changed-at 1
-                    :seon.render/projection 'seon.render.transcript/render-ai
-                    :seon.render/output "transcript-tail"}]}
+                    :seon.render/projection 'example/history
+                    :seon.render/output "history"}]}
             flattened (walk/units node)
             text (walk/prose @connection node)]
         (is (= flattened (walk/units node))
             "flattening is pure over the rendered node value")
         (is (= [[]
+                [:seon.render.walk/neighbours 6]
                 [:seon.render.walk/neighbours 0]
                 [:seon.render.walk/neighbours 0
                  :seon.render.walk/neighbours 0]
                 [:seon.render.walk/neighbours 1]
                 [:seon.render.walk/neighbours 2]
-                [:seon.render.walk/neighbours 4]
-                [:seon.render.walk/neighbours 6]]
+                [:seon.render.walk/neighbours 4]]
                (mapv :seon.render.walk/path flattened))
-            "root and transcript are stable rails around ordered branches")
-        (is (= [99 7 7 7 9 10 1]
+            "root leads and ordinary branches sort by their facts")
+        (is (= [99 1 7 7 7 9 10]
                (mapv :seon.render.walk/changed-at flattened))
             "changed-at is lifted onto every unit")
         (is (= 1 (count (re-seq #";; \(seon\.render/walk" text))))
@@ -492,12 +454,12 @@
         (is (= 2 (count (re-seq #"(?m)^branch-b$" text)))
             "distinct facts survive even when their projection bytes match")
         (is (< (.indexOf text "root-output")
+               (.indexOf text "history")
                (.indexOf text "branch-a")
                (.indexOf text "branch-a-child")
                (.indexOf text "branch-b")
-               (.indexOf text "churn")
-               (.indexOf text "transcript-tail"))
-            "own state is first, branches stay grouped, transcript is last")))))
+               (.indexOf text "churn"))
+            "own state is first and ordinary branches stay grouped")))))
 
 (deftest ordinary-requires-refs-and-derived-message-edges-are-walked
   (support/with-database

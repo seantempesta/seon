@@ -425,8 +425,8 @@
         (try
           (let [page (page-at connection)
                 initial (read-complete-paint! stream connection)]
-            (is (= 16 (count page))
-                "the complete cluster fixture includes its bootstrap-plan walk")
+            (is (= 15 (count page))
+                "transcript content is inside the agent owner's ordinary unit")
             (is (contains? page "surface-fleet-oversight")
                 "root's owner-ruled fleet block is part of the same paint")
             (is (str/includes? initial "data-walk-path=\"[]\""))
@@ -788,7 +788,7 @@
               [:db/add [:seon.cluster.run/id run-id]
                :seon.cluster.run/plan-digest
                (apply str (repeat 64 "e"))]])
-            (let [settled (read-until! tab "thinking-attempt")]
+            (let [settled (read-until! tab "seon-attempt-reasoning")]
               (is (str/includes? settled "seon-attempt-reasoning"))
               (is (str/includes? settled "First streaming thought"))
               (is (str/includes? settled "; thinking"))

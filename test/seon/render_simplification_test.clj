@@ -82,9 +82,11 @@
                       :seon.sci.admit/caps caps
                       :seon.sci.eval/time-limit-ms 2000
                       :seon.config/on-core-error :panic
-                      :seon.render/distance 0})]
-         (is (= (str "B:" fixture-b) (:seon.render/output walked)))
-         (is (not-any? #(contains? walked %)
+                      :seon.render/distance 0})
+             root-unit (first walked)]
+         (is (vector? walked))
+         (is (= (str "B:" fixture-b) (:seon.render/output root-unit)))
+         (is (not-any? #(contains? root-unit %)
                        [:seon.render/unit
                         :seon.render/kind
                         :seon.render/projection
@@ -125,11 +127,13 @@
        (is (= (sort expected)
               (:seon.render/candidates (:seon.error/data result))))
        (is (= :seon.render/ambiguous
-              (get-in walked [:seon.error/value :seon.error/kind])))
+              (get-in (first walked)
+                      [:seon.error/value :seon.error/kind])))
        (is (= expected
-              (set (get-in walked [:seon.error/value
-                                   :seon.error/data
-                                   :seon.render/candidates]))))))))
+              (set (get-in (first walked)
+                           [:seon.error/value
+                            :seon.error/data
+                            :seon.render/candidates]))))))))
 
 (deftest renderer-invocation-is-sci-only-and-live-var-backed
   (support/with-database

@@ -229,7 +229,7 @@
 (defn- unit-id
   [agent-id unit]
   (value/node-id
-   (assoc (:seon.render.walk/node unit)
+   (assoc unit
           :seon.cluster.agent/id agent-id
           :seon.render.value/root [:seon.cluster.agent/id agent-id])
    (:seon.render.walk/path unit)))
@@ -248,11 +248,10 @@
                        [:int {:min 0}]]
                   :string]}
   [agent-id unit rank]
-  (let [node (:seon.render.walk/node unit)
-        failure (:seon.error/value node)
+  (let [failure (:seon.error/value unit)
         output (:seon.render/output unit)
         id (unit-id agent-id unit)
-        floor? (:seon.render/would-fall-to-floor? node)
+        floor? (:seon.render/would-fall-to-floor? unit)
         attributes
         (cond-> {:id id
                  :class ["seon-walk-unit" (rank-class rank)]

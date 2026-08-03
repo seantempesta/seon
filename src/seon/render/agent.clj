@@ -47,14 +47,24 @@
 
   Crash walk: pure renders over a database value. A kill loses a prompt
   that re-derives."
-  (:require [seon.db :as db]
+  (:require [clojure.string :as str]
+            [seon.ai.tokens :as tokens]
+            [seon.db :as db]
             [seon.render.block :as block]
             [seon.render.route :as route]
+            [seon.render.transcript :as transcript]
             [seon.render.walk :as walk]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The renders
 ;;; ---------------------------------------------------------------------------
+
+(defn- transcript-unit
+  [unit]
+  (assoc unit :seon.render.transcript/token-budget
+         (quot (long (get-in unit [:seon.sci.admit/caps
+                                   :seon.config.eval.result/max-string]))
+               tokens/chars-per-token)))
 
 (defn agent-ai
   "`:seon.render/ai` — one agent, as its neighbours see it.
@@ -70,10 +80,14 @@
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
   [unit]
   (when-let [id (get unit :seon.cluster.agent/id)]
-    (str "Agent " id
-         (if (get unit :seon.cluster.agent/run)
-           " is running now."
-           " is idle."))))
+    (let [status (str "Agent " id
+                      (if (get unit :seon.cluster.agent/run)
+                        " is running now."
+                        " is idle."))
+          history (when (and (:seon.db/db unit)
+                             (:seon.sci.admit/caps unit))
+                    (transcript/render-ai (transcript-unit unit)))]
+      (str status (when (seq history) (str "\n" history))))))
 
 (defn agent-html
   "`:seon.render/html` — one agent, with the same facts as its AI twin."
@@ -82,7 +96,9 @@
   [unit]
   (when-let [text (agent-ai unit)]
     [:article {:class "seon-family-entry seon-agent-entry"}
-     [:p text]]))
+     [:p (first (str/split-lines text))]
+     (when (and (:seon.db/db unit) (:seon.sci.admit/caps unit))
+       (transcript/render-html (transcript-unit unit)))]))
 
 (defn agent-header-html
   "Agent identity and state, derived from presence at this database value."
