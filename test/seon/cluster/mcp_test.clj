@@ -6,6 +6,7 @@
             [seon.cluster :as cluster]
             [seon.config :as config]
             [seon.operator.runtime :refer [running-instances]]
+            [seon.sci.admit :as admit]
             [seon.test-support :as support]))
 
 (defn- projected
@@ -32,6 +33,30 @@
         "nested collection and string bulk cannot escape the value window")
     (is (true? (:seon.dev.mcp/windowed? result)))
     (is (string? (:seon.blob/digest result)))))
+
+(deftest door-evaluations-project-the-repl-text-face
+  (let [cluster-name "mcp-text-face-test"
+        effective (config/defaults)
+        result-edn (:seon.cluster.eval/result-edn
+                    (admit/admit
+                     {:seon.sci.admit/value (vec (range 50000))
+                      :seon.sci.admit/interrupt-fn (fn [])
+                      :seon.sci.admit/caps (config/result-caps effective)
+                      :seon.config/on-core-error :record}))
+        evaluation {:seon.cluster.eval/result-edn result-edn
+                    :seon.cluster.eval/ns [:seon.ns/name 'user]
+                    :seon.sci.eval/ending-ns 'user
+                    :seon.sci.admit/capped? true
+                    :seon.sci.admit/record {:seon.eval/outcome :ok}}
+        result (projected cluster-name effective evaluation)
+        face (:seon.dev.mcp/value result)]
+    (is (string? (:seon.dev.mcp/text face))
+        "a door evaluation projects the printed REPL face")
+    (is (str/starts-with? (:seon.dev.mcp/text face) "[0 1 2")
+        "the text face reads like a REPL value")
+    (is (not (contains? face :seon.cluster.eval/result-edn))
+        "the node tree never rides the envelope; the text replaces it")
+    (is (< (utf8-size result) 8192))))
 
 (deftest oversized-values-share-one-digest-across-storeless-and-stored-modes
   (let [cluster-name "mcp-value-test"

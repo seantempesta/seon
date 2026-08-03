@@ -43,6 +43,7 @@
             [seon.oversight :as oversight]
             [seon.problems :as problems]
             [seon.render.data :as render.data]
+            [seon.print :as print]
             [seon.render.value :as render.value]
             [seon.sci.admit :as admit]
             [seon.render.web :as web]
@@ -115,6 +116,37 @@
     (config/effective @connection cluster-name)
     bootstrap-effective))
 
+(defn- evaluation-node
+  ; A door evaluation is recognized by its result-edn parsing to a print
+  ; node. The ORIGINAL string is parsed (the admitted projection may have
+  ; truncated it into a marker); anything else falls to the generic window.
+  [value]
+  (when (and (map? value)
+             (string? (:seon.cluster.eval/result-edn value)))
+    (let [node (try (edn/read-string (:seon.cluster.eval/result-edn value))
+                    (catch Exception _ nil))]
+      (when (and (map? node) (:seon.print/face node))
+        node))))
+
+(defn- evaluation-face
+  ; The REPL text face of one door evaluation, rendered by the one printer
+  ; the transcript uses, with the effective config print dials.
+  [value node effective]
+  (let [text (print/emit-text
+              node
+              {:seon.print/length (:seon.print/length effective)
+               :seon.print/level (:seon.print/level effective)})]
+    (cond-> {:seon.dev.mcp/text text
+             :seon.cluster.eval/ns (:seon.cluster.eval/ns value)
+             :seon.sci.eval/ending-ns (:seon.sci.eval/ending-ns value)
+             :seon.sci.admit/capped?
+             (boolean (:seon.sci.admit/capped? value))
+             :seon.sci.admit/record (:seon.sci.admit/record value)}
+      (contains? value :seon.cluster.eval/error)
+      (assoc :seon.cluster.eval/error (:seon.cluster.eval/error value))
+      (contains? value :seon.cluster.eval/output)
+      (assoc :seon.cluster.eval/output (:seon.cluster.eval/output value)))))
+
 (defn- mcp-project
   [cluster-name bootstrap-effective value]
   (let [instance (mcp-instance cluster-name)
@@ -142,7 +174,9 @@
         stored-digest (when (and oversized? connection)
                         (blob/put! connection content))]
     (cond-> {:seon.dev.mcp/value
-             (admit/semantic-value projected-node)
+             (if-let [node (evaluation-node value)]
+               (evaluation-face value node effective)
+               (admit/semantic-value projected-node))
              :seon.sci.admit/capped?
              (:seon.sci.admit/capped? artifact)
              :seon.dev.mcp/windowed? oversized?}
