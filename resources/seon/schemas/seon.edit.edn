@@ -1,0 +1,34 @@
+#:seon.edit{:candidate
+             [:map
+              [:seon.edit/source :string]
+              [:seon.edit/start [:int {:min 0}]]
+              [:seon.edit/end [:int {:min 0}]]
+              [:my.edit/from-line :my.edit/from-line]
+              [:my.edit/to-line :my.edit/to-line]
+              [:my.edit/context :my.edit/context]
+              [:my.edit/context-complete?
+               :my.edit/context-complete?]
+              [:my.edit/replacements
+               {:optional true}
+               :my.edit/replacements]]
+             :request
+             [:or
+              :my.edit/form-request
+              :my.edit/exact-request
+              :my.edit/lines-request]
+             :cause :string
+             :form-count [:int {:min 0}]
+             :candidate-evidence
+             [:map
+              [:my.edit.form/head :my.edit.form/head]
+              [:my.edit.form/name :my.edit.form/name]
+              [:my.edit.form/dispatch-source
+               {:optional true}
+               :my.edit.form/dispatch-source]
+              [:my.edit/from-line :my.edit/from-line]
+              [:my.edit/to-line :my.edit/to-line]]
+             :candidates [:vector :seon.edit/candidate-evidence]
+             :candidates-complete? :boolean
+             :lines [:vector :my.edit/from-line]
+             :lines-complete? :boolean
+             :line-count [:int {:min 1}]}

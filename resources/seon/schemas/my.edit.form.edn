@@ -1,0 +1,10 @@
+#:my.edit.form{:head :symbol
+               :name :symbol
+               :dispatch-source [:string {:min 1}]
+               :selector
+               [:map
+                [:my.edit.form/head :my.edit.form/head]
+                [:my.edit.form/name :my.edit.form/name]
+                [:my.edit.form/dispatch-source
+                 {:optional true}
+                 :my.edit.form/dispatch-source]]}
