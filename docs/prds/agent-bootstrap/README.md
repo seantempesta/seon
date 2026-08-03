@@ -61,9 +61,31 @@ renderer code:
 - The OWNER controls it the same way: root (or the operator) transacts
   the fact on any agent — one mechanism, provenance recorded.
 - Content contract: current derived status row (decision 2's board
-  projection), current work item + one advance tip, pending count.
-  Bounded by the ordinary output caps; ugly readline output is a defect
-  like any other face.
+  projection), current work item + one advance tip, pending count, and
+  the LAST-TURN DURATION line (owner-ruled: shell-prompt convention —
+  "last: 3 forms · 14.2s · 1 slow (my.web/fetch 12.1s)"), derived from
+  the previous run's eval receipts. Per-eval results stay pure (real
+  REPLs print nothing but the value; durations are receipt facts); slow
+  capability results already carry :seon.effect/duration-ms per the
+  background-work ruling. Bounded by the ordinary output caps; ugly
+  readline output is a defect like any other face.
+
+## The narrative rule — the owner's one rule for the form series
+
+Owner-ruled 2026-08-03 night: **the bootstrap must read as one
+logically self-explaining story.** Each form is preceded by input-side
+`;;` thinking that explains HOW the agent knew to run THIS form given
+the PREVIOUS form's actual output — a complete causal chain that
+educates: `(help)` opens (rendering the db-resident system prompt —
+that prose is a named design deliverable of slice 2), then each form
+builds on the last: query for functions → the output names one →
+`(doc …)` it to learn usage → call it → combine results → discover the
+capability surface → on and on. No form appears without the thought
+that motivated it; no thought references output the reader has not
+seen. This is input-side narration (comments before forms — the
+display contract's comments-never-as-output rule is untouched), and it
+doubles as the worked demonstration of the thinking-then-forms style
+agents should imitate.
 
 ## Dependency ledger
 
