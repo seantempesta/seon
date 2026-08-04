@@ -244,9 +244,16 @@
                     output)
                    (print/enrich-elisions profile)
                    (print/fit profile))
-          options (assoc (print-options unit)
-                         :seon.print/length nil
-                         :seon.print/level nil)
+          options (cond-> (assoc (print-options unit)
+                                 :seon.print/length nil
+                                 :seon.print/level nil)
+                    (= :single-line
+                       (:seon.render.profile/composition profile))
+                    (assoc :seon.print/width 0 :seon.print/table? false)
+
+                    (= :tabular
+                       (:seon.render.profile/composition profile))
+                    (assoc :seon.print/table? true))
           emitted (print/emit-both tree options)
           truncated? (boolean
                       (or (:seon.render.value/truncated? admitted)
