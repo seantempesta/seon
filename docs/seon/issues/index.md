@@ -32,7 +32,7 @@ See `README.md` for the convention.
 | [Repair development MCP error locations and status scope](dev-mcp-envelopes-misdirect-errors-and-sprawl-status.md) | blocker | development MCP envelope repair |
 | [Eight `:seon.config.web/*` dials are registered with no shipped default](web-config-dials-ship-without-shipped-defaults.md) | blocker | web config default repair |
 
-## Friction (82)
+## Friction (85)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -79,6 +79,7 @@ See `README.md` for the convention.
 | [Promote the 34 proven REPL-parity divergences as the print path lands](repl-parity-divergences.md) | friction | print-path implementation wave |
 | [Close the 2026-08-01 unlogged findings (interop policy, agent write surface, rot)](unlogged-findings-2026-08-01.md) | friction | general |
 | [Stop rebuilding the whole schema projection on every contracted `defn`](contracted-defn-rebuilds-the-whole-schema-projection.md) | friction | per-cluster live-graph wave |
+| [Stop rebuilding gigabytes of schema state for one declaration](schema-declaration-rebuilds-four-gigabytes-per-form.md) | friction | schema projection performance wave |
 | [Give offline roster discovery a current read-only helper](give-offline-roster-discovery-a-current-read-only-helper.md) | friction | operator artifact follow-up |
 | [Separate declared search metadata from the process index ID](search-index-property-collides-with-process-index-id.md) | friction | cluster search wiring wave |
 | [Teach the live split schema registry in schema skills](schema-skills-teach-deleted-monolithic-resource.md) | friction | skill dependency-ledger repair |
@@ -96,6 +97,8 @@ See `README.md` for the convention.
 | [Adopt flow's read-set control and sanctioned egress](flow-has-no-read-set-control-and-a-hand-rolled-egress.md) | friction | flow-protocol wave |
 | [Connect namespace alias and refer targets with refs](namespace-binding-targets-are-symbols-not-refs.md) | friction | future program-graph binding wave |
 | [Partial hot reload leaves a live JVM running mixed old and new code](partial-hot-reload-produces-mixed-code-with-no-warning.md) | friction | general |
+| [Refuse invalid database read identities instead of returning absence](database-read-admission-treats-invalid-identities-as-absence.md) | friction | database read-admission repair |
+| [Make database request errors name the public operation](database-request-shape-errors-bypass-public-contracts.md) | friction | database diagnostic-output wave |
 | [Publish graph transitions instead of polling them in tests](observable-graph-transitions-are-polled-in-tests.md) | friction | Core |
 | [Acquire Flow test resources inside their cleanup scope](flow-monitor-test-resources-outlive-their-cleanup-scope.md) | friction | test fixture repair wave |
 | [Publish eval arming before testing concurrent interruption](concurrent-eval-test-calibrates-interpreted-work-to-wall-time.md) | friction | SCI eval readiness wave |
@@ -114,7 +117,7 @@ See `README.md` for the convention.
 | [Return walk state and failures without comment notices](render-walk-wrapper-returns-comment-notices.md) | friction | strict REPL display wave |
 | [Render effect notices as ordinary values](effect-context-suffix-returns-comment-notices.md) | friction | strict REPL display wave |
 | [Render run forms and receipts with strict REPL fidelity](run-renderer-narrates-forms-and-receipts.md) | friction | strict REPL display wave |
-| [Keep expected Datahike rejections from logging full writer exceptions](datahike-expected-rejections-log-full-writer-exceptions.md) | friction | database diagnostic-output wave |
+| [Keep expected Datahike errors from logging beside returned values](datahike-expected-rejections-log-full-writer-exceptions.md) | friction | database diagnostic-output wave |
 | [Keep nested map sequences structurally readable](nested-map-sequences-render-as-tables-inside-structural-values.md) | friction | print-path follow-up |
 | [Effect receipts have no render producers](effect-receipts-have-no-render-producers.md) | friction | render receipt-producer wave |
 | [Cluster, config, and bootstrap plan render as raw maps](cluster-config-and-bootstrap-plan-render-as-raw-maps.md) | friction | render important-schema producer wave |

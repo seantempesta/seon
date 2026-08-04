@@ -5,14 +5,15 @@ severity: friction
 tags: [issue, database, diagnostics]
 ---
 
-# Keep expected Datahike rejections from logging full writer exceptions
+# Keep expected Datahike errors from logging beside returned values
 
 ## Problem
 
-An expected transaction refusal is returned to the caller as a useful flat
-error value, but Datahike still logs its complete writer exception and stack.
-This makes focused test and operator output noisy and exposes the same raw
-datom tuples and entity IDs the agent-facing value now humanizes.
+An expected database mistake is returned to the caller as a useful flat error
+value, but Datahike also logs the dependency failure before that value returns.
+Writer refusals emit a complete exception and stack; read mistakes emit a raw
+dependency line. This makes tests, operator output, and the agent's own REPL
+noisy and exposes the same internals the agent-facing value should humanize.
 
 ## Evidence
 
@@ -21,14 +22,32 @@ On 2026-08-04, `bin/test seon.db-test` exercised the intentional
 transaction error and the full `:datahike/write-error` exception trace through
 `datahike.writer/create-thread` before `seon.db` received the refusal.
 
+The data-session dogfood pass found the read-side sibling in scratch cluster
+`codex-repl-dogfood-0804`, through MCP `eval_clj` in `door` mode:
+
+```clojure
+(seon.db/pull '[:seon.test.run/idd]
+              [:seon.test.run/id "dogfood-run-001"])
+```
+
+Before returning the flat `:seon.db/invalid-read` value, the REPL emitted:
+
+```text
+2026-08-04T22:16:00.640939Z :error datahike.db.utils [189 11] Bad entity attribute :seon.test.run/idd at (resolve-datom db 14194 :seon.test.run/idd nil nil), not defined in current schema
+```
+
+The returned value then repeated the same `resolve-datom` implementation face.
+This is an expected caller typo, not a core fault, and it should occupy one
+agent-visible face rather than stdout plus a value.
+
 ## Owner
 
-The Datahike writer logging boundary and Seon's database invocation policy own
-the distinction between expected transaction refusals and unexpected writer
+Datahike's database diagnostic boundaries and Seon's database invocation policy
+own the distinction between expected caller mistakes and unexpected database
 faults.
 
 ## Acceptance
 
-An expected Datahike refusal remains a flat, structured `:seon.error` value
-without printing a complete writer stack, while unexpected writer faults stay
-loud and retain their diagnostic trace.
+An expected Datahike refusal or invalid read remains one flat, structured
+`:seon.error` value without printing a second log line or writer stack, while
+unexpected database faults stay loud and retain their diagnostic trace.

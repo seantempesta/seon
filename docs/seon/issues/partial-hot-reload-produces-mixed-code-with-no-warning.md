@@ -64,3 +64,23 @@ what is on disk.
 - [[a-test-fixture-deleted-tracked-files-through-symlinks]] — the same
   evening, the same theme: a mechanism that is correct in isolation behaving
   surprisingly in a live, shared, long-running environment.
+
+## Data-session dogfood, 2026-08-04
+
+`bin/seon start codex-repl-dogfood-0804` created a new sovereign branch but
+added it to the existing JVM at PID 3885. `runtime_status` immediately reported
+15 `:seon.problems/stale-vars`.
+
+Current source at commit `89fe1a287` makes an absent configuration row return
+one bounded `:seon.config/missing-effective` error. The new cluster's real door
+still exercised the old Var:
+
+```clojure
+(seon.config/effective (seon.db/db) "dogfood-missing-cluster")
+;; => {}
+```
+
+The naked empty map is exactly the old misleading face: it neither says the
+cluster is absent nor lists the available cluster names. This proves the
+staleness surface can hide a newly landed agent-facing diagnostic even when
+the operator just reported a successful new-cluster boot.
