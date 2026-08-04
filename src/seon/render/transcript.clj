@@ -52,7 +52,8 @@
    :seon.problems/id
    :seon.error/kind
    {:seon.cluster.eval/ns [:db/id :seon.ns/name]}
-   {:seon.cluster.eval/run [:db/id :seon.cluster.run/id]}])
+   {:seon.cluster.eval/run
+    [:db/id :seon.cluster.run/id :seon.cluster.run/opened-at]}])
 
 (def ^:private form-selector
   [:db/id
@@ -327,6 +328,8 @@
      ::ordinal ordinal
      ::run-id (get-in receipt [:seon.cluster.eval/run
                                :seon.cluster.run/id])
+     ::run-opened-at (get-in receipt [:seon.cluster.eval/run
+                                      :seon.cluster.run/opened-at])
      ::source (get sources receipt-eid)
      ::namespace (get-in receipt [:seon.cluster.eval/ns :seon.ns/name])
      ::result (:seon.cluster.eval/result-edn receipt)
@@ -347,8 +350,11 @@
    ::id (:seon.cluster.run.form/id form)
    ::at (get-in form [:seon.cluster.run.form/run
                       :seon.cluster.run/opened-at])
+   ::ordinal (:seon.cluster.run.form/ordinal form)
    ::run-id (get-in form [:seon.cluster.run.form/run
                           :seon.cluster.run/id])
+   ::run-opened-at (get-in form [:seon.cluster.run.form/run
+                                 :seon.cluster.run/opened-at])
    ::source (:seon.cluster.run.form/source form)
    ::namespace
    (or (get-in form [:seon.cluster.run.form/ns :seon.ns/name])
@@ -360,9 +366,18 @@
 
 (defn- entry-order
   [entry]
-  [(.getTime ^java.util.Date (::at entry))
-   (case (::kind entry) :message 0 :attempt 1 :input 2 :eval 3)
-   (::id entry)])
+  (let [at (.getTime ^java.util.Date (::at entry))]
+    (case (::kind entry)
+      :message [at 0 nil nil (::id entry)]
+      :attempt [at 1 nil nil (::id entry)]
+      :input [at 2
+              (.getTime ^java.util.Date (::run-opened-at entry))
+              (::ordinal entry)
+              (::id entry)]
+      :eval [at 3
+             (.getTime ^java.util.Date (::run-opened-at entry))
+             (::ordinal entry)
+             (::id entry)])))
 
 (defn- history
   [db agent-id limit]
@@ -484,7 +499,9 @@
   {::kind (::kind entry)
    ::id (::id entry)
    ::at (::at entry)
+   ::ordinal (::ordinal entry)
    ::run-id (::run-id entry)
+   ::run-opened-at (::run-opened-at entry)
    ::detail detail
    ::text (case (::kind entry)
             :message (message-text unit entry detail)

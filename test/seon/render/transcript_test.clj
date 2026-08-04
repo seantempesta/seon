@@ -275,7 +275,7 @@
                :seon.cluster.eval/run
                [:seon.cluster.run/id bootstrap-run-id]
                :seon.cluster.eval/ordinal ordinal
-               :seon.cluster.eval/at (at ordinal)
+               :seon.cluster.eval/at (at 0)
                :seon.cluster.eval/result-edn (pr-str ordinal)}]))
          (range 13))
         messages
@@ -304,7 +304,7 @@
            cat
            [bootstrap-receipts messages]))))
 
-(deftest bootstrap-prefix-and-newest-tail-survive-middle-elision
+(deftest same-instant-bootstrap-prefix-and-newest-tail-preserve-plan-order
   (support/with-database
     (fn [connection]
       (seed-pinned-bootstrap-history! connection)
@@ -319,11 +319,16 @@
             pinned-ids (mapv #(pr-str [bootstrap-run-id %]) (range 13))
             newest-ids (mapv #(str "newest-" %) (range 6))
             visible-ids (mapv :id html-rows)
+            ai-positions
+            (mapv #(.indexOf ai (str "user=> (identity " % ")\n" %))
+                  (range 13))
             pinned-end (.indexOf ai "user=> (identity 12)\n12")
             marker-start (.indexOf ai "middle transcript entries elided")
             newest-start (.indexOf ai "newest history 0")]
         (is (pos? (html-elided html-value)))
         (is (= pinned-ids (subvec visible-ids 0 13)))
+        (is (every? #(<= 0 %) ai-positions))
+        (is (apply < ai-positions))
         (is (every? #(= :full (:detail %)) (take 13 html-rows)))
         (is (= newest-ids (subvec visible-ids (- (count visible-ids) 6))))
         (is (< pinned-end marker-start newest-start))
