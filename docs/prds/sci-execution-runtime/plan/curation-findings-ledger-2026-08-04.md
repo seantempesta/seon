@@ -21,7 +21,7 @@ direction; a lane departing from it reports why before landing.
 
 | # | Problem | Elegant solution | Status |
 |---|---|---|---|
-| A1 | Same-instant receipts render in lexical id order — live bootstrap scrambles | order by the run's numeric form-ordinal FACT at the one `entry-order` seam; one ≥11-receipt regression | lane `transcript-order-fix` resumed past a foreign gate; committing with live proof |
+| A1 | Same-instant receipts render in lexical id order — live bootstrap scrambles | order by the run's numeric form-ordinal FACT at the one `entry-order` seam; one ≥11-receipt regression | **DONE** — commits `2e6f1344e`/`d03a5b7bc`, issue archived; live proof: 13 same-instant bootstrap receipts render in exact plan order |
 | A2 | Capability walk fails OPEN on host-bound capability Vars (`capability-free-references?` true for `(my.fs/read …)`) | the walk classifies host `clojure.lang.Var` like any resolved var; unclassifiable ⇒ unproven (fail closed); regression through the real cluster ctx | **DONE** — commits `bcee99a74`/`cce3d5a14`, issue archived, live proof (`my.fs/read` ⇒ capability-free false); owning gate 31 tests green |
 
 ## B. Ugly output — fix lanes running (root-cause + declared producers)
@@ -41,7 +41,7 @@ direction; a lane departing from it reports why before landing.
 | # | Problem | Elegant solution | Blocked on |
 |---|---|---|---|
 | C1 | `defn` returns a string; a stock REPL prints `#'ns/name` (REPL parity, most common agent form) | the eval result carries the var face like `def` does; fix at the result-shaping seam in `seon.sci.eval` | lane `defn-var-face` dispatched (A2 landed, file free) |
-| C2 | error receipts without triage render as ambiguous naked prose | error receipts render as execution errors (the REPL-parity face), from the receipt's own error data | A1 lane owns `transcript.clj`; dispatch on its landing |
+| C2 | error receipts without triage render as ambiguous naked prose | error receipts render as execution errors (the REPL-parity face), from the receipt's own error data | lane `receipt-error-triage-face` dispatched (A1 landed, file free) |
 
 ## D. Issues filed by lanes — need owners/lanes (not yet dispatched)
 
