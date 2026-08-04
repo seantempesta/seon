@@ -2,6 +2,7 @@
   "Unit adapter from admitted print data to the two floor projections."
   (:require [clojure.string :as str]
             [clojure.edn :as edn]
+            [seon.ai.tokens :as tokens]
             [seon.print :as print]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -10,31 +11,10 @@
 (schema.edn/load! {})
 
 (defn transacted
-  "Restore a pulled entity to the value shape its schema validates.
-
-  Pull expands refs to maps and cardinality-many values to vectors. Renderer
-  selection validates the transaction shape, while renderer functions still
-  receive the original pulled value."
+  "Compatibility call into the projection selector's transaction shape."
   {:malli/schema [:=> [:cat :map] :map]}
   [entity]
-  (into {}
-        (map (fn [[attribute value]]
-               [attribute
-                (cond
-                  (and (map? value) (contains? value :db/id))
-                  (:db/id value)
-
-                  (and (sequential? value)
-                       (seq value)
-                       (every? (fn [element]
-                                 (and (map? element)
-                                      (contains? element :db/id)))
-                               value))
-                  (into #{} (map :db/id) value)
-
-                  (sequential? value) (set value)
-                  :else value)]))
-        (dissoc entity :db/id)))
+  ((requiring-resolve 'seon.render/transacted) entity))
 
 (def ^:private print-option-keys
   #{:seon.print/length
@@ -80,6 +60,25 @@
   (merge (print/default-options)
          (select-keys (:seon.render.value/options unit) print-option-keys)
          (:seon.print/options unit)))
+
+(defn- render-profile
+  [unit]
+  (let [profile (or (:seon.render/profile unit)
+                    ((requiring-resolve 'seon.render/agent-render-profile)
+                     ((requiring-resolve 'seon.config/defaults))))]
+    (cond-> profile
+      (:seon.cluster.eval/result-blob unit)
+      (assoc :seon.print/requery-id
+             [:seon.blob/digest (:seon.cluster.eval/result-blob unit)])
+
+      (and (nil? (:seon.cluster.eval/result-blob unit))
+           (:seon.render.value/root unit))
+      (assoc :seon.print/requery-id (:seon.render.value/root unit))
+
+      (and (nil? (:seon.cluster.eval/result-blob unit))
+           (nil? (:seon.render.value/root unit)))
+      (assoc :seon.print/requery-refusal
+             "the value has no durable blob or entity identity"))))
 
 (defn- page-size
   [unit]
@@ -168,13 +167,14 @@
 (defn- admitted-projection
   [value caps]
   (let [admitted
-        (admit/admit
+        (admit/admit-value
          {:seon.sci.admit/value value
           :seon.sci.admit/caps caps
           :seon.sci.admit/interrupt-fn (fn [])
           :seon.config/on-core-error :record})]
     {:seon.render.value/tree
-     (edn/read-string (:seon.cluster.eval/result-edn admitted))
+     (:seon.sci.admit/print-node admitted)
+     :seon.render.value/semantic (:seon.sci.admit/value admitted)
      :seon.render.value/truncated? (:seon.sci.admit/capped? admitted)}))
 
 (defn- breadcrumbs
@@ -203,19 +203,37 @@
          (path-link unit path (+ offset shown) "next →" "seon-data-page"))])))
 
 (defn prepare
-  "Admit one floor unit once and tee the finite print node to both sinks."
-  {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:or :nil :seon.render.value/projection]]}
-  [unit]
-  (when-let [caps (:seon.sci.admit/caps unit)]
+  "Admit once, recursively dispatch declared producers, fit, then emit."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.render/unit]
+     [:or :nil :seon.render.value/projection]]
+    [:=> [:cat :seon.render/unit :seon.render/output]
+     [:or :nil :seon.render.value/projection]]]}
+  ([unit]
+   (prepare unit :seon.render/ai))
+  ([unit output]
+   (when-let [caps (:seon.sci.admit/caps unit)]
     (let [display (display-value unit)
           admitted (if-let [result-edn (:seon.cluster.eval/result-edn unit)]
-                     {:seon.render.value/tree (edn/read-string result-edn)
-                      :seon.render.value/truncated? false}
+                     (let [tree (edn/read-string result-edn)]
+                       {:seon.render.value/tree tree
+                        :seon.render.value/semantic
+                        (admit/semantic-value tree)
+                        :seon.render.value/truncated? false})
                      (admitted-projection
                       (:seon.render.value/window display) caps))
-          tree (:seon.render.value/tree admitted)
-          options (print-options unit)
+          profile (render-profile unit)
+          tree (-> ((requiring-resolve 'seon.render/project-node)
+                    unit
+                    (:seon.render.value/semantic admitted)
+                    (:seon.render.value/tree admitted)
+                    output)
+                   (print/enrich-elisions profile)
+                   (print/fit profile))
+          options (assoc (print-options unit)
+                         :seon.print/length nil
+                         :seon.print/level nil)
           emitted (print/emit-both tree options)
           truncated? (boolean
                       (or (:seon.render.value/truncated? admitted)
@@ -234,7 +252,7 @@
         (:seon.print/hiccup emitted)
         (when truncated?
           [:p {:class "seon-data-capped"}
-           "elided — this value is larger than the configured window"]) ]})))
+           "elided — this value is larger than the configured window"]) ]}))))
 
 (defn render-ai-data
   "Return the text sink result from one already prepared projection."
@@ -288,100 +306,33 @@
   [stored]
   (admit/print-node-edn (:seon.sci.admit/print-node stored)))
 
-(def ^:private structural-faces
-  #{:seon.print/vector :seon.print/list :seon.print/set
-    :seon.print/map :seon.print/record :seon.print/throwable})
-
-(defn- window-string
-  ; A nil bound means no string clipping: the structural 2-arity window
-  ; keeps strings whole and only the budgeted 4-arity clips them.
-  [node max-string]
-  (if (nil? max-string)
-    node
-    (let [value (:seon.print/value node)
-          retained (min (count value) max-string)
-          original-length (or (:seon.print/length node) (count value))]
-      (if (and (= :seon.print/string (:seon.print/face node))
-               (= retained (count value)))
-        node
-        {:seon.print/face :seon.print/truncated-string
-         :seon.print/value (subs value 0 retained)
-         :seon.print/length original-length}))))
-
-(declare window-node)
-
-(defn- window-entry
-  [entry size level max-string depth]
-  (if (vector? entry)
-    (mapv #(window-node % size level max-string (inc depth)) entry)
-    entry))
-
-(defn- window-children
-  [children size level max-string depth child-window]
-  (let [limit (max 0 (dec size))
-        cut? (> (count children) limit)]
-    (cond-> (into []
-                  (map #(child-window % size level max-string (inc depth)))
-                  (subvec (vec children) 0 (min limit (count children))))
-      cut? (conj {:seon.print/face :seon.print/elided}))))
-
-(defn- window-node
-  [node size level max-string depth]
-  (let [face (:seon.print/face node)]
-    (if (and (some? level)
-             (>= depth level)
-             (contains? structural-faces face))
-      {:seon.print/face :seon.print/pruned}
-      (case face
-        (:seon.print/vector :seon.print/list :seon.print/set)
-        (assoc node :seon.print/items
-               (window-children (:seon.print/items node)
-                                size level max-string depth window-node))
-
-        (:seon.print/map :seon.print/record)
-        (assoc node :seon.print/entries
-               (window-children (:seon.print/entries node)
-                                size level max-string depth window-entry))
-
-        :seon.print/throwable
-        (update node :seon.print/value
-                window-node size level max-string (inc depth))
-
-        (:seon.print/string :seon.print/truncated-string)
-        (window-string node max-string)
-
-        node))))
-
-(defn- projected-size
-  [node]
-  (alength
-   (.getBytes ^String (admit/canonical-edn (admit/semantic-value node))
-              "UTF-8")))
-
 (defn print-node-window
-  "Return a recursively bounded structural window of one admitted print node."
+  "Compatibility call into the one profile-owned structural fitter."
   {:malli/schema
    [:function
     [:=> [:cat :seon.print/node :int] :seon.print/node]
     [:=> [:cat :seon.print/node :int :int :int] :seon.print/node]]}
   ([node size]
-   (window-node node size nil nil 0))
+   (print/fit node
+              {:seon.render.profile/id :seon.render.profile/legacy-window
+               :seon.render.profile/token-budget 1048576
+               :seon.render.profile/max-depth 64
+               :seon.render.profile/max-children (max 0 (dec size))
+               :seon.render.profile/blob-threshold 4096
+               :seon.render.profile/composition :multiline
+               :seon.print/requery-refusal
+               "the legacy caller supplied no stable identity"}))
   ([node size max-size level]
-   (loop [string-limit max-size
-          level level]
-     (let [windowed (window-node node size level string-limit 0)]
-       (cond
-         (<= (projected-size windowed) max-size)
-         windowed
-
-         (pos? string-limit)
-         (recur (quot string-limit 2) level)
-
-         (pos? level)
-         (recur 0 (dec level))
-
-         :else
-         windowed)))))
+   (print/fit node
+              {:seon.render.profile/id :seon.render.profile/legacy-window
+               :seon.render.profile/token-budget
+               (max 1 (tokens/estimate (apply str (repeat max-size "x"))))
+               :seon.render.profile/max-depth (max 0 level)
+               :seon.render.profile/max-children (max 0 (dec size))
+               :seon.render.profile/blob-threshold max-size
+               :seon.render.profile/composition :multiline
+               :seon.print/requery-refusal
+               "the legacy caller supplied no stable identity"})))
 
 (defn result-window-edn
   "Store a small tagged data window beside an oversized result blob."
@@ -394,11 +345,15 @@
                parsed
                (:seon.render.value/tree
                 (admitted-projection parsed (:seon.sci.admit/caps unit))))]
-    (admit/print-node-edn (print-node-window node (page-size unit)))))
+    (admit/print-node-edn
+     (print/fit node
+                (assoc (render-profile unit)
+                       :seon.render.profile/max-children
+                       (max 0 (dec (page-size unit))))))))
 
 (defn- render-prepared
   [unit output]
-  (if-let [projection (prepare unit)]
+  (if-let [projection (prepare unit output)]
     (if (= output :seon.render/html)
       (render-html-data projection)
       (render-ai-data projection))

@@ -23,6 +23,7 @@
               :seon.print/failed
               :seon.print/throwable
               :seon.print/elided
+              :seon.print/projected
               :seon.print/pruned],
              :length
              [:int
@@ -170,9 +171,20 @@
                                [:seon.print/value
                                 [:ref :seon.print/node*]]]]
                              [:seon.print/elided
+                              :seon.print/elision]
+                             [:seon.print/projected
                               [:map
+                               {:gen/gen seon.print/projected-node-generator}
                                [:seon.print/face
-                                [:= :seon.print/elided]]]]
+                                [:= :seon.print/projected]]
+                               [:seon.render/output
+                                [:enum
+                                 :seon.render/ai
+                                 :seon.render/html]]
+                               [:seon.print/value
+                                [:or
+                                 :string
+                                 :seon.render/hiccup]]]]
                              [:seon.print/pruned
                               [:map
                                [:seon.print/face
@@ -197,6 +209,56 @@
              [:map
               [:seon.print/text :string]
               [:seon.print/hiccup :seon.render/hiccup]],
+             :omitted [:int {:min 1}],
+             :elision-unit
+             [:enum :children :characters :subtree :tokens],
+             :requery-id :seon.schema/value,
+             :requery-refusal [:string {:min 1}],
+             :prefix :string,
+             :elision-base
+             [:map
+              [:seon.print/face [:= :seon.print/elided]]
+              [:seon.print/omitted :seon.print/omitted]
+              [:seon.print/elision-unit :seon.print/elision-unit]
+              [:seon.render.data/total
+               {:optional true}
+               :seon.render.data/total]
+              [:seon.render.data/path :seon.render.data/path]
+              [:seon.render.data/next-offset
+               :seon.render.data/next-offset]
+              [:seon.render.profile/id :seon.render.profile/id]
+              [:seon.print/prefix {:optional true} :string]],
+             :elision
+             [:or
+              {:seon.render/ai seon.print/render-elision-ai
+               :gen/gen seon.print/elision-node-generator}
+              [:map
+               [:seon.print/face [:= :seon.print/elided]]
+               [:seon.print/omitted :seon.print/omitted]
+               [:seon.print/elision-unit :seon.print/elision-unit]
+               [:seon.render.data/total
+                {:optional true}
+                :seon.render.data/total]
+               [:seon.render.data/path :seon.render.data/path]
+               [:seon.render.data/next-offset
+                :seon.render.data/next-offset]
+               [:seon.render.profile/id :seon.render.profile/id]
+               [:seon.print/prefix {:optional true} :string]
+               [:seon.print/requery-id :seon.print/requery-id]]
+              [:map
+               [:seon.print/face [:= :seon.print/elided]]
+               [:seon.print/omitted :seon.print/omitted]
+               [:seon.print/elision-unit :seon.print/elision-unit]
+               [:seon.render.data/total
+                {:optional true}
+                :seon.render.data/total]
+               [:seon.render.data/path :seon.render.data/path]
+               [:seon.render.data/next-offset
+                :seon.render.data/next-offset]
+               [:seon.render.profile/id :seon.render.profile/id]
+               [:seon.print/prefix {:optional true} :string]
+               [:seon.print/requery-refusal
+                :seon.print/requery-refusal]]],
              :sink
              [:fn
               {:error/message "must implement seon.print/Sink"

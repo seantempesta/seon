@@ -50,6 +50,7 @@
               :html [:or :qualified-symbol :seon.render/hiccup],
               :namespace :symbol,
               :output :any,
+              :profile :seon.render.profile/profile,
               :output-schema :qualified-keyword,
               :package
               [:map

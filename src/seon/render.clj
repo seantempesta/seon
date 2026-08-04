@@ -15,9 +15,9 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.render.hiccup :as hiccup]
-            [seon.render.value :as value]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
+            [seon.sci.admit :as admit]
             [seon.sci.kernel :as sci.kernel]))
 
 ;;; ---------------------------------------------------------------------------
@@ -34,6 +34,47 @@
   [request]
   (get request :seon.render/value request))
 
+(defn agent-render-profile
+  "Derive the agent generic-value fit profile from effective config facts."
+  {:malli/schema
+   [:=> [:cat [:or :seon.config/effective
+                :seon.config/missing-effective-error]]
+    [:or :seon.render.profile/profile
+     :seon.config/missing-effective-error]]}
+  [effective]
+  (if (:seon.config/missing-effective effective)
+    effective
+    {:seon.render.profile/id :seon.render.profile/agent
+     :seon.render.profile/token-budget
+     (:seon.config.render.agent/token-budget effective)
+     :seon.render.profile/max-depth
+     (:seon.config.render.agent/max-depth effective)
+     :seon.render.profile/max-children
+     (:seon.config.render.agent/max-children effective)
+     :seon.render.profile/blob-threshold
+     (:seon.config.eval.result/blob-threshold effective)
+     :seon.render.profile/composition
+     (:seon.config.render.agent/composition effective)}))
+
+(defn- request-profile
+  [request]
+  (or (:seon.render/profile request)
+      (let [database (:seon.db/db request)
+            agent-id (:seon.cluster.agent/id request)
+            cluster-name
+            (when (and database agent-id)
+              (db/q '[:find ?cluster-name .
+                      :in $ ?agent-id
+                      :where
+                      [?agent :seon.cluster.agent/id ?agent-id]
+                      [?agent :seon.cluster.agent/cluster ?cluster]
+                      [?cluster :seon.cluster/name ?cluster-name]]
+                    database agent-id))
+            effective (when cluster-name
+                        (config/effective database cluster-name))]
+        (when effective
+          (agent-render-profile effective)))))
+
 (defn- render-argument
   [request]
   (let [value (render-value request)
@@ -47,7 +88,10 @@
                               :seon.store/branch-connection
                               :seon.render/distance
                               :seon.cluster.run/live-processes
-                              :seon.ai/partial])]
+                              :seon.ai/partial])
+        profile (request-profile request)
+        context (cond-> context
+                  profile (assoc :seon.render/profile profile))]
     (if (map? value)
       (assoc (merge value context) :seon.render/value value)
       (assoc context :seon.render/value value))))
@@ -98,11 +142,28 @@
     (or (when (map? value) (get value output))
         (get request output))))
 
+(defn transacted
+  "Restore a pulled entity to the transaction shape used for selection."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [entity]
+  (into {}
+        (map (fn [[attribute value]]
+               [attribute
+                (cond
+                  (and (map? value) (contains? value :db/id)) (:db/id value)
+                  (and (sequential? value)
+                       (seq value)
+                       (every? #(and (map? %) (contains? % :db/id)) value))
+                  (into #{} (map :db/id) value)
+                  (sequential? value) (set value)
+                  :else value)]))
+        (dissoc entity :db/id)))
+
 (defn- schema-producer
   [projection value output]
   (when (map? value)
     (let [transacted-matches
-          (schema/matching-shapes-in projection (value/transacted value))
+          (schema/matching-shapes-in projection (transacted value))
           ;; A pull has two honest shapes. Refs and cardinality-many values
           ;; validate in transaction form, while tuple/vector value attributes
           ;; validate exactly as pulled. `:seon.schema/entity?` is the declared
@@ -173,14 +234,99 @@
    selected]
   (:seon.sci.admit/value
    (sci.kernel/invoke
-    {:seon.sci.eval/ctx ctx
-     :seon.db/db (:seon.db/db request)
-     :seon.fn/sym (str selected)
-     :seon.sci.eval/args [(render-argument request)]
-     :seon.sci.eval/time-limit-ms time-limit-ms
-     :seon.sci.admit/caps caps
-     :seon.db/capture-context (:seon.render.call/captured-reads request)
-     :seon.config/on-core-error on-core-error})))
+    (cond->
+     {:seon.sci.eval/ctx ctx
+      :seon.db/db (:seon.db/db request)
+      :seon.fn/sym (str selected)
+      :seon.sci.eval/args [(render-argument request)]
+      :seon.sci.eval/time-limit-ms time-limit-ms
+      :seon.sci.admit/caps caps
+      :seon.config/on-core-error on-core-error}
+      (:seon.render.call/captured-reads request)
+      (assoc :seon.db/capture-context
+             (:seon.render.call/captured-reads request))))))
+
+(defn- valid-projection?
+  [output value]
+  (or (:seon.error/kind value)
+      (case output
+        :seon.render/ai (string? value)
+        :seon.render/html (hiccup/hiccup? value))))
+
+(declare project-node*)
+
+(defn- project-entry
+  [request output path entry]
+  (if (vector? entry)
+    (mapv (fn [index child]
+            (project-node* request output (conj path index) child
+                           (admit/semantic-value child)))
+          (range)
+          entry)
+    entry))
+
+(defn- project-children
+  [request output path children]
+  (mapv (fn [index child]
+          (project-node* request output (conj path index) child
+                         (admit/semantic-value child)))
+        (range)
+        children))
+
+(defn- project-node*
+  [request output path node value]
+  (let [projection (sci.kernel/context-projection
+                    (:seon.sci.eval/ctx request))
+        selected (when (map? value)
+                   (or (get value output)
+                       (schema-producer projection value output)))]
+    (cond
+      (:seon.error/kind selected) node
+
+      selected
+      (let [rendered (invoke-selected
+                      (assoc request :seon.render/value value)
+                      selected)]
+        (if (valid-projection? output rendered)
+          (if (:seon.error/kind rendered)
+            node
+            {:seon.print/face :seon.print/projected
+             :seon.render/output output
+             :seon.print/value rendered})
+          node))
+
+      :else
+      (case (:seon.print/face node)
+        (:seon.print/vector :seon.print/list :seon.print/set)
+        (update node :seon.print/items
+                #(project-children request output path %))
+
+        (:seon.print/map :seon.print/record)
+        (update node :seon.print/entries
+                #(mapv (fn [index entry]
+                         (project-entry request output (conj path index)
+                                        entry))
+                       (range)
+                       %))
+
+        :seon.print/throwable
+        (update node :seon.print/value
+                #(project-node* request output
+                                (conj path :seon.print/throwable) %
+                                (admit/semantic-value %)))
+
+        node))))
+
+(defn project-node
+  "Apply explicit/schema producer precedence recursively to one print node.
+
+  A selected producer's output is terminal projection data: it is never fed
+  back into selection. Admission remains wholly owned by the guarded kernel."
+  {:malli/schema
+   [:=> [:cat :map :any :seon.print/node :seon.render/output]
+    :seon.print/node]}
+  [request value node output]
+  (project-node* request output [] node value))
 
 (defn- invoke-producer
   [request output output-schema]

@@ -2,6 +2,7 @@
   "Emits admitted print nodes through text and hiccup sinks."
   (:require [clojure.string :as str]
             [clojure.test.check.generators :as gen]
+            [seon.ai.tokens :as tokens]
             [seon.schema :as schema]
             #?(:clj [seon.schema.edn :as schema.edn])
             [seon.schema.form :as schema.form]))
@@ -9,6 +10,7 @@
 (defprotocol Sink
   (-open [sink node] "Enter one structural node.")
   (-token [sink face text] "Emit one lexical token.")
+  (-fragment [sink output value] "Emit one terminal producer projection.")
   (-close [sink node] "Leave one structural node."))
 
 (defn sink?
@@ -55,6 +57,22 @@
   "A concrete text sink for opaque sink-schema generation."
   (gen/fmap (fn [_] (text-sink {})) (gen/return nil)))
 
+(def projected-node-generator
+  "A readable terminal projection for recursive print-node generation."
+  (gen/return {::face ::projected
+               :seon.render/output :seon.render/ai
+               ::value "nil"}))
+
+(def elision-node-generator
+  "A complete refusal-bearing elision for recursive print-node generation."
+  (gen/return {::face ::elided
+               ::omitted 1
+               ::elision-unit :subtree
+               :seon.render.data/path []
+               :seon.render.data/next-offset 0
+               :seon.render.profile/id :seon.render.profile/agent
+               ::requery-refusal "generated values have no stable identity"}))
+
 (defn- append-chunk!
   [state text]
   (let [text (str text)
@@ -87,6 +105,11 @@
                    (if (= ::separator face)
                      (soft-separator state (::width options) text)
                      text)))
+  (-fragment [_ output value]
+    (append-chunk! state
+                   (if (= :seon.render/ai output)
+                     value
+                     (pr-str value))))
   (-close [_ node]
     (vswap! state update ::depth dec)
     (append-chunk! state (::end node))))
@@ -144,6 +167,11 @@
              ::children [(hiccup-token ::delimiter (::begin node))]}))
   (-token [_ face text]
     (append-hiccup! state (hiccup-token face text)))
+  (-fragment [_ output value]
+    (append-hiccup! state
+                    (if (= :seon.render/html output)
+                      value
+                      (hiccup-token ::projected value))))
   (-close [_ node]
     (append-hiccup! state (hiccup-token ::delimiter (::end node)))
     (let [frame (peek (::stack @state))]
@@ -164,6 +192,9 @@
   (-token [_ face text]
     (-token left face text)
     (-token right face text))
+  (-fragment [_ output value]
+    (-fragment left output value)
+    (-fragment right output value))
   (-close [_ node]
     (-close left node)
     (-close right node)))
@@ -236,6 +267,27 @@
    ::summary summary})
 
 (declare emit-node emit-text)
+
+(defn render-elision-ai
+  "Render an elision as a readable, requeryable structural face."
+  {:malli/schema [:=> [:cat :seon.render/unit] :string]}
+  [unit]
+  (let [omitted (or (:seon.print/omitted unit) 1)
+        measure (name (or (:seon.print/elision-unit unit) :subtree))
+        location (str "path " (pr-str (or (:seon.render.data/path unit) []))
+                      " offset " (or (:seon.render.data/next-offset unit) 0))
+        requery (if-some [identity (:seon.print/requery-id unit)]
+                  (str "requery by " (pr-str identity))
+                  (str "requery refused: "
+                       (or (:seon.print/requery-refusal unit)
+                           "no stable identity was supplied")))]
+    (str (or (:seon.print/prefix unit) "…")
+         " " omitted " more " measure
+         (when-some [total (:seon.render.data/total unit)]
+           (str " of " total))
+         "; " requery " at " location
+         " with " (pr-str (or (:seon.render.profile/id unit)
+                               :seon.render.profile/unspecified)))))
 
 (def ^:private scalar-faces
   #{::nil ::boolean ::number ::keyword ::symbol ::char ::string
@@ -476,8 +528,12 @@
       (emit-node (::value node) sink options depth (conj path ::throwable)))))
 
 (defmethod emit ::elided
-  [_ sink _ _ _]
-  (-token sink ::elision "..."))
+  [node sink _ _ _]
+  (-token sink ::elision (render-elision-ai node)))
+
+(defmethod emit ::projected
+  [node sink _ _ _]
+  (-fragment sink (:seon.render/output node) (::value node)))
 
 (defmethod emit ::pruned
   [_ sink _ _ _]
@@ -531,6 +587,186 @@
     (emit-node node sink options 0 [])
     {::text (sink-result text)
      ::hiccup (sink-result hiccup)}))
+
+(def ^:private structural-faces
+  #{::vector ::list ::set ::map ::record ::throwable})
+
+(defn- requery-fields
+  [profile]
+  (if-some [identity (::requery-id profile)]
+    {::requery-id identity}
+    {::requery-refusal
+     (or (::requery-refusal profile)
+         "the source has no stable requery identity")}))
+
+(defn- elision-node
+  [profile path next-offset omitted total unit prefix]
+  (merge
+   {::face ::elided
+    ::omitted (max 1 (long omitted))
+    ::elision-unit unit
+    :seon.render.data/path (vec path)
+    :seon.render.data/next-offset (long next-offset)
+    :seon.render.profile/id (:seon.render.profile/id profile)}
+   (when (some? total) {:seon.render.data/total (long total)})
+   (when (some? prefix) {::prefix prefix})
+   (requery-fields profile)))
+
+(declare enrich-node)
+
+(defn- enrich-entry
+  [entry profile path]
+  (if (vector? entry)
+    (mapv (fn [index child]
+            (enrich-node child profile (conj path index)))
+          (range)
+          entry)
+    (elision-node profile path 0 1 nil :subtree nil)))
+
+(defn- enrich-node
+  [node profile path]
+  (case (::face node)
+    (::vector ::list ::set)
+    (assoc node ::items
+           (mapv (fn [index child]
+                   (if (= ::elided (::face child))
+                     (elision-node profile path index 1 nil :children nil)
+                     (enrich-node child profile (conj path index))))
+                 (range)
+                 (::items node)))
+
+    (::map ::record)
+    (assoc node ::entries
+           (mapv (fn [index entry]
+                   (enrich-entry entry profile (conj path index)))
+                 (range)
+                 (::entries node)))
+
+    ::throwable
+    (update node ::value enrich-node profile (conj path ::throwable))
+
+    ::truncated-string
+    (elision-node profile path (count (::value node)) 1 (::length node)
+                  :characters (pr-str (::value node)))
+
+    ::elided
+    (if (::omitted node)
+      node
+      (elision-node profile path 0 1 nil :subtree nil))
+
+    node))
+
+(defn enrich-elisions
+  "Replace every admission marker with a declared structural elision value."
+  {:malli/schema
+   [:=> [:cat :seon.print/node :seon.render.profile/profile]
+    :seon.print/node]}
+  [node profile]
+  (enrich-node node profile []))
+
+(declare fit-node)
+
+(defn- fit-entry
+  [entry profile depth path child-limit string-limit]
+  (if (vector? entry)
+    (mapv (fn [index child]
+            (fit-node child profile (inc depth) (conj path index)
+                      child-limit string-limit))
+          (range)
+          entry)
+    entry))
+
+(defn- fit-children
+  [children profile depth path child-limit string-limit child-fit]
+  (let [children (vec children)
+        total (count children)
+        retained (min child-limit total)]
+    (cond->
+     (mapv (fn [index child]
+             (child-fit child profile (inc depth) (conj path index)
+                        child-limit string-limit))
+           (range retained)
+           (subvec children 0 retained))
+      (< retained total)
+      (conj (elision-node profile path retained (- total retained) total
+                          :children nil)))))
+
+(defn- fit-string
+  [node profile path string-limit]
+  (let [value (::value node)
+        original (long (or (::length node) (count value)))
+        retained (min string-limit (count value))]
+    (if (and (= retained (count value)) (= original retained))
+      node
+      (elision-node profile path retained (- original retained) original
+                    :characters (pr-str (subs value 0 retained))))))
+
+(defn- fit-node
+  [node profile depth path child-limit string-limit]
+  (let [face (::face node)]
+    (cond
+      (and (>= depth (:seon.render.profile/max-depth profile))
+           (contains? structural-faces face))
+      (let [total (count (or (::items node) (::entries node) [node]))]
+        (elision-node profile path 0 (max 1 total) total :subtree nil))
+
+      :else
+      (case face
+        (::vector ::list ::set)
+        (assoc node ::items
+               (fit-children (::items node) profile depth path child-limit
+                             string-limit fit-node))
+
+        (::map ::record)
+        (assoc node ::entries
+               (fit-children (::entries node) profile depth path child-limit
+                             string-limit fit-entry))
+
+        ::throwable
+        (update node ::value fit-node profile (inc depth)
+                (conj path ::throwable) child-limit string-limit)
+
+        (::string ::truncated-string)
+        (fit-string node profile path string-limit)
+
+        node))))
+
+(defn fit
+  "Fit one admitted node to one declared presentation profile.
+
+  Token size is measured only through `seon.ai.tokens/estimate`. Structural
+  cuts remain ordinary elision nodes carrying their continuation facts."
+  {:malli/schema
+   [:=> [:cat :seon.print/node :seon.render.profile/profile]
+    :seon.print/node]}
+  [node profile]
+  (let [budget (:seon.render.profile/token-budget profile)
+        initial-children (:seon.render.profile/max-children profile)
+        initial-depth (:seon.render.profile/max-depth profile)
+        initial-strings (tokens/estimate-chars budget)
+        options (assoc (default-options) ::length nil ::level nil)]
+    (loop [child-limit initial-children
+           depth-limit initial-depth
+           string-limit initial-strings]
+      (let [candidate (fit-node node
+                                (assoc profile
+                                       :seon.render.profile/max-depth
+                                       depth-limit)
+                                0 [] child-limit string-limit)]
+        (cond
+          (<= (tokens/estimate (emit-text candidate options)) budget)
+          candidate
+
+          (pos? string-limit)
+          (recur child-limit depth-limit (quot string-limit 2))
+
+          (pos? child-limit)
+          (recur (quot child-limit 2) depth-limit 0)
+
+          (pos? depth-limit)
+          (recur 0 (dec depth-limit) 0)
+
+          :else candidate)))))
 
 (schema/register-core-predicate! 'seon.print/sink? sink?)
 (schema/register-core-predicate! 'seon.print/print-number? print-number?)

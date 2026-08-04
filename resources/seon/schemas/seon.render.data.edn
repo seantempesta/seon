@@ -5,15 +5,17 @@
                      :seon.render.data/offset]],
                    :offset [:int {:min 0}],
                    :path [:vector :any],
+                   :total [:int {:min 0}],
+                   :next-offset :seon.render.data/offset,
                    :window
                    [:map
                     [:seon.render.data/entries
                      [:vector [:tuple :any :any]]]
                     [:seon.render.data/offset :seon.render.data/offset]
-                    [:seon.render.data/total [:int {:min 0}]]
+                    [:seon.render.data/total :seon.render.data/total]
                     [:seon.render.data/next-offset
                      {:optional true}
-                     :seon.render.data/offset]
+                     :seon.render.data/next-offset]
                     [:seon.render.data/previous-offset
                      {:optional true}
                      :seon.render.data/offset]],
