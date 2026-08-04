@@ -86,12 +86,18 @@
                               :seon.sci.eval/time-limit-ms
                               :seon.config/on-core-error
                               :seon.store/branch-connection
+                              :seon.cluster.eval/result-blob
+                              :seon.render.data/total
                               :seon.render/distance
                               :seon.cluster.run/live-processes
                               :seon.ai/partial])
         profile (request-profile request)
+        value (render-value request)
         context (cond-> context
-                  profile (assoc :seon.render/profile profile))]
+                  profile (assoc :seon.render/profile profile)
+                  (and (counted? value)
+                       (not (contains? context :seon.render.data/total)))
+                  (assoc :seon.render.data/total (count value)))]
     (if (map? value)
       (assoc (merge value context) :seon.render/value value)
       (assoc context :seon.render/value value))))

@@ -689,8 +689,14 @@
 (defn- fit-children
   [children profile depth path child-limit string-limit child-fit]
   (let [children (vec children)
-        total (count children)
-        retained (min child-limit total)]
+        children (if (= ::elided (::face (peek children)))
+                   (pop children)
+                   children)
+        admitted-total (count children)
+        total (or (when (empty? path)
+                    (:seon.render.data/total profile))
+                  admitted-total)
+        retained (min child-limit admitted-total)]
     (cond->
      (mapv (fn [index child]
              (child-fit child profile (inc depth) (conj path index)

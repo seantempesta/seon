@@ -232,9 +232,11 @@
                      (admitted-projection
                       (:seon.render.value/window display) caps))
           profile (cond-> (render-profile unit)
-                    (:seon.render.value/total display)
+                    (or (:seon.render.data/total unit)
+                        (:seon.render.value/total display))
                     (assoc :seon.render.data/total
-                           (:seon.render.value/total display)))
+                           (or (:seon.render.data/total unit)
+                               (:seon.render.value/total display))))
           tree (-> ((requiring-resolve 'seon.render/project-node)
                     unit
                     (:seon.render.value/semantic admitted)
