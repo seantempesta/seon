@@ -1657,21 +1657,25 @@
               :seon.sci.eval/eval-form! eval-form!
               :seon.schema/projection projection})
             evaluated-value
-            (if base-declared-row
-              (do
-                ;; A faithful REPL mutates the live cluster context during
-                ;; evaluation. Persistence is decided later by the terminal
-                ;; transaction; refusal never rolls this definition back.
-                (when live-declaration?
-                  (eval-form!))
-                (when-let [declared-ns (:seon.ns/name base-declared-row)]
-                  (vreset! ending-namespace declared-ns))
-                (or (:seon.ns/name base-declared-row)
-                    (:seon.fn/sym base-declared-row)
-                    (:seon.schema/key base-declared-row)
-                    (:seon.test/sym base-declared-row)
-                    (when unregister-key schema-value)))
-              (eval-form!))
+            (cond
+              ;; A faithful REPL returns the value SCI produced. This is the
+              ;; same path a plain `def` takes, and keeps `defn`/`deftest`
+              ;; declarations as Vars instead of replacing them with identity
+              ;; strings after evaluation. Persistence is still decided later
+              ;; by the terminal transaction; refusal never rolls a live
+              ;; definition back.
+              live-declaration? (eval-form!)
+
+              ;; Schema declarations run once inside their isolated
+              ;; registration delta above. Preserve that evaluated identity
+              ;; without executing the form a second time.
+              base-declared-row
+              (or (:seon.schema/key base-declared-row)
+                  (when unregister-key schema-value))
+
+              :else (eval-form!))
+            _ (when-let [declared-ns (:seon.ns/name base-declared-row)]
+                (vreset! ending-namespace declared-ns))
             {row :seon.sci.eval/program-row
              context-row :seon.sci.eval/context-row}
             (unmap-row

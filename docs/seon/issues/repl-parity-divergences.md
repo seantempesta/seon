@@ -61,3 +61,25 @@ independently recounted current partition is 88 rows: 45 passing executable,
 temporary “23 pending” wording counted four newly executable rows twice).
 The destination is the REPL-parity follow-up, one semantic family at a time;
 the gate remains the recurring acceptance surface.
+
+## Promotion 2026-08-04 — declaring forms retain SCI's Var result
+
+The durable `defn` result divergence from
+`docs/prds/sci-execution-runtime/plan/bootstrap-vector-design-2026-08-01.md`
+§8 is repaired at `seon.sci.eval/evaluate`. SCI's `eval-def` returns the
+declared Var for both `def` and macro-expanded `defn`; Seon had preserved that
+value only for the ordinary path while replacing a durable declaration's
+result with its program-row identity string. Live declarations now retain the
+actual SCI result while schema registration continues to use its isolated
+single-evaluation delta.
+
+`seon.sci.eval-test/contracted-defn-renders-the-var-it-declared` compares the
+closed print-node face of `def` and a contracted `defn`, and asserts the
+declared symbol structurally rather than pinning rendered text. The broader
+Var, namespace, history, helper, error, and collection-face families above
+remain open, so this issue stays in the print-path implementation wave.
+
+The live replay first returned `#'my.agents.varface/parity_value` for `def`
+but a quoted symbol string for contracted `defn` on the lane's scratch
+cluster. A cluster forked from the repaired `current-src` publication then
+returned `#'my.agents.varface/parity_fn_after` for the same contracted form.

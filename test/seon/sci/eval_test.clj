@@ -449,6 +449,22 @@
     (is (= 1 (count (:seon.fn/arities row))))
     (is (map? (:seon.fn/ast row)))))
 
+(deftest contracted-defn-renders-the-var-it-declared
+  (let [def-node
+        (edn/read-string
+         (:seon.cluster.eval/result-edn (run "(def plain-declaration 1)")))
+        defn-node
+        (edn/read-string
+         (:seon.cluster.eval/result-edn
+          (run
+           (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+                "rendered-declaration [x] x)"))))]
+    (is (= (:seon.print/face def-node)
+           (:seon.print/face defn-node)
+           :seon.print/var))
+    (is (= 'user/rendered-declaration
+           (symbol (:seon.print/name defn-node))))))
+
 (deftest evaluate-invokes-eval-form-exactly-once-on-every-path
   (let [ctx (eval/build-base-ctx)
         eval-form sci/eval-form
