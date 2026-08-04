@@ -16,6 +16,22 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**ADDENDUM — 2026-08-04, UNIVERSAL OUTPUT SINK MEASUREMENT LANDED.** Commit
+`6af14d45c` adds the two sparse leaf facts `:seon.fn/external-sink` and
+`:seon.fn/projection-boundary`, lifts them through the existing static index,
+and derives classified sink reachability through
+`seon.fn/output-path-report`. The fast fixture proves projected, bypass,
+unresolved, and codec paths plus the shortest bypass counterexample; the long
+diagnostic records the current totals without a ratchet assertion. Focused
+gate: 18 tests / 118 assertions, zero failures or errors. Fresh published-fork
+door proof: 9 indexed sinks, 34 AI path classes, 41 HTML path classes, 1 codec
+path class, 0 projected, 0 unresolved, 75 bypasses. This is measurement only:
+no crossing was converted, and the final zero-bypass/zero-unresolved assertion
+remains at the ladder's graduation step. MCP/operator script annotations lift
+under direct analysis but remain outside the default `src/`+`test/` database
+graph; the scope gap is filed at
+`docs/seon/issues/output-sink-query-excludes-operator-and-mcp-scripts.md`.
+
 **ADDENDUM — 2026-08-04, MESSAGE ORDER IS A NUMERIC FACT.** Commit
 `7cfb2435f` declares and commits `:seon.cluster.message/ordinal` for delivered
 message vectors and inbound singletons. Work derivation and both transcript

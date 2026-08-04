@@ -144,6 +144,44 @@ projection boundary it implements or requires. Then:
   larger profile reveals the omitted region. Today's escapes become
   generated counterexample SHAPES, not an enumerated regression list.
 
+### 4.1 Transitional graph measurement landed — 2026-08-04
+
+Commit `6af14d45c` lands the measurement without converting a crossing:
+
+- `:seon.fn/external-sink` declares `:ai-visible-text`, `:html-response`, or
+  `:codec-storage`; `:seon.fn/projection-boundary` declares
+  `:seon.render/ai`, `:seon.render/html`, or `:none`. The static index lifts
+  both from defn metadata exactly where it already lifts `:seon.workload`.
+- `seon.fn/output-path-report` derives declared-sink reachability from the
+  database program graph. Its cycle-safe walk retains the shortest
+  representative for every source, sink, and observed classification. A
+  visible path is projected only when its required boundary precedes any
+  `:none` value-to-text boundary; the other outcomes are bypass or unresolved.
+- `seon.fn-test/output-path-report-finds-the-shortest-bypass` is the fast
+  mechanism proof. Its synthetic graph contains projected, bypass, unresolved,
+  and codec paths without maintaining a function roster.
+- The long diagnostic
+  `seon.fn-test/current-output-floor-classification-is-recorded` writes
+  [universal-output-floor-baseline-2026-08-04.edn](../research/universal-output-floor-baseline-2026-08-04.edn).
+  It records totals and shortest counterexamples but deliberately contains no
+  zero-bypass or zero-unresolved assertion. That graduation assertion lands
+  only with the conversion ladder's final step.
+
+The focused gate passed 18 tests / 118 assertions. A cluster freshly forked
+from published `:current-src` commit
+`6a727274-4216-53b7-8a72-65d6aa2e075e` ran the query through the agent door:
+9 indexed sinks, 34 AI path classes, 41 HTML path classes, 1 codec path class,
+0 projected, 0 unresolved, and 75 bypasses. The zero projected count is the
+honest mid-conversion baseline: this lane annotated sink leaves and did not
+edit the protected projection owners.
+
+The default database program graph intentionally indexes `src/` and `test/`,
+not `script/`. Direct analysis proves the MCP/operator annotations lift to five
+additional script sink rows and six boundary rows, but they are not included
+in the live totals above. The graduation proof therefore remains incomplete
+until [the sink query covers non-installed operator and MCP leaves](../../../seon/issues/output-sink-query-excludes-operator-and-mcp-scripts.md)
+without publishing operator code into the agent-callable program graph.
+
 ## 5. Graduation
 
 The floor is complete when the graph query finds zero unprojected
@@ -164,3 +202,6 @@ transport.
   (they touch render/admit owners no current lane holds).
 - The wrong-node fix (ladder 3a) is dispatched as an immediate defect
   lane; the rest of step 3 waits on step 1.
+- The graph measurement is landed, but the runtime construction proof and the
+  final zero-bypass/zero-unresolved graduation assertion remain unbuilt by
+  design. The query's non-installed script scope is tracked separately above.
