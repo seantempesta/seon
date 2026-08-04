@@ -594,7 +594,9 @@
   recurrence, the `kind` to find the rule, and the run, process, proc,
   op, cid and basis-t refs to find everything around it. Each is omitted
   when absent."
-  {:malli/schema [:=> [:cat :seon.error/notice] [:string {:min 1}]]}
+  {:malli/schema [:=> [:cat :seon.error/notice] [:string {:min 1}]]
+   :seon.fn/external-sink :ai-visible-text
+   :seon.fn/projection-boundary :none}
   [notice]
   (let [fact (:seon.error/fact notice)
         {:seon.error/keys [id at kind message process signature

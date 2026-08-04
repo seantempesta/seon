@@ -33,6 +33,7 @@
 (def ^:dynamic *debug* (= "1" (System/getenv "DEBUG")))
 
 (defn- content-text
+  {:seon.fn/projection-boundary :none}
   [value]
   (if (string? value)
     value
@@ -809,6 +810,8 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- send-response
+  {:seon.fn/external-sink :ai-visible-text
+   :seon.fn/projection-boundary :none}
   [response]
   (let [encoded (json/generate-string response)]
     (log-debug "<<" encoded)

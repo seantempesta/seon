@@ -1551,6 +1551,8 @@
           ~name)))))
 
 (defn- create-log!
+  {:seon.fn/external-sink :codec-storage
+   :seon.fn/projection-boundary :none}
   [root name]
   (let [path (log-path root name)]
     (fs/create-dirs (fs/parent path))
@@ -1759,6 +1761,8 @@
     value))
 
 (defn- print-started!
+  {:seon.fn/external-sink :ai-visible-text
+   :seon.fn/projection-boundary :none}
   [root name value]
   (println (format "● %-20s %s  prepl=%s  log=%s"
                    name
@@ -2121,6 +2125,8 @@
     "stale"))
 
 (defn- status!
+  {:seon.fn/external-sink :ai-visible-text
+   :seon.fn/projection-boundary :none}
   [root arguments]
   (when (seq arguments)
     (fail! "`status` takes no arguments."
@@ -2585,6 +2591,8 @@
   (println "● reset republished current-src and reforked default"))
 
 (defn- logs!
+  {:seon.fn/external-sink :ai-visible-text
+   :seon.fn/projection-boundary :none}
   [root arguments]
   (when (> (count arguments) 1)
     (fail! "Use `logs [NAME]`."

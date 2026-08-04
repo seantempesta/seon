@@ -1050,6 +1050,8 @@
 
 (defn- send-request
   "Send one ordinary request map through the JDK HTTP leaf."
+  {:seon.fn/external-sink :ai-visible-text
+   :seon.fn/projection-boundary :none}
   [{:keys [:seon.ai/endpoint :seon.ai/timeout-ms
            :seon.ai.http/headers :seon.ai.http/body]
     stream? :seon.ai/stream?

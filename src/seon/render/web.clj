@@ -913,6 +913,8 @@
   While parked, the per-tab `(sliding-buffer 1)` retains only the newest
   complete package. Queue drain is permission for another write, never
   remote-delivery acknowledgement."
+  {:seon.fn/external-sink :html-response
+   :seon.fn/projection-boundary :none}
   [channel generator frame]
   (if (http/send! channel frame false)
     (let [{pending-bytes :http-kit.write/pending-bytes
@@ -1270,6 +1272,8 @@
    #(render/walk namespace-walk-options)))
 
 (defn- page-response
+  {:seon.fn/external-sink :html-response
+   :seon.fn/projection-boundary :none}
   [service
    agent-id]
   (let [page (:seon.render.package/keyframe

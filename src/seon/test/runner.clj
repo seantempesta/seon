@@ -121,6 +121,8 @@
                    current)))))))
 
 (defn- report-error!
+  {:seon.fn/external-sink :ai-visible-text
+   :seon.fn/projection-boundary :none}
   [options event signature]
   (test/with-test-out
     (test/inc-report-counter :error)
@@ -151,6 +153,8 @@
     (default-report event)))
 
 (defn- announce!
+  {:seon.fn/external-sink :ai-visible-text
+   :seon.fn/projection-boundary :none}
   [progress description]
   (let [at (Instant/now)]
     (reset! progress
@@ -272,6 +276,8 @@
     (.getCanonicalPath file)))
 
 (defn- persist-diagnostic!
+  {:seon.fn/external-sink :codec-storage
+   :seon.fn/projection-boundary :none}
   [text]
   (let [directory (io/file "tmp" "test-liveness")
         _ (.mkdirs directory)
@@ -288,6 +294,8 @@
       (.destroyForcibly child-process))))
 
 (defn- fire-liveness-backstop!
+  {:seon.fn/external-sink :ai-visible-text
+   :seon.fn/projection-boundary :none}
   [progress silence-seconds suite-start]
   (let [virtual-thread-dump
         (try
@@ -586,6 +594,8 @@
         ((requiring-resolve 'seon.cluster/stop!) instance)))))
 
 (defn- print-skipped!
+  {:seon.fn/external-sink :ai-visible-text
+   :seon.fn/projection-boundary :none}
   [skipped]
   (when (seq skipped)
     (println)

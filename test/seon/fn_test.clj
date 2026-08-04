@@ -187,7 +187,9 @@
              "  (:import [java.util Date]))\n"
              "(defn ^:private helper [x] (str/trim x))\n"
              "(defn ^{:malli/schema [:=> [:cat fn?] string?]\n"
-             "         :seon.workload :compute}\n"
+             "         :seon.workload :compute\n"
+             "         :seon.fn/external-sink :ai-visible-text\n"
+             "         :seon.fn/projection-boundary :none}\n"
              "  contracted \"Exact doc.\" [f] (helper (f)))\n"
              "(defrecord Pair [left right])\n"
              "(deftype Cell [value])\n"
@@ -216,6 +218,12 @@
                 (get by-id [:seon.fn/sym "sample.core/contracted"]))))
         (is (= :compute (:seon.fn/workload
                          (get by-id [:seon.fn/sym "sample.core/contracted"]))))
+        (is (= :ai-visible-text
+               (:seon.fn/external-sink
+                (get by-id [:seon.fn/sym "sample.core/contracted"]))))
+        (is (= :none
+               (:seon.fn/projection-boundary
+                (get by-id [:seon.fn/sym "sample.core/contracted"]))))
         (is (= [[:seon.fn/sym "sample.core/helper"]]
                (:seon.fn/calls
                 (get by-id [:seon.fn/sym "sample.core/contracted"]))))
@@ -760,6 +768,120 @@
             "the schema-property test reaches its subject without a call edge")
         (is (= []
                (seon.fn/tests-reaching @connection "sample.reach/absent")))))))
+
+(deftest output-path-report-finds-the-shortest-bypass
+  (test-support/with-database
+    (fn [connection]
+      (let [namespace-ref [:seon.ns/name 'sample.output]
+            function-row
+            (fn [function-symbol facts]
+              (merge {:seon.fn/sym function-symbol
+                      :seon.fn/ns namespace-ref
+                      :seon.fn/source
+                      (str "(defn " (name (symbol function-symbol)) " [] nil)")
+                      :seon.fn/arglists "([])"
+                      :seon.fn/private? false}
+                     facts))]
+        (db/transact!
+         connection
+         [{:seon.ns/name 'sample.output
+           :seon.ns/source "(ns sample.output)"}
+          (function-row "sample.output/ai-projector"
+                        {:seon.fn/projection-boundary :seon.render/ai})
+          (function-row "sample.output/raw-text"
+                        {:seon.fn/projection-boundary :none})
+          (function-row "sample.output/sink"
+                        {:seon.fn/external-sink :ai-visible-text
+                         :seon.fn/projection-boundary :none})
+          (function-row "sample.output/unresolved-sink"
+                        {:seon.fn/external-sink :ai-visible-text})
+          (function-row "sample.output/codec-sink"
+                        {:seon.fn/external-sink :codec-storage
+                         :seon.fn/projection-boundary :none})
+          (function-row "sample.output/projected-root" {})
+          (function-row "sample.output/bypass-root" {})
+          (function-row "sample.output/unresolved-root" {})
+          (function-row "sample.output/codec-root" {})])
+        (db/transact!
+         connection
+         [{:seon.fn/sym "sample.output/projected-root"
+           :seon.fn/calls [[:seon.fn/sym "sample.output/ai-projector"]]}
+          {:seon.fn/sym "sample.output/ai-projector"
+           :seon.fn/calls [[:seon.fn/sym "sample.output/sink"]]}
+          {:seon.fn/sym "sample.output/bypass-root"
+           :seon.fn/calls [[:seon.fn/sym "sample.output/raw-text"]]}
+          {:seon.fn/sym "sample.output/raw-text"
+           :seon.fn/calls [[:seon.fn/sym "sample.output/sink"]]}
+          {:seon.fn/sym "sample.output/unresolved-root"
+           :seon.fn/calls [[:seon.fn/sym "sample.output/unresolved-sink"]]}
+          {:seon.fn/sym "sample.output/codec-root"
+           :seon.fn/calls [[:seon.fn/sym "sample.output/codec-sink"]]}])
+        (let [paths
+              (->> (:seon.fn.output/paths
+                    (seon.fn/output-path-report @connection))
+                   (filter #(str/starts-with?
+                             (:seon.fn.output/source %)
+                             "sample.output/")))
+              by-source
+              (into {}
+                    (map (juxt :seon.fn.output/source identity))
+                    paths)]
+          (is (= {:seon.fn.output/classification :projected
+                  :seon.fn.output/path
+                  ["sample.output/projected-root"
+                   "sample.output/ai-projector"
+                   "sample.output/sink"]}
+                 (select-keys
+                  (get by-source "sample.output/projected-root")
+                  [:seon.fn.output/classification :seon.fn.output/path])))
+          (is (= {:seon.fn.output/classification :bypass
+                  :seon.fn.output/first-bypass "sample.output/raw-text"
+                  :seon.fn.output/path
+                  ["sample.output/bypass-root"
+                   "sample.output/raw-text"
+                   "sample.output/sink"]}
+                 (select-keys
+                  (get by-source "sample.output/bypass-root")
+                  [:seon.fn.output/classification
+                   :seon.fn.output/first-bypass
+                   :seon.fn.output/path])))
+          (is (= :unresolved
+                 (:seon.fn.output/classification
+                  (get by-source "sample.output/unresolved-root"))))
+          (is (= :codec
+                 (:seon.fn.output/classification
+                  (get by-source "sample.output/codec-root")))))))))
+
+(def ^:private output-floor-report-path
+  "docs/prds/sci-execution-runtime/research/universal-output-floor-baseline-2026-08-04.edn")
+
+(deftest ^{:seon.test/long
+           "Analyzes the complete indexed graph and updates a committed diagnostic artifact."
+           :doc
+           "Records transitional output-floor totals without asserting graduation. The final ladder step adds the zero-bypass and zero-unresolved assertion."}
+  current-output-floor-classification-is-recorded
+  (test-support/with-database
+    (fn [connection]
+      (let [report (seon.fn/output-path-report @connection)
+            paths (:seon.fn.output/paths report)
+            counterexamples
+            (->> [:bypass :unresolved]
+                 (mapcat
+                  (fn [classification]
+                    (->> paths
+                         (filter #(= classification
+                                     (:seon.fn.output/classification %)))
+                         (sort-by (juxt (comp count :seon.fn.output/path)
+                                        :seon.fn.output/source
+                                        :seon.fn.output/sink))
+                         (take 10))))
+                 vec)
+            artifact
+            {:seon.fn.output/totals (:seon.fn.output/totals report)
+             :seon.fn.output/counterexamples counterexamples}]
+        (spit output-floor-report-path (str (pr-str artifact) "\n"))
+        (is (map? (:seon.fn.output/totals artifact)))
+        (is (every? int? (vals (:seon.fn.output/totals artifact))))))))
 
 (deftest blocking-analysis-keeps-the-fresh-branch-unpublished
   (let [root (fixture-root)]

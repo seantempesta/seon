@@ -2,6 +2,8 @@
           :arities [:vector #:seon.db{:component true} :seon.db/ref],
           :ast [:and #:seon.db{:component true} :seon.db/ref],
           :calls [:set :seon.db/ref],
+          :external-sink
+          [:enum :ai-visible-text :html-response :codec-storage],
           :doc [:string #:seon.search{:index :text}],
           :keywords
           [:set
@@ -25,6 +27,12 @@
            [:seon.fn/arities {:optional true} :seon.fn/arities]
            [:seon.fn/ast {:optional true} :seon.fn/ast]
            [:seon.fn/workload {:optional true} :seon.fn/workload]
+           [:seon.fn/external-sink
+            {:optional true}
+            :seon.fn/external-sink]
+           [:seon.fn/projection-boundary
+            {:optional true}
+            :seon.fn/projection-boundary]
            [:seon.effect/capability
             {:optional true}
             :seon.effect/capability]],
@@ -38,6 +46,8 @@
            [:seon.fn/manifest {:optional true} :map]],
           :ns :seon.db/ref,
           :private? :boolean,
+          :projection-boundary
+          [:enum :seon.render/ai :seon.render/html :none],
           :roots [:vector [:string {:min 1}]],
           :source [:string {:min 1}],
           :spec :string,

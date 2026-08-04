@@ -297,6 +297,8 @@
         (first (filter #(= namespace-name (::analyzer/name %))
                        (::analyzer/namespace-definitions analysis)))
         source (exact-source entry)
+        external-sink (:seon.fn/external-sink metadata)
+        projection-boundary (:seon.fn/projection-boundary metadata)
         capability-declared? (contains? metadata :seon.effect/capability)
         capability (capability-symbol
                     (:seon.effect/capability metadata))]
@@ -343,6 +345,12 @@
         (assoc :seon.fn/keywords (keyword-values used-keywords qualified))
         (contains? #{:io :compute} (:seon.workload metadata))
         (assoc :seon.fn/workload (:seon.workload metadata))
+        (contains? #{:ai-visible-text :html-response :codec-storage}
+                   external-sink)
+        (assoc :seon.fn/external-sink external-sink)
+        (contains? #{:seon.render/ai :seon.render/html :none}
+                   projection-boundary)
+        (assoc :seon.fn/projection-boundary projection-boundary)
         capability-declared?
         (assoc :seon.effect/capability capability))
 
@@ -450,6 +458,202 @@
        sort
        vec))
 
+(def ^:private required-projection-by-sink
+  {:ai-visible-text :seon.render/ai
+   :html-response :seon.render/html
+   :codec-storage :none})
+
+(def ^:private visible-projections
+  [:seon.render/ai :seon.render/html])
+
+(defn- output-graph
+  [database]
+  (let [functions
+        (->> (db/q '[:find [?symbol ...]
+                     :where [_ :seon.fn/sym ?symbol]]
+                   database)
+             sort
+             vec)
+        calls
+        (reduce
+         (fn [by-caller [caller called]]
+           (update by-caller caller (fnil conj []) called))
+         {}
+         (sort
+          (db/q '[:find ?caller-symbol ?called-symbol
+                  :where
+                  [?caller :seon.fn/sym ?caller-symbol]
+                  [?caller :seon.fn/calls ?called]
+                  [?called :seon.fn/sym ?called-symbol]]
+                database)))
+        sinks
+        (into {}
+              (db/q '[:find ?symbol ?sink
+                      :where
+                      [?function :seon.fn/sym ?symbol]
+                      [?function :seon.fn/external-sink ?sink]]
+                    database))
+        boundaries
+        (into {}
+              (db/q '[:find ?symbol ?boundary
+                      :where
+                      [?function :seon.fn/sym ?symbol]
+                      [?function :seon.fn/projection-boundary ?boundary]]
+                    database))]
+    {:seon.fn.output.graph/functions functions
+     :seon.fn.output.graph/calls calls
+     :seon.fn.output.graph/sinks sinks
+     :seon.fn.output.graph/boundaries boundaries}))
+
+(defn- advance-output-state
+  [state function-symbol boundary]
+  (case boundary
+    :none
+    (-> state
+        (update :seon.fn.output.state/seen conj :none)
+        (update :seon.fn.output.state/bypassed
+                into
+                (remove (:seon.fn.output.state/seen state)
+                        visible-projections))
+        (update :seon.fn.output.state/first-bypass
+                (fn [first-bypass]
+                  (reduce
+                   (fn [result required]
+                     (if (or (contains? (:seon.fn.output.state/seen state)
+                                        required)
+                             (contains? result required))
+                       result
+                       (assoc result required function-symbol)))
+                   first-bypass
+                   visible-projections))))
+
+    (:seon.render/ai :seon.render/html)
+    (update state :seon.fn.output.state/seen conj boundary)
+
+    state))
+
+(defn- output-classification
+  [state external-sink]
+  (let [required (get required-projection-by-sink external-sink)
+        seen (:seon.fn.output.state/seen state)
+        bypassed (:seon.fn.output.state/bypassed state)]
+    (cond
+      (and (= :codec-storage external-sink)
+           (contains? seen :none))
+      :codec
+
+      (contains? bypassed required)
+      :bypass
+
+      (contains? seen required)
+      :projected
+
+      :else
+      :unresolved)))
+
+(defn- source-output-paths
+  [graph source]
+  (let [calls (:seon.fn.output.graph/calls graph)
+        sinks (:seon.fn.output.graph/sinks graph)
+        boundaries (:seon.fn.output.graph/boundaries graph)
+        initial-state
+        {:seon.fn.output.state/seen #{}
+         :seon.fn.output.state/bypassed #{}
+         :seon.fn.output.state/first-bypass {}}]
+    (loop [pending
+           (conj clojure.lang.PersistentQueue/EMPTY
+                 {:seon.fn.output.walk/function source
+                  :seon.fn.output.walk/path [source]
+                  :seon.fn.output.walk/state initial-state})
+           visited #{}
+           reports {}]
+      (if (empty? pending)
+        (vals reports)
+        (let [{function-symbol :seon.fn.output.walk/function
+               path :seon.fn.output.walk/path
+               state :seon.fn.output.walk/state}
+              (peek pending)
+              pending (pop pending)
+              state (advance-output-state
+                     state function-symbol (get boundaries function-symbol))
+              visit-key
+              [function-symbol
+               (:seon.fn.output.state/seen state)
+               (:seon.fn.output.state/bypassed state)]]
+          (if (contains? visited visit-key)
+            (recur pending visited reports)
+            (if-let [external-sink (get sinks function-symbol)]
+              (let [required (get required-projection-by-sink external-sink)
+                    classification (output-classification state external-sink)
+                    report-key [function-symbol classification]
+                    report
+                    (cond->
+                     {:seon.fn.output/source source
+                      :seon.fn.output/sink function-symbol
+                      :seon.fn.output/external-sink external-sink
+                      :seon.fn.output/required-projection required
+                      :seon.fn.output/classification classification
+                      :seon.fn.output/path path}
+                      (= :bypass classification)
+                      (assoc :seon.fn.output/first-bypass
+                             (get-in state
+                                     [:seon.fn.output.state/first-bypass
+                                      required])))]
+                (recur pending
+                       (conj visited visit-key)
+                       (if (contains? reports report-key)
+                         reports
+                         (assoc reports report-key report))))
+              (recur
+               (reduce
+                (fn [queue called]
+                  (conj queue
+                        {:seon.fn.output.walk/function called
+                         :seon.fn.output.walk/path (conj path called)
+                         :seon.fn.output.walk/state state}))
+                pending
+                (get calls function-symbol []))
+               (conj visited visit-key)
+               reports))))))))
+
+(defn output-path-report
+  "Classified external-sink reachability with shortest path evidence.
+
+  One shortest representative is retained for each source, sink, and
+  classification. A visible path is `:projected` only when its required
+  projection occurs before any `:none` value-to-text boundary. A `:none`
+  boundary before projection is a `:bypass`; a visible sink with neither is
+  `:unresolved`. Codec paths require and cross `:none` by construction.
+
+  This is the transition diagnostic, not the graduation assertion. The final
+  universal-output-floor ladder step asserts zero bypasses and unresolved
+  paths after every crossing has been converted and declared."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  :seon.fn.output/report]}
+  [database]
+  (let [graph (output-graph database)
+        paths
+        (->> (:seon.fn.output.graph/functions graph)
+             (mapcat #(source-output-paths graph %))
+             (sort-by (juxt :seon.fn.output/source
+                            :seon.fn.output/sink
+                            :seon.fn.output/classification
+                            :seon.fn.output/path))
+             vec)
+        classification-counts
+        (frequencies (map :seon.fn.output/classification paths))
+        sink-counts (frequencies (map :seon.fn.output/external-sink paths))]
+    {:seon.fn.output/totals
+     {:seon.fn.output/sinks
+      (count (:seon.fn.output.graph/sinks graph))
+      :seon.fn.output/ai-paths (get sink-counts :ai-visible-text 0)
+      :seon.fn.output/html-paths (get sink-counts :html-response 0)
+      :seon.fn.output/codec-paths (get sink-counts :codec-storage 0)
+      :seon.fn.output/projected (get classification-counts :projected 0)
+      :seon.fn.output/unresolved (get classification-counts :unresolved 0)
+      :seon.fn.output/bypasses (get classification-counts :bypass 0)}
+     :seon.fn.output/paths paths}))
+
 (defn- capability-refused!
   [rule function-symbol data]
   (throw
@@ -533,7 +737,7 @@
   "Build one deterministic first-party file projection."
   {:malli/schema
    [:=>
-    [:cat [:map {:closed true}
+    [:cat [:map
            [:seon.fn.file/path [:string {:min 1}]]
            [:seon.fn.file/first-party-functions
             [:vector [:string {:min 1}]]]]]
@@ -626,7 +830,7 @@
 (defn build-manifest
   "Build deterministic artifacts for the complete first-party program."
   {:malli/schema
-   [:=> [:cat [:map {:closed true}
+   [:=> [:cat [:map
               [:seon.fn/roots :seon.fn/roots]]]
     [:map]]}
   [request]

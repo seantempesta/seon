@@ -1,0 +1,50 @@
+#:seon.fn.output{:ai-paths :int,
+                 :bypasses :int,
+                 :classification
+                 [:enum :projected :bypass :unresolved :codec],
+                 :codec-paths :int,
+                 :counterexamples [:vector :seon.fn.output/path-report],
+                 :external-sink :seon.fn/external-sink,
+                 :first-bypass :seon.fn/sym,
+                 :html-paths :int,
+                 :path [:vector :seon.fn/sym],
+                 :path-report
+                 [:map
+                  [:seon.fn.output/source :seon.fn.output/source]
+                  [:seon.fn.output/sink :seon.fn.output/sink]
+                  [:seon.fn.output/external-sink
+                   :seon.fn.output/external-sink]
+                  [:seon.fn.output/required-projection
+                   {:optional true}
+                   :seon.fn.output/required-projection]
+                  [:seon.fn.output/classification
+                   :seon.fn.output/classification]
+                  [:seon.fn.output/first-bypass
+                   {:optional true}
+                   :seon.fn.output/first-bypass]
+                  [:seon.fn.output/path :seon.fn.output/path]],
+                 :paths [:vector :seon.fn.output/path-report],
+                 :projected :int,
+                 :report
+                 [:map
+                  [:seon.fn.output/totals :seon.fn.output/totals]
+                  [:seon.fn.output/paths :seon.fn.output/paths]],
+                 :report-artifact
+                 [:map
+                  [:seon.fn.output/totals :seon.fn.output/totals]
+                  [:seon.fn.output/counterexamples
+                   :seon.fn.output/counterexamples]],
+                 :required-projection :seon.fn/projection-boundary,
+                 :sink :seon.fn/sym,
+                 :sinks :int,
+                 :source :seon.fn/sym,
+                 :totals
+                 [:map
+                  [:seon.fn.output/sinks :seon.fn.output/sinks]
+                  [:seon.fn.output/ai-paths :seon.fn.output/ai-paths]
+                  [:seon.fn.output/html-paths :seon.fn.output/html-paths]
+                  [:seon.fn.output/codec-paths :seon.fn.output/codec-paths]
+                  [:seon.fn.output/projected :seon.fn.output/projected]
+                  [:seon.fn.output/unresolved :seon.fn.output/unresolved]
+                  [:seon.fn.output/bypasses :seon.fn.output/bypasses]],
+                 :unresolved :int}
