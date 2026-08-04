@@ -42,6 +42,10 @@ protected implementation or invent a second tool protocol.
 - Exact contracts remain colocated with code and enter context through the
   program graph. This document owns namespace purpose and boundary, not a
   signature copy that can drift.
+- `doc` keeps `clojure.repl/doc`'s symbol, arglist, and docstring face, then
+  renders each ordered arity's resolved input and output schema keys and forms
+  from the program graph. Schema forms use the ordinary bounded print floor;
+  the standard `:seon.error/value` arm renders as its bare key.
 - Every public function is agent-callable by definition. Function menus and
   program export derive the public, non-private function surface directly;
   complete schemas determine which functions can render compact contracts.

@@ -713,42 +713,106 @@
 (deftest bare-dir-and-program-derived-doc-are-repl-native
   (test-support/with-database
     (fn [connection]
-      (let [db @connection
+      (let [giant-schema-key :fixture.doc/giant
+            giant-schema-form
+            (into [:map]
+                  (map (fn [index]
+                         [(keyword "fixture.doc" (str "field-" index)) :int]))
+                  (range 500))
+            _ (db/transact!
+               connection
+               [{:seon.schema/key giant-schema-key
+                 :seon.schema.admission/source :core
+                 :seon.schema/form (pr-str giant-schema-form)}])
+            _ (db/transact!
+               connection
+               [{:seon.fn/sym "fixture.doc/uncontracted"
+                 :seon.fn/doc "An uncontracted fixture."
+                 :seon.fn/arglists "([value])"
+                 :seon.fn/private? false}
+                {:seon.fn/sym "fixture.doc/giant"
+                 :seon.fn/doc "A giant contracted fixture."
+                 :seon.fn/arglists "([request])"
+                 :seon.fn/private? false
+                 :seon.fn/arities
+                 [{:seon.fn.arity/order 0
+                   :seon.fn.arity/input-refs
+                   [[:seon.schema/key giant-schema-key]]}]}])
+            db @connection
             ctx (eval/build-base-ctx)
             _ (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db db})
             directory (run-in ctx "(dir my.message)" 2000)
-            documentation (run-in ctx "(doc my.message/send)" 2000)
-            row (db/pull db '[:seon.fn/sym :seon.fn/doc
-                             :seon.fn/arglists]
-                        [:seon.fn/sym "my.message/send"])
-            expected-output
-            (str "-------------------------\n"
-                 (:seon.fn/sym row) "\n"
-                 (:seon.fn/arglists row) "\n"
-                 (str/join "\n"
-                           (map #(str "; " %)
-                                (str/split-lines (:seon.fn/doc row))))
-                 "\n")
-            read-forms
-            (with-open [reader (java.io.PushbackReader.
-                                (java.io.StringReader.
-                                 (:seon.cluster.eval/output documentation)))]
-              (loop [forms []]
-                (let [form (edn/read {:eof ::eof} reader)]
-                  (if (= ::eof form)
-                    forms
-                    (recur (conj forms form))))))]
+            read-doc (run-in ctx "(doc my.fs/read)" 2000)
+            multi-doc (run-in ctx "(doc my.message/send)" 2000)
+            uncontracted-doc
+            (run-in ctx "(doc fixture.doc/uncontracted)" 2000)
+            giant-doc (run-in ctx "(doc fixture.doc/giant)" 2000)
+            read-output (:seon.cluster.eval/output read-doc)
+            multi-output (:seon.cluster.eval/output multi-doc)
+            uncontracted-output
+            (:seon.cluster.eval/output uncontracted-doc)
+            giant-output (:seon.cluster.eval/output giant-doc)]
         (is (= "decline\nsend\n"
                (:seon.cluster.eval/output directory)))
         (is (nil? (:seon.sci.admit/value directory)))
-        (is (= expected-output (:seon.cluster.eval/output documentation))
-            "doc prints the acquired program-row facts, not SCI Var metadata")
-        (is (nil? (:seon.sci.admit/value documentation)))
-        (is (= [(symbol "-------------------------")
-                'my.message/send
-                '([to content] [to content about])]
-               read-forms)
-            "the complete printed bytes read as ordinary Clojure")))))
+        (testing "one contracted function resolves both sides of its contract"
+          (is (every? #(str/includes? read-output %)
+                      ["my.fs/read"
+                       "([request])"
+                       "Read one bounded byte window"
+                       "  in:  :my.fs/read-request"
+                       "[:my.fs/path :my.fs/path]"
+                       "  out: :my.fs/read-result"
+                       "[:my.fs/digest :my.fs/digest]"
+                       "       :seon.error/value"]))
+          (is (= ["       :seon.error/value"]
+                 (filterv #(str/includes? % ":seon.error/value")
+                          (str/split-lines read-output)))
+              "the standard error arm is exactly one bare-key line")
+          (is (not-any? #(str/starts-with? % ";")
+                        (str/split-lines read-output))
+              "doc output is result text, never comment syntax"))
+        (testing "multiple arities each retain their ordered contract block"
+          (let [lines (str/split-lines multi-output)]
+            (is (= 2 (count (filter #(str/starts-with? % "  in:") lines))))
+            (is (= 2 (count (filter #(str/starts-with? % "  out:") lines)))))
+          (is (< (str/index-of multi-output "  arity 2:")
+                 (str/index-of multi-output "  arity 3:"))))
+        (testing "an uncontracted function gains no empty contract labels"
+          (is (every? #(str/includes? uncontracted-output %)
+                      ["fixture.doc/uncontracted"
+                       "([value])"
+                       "An uncontracted fixture."]))
+          (is (not (str/includes? uncontracted-output "  in:")))
+          (is (not (str/includes? uncontracted-output "  out:"))))
+        (testing "a giant schema uses the ordinary structural print floor"
+          (is (str/includes? giant-output "  in:  :fixture.doc/giant"))
+          (is (str/includes? giant-output "..."))
+          (is (not (str/includes? giant-output ":fixture.doc/field-499")))
+          (is (< (count giant-output) (count (pr-str giant-schema-form)))))
+        (testing "a non-core error definition keeps its resolved form"
+          (let [core-projection
+                (seon.schema/projection-from-database @connection)
+                projection
+                (seon.schema/projection-with-schema
+                 core-projection
+                 :seon.error/value
+                 (get-in core-projection
+                         [:seon.schema.projection/forms :seon.error/value])
+                 {:seon.schema.admission/source :agent})
+                nonstandard-ctx (eval/build-base-ctx)
+                _ (#'eval/install-program-doc!
+                   nonstandard-ctx @connection projection)
+                nonstandard-doc
+                (run-in nonstandard-ctx "(doc my.fs/read)" 2000)]
+            (is (some #(str/starts-with?
+                        % "       :seon.error/value  [:map")
+                      (str/split-lines
+                       (:seon.cluster.eval/output nonstandard-doc))))
+            (is (nil? (:seon.sci.admit/value nonstandard-doc)))))
+        (is (every? nil?
+                    (map :seon.sci.admit/value
+                         [read-doc multi-doc uncontracted-doc giant-doc])))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The armed boundary — time is the only limit

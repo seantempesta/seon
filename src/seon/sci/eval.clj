@@ -103,7 +103,6 @@
   happened. Nothing re-executes."
   (:require [clojure.edn :as edn]
             [clojure.main :as main]
-            [clojure.string :as str]
             [clojure.test]
             [clojure.test.check.generators :as gen]
             [my.background]
@@ -119,6 +118,7 @@
             [seon.db :as db]
             [seon.effect :as effect]
             [seon.instrument :as instrument]
+            [seon.print :as print]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -821,20 +821,125 @@
                   [local-name (sci/copy-var* host-var sci-namespace)]))
            intern-map))))
 
+(def ^:private program-documentation-selector
+  [{:seon.fn/arities
+    [:seon.fn.arity/order
+     :seon.fn.arity/arity
+     {:seon.fn.arity/input-refs
+      [:seon.schema/key :seon.schema/form]}
+     {:seon.fn.arity/output-refs
+      [:seon.schema/key :seon.schema/form]}]}])
+
+(defn- program-documentation-config
+  [db]
+  (let [cluster-name
+        (db/q '[:find ?cluster .
+                :where [?config :seon.config/cluster ?cluster]]
+              db)
+        effective
+        (merge
+         (config/defaults)
+         (when cluster-name
+           (db/pull db
+                    [:seon.config/on-core-error
+                     :seon.config.eval.result/max-depth
+                     :seon.config.eval.result/max-collection
+                     :seon.config.eval.result/max-string
+                     :seon.config.eval.result/max-nodes
+                     :seon.print/length
+                     :seon.print/level]
+                    [:seon.config/cluster cluster-name])))]
+    {:seon.sci.admit/caps (config/result-caps effective)
+     :seon.config/on-core-error (:seon.config/on-core-error effective)
+     :seon.print/options
+     (select-keys effective [:seon.print/length :seon.print/level])}))
+
+(defn- schema-form-text
+  [configuration standard-error? schema-ref]
+  (let [form (edn/read-string (:seon.schema/form schema-ref))]
+    (when-not (and standard-error?
+                   (= :seon.error/value (:seon.schema/key schema-ref)))
+      (let [admitted
+            (admit/admit-value
+             {:seon.sci.admit/value form
+              :seon.sci.admit/interrupt-fn (constantly nil)
+              :seon.sci.admit/caps (:seon.sci.admit/caps configuration)
+              :seon.config/on-core-error
+              (:seon.config/on-core-error configuration)})]
+        (print/emit-text (:seon.sci.admit/print-node admitted)
+                         (:seon.print/options configuration))))))
+
+(defn- role-contract-lines
+  [configuration standard-error? label schema-refs]
+  (let [first-prefix (case label
+                       :input "  in:  "
+                       :output "  out: ")]
+    (mapv
+     (fn [index schema-ref]
+       (str (if (zero? index) first-prefix "       ")
+            (:seon.schema/key schema-ref)
+            (when-let [form-text
+                       (schema-form-text
+                        configuration standard-error? schema-ref)]
+              (str "  " form-text))))
+     (range)
+     (sort-by (comp str :seon.schema/key) schema-refs))))
+
+(defn- arity-contract-lines
+  [configuration standard-error? arities]
+  (let [ordered-arities (sort-by :seon.fn.arity/order arities)
+        multiple? (< 1 (count ordered-arities))
+        blocks
+        (keep
+         (fn [arity]
+           (let [lines
+                 (into
+                  (role-contract-lines
+                   configuration standard-error? :input
+                   (:seon.fn.arity/input-refs arity))
+                  (role-contract-lines
+                   configuration standard-error? :output
+                   (:seon.fn.arity/output-refs arity)))]
+             (when (seq lines)
+               (if multiple?
+                 (into [(str "  arity "
+                             (:seon.fn.arity/arity arity)
+                             ":")]
+                       lines)
+                 lines))))
+         ordered-arities)]
+    (vec (mapcat identity (interpose [""] blocks)))))
+
 (defn- program-documentation
   "Public function documentation derived from one database value."
-  [db]
-  (into {}
-        (map (fn [[function-symbol doc arglists]]
-               [function-symbol
-                {:seon.fn/doc doc :seon.fn/arglists arglists}]))
-        (db/q '[:find ?function-symbol ?doc ?arglists
-               :where
-               [?function :seon.fn/sym ?function-symbol]
-               [?function :seon.fn/doc ?doc]
-               [?function :seon.fn/arglists ?arglists]
-               [?function :seon.fn/private? false]]
-             db)))
+  [db projection]
+  (let [configuration (program-documentation-config db)
+        standard-error?
+        (= :core
+           (get-in
+            projection
+            [:seon.schema.projection/schema-admissions
+             :seon.error/value
+             :seon.schema.admission/source]))]
+    (into {}
+          (map
+           (fn [[function-symbol doc arglists function]]
+             [function-symbol
+              {:seon.fn/doc doc
+               :seon.fn/arglists arglists
+               ::contract-lines
+               (arity-contract-lines
+                configuration standard-error?
+                (:seon.fn/arities function))}]))
+          (db/q '[:find ?function-symbol ?doc ?arglists
+                         (pull ?function selector)
+                  :in $ selector
+                  :where
+                  [?function :seon.fn/sym ?function-symbol]
+                  [?function :seon.fn/doc ?doc]
+                  [?function :seon.fn/arglists ?arglists]
+                  [?function :seon.fn/private? false]]
+                db program-documentation-selector))))
 
 (defn- program-doc-var
   "An SCI `doc` macro whose printed function facts came from acquisition."
@@ -844,22 +949,25 @@
     (sci/new-macro-var
      'doc
      (fn [form env function-symbol]
-       (if-let [{:seon.fn/keys [doc arglists]}
+       (if-let [{:seon.fn/keys [doc arglists]
+                 contract-lines ::contract-lines}
                 (get documentation (str function-symbol))]
-         (let [lines (concat ["-------------------------"
-                              (str function-symbol)
-                              arglists]
-                             (map #(str "; " %) (str/split-lines doc)))]
+         (let [ordinary-lines ["-------------------------"
+                               (str function-symbol)
+                               arglists]
+               print-doc (list 'clojure.core/println " " doc)]
            (cons 'do
-                 (concat (map #(list 'clojure.core/println %) lines)
+                 (concat (map #(list 'clojure.core/println %) ordinary-lines)
+                         [print-doc]
+                         (map #(list 'clojure.core/println %) contract-lines)
                          [nil])))
          (fallback form env function-symbol)))
      {:ns repl-ns})))
 
 (defn- install-program-doc!
   "Install one acquired program-doc projection without retaining the db."
-  [ctx db]
-  (let [doc-var (program-doc-var ctx (program-documentation db))]
+  [ctx db projection]
+  (let [doc-var (program-doc-var ctx (program-documentation db projection))]
     ;; Preserve qualified `clojure.repl/doc` and expose the same macro bare
     ;; through every namespace's ordinary clojure.core refer.
     (sci/add-namespace! ctx 'clojure.repl {'doc doc-var})
@@ -928,7 +1036,7 @@
                (fn [[_sym _ _ source-tx _]]
                  (agent-authored? source-tx)))
               all-function-rows)
-        _ (install-program-doc! ctx db)
+        _ (install-program-doc! ctx db projection)
         selected-namespace-names
         (into (into #{} (map #(nth % 2)) function-rows)
               (comp

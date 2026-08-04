@@ -16,6 +16,19 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**ADDENDUM — 2026-08-03, GRAPH-BACKED `doc` RESOLVES CONTRACTS.** The acquired
+`doc` macro preserves `clojure.repl/doc`'s symbol, arglist, and plain docstring
+face, then renders each ordered arity's resolved `:seon.fn.arity/input-refs`
+and `:seon.fn.arity/output-refs` as schema keys plus forms. Forms pass through
+the ordinary admission and structural print floor, the standard
+`:seon.error/value` arm stays compact as a bare key, and functions without
+schema refs retain their prior face without empty labels. The focused SCI eval
+gate passed 49 tests / 234 assertions and the REPL parity gate passed 69 / 69,
+both with zero failures or errors. A loaded-Var proof reinstalled the acquired
+projection in the running `default` cluster (PID 3885); `(doc my.fs/read)` then
+returned the resolved request, result, and bare error contracts through door
+mode. This proves live behavior without claiming a current-source refork.
+
 **ADDENDUM — 2026-08-03, UGLY OUTPUT COLLAPSES BY CONTENT SIGNATURE.** Core
 faults now retain and print one bounded face per `:seon.error/signature`, even
 when the database writer is dead (`7f09f6569`); a fresh committer proc also
