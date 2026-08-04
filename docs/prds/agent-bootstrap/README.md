@@ -70,6 +70,29 @@ renderer code:
   background-work ruling. Bounded by the ordinary output caps; ugly
   readline output is a defect like any other face.
 
+## The series is produced by a function, declared by symbol
+
+Owner-designed 2026-08-03 night: bootstrap forms are GENERATED per agent,
+not stored as rows or string templates. `:seon.cluster/bootstrap` on the
+cluster names the default producer function
+(`seon.bootstrap/default-forms`); `:seon.cluster.agent/bootstrap` on an
+agent names an override — the same declared-producer pattern as the
+readline and render producers, so slice 4's override mechanism is this
+one attribute. The producer is PURE: `({:agent … :db …})` → the ordered
+vector of `{:thought "…" :form <data>}` entries (`:source` verbatim
+string allowed where hand formatting matters, e.g. the defn lesson). The
+agent's namespace, id, keywords, and web port are ordinary arguments
+flowing into syntax-quoted code — the `{{…}}` mustache substitution over
+`bootstrap.edn` rows IS DELETED in the same change (textual templating
+of code is the parsed-representation violation). The display emits each
+`:thought` as the input-side `;;` lines before its form. Consequences,
+all by construction: owner iteration = editing the default defn (hot
+reload, every agent next turn); agent self-modification = define a
+function + transact the attribute (the exact move the readline lesson
+already teaches); cache stability = pure function of stable inputs;
+the producer is an ordinary indexed, doc-able, testable corpus function.
+Instruction PROSE stays db facts read by `(help)`; the SERIES is code.
+
 ## The narrative rule — the owner's one rule for the form series
 
 Owner-ruled 2026-08-03 night: **the bootstrap must read as one
