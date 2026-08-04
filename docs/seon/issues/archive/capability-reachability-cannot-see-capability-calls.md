@@ -1,9 +1,33 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, sci, effect, program-graph, curation]
 ---
+
+RESOLVED 2026-08-04 by `bcee99a74` (Fail closed on host Vars in form
+capability walks). The shared Var classifier now recognizes both SCI and host
+Vars, projects qualified symbols from the metadata contract used by
+`sci.core/var->symbol`, and retains the call-site symbol when a Var lacks
+classifying metadata. Both form walks therefore see host-bound capability
+entries, while an unclassifiable Var enters the unproven set and fails closed.
+
+The regression derives a host-bound entry from the database capability
+inventory, evaluates a definition that calls it through a real cluster ctx,
+and proves that the entry appears in both referenced and unproven sets and
+that `capability-free-references?` returns false. Its general class check binds
+an anonymous `clojure.lang.Var` and proves the call-site symbol remains
+unproven. Before the fix those four assertions failed; after it, the owning
+`seon.sci.session-image-test` plus `seon.cluster.loop-test` gate passed 31
+tests / 147 assertions with zero failures or errors.
+
+Live proof used scratch cluster `capvarwalk0804`. Before reload,
+`my.fs/read` resolved as `clojure.lang.Var`, both sets were empty, and the
+capability predicate returned true. After reloading the changed
+`seon.sci.eval` Vars, both sets contained `my.fs/read` and the predicate
+returned false. Committing a real definition whose body calls `my.fs/read`
+then produced `:seon.code.def/unrestorable` with no source, proving the
+session-image consumer now refuses replay.
 
 # See capability calls in the form-Var walk instead of failing open
 
