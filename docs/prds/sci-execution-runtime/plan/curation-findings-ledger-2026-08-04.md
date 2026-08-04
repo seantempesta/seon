@@ -30,6 +30,19 @@ dev-envelope lane's edits as the cause; its evidence cleared it — the
 creation/config lane, whose ownership confirmation is pending as it
 commits by index surgery. FULLY CLOSED: the creation/config lane confirmed and committed its hunks (`89fe1a287`), the dev-envelope lane verified and committed the remainder (`c683c7149`), and `cluster.clj` is clean.
 
+## A0-2. PLATFORM INCIDENT — render-receipt-ai NPE (opened 2026-08-04, evening)
+
+Every receipt in a live bootstrap drive fails `seon.cluster.run/render-receipt-ai`
+with `Number.doubleValue()` on null; message rendering fails similarly
+(22/22 Arm A transcripts invalid; evidence:
+[bootstrap-baseline-2026-08-04.md](../research/bootstrap-baseline-2026-08-04.md)).
+Regression from today's wave — candidate causes: W1 receipt facts
+(`c508d848c`) or bounded db-face projections (`59edb37fa`/`89fe1a287`).
+Routed incident-first into the `w2-curation-engine` lane (owns run.clj).
+Baseline experiment parked on the fix; Arm B mechanism itself landed
+(`02dd76e8a`) with a one-row live proof. Open until a drive attempt
+renders a complete transcript.
+
 ## A. Blockers with fix lanes running
 
 | # | Problem | Elegant solution | Status |
