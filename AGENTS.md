@@ -763,11 +763,14 @@ Worked examples, all measured on 2026-08-02:
   found by querying both sides rather than by naming it `render-html`.
 - "Is this var part of the agent-facing surface?" — `:seon.fn/private?`, the
   computed fact every agent-facing projection already honors.
-- COUNTEREXAMPLE, and the shape of the defect: "which tests exercise this
-  function?" is NOT answerable today, because `:seon.test` rows carry only
-  `sym`, `ns`, and `source` — no call edge. That missing edge, not a naming
-  convention between `foo` and `foo-test`, is what blocks definition-time
-  accretion testing.
+- "Which tests exercise this function?" — answerable since 2026-08-04
+  (F11): `:seon.test` rows carry the same `:seon.fn/calls` edges as
+  functions (one mechanism, `src/seon/fn.clj`), and
+  `seon.fn/tests-reaching` derives the transitive answer the
+  dependents-test quality gate needs. This was the standing
+  counterexample for a missing fact; it is now the worked example of
+  fixing one — the edge was declared at the one index pass, never a
+  `foo`/`foo-test` naming convention.
 
 ## Data-oriented Clojure rules
 
