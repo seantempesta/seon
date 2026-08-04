@@ -169,16 +169,15 @@
           ;; validate exactly as pulled. `:seon.schema/entity?` is the declared
           ;; discriminator: an entity must never accidentally acquire a
           ;; one-key value renderer merely because maps are open.
+          pulled-matches (schema/matching-shapes-in projection value)
           matches
-          (if (:db/id value)
-            (->> (concat transacted-matches
-                         (schema/matching-shapes-in projection value))
-                 (filter :seon.schema/entity?)
-                 (reduce (fn [by-key row]
-                           (assoc by-key (:seon.schema/key row) row))
-                         (sorted-map))
-                 vals)
-            transacted-matches)
+          (->> (concat transacted-matches pulled-matches)
+               (filter #(or (not (:db/id value))
+                            (:seon.schema/entity? %)))
+               (reduce (fn [by-key row]
+                         (assoc by-key (:seon.schema/key row) row))
+                       (sorted-map))
+               vals)
           producers
           (->> matches
                (keep #(get % output))
