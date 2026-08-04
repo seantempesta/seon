@@ -6,6 +6,7 @@
   agent's runs. Raw facts never acquire a detail level; every full, summary,
   and elided decision is derived for this call."
   (:require [clojure.edn :as edn]
+            [clojure.main :as main]
             [clojure.string :as str]
             [seon.db :as db]
             [seon.ai.tokens :as tokens]
@@ -475,16 +476,26 @@
   [_unit entry _detail]
   (prompted-source entry))
 
+(defn- execution-error-face
+  [error]
+  (-> {:clojure.error/phase :execution
+       :clojure.error/cause error}
+      main/ex-str
+      str/trim-newline))
+
 (defn- receipt-text
   [unit entry _detail]
-  (let [entity
+  (let [error (some->> (::error entry) (bounded-scalar unit))
+        entity
         (cond-> (::entity entry)
           (::result entry)
           (assoc :seon.cluster.eval/result-edn
                  (bounded-result unit (::result entry)))
-          (::error entry)
+          error
           (assoc :seon.cluster.eval/error
-                 (bounded-scalar unit (::error entry)))
+                 (if (::triage-edn entry)
+                   error
+                   (execution-error-face error)))
           (::triage-edn entry)
           (assoc :seon.cluster.eval/triage-edn (::triage-edn entry))
           (::output entry)
@@ -503,6 +514,7 @@
    ::run-id (::run-id entry)
    ::run-opened-at (::run-opened-at entry)
    ::detail detail
+   ::execution-error? (some? (::error entry))
    ::text (case (::kind entry)
             :message (message-text unit entry detail)
             :input (input-text unit entry detail)
@@ -574,13 +586,16 @@
   (into
    [:ol {:class "seon-transcript-list"}]
    (map (fn [entry]
-          [:li {:id (block/surface-id (entry-name entry))
-                :class (str "seon-transcript-entry"
-                            (when (= :attempt (::kind entry))
-                              " seon-transcript-attempt"))
-                :data-transcript-id (::id entry)
-                :data-transcript-kind (name (::kind entry))
-                :data-transcript-detail (some-> (::detail entry) name)}
+          [:li (cond->
+                 {:id (block/surface-id (entry-name entry))
+                  :class (str "seon-transcript-entry"
+                              (when (= :attempt (::kind entry))
+                                " seon-transcript-attempt"))
+                  :data-transcript-id (::id entry)
+                  :data-transcript-kind (name (::kind entry))
+                  :data-transcript-detail (some-> (::detail entry) name)}
+                 (::execution-error? entry)
+                 (assoc :data-transcript-error "true"))
            (if (= :attempt (::kind entry))
              (reasoning-disclosure (::reasoning entry))
              [:pre [:code (::text entry)]])]))

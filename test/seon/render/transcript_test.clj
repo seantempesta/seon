@@ -83,6 +83,15 @@
     (nodes rendered))
    0))
 
+(defn- html-entry-node
+  [rendered entry-id]
+  (some
+   (fn [node]
+     (let [attributes (when (map? (nth node 1 nil)) (nth node 1))]
+       (when (= entry-id (:data-transcript-id attributes))
+         node)))
+   (nodes rendered)))
+
 (def ^:private forbidden-session-narration
   ["Form 0 returned"
    "Form 0 failed"
@@ -236,6 +245,45 @@
                     (keyword (str "seon.transcript." (name kind)) id))
                    dom-id)))
           (is (str/includes? html "waiting for the peer review")))))))
+
+(deftest error-receipt-without-triage-has-an-execution-error-face
+  (support/with-database
+    (fn [connection]
+      (db/transact!
+       connection
+       [{:seon.cluster.agent/id agent-id}
+        {:seon.cluster.run/id "run-error-without-triage"
+         :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+         :seon.cluster.run/opened-at (at 0)}
+        {:seon.cluster.run.form/id "form-error-without-triage"
+         :seon.cluster.run.form/run
+         [:seon.cluster.run/id "run-error-without-triage"]
+         :seon.cluster.run.form/ordinal 0
+         :seon.cluster.run.form/source "(missing.function/call)"}
+        {:seon.cluster.eval/id "eval-error-without-triage"
+         :seon.cluster.eval/run
+         [:seon.cluster.run/id "run-error-without-triage"]
+         :seon.cluster.eval/ordinal 0
+         :seon.cluster.eval/at (at 1000)
+         :seon.cluster.eval/error "No such namespace: missing.function"}])
+      (let [request (unit @connection 100000)
+            ai (transcript/render-ai request)
+            html-value (transcript/render-html request)
+            html-entry (html-entry-node html-value
+                                        "eval-error-without-triage")
+            html-text (get-in html-entry [2 1 1])]
+        (testing "the AI projection presents the form and an execution error"
+          (is (str/includes? ai "user=> (missing.function/call)"))
+          (is (some #(str/starts-with? % "Execution error")
+                    (str/split-lines ai)))
+          (is (some #{"No such namespace: missing.function"}
+                    (str/split-lines ai))))
+        (testing "the HTML entry structurally identifies the same error face"
+          (is (= "true" (get-in html-entry [1 :data-transcript-error])))
+          (is (some #(str/starts-with? % "Execution error")
+                    (str/split-lines html-text)))
+          (is (some #{"No such namespace: missing.function"}
+                    (str/split-lines html-text))))))))
 
 (deftest a-tight-budget-degrades-then-elides-loudly
   (support/with-database
