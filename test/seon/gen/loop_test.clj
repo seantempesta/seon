@@ -72,7 +72,9 @@
            (seon.flow/start-work-launcher!
             {::seon.flow/configuration
              {:seon.config.flow.compute/queue-depth 10
-              :seon.config.flow.compute/concurrency 2}})]
+              :seon.config.flow.compute/concurrency 2
+              :seon.config.flow.io/queue-depth 2
+              :seon.config.flow.io/concurrency 2}})]
       (try
        (test-support/seed-cluster! connection "generate-code-v0")
        (db/transact! connection

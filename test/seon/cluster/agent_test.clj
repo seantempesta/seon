@@ -89,7 +89,9 @@
             (seon.flow/start-work-launcher!
              {::seon.flow/configuration
               {:seon.config.flow.compute/queue-depth 10
-               :seon.config.flow.compute/concurrency 3}})
+               :seon.config.flow.compute/concurrency 3
+               :seon.config.flow.io/queue-depth 2
+               :seon.config.flow.io/concurrency 2}})
             context-channel (async/chan)
             stream-channel (async/chan (async/sliding-buffer 1))
             render-channel (async/chan (async/sliding-buffer 1))
