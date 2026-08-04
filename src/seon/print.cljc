@@ -281,7 +281,7 @@
                   (str "requery refused: "
                        (or (:seon.print/requery-refusal unit)
                            "no stable identity was supplied")))]
-    (str (or (:seon.print/prefix unit) "…")
+    (str (or (:seon.print/prefix unit) "") "…"
          " " omitted " more " measure
          (when-some [total (:seon.render.data/total unit)]
            (str " of " total))
@@ -630,7 +630,11 @@
     (assoc node ::items
            (mapv (fn [index child]
                    (if (= ::elided (::face child))
-                     (elision-node profile path index 1 nil :children nil)
+                     (let [total (when (empty? path)
+                                   (:seon.render.data/total profile))]
+                       (elision-node profile path index
+                                     (if total (- total index) 1)
+                                     total :children nil))
                      (enrich-node child profile (conj path index))))
                  (range)
                  (::items node)))
@@ -638,7 +642,13 @@
     (::map ::record)
     (assoc node ::entries
            (mapv (fn [index entry]
-                   (enrich-entry entry profile (conj path index)))
+                   (if (= ::elided (::face entry))
+                     (let [total (when (empty? path)
+                                   (:seon.render.data/total profile))]
+                       (elision-node profile path index
+                                     (if total (- total index) 1)
+                                     total :children nil))
+                     (enrich-entry entry profile (conj path index))))
                  (range)
                  (::entries node)))
 

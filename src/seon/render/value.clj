@@ -16,6 +16,14 @@
   [entity]
   ((requiring-resolve 'seon.render/transacted) entity))
 
+(defn render-database-identity-ai
+  "Readable identity face for an admitted immutable database value."
+  {:malli/schema [:=> [:cat :seon.render/unit] :string]}
+  [unit]
+  (str "database " (pr-str (:db-name unit))
+       " at basis transaction " (:t unit)
+       " commit " (:datahike/commit-id unit)))
+
 (def ^:private print-option-keys
   #{:seon.print/length
     :seon.print/level
@@ -223,7 +231,10 @@
                         :seon.render.value/truncated? false})
                      (admitted-projection
                       (:seon.render.value/window display) caps))
-          profile (render-profile unit)
+          profile (cond-> (render-profile unit)
+                    (:seon.render.value/total display)
+                    (assoc :seon.render.data/total
+                           (:seon.render.value/total display)))
           tree (-> ((requiring-resolve 'seon.render/project-node)
                     unit
                     (:seon.render.value/semantic admitted)

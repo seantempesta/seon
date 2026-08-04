@@ -43,9 +43,9 @@
 (deftest one-admission-and-one-tee-produce-the-floor-twins
   (let [admissions (atom 0)
         emissions (atom 0)
-        original-admit admit/admit
+        original-admit admit/admit-value
         original-emit print/emit-both]
-    (with-redefs [admit/admit (fn [request]
+    (with-redefs [admit/admit-value (fn [request]
                                (swap! admissions inc)
                                (original-admit request))
                   print/emit-both (fn [node options]
@@ -93,18 +93,8 @@
     (is (= (:seon.cluster.eval/result-edn admitted)
            (value/artifact-result-edn restored)))))
 
-(deftest print-options-merge-over-declared-stock-defaults
+(deftest profile-fit-supersedes-legacy-print-cuts-with-values
   (is (= "(1 2 3)" (value/render-ai (unit '(1 2 3)))))
-  (is (= "(...)"
-         (value/render-ai
-          (assoc (unit '(1 2 3))
-                 :seon.print/options {:seon.print/length 0
-                                      :seon.print/level nil}))))
-  (is (= "#"
-         (value/render-ai
-          (assoc (unit '(1 2 3))
-                 :seon.print/options {:seon.print/length nil
-                                      :seon.print/level 0}))))
   (is (str/includes?
        (value/render-ai
         (assoc (unit (vec (range 20)))
@@ -118,10 +108,45 @@
                               :seon.config.eval.result/max-collection 4))
         text (value/render-ai bounded)
         html (hiccup/->string (value/render-html bounded))]
-    (is (str/includes? text "..."))
+    (is (str/includes? text "more children"))
     (is (str/includes? text "elided"))
     (is (str/includes? html "seon-print-elision"))
     (is (str/includes? html "seon-data-capped"))))
+
+(deftest elision-is-a-requeryable-structural-value
+  (let [digest (apply str (repeat 64 "a"))
+        projection
+        (value/prepare
+         (assoc (unit (vec (range 100)))
+                :seon.cluster.eval/result-blob digest
+                :seon.sci.admit/caps
+                (assoc caps :seon.config.eval.result/max-collection 4)))
+        html (hiccup/->string
+              (value/render-html
+               (assoc (unit (vec (range 100)))
+                      :seon.cluster.eval/result-blob digest
+                      :seon.sci.admit/caps
+                      (assoc caps
+                             :seon.config.eval.result/max-collection 4))))
+        elision (last (:seon.print/items
+                       (:seon.render.value/tree projection)))]
+    (is (= {:seon.print/omitted 96
+            :seon.render.data/total 100
+            :seon.render.data/path []
+            :seon.render.data/next-offset 4
+            :seon.render.profile/id :seon.render.profile/agent
+            :seon.print/requery-id [:seon.blob/digest digest]}
+           (select-keys elision
+                        [:seon.print/omitted
+                         :seon.render.data/total
+                         :seon.render.data/path
+                         :seon.render.data/next-offset
+                         :seon.render.profile/id
+                         :seon.print/requery-id])))
+    (is (str/includes? (:seon.render.value/text projection)
+                       "96 more children"))
+    (is (str/includes? html "96 more children"))
+    (is (str/includes? html digest))))
 
 (deftest references-stay-opaque
   (let [projection (value/prepare (unit (atom {:private/value 42})))

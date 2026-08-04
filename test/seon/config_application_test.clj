@@ -46,6 +46,10 @@
    :seon.config.eval.result/max-string :arm-time
    :seon.config.eval.result/max-nodes :arm-time
    :seon.config.eval.result/blob-threshold :live
+   :seon.config.render.agent/token-budget :live
+   :seon.config.render.agent/max-depth :live
+   :seon.config.render.agent/max-children :live
+   :seon.config.render.agent/composition :live
    :seon.config.eval/time-limit-ms :arm-time
    :seon.config.error/recurrence-limit :mixed
    :seon.config.error/escalate-to :mixed

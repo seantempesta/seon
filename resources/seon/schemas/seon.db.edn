@@ -28,6 +28,7 @@
           :basis-t :int,
           :database-value-identity
           [:map
+           {:seon.render/ai seon.render.value/render-database-identity-ai}
            [:db-name :seon.db/database-name]
            [:t :seon.db/basis-t]
            [:datahike/commit-id :uuid]],

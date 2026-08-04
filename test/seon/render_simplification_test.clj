@@ -62,6 +62,18 @@
            (is (not= :seon.render/missing-declaration
                      (:seon.error/kind (render-ai request))))))))))
 
+(deftest nested-database-value-renders-its-declared-identity-face
+  (support/with-database
+   (fn [connection]
+     (let [database @connection
+           ctx (eval/cluster-ctx database connection)
+           rendered (render-ai
+                     (render-request database ctx nil
+                                     {:probe/database database}))]
+       (is (str/includes? rendered "database"))
+       (is (str/includes? rendered "basis transaction"))
+       (is (not (str/includes? rendered "#datahike.db.DB")))))))
+
 (deftest owning-namespace-alone-selects-across-a-walk
   (support/with-database
    (fn [connection]

@@ -171,7 +171,9 @@
                                [:seon.print/value
                                 [:ref :seon.print/node*]]]]
                              [:seon.print/elided
-                              :seon.print/elision]
+                              [:map
+                               [:seon.print/face
+                                [:= :seon.print/elided]]]]
                              [:seon.print/projected
                               [:map
                                {:gen/gen seon.print/projected-node-generator}
