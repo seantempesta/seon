@@ -15,6 +15,8 @@
                 {:optional true}
                 :seon.boot/cluster-name]],
               :cluster [:string {:min 1, :seon.db/identity true}],
+              :missing-effective :seon.boot/cluster-name
+              :missing-effective-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the cluster whose effective configuration facts are absent"} [:seon.config/missing-effective :seon.config/missing-effective] [:seon.error/message :seon.error/message]]
               :compile-request
               [:map
                [:seon.config/manifest

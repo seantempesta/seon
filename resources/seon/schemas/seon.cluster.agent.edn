@@ -50,6 +50,16 @@
                       [:seon.cluster.agent/id :seon.cluster.agent/id]
                       [:seon.ns/name :seon.ns/name]
                       [:seon.cluster/name :seon.cluster/name]],
+                     :creation-result
+                     [:map
+                      {:seon.render/ai
+                       seon.cluster.agent/render-creation-ai,
+                       :seon.render/html
+                       seon.cluster.agent/render-creation-html}
+                      [:seon.cluster.agent/id :seon.cluster.agent/id]
+                      [:seon.ns/name :seon.ns/name]
+                      [:seon.cluster/name :seon.cluster/name]
+                      [:seon.cluster.run/id :seon.cluster.run/id]],
                      :creation-tx [:vector :map],
                      :disarm-request
                      [:map

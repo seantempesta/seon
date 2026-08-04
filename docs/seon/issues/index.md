@@ -29,7 +29,6 @@ See `README.md` for the convention.
 | [Attribute evals to the agent's assigned namespace](evals-ignore-the-agents-assigned-namespace.md) | blocker | SCI eval-context owner design gate |
 | [Prevent one cluster from exhausting every co-hosted cluster's heap](cohosted-clusters-share-one-unbounded-agent-heap.md) | blocker | no-crash architecture design gate |
 | [`seon.db/q` silently returns nil when its db argument is an error value](seon-db-q-returns-nil-on-error-value-db-argument.md) | blocker | database error-value repair |
-| [A forked cluster keeps the ancestor's `:seon.config/cluster`, so `config/effective` returns `{}`](forked-cluster-inherits-the-ancestors-config-cluster-name.md) | blocker | cluster config identity repair |
 | [Repair development MCP error locations and status scope](dev-mcp-envelopes-misdirect-errors-and-sprawl-status.md) | blocker | development MCP envelope repair |
 | [Eight `:seon.config.web/*` dials are registered with no shipped default](web-config-dials-ship-without-shipped-defaults.md) | blocker | web config default repair |
 

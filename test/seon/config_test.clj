@@ -339,6 +339,29 @@
                   [?process :seon.db.process/id ?process-id]]
                 @connection)))))))
 
+(deftest apply-replaces-an-inherited-config-identity-regardless-of-provenance
+  (test-support/with-database
+    (fn [connection]
+      (let [ancestor
+            (:seon.config/desired-row
+             (config/compile-manifest
+              {:seon.boot/cluster-name "ancestor"}))]
+        (db/transact! connection [ancestor])
+        (config/apply!
+         {:seon.config/connection connection
+          :seon.config/manifest
+          {:seon.config.flow.compute/queue-depth 17}
+          :seon.boot/cluster-name "fork"})
+        (is (= ["fork"]
+               (sort
+                (db/q '[:find [?cluster-name ...]
+                        :where
+                        [_ :seon.config/cluster ?cluster-name]]
+                      @connection))))
+        (is (= 17
+               (:seon.config.flow.compute/queue-depth
+                (config/effective @connection "fork"))))))))
+
 (deftest two-clusters-on-one-jvm-have-no-config-bleed
   (test-support/with-database
     (fn [alpha]
@@ -360,7 +383,13 @@
           (is (= 22
                  (:seon.config.flow.compute/queue-depth
                   (config/effective @beta "beta"))))
-          (is (= {}
-                 (config/effective @alpha "beta")))
-          (is (= {}
-                 (config/effective @beta "alpha"))))))))
+          (let [missing-beta (config/effective @alpha "beta")
+                missing-alpha (config/effective @beta "alpha")]
+            (is (= "beta" (:seon.config/missing-effective missing-beta)))
+            (is (= "alpha" (:seon.config/missing-effective missing-alpha)))
+            (is (= missing-beta (config/result-caps missing-beta)))
+            (is (= missing-alpha (config/result-caps missing-alpha)))
+            (is (= "No effective configuration facts match cluster \"beta\"; available clusters [\"alpha\"]."
+                   (:seon.error/message missing-beta)))
+            (is (= "No effective configuration facts match cluster \"alpha\"; available clusters [\"beta\"]."
+                   (:seon.error/message missing-alpha)))))))))

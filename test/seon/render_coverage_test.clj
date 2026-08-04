@@ -116,6 +116,11 @@
           :seon.render/html `transcript/render-session-html}
          (select-keys (family-properties :seon.cluster.agent/agent)
                       [:seon.render/ai :seon.render/html])))
+  (is (= {:seon.render/ai `agent/render-creation-ai
+          :seon.render/html `agent/render-creation-html}
+         (select-keys
+          (family-properties :seon.cluster.agent/creation-result)
+          [:seon.render/ai :seon.render/html])))
   (is (= {:seon.render/ai `run/render-receipt-ai
           :seon.render/html `run/render-receipt-html}
          (select-keys (family-properties :seon.cluster.eval/receipt)

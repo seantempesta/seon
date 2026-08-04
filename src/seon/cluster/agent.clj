@@ -100,6 +100,29 @@
       :seon.cluster.agent/namespace namespace-tempid
       :seon.cluster.agent/cluster [:seon.cluster/name cluster-name]}]))
 
+(defn render-creation-ai
+  "`:seon.render/ai` — the compact result of creating or resuming an agent."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  [unit]
+  (when-let [agent-id (:seon.cluster.agent/id unit)]
+    (str "Agent " agent-id " · namespace " (:seon.ns/name unit)
+         " · cluster " (:seon.cluster/name unit)
+         " · bootstrap run " (:seon.cluster.run/id unit) ".")))
+
+(defn render-creation-html
+  "`:seon.render/html` — the compact agent-creation result card."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:maybe :seon.render/hiccup]]}
+  [unit]
+  (when-let [agent-id (:seon.cluster.agent/id unit)]
+    [:article {:class "seon-family-entry seon-agent-creation-entry"}
+     [:h3 (str "Agent " agent-id)]
+     [:dl
+      [:div [:dt "Namespace"] [:dd [:code (str (:seon.ns/name unit))]]]
+      [:div [:dt "Cluster"] [:dd (:seon.cluster/name unit)]]
+      [:div [:dt "Bootstrap run"]
+       [:dd [:code (:seon.cluster.run/id unit)]]]]]))
+
 (defn owner-of
   "The agent id assigned to `namespace-name`, or nil."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ns/name]

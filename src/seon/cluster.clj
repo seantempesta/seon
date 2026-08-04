@@ -1248,18 +1248,55 @@
             :seon.cluster.run/opened-at now}))))
 
 (defn ensure-entity!
-  "Create one absent agent atomically; an existing agent resumes untouched."
+  "Create one absent agent atomically and return its durable useful identity.
+
+  An existing agent resumes untouched, so the result is always derived from
+  the committed database value rather than from the caller's request."
   {:malli/schema
    [:=> [:cat :seon.store/branch-connection
          :seon.db.process/id
          :seon.cluster.agent/creation-request]
-    [:or [:map] :seon.error/value]]}
+    [:or :seon.cluster.agent/creation-result :seon.error/value]]}
   [connection process request]
-  (db/transact!
-   connection
-   {:tx-data [[:db.fn/call #'ensure-entity-call
-               process (java.util.Date.) request]]
-    :tx-meta {:seon.db/process [:seon.db.process/id process]}}))
+  (let [transaction-result
+        (db/transact!
+         connection
+         {:tx-data [[:db.fn/call #'ensure-entity-call
+                     process (java.util.Date.) request]]
+          :tx-meta {:seon.db/process [:seon.db.process/id process]}})]
+    (if (:seon.error/kind transaction-result)
+      transaction-result
+      (let [database (:db-after transaction-result)
+            agent-id (:seon.cluster.agent/id request)
+            bootstrap-run-id (bootstrap/run-id agent-id)
+            agent
+            (db/pull database
+                     '[:seon.cluster.agent/id
+                       {:seon.cluster.agent/namespace [:seon.ns/name]}
+                       {:seon.cluster.agent/cluster [:seon.cluster/name]}]
+                     [:seon.cluster.agent/id agent-id])
+            run-agent-id
+            (db/q '[:find ?agent-id .
+                    :in $ ?run-id
+                    :where
+                    [?run :seon.cluster.run/id ?run-id]
+                    [?run :seon.cluster.run/agent ?agent]
+                    [?agent :seon.cluster.agent/id ?agent-id]]
+                  database bootstrap-run-id)
+            namespace-name
+            (get-in agent [:seon.cluster.agent/namespace :seon.ns/name])
+            cluster-name
+            (get-in agent [:seon.cluster.agent/cluster :seon.cluster/name])]
+        (if (and namespace-name cluster-name (= agent-id run-agent-id))
+          {:seon.cluster.agent/id agent-id
+           :seon.ns/name namespace-name
+           :seon.cluster/name cluster-name
+           :seon.cluster.run/id bootstrap-run-id}
+          {:seon.error/kind :seon.cluster.agent/creation-incomplete
+           :seon.error/message
+           (str "Agent " (pr-str agent-id)
+                " committed without its namespace, cluster, or bootstrap run.")
+           :seon.error/data {:seon.cluster.agent/id agent-id}})))))
 
 (defn- seed-root-agent!
   "Ensure the root agent exists without changing a resumed entity."

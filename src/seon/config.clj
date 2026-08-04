@@ -104,9 +104,14 @@
 (defn result-caps
   "Derive the value-admission caps from one effective configuration."
   {:malli/schema
-   [:=> [:cat :seon.config/effective] :seon.sci.admit/caps]}
+   [:=> [:cat [:or :seon.config/effective
+                :seon.config/missing-effective-error]]
+    [:or :seon.sci.admit/caps
+     :seon.config/missing-effective-error]]}
   [effective]
-  (select-keys effective result-cap-attributes))
+  (if (:seon.config/missing-effective effective)
+    effective
+    (select-keys effective result-cap-attributes)))
 
 (defn- map-attributes
   [schema-key]
@@ -416,7 +421,17 @@
   (let [desired
         (into [(:seon.config/desired-row compiled)]
               (:seon.config/initialization compiled))
-        identities (into #{} (keep row-identity) desired)
+        inherited-config-identities
+        (into #{}
+              (map (fn [cluster-name]
+                     [:seon.config/cluster cluster-name]))
+              (db/q '[:find [?cluster-name ...]
+                      :where
+                      [_ :seon.config/cluster ?cluster-name]]
+                    @connection))
+        identities (into inherited-config-identities
+                         (keep row-identity)
+                         desired)
         request
         {::reconcile/desired desired
          ::reconcile/process managing-process-identity
@@ -461,25 +476,41 @@
       :seon.boot/cluster-name]))))
 
 (defn effective
-  "Read the effective config for one cluster; absent cluster means `default`."
+  "Read one cluster's effective config or return one bounded error value."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value]
-     [:or :seon.config/effective [:map {:closed true}]]]
+     [:or :seon.config/effective
+      :seon.config/missing-effective-error]]
     [:=> [:cat :seon.db/database-value :seon.boot/cluster-name]
-     [:or :seon.config/effective [:map {:closed true}]]]]}
+     [:or :seon.config/effective
+      :seon.config/missing-effective-error]]]}
   ([db]
    (effective db "default"))
   ([db cluster-name]
-   (select-keys
-    (dissoc
-     (or
-      (db/pull
-       db
-       '[*]
-       [:seon.config/cluster (or cluster-name "default")])
-      {})
-     :db/id
-     :seon.config/cluster
-     :seon.config/applied-manifest-digest)
-    (dial-attributes))))
+   (let [cluster-name (or cluster-name "default")
+         row (db/pull db '[*] [:seon.config/cluster cluster-name])
+         effective (select-keys row (dial-attributes))
+         missing (sort (set/difference (required-dial-attributes)
+                                       (set (keys effective))))]
+     (if (and row (empty? missing))
+       effective
+       (let [shown (take 6 missing)
+             remaining (- (count missing) (count shown))
+             available
+             (vec
+              (sort
+               (db/q '[:find [?available ...]
+                       :where
+                       [_ :seon.config/cluster ?available]]
+                     db)))]
+         {:seon.config/missing-effective cluster-name
+          :seon.error/message
+          (if row
+            (str "Effective configuration for cluster " (pr-str cluster-name)
+                 " is missing required facts " (pr-str (vec shown))
+                 (when (pos? remaining)
+                   (str " and " remaining " more")) ".")
+            (str "No effective configuration facts match cluster "
+                 (pr-str cluster-name) "; available clusters "
+                 (pr-str available) "."))})))))

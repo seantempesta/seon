@@ -96,6 +96,11 @@
              @connection "bootstrap" namespace-name)
             first-result (cluster/ensure-entity! connection process request)
             run-id (bootstrap/run-id agent-id)
+            creation-result
+            {:seon.cluster.agent/id agent-id
+             :seon.ns/name namespace-name
+             :seon.cluster/name "bootstrap"
+             :seon.cluster.run/id run-id}
             before (run-row @connection run-id)]
         (is (empty? (bootstrap/population-tx @connection))
             "the source population is digest-guarded and idempotent")
@@ -105,7 +110,7 @@
                         '[{:seon.cluster/bootstrap-plan
                            [:seon.bootstrap.plan/id]}]
                         [:seon.cluster/name "bootstrap"]))))
-        (is (nil? (:seon.error/kind first-result)))
+        (is (= creation-result first-result))
         (is (= (mapv (fn [ordinal source]
                        [ordinal
                         (:seon.cluster.run.form/source source)
@@ -136,10 +141,10 @@
                 @connection
                 {:seon.cluster.agent/id agent-id
                  :seon.cluster.run/process process})))
-        (is (nil? (:seon.error/kind
-                   (cluster/ensure-entity!
-                    connection process
-                    (assoc request :seon.ns/name 'my.agents.replacement)))))
+        (is (= creation-result
+               (cluster/ensure-entity!
+                connection process
+                (assoc request :seon.ns/name 'my.agents.replacement))))
         (is (= before (run-row @connection run-id)))))))
 
 (deftest plan-edits-affect-only-agents-created-after-the-transaction
