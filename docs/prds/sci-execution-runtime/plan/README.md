@@ -396,13 +396,13 @@ Evidence base: eight paired sol/Opus research lanes (indexed in the PRD).
   every function; gating applies only to durable DEFINITION placement
   at the one admission seam.
 - **Session curation is sealed as designed in the PRD.** Trigger at a
-  run boundary on eval-error receipts; the curator is an ordinary agent
-  whose deliverable is DATA (the corrected ordered form vector); THREE
+  run boundary on eval-error receipts; the editor is an ordinary agent
+  whose deliverable is DATA — the REVISION, an ordered vector of form sources; THREE
   branches, strictly separated — the live branch (untouched), the
-  curator's scratch branch/fork (messy, ephemeral, never adopted), and
-  the verification fork at the original opening basis where the SYSTEM
-  executes the vector mechanically with no model call. Only clean
-  verification receipts (zero errors, equivalent completed result,
+  editor's scratch branch/fork (messy, ephemeral, never adopted), and
+  the PROOF — a fresh fork at the original opening basis where the
+  SYSTEM executes the revision mechanically with no model call. Only a
+  clean proof's receipts (zero errors, equivalent completed result,
   self-contained from the basis) are adopted.
 - **Adoption is projection-level supersession — the curated run
   REPLACES the messy span as the agent's history.** One append-only
@@ -410,7 +410,7 @@ Evidence base: eight paired sol/Opus research lanes (indexed in the PRD).
   run id with a run-to-runs `:seon.cluster.run/supersedes` connection;
   one derived active-runs rule feeds every transcript visibility query.
   The agent is parked between runs and never observes the swap. All
-  other paths and futures — the curator's branch and fork, losing
+  other paths and futures — the editor's branch and fork, losing
   speculative branches — are deleted; blobs need no copying (shared
   physical store, digest references). Branch-head adoption
   (`force-branch!`) is permitted only on an exclusive or frozen parent.
@@ -423,7 +423,7 @@ Evidence base: eight paired sol/Opus research lanes (indexed in the PRD).
   that make a span destructive: those are pinned fixed points a curated
   vector preserves in order, and when destructiveness goes beyond
   database writes the task is REJECTED — the system-side trigger fails
-  closed from door/message receipts (the derived gate), and the curator
+  closed from door/message receipts (the derived gate), and the editor
   additionally rejects with a reason when it judges its task
   destructive (the honest fallback for what receipts cannot see). The
   missing fact this names: per-request read/write classification on

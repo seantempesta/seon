@@ -10,7 +10,7 @@ Errors in a session's rendered history breed errors: a non-thinking model
 pattern-matches on what is in front of it, so a transcript full of failed
 probes and refusals degrades every later turn while inflating token cost.
 Session curation repairs this continuously: when a run closes with eval
-errors, a curator agent proposes a corrected ordered vector of form
+errors, an editor agent proposes a corrected ordered vector of form
 sources, the system re-executes that vector on a branch forked at the
 run's opening basis, and — only if the replay is clean and reaches the
 equivalent result — commits the curated run as facts that supersede the
@@ -112,7 +112,7 @@ where an ownership refusal would be ~5 lines, and where BOTH lanes
 locate any future check; the Opus lane recommends against building the
 refusal at all (no evidence of a real problem — the no-hobbling ruling;
 `work/form-owner` routing and objective O4 depend on cross-namespace
-reach; the curator itself is a non-owner by definition). The accretive
+reach; the editor itself is a non-owner by definition). The accretive
 alternative both designs support: record `:seon.fn/author` at that seam,
 refusing nothing. Owner question Q2.
 
@@ -121,10 +121,10 @@ refusing nothing. Owner question Q2.
 1. **Trigger** — run closes with ≥1 eval-error receipt AND no unpinnable
    barrier (§3 fail-closed list). Run boundary only in v1; no mid-run
    curation.
-2. **Curator** — an ordinary agent; its context is the messy run
+2. **Editor** — an ordinary agent; its context is the messy run
    rendered plainly; its deliverable is DATA: an ordered vector of form
    sources via `my.run/complete`. Pinned effectful forms are presented
-   as fixed points that must appear unchanged and in order. The curator
+   as fixed points that must appear unchanged and in order. The editor
    keeps one instructive failed form when the failure taught something
    (the repeat-mistake guard); that is ordering in the curated sources,
    no marking mechanism needed.
@@ -132,7 +132,7 @@ refusing nothing. Owner question Q2.
    vector as a system-authored run (`system-run-tx`) driven by the
    existing loop; no model call.
 4. **Accept** — S4 predicate. Any failure: keep the original, commit the
-   curator's report as data, done.
+   editor's report as data, done.
 5. **Adopt** — commit curated receipts (reusing fork blob digests) onto
    the agent's branch under the curated run id with
    `:seon.cluster.run/supersedes` → original run; the derived
@@ -214,7 +214,7 @@ in-branch only (fail-closed barriers never trigger).
    (`seon.cluster.curate` or per owner ruling). Gate: replay a seeded
    messy run, adopt, render clean; crash mid-curation leaves the
    original untouched (adoption is one transaction).
-3. **W3 — curator + trigger:** run-boundary trigger, curator agent
+3. **W3 — editor + trigger:** run-boundary trigger, editor agent
    spec, pinned-form presentation, fail-closed barrier check (door
    receipts + message trace + bare-transact detection). Gate: Arm C
    runs end to end on generation-zero objectives.
@@ -257,13 +257,13 @@ in-branch only (fail-closed barriers never trigger).
 - **Q3 RULED: silent adoption.** The verified curated run REPLACES the
   messy span as the agent's history ("the new and better Agent A");
   the agent is parked between runs and never observes the swap. The
-  curator's scratch branch/fork and every losing future are deleted
+  editor's scratch branch/fork and every losing future are deleted
   (optionally mined first for bootstrap candidates).
-- **Q3a (sharpening, same session): the curator's branch is never the
-  verification branch.** The curator's own session may be arbitrarily
+- **Q3a (sharpening, same session): the editor's branch is never the
+  verification branch.** The editor's own session may be arbitrarily
   messy; its deliverable is data. Acceptance judges only the fresh
   mechanical replay at the original opening basis — which also proves
-  the vector is self-contained (a vector depending on state the curator
+  the vector is self-contained (a vector depending on state the editor
   built up mid-session fails the clean replay and is not adopted).
 - **Q3b (sharpening, same session): destructive means WRITES, not
   door-crossings.** Database writes are branch-immutable and always
@@ -271,7 +271,7 @@ in-branch only (fail-closed barriers never trigger).
   replay re-executes them, and the acceptance equivalence gate catches
   material divergence. WRITES that left the branch (delivered messages,
   real file edits, web writes, external state) make a span destructive:
-  the derived trigger fails closed from receipts, and the curator
+  the derived trigger fails closed from receipts, and the editor
   additionally REJECTS with a reason when it judges the task
   destructive — the honest fallback for what receipts cannot see.
   Named missing fact: per-request read/write classification on door
