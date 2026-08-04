@@ -12,6 +12,7 @@
             [seon.cluster.store :as store]
             [seon.cluster.work :as work]
             [seon.db :as db]
+            [seon.eval.drive :as eval.drive]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -73,56 +74,72 @@
 
 (defn- declarations [database run-ids]
   (if (seq run-ids)
-    (->> (db/q
-          '[:find ?run-id ?ordinal ?identity ?identity-value ?source-attr ?source
-            :in $ [?run-id ...] [[?identity ?source-attr] ...]
-            :where
-            [?run :seon.cluster.run/id ?run-id]
-            [?receipt :seon.cluster.eval/run ?run]
-            [?receipt :seon.cluster.eval/ordinal ?ordinal]
-            (or-join [?receipt ?tx]
-                     [?receipt :seon.cluster.eval/result-edn _ ?tx true]
-                     [?receipt :seon.cluster.eval/error _ ?tx true]
-                     [?receipt :seon.cluster.eval/interrupted-at _ ?tx true])
-            [?entity ?identity ?identity-value ?tx true]
-            [?entity ?source-attr ?source ?tx true]]
-          (db/history database) run-ids identity-source-pairs)
-         (sort-by (juxt first second #(str (nth % 2)) #(pr-str (nth % 3))))
-         (mapv (fn [[run-id ordinal identity identity-value
-                     source-attribute source]]
-                 {:seon.cluster.run/id run-id
-                  :seon.cluster.eval/ordinal ordinal
-                  :seon.program/identity [identity identity-value]
-                  :seon.program/source-attribute source-attribute
-                  :seon.program/source source})))
+    (let [history (db/history database)
+          result-for-run
+          (fn [run-id]
+            (->>
+             identity-source-pairs
+             (mapcat
+              (fn [[identity source-attribute]]
+                (let [query
+                   [:find '?ordinal '?identity-value '?source
+                    :in '$ '?run-id
+                    :where
+                    ['?run :seon.cluster.run/id '?run-id]
+                    ['?receipt :seon.cluster.eval/run '?run]
+                    ['?receipt :seon.cluster.eval/ordinal '?ordinal]
+                    (list 'or-join ['?receipt '?tx]
+                          ['?receipt :seon.cluster.eval/result-edn
+                           '_ '?tx true]
+                          ['?receipt :seon.cluster.eval/error
+                           '_ '?tx true]
+                          ['?receipt :seon.cluster.eval/interrupted-at
+                           '_ '?tx true])
+                    ['?entity identity '?identity-value '?tx true]
+                    ['?entity source-attribute '?source '?tx true]]
+                      rows (db/q query history run-id)]
+                  (when (:seon.error/kind rows)
+                    (throw (ex-info "Declaration query failed." rows)))
+                  (map (fn [[ordinal identity-value source]]
+                         [run-id ordinal identity identity-value
+                          source-attribute source])
+                       rows))))
+             (sort-by (juxt second #(str (nth % 2)) #(pr-str (nth % 3))))))]
+      (->> run-ids
+           (mapcat result-for-run)
+           (mapv (fn [[run-id ordinal identity identity-value
+                       source-attribute source]]
+                   {:seon.cluster.run/id run-id
+                    :seon.cluster.eval/ordinal ordinal
+                    :seon.program/identity [identity identity-value]
+                    :seon.program/source-attribute source-attribute
+                    :seon.program/source source}))))
     []))
 
-(defn- drive-seam [symbol]
-  (requiring-resolve (symbol "seon.eval.drive" (name symbol))))
-
 (defn- terminal-state [database agent-id process run-ids]
-  ((drive-seam 'terminal-state)
+  (eval.drive/terminal-state
    database agent-id process
    {:seon.eval.drive/run-ids run-ids
     :seon.eval.drive/run-cap (max 1 (count run-ids))}))
 
 (defn- run-receipts [database run-ids]
-  ((drive-seam 'run-receipts) database run-ids))
+  (eval.drive/run-receipts database run-ids))
 
 (defn- completed-result [receipts]
-  ((drive-seam 'completed-result) receipts))
+  (eval.drive/completed-result receipts))
 
-(defn- execute-revision! [connection cluster agent-id process]
+(defn- execute-revision! [connection cluster agent-id process proof-run-id]
   (loop []
     (when-let [next-work
                (work/next-agent-work
                 @connection
                 {:seon.cluster.agent/id agent-id
                  :seon.cluster.run/process process})]
-      (loop/turn {:seon.cluster.loop/cluster cluster
-                  :seon.cluster.work/next next-work}
-                 (Date.))
-      (recur))))
+      (when (= proof-run-id (:seon.cluster.run/id next-work))
+        (loop/turn {:seon.cluster.loop/cluster cluster
+                    :seon.cluster.work/next next-work}
+                   (Date.))
+        (recur)))))
 
 (defn- retire-proof! [store-value branch]
   (registry/retire-branch! {:seon.store/store store-value
@@ -155,8 +172,9 @@
                              :seon.cluster.registry/from
                              (:seon.cluster.run/opening-commit-id span)
                              :seon.store/branch branch})
-          (let [connection (store/open-branch! store-value branch)]
-            (try
+          (let [connection (store/open-branch! store-value branch)
+                result
+                (try
               (let [ctx (sci.eval/cluster-ctx @connection connection)
                     cluster (assoc (:seon.cluster.loop/cluster instance)
                                    :seon.store/branch-connection connection
@@ -173,9 +191,10 @@
                                          {:tx-data
                                           (run/system-run-tx @connection request)})]
                 (if (:seon.error/kind opened)
-                  (do (retire-proof! store-value branch) opened)
+                  opened
                   (do
-                    (execute-revision! connection cluster agent-id process)
+                    (execute-revision! connection cluster agent-id process
+                                       proof-run-id)
                     (let [proof-db @connection
                           proof-receipts (run-receipts proof-db [proof-run-id])
                           original-receipts (run-receipts live-db run-ids)
@@ -205,19 +224,20 @@
                              {:original (completed-result original-receipts)
                               :proof (completed-result proof-receipts)}]
 
-                            (not= (mapv #(dissoc % :seon.cluster.run/id)
+                            (not= (mapv #(dissoc % :seon.cluster.run/id
+                                                 :seon.cluster.eval/ordinal)
                                         original-declarations)
-                                  (mapv #(dissoc % :seon.cluster.run/id)
+                                  (mapv #(dissoc % :seon.cluster.run/id
+                                                 :seon.cluster.eval/ordinal)
                                         proof-declarations))
                             [::declaration-equivalent
                              {:original original-declarations
                               :proof proof-declarations}])]
                       (if failed
-                        (do
-                          (retire-proof! store-value branch)
-                          (error-value (first failed)
-                                       "The revision did not satisfy proof acceptance."
-                                       (second failed)))
+                        (error-value
+                         (first failed)
+                         "The revision did not satisfy proof acceptance."
+                         (second failed))
                         {::proof-branch branch
                          ::run-ids run-ids
                          ::revision revision
@@ -231,14 +251,23 @@
                          ::declarations proof-declarations})))))
               (finally
                 (when (store/connection? connection)
-                  (store/release-branch! connection)))))
+                  (store/release-branch! connection))))]
+            (when (:seon.error/kind result)
+              (retire-proof! store-value branch))
+            result)
           (catch Throwable failure
             (when (contains? (registry/roster store-value) branch)
               (retire-proof! store-value branch))
             {:seon.error/kind ::proof-fault
              :seon.error/message (or (ex-message failure)
                                      "Session proof failed.")
-             :seon.error/data {:seon.cluster.curate/predicate ::proof-fault}}))))))
+             ::predicate ::proof-fault
+             :seon.error/data
+             {:seon.cluster.curate/predicate ::proof-fault
+              :seon.cluster.curate/throwable (str (class failure))
+              :seon.cluster.curate/cause (ex-data failure)
+              :seon.cluster.curate/frame
+              (some-> failure .getStackTrace first str)}}))))))
 
 (def ^:private receipt-selector
   [:seon.cluster.eval/id :seon.cluster.eval/ordinal :seon.cluster.eval/at
@@ -261,11 +290,13 @@
        (mapv (fn [[receipt _]] (db/pull database receipt-selector receipt)))))
 
 (defn- adopted-receipt [run-id receipt]
-  (-> receipt
-      (dissoc :db/id)
-      (assoc :seon.cluster.eval/run [:seon.cluster.run/id run-id])
-      (update :seon.cluster.eval/ns
-              #(when % [:seon.ns/name (:seon.ns/name %)]))))
+  (cond-> (-> receipt
+              (dissoc :db/id :seon.cluster.eval/ns)
+              (assoc :seon.cluster.eval/run [:seon.cluster.run/id run-id]))
+    (:seon.cluster.eval/ns receipt)
+    (assoc :seon.cluster.eval/ns
+           [:seon.ns/name
+            (get-in receipt [:seon.cluster.eval/ns :seon.ns/name])])))
 
 (defn adopt!
   "Atomically adopt one accepted proof, then retire its proof branch."

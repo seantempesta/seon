@@ -259,10 +259,12 @@
                         [::id ::id]
                         [::agent ::agent]
                         [::trigger {:optional true} ::trigger]
+                        [::opening-commit-id {:optional true}
+                         ::opening-commit-id]
                         [::opened-at ::opened-at]]]
                   [:vector :some]]}
   [db request]
-  (let [{::keys [id agent trigger opened-at]} request
+  (let [{::keys [id agent trigger opening-commit-id opened-at]} request
         agent-eid (:db/id (db/pull db [:db/id] agent))
         run-tempid (str "seon.cluster.run/" id)
         background-results (unanswered-background-results db agent-eid)]
@@ -279,7 +281,8 @@
       :else [(cond-> {:db/id run-tempid
                       ::id id
                       ::agent agent-eid
-                      ::opening-commit-id (db/commit-id db)
+                      ::opening-commit-id
+                      (or opening-commit-id (db/commit-id db))
                       ::opened-at opened-at}
                trigger (assoc ::trigger trigger)
                (seq background-results)
@@ -490,6 +493,8 @@
                              [::id ::id]
                              [::agent ::agent]
                              [::trigger {:optional true} ::trigger]
+                             [::opening-commit-id {:optional true}
+                              ::opening-commit-id]
                              [::opened-at ::opened-at]]]
                   [:vector :some]]}
   [request]
@@ -503,7 +508,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.run/system-run-request]
                   :seon.store/transaction-data]}
-  [_database request]
+  [database request]
   (let [{agent-id :seon.cluster.agent/id
          run-id ::id
          process ::process
@@ -516,6 +521,7 @@
           [(open-tx
             (cond-> {::id run-id
                      ::agent [:seon.cluster.agent/id agent-id]
+                     ::opening-commit-id (db/commit-id database)
                      ::opened-at opened-at}
               trigger (assoc ::trigger trigger)))
            (claim-tx {::id run-id

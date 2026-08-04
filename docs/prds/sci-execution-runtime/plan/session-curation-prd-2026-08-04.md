@@ -200,7 +200,7 @@ in-branch only (fail-closed barriers never trigger).
   [capability-reachability-cannot-see-capability-calls.md](../../../seon/issues/capability-reachability-cannot-see-capability-calls.md).
   Fix lane running (fail-closed classification + regression).
 - Filed by lanes, not blocking:
-  [program-row-replacement-churns-identical-redeclarations.md](../../../seon/issues/program-row-replacement-churns-identical-redeclarations.md),
+  [program-row-replacement-churns-identical-redeclarations.md](../../../seon/issues/archive/program-row-replacement-churns-identical-redeclarations.md),
   [forked-cluster-inherits-the-ancestors-config-cluster-name.md](../../../seon/issues/forked-cluster-inherits-the-ancestors-config-cluster-name.md),
   [transcript-orders-same-instant-receipts-lexically.md](../../../seon/issues/transcript-orders-same-instant-receipts-lexically.md).
 
@@ -214,11 +214,17 @@ in-branch only (fail-closed barriers never trigger).
    supersession before token accounting, opening commit + starting
    namespace facts, and committed ending namespace across a resumed
    fold. Non-superseded transcript histories remain green.
-2. **W2 — engine:** extract `system-run-tx` (seed-tx first caller);
-   fork-at-opening-commit + replay + S4 acceptance as one owner
-   (`seon.cluster.curate` or per owner ruling). Gate: replay a seeded
-   messy run, adopt, render clean; crash mid-curation leaves the
-   original untouched (adoption is one transaction).
+2. **W2 — engine: DONE (2026-08-04).** `system-run-tx` belongs to the
+   run data model (`seon.cluster.run`), with `seed-tx` as its first caller;
+   `seon.cluster.curate` owns fork-at-opening-commit replay, fact-space S4
+   acceptance, and one-transaction adoption. The recurring gate proves a
+   seeded messy run, failed-proof non-mutation, crash-before-adopt
+   non-mutation, ordinal-joined adoption, clean transcript visibility, and
+   original queryability (14 tests / 97 assertions with run facts). Live
+   isolated cluster `session-curation-w2-live-1af76a71` completed a
+   two-receipt proof, adopted a distinct curated run, rendered the curated
+   form while hiding `missing-symbol`, and retained the original run. The
+   proof branch was retired after adoption.
 3. **W3 — editor + trigger:** run-boundary trigger, editor agent
    spec, pinned-form presentation, fail-closed barrier check (door
    receipts + message trace + bare-transact detection). Gate: Arm C
@@ -241,8 +247,9 @@ in-branch only (fail-closed barriers never trigger).
   and the same fail-closed transact stance — strong calibration signal
   for single-lane research on adjacent questions.
 
-## 9. Owner rulings (2026-08-04 conversational session; recorded in
-[plan/README.md](README.md) "Rulings 2026-08-04")
+## 9. Owner rulings (2026-08-04; recorded in plan README)
+
+See [plan/README.md](README.md), “Rulings 2026-08-04.”
 
 - **Q1 RULED: adopted**, extended by the per-run fork-context ruling:
   each run evaluates in a fresh `sci/fork` of the cluster's base ctx;

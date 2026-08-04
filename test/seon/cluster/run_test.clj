@@ -264,34 +264,27 @@
         {:seon.cluster.agent/id "replay-agent"
          :seon.cluster.agent/namespace
          [:seon.ns/name 'my.agents.replay]}])
-      (db/transact!
-       connection
-       (run/open-tx {::run/id "replay-run"
-                     ::run/agent
-                     [:seon.cluster.agent/id "replay-agent"]
-                     ::run/opened-at t0}))
-      (db/transact!
-       connection
-       (run/claim-tx {::run/id "replay-run"
-                      ::run/process "replay-process"
-                      ::run/live-processes #{"replay-process"}
-                      ::run/now t0}))
-      (db/transact!
-       connection
-       (run/plan-tx
-        {::run/id "replay-run"
-         ::run/process "replay-process"
-         ::run/starting-ns [:seon.ns/name 'replay.start]
-         ::run/plan-digest "replay-digest"
-         ::run/sources
-         [{:seon.cluster.run.form/source "(def replayed 1)"}]}))
-      (let [run (db/pull
-                 @connection
-                 '[* {:seon.cluster.run/starting-ns [:seon.ns/name]}]
-                 [::run/id "replay-run"])]
-        (is (uuid? (::run/opening-commit-id run)))
-        (is (= 'replay.start
-               (get-in run [::run/starting-ns :seon.ns/name]))))
+      (let [opening-commit-id (db/commit-id @connection)]
+        (db/transact!
+         connection
+         (run/system-run-tx
+          @connection
+          {:seon.cluster.agent/id "replay-agent"
+           ::run/id "replay-run"
+           ::run/process "replay-process"
+           ::run/opened-at t0
+           ::run/starting-ns [:seon.ns/name 'replay.start]
+           ::run/plan-digest "replay-digest"
+           ::run/sources
+           [{:seon.cluster.run.form/source "(def replayed 1)"}]}))
+        (let [run (db/pull
+                   @connection
+                   '[* {:seon.cluster.run/starting-ns [:seon.ns/name]}]
+                   [::run/id "replay-run"])]
+          (is (= opening-commit-id (::run/opening-commit-id run)))
+          (is (uuid? (::run/opening-commit-id run)))
+          (is (= 'replay.start
+                 (get-in run [::run/starting-ns :seon.ns/name])))))
       (is (= 'replay.start
              (db/q '[:find ?namespace-name .
                      :where

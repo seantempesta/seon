@@ -174,7 +174,8 @@
 
 (defn completed-result
   "The last completed result represented by ordered grader receipts."
-  {:malli/schema [:=> [:cat [:vector :map]] :seon.schema/value]}
+  {:malli/schema [:=> [:cat [:vector :map]]
+                  [:maybe :seon.schema/value]]}
   [receipts]
   (:my.run/result (last (completion-values receipts))))
 

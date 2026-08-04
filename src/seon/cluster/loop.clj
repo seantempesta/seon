@@ -1197,6 +1197,8 @@
                             {:seon.cluster.run/id id
                              :seon.cluster.run/agent
                              [:seon.cluster.agent/id agent-id]
+                             :seon.cluster.run/opening-commit-id
+                             (db/commit-id @connection)
                              :seon.cluster.run/opened-at now}
                              (:seon.cluster.message/id work)
                              (assoc
