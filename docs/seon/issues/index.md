@@ -31,7 +31,7 @@ See `README.md` for the convention.
 | [Attribute evals to the agent's assigned namespace](evals-ignore-the-agents-assigned-namespace.md) | blocker | SCI eval-context owner design gate |
 | [Prevent one cluster from exhausting every co-hosted cluster's heap](cohosted-clusters-share-one-unbounded-agent-heap.md) | blocker | no-crash architecture design gate |
 
-## Friction (80)
+## Friction (81)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -115,6 +115,7 @@ See `README.md` for the convention.
 | [Return walk state and failures without comment notices](render-walk-wrapper-returns-comment-notices.md) | friction | strict REPL display wave |
 | [Render effect notices as ordinary values](effect-context-suffix-returns-comment-notices.md) | friction | strict REPL display wave |
 | [Render run forms and receipts with strict REPL fidelity](run-renderer-narrates-forms-and-receipts.md) | friction | strict REPL display wave |
+| [Keep expected Datahike rejections from logging full writer exceptions](datahike-expected-rejections-log-full-writer-exceptions.md) | friction | database diagnostic-output wave |
 
 ## Cleanup (13)
 
