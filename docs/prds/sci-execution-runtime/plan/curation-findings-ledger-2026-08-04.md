@@ -73,7 +73,7 @@ boot is proven.
 | D10 | bootstrap ordinal-0 attributed `my.agents.root` while ordinal 1 (`in-ns`) is `user` | attribution follows the plan's namespace designation consistently | to file (bootstrap owner) |
 | D11 | live default cluster: 813 occurrences of one `seon.instrument/contract-violated` signature + 7 stale `seon.cluster` fault vars | diagnose the one signature at its source; motivation case for curation | to file / probe |
 | D12 | unrestorable program row says the capability Var is "absent from the program graph" though its graph row exists | the unrestorable reason states the ACTUAL condition (unproven capability call), from the classification that produced it | to file (found by A2 lane) |
-| D13 | `test/seon/cluster/agent_test.clj:89` supplies only compute configuration while `flow.clj:475` now requires compute AND io facts — foreign boundary break | whichever lane changed the flow contract updates the fixture in the same beat; needs owner identification via git log | to file (foreign; blocks changed-test widening) |
+| D13 | `test/seon/cluster/agent_test.clj:89` supplies only compute configuration while `flow.clj:475` now requires compute AND io facts — foreign boundary break | whichever lane changed the flow contract updates the fixture in the same beat; needs owner identification via git log | **DONE** — commit `8127dc987` repairs all three stale direct fixtures; the combined gate cleared the configuration refusal, then stopped at the unrelated `disarm-has-a-provider-derived-loud-backstop` retryability assertion in the concurrently dirty tree |
 
 ## E. Design-level (owned by the PRD, not issues)
 
