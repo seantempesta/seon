@@ -109,6 +109,51 @@
               (:seon.code.def/unrestorable row)))
        (is (not (contains? row :seon.sci.eval/unproven-called-vars)))))))
 
+(deftest host-vars-remain-visible-to-capability-classification
+  (with-memory-database
+   (fn [connection]
+     (let [namespace-name 'my.agents.host-capability
+           _ (db/transact! connection
+                           {:tx-data
+                            [{:seon.config.eval.result/blob-threshold 32768}
+                             {:seon.ns/name namespace-name
+                              :seon.ns/source
+                              "(ns my.agents.host-capability)"}]})
+           ctx (eval/cluster-ctx @connection connection)
+           capability-symbol
+           (->> (db/q '[:find [?sym ...]
+                        :where
+                        [?function :seon.fn/sym ?sym]
+                        [?function :seon.effect/capability _]]
+                      @connection)
+                (map symbol)
+                (filter
+                 (fn [function-symbol]
+                   (sci/binding [sci/ns (sci/create-ns namespace-name)]
+                     (instance? clojure.lang.Var
+                                (sci/resolve ctx function-symbol)))))
+                (sort-by str)
+                first)
+           _ (is (some? capability-symbol)
+                 "the capability inventory supplies a host-bound Var")
+           evaluation
+           (evaluate! ctx namespace-name
+                      (str "(def calls-capability (fn [] ("
+                           capability-symbol ")))"))
+           candidate (first (:seon.sci.eval/session-defs evaluation))
+           referenced (:seon.sci.eval/referenced-vars candidate)
+           unproven (:seon.sci.eval/unproven-called-vars candidate)]
+       (is (contains? referenced capability-symbol))
+       (is (contains? unproven capability-symbol))
+       (is (false? (#'loop/capability-free-references?
+                    @connection referenced unproven))))))
+   (let [anonymous-var (clojure.lang.Var/create)
+         ctx (sci/init {:namespaces {'example {'mystery anonymous-var}}})]
+     (is (= #{'example/mystery}
+            (#'eval/unproven-called-vars
+             ctx 'user '(example/mystery)))
+         "a Var without classifying metadata fails closed")))
+
 (deftest executed-unsafe-built-ins-are-never-source-replayed
   (with-memory-database
    (fn [connection]

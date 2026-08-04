@@ -361,8 +361,22 @@
            (= (meta left) (meta right))
            (= left right))))
 
+(defn- resolved-var?
+  [value]
+  (or (sci.utils/var? value)
+      (var? value)))
+
+(defn- resolved-var-symbol
+  [candidate resolved]
+  (let [{var-namespace :ns var-name :name} (meta resolved)]
+    (if (and var-namespace var-name)
+      ;; SCI's implementation uses only these two metadata fields, so the
+      ;; same projection is valid for both sci.lang.Var and clojure.lang.Var.
+      (sci/var->symbol resolved)
+      candidate)))
+
 (defn- resolved-form-vars
-  "Every SCI Var a form mentions, resolved after the form changed its ctx.
+  "Every Var a form mentions, resolved after the form changed its ctx.
   Over-approximation is deliberate: a shadowed local can only make purity
   fail closed; a qualified or macro-expanded host touch is independently
   observed by SCI's analyzer."
@@ -374,8 +388,8 @@
            (keep (fn [candidate]
                    (try
                      (let [resolved (sci/resolve ctx candidate)]
-                       (when (sci.utils/var? resolved)
-                         (sci/var->symbol resolved)))
+                       (when (resolved-var? resolved)
+                         (resolved-var-symbol candidate resolved)))
                      (catch Throwable _ nil)))))
           (tree-seq coll? seq form))))
 
@@ -393,9 +407,9 @@
                  (when (symbol? candidate)
                    (try
                      (let [resolved (sci/resolve ctx candidate)]
-                       (when (and (sci.utils/var? resolved)
+                       (when (and (resolved-var? resolved)
                                   (not (:sci/built-in (meta resolved))))
-                         (sci/var->symbol resolved)))
+                         (resolved-var-symbol candidate resolved)))
                      (catch Throwable _ nil)))))))
           (tree-seq coll? seq form))))
 
