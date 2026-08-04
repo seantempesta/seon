@@ -53,5 +53,7 @@
                    (:seon.bootstrap-drive/transcript report)))
       (is (re-find #"total-by-label"
                    (:seon.bootstrap-drive/transcript report)))
+      (is (not (re-find #"invocation-failed"
+                        (:seon.bootstrap-drive/transcript report))))
       (is (.isFile (java.io.File.
                     (:seon.bootstrap-drive/report-path report)))))))
