@@ -1321,7 +1321,7 @@
             ;; change the resolver state that makes the next form valid.
             ;; The frozen plan FACT is the stream terminal; no lossy channel
             ;; value carries "done".
-            (let [namespace-name (sci.eval/agent-namespace agent-id)
+            (let [namespace-name (sci.eval/agent-namespace @connection agent-id)
                   sources
                   (reply/sources (:seon.ai/text completion)
                                  namespace-name)]
@@ -1332,8 +1332,6 @@
                                (run/plan-tx
                                 {:seon.cluster.run/id run-id
                                  :seon.cluster.run/process process
-                                 :seon.cluster.run/starting-ns
-                                 [:seon.ns/name namespace-name]
                                  :seon.cluster.run/plan-digest
                                  (digest sources)
                                  :seon.cluster.run/sources
@@ -1567,7 +1565,7 @@
                     :seon.sci.eval/ctx ctx
                     ::current-namespace namespace-name
                     ::fallback-namespace
-                    (sci.eval/agent-namespace agent-id)})
+                    (sci.eval/agent-namespace db-before-evaluation agent-id)})
                   evaluation-namespace
                   (second (:seon.cluster.run.form/ns form))
                   evaluation

@@ -54,14 +54,13 @@
   deadline, and a different context on an armed thread is refused as an
   ordinary flat error value.
 
-  AN AGENT EVALUATES IN ITS OWN NAMESPACE, by construction. The eval
-  binds sci's own `*ns*` to `my.agents.<id>` for the whole form, so a
-  `defn` lands where the prompt says it lands and the model never needs
-  to write `(in-ns …)` — which is what the first live drive tried, and
-  what failed with `Can't change/establish root binding of
-  clojure.core/*ns*`. The namespace name has ONE derivation
-  (`agent-namespace`) shared with the prompt, because an agent told one
-  name and evaluated in another would reason from a lie.
+  AN AGENT EVALUATES IN ITS ASSIGNED NAMESPACE, by construction. The eval
+  reads `:seon.cluster.agent/namespace` from the database and binds sci's
+  own `*ns*` there for the whole form, so a `defn` lands where the prompt
+  says it lands and the model never needs to write `(in-ns …)` — which is
+  what the first live drive tried, and what failed with `Can't
+  change/establish root binding of clojure.core/*ns*`. The assignment fact
+  is the authority; `my.agents.<id>` is only a creation-time default.
 
   OUTPUT IS CAPTURED, NOT DISCARDED. sci's `*out*` and `*err*` are
   unbound by default — `println` fails with `SciUnbound cannot be cast
@@ -237,13 +236,22 @@
            ::kernel/program-snapshot (atom {:functions {} :namespaces {}}))))
 
 (defn agent-namespace
-  "The ONE namespace name for an agent: `my.agents.<id>`.
-  One derivation, because the prompt tells the agent this name and the
-  evaluator evaluates in it — if those two ever disagreed the agent
-  would be told a lie it then reasons from."
-  {:malli/schema [:=> [:cat :seon.cluster.agent/id] :symbol]}
-  [agent-id]
-  (symbol (str "my.agents." agent-id)))
+  "The namespace name assigned to `agent-id`, or nil when it is absent.
+
+  This is the forward read of `seon.cluster.agent/owner-of`: evaluation
+  reads the committed assignment fact and never reconstructs it from an
+  agent id naming convention."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.agent/id]
+                  [:maybe :seon.ns/name]]}
+  [db agent-id]
+  (db/q '[:find ?namespace-name .
+          :in $ ?agent-id
+          :where
+          [?agent :seon.cluster.agent/id ?agent-id]
+          [?agent :seon.cluster.agent/namespace ?namespace]
+          [?namespace :seon.ns/name ?namespace-name]]
+        db agent-id))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The armed boundary
@@ -1578,21 +1586,20 @@
                 (when-let [disarm (::kernel/stop! @arm-state)]
                   (disarm)))
         printed (java.io.StringWriter.)
+        connection (get-in evaluation-ctx
+                           [::custody :seon.store/branch-connection])
         namespace-name (or (second namespace-ref)
-                           (when agent-id (agent-namespace agent-id))
+                           (when (and connection agent-id)
+                             (agent-namespace @connection agent-id))
                            'user)
         namespace-object (sci/create-ns namespace-name)
         ending-namespace (volatile! namespace-name)
         print-options (volatile! {})
         session-observation (volatile! nil)]
-    (binding [db/*conn*
-              (get-in evaluation-ctx
-                      [::custody :seon.store/branch-connection])
+    (binding [db/*conn* connection
               effect/*context*
               (when (and run-id (some? form-ordinal) cluster-name)
-                {:seon.store/branch-connection
-                 (get-in evaluation-ctx
-                         [::custody :seon.store/branch-connection])
+                {:seon.store/branch-connection connection
                  :seon.cluster.run/id run-id
                  :seon.cluster.run.form/ordinal form-ordinal
                  :seon.cluster.agent/id agent-id

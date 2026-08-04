@@ -95,8 +95,8 @@
 
 (defn- uuid-text [] (str (UUID/randomUUID)))
 
-(defn- agent-namespace [agent-id]
-  (sci.eval/agent-namespace agent-id))
+(defn- agent-namespace [db agent-id]
+  (sci.eval/agent-namespace db agent-id))
 
 (defn- objective-data [objective peer-id]
   (let [definition
@@ -151,7 +151,7 @@
           :seon.cluster.run.form/source
           (str "(" function-symbol " " (pr-str argument) ")")
           :seon.cluster.run.form/ns
-          [:seon.ns/name (agent-namespace agent-id)]
+          [:seon.ns/name (agent-namespace db agent-id)]
           :seon.cluster.agent/id agent-id
           :seon.sci.admit/caps caps
           :seon.sci.eval/time-limit-ms 30000
@@ -162,7 +162,7 @@
 (defn- grade-o1
   [connection cluster-name agent-id run-ids completed-result]
   (let [db @connection
-        candidates (candidate-functions db run-ids (agent-namespace agent-id))
+        candidates (candidate-functions db run-ids (agent-namespace db agent-id))
         executions
         (mapv (fn [{function-symbol :seon.fn/sym :as candidate}]
                 (assoc candidate
@@ -238,7 +238,7 @@
         peer-functions
         (mapv :seon.fn/sym
               (candidate-functions db peer-run-ids
-                                   (agent-namespace peer-id)))
+                                   (agent-namespace db peer-id)))
         called
         (some (fn [function-symbol]
                 (some #(when (and
@@ -277,7 +277,7 @@
               (comp
                (map :seon.fn/sym)
                (map #(last (str/split % #"/"))))
-              (candidate-functions db run-ids (agent-namespace agent-id)))]
+              (candidate-functions db run-ids (agent-namespace db agent-id)))]
     {:p5 (boolean (seq (set/intersection refused-names repaired)))
      :seon.bootstrap-drive/refused-names refused-names
      :seon.bootstrap-drive/repaired-names repaired}))

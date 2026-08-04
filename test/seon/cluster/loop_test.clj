@@ -639,6 +639,114 @@
         (flow.core/stop graph)
         (async/<!! completion)))))
 
+(deftest assigned-namespace-seeds-the-run-and-its-receipt
+  (test-support/with-database
+    (fn [connection]
+      (let [cluster-name "assigned-run-namespace"
+            agent-id "toolsmith"
+            run-id "assigned-run"
+            assigned-namespace 'my.tools.demo]
+        (test-support/seed-cluster! connection cluster-name)
+        (db/transact!
+         connection
+         (cluster.agent/creation-tx
+          {:seon.cluster.agent/id agent-id
+           :seon.ns/name assigned-namespace
+           :seon.cluster/name cluster-name}))
+        (db/transact!
+         connection
+         (run/open-tx {::run/id run-id
+                       ::run/agent [:seon.cluster.agent/id agent-id]
+                       ::run/opened-at now}))
+        (db/transact!
+         connection
+         (run/claim-tx {::run/id run-id
+                        ::run/process process
+                        ::run/live-processes #{process}
+                        ::run/now now}))
+        (db/transact!
+         connection
+         (run/plan-tx
+          {::run/id run-id
+           ::run/process process
+           ::run/plan-digest "assigned-run-plan"
+           ::run/sources
+           [{:seon.cluster.run.form/source "(ns-name *ns*)"}]}))
+        (let [planned-form
+              (db/pull
+               @connection
+               '[:seon.cluster.run.form/source
+                 {:seon.cluster.run.form/ns [:seon.ns/name]}]
+               (db/q '[:find ?form .
+                       :in $ ?run-id
+                       :where
+                       [?run :seon.cluster.run/id ?run-id]
+                       [?form :seon.cluster.run.form/run ?run]
+                       [?form :seon.cluster.run.form/ordinal 0]]
+                     @connection run-id))]
+          (is (= assigned-namespace
+                 (db/q '[:find ?namespace-name .
+                         :in $ ?run-id
+                         :where
+                         [?run :seon.cluster.run/id ?run-id]
+                         [?run :seon.cluster.run/starting-ns ?namespace]
+                         [?namespace :seon.ns/name ?namespace-name]]
+                       @connection run-id))
+              "the normal run writes its starting namespace from the assignment")
+          (is (= assigned-namespace
+                 (get-in planned-form
+                         [:seon.cluster.run.form/ns :seon.ns/name])))
+          (db/transact!
+           connection
+           (run/receipt-start-tx
+            {::run/id run-id
+             :seon.cluster.eval/ordinal 0
+             :seon.cluster.eval/at now}))
+          (let [evaluation
+                (sci.eval/evaluate
+                 {:seon.cluster.run.form/source
+                  (:seon.cluster.run.form/source planned-form)
+                  :seon.cluster.run.form/ns
+                  [:seon.ns/name
+                   (get-in planned-form
+                           [:seon.cluster.run.form/ns :seon.ns/name])]
+                  :seon.sci.eval/ctx
+                  (sci.eval/cluster-ctx @connection connection)
+                  :seon.sci.admit/caps
+                  (config/result-caps (config/defaults))
+                  :seon.sci.eval/time-limit-ms 2000
+                  :seon.config/on-core-error :panic
+                  :seon.boot/cluster-name cluster-name
+                  :seon.cluster.agent/id agent-id
+                  :seon.cluster.run/id run-id
+                  :seon.cluster.run.form/ordinal 0})]
+            (db/transact!
+             connection
+             (cluster.loop/terminal-tx
+              {:seon.cluster.run/id run-id
+               :seon.cluster.run/process process
+               :seon.cluster.run.form/ordinal 0
+               :seon.cluster.eval/result-edn
+               (:seon.cluster.eval/result-edn evaluation)
+               :seon.cluster.eval/ns
+               (:seon.cluster.eval/ns evaluation)
+               :seon.sci.eval/ending-ns
+               (:seon.sci.eval/ending-ns evaluation)}
+              now))
+            (is (= assigned-namespace
+                   (:seon.sci.admit/value evaluation)))
+            (is (= assigned-namespace
+                   (db/q '[:find ?namespace-name .
+                           :in $ ?run-id
+                           :where
+                           [?run :seon.cluster.run/id ?run-id]
+                           [?receipt :seon.cluster.eval/run ?run]
+                           [?receipt :seon.cluster.eval/ordinal 0]
+                           [?receipt :seon.cluster.eval/ns ?namespace]
+                           [?namespace :seon.ns/name ?namespace-name]]
+                         @connection run-id))
+                "the settled receipt records the evaluated namespace")))))))
+
 (deftest call-resolves-once-records-settings-and-sees-next-turn-config
   (test-support/with-database
    (fn [connection]

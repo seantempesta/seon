@@ -1022,11 +1022,29 @@
 (deftest acquisition-binds-loaded-first-party-compiled-vars
   (test-support/with-database
     (fn [connection]
-      (let [ctx (eval/build-base-ctx)
-            _ (eval/acquire! {:seon.sci.eval/ctx ctx
-                              :seon.db/db @connection})
+      (let [cluster-name "assigned-namespace-acquisition"
+            agent-id "probe"
+            assigned-namespace 'my.tools.demo
+            _ (test-support/seed-cluster! connection cluster-name)
+            _ (db/transact!
+               connection
+               (agent/creation-tx
+                {:seon.cluster.agent/id agent-id
+                 :seon.ns/name assigned-namespace
+                 :seon.cluster/name cluster-name}))
+            ctx (eval/cluster-ctx @connection connection)
             evaluation
-            (run-in ctx "(seon.sci.eval/agent-namespace \"probe\")" 2000)
+            (run-in ctx
+                    "(seon.sci.eval/agent-namespace (seon.db/db) \"probe\")"
+                    2000)
+            assigned-evaluation
+            (eval/evaluate
+             {:seon.sci.eval/ctx ctx
+              :seon.cluster.agent/id agent-id
+              :seon.cluster.run.form/source "(ns-name *ns*)"
+              :seon.sci.admit/caps caps
+              :seon.sci.eval/time-limit-ms 2000
+              :seon.config/on-core-error :panic})
             external (run-in ctx "(datahike.api/q '[:find ?e :where [?e]])"
                              2000)]
         (is (identical? #'eval/agent-namespace
@@ -1034,7 +1052,12 @@
                                 ['seon.sci.eval 'agent-namespace]))
             "the host binding is the live compiled Var, never a copied root")
         (is (ok? evaluation))
-        (is (= 'my.agents.probe (:seon.sci.admit/value evaluation)))
+        (is (= assigned-namespace (:seon.sci.admit/value evaluation)))
+        (is (= assigned-namespace
+               (:seon.sci.admit/value assigned-evaluation)))
+        (is (= [:seon.ns/name assigned-namespace]
+               (:seon.cluster.eval/ns assigned-evaluation))
+            "an evaluation without an explicit form namespace opens at the assignment")
         (is (failed? external)
             "loaded dependencies are not first-party merely because loaded")))))
 

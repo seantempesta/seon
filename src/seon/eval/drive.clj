@@ -21,13 +21,13 @@
 
 (defn- uuid-text [] (str (UUID/randomUUID)))
 
-(defn- agent-namespace [agent-id]
-  (sci.eval/agent-namespace agent-id))
+(defn- default-agent-namespace [agent-id]
+  (symbol (str "my.agents." agent-id)))
 
 (defn- creation-request [cluster-name agent-id]
   {:seon.cluster.agent/id agent-id
    :seon.cluster/name cluster-name
-   :seon.ns/name (agent-namespace agent-id)})
+   :seon.ns/name (default-agent-namespace agent-id)})
 
 (defn- bootstrap-complete? [db agent-id]
   (let [run-id (bootstrap/run-id agent-id)]
