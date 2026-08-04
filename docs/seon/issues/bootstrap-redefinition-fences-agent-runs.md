@@ -44,6 +44,29 @@ Each bootstrap run had 9 receipts for 13 ordered forms and no
 `:seon.cluster.run/closed-at`. The same boundary reproduced independently for
 both agents, so it is not agent-specific state.
 
+### N-way independent-symbol reproduction
+
+The concurrency-independence stress lane reproduced the same durable core
+fault without redefining a symbol. Its focused recurring test booted isolated
+cluster `concurrency-independence`, created five agents on one branch, and
+gave each agent a distinct assigned namespace and a distinct contracted
+function symbol. All five definitions evaluated and their runs settled six
+receipts, but concurrent terminal installation emitted:
+
+```text
+SEON CORE FAULT (dev panic): Committed declaration source does not match
+install request. [signature
+0708a7b745ed9db91eb8ef9813a245b59f8b69ffbdd99c9657a421d5d0a51e93]
+```
+
+The reproducer is
+`test/seon/concurrency_independence_test.clj`; the retained failed operator
+root is `tmp/test-runs/run.tXsWG5`. The five symbols were
+`my.agents.concurrency.s0-n5.a0/stress-f-s0-n5-0` through
+`my.agents.concurrency.s0-n5.a4/stress-f-s0-n5-4`. This disproves the narrower
+hypothesis that only same-symbol redefinition reaches the mismatch: distinct
+agents installing distinct symbols concurrently can cross the same boundary.
+
 ## Owner
 
 The single bootstrap definition/update sequence in `resources/seon/bootstrap.edn`
@@ -58,5 +81,8 @@ and the declaration installation boundary in `seon.sci.eval`.
   subsequently resolved and called.
 - A new agent-authored run can then define, redefine, call, test, wait, and
   complete through the real run loop.
+- Five agents on one branch can concurrently install five distinct contracted
+  definitions without an `install-source-mismatch` fault; each committed
+  `:seon.fn/source` matches the source installed for that exact symbol.
 - The proof queries receipts and durable errors; it does not recover or rearm a
   fenced bootstrap session.
