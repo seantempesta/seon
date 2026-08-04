@@ -1,7 +1,7 @@
 ---
 type: prd
 status: active
-tags: [prd, runtime, curation, issues, ledger]
+tags: [prd, runtime, curation]
 ---
 
 # Findings ledger — session-curation lane sweep (2026-08-04)
@@ -84,7 +84,8 @@ commits by index surgery. FULLY CLOSED: the creation/config lane confirmed and c
 | F2 | **DONE** — `open-call` records the mid-transaction database value's commit ID as `:seon.cluster.run/opening-commit-id` |
 | F3 | **DONE** — `plan-call` records `:seon.cluster.run/starting-ns`; ordinary call planning supplies the assigned namespace and replay callers may supply it explicitly |
 | F4 | **DONE** — terminal settlement commits `:seon.sci.eval/ending-ns`; a resumed fold seeds its namespace from the most recent committed ending namespace, falling back to the run's starting namespace |
-| F5–F11 | Pending W2–W4 — [session-curation-prd-2026-08-04.md](session-curation-prd-2026-08-04.md) §3 |
+| F5–F10 | Pending W2–W4 — [session-curation-prd-2026-08-04.md](session-curation-prd-2026-08-04.md) §3 |
+| F11 | **DONE** — commit `093670eff` indexes direct test→function refs from the same clj-kondo var-usage pass and stores them through the shared cardinality-many `:seon.fn/calls` attribute; `seon.fn/tests-reaching` derives the reverse transitive closure needed by the dependents-test gate. Independent verification: 33 focused tests / 200 assertions, zero failures or errors; the published `default` cluster reports 865 tests with direct call refs and resolves the `seon.fn/tests-reaching` dependent test. |
 
 - `agent-namespace` string-builds `my.agents.<id>` — read the assignment
   fact; overlaps existing `evals-ignore-the-agents-assigned-namespace`.
