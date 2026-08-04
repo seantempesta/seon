@@ -465,6 +465,39 @@
     (is (= 'user/rendered-declaration
            (symbol (:seon.print/name defn-node))))))
 
+(deftest schema-and-contract-declarations-have-bounded-allocation
+  ;; Warm the guarded evaluator so this measures declaration work rather than
+  ;; first-use namespace and instrumentation initialization.
+  (run "(+ 1 1)")
+  (let [schema-evaluation
+        (run
+         (str "(seon.schema/register! "
+              ":seon.sci.eval-test.allocation/score "
+              "[:int {:min 0 :max 100}])")
+         5000)
+        function-evaluation
+        (run
+         (str "(defn ^{:malli/schema [:=> [:cat :string] :string]} "
+              "allocation-contract [x] x)")
+         5000)
+        allocation-limit (* 64 1024 1024)]
+    (is (= :seon.sci.eval-test.allocation/score
+           (:seon.sci.admit/value schema-evaluation)))
+    (is (= :ok
+           (get-in schema-evaluation
+                   [:seon.sci.admit/record :seon.eval/outcome])))
+    (is (= :ok
+           (get-in function-evaluation
+                   [:seon.sci.admit/record :seon.eval/outcome])))
+    (is (< (get-in schema-evaluation
+                   [:seon.sci.admit/record :seon.eval/allocated-bytes])
+           allocation-limit)
+        "one schema declaration stays below 64 MiB at production registry size")
+    (is (< (get-in function-evaluation
+                   [:seon.sci.admit/record :seon.eval/allocated-bytes])
+           allocation-limit)
+        "one contracted defn stays below 64 MiB at production registry size")))
+
 (deftest evaluate-invokes-eval-form-exactly-once-on-every-path
   (let [ctx (eval/build-base-ctx)
         eval-form sci/eval-form

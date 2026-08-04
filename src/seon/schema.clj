@@ -169,6 +169,21 @@
 (defn- bound-forms [forms predicate-functions]
   (update-vals forms #(bind-predicates % predicate-functions)))
 
+(defn- projection-registry
+  "Registry over immutable forms that binds only the requested declaration."
+  [forms predicate-functions]
+  (let [defaults (mr/fast-registry (m/default-schemas))
+        all-schemas (delay (merge (mr/-schemas defaults) forms))]
+    (reify
+      mr/Registry
+      (-schema [this type]
+        (or (mr/-schema defaults type)
+            (when-let [definition (get forms type)]
+              (m/schema (bind-predicates definition predicate-functions)
+                        {:registry this}))))
+      (-schemas [_]
+        @all-schemas))))
+
 (declare ^:private core-predicate-functions)
 
 (defn canonical-definition
@@ -292,6 +307,29 @@
              #{}))]))
      forms)))
 
+(defn- direct-reference-keys-in
+  [definition predicate-functions canonical-keys]
+  (let [defaults (mr/fast-registry (m/default-schemas))
+        all-references
+        (delay
+          (into (mr/-schemas defaults)
+                (map (fn [schema-key]
+                       [schema-key [:ref schema-key]]))
+                canonical-keys))
+        reference-registry
+        (reify
+          mr/Registry
+          (-schema [_ type]
+            (or (mr/-schema defaults type)
+                (when (contains? canonical-keys type)
+                  [:ref type])))
+          (-schemas [_]
+            @all-references))]
+    (direct-references*
+     (m/schema (bind-predicates definition predicate-functions)
+               {:registry reference-registry})
+     canonical-keys)))
+
 (declare canonical-data-string)
 
 (defn- portable-string-hash [s]
@@ -363,10 +401,46 @@
 (defn- projection-fingerprint
   [forms function-contracts schema-admissions function-admissions
    function-source-admissions artifact-exports pure-predicate-symbols]
-  (portable-string-hash
-   (canonical-data-string
-    [forms function-contracts schema-admissions function-admissions
-     function-source-admissions artifact-exports pure-predicate-symbols])))
+  (letfn [(entry-fingerprint [section identity value]
+            (portable-string-hash
+             (canonical-data-string [section identity value])))
+          (map-fingerprint [section values]
+            (reduce-kv
+             (fn [fingerprint identity value]
+               (bit-xor fingerprint
+                        (entry-fingerprint section identity value)))
+             0
+             values))
+          (set-fingerprint [section values]
+            (reduce
+             (fn [fingerprint value]
+               (bit-xor fingerprint
+                        (entry-fingerprint section value true)))
+             0
+             values))]
+    (reduce
+     bit-xor
+     (portable-string-hash "seon.schema.projection/fingerprint-v2")
+     [(map-fingerprint :forms forms)
+      (map-fingerprint :function-contracts function-contracts)
+      (map-fingerprint :schema-admissions schema-admissions)
+      (map-fingerprint :function-admissions function-admissions)
+      (map-fingerprint :function-source-admissions
+                       function-source-admissions)
+      (set-fingerprint :artifact-exports artifact-exports)
+      (set-fingerprint :pure-predicate-symbols pure-predicate-symbols)])))
+
+(def ^:private projection-fingerprint-version 2)
+
+(defn- replace-fingerprint-entry
+  [fingerprint section identity before after]
+  (let [entry-fingerprint
+        (fn [value]
+          (portable-string-hash
+           (canonical-data-string [section identity value])))]
+    (cond-> fingerprint
+      (not= ::absent before) (bit-xor (entry-fingerprint before))
+      (not= ::absent after) (bit-xor (entry-fingerprint after)))))
 
 (defn direct-references
   "Canonical schema keys directly referenced by `form` in `projection`.
@@ -836,7 +910,10 @@
                               (walk-schema
                                 (or (get compiled-schemas reference)
                                     (m/schema
-                                     (get compiled-forms reference)
+                                     (or (get compiled-forms reference)
+                                         (bind-predicates
+                                          reference-form
+                                          predicate-functions))
                                      compile-options))
                                 role
                                 reference
@@ -1018,6 +1095,27 @@
 
 (declare compose-projection-data materialize-projection)
 
+(defn- shape-row-in
+  [forms schema-key definition]
+  (let [form (internal/with-entity-id-attr forms definition)
+        props (or (form/attr-form-properties form) {})
+        required-attrs (some-> (internal/map-required-attrs forms form) set)
+        id-attr (:seon.entity/id-attr props)]
+    (when (seq required-attrs)
+      (cond->
+       (merge
+        {:seon.schema/key schema-key
+         :seon.schema/required-attrs required-attrs
+         :seon.schema/entity? (boolean (:seon.db/entity props))}
+        (into {}
+              (filter
+               (fn [[property declaration]]
+                 (and (qualified-keyword? property)
+                      (= "seon.render" (namespace property))
+                      (qualified-symbol? declaration))))
+              props))
+        id-attr (assoc :seon.entity/id-attr id-attr)))))
+
 (defn build-projection
   "Build and validate one immutable runtime projection.
 
@@ -1184,33 +1282,22 @@
                            (get compiled-function-contracts sym)
                            canonical-keys)]))
               function-contracts)
+        reverse-function-dependencies
+        (reduce-kv
+         (fn [reverse-edges function-symbol dependencies]
+           (reduce
+            (fn [edges dependency]
+              (update edges dependency (fnil conj #{}) function-symbol))
+            reverse-edges
+            dependencies))
+         {}
+         function-dependencies)
         shape-rows
         (into (sorted-map)
               (keep
                 (fn [[k raw]]
-                  (let [form (internal/with-entity-id-attr forms raw)
-                        props (or (form/attr-form-properties form) {})
-                        required-attrs
-                        (some-> (internal/map-required-attrs forms form) set)
-                        id-attr (:seon.entity/id-attr props)]
-                    (when (seq required-attrs)
-                      [k (cond->
-                           (merge
-                            {:seon.schema/key k
-                             :seon.schema/required-attrs required-attrs
-                             :seon.schema/entity?
-                             (boolean (:seon.db/entity props))}
-                            (into {}
-                                  (filter
-                                   (fn [[property declaration]]
-                                     (and
-                                      (qualified-keyword? property)
-                                      (= "seon.render"
-                                         (namespace property))
-                                      (qualified-symbol? declaration))))
-                                  props))
-                           id-attr
-                           (assoc :seon.entity/id-attr id-attr))]))))
+                  (when-let [row (shape-row-in forms k raw)]
+                    [k row])))
               forms)
         required-by-key
         (into (sorted-map)
@@ -1269,15 +1356,20 @@
      :seon.schema.projection/pure-predicate-symbols pure-predicate-symbols
      :seon.schema.projection/predicate-functions predicate-functions
      :seon.schema.projection/schema-dependencies schema-dependencies
+     :seon.schema.projection/canonical-keys canonical-keys
      :seon.schema.projection/reverse-schema-dependencies
      reverse-schema-dependencies
      :seon.schema.projection/function-contracts function-contracts
      :seon.schema.projection/function-dependencies function-dependencies
+     :seon.schema.projection/reverse-function-dependencies
+     reverse-function-dependencies
      :seon.schema.projection/required-by-key required-by-key
      :seon.schema.projection/shape-index shape-index
      :seon.schema.projection/shape-rows shape-rows
-      :seon.schema.projection/catalog catalog
-      :seon.schema.projection/fingerprint fingerprint}))))
+     :seon.schema.projection/catalog catalog
+     :seon.schema.projection/fingerprint-version
+     projection-fingerprint-version
+     :seon.schema.projection/fingerprint fingerprint}))))
 
 (def ^:private projection-runtime-keys
   #{:seon.schema.projection/registry
@@ -1300,6 +1392,13 @@
    (:seon.schema.projection/function-source-admissions projection)
    (:seon.schema.projection/artifact-exports projection)
    (:seon.schema.projection/pure-predicate-symbols projection)))
+
+(defn- reusable-projection-fingerprint
+  [projection]
+  (if (= projection-fingerprint-version
+         (:seon.schema.projection/fingerprint-version projection))
+    (:seon.schema.projection/fingerprint projection)
+    (projection-fingerprint-from-data projection)))
 
 (defn- reverse-dependencies
   [dependencies]
@@ -1395,9 +1494,14 @@
                  (:seon.schema.projection/pure-predicate-symbols divergence)))
         composed
         (merge composed
-               {:seon.schema.projection/reverse-schema-dependencies
+               {:seon.schema.projection/canonical-keys
+                (set (keys (:seon.schema.projection/forms composed)))
+                :seon.schema.projection/reverse-schema-dependencies
                 (reverse-dependencies
-                 (:seon.schema.projection/schema-dependencies composed))}
+                 (:seon.schema.projection/schema-dependencies composed))
+                :seon.schema.projection/reverse-function-dependencies
+                (reverse-dependencies
+                 (:seon.schema.projection/function-dependencies composed))}
                (shape-projections
                 (:seon.schema.projection/shape-rows composed)))]
     (assoc composed
@@ -1548,6 +1652,92 @@
             :seon.schema.projection/compile-options options
             :seon.schema.projection/predicate-functions
             predicate-functions))))
+
+(defn- predicate-functions-with
+  [projection definitions]
+  (let [existing
+        (:seon.schema.projection/predicate-functions projection)]
+    (reduce
+     (fn [bindings predicate]
+       (if (contains? bindings predicate)
+         bindings
+         (if-let [f (runtime-predicate predicate)]
+           (assoc bindings predicate f)
+           bindings)))
+     existing
+     (into #{} (mapcat predicate-symbols-in) definitions))))
+
+(defn- validate-one-contract!
+  [projection identity definition admission]
+  (let [forms (:seon.schema.projection/forms projection)
+        predicate-functions
+        (:seon.schema.projection/predicate-functions projection)
+        compile-options
+        (:seon.schema.projection/compile-options projection)
+        bound (bind-predicates definition predicate-functions)
+        function? (qualified-symbol? identity)
+        compiled ((if function? m/function-schema m/schema)
+                  bound compile-options)]
+    (assert-complete-contract!
+     {:seon.schema/identity identity
+      :seon.schema/definition definition
+      :seon.schema/forms forms
+      :seon.schema/admission admission
+      :seon.schema/admissions
+      (:seon.schema.projection/schema-admissions projection)
+      :seon.schema/pure-predicate-symbols
+      (:seon.schema.projection/pure-predicate-symbols projection)
+      :seon.schema/predicate-functions predicate-functions
+      :seon.schema/direct-predicate-symbols
+      (predicate-symbols-in definition)
+      :seon.schema/compiled compiled
+      :seon.schema/compiled-definition bound
+      :seon.schema/compiled-forms {identity bound}
+      :seon.schema/compiled-schemas
+      (if function? {} {identity compiled})
+      :seon.schema/schema-dependencies
+      (:seon.schema.projection/schema-dependencies projection)
+      :seon.schema/registry
+      (:seon.schema.projection/registry projection)
+      :seon.schema/compile-options compile-options
+      :seon.schema/canonical-keys
+      (:seon.schema.projection/canonical-keys projection)})))
+
+(defn- replace-reverse-dependencies
+  [reverse-edges dependent before after]
+  (let [without-before
+        (reduce
+         (fn [edges dependency]
+           (let [dependents (disj (get edges dependency #{}) dependent)]
+             (if (seq dependents)
+               (assoc edges dependency dependents)
+               (dissoc edges dependency))))
+         reverse-edges
+         before)]
+    (reduce
+     (fn [edges dependency]
+       (update edges dependency (fnil conj #{}) dependent))
+     without-before
+     after)))
+
+(defn- replace-shape-rows
+  [shape-rows forms schema-keys]
+  (reduce
+   (fn [rows schema-key]
+     (if-let [row (shape-row-in forms schema-key (get forms schema-key))]
+       (assoc rows schema-key row)
+       (dissoc rows schema-key)))
+   shape-rows
+   schema-keys))
+
+(defn- function-dependents-of
+  [projection schema-keys]
+  (into #{}
+        (mapcat
+         #(get (:seon.schema.projection/reverse-function-dependencies
+                projection)
+               % #{}))
+        schema-keys))
 
 (defn projection-from-rows
   "Build one complete projection from committed schema and contract rows.
@@ -1780,24 +1970,91 @@
                 [:seon.schema/admission :map]]
     ::projection]}
   [projection schema-key definition admission]
-  (let [forms (assoc (:seon.schema.projection/forms projection)
-                     schema-key definition)]
-    (build-projection
-     forms
-     (:seon.schema.projection/function-contracts projection)
-     {:seon.schema/schema-admissions
-      (assoc (:seon.schema.projection/schema-admissions projection)
-             schema-key admission)
-      :seon.schema/function-admissions
-      (:seon.schema.projection/function-admissions projection)
-      :seon.schema/function-source-admissions
-      (:seon.schema.projection/function-source-admissions projection)
-      :seon.schema/artifact-exports
-      (:seon.schema.projection/artifact-exports projection)
-      :seon.schema/pure-predicate-symbols
-      (:seon.schema.projection/pure-predicate-symbols projection)
-      :seon.schema/predicate-functions
-      (:seon.schema.projection/predicate-functions projection)})))
+  (let [old-forms (:seon.schema.projection/forms projection)
+        old-definition (get old-forms schema-key ::absent)
+        forms (assoc old-forms schema-key definition)
+        predicate-functions (predicate-functions-with projection [definition])
+        registry (projection-registry forms predicate-functions)
+        compile-options {:registry registry}
+        canonical-keys
+        (conj (or (:seon.schema.projection/canonical-keys projection)
+                  (set (keys old-forms)))
+              schema-key)
+        direct-dependencies
+        (direct-reference-keys-in
+         definition predicate-functions canonical-keys)
+        old-dependencies
+        (get (:seon.schema.projection/schema-dependencies projection)
+             schema-key #{})
+        schema-dependencies
+        (assoc (:seon.schema.projection/schema-dependencies projection)
+               schema-key direct-dependencies)
+        _ (assert-acyclic-references!
+           forms [schema-key] schema-dependencies)
+        compiled (m/schema (bind-predicates definition predicate-functions)
+                           compile-options)
+        reverse-schema-dependencies
+        (replace-reverse-dependencies
+         (:seon.schema.projection/reverse-schema-dependencies projection)
+         schema-key old-dependencies direct-dependencies)
+        affected-schema-keys
+        (dependent-schema-keys projection #{schema-key})
+        schema-admissions
+        (assoc (:seon.schema.projection/schema-admissions projection)
+               schema-key admission)
+        candidate
+        (assoc projection
+               :seon.schema.projection/forms forms
+               :seon.schema.projection/registry registry
+               :seon.schema.projection/compile-options compile-options
+               :seon.schema.projection/predicate-functions predicate-functions
+               :seon.schema.projection/canonical-keys canonical-keys
+               :seon.schema.projection/schema-admissions schema-admissions
+               :seon.schema.projection/schema-dependencies schema-dependencies
+               :seon.schema.projection/reverse-schema-dependencies
+               reverse-schema-dependencies)
+        _ (doseq [affected (sort-by str affected-schema-keys)]
+            (validate-one-contract!
+             candidate affected (get forms affected)
+             (get schema-admissions affected
+                  {:seon.schema.admission/source :core})))
+        affected-function-symbols
+        (function-dependents-of candidate affected-schema-keys)
+        _ (doseq [function-symbol (sort-by str affected-function-symbols)]
+            (validate-one-contract!
+             candidate function-symbol
+             (get (:seon.schema.projection/function-contracts candidate)
+                  function-symbol)
+             (get (:seon.schema.projection/function-admissions candidate)
+                  function-symbol
+                  {:seon.schema.admission/source :core})))
+        shape-rows
+        (replace-shape-rows
+         (:seon.schema.projection/shape-rows projection)
+         forms affected-schema-keys)
+        shape-data
+        (if (identical? shape-rows
+                        (:seon.schema.projection/shape-rows projection))
+          (select-keys
+           projection
+           [:seon.schema.projection/required-by-key
+            :seon.schema.projection/shape-index
+            :seon.schema.projection/catalog])
+          (shape-projections shape-rows))
+        fingerprint
+        (-> (reusable-projection-fingerprint projection)
+            (replace-fingerprint-entry
+             :forms schema-key old-definition definition)
+            (replace-fingerprint-entry
+             :schema-admissions schema-key
+             (get (:seon.schema.projection/schema-admissions projection)
+                  schema-key ::absent)
+             admission))]
+    (merge candidate shape-data
+           {:seon.schema.projection/shape-rows shape-rows
+            :seon.schema.projection/fingerprint-version
+            projection-fingerprint-version
+            :seon.schema.projection/fingerprint fingerprint})))
 
 (defn projection-without-schema
   "Validate the projection produced by removing one unused schema.
@@ -1848,24 +2105,70 @@
                 [:seon.schema/admission :map]]
     ::projection]}
   [projection function-symbol definition admission]
-  (build-projection
-   (:seon.schema.projection/forms projection)
-   (assoc (:seon.schema.projection/function-contracts projection)
-          function-symbol definition)
-   {:seon.schema/schema-admissions
-    (:seon.schema.projection/schema-admissions projection)
-    :seon.schema/function-admissions
-    (assoc (:seon.schema.projection/function-admissions projection)
-           function-symbol admission)
-    :seon.schema/function-source-admissions
-    (assoc (:seon.schema.projection/function-source-admissions projection)
-           function-symbol admission)
-    :seon.schema/artifact-exports
-    (:seon.schema.projection/artifact-exports projection)
-    :seon.schema/pure-predicate-symbols
-    (:seon.schema.projection/pure-predicate-symbols projection)
-    :seon.schema/predicate-functions
-    (:seon.schema.projection/predicate-functions projection)}))
+  (let [forms (:seon.schema.projection/forms projection)
+        old-contracts (:seon.schema.projection/function-contracts projection)
+        old-definition (get old-contracts function-symbol ::absent)
+        contracts (assoc old-contracts function-symbol definition)
+        predicate-functions (predicate-functions-with projection [definition])
+        registry (projection-registry forms predicate-functions)
+        compile-options {:registry registry}
+        compiled
+        (m/function-schema
+         (bind-predicates definition predicate-functions)
+         compile-options)
+        canonical-keys
+        (or (:seon.schema.projection/canonical-keys projection)
+            (set (keys forms)))
+        dependencies
+        (direct-references* compiled canonical-keys)
+        old-dependencies
+        (get (:seon.schema.projection/function-dependencies projection)
+             function-symbol #{})
+        function-admissions
+        (assoc (:seon.schema.projection/function-admissions projection)
+               function-symbol admission)
+        function-source-admissions
+        (assoc
+         (:seon.schema.projection/function-source-admissions projection)
+         function-symbol admission)
+        candidate
+        (assoc projection
+               :seon.schema.projection/registry registry
+               :seon.schema.projection/compile-options compile-options
+               :seon.schema.projection/predicate-functions predicate-functions
+               :seon.schema.projection/canonical-keys canonical-keys
+               :seon.schema.projection/function-contracts contracts
+               :seon.schema.projection/function-admissions function-admissions
+               :seon.schema.projection/function-source-admissions
+               function-source-admissions
+               :seon.schema.projection/function-dependencies
+               (assoc (:seon.schema.projection/function-dependencies projection)
+                      function-symbol dependencies)
+               :seon.schema.projection/reverse-function-dependencies
+               (replace-reverse-dependencies
+                (:seon.schema.projection/reverse-function-dependencies
+                 projection)
+                function-symbol old-dependencies dependencies))
+        _ (validate-one-contract! candidate function-symbol definition admission)
+        fingerprint
+        (-> (reusable-projection-fingerprint projection)
+            (replace-fingerprint-entry
+             :function-contracts function-symbol old-definition definition)
+            (replace-fingerprint-entry
+             :function-admissions function-symbol
+             (get (:seon.schema.projection/function-admissions projection)
+                  function-symbol ::absent)
+             admission)
+            (replace-fingerprint-entry
+             :function-source-admissions function-symbol
+             (get
+              (:seon.schema.projection/function-source-admissions projection)
+              function-symbol ::absent)
+             admission))]
+    (assoc candidate
+           :seon.schema.projection/fingerprint-version
+           projection-fingerprint-version
+           :seon.schema.projection/fingerprint fingerprint)))
 
 (defn activate-projection!
   "Atomically publish an already validated projection.

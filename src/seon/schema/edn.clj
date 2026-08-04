@@ -482,20 +482,45 @@
                   [:vector :map]]}
   [{:seon.schema/keys [forms identity admission]}]
   (let [original-forms forms
-        forms (if identity (derive-config-forms forms) forms)]
-    (assert-predicates! forms)
+        forms (if identity (derive-config-forms forms) forms)
+        changed-identities
+        (when identity
+          (into
+           [identity]
+           (comp
+            (remove #{identity})
+            (filter
+             #(not= (get original-forms % ::absent)
+                    (get forms % ::absent))))
+           [:seon.config/manifest
+            :seon.config/effective
+            :seon.config/agent-overlay
+            :seon.config/entity]))]
+    (assert-predicates!
+     (if identity (select-keys forms changed-identities) forms))
     (try
       (if identity
         ;; Runtime registration admits the new declaration against the complete
-        ;; candidate registry. Unrelated bootstrap declarations may still await
-        ;; their owning namespace during module loading, so they are not
-        ;; recompiled merely because this producer added one independent key.
-        (schema/assert-complete-contract!
-         {:seon.schema/identity identity
-          :seon.schema/definition (get forms identity)
-          :seon.schema/forms forms
-          :seon.schema/admission
-          (or admission {:seon.schema.admission/source :agent})})
+        ;; active projection one changed identity at a time. A config leaf may
+        ;; also change its derived composites; each changed declaration passes
+        ;; the same incremental projection choke point without recompiling
+        ;; unrelated registry forms.
+        (if-let [projection (schema/current-projection)]
+          (reduce
+           (fn [candidate changed-identity]
+             (schema/projection-with-schema
+              candidate changed-identity (get forms changed-identity)
+              (or admission {:seon.schema.admission/source :agent})))
+           projection
+           changed-identities)
+          ;; Bootstrap has no database-derived projection yet. Its small
+          ;; declaration population retains the complete-population gate.
+          (schema/assert-complete-contract!
+           {:seon.schema/identity identity
+            :seon.schema/definition (get forms identity)
+            :seon.schema/forms forms
+            :seon.schema/admission
+            (or admission {:seon.schema.admission/source :agent})}))
         ;; Activation has no distinguished producer: every declaration must
         ;; compile and resolve in the complete population before publication.
         (schema/build-projection forms))

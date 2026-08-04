@@ -5,7 +5,8 @@
             [malli.error :as me]
             [seon.db]
             [seon.schema :as schema]
-            [seon.schema.edn]))
+            [seon.schema.edn]
+            [seon.schema.internal :as schema.internal]))
 
 (defn- refusal
   [thunk]
@@ -188,3 +189,45 @@
           :string]
          :seon.schema/admission
          {:seon.schema.admission/source :agent}}))))
+
+(deftest one-declaration-validates-only-its-dependency-closure
+  (let [unrelated
+        (into {}
+              (map (fn [index]
+                     [(keyword "seon.schema-test.unrelated" (str index))
+                      :string]))
+              (range 1024))
+        projection (schema/build-projection unrelated)
+        admission {:seon.schema.admission/source :agent}
+        binding-walks (atom 0)
+        population-compilations (atom 0)
+        original-bind schema/bind-predicates
+        original-compile schema.internal/assert-compilable-schema!
+        [schema-candidate function-candidate]
+        (with-redefs
+          [schema/bind-predicates
+           (fn [& args]
+             (swap! binding-walks inc)
+             (apply original-bind args))
+           schema.internal/assert-compilable-schema!
+           (fn [& args]
+             (swap! population-compilations inc)
+             (apply original-compile args))]
+          [(schema/projection-with-schema
+            projection :seon.schema-test.incremental/score
+            [:int {:min 0 :max 100}] admission)
+           (schema/projection-with-function-contract
+            projection 'seon.schema-test.incremental/accept
+            [:=> [:cat :string] :string] admission)])]
+    (is (zero? @population-compilations)
+        "one declaration never enters complete-population compilation")
+    (is (< @binding-walks 16)
+        "predicate binding is bounded by the two changed declarations")
+    (is (= [:int {:min 0 :max 100}]
+           (get-in schema-candidate
+                   [:seon.schema.projection/forms
+                    :seon.schema-test.incremental/score])))
+    (is (= [:=> [:cat :string] :string]
+           (get-in function-candidate
+                   [:seon.schema.projection/function-contracts
+                    'seon.schema-test.incremental/accept])))))
