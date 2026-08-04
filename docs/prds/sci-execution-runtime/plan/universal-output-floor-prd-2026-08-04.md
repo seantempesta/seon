@@ -105,8 +105,8 @@ authored copy (usage strings, CSS/JS assets) is not a value conversion
 
 ## 3. Conversion ladder (sol §4.4, Opus deletions merged; order = blast radius)
 
-1. **DONE — commits `e34eea186`, `aaaaf856b`, `00d8c6c0c`, and
-   `e35e7b27f`.** Structurally total AI/HTML projection walk (producer
+1. **DONE — commits `e34eea186`, `aaaaf856b`, `00d8c6c0c`, `e35e7b27f`,
+   and `de8e32c11`.** Structurally total AI/HTML projection walk (producer
    dispatch + fit + elision records at every depth) — settled before
    consumers convert. The original `render.value/print-node-window`
    implementation is deleted; its temporary compatibility call delegates to
