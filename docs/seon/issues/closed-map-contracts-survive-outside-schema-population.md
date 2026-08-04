@@ -31,6 +31,18 @@ population reaches zero. `rg` reports three more in
 `test/seon/bootstrap_test.clj:75-78` asserts that the repair adds the property,
 and `test/seon/bootstrap_drive_test.clj:7-18` supplies another closed contract.
 
+The 2026-08-04 isolated dogfood pass confirmed that this is the first guidance
+a newly created agent actually receives. `(help)` rendered this current face:
+
+```text
+The contract is checked, so write it honestly: input maps must say
+{:closed true}, and a return may not be a bare [:maybe ...].
+```
+
+The very next worked definition used an open map and was admitted, returning
+the new Var face. The instruction therefore contradicts both the owner ruling
+and the behavior in the same bootstrap run.
+
 ## Owner
 
 The public contract owner in each namespace, plus the one bootstrap plan and
