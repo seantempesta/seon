@@ -177,8 +177,11 @@ has an identity, cluster ref, namespace ownership ref, optional additive
 instructions, and no current run. Committing `:seon.cluster.agent/id` also wakes
 the cluster's arm owner so a graph is created for the new agent.
 
-A message is one recipient, content, and instant, with optional sender,
-`about`, and `caused-by` refs. Absence of `/from` means the message came from
+A message is one recipient, content, instant, and optional numeric ordinal,
+with optional sender, `about`, and `caused-by` refs. Delivery vectors record
+their source position in `/ordinal`; inbound singletons record zero. Consumers
+order equal instants by transaction, ordinal, and numeric entity id, never by
+the message identity string. Absence of `/from` means the message came from
 outside the agent population; no origin enum repeats that fact. The `/to` ref
 is the wake attribute. A run records its `/trigger` ref when it opens, so
 answeredness is the presence of that connection rather than a flag on the

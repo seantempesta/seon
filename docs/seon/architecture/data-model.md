@@ -170,12 +170,15 @@ call and recorded on the attempt as `:seon.ai.attempt/settings-edn`.
 | `:seon.cluster.message/to` | ref | recipient and wake attribute |
 | `:seon.cluster.message/content` | non-empty string | message text |
 | `:seon.cluster.message/at` | instant | observed send time |
+| `:seon.cluster.message/ordinal` | optional nonnegative integer | position in one committed source vector; inbound singletons use zero |
 | `:seon.cluster.message/from` | optional indexed ref | sender agent; absence means outside the agent population |
 | `:seon.cluster.message/about` | optional indexed ref | assigned or explained fact |
 | `:my.message/reason` | optional string | a declination's reader-facing reason |
 
 `to` is cardinality one. Sending to several agents produces several message
-rows. Origin, hop count, delivery acknowledgement, browser session, and
+rows. The numeric ordinal preserves their source-vector order without giving
+the derived identity string ordering semantics. Origin, hop count, delivery
+acknowledgement, browser session, and
 read/unread state are not stored. Message-chain bounds derive from transaction
 metadata and message relations.
 

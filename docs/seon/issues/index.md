@@ -38,7 +38,7 @@ See `README.md` for the convention.
 | [Refuse the losing concurrent divergent schema declaration](concurrent-divergent-schema-declarations-falsely-both-succeed.md) | blocker | schema collision admission wave |
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 
-## Friction (85)
+## Friction (87)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -127,7 +127,9 @@ See `README.md` for the convention.
 | [Keep nested map sequences structurally readable](nested-map-sequences-render-as-tables-inside-structural-values.md) | friction | print-path follow-up |
 | [Effect receipts have no render producers](effect-receipts-have-no-render-producers.md) | friction | render receipt-producer wave |
 | [Cluster, config, and bootstrap plan render as raw maps](cluster-config-and-bootstrap-plan-render-as-raw-maps.md) | friction | render important-schema producer wave |
-| [Preserve message vector order past index nine](same-transaction-message-order-is-lexical.md) | friction | message ordering repair |
+| [Order transcript receipt and comment candidates by numeric facts](transcript-candidate-window-orders-receipts-and-comments-by-id.md) | friction | transcript ordering follow-up |
+| [Order effect feedback by numeric facts](effect-feedback-orders-receipts-by-id.md) | friction | effect ordering follow-up |
+| [Select the latest closed run without comparing run ids](latest-closed-run-orders-by-id-string.md) | friction | work ordering follow-up |
 | [Admit definitions after dynamically hidden namespace movement](dynamic-in-ns-cannot-persist-definition-namespace.md) | friction | per-run fork context wave |
 
 ## Cleanup (15)

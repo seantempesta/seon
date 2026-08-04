@@ -51,6 +51,7 @@ drive rendered a complete transcript without an invocation failure (3 tests /
 |---|---|---|---|
 | A1 | Same-instant receipts render in lexical id order — live bootstrap scrambles | order by the run's numeric form-ordinal FACT at the one `entry-order` seam; one ≥11-receipt regression | **DONE** — commits `2e6f1344e`/`d03a5b7bc`, issue archived; live proof: 13 same-instant bootstrap receipts render in exact plan order |
 | A2 | Capability walk fails OPEN on host-bound capability Vars (`capability-free-references?` true for `(my.fs/read …)`) | the walk classifies host `clojure.lang.Var` like any resolved var; unclassifiable ⇒ unproven (fail closed); regression through the real cluster ctx | **DONE** — commits `bcee99a74`/`cce3d5a14`, issue archived, live proof (`my.fs/read` ⇒ capability-free false); owning gate 31 tests green |
+| A3 | Same-transaction messages render and schedule `0,1,10,11,2...` | declare the numeric source-vector ordinal at message commit; order work and both projections by numeric/temporal facts | **DONE** — commit `7cfb2435f`, issue archived; focused gate 36 tests / 232 assertions; fresh-cluster proof recorded ordinals `0..11` in one transaction and both projections returned all twelve in numeric order |
 
 ## B. Ugly output — fix lanes running (root-cause + declared producers)
 
@@ -106,7 +107,9 @@ drive rendered a complete transcript without an invocation failure (3 tests /
 | F2 | **DONE, corrected in W2** — the caller records the pre-open branch-head commit ID as `:seon.cluster.run/opening-commit-id`; a transaction function's database value retains the branch-origin commit and is not the fork point |
 | F3 | **DONE** — `plan-call` records `:seon.cluster.run/starting-ns`; ordinary call planning supplies the assigned namespace and replay callers may supply it explicitly |
 | F4 | **DONE** — terminal settlement commits `:seon.sci.eval/ending-ns`; a resumed fold seeds its namespace from the most recent committed ending namespace, falling back to the run's starting namespace |
-| F5–F10 | Pending W2–W4 — [session-curation-prd-2026-08-04.md](session-curation-prd-2026-08-04.md) §3 |
+| F5 | Pending W4 — [session-curation-prd-2026-08-04.md](session-curation-prd-2026-08-04.md) §3 |
+| F6 | **PARTIAL** — commit `7cfb2435f` lifts the source-vector index out of the message id into `:seon.cluster.message/ordinal`; order consumers no longer compare or parse the id. The direct message→issuing-form ref required by S5 pinning remains pending W4. |
+| F7–F10 | Pending W3–W4 — [session-curation-prd-2026-08-04.md](session-curation-prd-2026-08-04.md) §3 |
 | F11 | **DONE** — commit `093670eff` indexes direct test→function refs from the same clj-kondo var-usage pass and stores them through the shared cardinality-many `:seon.fn/calls` attribute; `seon.fn/tests-reaching` derives the reverse transitive closure needed by the dependents-test gate. Independent verification: 33 focused tests / 200 assertions, zero failures or errors; the published `default` cluster reports 865 tests with direct call refs and resolves the `seon.fn/tests-reaching` dependent test. |
 
 W2 is complete: `system-run-tx` is owned by `seon.cluster.run` (so

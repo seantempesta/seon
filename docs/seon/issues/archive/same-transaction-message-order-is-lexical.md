@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, runtime, concurrency]
 ---
@@ -38,3 +38,18 @@ transcript projection.
 - Equal timestamps remain deterministic without parsing identity strings.
 - Every message remains one durable fact with its existing derived identity;
   no queue or stored transcript projection is introduced.
+
+## Resolution
+
+Resolved by commit `7cfb2435f`. Delivery now records the source vector's
+numeric `:seon.cluster.message/ordinal` on every message row. Inbound singleton
+messages record ordinal zero. Work derivation and both transcript projections
+order messages by the message instant, assertion transaction, numeric ordinal,
+and numeric entity id; no ordering consumer parses or compares the message id.
+
+The two-digit regression commits twelve messages in one transaction and proves
+numeric order in `unanswered-triggers`, the AI projection, and the HTML
+projection. The focused checkpoint passed 36 tests / 232 assertions. A fresh
+`message-order-proof-0804` cluster recorded ordinals `0..11` in transaction
+`536870977`; its AI and HTML transcript projections each returned all twelve
+messages in order from `message-00` through `message-11`.

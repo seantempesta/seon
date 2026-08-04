@@ -16,6 +16,18 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**ADDENDUM — 2026-08-04, MESSAGE ORDER IS A NUMERIC FACT.** Commit
+`7cfb2435f` declares and commits `:seon.cluster.message/ordinal` for delivered
+message vectors and inbound singletons. Work derivation and both transcript
+projections now resolve equal instants by assertion transaction, numeric
+ordinal, and numeric entity id; message identity strings have no ordering
+semantics. The focused gate passed 36 tests / 232 assertions. A fresh
+`message-order-proof-0804` cluster recorded twelve messages with ordinals
+`0..11` in transaction `536870977`; AI and HTML projections each rendered all
+twelve in numeric order. The adjacent class sweep filed independent issues for
+transcript receipt/comment candidate windows, effect feedback, and
+latest-closed-run selection.
+
 **ADDENDUM — 2026-08-03, GRAPH-BACKED `doc` RESOLVES CONTRACTS.** The acquired
 `doc` macro preserves `clojure.repl/doc`'s symbol, arglist, and plain docstring
 face, then renders each ordered arity's resolved `:seon.fn.arity/input-refs`
