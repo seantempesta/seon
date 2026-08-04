@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, database, program-graph]
 ---
@@ -64,3 +64,15 @@ A regression that applies the same program row twice through
 and every component identity unchanged. A companion case where the source
 genuinely differs must still retract and rebuild exactly the changed
 attributes.
+
+## Closed 2026-08-04
+
+`seon.cluster.run/program-row-tx` now compares canonical declared content
+before constructing exact replacement transaction data. Reference attributes
+are normalized to lookup refs and component entity identities are excluded as
+database mechanics. An identical declaration therefore emits zero transaction
+data, while a changed source still emits and commits the real replacement.
+
+`seon.program-test` proves the correct `[database row]` argument order plus
+both identical and changed cases: 13 tests and 61 assertions passed. The real
+boot-tower gate additionally passed 28 tests and 137 assertions.

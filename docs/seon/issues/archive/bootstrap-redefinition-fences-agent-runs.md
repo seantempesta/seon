@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, bootstrap, agent, sci, repl]
 ---
@@ -86,3 +86,16 @@ and the declaration installation boundary in `seon.sci.eval`.
   `:seon.fn/source` matches the source installed for that exact symbol.
 - The proof queries receipts and durable errors; it does not recover or rearm a
   fenced bootstrap session.
+
+## Closed 2026-08-04
+
+The install fence was correct. The D1 declared-content comparison passed the
+canonical row and database to `declared-map` in reverse order, falsely
+classifying changed declarations as identical and suppressing the replacement
+transaction. `seon.cluster.run/declared-content` now calls the comparison with
+the correct argument order; the SCI install-source guard remains unchanged.
+
+The recurring boot-tower test now waits for `bootstrap:root` to close and
+asserts all 13 receipts. The complete `seon.cluster.boot-test` gate passed 28
+tests and 137 assertions; the declared-content unit gate passed 13 tests and
+61 assertions, including identical/no-op and changed/replacement cases.

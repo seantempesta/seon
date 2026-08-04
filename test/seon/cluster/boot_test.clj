@@ -1094,6 +1094,16 @@
                     :seon.boot.phase/web
                     :seon.boot.phase/ready]
                    @phases)))
+          (testing "the bootstrap fold installs both declarations and closes"
+            (await-bootstrap! (:seon.boot/cluster-connection instance) "root")
+            (is (= 13
+                   (db/q '[:find (count ?receipt) .
+                           :in $ ?run-id
+                           :where
+                           [?run :seon.cluster.run/id ?run-id]
+                           [?receipt :seon.cluster.eval/run ?run]]
+                         @(:seon.boot/cluster-connection instance)
+                         (bootstrap/run-id "root")))))
           (testing "a second cluster in the same process forks
                     near-instantly off the shared store"
             (let [forked-at (System/nanoTime)

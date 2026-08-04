@@ -176,6 +176,41 @@
                  (db/pull @connection '[*]
                           [:seon.fn/sym function-symbol]))))))))
 
+(deftest changed-runtime-redeclaration-builds-a-real-replacement
+  (test-support/with-database
+    (fn [connection]
+      (let [function-symbol "sample/redefined"
+            spec [:=> [:cat :int] :int]
+            original
+            (merge {:seon.fn/sym function-symbol
+                    :seon.fn/ns [:seon.ns/name 'sample]
+                    :seon.fn/source
+                    "(defn redefined {:malli/schema [:=> [:cat :int] :int]} [x] x)"
+                    :seon.fn/arglists "([x])"
+                    :seon.fn/private? false
+                    :seon.fn/spec (pr-str spec)}
+                   (parsed-contract function-symbol spec {}))
+            changed
+            (assoc original :seon.fn/source
+                   "(defn redefined {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
+            program-row-tx (ns-resolve 'seon.cluster.run 'program-row-tx)
+            declared-content (ns-resolve 'seon.cluster.run 'declared-content)]
+        (db/transact! connection [{:seon.ns/name 'sample
+                                   :seon.ns/source "(ns sample)"}])
+        (db/transact! connection (program-row-tx @connection {} original))
+        (let [current (db/pull @connection '[*]
+                               [:seon.fn/sym function-symbol])
+              replacement (program-row-tx @connection {} changed)]
+          (is (not= (declared-content @connection current)
+                    (declared-content @connection changed))
+              "declared content receives the database before the row")
+          (is (seq replacement))
+          (db/transact! connection replacement)
+          (is (= (:seon.fn/source changed)
+                 (:seon.fn/source
+                  (db/pull @connection [:seon.fn/source]
+                           [:seon.fn/sym function-symbol])))))))))
+
 (deftest reader-events-have-one-canonical-declaration-row
   (let [cases
         [{:label "contracted function"

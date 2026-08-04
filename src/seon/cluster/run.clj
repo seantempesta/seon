@@ -771,10 +771,8 @@
   ;; Contract AST and arity rows are deterministic projections of the
   ;; declaration's `:seon.fn/spec`. Their component entity ids are database
   ;; mechanics, not declared content.
-  (some-> value
-          program/canonical-row
-          (dissoc :seon.fn/arities :seon.fn/ast)
-          (declared-map db)))
+  (when-some [canonical (program/canonical-row value)]
+    (declared-map db (dissoc canonical :seon.fn/arities :seon.fn/ast))))
 
 (defn- program-row-tx
   "Validate and exact-upsert one reader-produced durable declaration."

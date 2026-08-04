@@ -31,6 +31,11 @@ See `README.md` for the convention.
 | [`seon.db/q` silently returns nil when its db argument is an error value](seon-db-q-returns-nil-on-error-value-db-argument.md) | blocker | database error-value repair |
 | [Repair development MCP error locations and status scope](dev-mcp-envelopes-misdirect-errors-and-sprawl-status.md) | blocker | development MCP envelope repair |
 | [Eight `:seon.config.web/*` dials are registered with no shipped default](web-config-dials-ship-without-shipped-defaults.md) | blocker | web config default repair |
+| [Isolate session deltas from other runs' context mutations](shared-context-session-delta-crosses-run-attribution.md) | blocker | per-run fork context wave |
+| [Make concurrent definition receipts agree with the durable program row](concurrent-definition-receipts-can-diverge-from-durable-program-row.md) | blocker | per-run fork context wave |
+| [Let evaluation errors settle their triage receipt](eval-errors-cannot-settle-triage-receipts.md) | blocker | receipt settlement repair |
+| [Refuse the losing concurrent divergent schema declaration](concurrent-divergent-schema-declarations-falsely-both-succeed.md) | blocker | schema collision admission wave |
+| [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 
 ## Friction (85)
 
@@ -121,6 +126,8 @@ See `README.md` for the convention.
 | [Keep nested map sequences structurally readable](nested-map-sequences-render-as-tables-inside-structural-values.md) | friction | print-path follow-up |
 | [Effect receipts have no render producers](effect-receipts-have-no-render-producers.md) | friction | render receipt-producer wave |
 | [Cluster, config, and bootstrap plan render as raw maps](cluster-config-and-bootstrap-plan-render-as-raw-maps.md) | friction | render important-schema producer wave |
+| [Preserve message vector order past index nine](same-transaction-message-order-is-lexical.md) | friction | message ordering repair |
+| [Admit definitions after dynamically hidden namespace movement](dynamic-in-ns-cannot-persist-definition-namespace.md) | friction | per-run fork context wave |
 
 ## Cleanup (15)
 
@@ -140,4 +147,3 @@ See `README.md` for the convention.
 | [Close the remaining vendored-versus-pinned dependency drift](vendored-transit-clj-drifts-from-the-pinned-artifact.md) | cleanup | upstream-delta sweep follow-up |
 | [Stop opaque contract generators from sharing live process objects](opaque-contract-generators-share-live-process-objects.md) | cleanup | contract-generator cleanup wave |
 | [Declare the config-to-request ident route instead of string-building it](config-ai-request-idents-are-derived-by-string-surgery.md) | cleanup | config application-contract cleanup wave |
-| [Re-declaring an identical function retracts and rebuilds its component trees](program-row-replacement-churns-identical-redeclarations.md) | cleanup | program graph idempotency cleanup wave |
