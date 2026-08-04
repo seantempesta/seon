@@ -86,25 +86,25 @@
     (is (false? (:seon.dev.mcp/windowed? result)))
     (is (not (contains? result :seon.blob/digest)))))
 
-(deftest jvm-exceptions-retain-one-summary-and-blob-only-oversized-messages
+(deftest jvm-exceptions-retain-the-root-location-and-flat-error
   (let [cluster-name "mcp-jvm-exception-face-test"
         effective (config/defaults)
         inline-ceiling (:seon.config.eval.result/blob-threshold effective)
-        dependency-frame
+        throw-site-frame
         ['malli.core$_map_schema$reify__1 'invoke "core.cljc" 1289]
-        first-party-frame
-        ['seon.cluster.mcp_test$explode 'invokeStatic "mcp_test.clj" 99]
+        serving-frame
+        ['seon.cluster$mcp_io_prepl 'invokeStatic "cluster.clj" 336]
         small-message "The contract value was wrong."
         oversized-message (apply str (repeat (inc inline-ceiling) \x))
         envelope
         {:via [{:type 'clojure.lang.ExceptionInfo
                 :message "The wrapper."
-                :at dependency-frame}
+                :at serving-frame}
                {:type 'java.lang.IllegalArgumentException
                 :message small-message
-                :at first-party-frame}]
-         :trace (into [dependency-frame first-party-frame]
-                      (repeat 500 dependency-frame))
+                :at throw-site-frame}]
+         :trace (into [throw-site-frame serving-frame]
+                      (repeat 500 serving-frame))
          :cause small-message
          :phase :execution}]
     (support/with-database
@@ -127,13 +127,14 @@
                 retained-message
                 (cluster/mcp-get-value
                  cluster-name (:seon.blob/digest oversized-result)
-                 [:seon.dev.mcp/exception-message] 0)]
+                 [:seon.error/message] 0)]
             (is (= {:seon.dev.mcp/exception-class
                     "java.lang.IllegalArgumentException"
-                    :seon.dev.mcp/exception-message small-message
-                    :seon.dev.mcp/frame first-party-frame}
+                    :seon.error/kind :seon.dev.mcp/jvm-exception
+                    :seon.error/message small-message
+                    :seon.dev.mcp/frame throw-site-frame}
                    face)
-                "the exception sentence has one structured face")
+                "the root exception location survives instead of the serving frame")
             (is (not (contains? face :seon.dev.mcp/text))
                 "the same sentence is not rendered again inside the face")
             (is (false? (:seon.dev.mcp/windowed? result)))
@@ -149,6 +150,60 @@
                 "a genuinely oversized message remains available by digest"))
           (finally
             (swap! running-instances dissoc cluster-name)))))))
+
+(deftest jvm-nil-deref-is-a-flat-error-value
+  (let [cluster-name "mcp-jvm-nil-deref-test"
+        effective (config/defaults)
+        deref-frame
+        ['clojure.core$deref_future 'invokeStatic "core.clj" 2314]
+        serving-frame
+        ['seon.cluster$mcp_io_prepl 'invokeStatic "cluster.clj" 336]
+        result
+        (projected
+         cluster-name effective
+         {:via [{:type 'java.lang.NullPointerException
+                 :message
+                 "Cannot invoke java.util.concurrent.Future.get() because fut is null"
+                 :at deref-frame}]
+          :trace [deref-frame serving-frame]
+          :cause
+          "Cannot invoke java.util.concurrent.Future.get() because fut is null"
+          :phase :execution})
+        face (:seon.dev.mcp/value result)]
+    (is (= {:seon.error/kind :seon.dev.mcp/nil-deref
+            :seon.error/message "The evaluated form dereferenced nil."
+            :seon.dev.mcp/exception-class "java.lang.NullPointerException"
+            :seon.dev.mcp/frame deref-frame}
+           face))
+    (is (not (str/includes? (pr-str result) "Future.get"))
+        "the misleading host overload sentence must not leak")))
+
+(deftest runtime-observation-counts-problems-without-embedding-facts
+  (let [cluster-name "mcp-runtime-problem-count-test"
+        large-detail (apply str (repeat 20000 \x))]
+    (swap! running-instances assoc cluster-name
+           {:seon.boot/cluster-connection ::connection})
+    (try
+      (with-redefs [cluster/readiness
+                    (fn [_]
+                      {:seon.boot/cluster-name cluster-name
+                       :seon.problems/problems
+                       {:seon.problems/error-signatures
+                        [{:seon.error/fact
+                          {:seon.error/data-edn large-detail}}
+                         {:seon.error/fact
+                          {:seon.error/data-edn large-detail}}]
+                        :seon.problems/errored-receipts
+                        [{:seon.cluster.eval/error large-detail}]}})]
+        (let [result (cluster/mcp-runtime-observation cluster-name)
+              ready (:seon.dev.mcp/readiness result)]
+          (is (= {:seon.problems/error-signatures 2
+                  :seon.problems/errored-receipts 1}
+                 (:seon.dev.mcp/problem-counts result)))
+          (is (not (contains? ready :seon.problems/problems)))
+          (is (< (utf8-size result) 1024))))
+      (finally
+        (swap! running-instances dissoc cluster-name)))))
 
 (deftest oversized-values-share-one-digest-across-storeless-and-stored-modes
   (let [cluster-name "mcp-value-test"

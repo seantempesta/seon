@@ -230,38 +230,25 @@
        (vector? (:trace value))
        (contains? value :cause)))
 
-(defn- program-namespaces
-  [connection]
-  (if connection
-    (let [names
-          (db/q '[:find [?name ...]
-                  :where
-                  [?namespace :seon.ns/name ?name]
-                  [?namespace :seon.ns/source _]]
-                @connection)]
-      (if (sequential? names) (set names) #{}))
-    #{}))
-
-(defn- namespace-frame?
-  [namespace-names frame]
-  (let [class-name (str (first frame))]
-    (boolean
-     (some
-      (fn [namespace-name]
-        (let [prefix (munge (str namespace-name))]
-          (or (= prefix class-name)
-              (str/starts-with? class-name (str prefix "$")))))
-      namespace-names))))
+(defn- nil-deref?
+  [cause]
+  (= 'clojure.core$deref_future (first (:at cause))))
 
 (defn- exception-summary
-  [value connection]
-  (let [cause (or (:cause value) (:message (last (:via value))))
-        exception-class (:type (last (:via value)))
-        frame (first (filter (partial namespace-frame?
-                                      (program-namespaces connection))
-                             (:trace value)))]
-    (cond-> {:seon.dev.mcp/exception-class (str exception-class)
-             :seon.dev.mcp/exception-message (str cause)}
+  [value]
+  (let [cause-entry (last (:via value))
+        nil-deref? (nil-deref? cause-entry)
+        frame (or (:at cause-entry) (first (:trace value)))
+        kind (or (get-in cause-entry [:data :seon.error/kind])
+                 (if nil-deref?
+                   :seon.dev.mcp/nil-deref
+                   :seon.dev.mcp/jvm-exception))
+        message (if nil-deref?
+                  "The evaluated form dereferenced nil."
+                  (str (or (:cause value) (:message cause-entry))))]
+    (cond-> {:seon.error/kind kind
+             :seon.error/message message
+             :seon.dev.mcp/exception-class (str (:type cause-entry))}
       frame (assoc :seon.dev.mcp/frame frame))))
 
 (defn- mcp-project
@@ -272,7 +259,7 @@
         evaluation-print-node (evaluation-node value)
         exception-envelope? (prepl-exception-envelope? value)
         exception-summary-value (when exception-envelope?
-                                  (exception-summary value connection))
+                                  (exception-summary value))
         admitted
         (if evaluation-print-node
           {:seon.sci.admit/print-node evaluation-print-node
@@ -369,15 +356,24 @@
   {:malli/schema [:=> [:cat :seon.boot/cluster-name] :map]}
   [cluster-name]
   (let [instance (mcp-instance cluster-name)
-        connection (:seon.boot/cluster-connection instance)]
+        connection (:seon.boot/cluster-connection instance)
+        ready (when instance (readiness instance))
+        problem-counts
+        (into (sorted-map)
+              (map (fn [[family rows]] [family (count rows)]))
+              (:seon.problems/problems ready))
+        readiness-face
+        (when ready
+          (dissoc ready :seon.problems/problems))]
     (cond-> {:seon.dev.mcp/cluster cluster-name
              :seon.dev.mcp/health
              (if connection :observed :unknown)
              :seon.dev.mcp/flow
              (if (and connection (:seon.flow/graph instance))
                (oversight/cluster-flow-status @connection instance)
-               :unknown)}
-      instance (assoc :seon.dev.mcp/readiness (readiness instance)))))
+               :unknown)
+             :seon.dev.mcp/problem-counts problem-counts}
+      readiness-face (assoc :seon.dev.mcp/readiness readiness-face))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure resolution — defaults are THE defaults document for this layer

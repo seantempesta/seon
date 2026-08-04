@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, tooling, mcp, repl, observability]
 ---
@@ -114,7 +114,7 @@ Fresh bridge processes against the hot-reloaded scratch cluster returned:
  :full-problems? false}
 ```
 
-The uncommitted cluster-side repair returns the real root location:
+The cluster-side B5 repair returns the real root location:
 
 ```clojure
 {:seon.error/kind :seon.dev.mcp/jvm-exception
@@ -124,7 +124,7 @@ The uncommitted cluster-side repair returns the real root location:
  ["user$eval13323" "invokeStatic" "NO_SOURCE_FILE" 1]}
 ```
 
-and classifies `(deref nil)` without leaking the host sentence:
+The B6 repair classifies `(deref nil)` without leaking the host sentence:
 
 ```clojure
 {:seon.error/kind :seon.dev.mcp/nil-deref
@@ -146,8 +146,10 @@ and
 
 The requested platform-incident probe published the current tree and cleanly
 booted `incident-envelope-0804` through `agents` and `web` under
-`tmp/dev-envelope-probe`. The MCP hunks do not touch `ensure-entity!`; that
-function and its creation-result schema remain concurrently modified by a
-different lane. The cluster-side MCP source and regression remain uncommitted
-until that shared-file owner lands, because a path-limited commit of
-`src/seon/cluster.clj` would otherwise absorb unrelated work.
+`tmp/dev-envelope-probe`. Commit `89fe1a287` subsequently landed the separate
+`ensure-entity!` creation-result work, leaving only the MCP projection hunks in
+`src/seon/cluster.clj`. The closing MCP commit owns those remaining hunks and
+their regression, closes B5 and B6, and fully closes platform incident A0.
+
+MCP clients must restart to load the repaired bridge; an already-running
+client retains its original stdio server definition.
