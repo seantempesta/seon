@@ -1,0 +1,34 @@
+#:my.shell{:argv [:vector {:min 1} [:string {:min 1}]]
+           :cwd :my.fs/path
+           :exit :int
+           :run-request
+           [:map
+            [:my.shell/argv :my.shell/argv]
+            [:my.shell/cwd :my.shell/cwd]
+            [:my.shell/stdin {:optional true} :my.shell/stdin]]
+           :run-result
+           [:map
+            [:my.shell/argv :my.shell/argv]
+            [:my.shell/cwd :my.shell/cwd]
+            [:my.shell/exit :my.shell/exit]
+            [:my.shell/stdout :my.shell.output/value]
+            [:my.shell/stderr :my.shell.output/value]]
+           :stderr :my.shell.output/value
+           :stdin
+           [:and
+            [:map
+             [:my.shell/stdin-text {:optional true} :my.shell/stdin-text]
+             [:my.shell/stdin-bytes {:optional true} :my.shell/stdin-bytes]
+             [:seon.blob/digest {:optional true} :seon.blob/digest]]
+            [:fn
+             {:error/message
+              "must contain exactly one stdin source: :my.shell/stdin-text, :my.shell/stdin-bytes, or :seon.blob/digest"
+              :gen/schema
+              [:or
+               [:map [:my.shell/stdin-text :my.shell/stdin-text]]
+               [:map [:my.shell/stdin-bytes :my.shell/stdin-bytes]]
+               [:map [:seon.blob/digest :seon.blob/digest]]]}
+             my.shell/stdin?]]
+           :stdin-bytes :my.fs/bytes
+           :stdin-text :string
+           :stdout :my.shell.output/value}

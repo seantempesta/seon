@@ -1,0 +1,51 @@
+#:my.shell.output{:blob :seon.blob/digest
+                  :bytes :my.fs/byte-count
+                  :digest :seon.blob/digest
+                  :octet-values :my.fs/bytes
+                  :preview :string
+                  :preview-complete? :boolean
+                  :text :string
+                  :value
+                  [:and
+                   [:map
+                    [:my.shell.output/bytes :my.shell.output/bytes]
+                    [:my.shell.output/digest :my.shell.output/digest]
+                    [:my.shell.output/text
+                     {:optional true}
+                     :my.shell.output/text]
+                    [:my.shell.output/octet-values
+                     {:optional true}
+                     :my.shell.output/octet-values]
+                    [:my.shell.output/blob
+                     {:optional true}
+                     :my.shell.output/blob]
+                    [:my.shell.output/preview
+                     {:optional true}
+                     :my.shell.output/preview]
+                    [:my.shell.output/preview-complete?
+                     :my.shell.output/preview-complete?]]
+                   [:fn
+                    {:error/message
+                     "must contain exactly one complete output arm: text, octet values, or blob"
+                     :gen/schema
+                     [:or
+                      [:map
+                       [:my.shell.output/bytes :my.shell.output/bytes]
+                       [:my.shell.output/digest :my.shell.output/digest]
+                       [:my.shell.output/text :my.shell.output/text]
+                       [:my.shell.output/preview-complete?
+                        :my.shell.output/preview-complete?]]
+                      [:map
+                       [:my.shell.output/bytes :my.shell.output/bytes]
+                       [:my.shell.output/digest :my.shell.output/digest]
+                       [:my.shell.output/octet-values
+                        :my.shell.output/octet-values]
+                       [:my.shell.output/preview-complete?
+                        :my.shell.output/preview-complete?]]
+                      [:map
+                       [:my.shell.output/bytes :my.shell.output/bytes]
+                       [:my.shell.output/digest :my.shell.output/digest]
+                       [:my.shell.output/blob :my.shell.output/blob]
+                       [:my.shell.output/preview-complete?
+                        :my.shell.output/preview-complete?]]]}
+                    my.shell/output?]]}

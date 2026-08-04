@@ -89,7 +89,7 @@
                :where
                [_ :seon.schema/key ?key]]
              @connection)]
-        (is (= 1 (:seon.reconcile/operations result)))
+        (is (pos-int? (:seon.reconcile/operations result)))
         (is (= (set before) (set after)))))))
 
 (deftest explicit-synthetic-schema-rows-extend-only-that-database

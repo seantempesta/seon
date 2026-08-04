@@ -1,0 +1,28 @@
+#:seon.config.shell{:home
+                    [:string
+                     {:min 1
+                      :seon.config/dial true
+                      :seon.config/optional true
+                      :seon.shell/environment "HOME"}]
+                    :inline-output-bytes
+                    [:int {:min 1, :seon.config/dial true}]
+                    :lang
+                    [:string
+                     {:min 1
+                      :seon.config/dial true
+                      :seon.config/optional true
+                      :seon.shell/environment "LANG"}]
+                    :path
+                    [:string
+                     {:min 1
+                      :seon.config/dial true
+                      :seon.config/optional true
+                      :seon.shell/environment "PATH"}]
+                    :preview-bytes
+                    [:int {:min 1, :seon.config/dial true}]
+                    :stdin-max-bytes
+                    [:int {:min 1, :seon.config/dial true}]
+                    :termination-grace-ms
+                    [:int {:min 1, :seon.config/dial true}]
+                    :time-limit-ms
+                    [:int {:min 1, :seon.config/dial true}]}
