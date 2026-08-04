@@ -197,7 +197,7 @@
       (finally
         (delete-known-files! known-paths)))))
 
-(deftest runtime-status-derives-live-stale-invalid-and-degraded-rows
+(deftest discovery-derives-live-stale-invalid-and-degraded-rows
   (let [fixture-root (io/file project-root "tmp"
                               (str "mcp-status-" (random-uuid)))
         root (.getCanonicalPath fixture-root)
@@ -244,7 +244,7 @@
              :seon.fresh-operator/advertisement degraded}]}]
          :seon.fresh-operator/process-records []
          :seon.fresh-operator/process-record-errors []}
-        result
+        rows
         (with-redefs-fn {(bridge-var 'operator-private)
                          (fn [var-symbol & _]
                            (case var-symbol
@@ -253,12 +253,8 @@
                                            "degraded" false}))
                          (bridge-var 'clj-sessions)
                          (atom {[root "alive" "investigation"] {}})}
-          #((bridge-var 'execute-runtime-status) {:root root}))
-        data (result-data result)
-        rows (:seon.dev.mcp/clusters data)
+          #((bridge-var 'discovery-rows) root))
         by-cluster (into {} (map (juxt :seon.dev.mcp/cluster identity)) rows)]
-    (is (= root (:seon.dev.mcp/root data)))
-        (is (= "inventory-health-flow" (name (:seon.dev.mcp/view data))))
     (is (= "alive" (name (get-in by-cluster ["alive" :seon.dev.mcp/state]))))
     (is (= "degraded"
            (name (get-in by-cluster ["degraded" :seon.dev.mcp/state]))))
@@ -266,11 +262,48 @@
            (name (get-in by-cluster ["unknown" :seon.dev.mcp/state]))))
     (is (= "stale" (name (get-in by-cluster ["stale" :seon.dev.mcp/state]))))
     (is (= "invalid"
-           (name (get-in by-cluster ["invalid" :seon.dev.mcp/state]))))
+           (name (get-in by-cluster ["invalid" :seon.dev.mcp/state]))))))
+
+(deftest runtime-status-is-scoped-and-deduplicated
+  (let [root (.getCanonicalPath
+              (io/file project-root "tmp" (str "mcp-status-face-"
+                                                (random-uuid))))
+        selected "selected"
+        selected-row {:seon.dev.mcp/root root
+                      :seon.dev.mcp/cluster selected
+                      :seon.dev.mcp/state :alive
+                      :seon.dev.mcp/source :advertisement}
+        unrelated-row {:seon.dev.mcp/root root
+                       :seon.dev.mcp/cluster "unrelated"
+                       :seon.dev.mcp/state :alive
+                       :seon.dev.mcp/source :advertisement}
+        observations (atom [])
+        result
+        (with-redefs-fn
+          {(bridge-var 'discovery-rows)
+           (fn [_] [selected-row selected-row unrelated-row])
+           (bridge-var 'runtime-observation)
+           (fn [_ cluster]
+             (swap! observations conj cluster)
+             {:seon.dev.mcp/health :observed})
+           (bridge-var 'clj-sessions)
+           (atom {[root selected "selected-session"] {}
+                  [root "unrelated" "unrelated-session"] {}})}
+          #((bridge-var 'execute-runtime-status)
+            {:root root :cluster selected}))
+        data (result-data result)
+        rows (:seon.dev.mcp/clusters data)]
+    (is (= "cluster-health-flow" (name (:seon.dev.mcp/view data))))
+    (is (= [selected] @observations))
+    (is (= 1 (count rows)))
+    (is (= selected (:seon.dev.mcp/cluster (first rows))))
+    (is (= 2 (:seon.dev.mcp/observation-count (first rows))))
     (is (= [{:seon.dev.mcp/root root
-             :seon.dev.mcp/cluster "alive"
-             :seon.dev.mcp/session-id "investigation"}]
-           (:seon.dev.mcp/sessions data)))))
+             :seon.dev.mcp/cluster selected
+             :seon.dev.mcp/session-id "selected-session"}]
+           (:seon.dev.mcp/sessions data)))
+    (is (not (str/includes? (get-in result [:content 0 :text])
+                            "unrelated")))))
 
 (deftest transport-errors-echo-the-attempted-evaluation-coordinates
   (let [result

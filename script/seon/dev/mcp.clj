@@ -643,11 +643,13 @@
                   (ex-data throwable)))))))))
 
 (defn- session-rows
-  [root]
+  [root cluster]
   (into
    []
    (comp
-    (filter (fn [[session-root _ _]] (= root session-root)))
+    (filter (fn [[session-root session-cluster _]]
+              (and (= root session-root)
+                   (= cluster session-cluster))))
     (map (fn [[session-root cluster session-id]]
            {:seon.dev.mcp/root session-root
             :seon.dev.mcp/cluster cluster
@@ -680,23 +682,29 @@
   [{:keys [root cluster]}]
   (let [root (canonical-root root)
         rows (discovery-rows root)
-        selected (or cluster own-cluster)]
+        selected (or cluster own-cluster)
+        selected-rows (filterv #(= selected (:seon.dev.mcp/cluster %)) rows)
+        selected-row
+        (when-let [row (first selected-rows)]
+          (cond-> row
+            (< 1 (count selected-rows))
+            (assoc :seon.dev.mcp/observation-count
+                   (count selected-rows))))]
     (mcp-success
      {:seon.dev.mcp/root root
-      :seon.dev.mcp/view :inventory-health-flow
+      :seon.dev.mcp/view :cluster-health-flow
       :seon.dev.mcp/clusters
-      (mapv (fn [row]
-              (if (contains? #{:alive :degraded :unknown}
-                             (:seon.dev.mcp/state row))
-                (assoc row :seon.dev.mcp/runtime
-                       (runtime-observation
-                        root (:seon.dev.mcp/cluster row)))
-                (assoc row :seon.dev.mcp/runtime
-                       {:seon.dev.mcp/health :unknown
-                        :seon.dev.mcp/flow :unknown})))
-            rows)
+      (if selected-row
+        [(if (contains? #{:alive :degraded :unknown}
+                        (:seon.dev.mcp/state selected-row))
+           (assoc selected-row :seon.dev.mcp/runtime
+                  (runtime-observation root selected))
+           (assoc selected-row :seon.dev.mcp/runtime
+                  {:seon.dev.mcp/health :unknown
+                   :seon.dev.mcp/flow :unknown}))]
+        [])
       :seon.dev.mcp/selected-cluster selected
-      :seon.dev.mcp/sessions (session-rows root)})))
+      :seon.dev.mcp/sessions (session-rows root selected)})))
 
 (defn- hex-digit?
   [character]
@@ -766,7 +774,7 @@
                   :required ["code"]}}
 
    {:name "runtime_status"
-    :description "Report root-scoped cluster inventory, health/readiness, Flow proc observations, and active stateful io-prepl sessions. A proc that does not answer within the configured ping window is unknown, never healthy."
+    :description "Report one selected cluster's deduplicated health/readiness, bounded problem counts, Flow proc observations, and active stateful io-prepl sessions. A proc that does not answer within the configured ping window is unknown, never healthy."
     :inputSchema {:type "object"
                   :properties {:root {:type "string" :description "Operator root path. Defaults to the repository root used by bin/seon."}
                                :cluster {:type "string" :description "Selected cluster. Defaults to this MCP server's cluster."}}
