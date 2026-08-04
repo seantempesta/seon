@@ -57,6 +57,18 @@
  ; digest/size envelope, and blob — so this floor never forces a larger row.
  :seon.config.eval.result/blob-threshold 4096
 
+ ; The generic value face is fitted after admission and recursive producer
+ ; selection. Its visible budget is estimated tokens; its other bounds are
+ ; structural, and its blob threshold reuses the storage decision above.
+ ; Unit: estimated tokens (`seon.ai.tokens/estimate`).
+ :seon.config.render.agent/token-budget 1024
+ ; Unit: nested structural nodes retained in the visible face.
+ :seon.config.render.agent/max-depth 8
+ ; Unit: children retained per collection node.
+ :seon.config.render.agent/max-children 32
+ ; Composition is a presentation decision, not another size limit.
+ :seon.config.render.agent/composition :multiline
+
  ; Unit: retained entries in one routed `/data` window; the navigation
  ; elision marker rides beside them, never inside the count (the
  ; 2026-08-01 off-by-one repair). Provenance: the 2026-08-01 cap measurements

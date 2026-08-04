@@ -1,0 +1,12 @@
+#:seon.config.render.agent{:token-budget
+                           [:int {:min 1, :seon.config/dial true}],
+                           :max-depth
+                           [:int {:min 0, :seon.config/dial true}],
+                           :max-children
+                           [:int {:min 0, :seon.config/dial true}],
+                           :composition
+                           [:enum
+                            {:seon.config/dial true}
+                            :single-line
+                            :multiline
+                            :tabular]}
