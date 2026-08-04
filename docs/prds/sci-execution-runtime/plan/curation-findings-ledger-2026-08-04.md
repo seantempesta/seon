@@ -17,6 +17,20 @@ commit. Evidence lives in the eight lane reports indexed by
 Solution-shape legend: the elegant fix named per row is the ruled
 direction; a lane departing from it reports why before landing.
 
+## A0. PLATFORM INCIDENT (owner-ruled highest priority, 2026-08-04)
+
+Scratch-cluster boot broken tree-wide: `seon.cluster/ensure-entity!`
+fails at boot, then `seon.sci.kernel/invoke` capture-context contract.
+Evidence: the `ugly-dev-envelope` lane's UNCOMMITTED cluster.clj diff
+rewrites `ensure-entity!`'s `:db.fn/call` tx shape — the exact failing
+seam. Lane stopped and resumed 2026-08-04 with fix-first orders: isolate,
+repair, prove a clean boot in an isolated root BEFORE any commit; report
+immediately if evidence shows its edits are NOT the cause (would make
+this a landed-commit regression). The possibly-separate kernel/invoke
+contract failure must be captured exactly, not papered over. Status:
+lane running under incident orders; incident stays open until a clean
+boot is proven.
+
 ## A. Blockers with fix lanes running
 
 | # | Problem | Elegant solution | Status |
