@@ -236,19 +236,58 @@ in-branch only (fail-closed barriers never trigger).
   and the same fail-closed transact stance — strong calibration signal
   for single-lane research on adjacent questions.
 
-## 9. Owner questions
+## 9. Owner rulings (2026-08-04 conversational session; recorded in
+[plan/README.md](README.md) "Rulings 2026-08-04")
 
-- **Q1 (recommend: yes)** — adopt S1-S6 as the ruled design and let W1
-  start after the two fix lanes land.
-- **Q2 (recommend: author fact, no refusal)** — record `:seon.fn/author`
-  at `program-row-tx`; build no ownership refusal absent evidence of a
-  real problem. The alternative (refusal for durable defn writes into an
-  owned namespace, ~5 lines at the same seam) stays a recorded option.
-- **Q3 (recommend: silent for v1)** — curated history adopts silently;
-  the "system heals sessions" lesson as rendered attribution is a later
-  experiment, informed by whether curated agents repeat pruned mistakes.
-- **Q4 (recommend: defer)** — mid-run curation and message-boundary
-  compaction stay out until run-boundary evidence exists.
+- **Q1 RULED: adopted**, extended by the per-run fork-context ruling:
+  each run evaluates in a fresh `sci/fork` of the cluster's base ctx;
+  cross-agent propagation is through the durable graph (admission →
+  fact → acquisition), never the live ctx. The curation loop below is
+  sealed; W1 starts after the in-flight fix lanes land.
+- **Q2 RULED: gate durable placement, and record the author.** Owner:
+  "we can gate where they can define things." Both land at the ONE
+  admission seam (`program-row-tx`): `:seon.fn/author` recorded on
+  every program row, and durable definition placement checked against
+  namespace assignment. Live-tier definitions need no gate — they are
+  fork-private and evaporate, which is what makes the placement gate
+  consistent with the no-hobbling ruling (nothing an agent does in its
+  own fork is restricted; only the shared durable graph has admission,
+  exactly like schema registration). Session-image rows (F10) must
+  route through the same seam before the gate is meaningful.
+- **Q3 RULED: silent adoption.** The verified curated run REPLACES the
+  messy span as the agent's history ("the new and better Agent A");
+  the agent is parked between runs and never observes the swap. The
+  curator's scratch branch/fork and every losing future are deleted
+  (optionally mined first for bootstrap candidates).
+- **Q3a (sharpening, same session): the curator's branch is never the
+  verification branch.** The curator's own session may be arbitrarily
+  messy; its deliverable is data. Acceptance judges only the fresh
+  mechanical replay at the original opening basis — which also proves
+  the vector is self-contained (a vector depending on state the curator
+  built up mid-session fails the clean replay and is not adopted).
+- **Q3b (sharpening, same session): destructive means WRITES, not
+  door-crossings.** Database writes are branch-immutable and always
+  curable. READ effects (web reads, fs reads) are fine ground: the
+  replay re-executes them, and the acceptance equivalence gate catches
+  material divergence. WRITES that left the branch (delivered messages,
+  real file edits, web writes, external state) make a span destructive:
+  the derived trigger fails closed from receipts, and the curator
+  additionally REJECTS with a reason when it judges the task
+  destructive — the honest fallback for what receipts cannot see.
+  Named missing fact: per-request read/write classification on door
+  receipts, DECLARED by the capability leaf (joins F8). Mechanism
+  (owner, same session): the workload-classification pattern applied a
+  second time — defn METADATA on the few capability leaves (as
+  `^{:seon.workload :io}` already is, lifted to a `:seon.fn/*` fact at
+  index time), e.g. a mutation marker distinguishing `my.fs/read` from
+  `my.edit`/web writes; chains DERIVE by reachability over
+  `:seon.fn/calls`; never annotate everything, never a hand list. A
+  span is destructive when its receipts (or, advisorily, its call
+  graph) reach a mutation-marked leaf — reads never trip it.
+- **Q4 (still open, recommend: defer)** — mid-run curation and
+  message-boundary compaction stay out until run-boundary evidence
+  exists. Also open: the merge rule when two adopted speculative
+  futures redefine the same symbol.
 
 ## 10. Ugly-output roll-up (standing order)
 

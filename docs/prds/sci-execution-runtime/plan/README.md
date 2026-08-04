@@ -370,6 +370,72 @@ A JVM records and retains the exact digest directory on its classpath; refresh
 publishes another directory, and cleanup may delete only directories not
 referenced by a recorded live process identity.
 
+### Rulings 2026-08-04 (owner, conversational session) — per-run fork contexts and session curation
+
+Full design, evidence, and wave order:
+[session-curation-prd-2026-08-04.md](session-curation-prd-2026-08-04.md);
+tracking:
+[curation-findings-ledger-2026-08-04.md](curation-findings-ledger-2026-08-04.md).
+Evidence base: eight paired sol/Opus research lanes (indexed in the PRD).
+
+- **Per-run fork contexts.** Each run evaluates in a fresh `sci/fork` of
+  the cluster's base context; the base is derived from the program graph
+  and refreshed from facts. Owner: "I'm happy with having each agent
+  have independent state and just a shared graph that's always rebuilt
+  and present for the agent. Then they can't wreck anything and we can
+  gate where they can define things." This revises ruling #27's sharing
+  channel, not its substance: the ONE program is still shared by every
+  agent — sharing moves from the mutable ctx to the durable graph.
+  Cross-agent propagation is contracted `defn` → admission → program
+  fact → acquisition at a basis (the schema-registration pattern
+  generalized). Live mutations are run-private and evaporate; the
+  "agent A wrecks agent B" class becomes unrepresentable rather than
+  detected. Admissible because the pinned generation-aware `sci/fork`
+  makes forked Vars copy-on-write (verified 2026-08-04, superseding the
+  2026-08-02 leak probe). Ruling #20 untouched: every agent calls
+  every function; gating applies only to durable DEFINITION placement
+  at the one admission seam.
+- **Session curation is sealed as designed in the PRD.** Trigger at a
+  run boundary on eval-error receipts; the curator is an ordinary agent
+  whose deliverable is DATA (the corrected ordered form vector); THREE
+  branches, strictly separated — the live branch (untouched), the
+  curator's scratch branch/fork (messy, ephemeral, never adopted), and
+  the verification fork at the original opening basis where the SYSTEM
+  executes the vector mechanically with no model call. Only clean
+  verification receipts (zero errors, equivalent completed result,
+  self-contained from the basis) are adopted.
+- **Adoption is projection-level supersession — the curated run
+  REPLACES the messy span as the agent's history.** One append-only
+  transaction commits the verified receipts under a distinct curated
+  run id with a run-to-runs `:seon.cluster.run/supersedes` connection;
+  one derived active-runs rule feeds every transcript visibility query.
+  The agent is parked between runs and never observes the swap. All
+  other paths and futures — the curator's branch and fork, losing
+  speculative branches — are deleted; blobs need no copying (shared
+  physical store, digest references). Branch-head adoption
+  (`force-branch!`) is permitted only on an exclusive or frozen parent.
+- **Curation is bounded by WRITES, not by door-crossings** (owner
+  refinement, same session): database updates are branch-immutable and
+  always curable; READ effects (web reads, fs reads) are fine ground —
+  the replay re-executes them and the acceptance equivalence gate
+  catches material divergence. It is WRITES that left the branch
+  (delivered messages, real file edits, web writes, external state)
+  that make a span destructive: those are pinned fixed points a curated
+  vector preserves in order, and when destructiveness goes beyond
+  database writes the task is REJECTED — the system-side trigger fails
+  closed from door/message receipts (the derived gate), and the curator
+  additionally rejects with a reason when it judges its task
+  destructive (the honest fallback for what receipts cannot see). The
+  missing fact this names: per-request read/write classification on
+  door receipts, declared by the capability leaf, never guessed (joins
+  F8's capability family). Bare agent `transact!` spans stay uncurated
+  until write provenance (F7) lands.
+- **Speculative futures are the same mechanism.** Fork → run → judge →
+  adopt covers the bootstrap experiment, curation, speculation, and
+  accretion testing; N futures on N branches, winners adopted by
+  append. Open sub-question recorded in the PRD: merge rule when two
+  adopted futures redefine the same symbol.
+
 ### Rulings 2026-07-27 session 2 (owner, conversational) — the fresh tree IS the project
 
 - **Stop thinking temporary; drop the "nucleus" vocabulary.** The fresh
