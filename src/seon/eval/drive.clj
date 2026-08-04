@@ -118,7 +118,10 @@
        (sort-by second)
        (mapv first)))
 
-(defn- read-result [serialized]
+(defn read-result
+  "Read one admitted receipt result through the grader's print-face seam."
+  {:malli/schema [:=> [:cat :string] :seon.schema/value]}
+  [serialized]
   (when (string? serialized)
     (try
       (let [parsed (edn/read-string {:default (fn [_ value] value)}
@@ -129,7 +132,12 @@
           parsed))
       (catch Throwable _ ::unreadable))))
 
-(defn- run-receipts [db run-ids]
+(defn run-receipts
+  "Ordered fact-space receipt values for `run-ids`."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:vector :seon.cluster.run/id]]
+                  [:vector :map]]}
+  [db run-ids]
   (if (seq run-ids)
     (->> (db/q '[:find ?run-id ?ordinal ?source ?result ?error ?error-kind ?at
                 :in $ [?run-id ...]
@@ -164,7 +172,10 @@
               (filter #(= :completed (:my.run/disposition %))))
         receipts))
 
-(defn- completed-result [receipts]
+(defn completed-result
+  "The last completed result represented by ordered grader receipts."
+  {:malli/schema [:=> [:cat [:vector :map]] :seon.schema/value]}
+  [receipts]
   (:my.run/result (last (completion-values receipts))))
 
 (defn- model-attempts [db run-ids]
@@ -208,8 +219,26 @@
                  [:seon.cluster.run/id %])
         run-ids))
 
-(defn- terminal-state [db agent-id process message-id run-cap]
-  (let [run-ids (objective-run-ids db message-id)
+(defn terminal-state
+  "Derive a terminal episode state from a trigger or explicit proof run ids."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/database-value :seon.cluster.agent/id
+          :seon.cluster.run/process :seon.cluster.message/id [:int {:min 1}]]
+     [:maybe :map]]
+    [:=> [:cat :seon.db/database-value :seon.cluster.agent/id
+          :seon.cluster.run/process
+          [:map [:seon.eval.drive/run-ids [:vector :seon.cluster.run/id]]
+           [:seon.eval.drive/run-cap [:int {:min 1}]]]]
+     [:maybe :map]]]}
+  ([db agent-id process message-id run-cap]
+   (terminal-state db agent-id process
+                   {:seon.eval.drive/run-ids
+                    (objective-run-ids db message-id)
+                    :seon.eval.drive/run-cap run-cap}))
+  ([db agent-id process request]
+   (let [run-ids (:seon.eval.drive/run-ids request)
+         run-cap (:seon.eval.drive/run-cap request)
         receipts (run-receipts db run-ids)
         completions (completion-values receipts)
         closed-count
@@ -241,7 +270,7 @@
       {:seon.eval.drive/outcome :stopped
        :seon.eval.drive/run-ids run-ids}
 
-      :else nil)))
+      :else nil))))
 
 (defn- full-transcript [db agent-id instance settings]
   (transcript/render-ai

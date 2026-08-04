@@ -13,6 +13,16 @@
                    :process [:string {:min 1}],
                    :starting-ns :seon.db/ref,
                    :supersedes [:set :seon.db/ref],
+                   :system-run-request
+                   [:map
+                    [:seon.cluster.agent/id :seon.cluster.agent/id]
+                    [:seon.cluster.run/id :seon.cluster.run/id]
+                    [:seon.cluster.run/process :seon.cluster.run/process]
+                    [:seon.cluster.run/opened-at :seon.cluster.run/opened-at]
+                    [:seon.cluster.run/starting-ns :seon.cluster.run/starting-ns]
+                    [:seon.cluster.run/plan-digest :seon.cluster.run/plan-digest]
+                    [:seon.cluster.run/sources :seon.cluster.reply/sources]
+                    [:seon.cluster.run/trigger {:optional true} :seon.cluster.run/trigger]],
                    :run
                    [:map
                     {:seon.db/entity true,

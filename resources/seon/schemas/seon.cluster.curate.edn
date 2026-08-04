@@ -1,0 +1,35 @@
+#:seon.cluster.curate{:run-ids [:vector {:min 1} :seon.cluster.run/id]
+                       :revision :seon.cluster.reply/sources
+                       :proof-branch :seon.store/branch
+                       :predicate :qualified-keyword
+                       :receipts [:vector :map]
+                       :terminal :map
+                       :declarations [:vector :map]
+                       :adopted-commit-id :uuid
+                       :proof-request
+                       [:map
+                        [:seon.boot/instance :seon.boot/instance]
+                        [:seon.cluster.curate/run-ids :seon.cluster.curate/run-ids]
+                        [:seon.cluster.curate/revision :seon.cluster.curate/revision]]
+                       :proof
+                       [:map
+                        [:seon.cluster.curate/proof-branch :seon.cluster.curate/proof-branch]
+                        [:seon.cluster.curate/run-ids :seon.cluster.curate/run-ids]
+                        [:seon.cluster.curate/revision :seon.cluster.curate/revision]
+                        [:seon.cluster.agent/id :seon.cluster.agent/id]
+                        [:seon.cluster.run/id :seon.cluster.run/id]
+                        [:seon.cluster.run/process :seon.cluster.run/process]
+                        [:seon.cluster.run/starting-ns :seon.cluster.run/starting-ns]
+                        [:seon.cluster.run/plan-digest :seon.cluster.run/plan-digest]
+                        [:seon.cluster.curate/receipts :seon.cluster.curate/receipts]
+                        [:seon.cluster.curate/terminal :seon.cluster.curate/terminal]
+                        [:seon.cluster.curate/declarations :seon.cluster.curate/declarations]]
+                       :adopt-request
+                       [:map
+                        [:seon.boot/instance :seon.boot/instance]
+                        [:seon.cluster.curate/proof :seon.cluster.curate/proof]]
+                       :adoption
+                       [:map
+                        [:seon.cluster.run/id :seon.cluster.run/id]
+                        [:seon.cluster.curate/run-ids :seon.cluster.curate/run-ids]
+                        [:seon.cluster.curate/adopted-commit-id :seon.cluster.curate/adopted-commit-id]]}

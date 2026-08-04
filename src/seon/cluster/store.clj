@@ -403,3 +403,10 @@
                  {::dir (:seon.store/dir store)
                   ::branch branch}))
       (d/connect configuration))))
+
+(defn release-branch!
+  "Release one proof branch connection before its roster branch is retired."
+  {:malli/schema [:=> [:cat :seon.store/connection] :nil]}
+  [connection]
+  (d/release connection)
+  nil)

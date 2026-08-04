@@ -257,7 +257,7 @@
    [:=>
     [:cat
      :seon.db/database-value
-     [:map {:closed true}
+     [:map
       [:seon.cluster.agent/id :seon.cluster.agent/id]
       [:seon.cluster/name :seon.cluster/name]
       [:seon.ns/name :seon.ns/name]
@@ -288,21 +288,13 @@
           {:seon.ns.refer/local 'doc
            :seon.ns.refer/target-ns 'seon.bootstrap
            :seon.ns.refer/target-name 'doc}]}]
-    (into
-     []
-     cat
-     [[namespace-row]
-      (run/open-tx
-       {:seon.cluster.run/id id
-        :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-        :seon.cluster.run/opened-at opened-at})
-      (run/claim-tx
-       {:seon.cluster.run/id id
-        :seon.cluster.run/process process
-        :seon.cluster.run/live-processes #{process}
-        :seon.cluster.run/now opened-at})
-      (run/plan-tx
-       {:seon.cluster.run/id id
-        :seon.cluster.run/process process
-        :seon.cluster.run/plan-digest (plan-digest db cluster-name)
-        :seon.cluster.run/sources sources})])))
+    (into [namespace-row]
+          (run/system-run-tx
+           db
+           {:seon.cluster.agent/id agent-id
+            :seon.cluster.run/id id
+            :seon.cluster.run/process process
+            :seon.cluster.run/opened-at opened-at
+            :seon.cluster.run/starting-ns [:seon.ns/name namespace-name]
+            :seon.cluster.run/plan-digest (plan-digest db cluster-name)
+            :seon.cluster.run/sources sources}))))

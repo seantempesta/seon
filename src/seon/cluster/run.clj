@@ -495,6 +495,39 @@
   [request]
   [[:db.fn/call #'open-call request]])
 
+(defn system-run-tx
+  "Open, claim, and plan one system-authored run for an existing agent.
+
+  The caller owns the ordered sources and their digest. The ordinary run
+  transaction functions retain every custody, pointer, and plan fence."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.run/system-run-request]
+                  :seon.store/transaction-data]}
+  [_database request]
+  (let [{agent-id :seon.cluster.agent/id
+         run-id ::id
+         process ::process
+         opened-at ::opened-at
+         starting-ns ::starting-ns
+         plan-digest ::plan-digest
+         sources ::sources
+         trigger ::trigger} request]
+    (into [] cat
+          [(open-tx
+            (cond-> {::id run-id
+                     ::agent [:seon.cluster.agent/id agent-id]
+                     ::opened-at opened-at}
+              trigger (assoc ::trigger trigger)))
+           (claim-tx {::id run-id
+                      ::process process
+                      ::live-processes #{process}
+                      ::now opened-at})
+           (plan-tx {::id run-id
+                     ::process process
+                     ::starting-ns starting-ns
+                     ::plan-digest plan-digest
+                     ::sources sources})])))
+
 (defn- current-receipt
   "The receipt identified by run and ordinal, or nil.
   Identity is `(pr-str [id ordinal])` — AT MOST ONE ATTEMPT PER FORM,
@@ -682,6 +715,67 @@
           (keep candidate-declarations)
           (sort changed-attributes))))
 
+(defn- cardinality-many?
+  [db attribute]
+  (= :db.cardinality/many
+     (get-in db [:schema attribute :db/cardinality])))
+
+(defn- component-ref?
+  [db attribute]
+  (true? (get-in db [:schema attribute :db/isComponent])))
+
+(defn- ref-attribute?
+  [db attribute]
+  (= :db.type/ref
+     (get-in db [:schema attribute :db/valueType])))
+
+(declare declared-map)
+
+(defn- identity-ref
+  [db value]
+  (cond
+    (and (vector? value) (= 2 (count value))) value
+    (map? value) (identity-ref db (:db/id value))
+    (number? value)
+    (some (fn [identity-attribute]
+            (when-some [identity-value
+                        (get (db/pull db [identity-attribute] value)
+                             identity-attribute)]
+              [identity-attribute identity-value]))
+          program/identity-attributes)
+    :else value))
+
+(defn- declared-one
+  [db attribute value]
+  (cond
+    (component-ref? db attribute) (declared-map db value)
+    (ref-attribute? db attribute) (identity-ref db value)
+    :else value))
+
+(defn- declared-value
+  [db attribute value]
+  (if (cardinality-many? db attribute)
+    (into #{} (map #(declared-one db attribute %)) (or value []))
+    (declared-one db attribute value)))
+
+(defn- declared-map
+  [db value]
+  (into {}
+        (keep (fn [[attribute attribute-value]]
+                (when (not= :db/id attribute)
+                  [attribute (declared-value db attribute attribute-value)])))
+        value))
+
+(defn- declared-content
+  [db value]
+  ;; Contract AST and arity rows are deterministic projections of the
+  ;; declaration's `:seon.fn/spec`. Their component entity ids are database
+  ;; mechanics, not declared content.
+  (some-> value
+          program/canonical-row
+          (dissoc :seon.fn/arities :seon.fn/ast)
+          (declared-map db)))
+
 (defn- program-row-tx
   "Validate and exact-upsert one reader-produced durable declaration."
   [db request row]
@@ -778,10 +872,15 @@
               [])]
         (into
          schema-declarations
-         (if existing
-           (program/exact-replacement-tx existing row)
-           [(assoc row :db/id
-                   (str (name identity) ":" identity-value))]))))))
+         (cond
+           (nil? existing)
+           [(assoc row :db/id (str (name identity) ":" identity-value))]
+
+           (= (declared-content db existing) (declared-content db row))
+           []
+
+           :else
+           (program/exact-replacement-tx existing row)))))))
 
 (def ^:private receipt-terminal-attributes
   [:seon.cluster.eval/result-edn

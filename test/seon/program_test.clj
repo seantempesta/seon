@@ -151,6 +151,31 @@
             (is (every? #(empty? (db/datoms @connection :eavt %))
                         old-components))))))))
 
+(deftest identical-runtime-redeclaration-builds-no-datoms
+  (test-support/with-database
+    (fn [connection]
+      (let [function-symbol "sample/idempotent"
+            spec [:=> [:cat :int] :int]
+            row (merge {:seon.fn/sym function-symbol
+                        :seon.fn/ns [:seon.ns/name 'sample]
+                        :seon.fn/source
+                        "(defn idempotent {:malli/schema [:=> [:cat :int] :int]} [x] x)"
+                        :seon.fn/arglists "([x])"
+                        :seon.fn/private? false
+                        :seon.fn/spec (pr-str spec)}
+                       (parsed-contract function-symbol spec {}))
+            program-row-tx (ns-resolve 'seon.cluster.run 'program-row-tx)]
+        (db/transact! connection [{:seon.ns/name 'sample
+                                   :seon.ns/source "(ns sample)"}])
+        (db/transact! connection (program-row-tx @connection {} row))
+        (let [before (db/pull @connection '[*]
+                              [:seon.fn/sym function-symbol])
+              replacement (program-row-tx @connection {} row)]
+          (is (empty? replacement))
+          (is (= before
+                 (db/pull @connection '[*]
+                          [:seon.fn/sym function-symbol]))))))))
+
 (deftest reader-events-have-one-canonical-declaration-row
   (let [cases
         [{:label "contracted function"
