@@ -28,8 +28,7 @@ CORRECTION (the 08-03 lesson again): the orchestrator first named the
 dev-envelope lane's edits as the cause; its evidence cleared it — the
 `ensure-entity!` hunk is a concurrent edit believed to belong to the
 creation/config lane, whose ownership confirmation is pending as it
-commits by index surgery. Incident closes fully when that hunk's owner
-is confirmed and the file's interleaved edits are both committed.
+commits by index surgery. FULLY CLOSED: the creation/config lane confirmed and committed its hunks (`89fe1a287`), the dev-envelope lane verified and committed the remainder (`c683c7149`), and `cluster.clj` is clean.
 
 ## A. Blockers with fix lanes running
 
@@ -46,8 +45,8 @@ is confirmed and the file's interleaved edits are both committed.
 | B2 | `:seon.db/rejected` faces show bare entity ids — agent cannot see WHICH agent owns a namespace | rejection error VALUE carries the conflict as data with the owner resolved to its identity attribute; face renders it | lane `ugly-db-faces` |
 | B3 | agent creation returns ~3 MB | creation returns the useful projection (agent id, namespace, cluster, bootstrap run id); declared producers for the agent shape | **DONE** — commit `89fe1a287`; creation returns the four-field projection, producers declared; issue archived |
 | B4 | `config/effective` ⇒ `{}` on live forked/scratch clusters ⇒ 5 KB per-dial missing-key wall (hits `eval.drive`/`bootstrap-drive` caps) | fix the empty read at its root; failure is ONE flat `:seon.error` naming cluster + missing config facts | **DONE** — commit `89fe1a287`; missing effective config is one concise error preserved by result-caps |
-| B5 | every `eval_clj` mode:jvm exception reports the io-prepl serving frame, not the throw site | served error envelope carries the actual throw-site location as data | committed pending: fix done + regression in mcp_test.clj, uncommitted until cluster.clj untangles (see A0) |
-| B6 | leaked host NPE `"fut" is null` through the prepl path | root-cause the nil future; that path returns a flat `:seon.error` naming the real cause | lane `ugly-dev-envelope` |
+| B5 | every `eval_clj` mode:jvm exception reports the io-prepl serving frame, not the throw site | served error envelope carries the actual throw-site location as data | **DONE** — commit `c683c7149`; MCP clients must restart to load the new bridge |
+| B6 | leaked host NPE `"fut" is null` through the prepl path | root-cause the nil future; that path returns a flat `:seon.error` naming the real cause | **DONE** — commit `c683c7149` |
 | B7 | `runtime_status` ⇒ ~19k tokens of duplicated unscoped JSON | scope + dedupe the status projection structurally (per-cluster once, bounded problem summaries) | **DONE** — commit `07fd06a51`; fresh result 1,772 bytes, one selected cluster, bounded counts |
 
 ## C. Held — owner files occupied by running lanes
