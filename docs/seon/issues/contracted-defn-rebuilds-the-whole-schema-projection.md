@@ -57,3 +57,23 @@ cost: current `seon.schema/projection-with-function-contract` still calls
 still invokes it for every contracted definition. The destination is the
 contract-projection performance follow-up, not the completed per-cluster live-
 context wave.
+
+## Live door dogfood 2026-08-04
+
+An isolated `edgefaces0804` cluster reproduced the same cost class through MCP
+`eval_clj` in `door` mode, but the evaluation diagnostic made the allocation
+cost visible as well:
+
+```clojure
+(defn ^{:malli/schema [:=> [:cat :string] :string]}
+  unicode-doc-edge
+  "Snowman ☃, emoji 🧪, combining é.\nSecond doc line."
+  [x] x)
+```
+
+The definition took 135 ms and recorded 578,302,120 allocated bytes. A second
+contracted definition took 169 ms and recorded 578,696,192 allocated bytes.
+The face itself was correctly `#'user/unicode-doc-edge`; the defect is the
+whole-registry work paid to produce it. Acceptance should therefore retain an
+allocation-class assertion as well as the latency comparison, so a fast heap-
+intensive rebuild cannot false-green the repair.

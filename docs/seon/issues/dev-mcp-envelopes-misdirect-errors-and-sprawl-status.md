@@ -1,6 +1,6 @@
 ---
 type: issue
-status: resolved
+status: open
 severity: blocker
 tags: [issue, tooling, mcp, repl, observability]
 ---
@@ -153,3 +153,22 @@ their regression, closes B5 and B6, and fully closes platform incident A0.
 
 MCP clients must restart to load the repaired bridge; an already-running
 client retains its original stdio server definition.
+
+## Regression evidence — 2026-08-04
+
+A fresh MCP client against the newly initialized isolated root
+`tmp/repl-dogfood-edgefaces-0804` selected its only cluster, `edgefaces0804`,
+but returned a contract violation instead of bounded runtime health:
+
+```clojure
+{:seon.error/kind "seon.instrument/contract-violated"
+ :seon.error/message
+ "seon.problems/problems violated its contract (invalid-output): #:seon.problems{:error-signatures [nil #:seon.error{:fact ...}]}"
+ :seon.dev.mcp/exception-class "clojure.lang.ExceptionInfo"}
+```
+
+The bridge remained scoped to the selected cluster, but its one runtime value
+was unusable. This reopens the issue: acceptance additionally requires a clean
+isolated boot whose selected runtime health satisfies the
+`seon.problems/problems` output contract when an error-signature entry contains
+an absent side of a comparison.

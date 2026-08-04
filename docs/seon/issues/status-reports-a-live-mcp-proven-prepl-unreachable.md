@@ -33,6 +33,14 @@ when no probed JVM contributes both `:seon.fresh-operator/reachable?` and
 that result at `script/seon/fresh_operator.clj:2021-2035` even when the cluster
 row itself remains alive.
 
+The REPL edge dogfood pass independently reproduced the contradiction on
+2026-08-04. MCP completed every door probe through `edgefaces0804` on prepl
+port 56068. Immediately afterward, root-scoped status printed PID 11892 and
+that same port as `alive`, then emitted the identical `roster unreadable` /
+`prepl is unreachable` sentence. This rules out a default-root mix-up and a
+stale advertisement: the successful MCP requests and contradictory operator
+observation addressed the same isolated root and process.
+
 ## Owner
 
 The root-scoped operator observation shared by `bin/seon status` and MCP

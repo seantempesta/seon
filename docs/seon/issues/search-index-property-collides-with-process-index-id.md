@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, search, schema, architecture]
+tags: [issue, schema, architecture]
 ---
 
 # Separate declared search metadata from the process index ID
@@ -25,6 +25,19 @@ globally declared key without making one side's contract false.
   meaning. The search metadata implementation did not change the protected
   cluster-owned wiring.
 
+The isolated `edgefaces0804` boot on 2026-08-04 exposed the live consequence
+immediately after readiness:
+
+```text
+SEON CORE FAULT (dev panic): seon.search/apply-report! violated its contract
+(invalid-input): [[{:value ".../derived/lucene", :message "invalid type"}]]
+```
+
+`src/seon/search.clj:213-217` names the first argument `index-id` but declares
+it as `:map`; the running graph supplies the process-local string path/ID. The
+schema collision is therefore not only latent registry drift: it produces a
+core fault on an otherwise clean scratch boot.
+
 ## Owner
 
 The cluster search wiring owner after the stop-retry lane releases
@@ -37,4 +50,6 @@ The cluster search wiring owner after the stop-retry lane releases
 - Move the cluster graph and `seon.search/index-step` to that key.
 - Keep `:seon.search/index` exclusively as the Malli declaration property
   whose values are `:text | :symbol`.
-
+- Give `seon.search/apply-report!` the declared input shape of that same
+  process-local index ID, and prove one post-ready transaction report reaches
+  it without a contract fault.
