@@ -94,3 +94,60 @@ of scope.
 - Focused tests and the changed-test selector pass.
 - A restarted MCP client observes the new envelopes; already-running clients
   are known to retain the old bridge definition and are not valid proof.
+
+## Repair evidence — 2026-08-04
+
+Commit `07fd06a51` repairs the non-overlapping bridge half: status now selects
+and probes one cluster once, scopes sessions to that cluster, and reports the
+deduplicated `cluster-health-flow` face.
+
+Fresh bridge processes against the hot-reloaded scratch cluster returned:
+
+```clojure
+{:bytes 1772
+ :selected "mcp-envelope-0804"
+ :clusters ["mcp-envelope-0804"]
+ :sessions []
+ :problem-counts
+ {:seon.problems/error-signatures 1
+  :seon.problems/stale-vars 1}
+ :full-problems? false}
+```
+
+The uncommitted cluster-side repair returns the real root location:
+
+```clojure
+{:seon.error/kind :seon.dev.mcp/jvm-exception
+ :seon.error/message "mcp-frame-probe"
+ :seon.dev.mcp/exception-class "clojure.lang.ExceptionInfo"
+ :seon.dev.mcp/frame
+ ["user$eval13323" "invokeStatic" "NO_SOURCE_FILE" 1]}
+```
+
+and classifies `(deref nil)` without leaking the host sentence:
+
+```clojure
+{:seon.error/kind :seon.dev.mcp/nil-deref
+ :seon.error/message "The evaluated form dereferenced nil."
+ :seon.dev.mcp/exception-class "java.lang.NullPointerException"
+ :seon.dev.mcp/frame
+ ["clojure.core$deref_future" "invokeStatic" "core.clj" 2321]}
+```
+
+`bin/test seon.cluster.mcp-test seon.dev.mcp-bridge-test` passed with 28
+tests and 175 assertions. The changed-test selector ran, but its operator
+boundary failed in `seon.dev.fresh-operator-test` because `message-count`
+changed across process restart, and its writer boundary failed because the
+work launcher lacked the flow configuration facts; both boundaries then hit
+the selector timeout. The retained evidence is in
+`tmp/test-changed/changed-operator-1785877348331-31afe490-eb1b-4bd9-9160-a6791b539904.log`
+and
+`tmp/test-changed/changed-writer-1785877648412-2b1d80aa-27dc-4a53-a203-4cec45ef7e9c.log`.
+
+The requested platform-incident probe published the current tree and cleanly
+booted `incident-envelope-0804` through `agents` and `web` under
+`tmp/dev-envelope-probe`. The MCP hunks do not touch `ensure-entity!`; that
+function and its creation-result schema remain concurrently modified by a
+different lane. The cluster-side MCP source and regression remain uncommitted
+until that shared-file owner lands, because a path-limited commit of
+`src/seon/cluster.clj` would otherwise absorb unrelated work.
