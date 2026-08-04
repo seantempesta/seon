@@ -1,12 +1,15 @@
 (ns my.edit
-  "Digest-fenced structural and exact source editing requests."
+  "Edit source files only when their expected digest still matches."
   (:require [clojure.test.check.generators :as gen]
             [seon.edit :as edit]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
 (defn valid-form-operation?
-  "True when operation and replacement-source presence form one valid arm."
+  "Whether a form-edit request has the required replacement source.
+
+  Takes a request value and returns a boolean. This predicate validates
+  `:my.edit/form-request`; call `form` to perform the edit."
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [request]
   (and (map? request)
@@ -46,7 +49,11 @@
 (schema.edn/load! {})
 
 (defn form
-  "Edit one unambiguous named top-level Clojure form."
+  "Edit one named top-level Clojure form under a digest fence.
+
+  Takes a path, expected digest, form selector, operation, and replacement
+  source when required. Returns the changed-file summary or a flat error.
+  Use it for structural Clojure edits."
   {:malli/schema
    [:=> [:cat :my.edit/form-request]
     [:or :my.edit/result :seon.error/value]]
@@ -56,7 +63,11 @@
   (effect/request! #'form request))
 
 (defn exact
-  "Replace one exact string occurrence, or all occurrences when explicit."
+  "Replace exact source text under a digest fence.
+
+  Takes a path, expected digest, old string, new string, and optional
+  replace-all flag. Returns the changed-file summary or a flat error. Use it
+  when the literal target text is unambiguous."
   {:malli/schema
    [:=> [:cat :my.edit/exact-request]
     [:or :my.edit/result :seon.error/value]]
@@ -66,7 +77,11 @@
   (effect/request! #'exact request))
 
 (defn lines
-  "Replace an exact, digest-fenced one-based inclusive line window."
+  "Replace one verified line window under a digest fence.
+
+  Takes a path, expected digest, inclusive line bounds, old window, and new
+  window. Returns the changed-file summary or a flat error. Use it when line
+  boundaries are the clearest stable target."
   {:malli/schema
    [:=> [:cat :my.edit/lines-request]
     [:or :my.edit/result :seon.error/value]]

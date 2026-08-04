@@ -1,5 +1,5 @@
 (ns my.background
-  "Start, inspect, or await the one durable capability-effect receipt."
+  "Start and inspect capability requests that may finish later."
   (:refer-clojure :exclude [await])
   (:require [my.run :as run]
             [seon.db :as db]
@@ -15,7 +15,11 @@
    :seon.error/data {}})
 
 (defmacro background
-  "Open one direct declared capability call and return its receipt ref."
+  "Start one capability request without waiting for its result.
+
+  Takes exactly one direct capability call and returns its
+  `:seon.effect/id` lookup ref. Use it for work that can finish after the
+  current run."
   [& calls]
   (let [call (first calls)]
     (if (and (= 1 (count calls))
@@ -30,7 +34,11 @@
       (invalid-call))))
 
 (defn poll
-  "Return a bounded descriptor derived from one effect receipt."
+  "Read the current result of a background request.
+
+  Takes a `:seon.effect/id` lookup ref and returns its bounded request/result
+  descriptor or a flat error value. Use it to inspect work started with
+  `background`."
   {:malli/schema
    [:=> [:cat :my.background/result]
     [:or :my.background/descriptor :seon.error/value]]}
@@ -69,7 +77,11 @@
        :seon.error/data {:my.background/result result-ref}})))
 
 (defn await
-  "Return a wait disposition while pending, otherwise the poll descriptor."
+  "Wait for a background request or return its finished result.
+
+  Takes a `:seon.effect/id` lookup ref and a continuation note. Returns the
+  finished descriptor, a `my.run/wait` value while pending, or a flat error.
+  Use it when the next run should resume after the request settles."
   {:malli/schema
    [:=> [:cat :my.background/result :my.run/note]
     [:or :my.background/descriptor :my.run/wait :seon.error/value]]}

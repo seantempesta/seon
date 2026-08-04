@@ -1,5 +1,5 @@
 (ns my.web
-  "Bounded web fetch and provider-neutral search requests."
+  "Fetch web resources and search the configured provider."
   (:refer-clojure :exclude [fetch])
   (:require [seon.effect :as effect]
             [seon.schema.edn :as schema.edn]))
@@ -7,7 +7,11 @@
 (schema.edn/load! {})
 
 (defn fetch
-  "Fetch one bounded HTTP(S) URL through the protected web owner."
+  "Fetch one bounded HTTP(S) resource.
+
+  Takes a URL and optional `:get` or `:head` method. Returns status, redirect
+  history, bounded body, and extraction data, or a flat web error. Use it when
+  you already know the resource URL."
   {:malli/schema
    [:=> [:cat :my.web/fetch-request]
     [:or :my.web/fetch-result :my.web/error]]
@@ -17,7 +21,11 @@
   (effect/request! #'fetch request))
 
 (defn search
-  "Search the configured provider and return source rows plus raw evidence."
+  "Search the configured provider for source rows.
+
+  Takes a query and optional result limit. Returns bounded result rows plus a
+  blob digest for the raw response, or a flat web error. Use it to discover
+  sources before fetching them."
   {:malli/schema
    [:=> [:cat :my.web/search-request]
     [:or :my.web/search-result :my.web/error]]
