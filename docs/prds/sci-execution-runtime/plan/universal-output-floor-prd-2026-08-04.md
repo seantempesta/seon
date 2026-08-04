@@ -105,9 +105,12 @@ authored copy (usage strings, CSS/JS assets) is not a value conversion
 
 ## 3. Conversion ladder (sol §4.4, Opus deletions merged; order = blast radius)
 
-1. Structurally total AI/HTML projection walk (producer dispatch +
-   fit + elision records at every depth) — settles before consumers
-   convert.
+1. **DONE — commits `e34eea186`, `aaaaf856b`, `00d8c6c0c`, and
+   `e35e7b27f`.** Structurally total AI/HTML projection walk (producer
+   dispatch + fit + elision records at every depth) — settled before
+   consumers convert. The original `render.value/print-node-window`
+   implementation is deleted; its temporary compatibility call delegates to
+   the one `seon.print/fit` owner.
 2. Admission identity-only refusal for reference values; delete the
    hand-stripper (with W2's landed `transact!` face as first consumer).
 3. Kill the wrong-node bug + route MCP value/envelope/`runtime_status`/
@@ -182,6 +185,32 @@ in the live totals above. The graduation proof therefore remains incomplete
 until [the sink query covers non-installed operator and MCP leaves](../../../seon/issues/output-sink-query-excludes-operator-and-mcp-scripts.md)
 without publishing operator code into the agent-callable program graph.
 
+### 4.2 Ladder step 1 landed — 2026-08-04
+
+Recursive selection now applies the root explicit/schema/floor precedence to
+every admitted value node. A selected producer becomes terminal projection
+data and is never selected again. Admission remains unchanged and contains no
+producer dispatch. Agent generic-value fitting reads its token, depth, child,
+blob, and composition profile from effective config facts; visible size is
+measured only by `seon.ai.tokens/estimate`.
+
+The combined print/value/render/transcript gate passed 40 tests / 244
+assertions without a transcript change beyond the declared elision face. A
+fresh isolated root at
+`tmp/universal-floor-live-0804` published `:current-src` commit
+`6a727937-2aee-50cd-a10a-d1a26ab3ecd4`. Door-mode evaluation rendered a
+nested transaction report as `Committed transaction …` and a nested database
+value as `database :cluster-default at basis transaction … commit …`, rather
+than exposing either host record. A 100,000-element vector rendered 32 values
+plus `99,968 more children of 100,000`, path `[]`, next offset `32`, profile
+`:seon.render.profile/agent`, and requery digest
+`f09029ee10a50fbde2ea1fb3459502f769df6b8779a95f7158fc6c7c4f793f38`.
+
+The complete config-application gate is temporarily blocked by a foreign
+in-flight boundary: `:seon.config/initialization` is registered but absent from
+that test's application-mode roster. The four render-profile dials themselves
+are present in the roster and their zero-overlay/default config gates pass.
+
 ## 5. Graduation
 
 The floor is complete when the graph query finds zero unprojected
@@ -198,8 +227,8 @@ transport.
 - Three new defects from the Opus lane need issue notes once the issue
   index settles (record-admission root, `transact!` 2-arity raw report,
   runner `:fail` fallthrough); sol's probes P1–P7 are their repros.
-- Ladder steps 1–2 are the next implementation wave after W2 lands
-  (they touch render/admit owners no current lane holds).
+- Ladder steps 1–2 are landed. Consumer conversion begins at step 3; later
+  consumers must use the one profile/fit owner rather than add local caps.
 - The wrong-node fix (ladder 3a) is dispatched as an immediate defect
   lane; the rest of step 3 waits on step 1.
 - The graph measurement is landed, but the runtime construction proof and the

@@ -55,3 +55,16 @@ registry (`:seon.config/dial` schema properties), which is the fact that
 - The application-contract test compares against the dial registry rather than
   the shipped manifest, so the next dial registered without a default fails a
   fast test instead of every cluster start.
+
+## Recurrence and ugly output, 2026-08-04
+
+The universal-output-floor lane registered four agent render-profile dials
+before its default commit. Fresh boots correctly refused all four. Commit
+`b40a43f47` immediately supplied the complete decisions: 1,024 estimated
+tokens, depth 8, 32 children, and multiline composition.
+
+The refusal's one-line face was only `Configuration refused:
+missing-default.` The missing attributes existed in report data but were not
+named in the visible face, so operators had to inspect the EDN report to learn
+what blocked boot. That is a remaining ugly-output defect: the concise refusal
+must name the missing keys directly while retaining the structured report.
