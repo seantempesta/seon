@@ -430,11 +430,24 @@ Evidence base: eight paired sol/Opus research lanes (indexed in the PRD).
   door receipts, declared by the capability leaf, never guessed (joins
   F8's capability family). Bare agent `transact!` spans stay uncurated
   until write provenance (F7) lands.
-- **Speculative futures are the same mechanism.** Fork → run → judge →
-  adopt covers the bootstrap experiment, curation, speculation, and
-  accretion testing; N futures on N branches, winners adopted by
-  append. Open sub-question recorded in the PRD: merge rule when two
-  adopted futures redefine the same symbol.
+- **Speculative futures are the same mechanism, and adoption is always
+  SINGLE-FUTURE** (owner clarification, same session): fork → run →
+  judge → adopt covers the bootstrap experiment, curation, speculation,
+  and accretion testing, but there is never a merge of two futures —
+  the editor forks the agent's context at the error, the proof runs at
+  the span's opening basis, ONE clean proof adopts, and every other
+  path and fork is deleted. With N candidate editors, one winner is
+  adopted whole; losers are discarded (optionally mined), never merged.
+- **Shared-graph updates merge to main through a QUALITY GATE** (owner,
+  same session): a shared defn, schema, or test propagates to the main
+  branch only when the gate passes, and the gate is running the
+  DEPENDENTS' tests against the candidate — "testing other functions'
+  dependencies is a pretty good test, as we aren't breaking contracts."
+  Accretion is checked by construction at the one admission seam, not
+  reviewed by convention. Enabling fact this names: the test→function
+  edge (`:seon.test` rows carry no call edge today — the known
+  counterexample in the repository authority); acquisition by other
+  agents then follows at their next run boundary from main.
 
 ### Rulings 2026-07-27 session 2 (owner, conversational) — the fresh tree IS the project
 

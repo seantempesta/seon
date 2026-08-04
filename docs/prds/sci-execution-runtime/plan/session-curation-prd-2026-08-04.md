@@ -159,6 +159,7 @@ independently identified; none requires new mechanism.
 | F8 | normalized capability FAMILY on door receipts (owner/handler recorded; fs/web/llm/db family is a derivation away) | effect door | pinning policy by family |
 | F9 | `:seon.fn/calls` edges for agent-authored defns (today only clj-kondo-indexed first-party source has edges; agent code is a graph leaf) | program-row install | advisory prediction, workload derivation |
 | F10 | session-image rows bypass the `program-row-tx` choke point | session image | closes the "one admission seam" claim |
+| F11 | test→function call edge (`:seon.test` rows carry only sym/ns/source) | test indexing | Q6 quality gate; definition-time accretion testing |
 
 ## 4. Namespace decisions folded in
 
@@ -286,8 +287,16 @@ in-branch only (fail-closed barriers never trigger).
   graph) reach a mutation-marked leaf — reads never trip it.
 - **Q4 (still open, recommend: defer)** — mid-run curation and
   message-boundary compaction stay out until run-boundary evidence
-  exists. Also open: the merge rule when two adopted speculative
-  futures redefine the same symbol.
+  exists.
+- **Q5 RULED: adoption is single-future; there is no merge.** The
+  editor forks the agent's context at the error; the proof runs at the
+  span's opening basis; one clean proof adopts and supersedes; every
+  other branch and fork is deleted. N candidate editors ⇒ one adopted
+  winner, losers discarded whole (optionally mined), never merged.
+- **Q6 RULED: shared-graph propagation is the quality gate.** A shared
+  defn/schema/test merges to main when its DEPENDENTS' tests pass
+  against the candidate; other agents acquire from main at their next
+  run boundary. Enabling fact: the test→function edge (F11).
 
 ## 10. Ugly-output roll-up (standing order)
 
