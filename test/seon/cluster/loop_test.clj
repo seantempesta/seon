@@ -384,6 +384,7 @@
            :seon.cluster.eval/interrupted-at now
            :seon.cluster.eval/output "printed\n"
            :seon.cluster.eval/ns [:seon.ns/name 'my.agent]
+           :seon.sci.eval/ending-ns 'my.agent.after
            :seon.sci.eval/program-row program-row}
           :seon.cluster.loop/settlement-evaluation
           {:seon.cluster.eval/result-edn "{:result :projected}"
@@ -404,11 +405,129 @@
             :seon.error/kind :evaluation/kind
             :seon.cluster.eval/output "printed\n"
             :seon.cluster.eval/ns [:seon.ns/name 'my.agent]
+            :seon.sci.eval/ending-ns 'my.agent.after
             :seon.sci.eval/program-row program-row
             :my.run/value completed}
            request))
     (is (schema/valid-candidate-value?
          :seon.cluster.loop/terminal-request request))))
+
+(deftest committed-ending-namespace-seeds-a-resumed-fold
+  (test-support/with-database
+    (fn [connection]
+      (let [cluster-name "namespace-resume"
+            agent-id "namespace-resume-agent"
+            run-id "namespace-resume-run"
+            starting-ns 'my.agents.namespace-resume
+            ending-ns 'my.generated.after-resume]
+        (test-support/seed-cluster! connection cluster-name)
+        (db/transact!
+         connection
+         (cluster.agent/creation-tx
+          {:seon.cluster.agent/id agent-id
+           :seon.ns/name starting-ns
+           :seon.cluster/name cluster-name}))
+        (db/transact!
+         connection
+         (run/open-tx {::run/id run-id
+                       ::run/agent [:seon.cluster.agent/id agent-id]
+                       ::run/opened-at now}))
+        (db/transact!
+         connection
+         (run/claim-tx {::run/id run-id
+                        ::run/process process
+                        ::run/live-processes #{process}
+                        ::run/now now}))
+        (db/transact!
+         connection
+         (run/plan-tx
+          {::run/id run-id
+           ::run/process process
+           ::run/starting-ns [:seon.ns/name starting-ns]
+           ::run/plan-digest "namespace-resume-plan"
+           ::run/sources
+           [{:seon.cluster.run.form/source
+             "(when true (in-ns 'my.generated.after-resume))"
+             :seon.ns/name starting-ns}
+            {:seon.cluster.run.form/source
+             (str "(defn ^{:malli/schema [:=> [:cat] :int]} "
+                  "attributed-after-resume [] 1)")
+             :seon.ns/name starting-ns}]}))
+        (db/transact!
+         connection
+         (run/receipt-start-tx
+          {::run/id run-id
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/at now}))
+        (let [ctx (sci.eval/cluster-ctx @connection connection)
+              first-evaluation
+              (sci.eval/evaluate
+               {:seon.cluster.run.form/source
+                "(when true (in-ns 'my.generated.after-resume))"
+                :seon.cluster.run.form/ns [:seon.ns/name starting-ns]
+                :seon.sci.eval/ctx ctx
+                :seon.sci.admit/caps
+                (config/result-caps (config/defaults))
+                :seon.sci.eval/time-limit-ms 2000
+                :seon.config/on-core-error :panic
+                :seon.boot/cluster-name cluster-name
+                :seon.cluster.agent/id agent-id
+                :seon.cluster.run/id run-id
+                :seon.cluster.run.form/ordinal 0})]
+          (is (= ending-ns (:seon.sci.eval/ending-ns first-evaluation)))
+          (db/transact!
+           connection
+           (cluster.loop/terminal-tx
+            {:seon.cluster.run/id run-id
+             :seon.cluster.run/process process
+             :seon.cluster.run.form/ordinal 0
+             :seon.cluster.eval/result-edn
+             (:seon.cluster.eval/result-edn first-evaluation)
+             :seon.cluster.eval/ns
+             (:seon.cluster.eval/ns first-evaluation)
+             :seon.sci.eval/ending-ns
+             (:seon.sci.eval/ending-ns first-evaluation)}
+            now))
+          (is (= ending-ns
+                 (:seon.sci.eval/ending-ns
+                  (db/pull @connection
+                           [:seon.sci.eval/ending-ns]
+                           [:seon.cluster.eval/id (pr-str [run-id 0])]))))
+          (let [fold-namespace (private-loop-fn 'fold-namespace)
+                admitted-form (private-loop-fn 'admitted-form)
+                resumed-namespace (fold-namespace @connection run-id 1)
+                form
+                (with-redefs [cluster.loop/lint-form
+                              (fn [{source :seon.cluster.loop/source}]
+                                source)]
+                  (admitted-form
+                   {:seon.db/db @connection
+                    :seon.cluster.run/id run-id
+                    :seon.cluster.run.form/ordinal 1
+                    :seon.sci.eval/ctx ctx
+                    :seon.cluster.loop/current-namespace resumed-namespace
+                    :seon.cluster.loop/fallback-namespace starting-ns}))
+                evaluation
+                (sci.eval/evaluate
+                 {:seon.cluster.run.form/source
+                  (:seon.cluster.run.form/source form)
+                  :seon.cluster.run.form/ns
+                  (:seon.cluster.run.form/ns form)
+                  :seon.sci.eval/ctx ctx
+                  :seon.sci.admit/caps
+                  (config/result-caps (config/defaults))
+                  :seon.sci.eval/time-limit-ms 2000
+                  :seon.config/on-core-error :panic
+                  :seon.boot/cluster-name cluster-name
+                  :seon.cluster.agent/id agent-id
+                  :seon.cluster.run/id run-id
+                  :seon.cluster.run.form/ordinal 1})]
+            (is (= ending-ns resumed-namespace))
+            (is (= [:seon.ns/name ending-ns]
+                   (:seon.cluster.run.form/ns form)))
+            (is (= "my.generated.after-resume/attributed-after-resume"
+                   (get-in evaluation
+                           [:seon.sci.eval/program-row :seon.fn/sym])))))))))
 
 (deftest two-agents-resolve-one-config-row-with-ordinary-inheritance
   (test-support/with-database

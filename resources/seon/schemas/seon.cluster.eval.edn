@@ -22,6 +22,9 @@
                      [:seon.cluster.eval/ns
                       {:optional true}
                       :seon.cluster.eval/ns]
+                     [:seon.sci.eval/ending-ns
+                      {:optional true}
+                      :seon.sci.eval/ending-ns]
                      [:seon.cluster.eval/result-edn
                       {:optional true}
                       :seon.cluster.eval/result-edn]

@@ -279,6 +279,7 @@
       :else [(cond-> {:db/id run-tempid
                       ::id id
                       ::agent agent-eid
+                      ::opening-commit-id (db/commit-id db)
                       ::opened-at opened-at}
                trigger (assoc ::trigger trigger)
                (seq background-results)
@@ -397,6 +398,7 @@
                              [::id ::id]
                              [::process ::process]
                              [::plan-digest ::plan-digest]
+                             [::starting-ns {:optional true} ::starting-ns]
                              [::sources :seon.cluster.reply/sources]]]
                   [:vector :some]]}
   [request]
@@ -414,10 +416,11 @@
                         [::id ::id]
                         [::process ::process]
                         [::plan-digest ::plan-digest]
+                        [::starting-ns {:optional true} ::starting-ns]
                         [::sources :seon.cluster.reply/sources]]]
                   [:vector :some]]}
   [db request]
-  (let [{::keys [id plan-digest sources]} request
+  (let [{::keys [id plan-digest sources starting-ns]} request
         run (held-run db `plan-call request)
         run-eid (:db/id run)
         agent-namespace
@@ -426,9 +429,18 @@
                :where
                [?agent :seon.cluster.agent/namespace ?namespace]
                [?namespace :seon.ns/name ?namespace-name]]
-             db (:db/id (::agent run)))]
+             db (:db/id (::agent run)))
+        requested-starting-namespace
+        (cond
+          (vector? starting-ns) (second starting-ns)
+          starting-ns (:seon.ns/name
+                       (db/pull db [:seon.ns/name] starting-ns)))
+        starting-namespace
+        (or requested-starting-namespace agent-namespace)]
     (when (some? (::plan-digest run))
       (refuse! `plan-call ::plan-frozen request))
+    (when-not starting-namespace
+      (refuse! `plan-call ::starting-namespace-missing request))
     (let [;; THE PARSE-TIME NAMESPACE IS PROJECTED, NEVER DERIVED HERE.
           ;; The splitter carries the reader's namespace-in-effect; this
           ;; freeze upserts that `:seon.ns` by its identity attribute and
@@ -438,20 +450,20 @@
           ;; the routing owner falls back to the run's author.
           namespaces (into []
                            (comp (map #(or (:seon.ns/name %)
-                                          agent-namespace))
+                                          starting-namespace))
                                  (keep identity)
                                  (distinct)
                                  (map (fn [namespace-name]
                                         {:db/id (str "namespace:"
                                                      namespace-name)
                                          :seon.ns/name namespace-name})))
-                           sources)
+                           (cons {:seon.ns/name starting-namespace} sources))
           forms (into []
                       (map-indexed
                        (fn [ordinal form]
                          (let [form-id (pr-str [id ordinal])
                                namespace-name (or (:seon.ns/name form)
-                                                  agent-namespace)]
+                                                  starting-namespace)]
                            (cond-> {:db/id form-id
                                     :seon.cluster.run.form/id form-id
                                     :seon.cluster.run.form/run run-eid
@@ -462,7 +474,9 @@
                              (assoc :seon.cluster.run.form/ns
                                     (str "namespace:" namespace-name))))))
                       sources)]
-      (into [[:db/add run-eid ::plan-digest plan-digest]]
+      (into [[:db/add run-eid ::plan-digest plan-digest]
+             [:db/add run-eid ::starting-ns
+              (str "namespace:" starting-namespace)]]
             cat
             [namespaces
              forms
@@ -559,6 +573,8 @@
           [:seon.cluster.eval/output {:optional true}
            :seon.cluster.eval/output]
           [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns]
+          [:seon.sci.eval/ending-ns {:optional true}
+           :seon.sci.eval/ending-ns]
           [:seon.sci.eval/program-row {:optional true}
            :seon.sci.eval/program-row]]]
     [:vector :some]]}
@@ -775,7 +791,8 @@
    :seon.cluster.eval/interrupted-at
    :seon.error/kind
    :seon.cluster.eval/output
-   :seon.cluster.eval/ns])
+   :seon.cluster.eval/ns
+   :seon.sci.eval/ending-ns])
 
 (defn- receipt-terminal-assertions
   "Terminal assertions present in `request`, targeting `receipt`."
@@ -813,6 +830,8 @@
           [:seon.cluster.eval/output {:optional true}
            :seon.cluster.eval/output]
           [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns]
+          [:seon.sci.eval/ending-ns {:optional true}
+           :seon.sci.eval/ending-ns]
           [:seon.sci.eval/program-row {:optional true}
            :seon.sci.eval/program-row]]]
     [:vector :some]]}

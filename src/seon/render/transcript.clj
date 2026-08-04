@@ -80,6 +80,14 @@
    :seon.ai.attempt/reasoning-size
    {:seon.ai.attempt/run [:db/id :seon.cluster.run/id]}])
 
+(def ^:private active-runs-rules
+  '[[(active-run ?run ?agent ?bootstrap-run-id ?pinned?)
+     [?run :seon.cluster.run/agent ?agent]
+     [?run :seon.cluster.run/id ?run-id]
+     (not-join [?run]
+               [_ :seon.cluster.run/supersedes ?run])
+     [(= ?run-id ?bootstrap-run-id) ?pinned?]]])
+
 (defn- message-count
   [db agent-id]
   (or
@@ -97,12 +105,12 @@
   [db agent-id]
   (or
    (db/q '[:find (count-distinct ?receipt) .
-          :in $ ?agent-id
+          :in $ % ?agent-id ?bootstrap-run-id
           :where
           [?agent :seon.cluster.agent/id ?agent-id]
-          [?run :seon.cluster.run/agent ?agent]
+          (active-run ?run ?agent ?bootstrap-run-id ?pinned?)
           [?receipt :seon.cluster.eval/run ?run]]
-        db agent-id)
+        db active-runs-rules agent-id (bootstrap/run-id agent-id))
    0))
 
 (defn- comment-only-source?
@@ -115,10 +123,10 @@
   [db agent-id]
   (->> (db/q {:query
               '[:find ?form ?at ?id ?source
-                :in $ ?agent-id
+                :in $ % ?agent-id ?bootstrap-run-id
                 :where
                 [?agent :seon.cluster.agent/id ?agent-id]
-                [?run :seon.cluster.run/agent ?agent]
+                (active-run ?run ?agent ?bootstrap-run-id ?pinned?)
                 [?run :seon.cluster.run/opened-at ?at]
                 [?form :seon.cluster.run.form/run ?run]
                 [?form :seon.cluster.run.form/id ?id]
@@ -127,7 +135,8 @@
                 (not-join [?run ?ordinal]
                           [?receipt :seon.cluster.eval/run ?run]
                           [?receipt :seon.cluster.eval/ordinal ?ordinal])]
-              :args [db agent-id]
+              :args [db active-runs-rules agent-id
+                     (bootstrap/run-id agent-id)]
               :order-by '[?at :desc ?id :desc]})
        (filter (fn [[_ _ _ source]] (comment-only-source? source)))))
 
@@ -159,16 +168,14 @@
   [db agent-id limit]
   (db/q {:query
         '[:find ?receipt ?at ?id
-          :in $ ?agent-id ?bootstrap-run-id
+          :in $ % ?agent-id ?bootstrap-run-id
           :where
           [?agent :seon.cluster.agent/id ?agent-id]
-          [?run :seon.cluster.run/agent ?agent]
-          [?run :seon.cluster.run/id ?run-id]
-          [(not= ?run-id ?bootstrap-run-id)]
+          (active-run ?run ?agent ?bootstrap-run-id false)
           [?receipt :seon.cluster.eval/run ?run]
           [?receipt :seon.cluster.eval/at ?at]
           [?receipt :seon.cluster.eval/id ?id]]
-        :args [db agent-id (bootstrap/run-id agent-id)]
+        :args [db active-runs-rules agent-id (bootstrap/run-id agent-id)]
         :order-by '[?at :desc ?id :desc]
         :limit limit}))
 
@@ -179,13 +186,12 @@
 (defn- pinned-receipt-ids
   [db agent-id]
   (db/q '[:find [?receipt ...]
-         :in $ ?agent-id ?run-id
+         :in $ % ?agent-id ?bootstrap-run-id
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
-         [?run :seon.cluster.run/agent ?agent]
-         [?run :seon.cluster.run/id ?run-id]
+         (active-run ?run ?agent ?bootstrap-run-id true)
          [?receipt :seon.cluster.eval/run ?run]]
-       db agent-id (bootstrap/run-id agent-id)))
+       db active-runs-rules agent-id (bootstrap/run-id agent-id)))
 
 (defn- candidate-entity-ids
   [db agent-id limit]

@@ -206,10 +206,14 @@ in-branch only (fail-closed barriers never trigger).
 
 ## 7. Implementation order
 
-1. **W1 — facts:** F1 + F2 + F3 + F4 (schema + seams; no behavior
-   change), and the derived active-runs rule joined by the four
-   visibility queries. Gate: transcript renders unchanged for
-   non-superseded histories; supersession regression.
+1. **W1 — facts: DONE (2026-08-04).** F1 + F2 + F3 + F4 are declared
+   and recorded at their existing seams. One derived active-runs rule
+   owns bootstrap pinning and supersession for all four transcript
+   visibility queries. Gate: the explicit transcript, run, and loop
+   namespaces pass 47 tests / 311 assertions, including chained
+   supersession before token accounting, opening commit + starting
+   namespace facts, and committed ending namespace across a resumed
+   fold. Non-superseded transcript histories remain green.
 2. **W2 — engine:** extract `system-run-tx` (seed-tx first caller);
    fork-at-opening-commit + replay + S4 acceptance as one owner
    (`seon.cluster.curate` or per owner ruling). Gate: replay a seeded

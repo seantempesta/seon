@@ -79,7 +79,14 @@ is confirmed and the file's interleaved edits are both committed.
 
 ## E. Design-level (owned by the PRD, not issues)
 
-- Missing facts F1–F10 — [session-curation-prd-2026-08-04.md](session-curation-prd-2026-08-04.md) §3, waves W1–W4.
+| Fact | Status |
+|---|---|
+| F1 | **DONE** — cardinality-many run-to-runs `:seon.cluster.run/supersedes`; one active-runs rule joins receipt count, recent receipts, pinned receipts, and comment forms, including bootstrap pinning and chained `not-join` exclusion before token accounting |
+| F2 | **DONE** — `open-call` records the mid-transaction database value's commit ID as `:seon.cluster.run/opening-commit-id` |
+| F3 | **DONE** — `plan-call` records `:seon.cluster.run/starting-ns`; ordinary call planning supplies the assigned namespace and replay callers may supply it explicitly |
+| F4 | **DONE** — terminal settlement commits `:seon.sci.eval/ending-ns`; a resumed fold seeds its namespace from the most recent committed ending namespace, falling back to the run's starting namespace |
+| F5–F11 | Pending W2–W4 — [session-curation-prd-2026-08-04.md](session-curation-prd-2026-08-04.md) §3 |
+
 - `agent-namespace` string-builds `my.agents.<id>` — read the assignment
   fact; overlaps existing `evals-ignore-the-agents-assigned-namespace`.
 - Session-image rows bypass `program-row-tx` (F10) — route through the

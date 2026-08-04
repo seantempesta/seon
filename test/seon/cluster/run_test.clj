@@ -74,17 +74,22 @@
 (def ^:private model-attributes
   [:seon.cluster.agent/id
    :seon.cluster.agent/run
+   :seon.cluster.agent/namespace
+   :seon.ns/name
    :seon.cluster.run/id
    :seon.cluster.run/agent
+   :seon.cluster.run/opening-commit-id
    :seon.cluster.run/opened-at
    :seon.cluster.run/closed-at
    :seon.cluster.run/process
    :seon.cluster.run/plan-digest
+   :seon.cluster.run/starting-ns
    :seon.cluster.run/forms
    :seon.cluster.run.form/id
    :seon.cluster.run.form/run
    :seon.cluster.run.form/ordinal
    :seon.cluster.run.form/source
+   :seon.cluster.run.form/ns
    :seon.cluster.eval/id
    :seon.cluster.eval/run
    :seon.cluster.eval/ordinal
@@ -219,6 +224,7 @@
                 connection
                 (run/plan-tx {::run/id "lesson"
                               ::run/process "p1"
+                              ::run/starting-ns [:seon.ns/name 'user]
                               ::run/plan-digest "digest-a"
                               ::run/sources
                               [{:seon.cluster.run.form/source "(+ 1 1)"}
@@ -249,6 +255,53 @@
               "a closed run holds no custody"))
         (is (nil? (agent-pointer connection "teacher")))))))
 
+(deftest run-records-its-opening-commit-and-starting-namespace
+  (with-model-database
+    (fn [connection]
+      (db/transact!
+       connection
+       [{:seon.ns/name 'my.agents.replay}
+        {:seon.cluster.agent/id "replay-agent"
+         :seon.cluster.agent/namespace
+         [:seon.ns/name 'my.agents.replay]}])
+      (db/transact!
+       connection
+       (run/open-tx {::run/id "replay-run"
+                     ::run/agent
+                     [:seon.cluster.agent/id "replay-agent"]
+                     ::run/opened-at t0}))
+      (db/transact!
+       connection
+       (run/claim-tx {::run/id "replay-run"
+                      ::run/process "replay-process"
+                      ::run/live-processes #{"replay-process"}
+                      ::run/now t0}))
+      (db/transact!
+       connection
+       (run/plan-tx
+        {::run/id "replay-run"
+         ::run/process "replay-process"
+         ::run/starting-ns [:seon.ns/name 'replay.start]
+         ::run/plan-digest "replay-digest"
+         ::run/sources
+         [{:seon.cluster.run.form/source "(def replayed 1)"}]}))
+      (let [run (db/pull
+                 @connection
+                 '[* {:seon.cluster.run/starting-ns [:seon.ns/name]}]
+                 [::run/id "replay-run"])]
+        (is (uuid? (::run/opening-commit-id run)))
+        (is (= 'replay.start
+               (get-in run [::run/starting-ns :seon.ns/name]))))
+      (is (= 'replay.start
+             (db/q '[:find ?namespace-name .
+                     :where
+                     [?run :seon.cluster.run/id "replay-run"]
+                     [?form :seon.cluster.run.form/run ?run]
+                     [?form :seon.cluster.run.form/ordinal 0]
+                     [?form :seon.cluster.run.form/ns ?namespace]
+                     [?namespace :seon.ns/name ?namespace-name]]
+                   @connection))))))
+
 (deftest a-non-holder-refuses-every-held-run-transition
   ;; the surviving custody assertion, re-expressed from the lease-era
   ;; expiry test: a process that does not hold the run cannot act on
@@ -265,6 +318,7 @@
            [:plan
             #(run/plan-tx {::run/id "held"
                            ::run/process "p2"
+                           ::run/starting-ns [:seon.ns/name 'user]
                            ::run/plan-digest "held-digest"
                            ::run/sources
                            [{:seon.cluster.run.form/source "(+ 1 1)"}]})]]]
@@ -667,6 +721,7 @@
              (run/plan-tx
               {::run/id run-id
                ::run/process process
+               ::run/starting-ns [:seon.ns/name 'user]
                ::run/plan-digest digest
                ::run/sources
                 [{:seon.cluster.run.form/source "(+ 1 1)"}]})))

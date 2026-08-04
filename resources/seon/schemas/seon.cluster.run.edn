@@ -7,9 +7,12 @@
                    :id [:string {:min 1, :seon.db/identity true}],
                    :live-processes [:set :seon.cluster.run/process],
                    :missing-results [:int {:min 0}],
+                   :opening-commit-id :uuid,
                    :opened-at :inst,
                    :plan-digest [:string {:min 1}],
                    :process [:string {:min 1}],
+                   :starting-ns :seon.db/ref,
+                   :supersedes [:set :seon.db/ref],
                    :run
                    [:map
                     {:seon.db/entity true,
@@ -25,6 +28,15 @@
                      :seon.cluster.run/background-results]
                     [:seon.cluster.run/opened-at
                      :seon.cluster.run/opened-at]
+                    [:seon.cluster.run/opening-commit-id
+                     {:optional true}
+                     :seon.cluster.run/opening-commit-id]
+                    [:seon.cluster.run/starting-ns
+                     {:optional true}
+                     :seon.cluster.run/starting-ns]
+                    [:seon.cluster.run/supersedes
+                     {:optional true}
+                     :seon.cluster.run/supersedes]
                     [:seon.cluster.run/closed-at
                      {:optional true}
                      :seon.cluster.run/closed-at]

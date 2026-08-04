@@ -99,6 +99,9 @@
                      [:seon.cluster.eval/ns
                       {:optional true}
                       :seon.cluster.eval/ns]
+                     [:seon.sci.eval/ending-ns
+                      {:optional true}
+                      :seon.sci.eval/ending-ns]
                      [:seon.sci.eval/program-row
                       {:optional true}
                       :seon.sci.eval/program-row]

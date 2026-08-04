@@ -281,6 +281,9 @@
              (:seon.cluster.eval/output evaluation))
       (:seon.cluster.eval/ns evaluation)
       (assoc :seon.cluster.eval/ns (:seon.cluster.eval/ns evaluation))
+      (:seon.sci.eval/ending-ns evaluation)
+      (assoc :seon.sci.eval/ending-ns
+             (:seon.sci.eval/ending-ns evaluation))
       (:seon.sci.eval/program-row evaluation)
       (assoc :seon.sci.eval/program-row
              (:seon.sci.eval/program-row evaluation))
@@ -301,6 +304,7 @@
            :seon.cluster.eval/triage-edn
            :seon.cluster.eval/interrupted-at
            :seon.cluster.eval/output :seon.cluster.eval/ns
+           :seon.sci.eval/ending-ns
            :seon.sci.eval/program-row :seon.error/kind
            :my.run/value]}
    now]
@@ -318,6 +322,7 @@
                                         interrupted-at)
                   kind (assoc :seon.error/kind kind)
                   ns (assoc :seon.cluster.eval/ns ns)
+                  ending-ns (assoc :seon.sci.eval/ending-ns ending-ns)
                   program-row (assoc :seon.sci.eval/program-row program-row)
                   ;; what the form printed is evidence, and evidence is
                   ;; durable or it is nothing
@@ -1043,6 +1048,31 @@
                [:seon.ns/name
                 (get-in form [:seon.cluster.run.form/ns :seon.ns/name])])))))
 
+(defn- fold-namespace
+  "The committed namespace in effect immediately before `ordinal`."
+  [db run-id ordinal]
+  (or
+   (ffirst
+    (db/q {:query
+           '[:find ?ending-ns ?previous
+             :in $ ?run-id ?ordinal
+             :where
+             [?run :seon.cluster.run/id ?run-id]
+             [?receipt :seon.cluster.eval/run ?run]
+             [?receipt :seon.cluster.eval/ordinal ?previous]
+             [(< ?previous ?ordinal)]
+             [?receipt :seon.sci.eval/ending-ns ?ending-ns]]
+           :args [db run-id ordinal]
+           :order-by '[?previous :desc]
+           :limit 1}))
+   (db/q '[:find ?starting-ns .
+           :in $ ?run-id
+           :where
+           [?run :seon.cluster.run/id ?run-id]
+           [?run :seon.cluster.run/starting-ns ?namespace]
+           [?namespace :seon.ns/name ?starting-ns]]
+         db run-id)))
+
 (defn- admitted-form
   "One run form after namespace-sensitive static admission."
   [{db :seon.db/db
@@ -1300,6 +1330,8 @@
                                (run/plan-tx
                                 {:seon.cluster.run/id run-id
                                  :seon.cluster.run/process process
+                                 :seon.cluster.run/starting-ns
+                                 [:seon.ns/name namespace-name]
                                  :seon.cluster.run/plan-digest
                                  (digest sources)
                                  :seon.cluster.run/sources
@@ -1505,7 +1537,9 @@
           ctx (:seon.sci.eval/ctx cluster)]
       (loop [ordinal (:seon.cluster.run.form/ordinal work)
              ran 0
-             namespace-name nil]
+             namespace-name
+             (fold-namespace @connection run-id
+                             (:seon.cluster.run.form/ordinal work))]
         (let [receipt-id (pr-str [run-id ordinal])
               problem-id (work/problem-id run-id ordinal)
               started

@@ -388,6 +388,92 @@
         (is (<= (tokens/estimate html) budget))
         (assert-no-session-narration ai)))))
 
+(deftest supersession-chains-vanish-before-token-accounting
+  (support/with-database
+    (fn [connection]
+      (let [bootstrap-run-id (bootstrap/run-id agent-id)]
+        (db/transact!
+         connection
+         [{:seon.cluster.agent/id agent-id}
+          {:seon.cluster.run/id bootstrap-run-id
+           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+           :seon.cluster.run/opened-at (at 0)}
+          {:seon.cluster.run.form/id "bootstrap-form"
+           :seon.cluster.run.form/run
+           [:seon.cluster.run/id bootstrap-run-id]
+           :seon.cluster.run.form/ordinal 0
+           :seon.cluster.run.form/source "(identity :bootstrap)"}
+          {:seon.cluster.eval/id "bootstrap-receipt"
+           :seon.cluster.eval/run [:seon.cluster.run/id bootstrap-run-id]
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/at (at 1)
+           :seon.cluster.eval/result-edn ":bootstrap"}
+
+          {:seon.cluster.run/id "original"
+           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+           :seon.cluster.run/opened-at (at 100)}
+          {:seon.cluster.run.form/id "original-receipt-form"
+           :seon.cluster.run.form/run [:seon.cluster.run/id "original"]
+           :seon.cluster.run.form/ordinal 0
+           :seon.cluster.run.form/source "(identity :original)"}
+          {:seon.cluster.eval/id "original-receipt"
+           :seon.cluster.eval/run [:seon.cluster.run/id "original"]
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/at (at 101)
+           :seon.cluster.eval/result-edn ":original"}
+          {:seon.cluster.run.form/id "original-comment"
+           :seon.cluster.run.form/run [:seon.cluster.run/id "original"]
+           :seon.cluster.run.form/ordinal 1
+           :seon.cluster.run.form/source "; original comment"}
+
+          {:seon.cluster.run/id "curated"
+           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+           :seon.cluster.run/opened-at (at 200)
+           :seon.cluster.run/supersedes
+           [[:seon.cluster.run/id "original"]]}
+          {:seon.cluster.run.form/id "curated-form"
+           :seon.cluster.run.form/run [:seon.cluster.run/id "curated"]
+           :seon.cluster.run.form/ordinal 0
+           :seon.cluster.run.form/source "(identity :curated)"}
+          {:seon.cluster.eval/id "curated-receipt"
+           :seon.cluster.eval/run [:seon.cluster.run/id "curated"]
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/at (at 201)
+           :seon.cluster.eval/result-edn ":curated"}
+
+          {:seon.cluster.run/id "proof"
+           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+           :seon.cluster.run/opened-at (at 300)
+           :seon.cluster.run/supersedes
+           [[:seon.cluster.run/id "curated"]]}
+          {:seon.cluster.run.form/id "proof-receipt-form"
+           :seon.cluster.run.form/run [:seon.cluster.run/id "proof"]
+           :seon.cluster.run.form/ordinal 0
+           :seon.cluster.run.form/source "(identity :proof)"}
+          {:seon.cluster.eval/id "proof-receipt"
+           :seon.cluster.eval/run [:seon.cluster.run/id "proof"]
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/at (at 301)
+           :seon.cluster.eval/result-edn ":proof"}
+          {:seon.cluster.run.form/id "proof-comment"
+           :seon.cluster.run.form/run [:seon.cluster.run/id "proof"]
+           :seon.cluster.run.form/ordinal 1
+           :seon.cluster.run.form/source "; proof comment"}])
+        (let [db @connection
+              floor (transcript/minimum-token-budget (unit db 0))
+              at-floor (transcript/render-html (unit db floor))
+              full (transcript/render-html (unit db 100000))
+              visible (mapv :id (html-entries full))]
+          (is (= 2 (html-elided at-floor))
+              "only the active proof receipt and comment are budget-elided")
+          (is (= "bootstrap-receipt" (first visible)))
+          (is (= #{"bootstrap-receipt" "proof-receipt" "proof-comment"}
+                 (set visible)))
+          (is (db/pull db '[*]
+                       [:seon.cluster.eval/id "original-receipt"]))
+          (is (db/pull db '[*]
+                       [:seon.cluster.eval/id "curated-receipt"])))))))
+
 (deftest malformed-receipt-bytes-and-any-unique-about-stay-replayable
   (support/with-database
     (fn [connection]
