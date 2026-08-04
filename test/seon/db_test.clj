@@ -1,5 +1,6 @@
 (ns seon.db-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.db :as db]
             [seon.instrument :as instrument]
@@ -322,38 +323,110 @@
        (is (not-any? #(instance? datahike.datom.Datom %)
                      explicit-datoms))))))
 
-(deftest transact-supports-both-native-interfaces-and-ambient-custody
+(deftest agent-transactions-return-one-bounded-useful-report
   (test-support/with-database
    (fn [connection]
-     (let [system-explicit
-           (binding [db/*conn* nil]
+     (db/transact!
+      connection
+      [{:seon.ns/name 'my.agents.root}
+       {:seon.cluster.agent/id "root"
+        :seon.cluster.agent/namespace [:seon.ns/name 'my.agents.root]}
+       {:seon.config.eval.result/max-collection 8192}])
+     (let [system-report
+           (db/transact!
+            connection
+            [{:seon.cluster.message/id "db-test-system-explicit"}])
+           message
+           {:seon.cluster.message/id "db-test-agent-report"
+            :seon.cluster.message/to [:seon.cluster.agent/id "root"]
+            :seon.cluster.message/from [:seon.cluster.agent/id "root"]
+            :seon.cluster.message/content "bounded report"
+            :seon.cluster.message/at #inst "2026-08-04T22:00:00Z"
+            :my.message/reason "test"}
+           full-report
+           (binding [db/*conn* connection]
+             (db/transact! {:tx-data [message]}))]
+       (testing "the explicit system arity retains exact database values"
+         (is (db/database-value? (:db-before system-report)))
+         (is (db/database-value? (:db-after system-report))))
+       (testing "the ambient arity returns the useful seven-datom projection"
+         (is (= 7 (:seon.db/datom-count full-report)))
+         (is (= 7 (count (:tx-data full-report))))
+         (is (int? (:tx full-report)))
+         (is (uuid? (:datahike/commit-id full-report)))
+         (is (map? (:tempids full-report)))
+         (is (not-any? #(contains? full-report %)
+                       [:db-before :db-after]))
+         (is (every? #(= #{:e :a :v :tx :added} (set (keys %)))
+                     (:tx-data full-report)))
+         (is (schema/valid-candidate-value?
+              :seon.db/transaction-report full-report))
+         (is (= 'seon.db/render-transaction-ai
+                (->> (schema/matching-shapes full-report)
+                     (some #(when (= :seon.db/transaction-report
+                                     (:seon.schema/key %))
+                              (:seon.render/ai %))))))
+         (is (str/includes? (db/render-transaction-ai full-report)
+                            "with 7 datoms")))
+       (testing "the configured collection ceiling bounds committed datoms"
+         (let [config-entity
+               (d/q '[:find ?entity .
+                      :where
+                      [?entity :seon.config.eval.result/max-collection _]]
+                    @connection)]
+           (db/transact!
+            connection
+            [[:db/add config-entity
+              :seon.config.eval.result/max-collection 2]])
+           (let [bounded
+                 (binding [db/*conn* connection]
+                   (db/transact!
+                    [{:seon.cluster.message/id "db-test-bounded-report"
+                      :seon.cluster.message/to
+                      [:seon.cluster.agent/id "root"]
+                      :seon.cluster.message/content "bounded"}]))]
+             (is (< (count (:tx-data bounded))
+                    (:seon.db/datom-count bounded)))
+             (is (= 2 (count (:tx-data bounded)))))))))))
+
+(deftest unique-rejection-names-the-existing-owner-as-data
+  (test-support/with-database
+   (fn [connection]
+     (db/transact!
+      connection
+      [{:seon.ns/name 'my.agents.db-conflict}
+       {:seon.cluster.agent/id "db-conflict-owner"
+        :seon.cluster.agent/namespace
+        [:seon.ns/name 'my.agents.db-conflict]}])
+     (let [rejected
+           (binding [db/*conn* connection]
              (db/transact!
-              connection
-              [{:seon.cluster.message/id "db-test-system-explicit"}]))]
-       (binding [db/*conn* connection]
-         (let [positional
-               (db/transact!
-                [{:seon.cluster.message/id "db-test-positional"}])
-               argument-map
-               (db/transact!
-                {:tx-data
-                 [{:seon.cluster.message/id "db-test-argument-map"}]
-                 :tx-meta {:seon.db/user "db-test"}})
-               explicit
-               (db/transact!
-                connection
-                {:tx-data
-                 [{:seon.cluster.message/id "db-test-explicit-map"}]})]
-           (is (every? #(contains? % :db-after)
-                       [system-explicit positional argument-map explicit]))
-           (is (= #{"db-test-system-explicit"
-                    "db-test-positional"
-                    "db-test-argument-map"
-                    "db-test-explicit-map"}
-                  (set
-                   (db/q
-                    '[:find [?id ...]
-                      :where [_ :seon.cluster.message/id ?id]]))))))))))
+              [{:seon.cluster.agent/id "db-conflict-contender"
+                :seon.cluster.agent/namespace
+                [:seon.ns/name 'my.agents.db-conflict]}]))
+           conflict (:seon.error/data rejected)]
+       (is (= :seon.db/rejected (:seon.error/kind rejected)))
+       (is (true? (:seon.db/transaction-refused rejected)))
+       (is (= {:seon.db/conflict-attribute
+               :seon.cluster.agent/namespace
+               :seon.db/conflict-value
+               [:seon.ns/name 'my.agents.db-conflict]
+               :seon.db/conflict-owner
+               [:seon.cluster.agent/id "db-conflict-owner"]}
+              conflict))
+       (is (str/includes? (:seon.error/message rejected)
+                          "db-conflict-owner"))
+       (is (not (str/includes? (:seon.error/message rejected)
+                               "ExceptionInfo")))
+       (is (= (:seon.error/message rejected)
+              (db/render-rejection-ai rejected)))
+       (is (str/includes? (pr-str (db/render-rejection-html rejected))
+                          "db-conflict-owner"))
+       (is (= 'seon.db/render-rejection-ai
+              (->> (schema/matching-shapes rejected)
+                   (some #(when (= :seon.db/transaction-refused-error
+                                   (:seon.schema/key %))
+                            (:seon.render/ai %))))))))))
 
 (deftest temporal-reads-use-explicit-and-ambient-database-values
   (test-support/with-database

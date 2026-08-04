@@ -3,7 +3,8 @@
   an explicit immutable database value or connection, or, when custody is
   elided, the current connection of the calling agent's cluster (`*conn*`,
   bound per evaluation). Failures return flat `:seon.error` values."
-  (:require [clojure.walk :as walk]
+  (:require [clojure.string :as str]
+            [clojure.walk :as walk]
             [datahike.api :as d]
             [datahike.connector :as connector]
             [datahike.db.interface :as dbi]
@@ -877,6 +878,70 @@
        value))
    transaction))
 
+(def ^:private entity-identity-query
+  '[:find ?identity-attribute ?identity-value
+    :in $ ?entity
+    :where
+    [?schema :db/ident ?identity-attribute]
+    [?schema :db/unique :db.unique/identity]
+    [?entity ?identity-attribute ?identity-value]])
+
+(defn- entity-identity
+  [database entity-id]
+  (some->> (d/q entity-identity-query database entity-id)
+           (sort-by (comp str first))
+           first
+           vec))
+
+(defn- conflict-value
+  [database attribute value]
+  (if (db.utils/ref? database attribute)
+    (or (entity-identity database value) value)
+    value))
+
+(defn- unique-conflict
+  [database data]
+  (when (= :transact/unique (:error data))
+    (let [attribute (:attribute data)
+          datom (:datom data)
+          stored-value (:v datom)
+          owner
+          (d/q '[:find ?owner .
+                 :in $ ?attribute ?value
+                 :where [?owner ?attribute ?value]]
+               database attribute stored-value)]
+      (cond-> {::conflict-attribute attribute
+               ::conflict-value
+               (conflict-value database attribute stored-value)}
+        owner (assoc ::conflict-owner
+                     (or (entity-identity database owner) owner))))))
+
+(defn- rejection-message
+  [conflict throwable]
+  (if conflict
+    (str "Transaction rejected: "
+         (pr-str (::conflict-attribute conflict))
+         " value " (pr-str (::conflict-value conflict))
+         " is already held by "
+         (pr-str (or (::conflict-owner conflict) "an existing entity"))
+         ".")
+    (loop [failure throwable]
+      (if-let [cause (ex-cause failure)]
+        (recur cause)
+        (or (ex-message failure) "Transaction rejected.")))))
+
+(defn- rejected-value
+  [connection throwable data]
+  (let [conflict
+        (try
+          (unique-conflict (d/db connection) data)
+          (catch Throwable _
+            nil))]
+    {:seon.error/kind ::rejected
+     :seon.error/message (rejection-message conflict throwable)
+     :seon.error/data (or conflict data)
+     ::transaction-refused true}))
+
 (defn- transact-call
   [connection transaction]
   (if (error-value? connection)
@@ -894,10 +959,7 @@
 
             ;; A Datahike abort keeps the dependency's classification.
             (some? (:error data))
-            {:seon.error/kind :seon.db/rejected
-             :seon.error/message
-             (or (ex-message throwable) "transaction rejected")
-             :seon.error/data data}
+            (rejected-value connection throwable data)
 
             :else
             (let [failure
@@ -913,6 +975,114 @@
                           throwable)))
               failure)))))))
 
+(defn- transaction-report-limit
+  [database]
+  (try
+    (long
+     (or (d/q '[:find ?limit .
+                :where
+                [_ :seon.config.eval.result/max-collection ?limit]]
+              database)
+         0))
+    (catch Throwable _
+      0)))
+
+(defn- agent-transaction-report
+  [report]
+  (let [database (:db-after report)
+        datoms (:tx-data report)
+        limit (transaction-report-limit database)]
+    {:tx (:tx (first datoms))
+     :datahike/commit-id (or (get-in report [:tx-meta :db/commitId])
+                             (d/commit-id database))
+     ::datom-count (count datoms)
+     :tx-data (into []
+                    (map #(datom->data database %))
+                    (take limit datoms))
+     :tempids (:tempids report)}))
+
+(defn- rendered-value
+  [unit]
+  (if (map? (:seon.render/value unit))
+    (:seon.render/value unit)
+    unit))
+
+(defn render-transaction-ai
+  "Render a committed transaction report as bounded readable text."
+  {:malli/schema
+   [:=> [:cat :seon.db/transaction-report] [:string {:min 1}]]}
+  [unit]
+  (let [{transaction :tx
+         commit-id :datahike/commit-id
+         datom-count ::datom-count
+         datoms :tx-data
+         tempids :tempids}
+        (rendered-value unit)
+        shown (count datoms)]
+    (str "Committed transaction " transaction
+         " at commit " commit-id
+         " with " datom-count " datoms"
+         (when (< shown datom-count)
+           (str " (showing " shown ")"))
+         "."
+         (when (seq tempids)
+           (str "\nTempids: " (pr-str tempids)))
+         (when (seq datoms)
+           (str "\nCommitted datoms:\n"
+                (str/join "\n" (map pr-str datoms)))))))
+
+(defn render-transaction-html
+  "Render a committed transaction report as bounded readable Hiccup."
+  {:malli/schema
+   [:=> [:cat :seon.db/transaction-report] :seon.render/hiccup]}
+  [unit]
+  (let [{transaction :tx
+         commit-id :datahike/commit-id
+         datom-count ::datom-count
+         datoms :tx-data
+         tempids :tempids}
+        (rendered-value unit)
+        shown (count datoms)]
+    [:article {:class "seon-family-entry seon-db-transaction-entry"}
+     [:h3 "Committed transaction"]
+     [:dl
+      [:div [:dt "Transaction"] [:dd (str transaction)]]
+      [:div [:dt "Commit ID"] [:dd (str commit-id)]]
+      [:div [:dt "Datoms"]
+       [:dd (str datom-count
+                 (when (< shown datom-count)
+                   (str " (showing " shown ")")))]]
+      [:div [:dt "Tempids"] [:dd (pr-str tempids)]]]
+     (when (seq datoms)
+       (into [:ol {:class "seon-db-transaction-datoms"}]
+             (map (fn [datom] [:li [:code (pr-str datom)]]))
+             datoms))]))
+
+(defn render-rejection-ai
+  "Render a rejected database transaction as readable steering text."
+  {:malli/schema
+   [:=> [:cat :seon.db/transaction-refused-error] [:string {:min 1}]]}
+  [unit]
+  (:seon.error/message (rendered-value unit)))
+
+(defn render-rejection-html
+  "Render a rejected database transaction as readable Hiccup."
+  {:malli/schema
+   [:=> [:cat :seon.db/transaction-refused-error] :seon.render/hiccup]}
+  [unit]
+  (let [value (rendered-value unit)
+        conflict (:seon.error/data value)]
+    [:article {:class "seon-family-entry seon-db-rejection-entry"}
+     [:h3 (:seon.error/message value)]
+     (when (::conflict-attribute conflict)
+       [:dl
+        [:div [:dt "Attribute"]
+         [:dd (pr-str (::conflict-attribute conflict))]]
+        [:div [:dt "Value"]
+         [:dd (pr-str (::conflict-value conflict))]]
+        [:div [:dt "Existing owner"]
+         [:dd (pr-str (::conflict-owner conflict))]]])]))
+
 (defn transact!
   "Commit a transaction through an explicit or ambient connection.
 
@@ -922,11 +1092,14 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.store/transaction]
-     [:or :map :seon.error/value]]
+     [:or :seon.db/transaction-report :seon.error/value]]
     [:=> [:cat :seon.db/connection :seon.store/transaction]
      [:or :map :seon.error/value]]]}
   ([transaction]
-   (transact-call (current-connection) transaction))
+   (let [result (transact-call (current-connection) transaction)]
+     (if (and (map? result) (contains? result :db-after))
+       (agent-transaction-report result)
+       result)))
   ([connection transaction]
    (cond
      (not (connection? connection))

@@ -150,6 +150,10 @@ operation ID.
 
 `seon.db` owns `q`, `pull`, `pull-many`, eager entity and datom data, ordinary
 database values, time-travel reads, and native-shaped transaction reports.
+An ambient agent write returns the useful bounded report projection—transaction
+and commit IDs, total datom count, bounded committed datoms, and tempids—while
+the explicit system arity retains Datahike's exact `db-before` and `db-after`
+values for in-process reducers and listeners.
 Each function preserves Datahike's positional and argument-map forms, using
 the dependency's own keys, and returns a flat error value on failure.
 Datahike `:db.fn/cas` is reserved for facts two processes race to win exactly
