@@ -17,19 +17,19 @@ commit. Evidence lives in the eight lane reports indexed by
 Solution-shape legend: the elegant fix named per row is the ruled
 direction; a lane departing from it reports why before landing.
 
-## A0. PLATFORM INCIDENT (owner-ruled highest priority, 2026-08-04)
+## A0. PLATFORM INCIDENT — RESOLVED by clean-boot proof (2026-08-04)
 
-Scratch-cluster boot broken tree-wide: `seon.cluster/ensure-entity!`
-fails at boot, then `seon.sci.kernel/invoke` capture-context contract.
-Evidence: the `ugly-dev-envelope` lane's UNCOMMITTED cluster.clj diff
-rewrites `ensure-entity!`'s `:db.fn/call` tx shape — the exact failing
-seam. Lane stopped and resumed 2026-08-04 with fix-first orders: isolate,
-repair, prove a clean boot in an isolated root BEFORE any commit; report
-immediately if evidence shows its edits are NOT the cause (would make
-this a landed-commit regression). The possibly-separate kernel/invoke
-contract failure must be captured exactly, not papered over. Status:
-lane running under incident orders; incident stays open until a clean
-boot is proven.
+Scratch boots failed transiently in `seon.cluster/ensure-entity!` during
+concurrent in-flight edits. Resolution evidence: the dev-envelope lane
+published `current-src` and booted `incident-envelope-0804` through
+`agents` and `web` in an isolated root — clean, and the reported
+`seon.sci.kernel/invoke` contract failure did NOT reproduce. ATTRIBUTION
+CORRECTION (the 08-03 lesson again): the orchestrator first named the
+dev-envelope lane's edits as the cause; its evidence cleared it — the
+`ensure-entity!` hunk is a concurrent edit believed to belong to the
+creation/config lane, whose ownership confirmation is pending as it
+commits by index surgery. Incident closes fully when that hunk's owner
+is confirmed and the file's interleaved edits are both committed.
 
 ## A. Blockers with fix lanes running
 
@@ -46,9 +46,9 @@ boot is proven.
 | B2 | `:seon.db/rejected` faces show bare entity ids — agent cannot see WHICH agent owns a namespace | rejection error VALUE carries the conflict as data with the owner resolved to its identity attribute; face renders it | lane `ugly-db-faces` |
 | B3 | agent creation returns ~3 MB | creation returns the useful projection (agent id, namespace, cluster, bootstrap run id); declared producers for the agent shape | lane `ugly-creation-config-faces` |
 | B4 | `config/effective` ⇒ `{}` on live forked/scratch clusters ⇒ 5 KB per-dial missing-key wall (hits `eval.drive`/`bootstrap-drive` caps) | fix the empty read at its root; failure is ONE flat `:seon.error` naming cluster + missing config facts | lane `ugly-creation-config-faces`; related issue: forked-cluster-inherits-the-ancestors-config-cluster-name |
-| B5 | every `eval_clj` mode:jvm exception reports the io-prepl serving frame, not the throw site | served error envelope carries the actual throw-site location as data | lane `ugly-dev-envelope` |
+| B5 | every `eval_clj` mode:jvm exception reports the io-prepl serving frame, not the throw site | served error envelope carries the actual throw-site location as data | committed pending: fix done + regression in mcp_test.clj, uncommitted until cluster.clj untangles (see A0) |
 | B6 | leaked host NPE `"fut" is null` through the prepl path | root-cause the nil future; that path returns a flat `:seon.error` naming the real cause | lane `ugly-dev-envelope` |
-| B7 | `runtime_status` ⇒ ~19k tokens of duplicated unscoped JSON | scope + dedupe the status projection structurally (per-cluster once, bounded problem summaries) | lane `ugly-dev-envelope` |
+| B7 | `runtime_status` ⇒ ~19k tokens of duplicated unscoped JSON | scope + dedupe the status projection structurally (per-cluster once, bounded problem summaries) | **DONE** — commit `07fd06a51`; fresh result 1,772 bytes, one selected cluster, bounded counts |
 
 ## C. Held — owner files occupied by running lanes
 
