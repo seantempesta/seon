@@ -16,10 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (8)
+## Blocker (9)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Order same-instant transcript receipts by ordinal, not id string](transcript-orders-same-instant-receipts-lexically.md) | blocker | bootstrap instruction wave |
 | [Remove closed map contracts outside the canonical schema population](closed-map-contracts-survive-outside-schema-population.md) | blocker | open-maps accretion wave |
 | [Refuse malformed SSE data before it can change agent code](malformed-sse-data-can-change-agent-code.md) | blocker | AI provider-integrity wave |
 | [Bound work submission before Flow injection can block](work-submission-can-block-before-its-time-limit.md) | blocker | Flow bounded-submission wave |
