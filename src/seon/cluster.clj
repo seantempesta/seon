@@ -289,7 +289,7 @@
                         (blob/put! connection content))]
     (cond-> {:seon.dev.mcp/value
              (if evaluation-print-node
-               (evaluation-face value evaluation-print-node effective)
+               (evaluation-face value projected-node effective)
                (admit/semantic-value projected-node))
              :seon.sci.admit/capped?
              (:seon.sci.admit/capped? artifact)

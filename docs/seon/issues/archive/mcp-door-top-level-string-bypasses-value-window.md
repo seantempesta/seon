@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, mcp, repl, sci, render]
 ---
@@ -54,3 +54,23 @@ An admitted one-megabyte top-level string remains blob-retrievable, its inline
 MCP envelope stays below the configured threshold, and the face supplies the
 same digest and size needed to retrieve the remainder. A regression enters
 through an actual evaluation print node rather than a generic nested value.
+
+## Resolution
+
+Resolved by the path-limited `Fix MCP scalar value window` commit. The eval
+arm now passes its already fitted `projected-node` to `evaluation-face`; the
+non-eval arm continues to use that same node.
+
+The focused `seon.cluster.mcp-test` gate passed 9 tests / 44 assertions with
+zero failures or errors. Its P5 regression enters through an evaluation print
+node, asserts an order-of-magnitude reduction rather than an exact face size,
+and independently derives the complete artifact digest and size.
+
+Live proof on scratch cluster `mcp-window-fix-0804` evaluated
+`(apply str (repeat 1048576 "x"))` through `eval_clj` before and after a loaded
+Var reload. The complete MCP response fell from 263,048 to 2,953 characters
+and its visible face fell from 262,147 to 2,051. Both runs retained digest
+`cfbbec8053dd361e864119a55d5c887b55261f4728a70153fe510415158ad261`,
+artifact size 262,265, `capped? true`, `windowed? true`, and
+`retrievable? true`. This proves the loaded Var behavior; it does not claim a
+current-source refork.

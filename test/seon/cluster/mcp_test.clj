@@ -3,10 +3,12 @@
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [seon.blob :as blob]
             [seon.cluster :as cluster]
             [seon.config :as config]
             [seon.db :as db]
             [seon.operator.runtime :refer [running-instances]]
+            [seon.render.value :as render.value]
             [seon.sci.admit :as admit]
             [seon.test-support :as support]))
 
@@ -70,6 +72,31 @@
     (is (not (contains? face :seon.cluster.eval/result-edn))
         "the node tree never rides the envelope; the text replaces it")
     (is (< (utf8-size result) 8192))))
+
+(deftest door-top-level-strings-use-the-shared-value-window
+  (let [cluster-name "mcp-top-level-string-window-test"
+        effective (config/defaults)
+        evaluation (door-evaluation effective
+                                    (apply str (repeat 1048576 \x)))
+        artifact
+        (render.value/artifact
+         {:seon.sci.admit/print-node
+          (edn/read-string (:seon.cluster.eval/result-edn evaluation))
+          :seon.sci.admit/capped?
+          (:seon.sci.admit/capped? evaluation)})
+        artifact-content (render.value/artifact-edn artifact)
+        result (projected cluster-name effective evaluation)
+        text (get-in result [:seon.dev.mcp/value :seon.dev.mcp/text])]
+    (is (< (utf8-size result) 8192)
+        "a scalar face is bounded by the same window as structural values")
+    (is (< (* 10 (utf8-size text)) (:seon.blob/size result))
+        "the inline face is at least an order of magnitude smaller than its artifact")
+    (is (true? (:seon.dev.mcp/windowed? result)))
+    (is (true? (:seon.sci.admit/capped? result)))
+    (is (= (blob/digest artifact-content) (:seon.blob/digest result))
+        "windowing retains the complete artifact digest")
+    (is (= (count artifact-content) (:seon.blob/size result))
+        "windowing retains the complete artifact size")))
 
 (deftest door-artifact-size-ignores-evaluation-envelope-bulk
   (let [cluster-name "mcp-small-door-value-test"
