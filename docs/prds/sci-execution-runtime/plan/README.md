@@ -430,6 +430,15 @@ Evidence base: eight paired sol/Opus research lanes (indexed in the PRD).
   door receipts, declared by the capability leaf, never guessed (joins
   F8's capability family). Bare agent `transact!` spans stay uncurated
   until write provenance (F7) lands.
+- **Open maps extend to agent-authored function contracts** (owner,
+  2026-08-04 late): the `{:closed true}` admission requirement on
+  authored `:malli/schema` input maps is DELETED — ruling #48's
+  accretion rationale explicitly covered functions, and the exception
+  survived only as drift (tracked in
+  `closed-map-contracts-survive-outside-schema-population.md`).
+  Declared keys stay rigorously validated; extra keys are ignored. The
+  bootstrap's refusal→repair beat re-teaches on a surviving refusal
+  (the `:any` rule) instead.
 - **Speculative futures are the same mechanism, and adoption is always
   SINGLE-FUTURE** (owner clarification, same session): fork → run →
   judge → adopt covers the bootstrap experiment, curation, speculation,
