@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, database, sci, architecture]
 ---
@@ -68,3 +68,44 @@ settlement path. `src/seon/sci/eval.clj:230-234` still constructs
 `my.agents.<id>` without reading `:seon.cluster.agent/namespace`. The parsed
 contract, live-context, and stateless-resume waves preserve this namespace
 choice; they do not reconcile it with the agent's database ref.
+
+## Resolution 2026-08-04
+
+Commit `3a6264724` deleted eval-time namespace construction. The surviving
+`seon.sci.eval/agent-namespace` reads the agent's
+`:seon.cluster.agent/namespace` ref and resolves its `:seon.ns/name` from the
+database value. The normal run loop passes no requested starting namespace to
+`seon.cluster.run/plan-tx`, so `plan-call` writes
+`:seon.cluster.run/starting-ns` from that same committed assignment. Explicit
+starting namespaces remain available to system-authored and curation runs.
+
+`my.agents.<id>` remains only in `seon.eval.drive/creation-request`, where it
+is the default assigned to a temporary agent at creation. Bootstrap grading,
+reply freezing, resumed-form fallback, and direct evaluation now all pass a
+database value when resolving an existing agent's namespace.
+
+## Verification 2026-08-04
+
+The pre-fix falsifier on the isolated operator root
+`tmp/eval-assigned-namespace-root` created agent `namespace-falsifier` with
+assignment `my.tools.demo`; `seon.cluster.agent/owner-of` returned that agent,
+while `seon.sci.eval/agent-namespace` returned the incorrect
+`my.agents.namespace-falsifier`.
+
+After publishing current source commit
+`6a727b42-c967-580d-8225-e3204cea91e8`, the fresh scratch cluster
+`assigned-ns-post` created `assigned-bootstrap-live` with assignment
+`my.tools.demo`. Its system-authored run
+`bootstrap:assigned-bootstrap-live` recorded starting namespace
+`my.tools.demo`, closed normally, and committed 13 receipts. The set of
+receipt evaluation namespaces was exactly `#{my.tools.demo}`; ordinal 0 also
+recorded `my.tools.demo`.
+
+The recurring regression `assigned-namespace-seeds-the-run-and-its-receipt`
+creates a non-default assignment and proves the run starting namespace,
+planned form namespace, admitted value, and settled receipt namespace. The
+loop namespace passed 24 tests / 107 assertions. In the combined owning run,
+all run and loop tests plus the new direct-eval regression passed; the SCI
+namespace retained five unrelated dirty-tree assertions in the existing
+`bare-dir-and-program-derived-doc-are-repl-native` and
+`agent-contracts-apply-on-acquire-and-cold-recovery` tests.
