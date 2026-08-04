@@ -6,8 +6,9 @@
   unambiguous `:seon.print/face` envelope in the closed print grammar;
   authored print keywords remain ordinary child data. Maps, sets,
   records, sequences, and host collections are rebuilt within the
-  configured depth, width, string, and node caps. Reference types and
-  arrays are never entered.
+  configured depth, width, string, and node caps. Reference values with a
+  registry-declared identity projection admit only that identity; other
+  reference types and arrays are never entered.
 
   `admit-value` returns the one bounded print node and its derived semantic
   value without constructing a print sink. `admit` adds
@@ -137,6 +138,16 @@
 
 (declare project)
 
+(defn- identity-only-node
+  [value child-depth state]
+  (when-let [projection (schema/identity-only-projection value)]
+    (if (take-node! state)
+      (assoc (object-node value (:caps state))
+             ::print/value
+             (project (:seon.schema/identity-value projection)
+                      child-depth state))
+      (elide! state))))
+
 (defn- append-elision!
   "Append the scalar cut marker, charging its one node."
   [state accumulated emit]
@@ -222,7 +233,8 @@
                 :seon.config.eval.result/max-string]}
         (:caps state)
         deep? (>= depth max-depth)
-        child-depth (inc depth)]
+        child-depth (inc depth)
+        identity-node (delay (identity-only-node value child-depth state))]
     (cond
       (nil? value) (value-node ::print/nil nil)
       (boolean? value) (value-node ::print/boolean value)
@@ -256,6 +268,11 @@
       ;; (Falsified the other way first: markers-as-maps at the cap
       ;; produced depth 7 under a cap of 6.)
       deep? (prune! state)
+
+      ;; A registry predicate, not a class roster, decides which reference
+      ;; values are identities in data. The identity itself re-enters this
+      ;; bounded walk; the reference's structural fields never do.
+      @identity-node @identity-node
 
       (instance? Throwable value)
       (if (take-node! state)
@@ -417,7 +434,9 @@
                  ::name (str "#'" (::print/name print-node))}
     ::print/type {::opaque "sci.lang.Type" ::name (::print/name print-node)}
     ::print/class {::opaque "java.lang.Class" ::name (::print/name print-node)}
-    ::print/object {::opaque (::print/class print-node)}
+    ::print/object (if-let [identity (::print/value print-node)]
+                     (semantic-value identity)
+                     {::opaque (::print/class print-node)})
     ::print/truncated-string {::truncated-string (::print/value print-node)
                               ::elided true}
     ::print/failed {::opaque (::print/class print-node)

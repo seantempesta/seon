@@ -9,13 +9,28 @@
           [:fn
            {:error/message
             "must be a live unreleased Datahike connection from the calling cluster"
-            :gen/gen seon.db/connection-generator}
+            :gen/gen seon.db/connection-generator
+            :seon.schema/identity-only true
+            :seon.schema/identity-projection seon.db/connection-identity}
            seon.db/connection?],
+          :connection-id [:vector [:or :uuid :keyword]],
+          :connection-identity
+          [:map
+           [:datahike/connection-id :seon.db/connection-id]],
           :database-value
           [:fn
            {:error/message "must be an immutable Datahike database value"
-            :gen/gen seon.db/database-value-generator}
+            :gen/gen seon.db/database-value-generator
+            :seon.schema/identity-only true
+            :seon.schema/identity-projection seon.db/database-value-identity}
            seon.db/database-value?],
+          :database-name :keyword,
+          :basis-t :int,
+          :database-value-identity
+          [:map
+           [:db-name :seon.db/database-name]
+           [:t :seon.db/basis-t]
+           [:datahike/commit-id :uuid]],
           :datom
           [:map
            [:e :seon.schema/value]

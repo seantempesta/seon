@@ -2569,6 +2569,76 @@
           (:seon.schema.shape/projection cached)
           (build-projection forms)))))
 
+(defonce ^:private !identity-only-generation
+  (atom {:seon.schema.identity-only/projection nil
+         :seon.schema.identity-only/descriptors []}))
+
+(defn- identity-only-descriptors-in
+  [projection]
+  (into
+   []
+   (keep
+    (fn [[schema-key definition]]
+      (let [properties (form/attr-form-properties definition)]
+        (when (true? (:seon.schema/identity-only properties))
+          (let [projection-symbol
+                (:seon.schema/identity-projection properties)
+                _ (when-not (qualified-symbol? projection-symbol)
+                    (throw
+                     (ex-info
+                      (str schema-key " declares identity-only admission "
+                           "without a qualified identity projection.")
+                      {:seon.schema/key schema-key
+                       :seon.schema/identity-projection projection-symbol
+                       :seon.error/kind :core-bug})))
+                projection-var (requiring-resolve projection-symbol)]
+            (when-not (ifn? (var-get projection-var))
+              (throw
+               (ex-info
+                (str schema-key " declares identity-only admission without "
+                     "a callable identity projection.")
+                {:seon.schema/key schema-key
+                 :seon.schema/identity-projection projection-symbol
+                 :seon.error/kind :core-bug})))
+            {:seon.schema/key schema-key
+             :seon.schema.identity-only/validator
+             (projection-validator projection schema-key)
+             :seon.schema/identity-projection projection-var})))))
+   (sort-by (comp str key)
+            (:seon.schema.projection/forms projection))))
+
+(defn- identity-only-descriptors
+  [projection]
+  (let [cached @!identity-only-generation]
+    (if (identical? projection
+                    (:seon.schema.identity-only/projection cached))
+      (:seon.schema.identity-only/descriptors cached)
+      (let [descriptors (identity-only-descriptors-in projection)]
+        (reset! !identity-only-generation
+                {:seon.schema.identity-only/projection projection
+                 :seon.schema.identity-only/descriptors descriptors})
+        descriptors))))
+
+(defn identity-only-projection-in
+  "Project a registered reference value to its declared identity data."
+  {:malli/schema
+   [:=> [:catn [::projection ::projection] [::value ::value]]
+    [:maybe :map]]}
+  [projection value]
+  (some
+   (fn [{:seon.schema/keys [key identity-projection]
+         validator :seon.schema.identity-only/validator}]
+     (when (validator value)
+       {:seon.schema/key key
+        :seon.schema/identity-value (identity-projection value)}))
+   (identity-only-descriptors projection)))
+
+(defn identity-only-projection
+  "Project a registered reference value using the active schema registry."
+  {:malli/schema [:=> [:catn [::value ::value]] [:maybe :map]]}
+  [value]
+  (identity-only-projection-in (shape-projection) value))
+
 (defn- ensure-shape-generation-for! [projection]
     (when-not (identical? projection
                            (:seon.schema.shape/projection @!shape-generation))

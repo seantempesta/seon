@@ -1,5 +1,7 @@
 #:seon.schema{:arguments [:vector :any],
               :identity :qualified-keyword,
+              :identity-only :boolean,
+              :identity-projection :qualified-symbol,
               :predicate :qualified-symbol,
               :schema
               [:map

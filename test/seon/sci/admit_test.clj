@@ -24,6 +24,7 @@
   on the default classpath (n3-plan §6.2 moves it out of the `:host`
   alias). Named in the draft report; not edited here."
   (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
@@ -74,6 +75,36 @@
                             :seon.eval/duration-ms 7
                             :seon.eval/allocated-bytes 918273
                             :seon.eval/outcome :ok}}))
+
+(defrecord IdentityOnlyRecord [id payload])
+
+(def identity-only-record-generator
+  (gen/fmap (fn [id] (->IdentityOnlyRecord id "generated")) gen/small-integer))
+
+(defn identity-only-record?
+  [value]
+  (instance? IdentityOnlyRecord value))
+
+(defn identity-only-record-identity
+  [value]
+  {::identity (:id value)})
+
+(schema/register-core-predicate!
+ 'seon.sci.admit-test/identity-only-record?
+ identity-only-record?)
+
+(defn- projection-with-identity-only-record
+  []
+  (schema/build-projection
+   (assoc
+    (schema/snapshot)
+    ::identity-only-record
+    [:fn
+     {:seon.schema/identity-only true
+      :seon.schema/identity-projection
+      'seon.sci.admit-test/identity-only-record-identity
+      :gen/gen 'seon.sci.admit-test/identity-only-record-generator}
+     'seon.sci.admit-test/identity-only-record?])))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Independent measurement of a projection — never the production walker
@@ -136,6 +167,29 @@
       (is (= print-node
              (:seon.sci.admit/print-node
               (admit/admit-value (request {:alpha [1 2 3]}))))))))
+
+(deftest every-identity-only-record-admits-as-identity-at-depth
+  (let [payload (apply str (repeat 100000 \x))
+        reference (->IdentityOnlyRecord 41 payload)
+        projection (projection-with-identity-only-record)
+        admitted
+        (with-redefs [schema/current-projection (constantly projection)]
+          (admit/admit (request {:outer [{:reference reference}]})))
+        semantic (:seon.sci.admit/value admitted)
+        print-node (:seon.sci.admit/print-node admitted)
+        object-nodes
+        (filter #(and (map? %)
+                      (= ::print/object (::print/face %)))
+                (tree-seq coll? seq print-node))]
+    (is (= {:outer [{:reference {::identity 41}}]} semantic))
+    (is (= 1 (count object-nodes)))
+    (is (= {::identity 41}
+           (admit/semantic-value (::print/value (first object-nodes)))))
+    (is (< (* 10 (count (:seon.cluster.eval/result-edn admitted)))
+           (count payload))
+        "a satisfying defrecord can never contribute its structural bulk")
+    (is (not (str/includes? (:seon.cluster.eval/result-edn admitted)
+                            payload)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Real sci values — one context, inert values, never mutated

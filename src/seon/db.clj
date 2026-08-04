@@ -122,6 +122,23 @@
   [connection]
   (datahike.store/connection-id (:config @connection)))
 
+(defn connection-identity
+  "Plain-data identity of a live Datahike connection."
+  {:malli/schema
+   [:=> [:cat :seon.db/connection] :seon.db/connection-identity]}
+  [connection]
+  {:datahike/connection-id (connection-id connection)})
+
+(defn database-value-identity
+  "Plain-data identity of an immutable Datahike database value."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value] :seon.db/database-value-identity]}
+  [database]
+  (let [configuration (dbi/-config database)]
+    {:db-name (:branch configuration)
+     :t (dbi/-max-tx database)
+     :datahike/commit-id (d/commit-id database)}))
+
 (defn- foreign-connection-error
   [connection]
   (when (some? *conn*)
@@ -942,14 +959,24 @@
      :seon.error/data (or conflict data)
      ::transaction-refused true}))
 
+(declare agent-transaction-report)
+
 (defn- transact-call
   [connection transaction]
   (if (error-value? connection)
     connection
     (try
-      (d/transact connection
-                  (schema.datahike/encode-transaction
-                   (jdk-integers->long transaction)))
+      (let [report
+            (d/transact connection
+                        (schema.datahike/encode-transaction
+                         (jdk-integers->long transaction)))]
+        ;; Ambient custody marks an agent-facing call. Both public arities
+        ;; therefore return the same declared semantic report inside an eval;
+        ;; unbound system callers retain Datahike's exact report for reducers
+        ;; and listeners.
+        (if (some? *conn*)
+          (agent-transaction-report report)
+          report))
       (catch Throwable throwable
         (let [data (error.refusal/refusal throwable)]
           (cond
@@ -1096,10 +1123,7 @@
     [:=> [:cat :seon.db/connection :seon.store/transaction]
      [:or :map :seon.error/value]]]}
   ([transaction]
-   (let [result (transact-call (current-connection) transaction)]
-     (if (and (map? result) (contains? result :db-after))
-       (agent-transaction-report result)
-       result)))
+   (transact-call (current-connection) transaction))
   ([connection transaction]
    (cond
      (not (connection? connection))
