@@ -67,7 +67,7 @@ commits by index surgery. FULLY CLOSED: the creation/config lane confirmed and c
 | D5 | `seon.effect/capabilities` NPEs on a symbol absent from the graph and violates its own output contract | absent symbol ⇒ empty set or flat error value per its declared contract; regression | to file |
 | D6 | contract violations nest a `pr-str`'d print-face tree as a string inside `:seon.error/data` | error data carries the face as DATA, rendered by the error's producer | to file |
 | D7 | capped collections render a bare `… :seon.sci.admit/elided` keyword (no how-much/how-to-requery) | enrich the ordinary value (count + requery handle), never a synthetic notice (08-01 finding) | to file |
-| D8 | `my.*` docstrings are maintenance diaries (205 tokens where ~60 teach) | rewrite for the actual reader (they render into agent context) | to file |
+| D8 | `my.*` docstrings are maintenance diaries (205 tokens where ~60 teach) | rewrite for the actual reader (they render into agent context) | **DONE** — commit `ed41a90f7`; tracked `src/my` docstrings fell from 2,040 to 1,187 estimated tokens (−853, 42%); focused gate: 30 tests / 156 assertions |
 | D9 | two graders regex over form source | the missing receipt→declaration ref (fact), then delete the regexes | to file |
 | D10 | bootstrap ordinal-0 attributed `my.agents.root` while ordinal 1 (`in-ns`) is `user` | attribution follows the plan's namespace designation consistently | to file (bootstrap owner) |
 | D11 | live default cluster: 813 occurrences of one `seon.instrument/contract-violated` signature + 7 stale `seon.cluster` fault vars | diagnose the one signature at its source; motivation case for curation | to file / probe |
