@@ -54,7 +54,7 @@ is confirmed and the file's interleaved edits are both committed.
 
 | # | Problem | Elegant solution | Blocked on |
 |---|---|---|---|
-| C1 | `defn` returns a string; a stock REPL prints `#'ns/name` (REPL parity, most common agent form) | the eval result carries the var face like `def` does; fix at the result-shaping seam in `seon.sci.eval` | lane `defn-var-face` dispatched (A2 landed, file free) |
+| C1 | `defn` returns a string; a stock REPL prints `#'ns/name` (REPL parity, most common agent form) | the eval result carries the var face like `def` does; fix at the result-shaping seam in `seon.sci.eval` | **DONE** — commit `d6329faa4`; live proof: contracted defn now returns the Var face; parity issue updated |
 | C2 | error receipts without triage render as ambiguous naked prose | error receipts render as execution errors (the REPL-parity face), from the receipt's own error data | lane `receipt-error-triage-face` dispatched (A1 landed, file free) |
 
 ## D. Issues filed by lanes — need owners/lanes (not yet dispatched)
@@ -75,6 +75,7 @@ is confirmed and the file's interleaved edits are both committed.
 | D12 | unrestorable program row says the capability Var is "absent from the program graph" though its graph row exists | the unrestorable reason states the ACTUAL condition (unproven capability call), from the classification that produced it | to file (found by A2 lane) |
 | D13 | `test/seon/cluster/agent_test.clj:89` supplies only compute configuration while `flow.clj:475` now requires compute AND io facts — foreign boundary break | whichever lane changed the flow contract updates the fixture in the same beat; needs owner identification via git log | **DONE** — commit `8127dc987` repairs all three stale direct fixtures; the combined gate cleared the configuration refusal, then stopped at the unrelated `disarm-has-a-provider-derived-loud-backstop` retryability assertion in the concurrently dirty tree |
 | D14 | `disarm-has-a-provider-derived-loud-backstop` fails at `agent_test.clj:870` (`agent/armed` nil) after the D13 repair | judge only once `cluster.clj`'s interleaved in-flight hunks are committed — dirty-tree suspicion first, per the verify-before-attributing rule | open; re-run at the A0 full close |
+| D15 | changed-test selector emits a 478K single-line result dominated by unrelated lint warnings; on timeout it deletes its operator root while leaving the child JVM alive (orphan `96727` verified + reaped by the orchestrator) | selector report gets a bounded structured face; teardown reaps its child BEFORE removing records (joins the existing changed-test-process-cleanup issue) | open |
 
 ## E. Design-level (owned by the PRD, not issues)
 
