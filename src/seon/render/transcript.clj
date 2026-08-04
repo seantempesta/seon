@@ -31,6 +31,7 @@
 (def ^:private message-selector
   [:db/id
    :seon.cluster.message/id
+   :seon.cluster.message/ordinal
    :seon.cluster.message/at
    :seon.cluster.message/content
    :my.message/reason
@@ -151,17 +152,19 @@
 (defn- recent-message-rows
   [db agent-id limit]
   (db/q {:query
-        '[:find ?message ?at ?id
+        '[:find ?message ?at ?ordinal ?tx
           :in $ ?agent-id
           :where
           [?agent :seon.cluster.agent/id ?agent-id]
           (or-join [?message ?agent]
                    [?message :seon.cluster.message/to ?agent]
                    [?message :seon.cluster.message/from ?agent])
-          [?message :seon.cluster.message/at ?at]
-          [?message :seon.cluster.message/id ?id]]
+          [?message :seon.cluster.message/at ?at ?tx]
+          [?message :seon.cluster.message/id _]
+          [(get-else $ ?message :seon.cluster.message/ordinal 0)
+           ?ordinal]]
         :args [db agent-id]
-        :order-by '[?at :desc ?id :desc]
+        :order-by '[?at :desc ?tx :desc ?ordinal :desc ?message :desc]
         :limit limit}))
 
 (defn- recent-receipt-rows
@@ -197,7 +200,8 @@
   [db agent-id limit]
   (let [recent
         (->> (concat
-              (map #(into [:message] %)
+              (map (fn [[entity at ordinal tx]]
+                     [:message entity at [tx ordinal entity]])
                    (recent-message-rows db agent-id limit))
               (map #(into [:eval] %)
                    (recent-receipt-rows db agent-id limit))
@@ -298,21 +302,39 @@
      {}
      candidates)))
 
+(defn- message-order-facts
+  [db message-ids]
+  (if (seq message-ids)
+    (into
+     {}
+     (map (fn [[message tx ordinal]]
+            [message {::transaction tx ::ordinal ordinal}]))
+     (db/q '[:find ?message ?tx ?ordinal
+            :in $ [?message ...]
+            :where
+            [?message :seon.cluster.message/at _ ?tx]
+            [(get-else $ ?message :seon.cluster.message/ordinal 0)
+             ?ordinal]]
+          db message-ids))
+    {}))
+
 (defn- message-entry
-  [identities message]
+  [identities orders message]
   (let [about-eid (get-in message [:seon.cluster.message/about :db/id])]
-    {::kind :message
-     ::entity message
-     ::id (:seon.cluster.message/id message)
-     ::at (:seon.cluster.message/at message)
-     ::content (:seon.cluster.message/content message)
-     ::from (get-in message [:seon.cluster.message/from
-                             :seon.cluster.agent/id])
-     ::to (get-in message [:seon.cluster.message/to
-                           :seon.cluster.agent/id])
-     ::about (second (get identities about-eid))
-     ::about-ref? (some? about-eid)
-     ::reason (:my.message/reason message)}))
+    (merge
+     {::kind :message
+      ::entity message
+      ::id (:seon.cluster.message/id message)
+      ::at (:seon.cluster.message/at message)
+      ::content (:seon.cluster.message/content message)
+      ::from (get-in message [:seon.cluster.message/from
+                              :seon.cluster.agent/id])
+      ::to (get-in message [:seon.cluster.message/to
+                            :seon.cluster.agent/id])
+      ::about (second (get identities about-eid))
+      ::about-ref? (some? about-eid)
+      ::reason (:my.message/reason message)}
+     (get orders (:db/id message)))))
 
 (defn capped-result?
   "True when a receipt stores less result text than its original size."
@@ -375,7 +397,10 @@
   [entry]
   (let [at (.getTime ^java.util.Date (::at entry))]
     (case (::kind entry)
-      :message [at 0 nil nil (::id entry)]
+      :message [at 0
+                (::transaction entry)
+                (::ordinal entry)
+                (get-in entry [::entity :db/id])]
       :attempt [at 1 nil nil (::id entry)]
       :input [at 2
               (.getTime ^java.util.Date (::run-opened-at entry))
@@ -393,8 +418,10 @@
         receipts (pulled-many db receipt-selector (:eval ids))
         inputs (pulled-many db form-selector (:input ids))
         identities (about-identities db messages)
+        message-orders (message-order-facts db (:message ids))
         sources (form-sources db (:eval ids))]
-    (->> (concat (map (partial message-entry identities) messages)
+    (->> (concat (map (partial message-entry identities message-orders)
+                      messages)
                  (map input-entry inputs)
                  (map (partial receipt-entry sources) receipts))
          (map (fn [entry]

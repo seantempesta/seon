@@ -674,17 +674,21 @@
                   [:vector [:map [:seon.cluster.message/id
                                   :seon.cluster.message/id]]]]}
   [db agent-id]
-  (->> (db/q '[:find ?id ?at
+  (->> (db/q '[:find ?message ?id ?at ?ordinal ?tx
               :in $ ?agent-id
               :where
               [?agent :seon.cluster.agent/id ?agent-id]
               [?message :seon.cluster.message/to ?agent]
               [?message :seon.cluster.message/id ?id]
-              [?message :seon.cluster.message/at ?at]
+              [?message :seon.cluster.message/at ?at ?tx]
+              [(get-else $ ?message :seon.cluster.message/ordinal 0)
+               ?ordinal]
               ;; answered = SOME run names it as its trigger.
               ;; The absence is the fact; there is no flag to maintain.
               (not [_ :seon.cluster.run/trigger ?message])]
             db agent-id)
-       (sort-by (fn [[id at]] [(inst-ms at) id]))
-       (mapv (fn [[id at]] {:seon.cluster.message/id id
-                            :seon.cluster.message/at at}))))
+       (sort-by (fn [[message _id at ordinal tx]]
+                  [(inst-ms at) tx ordinal message]))
+       (mapv (fn [[_message id at _ordinal _tx]]
+               {:seon.cluster.message/id id
+                :seon.cluster.message/at at}))))

@@ -298,6 +298,7 @@
 
     :else
     [{:seon.cluster.message/id (inbound-message-id db 0)
+      :seon.cluster.message/ordinal 0
       :seon.cluster.message/to [:seon.cluster.agent/id id]
       :seon.cluster.message/content inbound-content
       :seon.cluster.message/at at}]))
@@ -407,6 +408,7 @@
                     [:seon.cluster.agent/id sender]
                     :seon.cluster.message/content
                     (or (:my.message/content candidate) reason)
+                    :seon.cluster.message/ordinal index
                     :seon.cluster.message/at at}
                     trigger
                     (assoc :seon.cluster.message/caused-by

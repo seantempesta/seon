@@ -35,6 +35,7 @@
                         [:vector {:min 1, :max 1} :map]
                         :seon.error/value],
                        :inbound-content :string,
+                       :ordinal [:int {:min 0}],
                        :inbound-request
                        [:map
                         [:seon.cluster.agent/id :seon.cluster.agent/id]
@@ -59,6 +60,9 @@
                          :seon.cluster.message/content]
                         [:seon.cluster.message/at
                          :seon.cluster.message/at]
+                        [:seon.cluster.message/ordinal
+                         {:optional true}
+                         :seon.cluster.message/ordinal]
                         [:seon.cluster.message/from
                          {:optional true}
                          :seon.cluster.message/from]

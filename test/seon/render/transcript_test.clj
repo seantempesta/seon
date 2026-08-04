@@ -693,6 +693,7 @@
     event-at :at}]
   (if (contains? message-event-kinds event-kind)
     [(cond-> {:seon.cluster.message/id id
+              :seon.cluster.message/ordinal source-index
               :seon.cluster.message/to
               [:seon.cluster.agent/id
                (if (= :message-out event-kind) peer-id agent-id)]
@@ -747,10 +748,10 @@
 (defn- expected-order
   [events]
   (sort-by
-   (fn [{:keys [kind id] event-at :at}]
+   (fn [{:keys [kind id source-index] event-at :at}]
      [(.getTime ^java.util.Date event-at)
       (case kind :message 0 :eval 1)
-      id])
+      (if (= :message kind) source-index id)])
    events))
 
 (deftest every-generated-history-is-ordered-total-and-token-bounded
