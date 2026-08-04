@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: correctness
+severity: cleanup
 tags: [issue, config, schema, program-graph]
 ---
 

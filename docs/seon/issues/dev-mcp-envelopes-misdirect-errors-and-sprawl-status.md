@@ -1,6 +1,6 @@
 ---
 type: issue
-status: active
+status: open
 severity: blocker
 tags: [issue, tooling, mcp, repl, observability]
 ---
@@ -94,4 +94,3 @@ of scope.
 - Focused tests and the changed-test selector pass.
 - A restarted MCP client observes the new envelopes; already-running clients
   are known to retain the old bridge definition and are not valid proof.
-

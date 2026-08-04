@@ -16,12 +16,10 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (10)
+## Blocker (12)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [See capability calls in the form-Var walk instead of failing open](capability-reachability-cannot-see-capability-calls.md) | blocker | session-curation effect-visibility wave |
-| [Order same-instant transcript receipts by ordinal, not id string](transcript-orders-same-instant-receipts-lexically.md) | blocker | bootstrap instruction wave |
 | [Remove closed map contracts outside the canonical schema population](closed-map-contracts-survive-outside-schema-population.md) | blocker | open-maps accretion wave |
 | [Refuse malformed SSE data before it can change agent code](malformed-sse-data-can-change-agent-code.md) | blocker | AI provider-integrity wave |
 | [Bound work submission before Flow injection can block](work-submission-can-block-before-its-time-limit.md) | blocker | Flow bounded-submission wave |
@@ -30,8 +28,12 @@ See `README.md` for the convention.
 | [Refuse a cluster fork whose source lacks the rows population will name](new-cluster-boot-fails-on-a-stale-published-source.md) | blocker | visual-QA fix wave |
 | [Attribute evals to the agent's assigned namespace](evals-ignore-the-agents-assigned-namespace.md) | blocker | SCI eval-context owner design gate |
 | [Prevent one cluster from exhausting every co-hosted cluster's heap](cohosted-clusters-share-one-unbounded-agent-heap.md) | blocker | no-crash architecture design gate |
+| [`seon.db/q` silently returns nil when its db argument is an error value](seon-db-q-returns-nil-on-error-value-db-argument.md) | blocker | database error-value repair |
+| [A forked cluster keeps the ancestor's `:seon.config/cluster`, so `config/effective` returns `{}`](forked-cluster-inherits-the-ancestors-config-cluster-name.md) | blocker | cluster config identity repair |
+| [Repair development MCP error locations and status scope](dev-mcp-envelopes-misdirect-errors-and-sprawl-status.md) | blocker | development MCP envelope repair |
+| [Eight `:seon.config.web/*` dials are registered with no shipped default](web-config-dials-ship-without-shipped-defaults.md) | blocker | web config default repair |
 
-## Friction (81)
+## Friction (82)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -61,7 +63,6 @@ See `README.md` for the convention.
 | [Reject negative imports at the escape/static admission boundary](negative-import-masks-escape-static-admission.md) | friction | SCI static-admission repair wave |
 | [Say what a predicate schema expected instead of "unknown error"](predicate-schema-violations-humanize-to-unknown-error.md) | friction | agent-diagnostics repair |
 | [Derive the initial-paint census instead of hand-maintaining it](initial-paint-census-is-a-hand-maintained-count.md) | friction | render test repair |
-| [Stop disarm waiting forever on a turn that cannot complete](agent-disarm-waits-forever-on-a-turn-that-cannot-complete.md) | blocker | flow teardown repair |
 | [Blob get assumes the file-store callback shape](blob-get-assumes-file-store-callback-shape.md) | friction | blob storage repair wave |
 | [Delete Flow prototype procs beside the live agent graphs](flow-prototype-procs-survive-beside-the-live-agent-graphs.md) | friction | Flow prototype deletion wave |
 | [Keep session-image refusal evidence as facts, not derived prose](session-image-stores-derived-unrestorable-prose.md) | friction | session-image evidence wave |
@@ -108,7 +109,6 @@ See `README.md` for the convention.
 | [Update the Datahike skill after every selected fork commit](datahike-skill-pin-drifted-after-cache-cleanup.md) | friction | skill dependency-ledger repair |
 | [Give the shared compute executor per-cluster fairness](root-compute-executor-has-no-per-cluster-fairness.md) | friction | shared-surface scheduling design gate |
 | [Extract Malli map entries by shape, not position](schema-map-extraction-still-depends-on-position-two.md) | friction | schema-form extraction repair |
-| [Make SCI `doc` print documentation without comment syntax](sci-doc-prefixes-program-docstrings-as-comments.md) | friction | strict REPL display wave |
 | [Stop encoding namespace-render results as source comments](namespace-renderer-encodes-results-as-comments.md) | friction | strict REPL display wave |
 | [Render transcript entries as forms and actual values](transcript-renderer-encodes-entries-as-comment-forms.md) | friction | strict REPL display wave |
 | [Make the rendered walk an ordinary REPL value](render-walk-frames-values-as-comments.md) | friction | strict REPL display wave |
@@ -116,8 +116,11 @@ See `README.md` for the convention.
 | [Render effect notices as ordinary values](effect-context-suffix-returns-comment-notices.md) | friction | strict REPL display wave |
 | [Render run forms and receipts with strict REPL fidelity](run-renderer-narrates-forms-and-receipts.md) | friction | strict REPL display wave |
 | [Keep expected Datahike rejections from logging full writer exceptions](datahike-expected-rejections-log-full-writer-exceptions.md) | friction | database diagnostic-output wave |
+| [Keep nested map sequences structurally readable](nested-map-sequences-render-as-tables-inside-structural-values.md) | friction | print-path follow-up |
+| [Effect receipts have no render producers](effect-receipts-have-no-render-producers.md) | friction | render receipt-producer wave |
+| [Cluster, config, and bootstrap plan render as raw maps](cluster-config-and-bootstrap-plan-render-as-raw-maps.md) | friction | render important-schema producer wave |
 
-## Cleanup (13)
+## Cleanup (15)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -134,3 +137,5 @@ See `README.md` for the convention.
 | [Read the symbol SCI already puts in analysis ex-data](sci-analysis-ex-data-carries-a-symbol-nothing-reads.md) | cleanup | SCI eval-context owner design gate |
 | [Close the remaining vendored-versus-pinned dependency drift](vendored-transit-clj-drifts-from-the-pinned-artifact.md) | cleanup | upstream-delta sweep follow-up |
 | [Stop opaque contract generators from sharing live process objects](opaque-contract-generators-share-live-process-objects.md) | cleanup | contract-generator cleanup wave |
+| [Declare the config-to-request ident route instead of string-building it](config-ai-request-idents-are-derived-by-string-surgery.md) | cleanup | config application-contract cleanup wave |
+| [Re-declaring an identical function retracts and rebuilds its component trees](program-row-replacement-churns-identical-redeclarations.md) | cleanup | program graph idempotency cleanup wave |

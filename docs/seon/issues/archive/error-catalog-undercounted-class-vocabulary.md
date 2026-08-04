@@ -1,7 +1,7 @@
 ---
 type: issue
 status: resolved
-severity: correctness
+severity: cleanup
 tags: [issue, schema, error]
 ---
 
