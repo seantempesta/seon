@@ -288,8 +288,27 @@
                           print-node page-size threshold
                           (:seon.print/level effective))
                          print-node)
-        stored-digest (when (and artifact-backed? connection)
-                        (blob/put! connection content))]
+        staged (when (and artifact-backed? connection)
+                 (blob/stage! connection content))
+        stored-digest
+        (when staged
+          (blob/with-publication!
+           connection
+           [staged]
+           (fn []
+             (let [result
+                   (db/transact!
+                    connection
+                    [{:seon.dev.mcp.artifact/id content-digest
+                      :seon.dev.mcp.artifact/digest content-digest}])]
+               (when (:seon.error/kind result)
+                 (throw
+                  (ex-info
+                   "The durable MCP artifact root did not commit."
+                   {:seon.error/kind :core-bug
+                    :seon.dev.mcp.artifact/digest content-digest
+                    :seon.dev.mcp.artifact/transaction-result result})))
+               content-digest))))]
     (cond-> {:seon.dev.mcp/value
              (if evaluation-print-node
                (evaluation-face value projected-node effective)
@@ -334,7 +353,16 @@
   [cluster-name content-digest path offset]
   (if-let [connection (:seon.boot/cluster-connection
                        (mcp-instance cluster-name))]
-    (if-let [content (blob/get connection content-digest)]
+    (if-let [content
+             (when
+              (db/q
+               '[:find ?artifact .
+                 :in $ ?digest
+                 :where
+                 [?artifact :seon.dev.mcp.artifact/digest ?digest]]
+               (db/db connection)
+               content-digest)
+               (blob/get connection content-digest))]
       (let [stored (render.value/read-artifact content)
             found (render.data/at
                    (render.value/artifact-value stored)

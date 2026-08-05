@@ -9,6 +9,7 @@
             [seon.db :as db]
             [seon.operator.runtime :refer [running-instances]]
             [seon.render.value :as render.value]
+            [seon.schema.datahike :as schema.datahike]
             [seon.sci.admit :as admit]
             [seon.test-support :as support]))
 
@@ -263,6 +264,58 @@
             (is (= 9000 (:seon.render.value/offset past-end)))
             (is (= 2000 (:seon.render.value/total past-end)))
             (is (true? (:seon.render.value/beyond-end? past-end))))
+          (finally
+            (swap! running-instances dissoc cluster-name)))))))
+
+(deftest retrievable-artifacts-have-an-identified-no-history-root
+  (let [cluster-name "mcp-durable-artifact-test"
+        effective (config/defaults)
+        value (vec (range 2000))]
+    (support/with-database
+      {:seon.test-support/fresh-store? true}
+      (fn [connection]
+        (config/apply! {:seon.db/connection connection
+                        :seon.boot/cluster-name cluster-name})
+        (support/seed-cluster! connection cluster-name)
+        (swap! running-instances assoc cluster-name
+               {:seon.boot/cluster-connection connection})
+        (try
+          (let [stored (projected cluster-name effective value)
+                content-digest (:seon.blob/digest stored)
+                artifact-id
+                (db/q
+                 '[:find ?id .
+                   :in $ ?digest
+                   :where
+                   [?artifact :seon.dev.mcp.artifact/id ?id]
+                   [?artifact :seon.dev.mcp.artifact/digest ?digest]]
+                 (db/db connection)
+                 content-digest)]
+            (is (true? (:seon.dev.mcp/retrievable? stored))
+                "retrievability is returned only after the root commits")
+            (is (= content-digest artifact-id)
+                "the content digest identifies its durable artifact root")
+            (is (true?
+                 (:db/noHistory
+                  (schema.datahike/malli->datahike-attr
+                   :seon.dev.mcp.artifact/digest)))
+                "the direct digest root derives Datahike noHistory")
+            (db/transact!
+             connection
+             [[:db.fn/retractEntity
+               [:seon.dev.mcp.artifact/id artifact-id]]])
+            (is (empty?
+                 (db/q
+                  '[:find [?digest ...]
+                    :where
+                    [_ :seon.dev.mcp.artifact/digest ?digest]]
+                  (db/history (db/db connection))))
+                "explicit root retraction does not retain the digest in history")
+            (is (= :seon.dev.mcp/value-not-found
+                   (:seon.error/kind
+                    (cluster/mcp-get-value
+                     cluster-name content-digest [] 0)))
+                "retraction ends the durable retrieval promise immediately"))
           (finally
             (swap! running-instances dissoc cluster-name)))))))
 
