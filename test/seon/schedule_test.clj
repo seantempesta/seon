@@ -158,7 +158,7 @@
             delivered (CountDownLatch. 1)
             _ (async/>!! completion ::ready)
             cluster-handle
-            {:seon.store/branch-connection @connection
+            {:seon.db/connection @connection
              :seon.cluster.wake/channel owner-channel
              :seon.schedule/channel schedule-channel
              :seon.cluster.loop/completion completion

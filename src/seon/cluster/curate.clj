@@ -177,7 +177,7 @@
                 (try
               (let [ctx (sci.eval/cluster-ctx @connection connection)
                     cluster (assoc (:seon.cluster.loop/cluster instance)
-                                   :seon.store/branch-connection connection
+                                   :seon.db/connection connection
                                    :seon.sci.eval/ctx ctx
                                    :seon.cluster.run/process process)
                     request {:seon.cluster.agent/id agent-id

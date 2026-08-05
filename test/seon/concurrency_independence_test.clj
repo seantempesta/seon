@@ -415,7 +415,7 @@
         settings (config/effective database cluster-name)]
     (transcript/render-ai
      {:seon.db/db database
-      :seon.store/branch-connection
+      :seon.db/connection
       (:seon.boot/cluster-connection instance)
       :seon.sci.eval/ctx (:seon.sci.eval/ctx instance)
       :seon.cluster.agent/id agent-id

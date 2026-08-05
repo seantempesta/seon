@@ -375,12 +375,12 @@
         (let [before (:max-tx @connection)
               first-result
               (seon.fn/backfill-contract-facts!
-               {:seon.store/branch-connection connection
+               {:seon.db/connection connection
                 :seon.db/process boot-process})
               after-first (:max-tx @connection)
               second-result
               (seon.fn/backfill-contract-facts!
-               {:seon.store/branch-connection connection
+               {:seon.db/connection connection
                 :seon.db/process boot-process})
               after-second (:max-tx @connection)]
           (is (= {:seon.reconcile/converged? false
@@ -602,7 +602,7 @@
                     (swap! transactions conj request)
                     {})]
       (let [result (seon.fn/index!
-                    {:seon.store/branch-connection (atom :database)
+                    {:seon.db/connection (atom :database)
                      :seon.fn/manifest manifest})]
         (is (pos? (:seon.reconcile/operations result)))
         (is (= 5 (count @transactions)))
@@ -634,7 +634,7 @@
                           {:seon.error/kind :seon.db/invalid-transaction})]
             (try
               (seon.fn/index!
-               {:seon.store/branch-connection (atom :database)
+               {:seon.db/connection (atom :database)
                 :seon.fn/manifest manifest})
               ::committed
               (catch clojure.lang.ExceptionInfo failure
@@ -891,7 +891,7 @@
       (fn [connection]
         (let [before (:max-tx @connection)
               failure (try
-                        (seon.fn/index! {:seon.store/branch-connection connection
+                        (seon.fn/index! {:seon.db/connection connection
                                          :seon.db/process boot-process
                                          :seon.fn/roots [(.getPath root)]})
                         nil
@@ -913,6 +913,6 @@
         (is (thrown-with-msg?
              clojure.lang.ExceptionInfo
              #"fresh source scratch"
-             (seon.fn/index! {:seon.store/branch-connection connection
+             (seon.fn/index! {:seon.db/connection connection
                               :seon.db/process boot-process
                               :seon.fn/roots [(.getPath root)]})))))))

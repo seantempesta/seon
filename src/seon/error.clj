@@ -868,7 +868,7 @@
     :seon.sci.admit/caps
     :seon.sci.eval/time-limit-ms
     :seon.config/on-core-error
-    :seon.store/branch-connection
+    :seon.db/connection
     :seon.render/distance
     :seon.render/value})
 

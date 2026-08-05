@@ -3,7 +3,7 @@
                    [:seon.cluster.agent/id :seon.cluster.agent/id]
                    [:seon.render.web/root-agent-id
                     :seon.render.web/root-agent-id]
-                   [:seon.store/connection :seon.store/connection]
+                   [:seon.store/connection-object :seon.store/connection-object]
                    [:seon.sci.admit/caps :seon.sci.admit/caps]
                    [:seon.cluster.run/process
                     :seon.cluster.run/process]
@@ -47,9 +47,9 @@
                   :paint-request
                   [:map
                    [:seon.db/db :seon.db/database-value]
-                   [:seon.store/branch-connection
+                   [:seon.db/connection
                     {:optional true}
-                    :seon.store/branch-connection]
+                    :seon.db/connection]
                    [:seon.cluster.agent/id :seon.cluster.agent/id]
                    [:seon.render.web/root-agent-id
                     :seon.render.web/root-agent-id]
@@ -83,7 +83,7 @@
                     :seon.render.web/wanted-port]],
                   :service
                   [:map
-                   [:seon.store/connection :seon.store/connection]
+                   [:seon.store/connection-object :seon.store/connection-object]
                    [:seon.cluster.agent/id :seon.cluster.agent/id]
                    [:seon.sci.admit/caps :seon.sci.admit/caps]
                    [:seon.sci.eval/ctx :seon.sci.eval/ctx]

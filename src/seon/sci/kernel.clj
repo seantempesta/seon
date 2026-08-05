@@ -335,7 +335,7 @@
         (binding [db/*conn*
                   (get-in ctx
                           [:seon.sci.eval/custody
-                           :seon.store/branch-connection])
+                           :seon.db/connection])
                   db/*capture-context*
                   (or capture-context db/*capture-context*)]
           (let [sci-var (sci/resolve ctx function-symbol)]

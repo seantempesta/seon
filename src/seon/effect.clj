@@ -407,7 +407,7 @@
                    {})
 
        :else
-       (let [connection (:seon.store/branch-connection *context*)
+       (let [connection (:seon.db/connection *context*)
              effect-ordinal (swap! (:seon.effect/counter *context*) inc)
              database @connection
              owner-row

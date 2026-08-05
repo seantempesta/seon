@@ -58,7 +58,7 @@
                                                      :seon.boot/cluster-name]))]
     (transcript/render-ai
      {:seon.db/db database
-      :seon.store/branch-connection connection
+      :seon.db/connection connection
       :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster-value)
       :seon.cluster.agent/id "root"
       :seon.sci.admit/caps (config/result-caps settings)

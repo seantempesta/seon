@@ -1,7 +1,7 @@
 #:seon.cluster.loop{:cluster
                     [:map
-                     [:seon.store/branch-connection
-                      :seon.store/branch-connection]
+                     [:seon.db/connection
+                      :seon.db/connection]
                      [:seon.cluster/name :seon.cluster/name]
                      [:seon.cluster.run/process
                       :seon.cluster.run/process]

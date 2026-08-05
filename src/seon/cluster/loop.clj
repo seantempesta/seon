@@ -375,7 +375,7 @@
   [db row]
   (let [row (program/canonical-row row)
         existing (db/pull db '[*]
-                         [:seon.code.def/id (:seon.code.def/id row)])
+                         [:seon.def/id (:seon.def/id row)])
         changed (when existing (program/changed-attributes existing row))]
     (concat
      (when existing
@@ -384,7 +384,7 @@
             (filter #(contains? existing %) changed)))
      [(assoc row :db/id
              (or (:db/id existing)
-                 (str "code.def:" (:seon.code.def/id row))))])))
+                 (str "code.def:" (:seon.def/id row))))])))
 
 (defn- session-image-tx
   "Exact session-image changes riding beside one terminal receipt."
@@ -400,8 +400,8 @@
         rows
         (map
          (fn [candidate]
-           (let [stored? (or (:seon.code.def/value-edn candidate)
-                             (:seon.code.def/blob candidate))
+           (let [stored? (or (:seon.def/value-edn candidate)
+                             (:seon.def/blob candidate))
                  unproven-called-vars
                  (:seon.sci.eval/unproven-called-vars candidate)
                  nondeterministic-calls
@@ -422,9 +422,9 @@
                            :seon.sci.eval/unproven-called-vars
                            :seon.sci.eval/nondeterministic-calls
                            :seon.sci.eval/impure-calls
-                           :seon.code.def/source
-                           :seon.code.def/unrestorable)
-                   (assoc :seon.code.def/ordinal ordinal))
+                           :seon.def/source
+                           :seon.def/unrestorable-reason)
+                   (assoc :seon.def/ordinal ordinal))
 
                (and successful-evaluation? pure? deterministic?)
                (-> candidate
@@ -433,8 +433,8 @@
                            :seon.sci.eval/unproven-called-vars
                            :seon.sci.eval/nondeterministic-calls
                            :seon.sci.eval/impure-calls
-                           :seon.code.def/unrestorable)
-                   (assoc :seon.code.def/ordinal ordinal))
+                           :seon.def/unrestorable-reason)
+                   (assoc :seon.def/ordinal ordinal))
 
                :else
                (-> candidate
@@ -443,9 +443,9 @@
                            :seon.sci.eval/unproven-called-vars
                            :seon.sci.eval/nondeterministic-calls
                            :seon.sci.eval/impure-calls
-                           :seon.code.def/source)
-                   (assoc :seon.code.def/ordinal ordinal
-                          :seon.code.def/unrestorable
+                           :seon.def/source)
+                   (assoc :seon.def/ordinal ordinal
+                          :seon.def/unrestorable-reason
                           (cond
                             (not successful-evaluation?)
                             "Defining evaluation did not complete successfully."
@@ -470,7 +470,7 @@
         contracted-entry
         (when contracted-id
           (db/pull db [:db/id]
-                  [:seon.code.def/id contracted-id]))]
+                  [:seon.def/id contracted-id]))]
     (into
      (if contracted-entry
        [[:db/retractEntity (:db/id contracted-entry)]]
@@ -496,13 +496,13 @@
                    (sci.eval/store-faithful-edn
                     (:seon.sci.eval/value candidate))]
             (let [size (long (count serialized))]
-              (cond-> (assoc candidate :seon.code.def/size size)
+              (cond-> (assoc candidate :seon.def/size size)
                 (and threshold (> size threshold))
-                (assoc :seon.code.def/blob
+                (assoc :seon.def/blob
                        (blob/put! connection serialized))
 
                 (or (nil? threshold) (<= size threshold))
-                (assoc :seon.code.def/value-edn serialized)))
+                (assoc :seon.def/value-edn serialized)))
             candidate))
         candidates)))))
 
@@ -538,7 +538,7 @@
 (defn- settlement-result
   [cluster evaluation]
   (if-let [result-edn (:seon.cluster.eval/result-edn evaluation)]
-    (let [connection (:seon.store/branch-connection cluster)
+    (let [connection (:seon.db/connection cluster)
           result-size (long (count result-edn))
           db @connection
           threshold (result-blob-threshold db)
@@ -711,7 +711,7 @@
   [cluster outcome now attribution]
   (boolean
    (when-let [kind (:seon.error/kind outcome)]
-     (let [connection (:seon.store/branch-connection cluster)
+     (let [connection (:seon.db/connection cluster)
            db @connection]
        (db/transact!
         connection
@@ -758,7 +758,7 @@
   [cluster outcome now attribution receipt]
   (boolean
    (when-let [kind (:seon.error/kind outcome)]
-     (let [connection (:seon.store/branch-connection cluster)
+     (let [connection (:seon.db/connection cluster)
            db @connection
            admitted
            (admit/admit
@@ -967,7 +967,7 @@
          finish-reason :seon.ai/finish-reason
          delay-ms :seon.ai.attempt/delay-ms
          failover-from :seon.ai.attempt/failover-from} request
-        connection (:seon.store/branch-connection cluster)
+        connection (:seon.db/connection cluster)
         db @connection
         reasoning-size (when (seq reasoning-content)
                          (long (count reasoning-content)))
@@ -1154,7 +1154,7 @@
                        :seon.cluster.run/id :inst]
                   :boolean]}
   [cluster run-id now]
-  (let [connection (:seon.store/branch-connection cluster)
+  (let [connection (:seon.db/connection cluster)
         process (:seon.cluster.run/process cluster)
         claimed (db/transact!
                  connection
@@ -1180,7 +1180,7 @@
 (defn- open-turn
   "Open and claim one run before any paid provider call."
   [{cluster ::cluster work ::work now ::now report ::report}]
-  (let [connection (:seon.store/branch-connection cluster)
+  (let [connection (:seon.db/connection cluster)
         process (:seon.cluster.run/process cluster)
         agent-id (:seon.cluster.agent/id work)]
     ;; OPEN + CLAIM FIRST, model second. The busy fence has to exist
@@ -1219,7 +1219,7 @@
 (defn- call-turn
   "Call the provider and freeze the returned plan."
   [{cluster ::cluster work ::work now ::now report ::report}]
-  (let [connection (:seon.store/branch-connection cluster)
+  (let [connection (:seon.db/connection cluster)
         process (:seon.cluster.run/process cluster)
         agent-id (:seon.cluster.agent/id work)
         run-id (:seon.cluster.run/id work)]
@@ -1496,7 +1496,7 @@
 (defn- resume-turn
   "Reduce one held run over its remaining admitted forms."
   [{cluster ::cluster work ::work now ::now report ::report}]
-  (let [connection (:seon.store/branch-connection cluster)
+  (let [connection (:seon.db/connection cluster)
         process (:seon.cluster.run/process cluster)
         agent-id (:seon.cluster.agent/id work)
         run-id (:seon.cluster.run/id work)]
@@ -1518,7 +1518,7 @@
           (fn [request]
             (render/call-with-walk-context
              {:seon.db/db @connection
-              :seon.store/branch-connection connection
+              :seon.db/connection connection
               :seon.cluster.agent/id agent-id
               :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
               :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
@@ -1695,7 +1695,7 @@
 (defn- close-turn
   "Claim when needed and close one fully settled run."
   [{cluster ::cluster work ::work now ::now report ::report}]
-  (let [connection (:seon.store/branch-connection cluster)
+  (let [connection (:seon.db/connection cluster)
         process (:seon.cluster.run/process cluster)
         agent-id (:seon.cluster.agent/id work)
         run-id (:seon.cluster.run/id work)]

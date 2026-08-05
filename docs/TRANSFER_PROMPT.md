@@ -220,7 +220,7 @@ unbuilt is largely built and live-proven:
   in a cluster share one program; clusters share nothing (ruling #27
   closed, including the 17-var sci-fork residue).
 - **Stateless resume**: a session restores value-first from
-  `:seon.code.def` facts, re-evaluating only *provably pure* forms;
+  `:seon.def` facts, re-evaluating only *provably pure* forms;
   effectful and nondeterministic ones never re-run (rulings #28/#32).
 - **The print path**: one closed grammar, one dispatch, text and hiccup
   from one stored fact (#26). 34 REPL-parity divergences tracked; 10

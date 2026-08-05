@@ -42,7 +42,7 @@
    {:db/ident :seon.cluster.eval/result-blob
     :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.code.def/blob
+   {:db/ident :seon.def/blob
     :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one}
    {:db/ident :seon.schema/key
@@ -90,13 +90,13 @@
      (let [opened
            (store/open-store! (assoc store-request :seon.store/dir dir))]
        (try
-         (db/transact! (:seon.store/connection opened) probe-schema)
-         (db/transact! (:seon.store/connection opened)
+         (db/transact! (:seon.store/connection-object opened) probe-schema)
+         (db/transact! (:seon.store/connection-object opened)
                      [{:seon.schema/key :seon.cluster.eval/result-blob
                        :seon.schema/form ":seon.blob/digest"}
-                      {:seon.schema/key :seon.code.def/blob
+                      {:seon.schema/key :seon.def/blob
                        :seon.schema/form ":seon.blob/digest"}])
-         (write-marker! (:seon.store/connection opened) "ancestral")
+         (write-marker! (:seon.store/connection-object opened) "ancestral")
          (registry/branch! {:seon.store/store opened
                             :seon.cluster.registry/from :db
                             :seon.store/branch source-branch})
@@ -124,22 +124,22 @@
           (let [report
                 (db/transact! connection
                             [{:seon.registry.test/marker "session def"
-                              :seon.code.def/blob digest}])
+                              :seon.def/blob digest}])
                 entity-id
                 (:db/id
                  (db/pull (:db-after report) [:db/id]
                          [:seon.registry.test/marker "session def"]))]
             (db/transact! connection
-                        [[:db/retract entity-id :seon.code.def/blob digest]]))
+                        [[:db/retract entity-id :seon.def/blob digest]]))
           (finally
             (d/release connection)))
         (registry/collect! opened)
-        (is (= content (blob/get (:seon.store/connection opened) digest))
+        (is (= content (blob/get (:seon.store/connection-object opened) digest))
             "a digest reachable only through a declared blob attribute's history extends the GC mark")
         (registry/retire-branch! {:seon.store/store opened
                                   :seon.store/branch branch})
         (registry/collect! opened)
-        (is (nil? (blob/get (:seon.store/connection opened) digest))
+        (is (nil? (blob/get (:seon.store/connection-object opened) digest))
             "retiring the last referencing branch makes the blob collectible")))))
 
 (deftest non-temporal-collection-marks-current-blob-references
@@ -158,7 +158,7 @@
           (finally
             (d/release connection)))
         (registry/collect! opened)
-        (is (= content (blob/get (:seon.store/connection opened) digest))
+        (is (= content (blob/get (:seon.store/connection-object opened) digest))
             "current references remain live when historical datoms are absent")))))
 
 ;;; ---------------------------------------------------------------------------

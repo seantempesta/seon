@@ -13,14 +13,14 @@
   (support/with-database
     (fn [connection]
       (config/apply!
-       {:seon.config/connection connection
+       {:seon.db/connection connection
         :seon.boot/cluster-name "options-test"
         :seon.config/manifest
         {:seon.render.value/max-collection 3}})
       (support/seed-cluster! connection "options-test")
       (let [response
             (#'web/data-response
-             {:seon.store/connection connection
+             {:seon.store/connection-object connection
               :seon.cluster.agent/id "root"
               :seon.sci.admit/caps caps}
              {:query-string ""})]

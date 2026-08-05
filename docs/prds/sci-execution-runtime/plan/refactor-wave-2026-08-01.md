@@ -35,7 +35,7 @@ against the live `default` cluster while writing this plan.
 | `admission-source` is recomputed per program row, unmemoized | `src/seon/sci/eval.clj:650-653`, called from `:743-745` |
 | Ruling #25's caps have LANDED | `config/default.edn:21-27` (max-depth 64, max-collection 8192, max-string 262144, max-nodes 65536) |
 | `seon.blob` exists and `collect!` extends reachability by one hand-named attribute | `src/seon/blob.clj:19-53`; `src/seon/cluster/registry.clj:286-302` |
-| `seon.print` and `:seon.code.def` do NOT exist | `rg` finds no occurrence in `src`, `test`, `resources` |
+| `seon.print` and `:seon.def` do NOT exist | `rg` finds no occurrence in `src`, `test`, `resources` |
 | The parity gate proves 34 divergences across 69 executable rows | `test/seon/repl_parity_test.clj`; counted: 10 B + 3 A + 6 C + 4 D + 4 E + 2 F + 5 H = **34** |
 
 ## 1. What this wave is
@@ -47,7 +47,7 @@ Three results, in dependency order:
   measured 352–405 ms from every turn (re-measured today) and turns
   rebuild-from-facts back into the cold path it always should have been.
 - **B — an agent's session survives a JVM restart from facts alone.** The
-  `:seon.code.def` family as a fifth `seon.program/shapes` entry, forms
+  `:seon.def` family as a fifth `seon.program/shapes` entry, forms
   are the truth, two-pass interning makes install order irrelevant.
 - **C — one print dispatch over a closed admission grammar, two sinks.**
   The 34 proven parity divergences are the acceptance backlog.
@@ -343,7 +343,7 @@ with a real poisoned row and a real subsequent turn.
 
 | Piece | Where |
 |---|---|
-| `:seon.code.def/{id,ns,name,source,unrestorable,ordinal}` as a fifth `seon.program/shapes` entry | `resources/seon/schema/program.edn`, `src/seon/program.cljc:8-30` |
+| `:seon.def/{id,ns,name,source,unrestorable,ordinal}` as a fifth `seon.program/shapes` entry | `resources/seon/schema/program.edn`, `src/seon/program.cljc:8-30` |
 | intern-diff at the settle seam, writing one entry per interned name, reusing the existing before/after mechanism | `src/seon/cluster/loop.cljc` terminal seam; the mechanism is `removed-program-identities` (`eval.clj:425-439`) **extended, never duplicated** |
 | `install-session-image!` — pass 1 interns every name unbound, pass 2 evaluates the pure defining forms in ordinal order | `src/seon/sci/eval.clj`, beside `acquire!` |
 | the call from the run loop's `:resume` branch, right after the cold path | `src/seon/cluster/loop.cljc` |

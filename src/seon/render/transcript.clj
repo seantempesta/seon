@@ -567,7 +567,7 @@
   [unit]
   (let [db (:seon.db/db unit)
         agent-id (:seon.cluster.agent/id unit)
-        connection (:seon.store/branch-connection unit)]
+        connection (:seon.db/connection unit)]
     (if (and db agent-id)
       (->> (db/q '[:find [?attempt ...]
                    :in $ ?agent-id

@@ -115,10 +115,10 @@
       #(test-support/with-database
          (fn [connection]
            (let [first-result
-                 (config/apply! {:seon.config/connection connection})
+                 (config/apply! {:seon.db/connection connection})
                  committed-basis (:max-tx @connection)
                  second-result
-                 (config/apply! {:seon.config/connection connection})]
+                 (config/apply! {:seon.db/connection connection})]
              (is (false? (:seon.reconcile/converged? first-result)))
              (is (= process-id
                     (db/q
@@ -312,13 +312,13 @@
     (fn [connection]
       (let [result
             (config/apply!
-             {:seon.config/connection connection
+             {:seon.db/connection connection
               :seon.config/manifest
               {:seon.config/on-core-error :record}})
             committed-basis (:max-tx @connection)
             converged
             (config/apply!
-             {:seon.config/connection connection
+             {:seon.db/connection connection
               :seon.config/manifest
               {:seon.config/on-core-error :record}})]
         (is (false? (:seon.reconcile/converged? result)))
@@ -348,7 +348,7 @@
               {:seon.boot/cluster-name "ancestor"}))]
         (db/transact! connection [ancestor])
         (config/apply!
-         {:seon.config/connection connection
+         {:seon.db/connection connection
           :seon.config/manifest
           {:seon.config.flow.compute/queue-depth 17}
           :seon.boot/cluster-name "fork"})
@@ -368,12 +368,12 @@
       (test-support/with-database
         (fn [beta]
           (config/apply!
-           {:seon.config/connection alpha
+           {:seon.db/connection alpha
             :seon.config/manifest
             {:seon.config.flow.compute/queue-depth 11}
             :seon.boot/cluster-name "alpha"})
           (config/apply!
-           {:seon.config/connection beta
+           {:seon.db/connection beta
             :seon.config/manifest
             {:seon.config.flow.compute/queue-depth 22}
             :seon.boot/cluster-name "beta"})

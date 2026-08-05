@@ -28,9 +28,9 @@
 (defonce ^:private blocked-release (atom nil))
 
 (defn populate!
-  [{:keys [:seon.store/branch-connection :seon.source/digest]}]
-  (db/transact! branch-connection probe-schema)
-  (db/transact! branch-connection
+  [{:keys [:seon.db/connection :seon.source/digest]}]
+  (db/transact! connection probe-schema)
+  (db/transact! connection
               [{:seon.source.test/marker digest}]))
 
 (defn populate-fails!
@@ -38,9 +38,9 @@
   (throw (ex-info "population failed" {::injected true})))
 
 (defn populate-from-data!
-  [{:keys [:seon.store/branch-connection :seon.source.test/marker]}]
-  (db/transact! branch-connection probe-schema)
-  (db/transact! branch-connection [{:seon.source.test/marker marker}]))
+  [{:keys [:seon.db/connection :seon.source.test/marker]}]
+  (db/transact! connection probe-schema)
+  (db/transact! connection [{:seon.source.test/marker marker}]))
 
 (defn populate-blocked!
   [request]
@@ -145,7 +145,7 @@
                   (:seon.source/commit-id b)))
         (is (= #{(:seon.source/commit-id a)}
                (d/parent-commit-ids
-                (d/branch-as-db (:seon.store/connection opened)
+                (d/branch-as-db (:seon.store/connection-object opened)
                                 source/current-branch)))
             "published history follows prior current-src, not scratch")
         (is (= #{:db :current-src} (registry/roster opened)))
@@ -166,7 +166,7 @@
                 (d/release connection))))
           (let [again (publish opened digest-b)
                 current-db (d/branch-as-db
-                            (:seon.store/connection opened)
+                            (:seon.store/connection-object opened)
                             source/current-branch)]
             (is (true? (:seon.source/built? again)))
             (is (= digest-b (:seon.source/digest again)))
@@ -201,11 +201,11 @@
       (let [a (publish opened digest-a)
             commit-a (:seon.source/commit-id a)
             max-a (:max-tx
-                   (d/branch-as-db (:seon.store/connection opened)
+                   (d/branch-as-db (:seon.store/connection-object opened)
                                    source/current-branch))
             b (upsert opened commit-a digest-b
                       [{:seon.source.test/marker "incremental"}])
-            current-db (d/branch-as-db (:seon.store/connection opened)
+            current-db (d/branch-as-db (:seon.store/connection-object opened)
                                        source/current-branch)]
         (is (= digest-b (:seon.source/digest b)))
         (is (true? (get-in current-db

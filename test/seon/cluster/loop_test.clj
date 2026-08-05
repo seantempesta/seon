@@ -182,10 +182,10 @@
 (deftest attempt-settlement-updates-the-registered-model-gauges
   (test-support/with-database
     (fn [connection]
-      (config/apply! {:seon.config/connection connection})
+      (config/apply! {:seon.db/connection connection})
       (db/transact! connection [{:seon.cluster.run/id "gauge-run"}])
       ((private-loop-fn 'record-attempt!)
-       {:seon.store/branch-connection connection}
+       {:seon.db/connection connection}
        {:seon.ai/target
         {:seon.ai/endpoint "https://api.deepseek.com/chat/completions"
          :seon.ai/model "deepseek-v4-flash"}
@@ -533,7 +533,7 @@
   (test-support/with-database
     (fn [connection]
       (let [cluster-name "settings-resolution"]
-        (config/apply! {:seon.config/connection connection
+        (config/apply! {:seon.db/connection connection
                         :seon.boot/cluster-name cluster-name})
         (test-support/seed-cluster! connection cluster-name)
         (db/transact!
@@ -757,7 +757,7 @@
            resolutions (atom [])
            overlays (atom [])
            requests (atom [])
-           cluster {:seon.store/branch-connection connection
+           cluster {:seon.db/connection connection
                     :seon.cluster/name cluster-name
                     :seon.cluster.run/process process
                     :seon.sci.eval/ctx
@@ -787,7 +787,7 @@
                               {:seon.ai/text "(identity 2)"
                                :seon.ai/finish-reason "stop"}])]
        (config/apply!
-        {:seon.config/connection connection
+        {:seon.db/connection connection
          :seon.boot/cluster-name cluster-name
          :seon.config/manifest
          {:seon.config.ai/model "before-apply"
@@ -860,7 +860,7 @@
                :seon.cluster.run/process process
                :seon.cluster.run/closed-at now}))
             (config/apply!
-             {:seon.config/connection connection
+             {:seon.db/connection connection
               :seon.boot/cluster-name cluster-name
               :seon.config/manifest
               {:seon.config.ai/model "after-apply"}})

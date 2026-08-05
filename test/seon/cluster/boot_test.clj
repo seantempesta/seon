@@ -255,7 +255,7 @@
             (release! absolute-store))))
       (let [reopened (store/open-store! {:seon.store/dir absolute-store})]
         (try
-          (is (store/connection? (:seon.store/connection reopened))
+          (is (store/connection? (:seon.store/connection-object reopened))
               "the final canonical holder releases the physical flock")
           (finally
             (store/release-store! reopened))))
@@ -715,7 +715,7 @@
     (try
       (let [store (:seon.store/store instance)
             connection (:seon.boot/cluster-connection instance)]
-        (is (false? (get-in @(:seon.store/connection store)
+        (is (false? (get-in @(:seon.store/connection-object store)
                             [:config :keep-history?])))
         (is (false? (get-in @connection [:config :keep-history?])))
         (is (false?
@@ -1037,7 +1037,7 @@
           (let [opened (store/open-store!
                         {:seon.store/dir (str (io/file root "store"))})]
             (try
-              (let [db (d/branch-as-db (:seon.store/connection opened)
+              (let [db (d/branch-as-db (:seon.store/connection-object opened)
                                        source/current-branch)]
                 (is (str/includes?
                      (db/q '[:find ?source .

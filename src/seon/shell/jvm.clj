@@ -283,7 +283,7 @@
 
 (defn- execute
   [request effective cwd]
-  (let [connection (:seon.store/branch-connection effect/*context*)
+  (let [connection (:seon.db/connection effect/*context*)
         argv (:my.shell/argv request)
         process-record
         (process/process

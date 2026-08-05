@@ -613,7 +613,7 @@
                  :seon.ai.attempt/reasoning-blob digest
                  :seon.ai.attempt/reasoning-size (long (count reasoning)))])
         (let [request (assoc (unit @connection 100000)
-                             :seon.store/branch-connection connection)
+                             :seon.db/connection connection)
               rendered
               (with-redefs [blob/get (fn [actual-connection actual-digest]
                                        (is (identical? connection actual-connection))

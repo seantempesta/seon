@@ -80,7 +80,7 @@
              @connection)
             result
             (config/apply!
-             {:seon.config/connection connection
+             {:seon.db/connection connection
               :seon.config/manifest (config/defaults)
               :seon.boot/cluster-name "fixture-proof"})
             after

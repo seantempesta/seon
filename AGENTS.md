@@ -761,7 +761,7 @@ names never scope declarations or shorten fully qualified keys.
 Worked examples, all measured on 2026-08-02:
 
 - "Which functions need cluster custody?" — 9 declare
-  `:seon.store/branch-connection` and 42 declare `:seon.db/database-value` in
+  `:seon.db/connection` and 42 declare `:seon.db/database-value` in
   some arity's `:seon.fn.arity/input-refs`. Nobody maintains that roster.
 - "Which public functions hand out a custody object?" — exactly 4, by querying
   `:seon.fn.arity/output-refs`. Because it is a query and not a list, a fifth

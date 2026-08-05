@@ -15,8 +15,8 @@
               :path [:string {:min 1}],
               :population
               [:map
-               [:seon.store/branch-connection
-                :seon.store/branch-connection]
+               [:seon.db/connection
+                :seon.db/connection]
                [:seon.source/digest :seon.source/digest]],
               :population-data :map,
               :publish-request

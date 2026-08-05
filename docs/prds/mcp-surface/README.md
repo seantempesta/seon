@@ -628,7 +628,7 @@ The browser equivalent is:
  :seon.dev.mcp/cluster "acme"
  :seon.dev.mcp/session-id "default"
  :seon.dev.mcp/missing [:seon.sci.admit/caps
-                        :seon.store/branch-connection]}
+                        :seon.db/connection]}
 ```
 
 The currently built bridge-only session call remains `list_sessions {}` until

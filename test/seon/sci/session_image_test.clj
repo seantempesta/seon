@@ -103,10 +103,10 @@
            row (first (#'loop/session-image-tx @connection stored 1))]
        (is (= #{'my.agents.session-macro/hidden}
               (:seon.sci.eval/unproven-called-vars candidate)))
-       (is (nil? (:seon.code.def/source row))
+       (is (nil? (:seon.def/source row))
            "an unstorable value is never replayed through an unproven macro")
        (is (= "Defining form calls a Var absent from the program graph."
-              (:seon.code.def/unrestorable row)))
+              (:seon.def/unrestorable-reason row)))
        (is (not (contains? row :seon.sci.eval/unproven-called-vars)))))))
 
 (deftest host-vars-remain-visible-to-capability-classification
@@ -196,16 +196,16 @@
          (is (false? (sci.vars/hasRoot replay-symbol)))
          (is (false? (sci.vars/hasRoot replay-print)))
          (is (= "Defining form called a nondeterministic SCI built-in."
-                (:seon.code.def/unrestorable
+                (:seon.def/unrestorable-reason
                  (db/pull @connection
-                         [:seon.code.def/unrestorable]
-                         [:seon.code.def/id
+                         [:seon.def/unrestorable-reason]
+                         [:seon.def/id
                           "my.agents.session-built-ins/replay-symbol"]))))
          (is (= "Defining form called an effectful SCI built-in."
-                (:seon.code.def/unrestorable
+                (:seon.def/unrestorable-reason
                  (db/pull @connection
-                         [:seon.code.def/unrestorable]
-                         [:seon.code.def/id
+                         [:seon.def/unrestorable-reason]
+                         [:seon.def/id
                           "my.agents.session-built-ins/replay-print"]))))
          (is (= sampled-live
                 @(sci/resolve fresh 'my.agents.session-built-ins/sampled))
@@ -231,7 +231,7 @@
                       [:seon.sci.admit/record :seon.eval/outcome])))
        (is (= #{"my.agents.failed-session/kept"
                 "my.agents.failed-session/lost"}
-              (into #{} (map :seon.code.def/id)
+              (into #{} (map :seon.def/id)
                     (:seon.sci.eval/session-defs failed))))
        (is (= 9 @(sci/resolve live 'my.agents.failed-session/kept)))
        (is (= 7 ((deref (sci/resolve live
@@ -242,10 +242,10 @@
          (is (= 9 @(sci/resolve fresh 'my.agents.failed-session/kept)))
          (is (false? (sci.vars/hasRoot lost)))
          (is (= "Defining evaluation did not complete successfully."
-                (:seon.code.def/unrestorable
+                (:seon.def/unrestorable-reason
                  (db/pull @connection
-                         [:seon.code.def/unrestorable]
-                         [:seon.code.def/id
+                         [:seon.def/unrestorable-reason]
+                         [:seon.def/id
                           "my.agents.failed-session/lost"])))))))))
 
 (deftest time-limited-evaluation-reports-its-earlier-def-delta
@@ -264,7 +264,7 @@
            (get-in evaluation
                    [:seon.sci.admit/record :seon.eval/outcome])))
     (is (= ["my.agents.cut-session/before-cut"]
-           (mapv :seon.code.def/id
+           (mapv :seon.def/id
                  (:seon.sci.eval/session-defs evaluation))))
     (is (= 7 @(sci/resolve ctx 'my.agents.cut-session/before-cut)))))
 
@@ -296,7 +296,7 @@
        (testing "the env diff sees a redefinition through the existing SCI Var"
          (let [redefinition (evaluate! live namespace-name "(def limit 11)")]
            (is (= ["my.agents.session-image/limit"]
-                  (mapv :seon.code.def/id
+                  (mapv :seon.def/id
                         (:seon.sci.eval/session-defs redefinition))))
            (commit-evaluation! connection redefinition 9)))
        (let [fresh (eval/cluster-ctx @connection connection)
@@ -318,40 +318,40 @@
          (is (= {:answer 42}
                 (resolved 'my.agents.session-image/effectful-data))
              "a faithful value touched host interop but is bound, never replayed")
-         (is (some? (:seon.code.def/blob
+         (is (some? (:seon.def/blob
                      (db/pull @connection
-                             [:seon.code.def/blob]
-                             [:seon.code.def/id
+                             [:seon.def/blob]
+                             [:seon.def/id
                               "my.agents.session-image/big"])))
              "the 200k value takes the database-configured blob path")
-         (is (some? (:seon.code.def/value-edn
+         (is (some? (:seon.def/value-edn
                      (db/pull @connection
-                             [:seon.code.def/value-edn]
-                             [:seon.code.def/id
+                             [:seon.def/value-edn]
+                             [:seon.def/id
                               "my.agents.session-image/tagged"])))
              "metadata-faithful small values bind before forms")
-         (is (some? (:seon.code.def/value-edn
+         (is (some? (:seon.def/value-edn
                      (db/pull @connection
-                             [:seon.code.def/value-edn]
-                             [:seon.code.def/id
+                             [:seon.def/value-edn]
+                             [:seon.def/id
                               "my.agents.session-image/effectful-data"]))))
-         (is (= {:seon.code.def/source
+         (is (= {:seon.def/source
                  "(def function-map {:scale (fn [v] (* v limit))})"}
                 (db/pull @connection
-                        [:seon.code.def/source
-                         :seon.code.def/value-edn
-                         :seon.code.def/blob]
-                        [:seon.code.def/id
+                        [:seon.def/source
+                         :seon.def/value-edn
+                         :seon.def/blob]
+                        [:seon.def/id
                          "my.agents.session-image/function-map"]))
              "nested closures force the source tier rather than a partial value")
          (is (contains? (get (sci/namespace-interns fresh) namespace-name)
                         'dropped)
              "an unrestorable name is pre-interned, never marker-bound")
          (is (= "Defining form touched host interop."
-                (:seon.code.def/unrestorable
+                (:seon.def/unrestorable-reason
                  (db/pull @connection
-                         [:seon.code.def/unrestorable]
-                         [:seon.code.def/id
+                         [:seon.def/unrestorable-reason]
+                         [:seon.def/id
                           "my.agents.session-image/dropped"]))))
          )))))
 
@@ -363,13 +363,13 @@
            (into [{:seon.ns/name namespace-name
                    :seon.ns/source "(ns my.agents.session-cost)"}]
                  (map (fn [ordinal]
-                        {:seon.code.def/id
+                        {:seon.def/id
                          (str namespace-name "/n" ordinal)
-                         :seon.code.def/ns [:seon.ns/name namespace-name]
-                         :seon.code.def/name (symbol (str "n" ordinal))
-                         :seon.code.def/source
+                         :seon.def/ns [:seon.ns/name namespace-name]
+                         :seon.def/name (symbol (str "n" ordinal))
+                         :seon.def/source
                          (str "(def n" ordinal " " ordinal ")")
-                         :seon.code.def/ordinal ordinal}))
+                         :seon.def/ordinal ordinal}))
                  (range 200))
            _ (db/transact! connection {:tx-data rows})
            ctx (eval/build-base-ctx)
@@ -404,10 +404,10 @@
            evaluation
            (fn [id]
              {:seon.sci.eval/session-defs
-              [{:seon.code.def/id id
-                :seon.code.def/ns [:seon.ns/name 'my.agents.dedup]
-                :seon.code.def/name (symbol (last (str/split id #"/")))
-                :seon.code.def/source "(def ignored nil)"
+              [{:seon.def/id id
+                :seon.def/ns [:seon.ns/name 'my.agents.dedup]
+                :seon.def/name (symbol (last (str/split id #"/")))
+                :seon.def/source "(def ignored nil)"
                 :seon.sci.eval/value value
                 :seon.sci.eval/referenced-vars #{}
                 :seon.sci.eval/unproven-called-vars #{}}]})
@@ -416,7 +416,7 @@
            right (#'loop/store-session-values!
                   connection (evaluation "my.agents.dedup/right"))]
        (is (= (get-in left [:seon.sci.eval/session-defs 0
-                            :seon.code.def/blob])
+                            :seon.def/blob])
               (get-in right [:seon.sci.eval/session-defs 0
-                             :seon.code.def/blob]))
+                             :seon.def/blob]))
            "two agents' equal serialized values address one blob key")))))

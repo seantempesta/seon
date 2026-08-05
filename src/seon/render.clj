@@ -85,7 +85,7 @@
                               :seon.sci.admit/caps
                               :seon.sci.eval/time-limit-ms
                               :seon.config/on-core-error
-                              :seon.store/branch-connection
+                              :seon.db/connection
                               :seon.cluster.eval/result-blob
                               :seon.render.data/total
                               :seon.render/distance
@@ -220,7 +220,7 @@
   (let [argument (dissoc (render-argument request)
                          :seon.db/db
                          :seon.sci.eval/ctx
-                         :seon.store/branch-connection)
+                         :seon.db/connection)
         value (:seon.render/value argument)]
     {:seon.render.call/producer selected
      :seon.render.call/program-row
@@ -511,15 +511,15 @@
        [:seon.config/on-core-error
         {:optional true}
         :seon.config/on-core-error]
-       [:seon.store/branch-connection
+       [:seon.db/connection
         {:optional true}
-        :seon.store/branch-connection]]]
+        :seon.db/connection]]]
      [:seon.render.walk/body [:fn clojure.core/ifn?]]]
     :any]}
   [context body]
   (binding [*walk-context* context
             db/*conn*
-            (or (:seon.store/branch-connection context)
+            (or (:seon.db/connection context)
                 db/*conn*)]
     (body)))
 

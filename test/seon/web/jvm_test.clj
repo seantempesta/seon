@@ -32,7 +32,7 @@
         opened (store/open-store! {:seon.store/dir (str root "/store")})]
     (try
       ((ns-resolve 'seon.test-support 'populate-database!)
-       (:seon.store/connection opened))
+       (:seon.store/connection-object opened))
       (registry/branch! {:seon.store/store opened
                          :seon.cluster.registry/from :db
                          :seon.store/branch :my-web-test})
@@ -196,7 +196,7 @@
 
 (defn- effect-context
   [connection]
-  {:seon.store/branch-connection connection
+  {:seon.db/connection connection
    :seon.cluster.agent/id "web-agent"
    :seon.cluster.run/id "web-receipt-run"
    :seon.cluster.run.form/ordinal 0

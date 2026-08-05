@@ -106,7 +106,7 @@
                      {:proc (flow/var-process
                              #'web/render-step :io
                              (assoc view :seon.cluster.loop/cluster
-                                    {:seon.store/branch-connection connection
+                                    {:seon.db/connection connection
                                      :seon.sci.admit/caps caps
                                      :seon.sci.eval/ctx ctx
                                      :seon.config.eval/time-limit-ms
@@ -138,7 +138,7 @@
                         :seon.cluster.wake/fault-channel fault-channel
                         :seon.cluster.wake/key ::route})
           (reset! server (web/start!
-                          {:seon.store/connection connection
+                          {:seon.store/connection-object connection
                            :seon.cluster.agent/id agent-id
                            :seon.sci.admit/caps caps
                            :seon.cluster.run/process process
@@ -667,7 +667,7 @@
                 (throw (BindException. "injected ephemeral bind failure")))]
               (try
                 (web/start!
-                 {:seon.store/connection connection
+                 {:seon.store/connection-object connection
                   :seon.cluster.agent/id agent-id
                   :seon.sci.admit/caps caps
                   :seon.cluster.run/process process
@@ -1145,7 +1145,7 @@
                    {:seon.cluster.agent/id agent-id
                     :seon.cluster/name "web-write-refusal"
                     :seon.ns/name 'my.agents.root}))
-      (let [service {:seon.store/connection connection
+      (let [service {:seon.store/connection-object connection
                      :seon.cluster.agent/id agent-id
                      :seon.sci.admit/caps caps
                      :seon.cluster.run/process process}
@@ -1173,7 +1173,7 @@
                             {:seon.error/kind :seon.db/rejected
                              :seon.error/message "injected process refusal"})]
               (support/refusal-data
-               #(web/start! {:seon.store/connection connection
+               #(web/start! {:seon.store/connection-object connection
                              :seon.cluster.run/process process})))]
         (is (= :seon.db/rejected (:seon.error/kind result)))
         (is (= "injected process refusal" (:seon.error/message result)))))))
@@ -1248,7 +1248,7 @@
     (fn [connection first-server _graph]
       (let [taken (:seon.render.web/port first-server)
             second-server (web/start!
-                           {:seon.store/connection connection
+                           {:seon.store/connection-object connection
                             :seon.cluster.agent/id agent-id
                             :seon.sci.admit/caps caps
                             :seon.cluster.run/process process

@@ -231,17 +231,17 @@ duration decides.
 Three lines, plus the honesty attribute:
 
 ```clojure
-:seon.code.def/id     [:string {:seon.db/identity true}]  ; "my.agents.ada/index"
-:seon.code.def/ns     :seon.db/ref                        ; → :seon.ns/name
-:seon.code.def/name   :symbol
+:seon.def/id     [:string {:seon.db/identity true}]  ; "my.agents.ada/index"
+:seon.def/ns     :seon.db/ref                        ; → :seon.ns/name
+:seon.def/name   :symbol
 ;; exactly one of: (presence IS the state)
-:seon.code.def/value-edn     :string          ; small faithful value, inline
-:seon.code.def/blob          :seon.blob/digest ; large faithful value
-:seon.code.def/size          [:int {:min 0}]   ; the full serialized length
-:seon.code.def/source        [:string {:min 1}] ; the pure top-level defining form
-:seon.code.def/unrestorable  [:string {:min 1}] ; the honest reason
+:seon.def/value-edn     :string          ; small faithful value, inline
+:seon.def/blob          :seon.blob/digest ; large faithful value
+:seon.def/size          [:int {:min 0}]   ; the full serialized length
+:seon.def/source        [:string {:min 1}] ; the pure top-level defining form
+:seon.def/unrestorable-reason  [:string {:min 1}] ; the honest reason
 ;; ordering only, never a dependency graph
-:seon.code.def/ordinal       [:int {:min 0}]
+:seon.def/ordinal       [:int {:min 0}]
 ```
 
 It is deliberately the **`:seon.fn`/`:seon.ns`/`:seon.schema` family shape**
@@ -404,7 +404,7 @@ one truth.
 
 | Piece | Where | Size |
 |---|---|---|
-| `:seon.code.def` attributes (§3) as a fifth `seon.program/shapes` entry | `resources/seon/schema/program.edn`, `src/seon/program.cljc` | ~15 lines |
+| `:seon.def` attributes (§3) as a fifth `seon.program/shapes` entry | `resources/seon/schema/program.edn`, `src/seon/program.cljc` | ~15 lines |
 | intern-diff at the settle seam + the faithfulness check + the duration-vs-rehydrate comparison; write one entry per interned name | `src/seon/cluster/loop.cljc` (terminal seam), beside the ruling-#25 blob write | ~60 lines |
 | `install-session-image!` — the two-pass install of §4 steps 4–7 | `src/seon/sci/eval.clj`, next to `acquire!` | ~50 lines |
 | call it from the run loop's `:resume` branch, right after `acquire!` | `src/seon/cluster/loop.cljc:995` | 1 line |

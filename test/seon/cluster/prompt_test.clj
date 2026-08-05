@@ -68,7 +68,7 @@
                   :seon.render.web/completion completion
                   :seon.render.web/root-agent-id "walker"
                   :seon.cluster.loop/cluster
-                  {:seon.store/branch-connection connection
+                  {:seon.db/connection connection
                    :seon.cluster.loop/stream-channel stream-channel
                    :seon.sci.admit/caps caps
                    :seon.sci.eval/ctx ctx

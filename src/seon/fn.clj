@@ -1067,10 +1067,10 @@
    [:=>
     [:cat
      [:map
-      [:seon.store/branch-connection :seon.store/branch-connection]
+      [:seon.db/connection :seon.db/connection]
       [:seon.db/process {:optional true} :seon.db/ref]]]
     :seon.reconcile/result]}
-  [{connection :seon.store/branch-connection process :seon.db/process}]
+  [{connection :seon.db/connection process :seon.db/process}]
   (let [db @connection
         projection (schema/projection-from-database db)
         compile-options (:seon.schema.projection/compile-options projection)
@@ -1156,7 +1156,7 @@
 (defn index!
   "Populate one fresh source scratch branch from static analysis."
   {:malli/schema [:=> [:cat :seon.fn/index-request] :seon.reconcile/result]}
-  [{connection :seon.store/branch-connection process :seon.db/process :as request}]
+  [{connection :seon.db/connection process :seon.db/process :as request}]
   (let [program-rows (desired-program-rows request)
         _ (assert-one-row-per-identity! program-rows)
         _ (assert-populated! program-rows)

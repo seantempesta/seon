@@ -65,7 +65,7 @@
 (defn- populate-database!
   [connection]
   (cluster/populate-source!
-   {:seon.store/branch-connection connection
+   {:seon.db/connection connection
     :seon.fn/manifest @source-manifest})
   ;; `populate-source!` is the contents step used by production
   ;; `source/publish!`; production seals that completed population in the

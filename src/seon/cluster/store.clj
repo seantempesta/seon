@@ -1,5 +1,5 @@
 (ns seon.cluster.store
-  "Owns Datahike store, branch-connection, and flock custody.
+  "Owns Datahike store, connection, and flock custody.
 
   `open-store!` canonicalizes a store directory and acquires its
   non-blocking exclusive flock before checking or creating the
@@ -343,7 +343,7 @@
             (throw failure)))
         {:seon.store/dir dir
          :seon.store/lock-file lock-path
-         :seon.store/connection connection
+         :seon.store/connection-object connection
          :seon.store/lock lock
          :seon.store/created? created?})
       (catch Throwable failure
@@ -365,7 +365,7 @@
   ; nothing in the (closed, immutable) store value has to change
   (let [^FileLock lock (:seon.store/lock store)]
     (when (.isValid lock)
-      (d/release (:seon.store/connection store))
+      (d/release (:seon.store/connection-object store))
       (release-flock! (:seon.store/lock-file store) lock)))
   nil)
 
@@ -380,10 +380,10 @@
   would reference-count a second connect into the SAME connection,
   silently giving two cluster instances one writer)."
   {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch]
-                  :seon.store/branch-connection]}
+                  :seon.db/connection]}
   [store branch]
   (locking branch-open-monitor
-    (let [main-connection (:seon.store/connection store)
+    (let [main-connection (:seon.store/connection-object store)
           configuration (assoc (open-configuration
                                 (datahike-configuration
                                  (:seon.store/dir store)
@@ -406,7 +406,7 @@
 
 (defn release-branch!
   "Release one proof branch connection before its roster branch is retired."
-  {:malli/schema [:=> [:cat :seon.store/connection] :nil]}
+  {:malli/schema [:=> [:cat :seon.store/connection-object] :nil]}
   [connection]
   (d/release connection)
   nil)

@@ -38,10 +38,10 @@ context sharing (`docs/prds/sci-execution-runtime/plan/README.md:381-395`;
 
 ## 4. Durable session-image facts
 
-Ordinary session definitions are `:seon.code.def` facts, not contracted
+Ordinary session definitions are `:seon.def` facts, not contracted
 `:seon.fn` rows. Each row carries a faithful inline value, blob-backed value,
 proven source form, or explicit unrestorable reason
-(`resources/seon/schemas/seon.code.def.edn:1-38`). The loop exact-reconciles
+(`resources/seon/schemas/seon.def.edn:1-38`). The loop exact-reconciles
 those rows beside the terminal receipt
 (`src/seon/cluster/loop.clj:389-491,1641-1653`).
 
@@ -54,5 +54,5 @@ proven source, and unrestorable closures
 
 Do not collapse the session image into receipts, program rows, or replay.
 Receipts share the terminal transaction boundary, but cold restore reads
-`:seon.code.def` rows directly (`src/seon/cluster/loop.clj:1641-1653`;
+`:seon.def` rows directly (`src/seon/cluster/loop.clj:1641-1653`;
 `src/seon/sci/eval.clj:1282-1294`).

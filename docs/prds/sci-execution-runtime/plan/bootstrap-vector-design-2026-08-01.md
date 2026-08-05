@@ -61,7 +61,7 @@ Consequences that fall out for free, all of them wanted:
   transcript renders them like any other history and **stateless resume
   restores them like everything else** (ruling #28/#32) — a fresh JVM
   rebuilding the session re-derives the bootstrap from the same
-  `:seon.code.def`/program rows, with no bootstrap-specific path;
+  `:seon.def`/program rows, with no bootstrap-specific path;
 - an eval error inside the bootstrap does not abort the fold
   (loop.cljc:1436 continues on any non-transaction failure), which is
   what makes the deliberate refusal→repair beat in §3 possible;

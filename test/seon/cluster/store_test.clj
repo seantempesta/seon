@@ -45,7 +45,7 @@
 (defn- markers [store]
   (set (db/q '[:find [?marker ...]
               :where [_ :seon.store.test/marker ?marker]]
-            @(:seon.store/connection store))))
+            @(:seon.store/connection-object store))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure derivations
@@ -124,7 +124,7 @@
       (let [opened (store/open-store! {:seon.store/dir dir})]
         (try
           (is (true? (konserve.utils/multi-key-capable?
-                      (:store @(:seon.store/connection opened))))
+                      (:store @(:seon.store/connection-object opened))))
               "the application pin exposes the filestore batch Datahike builds")
           (finally
             (store/release-store! opened))))
@@ -137,8 +137,8 @@
       (let [opened (store/open-store! {:seon.store/dir dir})]
         (is (seon.schema/valid-candidate-value? :seon.store/store opened))
         (is (true? (:seon.store/created? opened)))
-        (db/transact! (:seon.store/connection opened) probe-schema)
-        (db/transact! (:seon.store/connection opened)
+        (db/transact! (:seon.store/connection-object opened) probe-schema)
+        (db/transact! (:seon.store/connection-object opened)
                     [{:seon.store.test/marker "survives"}])
         (is (nil? (store/release-store! opened)))
         (is (nil? (store/release-store! opened)) "release is idempotent")
@@ -163,10 +163,10 @@
         (let [opened (store/open-store! {:seon.store/dir dir})]
           (try
             (is (false? (:seon.store/created? opened)))
-            (is (not (true? (get-in @(:seon.store/connection opened)
+            (is (not (true? (get-in @(:seon.store/connection-object opened)
                                     [:config :fuse-index-roots?]))))
             (is (not= 256
-                      (get-in @(:seon.store/connection opened)
+                      (get-in @(:seon.store/connection-object opened)
                               [:config :index-config :diff-buf-size])))
             (finally
               (store/release-store! opened))))
@@ -178,10 +178,10 @@
         (let [opened (store/open-store! {:seon.store/dir dir})]
           (try
             (is (true? (:seon.store/created? opened)))
-            (is (true? (get-in @(:seon.store/connection opened)
+            (is (true? (get-in @(:seon.store/connection-object opened)
                                [:config :fuse-index-roots?])))
             (is (= 256
-                   (get-in @(:seon.store/connection opened)
+                   (get-in @(:seon.store/connection-object opened)
                            [:config :index-config :diff-buf-size])))
             (finally
               (store/release-store! opened))))
@@ -196,17 +196,17 @@
              {:seon.store/dir dir
               :seon.config.db/keep-history? false})]
         (is (true? (:seon.store/created? opened)))
-        (is (false? (get-in @(:seon.store/connection opened)
+        (is (false? (get-in @(:seon.store/connection-object opened)
                             [:config :keep-history?])))
         (is (= :seon.db/non-temporal-database
                (:seon.error/kind
-                (db/history @(:seon.store/connection opened)))))
+                (db/history @(:seon.store/connection-object opened)))))
         (store/release-store! opened))
       (testing "an omitted request adopts the persisted policy"
         (let [reopened (store/open-store! {:seon.store/dir dir})]
           (try
             (is (false? (:seon.store/created? reopened)))
-            (is (false? (get-in @(:seon.store/connection reopened)
+            (is (false? (get-in @(:seon.store/connection-object reopened)
                                 [:config :keep-history?])))
             (finally
               (store/release-store! reopened)))))
@@ -226,7 +226,7 @@
   (let [dir (fresh-dir)]
     (try
       (let [opened (store/open-store! {:seon.store/dir dir})
-            connection (:seon.store/connection opened)]
+            connection (:seon.store/connection-object opened)]
         (try
           (db/transact! connection probe-schema)
           (let [basis (:max-tx @connection)]
@@ -247,7 +247,7 @@
             (store/open-store!
              {:seon.store/dir dir
               :seon.config.db/keep-history? false})
-            main (:seon.store/connection opened)
+            main (:seon.store/connection-object opened)
             branch :non-temporal-test]
         (try
           (db/transact! main probe-schema)
@@ -274,7 +274,7 @@
   (let [dir (fresh-dir)]
     (try
       (let [opened (store/open-store! {:seon.store/dir dir})
-            connection (:seon.store/connection opened)]
+            connection (:seon.store/connection-object opened)]
         (try
           (db/transact! connection probe-schema)
           (testing "Integer values commit from entity maps and datom vectors"
@@ -337,9 +337,9 @@
       (let [a (store/open-store! {:seon.store/dir dir-a})
             b (store/open-store! {:seon.store/dir dir-b})]
         (try
-          (db/transact! (:seon.store/connection a) probe-schema)
-          (db/transact! (:seon.store/connection b) probe-schema)
-          (db/transact! (:seon.store/connection a)
+          (db/transact! (:seon.store/connection-object a) probe-schema)
+          (db/transact! (:seon.store/connection-object b) probe-schema)
+          (db/transact! (:seon.store/connection-object a)
                       [{:seon.store.test/marker "only-a"}])
           (is (= #{"only-a"} (markers a)))
           (is (= #{} (markers b)) "stores share nothing")
@@ -359,8 +359,8 @@
     (try
       ;; a complete store with one durable marker...
       (let [victim (store/open-store! {:seon.store/dir dir})]
-        (db/transact! (:seon.store/connection victim) probe-schema)
-        (db/transact! (:seon.store/connection victim)
+        (db/transact! (:seon.store/connection-object victim) probe-schema)
+        (db/transact! (:seon.store/connection-object victim)
                     [{:seon.store.test/marker "pre-window"}])
         (store/release-store! victim))
       ;; ...manufactured into the mid-genesis state Datahike can leave
@@ -373,7 +373,7 @@
         (try
           (is (true? (:seon.store/created? repaired))
               "mid-genesis means nothing durable existed — recreate")
-          (db/transact! (:seon.store/connection repaired) probe-schema)
+          (db/transact! (:seon.store/connection-object repaired) probe-schema)
           (is (= #{} (markers repaired))
               "the recreated store is empty")
           (finally

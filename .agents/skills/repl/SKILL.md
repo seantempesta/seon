@@ -173,7 +173,7 @@ not program-graph indexing”).
 |---|---|
 | Reply became prose or the wrong plan forms | Agent reply: call `seon.cluster.reply/sources` with the actual run/form namespace or the result of `seon.sci.eval/agent-namespace`. |
 | `:seon.cluster.reply/unreadable` | Agent reply: fix malformed Clojure; no repair layer will close it. |
-| A def is live now but missing after restart | Agent turn: inspect its terminal receipt plus `:seon.code.def` row, then cold-acquire a fresh cluster context (`src/seon/cluster/loop.clj:380-465,1552-1644`; `src/seon/sci/eval.clj:1142-1228`). |
+| A def is live now but missing after restart | Agent turn: inspect its terminal receipt plus `:seon.def` row, then cold-acquire a fresh cluster context (`src/seon/cluster/loop.clj:380-465,1552-1644`; `src/seon/sci/eval.clj:1142-1228`). |
 | Bare map/keyword evaluates and prints | Expected in `io-prepl` and raw JVM REPLs. |
 | A private function is unresolved | JVM probe: invoke `#'fully.qualified.ns/var`. |
 | The same old result appears after an edit | Reload/re-evaluate the owning namespace, then rerun the identical probe. |

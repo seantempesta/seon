@@ -176,7 +176,7 @@
          (fn [{source :seon.cluster.loop/source}] source)]
         (with-render-context-proc
          connection
-         {:seon.store/branch-connection connection
+         {:seon.db/connection connection
                :seon.cluster/name "turn-test"
                :seon.flow/work-launcher launcher
                :seon.cluster.run/process process
@@ -250,7 +250,7 @@
   "Run the loop's own pass — settle, then derive, then turn — until idle.
   This drives what `step` drives, so a test sees what production sees."
   [cluster limit]
-  (let [connection (:seon.store/branch-connection cluster)]
+  (let [connection (:seon.db/connection cluster)]
     (loop [passes 0]
       (let [now (Date.)]
         (settle-orphans! cluster connection now)
@@ -264,7 +264,7 @@
 (defn- drive!
   "Run passes until the loop says idle, or `limit` passes have run."
   [cluster limit]
-  (let [connection (:seon.store/branch-connection cluster)]
+  (let [connection (:seon.db/connection cluster)]
     (loop [passes 0 reports []]
       (let [request (request connection)
             work (any-agent-work connection)]
@@ -280,7 +280,7 @@
 (defn- drive-agent!
   "Run one agent's passes until that agent is idle, or `limit` is reached."
   [cluster agent-id limit]
-  (let [connection (:seon.store/branch-connection cluster)]
+  (let [connection (:seon.db/connection cluster)]
     (loop [passes 0
            reports []]
       (let [request (request connection agent-id)
@@ -297,7 +297,7 @@
 (defn- running-refusal-receipt!
   "Create one held run with ordinal zero running, for the terminal seam."
   [cluster tag]
-  (let [connection (:seon.store/branch-connection cluster)
+  (let [connection (:seon.db/connection cluster)
         run-id (str "terminal-refusal-" tag)
         at (Date.)]
     (db/transact!
@@ -342,7 +342,7 @@
 
 (defn- recover-terminal-refusal!
   [cluster receipt]
-  (let [connection (:seon.store/branch-connection cluster)
+  (let [connection (:seon.db/connection cluster)
         recovered-process "terminal-refusal-recovery"]
     (db/transact!
      connection
@@ -366,7 +366,7 @@
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
-            connection (:seon.store/branch-connection cluster)]
+            connection (:seon.db/connection cluster)]
         (with-redefs [ai/complete
                       (fn [_] {:seon.ai/text
                                (str "(def widgets (map inc (range 3)))\n"
@@ -422,7 +422,7 @@
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
-            connection (:seon.store/branch-connection cluster)]
+            connection (:seon.db/connection cluster)]
         (with-redefs [ai/complete
                       (fn [_] {:seon.ai/text
                                (str "(defn widget-count [n] (* n 3))\n"
@@ -464,7 +464,7 @@
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
-            connection (:seon.store/branch-connection cluster)]
+            connection (:seon.db/connection cluster)]
         (db/transact! connection
                     [{:seon.ns/name 'my.agents.agent-a}
                      {:seon.cluster.agent/id "agent-a"
@@ -518,7 +518,7 @@
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
-            connection (:seon.store/branch-connection cluster)]
+            connection (:seon.db/connection cluster)]
         (db/transact! connection
                     [{:seon.ns/name 'my.agents.agent-a}
                      {:seon.cluster.agent/id "agent-a"
@@ -551,7 +551,7 @@
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
-            connection (:seon.store/branch-connection cluster)]
+            connection (:seon.db/connection cluster)]
         (with-redefs
           [ai/complete
            (fn [_]
@@ -581,7 +581,7 @@
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
-            connection (:seon.store/branch-connection cluster)
+            connection (:seon.db/connection cluster)
             function-sym "my.agents.agent-a/dynamic-obsolete"]
         (with-redefs
           [ai/complete
@@ -606,7 +606,7 @@
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
-            connection (:seon.store/branch-connection cluster)
+            connection (:seon.db/connection cluster)
             original-evaluate sci.eval/evaluate
             evaluated-ctx (atom nil)]
         (with-redefs
@@ -638,7 +638,7 @@
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
-            connection (:seon.store/branch-connection cluster)
+            connection (:seon.db/connection cluster)
             original-evaluate sci.eval/evaluate
             evaluated-ctx (atom nil)]
         (with-redefs
@@ -732,7 +732,7 @@
                       [?namespace-entity :seon.ns/name ?namespace]
                       [?namespace-entity :seon.ns/imports ?import]
                       [?import :seon.ns.import/local ?local]]
-                    @(:seon.store/branch-connection cluster)
+                    @(:seon.db/connection cluster)
                     'my.agents.agent-a
                     'String))
               "a refused mask never reaches the database")
@@ -749,7 +749,7 @@
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
-            connection (:seon.store/branch-connection cluster)]
+            connection (:seon.db/connection cluster)]
         (with-redefs
           [ai/complete
            (fn [_]
@@ -788,7 +788,7 @@
         (fn [cluster]
           (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                                'seon.sci.eval/evaluate)
-                connection (:seon.store/branch-connection cluster)
+                connection (:seon.db/connection cluster)
                 calls (atom [])
                 transact! db/transact!
                 original-install! sci.eval/install-program-row!
@@ -939,7 +939,7 @@
   ;; commit refusal proves the returned outcome is checked too.
   (with-cluster
     (fn [cluster]
-      (let [connection (:seon.store/branch-connection cluster)
+      (let [connection (:seon.db/connection cluster)
             passing
             [["ordinary"
               {:seon.error/kind :seon.db/rejected
@@ -1085,7 +1085,7 @@
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
-            connection (:seon.store/branch-connection cluster)]
+            connection (:seon.db/connection cluster)]
         (with-redefs
           [ai/complete
            (fn [_]
@@ -1128,7 +1128,7 @@
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
-            connection (:seon.store/branch-connection cluster)]
+            connection (:seon.db/connection cluster)]
         (with-redefs
           [ai/complete
            (fn [_]
@@ -1161,7 +1161,7 @@
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
-            connection (:seon.store/branch-connection cluster)]
+            connection (:seon.db/connection cluster)]
         (with-redefs
           [ai/complete
            (fn [_]
@@ -1185,7 +1185,7 @@
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
-            connection (:seon.store/branch-connection cluster)
+            connection (:seon.db/connection cluster)
             persistent-key :my.agents.agent-a/nonnegative
             value-key :my.agents.agent-a/label]
         (with-redefs
@@ -1245,7 +1245,7 @@
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
-            connection (:seon.store/branch-connection cluster)
+            connection (:seon.db/connection cluster)
             schema-key :shared.runtime/unregister-me]
         (with-redefs
           [ai/complete
@@ -1284,7 +1284,7 @@
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
-            connection (:seon.store/branch-connection cluster)
+            connection (:seon.db/connection cluster)
             schema-key :my.agents.agent-a/refused
             global-projection (schema/current-projection)
             global-forms (schema/registered-schemas)]
@@ -1316,7 +1316,7 @@
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
-            connection (:seon.store/branch-connection cluster)
+            connection (:seon.db/connection cluster)
             schema-key :my.agents.agent-a/not-committed
             transact! db/transact!
             install! sci.eval/install-program-row!
@@ -1372,7 +1372,7 @@
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
-            connection (:seon.store/branch-connection cluster)
+            connection (:seon.db/connection cluster)
             test-sym "my.agents.agent-a/versioned-test"]
         (with-redefs
           [ai/complete
@@ -1411,7 +1411,7 @@
     (fn [cluster-a]
       (let [cluster-a (assoc cluster-a :seon.cluster.loop/evaluate
                              'seon.sci.eval/evaluate)
-            connection-a (:seon.store/branch-connection cluster-a)
+            connection-a (:seon.db/connection cluster-a)
             shared-key :seon.runtime.registration/shared
             a-only-key :seon.runtime.registration/a-only
             global-projection (schema/current-projection)]
@@ -1431,7 +1431,7 @@
           (fn [cluster-b]
             (let [cluster-b (assoc cluster-b :seon.cluster.loop/evaluate
                                    'seon.sci.eval/evaluate)
-                  connection-b (:seon.store/branch-connection cluster-b)]
+                  connection-b (:seon.db/connection cluster-b)]
               (with-redefs
                 [ai/complete
                  (fn [_]
@@ -1478,7 +1478,7 @@
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
-            connection (:seon.store/branch-connection cluster)
+            connection (:seon.db/connection cluster)
             replies (atom
                      [(str
                        "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
@@ -1519,7 +1519,7 @@
                            :seon.cluster/name "turn-test"
                            :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
-            connection (:seon.store/branch-connection cluster)
+            connection (:seon.db/connection cluster)
             replies
             (atom
              [(str
@@ -1583,7 +1583,7 @@
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
-            connection (:seon.store/branch-connection cluster)
+            connection (:seon.db/connection cluster)
             function-sym "my.agents.agent-a/refused-live"
             replies (atom
                      [(str
@@ -1721,7 +1721,7 @@
   ;; forever. This is that whole sequence, end to end.
   (with-cluster
     (fn [cluster]
-      (let [connection (:seon.store/branch-connection cluster)
+      (let [connection (:seon.db/connection cluster)
             now (Date.)]
         ;; the wreckage a crash leaves, AFTER boot recovery has released
         ;; the dead holder: open, unclaimed, unplanned
@@ -1774,7 +1774,7 @@
   ;; The reason is now a fact, and the next prompt says it.
   (with-cluster
     (fn [cluster]
-      (let [connection (:seon.store/branch-connection cluster)]
+      (let [connection (:seon.db/connection cluster)]
         (with-redefs [ai/complete
                       (fn [_] {:seon.error/kind :seon.ai/no-credential
                                :seon.error/message
@@ -1829,7 +1829,7 @@
                            :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
                            ;; a short leash for the runaway case
                            :seon.config.eval/time-limit-ms 300)
-            connection (:seon.store/branch-connection cluster)]
+            connection (:seon.db/connection cluster)]
         (with-redefs [ai/complete
                       (fn [_] {:seon.ai/text "(loop [] (recur))"})]
           (drive! cluster 6)
@@ -1847,7 +1847,7 @@
     (fn [cluster]
       (let [cluster (assoc cluster
                            :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate)
-            connection (:seon.store/branch-connection cluster)
+            connection (:seon.db/connection cluster)
             route-run "route-run"]
         (db/transact!
          connection
@@ -1929,7 +1929,7 @@
                              "(+ 1 1)\n(my.run/complete \"two widgets\")"})]
         (binding [*evaluation* {:seon.cluster.eval/result-edn "2"
                                :seon.sci.admit/value 2}]
-          (let [connection (:seon.store/branch-connection cluster)
+          (let [connection (:seon.db/connection cluster)
                 reports (drive! cluster 10)]
             (testing "the trigger was answered by exactly one run"
               (is (empty? (work/unanswered-triggers @connection "agent-a"))))
@@ -1946,7 +1946,7 @@
 (deftest a-pure-prose-reply-records-input-without-a-failed-receipt
   (with-cluster
     (fn [cluster]
-      (let [connection (:seon.store/branch-connection cluster)]
+      (let [connection (:seon.db/connection cluster)]
         (with-redefs [ai/complete
                       (fn [_]
                         {:seon.ai/text
@@ -1992,7 +1992,7 @@
         (binding [*evaluation* {:seon.cluster.eval/result-edn
                                (pr-str (my.run/complete "done"))
                                :seon.sci.admit/value (my.run/complete "done")}]
-          (let [connection (:seon.store/branch-connection cluster)
+          (let [connection (:seon.db/connection cluster)
                 reports (drive! cluster 10)]
             (is (= [:open :call :resume]
                    (mapv :seon.cluster.work/situation reports))
@@ -2008,7 +2008,7 @@
   ;; the separate examples that cover each attribute alone.
   (with-cluster
     (fn [cluster]
-      (let [connection (:seon.store/branch-connection cluster)
+      (let [connection (:seon.db/connection cluster)
             result (my.run/complete "combined receipt")
             result-edn (pr-str result)
             result-blob (apply str (repeat 64 "a"))
@@ -2090,7 +2090,7 @@
         (binding [*evaluation* {:seon.cluster.eval/result-edn
                                (pr-str (my.run/wait "need input"))
                                :seon.sci.admit/value (my.run/wait "need input")}]
-          (let [connection (:seon.store/branch-connection cluster)
+          (let [connection (:seon.db/connection cluster)
                 reports (drive! cluster 12)]
             (is (= [:open :call :resume]
                    (mapv :seon.cluster.work/situation reports))
@@ -2214,7 +2214,7 @@
 (deftest one-successful-call-leaves-exactly-one-attempt-fact
   (with-cluster
     (fn [cluster]
-      (let [connection (:seon.store/branch-connection cluster)
+      (let [connection (:seon.db/connection cluster)
             requests (atom [])]
         (with-redefs [ai/complete
                       (recording-completer
@@ -2244,7 +2244,7 @@
 (deftest successful-call-persists-the-providers-open-usage-document
   (with-cluster
     (fn [cluster]
-      (let [connection (:seon.store/branch-connection cluster)
+      (let [connection (:seon.db/connection cluster)
             requests (atom [])
             usage {"prompt_tokens" 31
                    "completion_tokens" 7
@@ -2281,7 +2281,7 @@
 (deftest reasoning-starvation-persists-usage-finish-and-the-named-error
   (with-cluster
     (fn [cluster]
-      (let [connection (:seon.store/branch-connection cluster)
+      (let [connection (:seon.db/connection cluster)
             requests (atom [])
             usage {"prompt_tokens" 104
                    "completion_tokens" 8
@@ -2314,7 +2314,7 @@
 (deftest an-unpaid-failure-with-a-backup-makes-exactly-two-calls
   (with-cluster
     (fn [cluster]
-      (let [connection (:seon.store/branch-connection cluster)
+      (let [connection (:seon.db/connection cluster)
             requests (atom [])]
         (configure-backup! connection)
         (with-redefs [ai/complete
@@ -2495,7 +2495,7 @@
   (with-cluster
     (fn [cluster]
       (let [{::keys [attempts succeeded?]} (expected-attempt-trace scenario)
-            connection (:seon.store/branch-connection cluster)
+            connection (:seon.db/connection cluster)
             retry-strategy {:seon.ai.retry/base-delay-ms 1
                             :seon.ai.retry/multiplier 2.0
                             :seon.ai.retry/jitter-fraction 0.0
@@ -2590,7 +2590,7 @@
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
-            connection (:seon.store/branch-connection cluster)]
+            connection (:seon.db/connection cluster)]
         (db/transact! connection [(agent-row "agent-b")])
         ;; ONE stub, two agents: the reply depends on WHOSE prompt it
         ;; is, so the delegate answers instead of forwarding the same
@@ -2659,7 +2659,7 @@
   ;; contain both rails, and neither may be lost when their tx-data is named.
   (with-cluster
     (fn [cluster]
-      (let [connection (:seon.store/branch-connection cluster)
+      (let [connection (:seon.db/connection cluster)
             asked [(my.message/send "agent-b" "delivered together")
                    (my.message/send "missing-agent" "refused together")]]
         (db/transact! connection [(agent-row "agent-b")])
@@ -2717,7 +2717,7 @@
                            'seon.sci.eval/evaluate
                            ;; nothing may be delivered at all
                            :seon.config.message/max-chain 0)
-            connection (:seon.store/branch-connection cluster)]
+            connection (:seon.db/connection cluster)]
         (db/transact! connection [(agent-row "agent-b")])
         (with-redefs [ai/complete
                       (fn [_] {:seon.ai/text
@@ -2749,7 +2749,7 @@
   ;; (research/trigger-conservation-2026-07-28 §3.2).
   (with-cluster
     (fn [cluster]
-      (let [connection (:seon.store/branch-connection cluster)
+      (let [connection (:seon.db/connection cluster)
             requests (atom [])]
         ;; pass 1: open + claim (the busy fence before the expensive part)
         (let [work (work/next-agent-work @connection (request connection))]
@@ -2795,7 +2795,7 @@
   ;; value, the turn ends `:error`, and no provider call is made.
   (with-cluster
     (fn [cluster]
-      (let [connection (:seon.store/branch-connection cluster)
+      (let [connection (:seon.db/connection cluster)
             requests (atom [])]
         ;; a held run whose creating transaction names NO trigger — the
         ;; caller-bug state `::no-trigger` seals
@@ -2840,7 +2840,7 @@
   ;; read back by `message/trigger`.
   (with-cluster
     (fn [cluster]
-      (let [connection (:seon.store/branch-connection cluster)
+      (let [connection (:seon.db/connection cluster)
             requests (atom [])]
         ;; pass 1: the loop opens a run on m-1 ("count the widgets")
         (let [work (work/next-agent-work @connection (request connection))]
@@ -2978,7 +2978,7 @@
       (let [stream-channel (async/chan (async/sliding-buffer 1))
             cluster (assoc cluster :seon.cluster.loop/stream-channel
                            stream-channel)
-            connection (:seon.store/branch-connection cluster)
+            connection (:seon.db/connection cluster)
             proc (render-proc-for cluster)
             requests (atom [])
             chunks ["(my.run/complete " "\"streamed" " home\")"]]
@@ -3067,7 +3067,7 @@
   ;; threads are NEVER parked, whatever the render side is doing.
   (with-cluster
     (fn [cluster]
-      (let [connection (:seon.store/branch-connection cluster)
+      (let [connection (:seon.db/connection cluster)
             stream-channel (async/chan (async/sliding-buffer 1))
             cluster (assoc cluster :seon.cluster.loop/stream-channel
                            stream-channel)]

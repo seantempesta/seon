@@ -73,7 +73,7 @@
   same class, buildable without a store."
   []
   (let [connection (atom nil)
-        state {:seon.cluster.loop/cluster {:seon.store/branch-connection connection}
+        state {:seon.cluster.loop/cluster {:seon.db/connection connection}
                :seon.cluster.agent/turns 7}]
     (reset! connection state)
     state))
@@ -226,7 +226,7 @@
       (is (= {:seon.sci.admit/opaque "clojure.lang.Atom"}
              (get-in read-back [::flow/state
                                 :seon.cluster.loop/cluster
-                                :seon.store/branch-connection]))))
+                                :seon.db/connection]))))
     (testing "and the Throwable is the printer's bounded data projection,
     never the live Throwable"
       (let [projected (get read-back ::flow/ex)]

@@ -310,7 +310,7 @@
                                                   (str intern-name)))]
                        [[:seon.fn/sym qualified]
                         [:seon.test/sym qualified]
-                        [:seon.code.def/id qualified]]))
+                        [:seon.def/id qualified]]))
                    (sort-by str
                             (remove (get after namespace-name #{})
                                     intern-names)))))
@@ -476,11 +476,11 @@
                           (get before qualified absent-intern) value))))
            (map (fn [[qualified value]]
                   (merge
-                   {:seon.code.def/id (str qualified)
-                    :seon.code.def/ns
+                   {:seon.def/id (str qualified)
+                    :seon.def/ns
                     [:seon.ns/name (symbol (namespace qualified))]
-                    :seon.code.def/name (symbol (name qualified))
-                    :seon.code.def/source source
+                    :seon.def/name (symbol (name qualified))
+                    :seon.def/source source
                     :seon.sci.eval/value value
                     :seon.sci.eval/referenced-vars
                     (resolved-form-vars ctx namespace-name form)
@@ -1278,32 +1278,32 @@
   {:malli/schema [:=> [:cat :seon.sci.eval/session-install-request] :map]}
   [{ctx :seon.sci.eval/ctx
     db :seon.db/db
-    connection :seon.store/branch-connection}]
+    connection :seon.db/connection}]
   (let [entry-ids (db/q '[:find [?entry ...]
-                         :where [?entry :seon.code.def/id _]]
+                         :where [?entry :seon.def/id _]]
                        db)
         rows
         (->> (db/pull-many db
-                          '[* {:seon.code.def/ns [:seon.ns/name]}]
+                          '[* {:seon.def/ns [:seon.ns/name]}]
                           entry-ids)
              (remove
               (fn [row]
                 (some? (db/pull db [:db/id]
-                               [:seon.fn/sym (:seon.code.def/id row)]))))
-             (sort-by (juxt :seon.code.def/ordinal :seon.code.def/id))
+                               [:seon.fn/sym (:seon.def/id row)]))))
+             (sort-by (juxt :seon.def/ordinal :seon.def/id))
              vec)]
-    (doseq [{namespace-ref :seon.code.def/ns
-             intern-name :seon.code.def/name} rows]
+    (doseq [{namespace-ref :seon.def/ns
+             intern-name :seon.def/name} rows]
       (let [namespace-name (:seon.ns/name namespace-ref)]
         (when-not (sci/find-ns ctx namespace-name)
           (sci/add-namespace! ctx namespace-name {}))
         (sci/intern ctx namespace-name intern-name)))
-    (doseq [{namespace-ref :seon.code.def/ns
-             intern-name :seon.code.def/name
-             value-edn :seon.code.def/value-edn
-             digest :seon.code.def/blob}
-            (filter #(or (:seon.code.def/value-edn %)
-                         (:seon.code.def/blob %))
+    (doseq [{namespace-ref :seon.def/ns
+             intern-name :seon.def/name
+             value-edn :seon.def/value-edn
+             digest :seon.def/blob}
+            (filter #(or (:seon.def/value-edn %)
+                         (:seon.def/blob %))
                     rows)]
       (let [serialized
             (or value-edn
@@ -1314,9 +1314,9 @@
                            :seon.blob/digest digest})))
             value (edn/read-string serialized)]
         (sci/intern ctx (:seon.ns/name namespace-ref) intern-name value)))
-    (doseq [{namespace-ref :seon.code.def/ns
-             source :seon.code.def/source}
-            (filter :seon.code.def/source rows)]
+    (doseq [{namespace-ref :seon.def/ns
+             source :seon.def/source}
+            (filter :seon.def/source rows)]
       (let [namespace-name (:seon.ns/name namespace-ref)
             namespace-object (sci/create-ns namespace-name)
             event (one-event source namespace-name ctx)]
@@ -1326,9 +1326,9 @@
      :seon.sci.eval/unrestorable
      (into []
            (keep (fn [row]
-                   (when-let [reason (:seon.code.def/unrestorable row)]
-                     {:seon.code.def/id (:seon.code.def/id row)
-                      :seon.code.def/unrestorable reason})))
+                   (when-let [reason (:seon.def/unrestorable-reason row)]
+                     {:seon.def/id (:seon.def/id row)
+                      :seon.def/unrestorable-reason reason})))
            rows)}))
 
 (defn cluster-ctx
@@ -1336,14 +1336,14 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value] :seon.sci.eval/ctx]
-    [:=> [:cat :seon.db/database-value :seon.store/branch-connection]
+    [:=> [:cat :seon.db/database-value :seon.db/connection]
      :seon.sci.eval/ctx]]}
   ([db]
    (cluster-ctx db nil))
   ([db connection]
    (let [ctx (assoc (build-base-ctx)
                     ::custody
-                    {:seon.store/branch-connection connection}
+                    {:seon.db/connection connection}
                     ::kernel/install-function!
                     install-function-from-database!)
          acquired (acquire! {:seon.sci.eval/ctx ctx
@@ -1357,7 +1357,7 @@
      (install-session-image!
       (cond-> {:seon.sci.eval/ctx ctx
                :seon.db/db db}
-        connection (assoc :seon.store/branch-connection connection)))
+        connection (assoc :seon.db/connection connection)))
      ctx)))
 
 (defn- declared-row
@@ -1587,7 +1587,7 @@
                   (disarm)))
         printed (java.io.StringWriter.)
         connection (get-in evaluation-ctx
-                           [::custody :seon.store/branch-connection])
+                           [::custody :seon.db/connection])
         namespace-name (or (second namespace-ref)
                            (when (and connection agent-id)
                              (agent-namespace @connection agent-id))
@@ -1599,7 +1599,7 @@
     (binding [db/*conn* connection
               effect/*context*
               (when (and run-id (some? form-ordinal) cluster-name)
-                {:seon.store/branch-connection connection
+                {:seon.db/connection connection
                  :seon.cluster.run/id run-id
                  :seon.cluster.run.form/ordinal form-ordinal
                  :seon.cluster.agent/id agent-id

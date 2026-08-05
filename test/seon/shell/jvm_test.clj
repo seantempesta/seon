@@ -54,7 +54,7 @@
   (let [opened (store/open-store! {:seon.store/dir (str root "/store")})]
     (try
       ((ns-resolve 'seon.test-support 'populate-database!)
-       (:seon.store/connection opened))
+       (:seon.store/connection-object opened))
       (registry/branch! {:seon.store/store opened
                          :seon.cluster.registry/from :db
                          :seon.store/branch :my-shell-test})
@@ -76,7 +76,7 @@
        [{:seon.config/cluster "shell-test"
          :seon.config.eval.result/blob-threshold 4096}])
       (binding [effect/*context*
-                {:seon.store/branch-connection connection}]
+                {:seon.db/connection connection}]
         (f connection (handler) effective-map)))))
 
 (defn- sha-256
@@ -273,7 +273,7 @@
                            {:seon.config.shell/time-limit-ms 750
                             :seon.config.shell/termination-grace-ms 100})
                 context
-                {:seon.store/branch-connection connection
+                {:seon.db/connection connection
                  :seon.cluster.run/id "shell-time-limit"
                  :seon.cluster.run.form/ordinal 0
                  :seon.boot/cluster-name "default"

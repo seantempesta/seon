@@ -566,7 +566,7 @@
   (let [printed (doto (java.io.StringWriter.) (.write "abcdef"))
         record {:seon.eval/outcome :ok}
         row {:seon.fn/sym "user/f"}
-        session-defs [{:seon.code.def/id "user/x"}]
+        session-defs [{:seon.def/id "user/x"}]
         evaluation
         (#'eval/success-evaluation
          {:seon.sci.eval/admitted
@@ -603,7 +603,7 @@
         admitted {:seon.sci.admit/value value
                   :seon.cluster.eval/result-edn (pr-str value)
                   :seon.sci.admit/capped? false}
-        session-defs [{:seon.code.def/id "user/x"}]
+        session-defs [{:seon.def/id "user/x"}]
         evaluation
         (#'eval/failed-evaluation
          {:seon.sci.eval/admitted admitted
@@ -670,7 +670,7 @@
     (is (true? (:seon.sci.eval/namespace-changed? result)))
     (is (= #{[:seon.fn/sym "user/discarded"]
              [:seon.test/sym "user/discarded"]
-             [:seon.code.def/id "user/discarded"]}
+             [:seon.def/id "user/discarded"]}
            (set (:seon.program/delete-identities row))))
     (is (= [:seon.ns/name 'user] (:seon.program/ns row)))
     (is (= (sci/namespace-state execution-ctx)
@@ -1150,7 +1150,7 @@
       (let [ctx (eval/cluster-ctx @connection connection)
             evaluation
             (render/call-with-walk-context
-             {:seon.store/branch-connection connection
+             {:seon.db/connection connection
               :seon.cluster.agent/id "host-walker"
               :seon.sci.admit/caps caps
               :seon.sci.eval/ctx ctx

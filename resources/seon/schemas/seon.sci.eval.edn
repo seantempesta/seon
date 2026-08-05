@@ -100,10 +100,10 @@
                   :seon.boot/cluster-name]],
                 :session-def
                 [:map
-                 [:seon.code.def/id :seon.code.def/id]
-                 [:seon.code.def/ns :seon.code.def/ns]
-                 [:seon.code.def/name :seon.code.def/name]
-                 [:seon.code.def/source :seon.code.def/source]
+                 [:seon.def/id :seon.def/id]
+                 [:seon.def/ns :seon.def/ns]
+                 [:seon.def/name :seon.def/name]
+                 [:seon.def/source :seon.def/source]
                  [:seon.sci.eval/value :any]
                  [:seon.sci.eval/referenced-vars
                   :seon.sci.eval/referenced-vars]
@@ -118,9 +118,9 @@
                 [:map
                  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
                  [:seon.db/db :seon.db/database-value]
-                 [:seon.store/branch-connection
+                 [:seon.db/connection
                   {:optional true}
-                  :seon.store/branch-connection]],
+                  :seon.db/connection]],
                 :time-limit-ms [:int {:min 1}],
                 :unproven-called-vars [:set :symbol],
                 :install-mismatch [:= true]

@@ -16,7 +16,7 @@
         opened (store/open-store! {:seon.store/dir (str root "/store")})]
     (try
       (db/transact!
-       (:seon.store/connection opened)
+       (:seon.store/connection-object opened)
        [{:db/ident :seon.config.eval.result/blob-threshold
          :db/valueType :db.type/long
          :db/cardinality :db.cardinality/one}
@@ -34,11 +34,11 @@
           (let [caps (config/result-caps (config/defaults))
                 full (pr-str (vec (range 20000)))
                 large (#'loop/settlement-result
-                       {:seon.store/branch-connection connection
+                       {:seon.db/connection connection
                         :seon.sci.admit/caps caps}
                        {:seon.cluster.eval/result-edn full})
                 small (#'loop/settlement-result
-                       {:seon.store/branch-connection connection
+                       {:seon.db/connection connection
                         :seon.sci.admit/caps caps}
                        {:seon.cluster.eval/result-edn "42"})]
             (is (= (count full) (:seon.cluster.eval/result-size large)))

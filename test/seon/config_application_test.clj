@@ -249,7 +249,7 @@
         (try
           (testing "the database representation is fixed at store creation"
             (is (true?
-                 (get-in @(:seon.store/connection
+                 (get-in @(:seon.store/connection-object
                             (:seon.store/store instance))
                          [:config :keep-history?]))))
           (testing "flow structure consumes its applied values"
@@ -299,7 +299,7 @@
                   "explicit port 0 reaches bind; the derived named port does not")))
           (testing "hot entries re-read the applied database value"
             (config/apply!
-             {:seon.config/connection connection
+             {:seon.db/connection connection
               :seon.boot/cluster-name name
               :seon.config/manifest
               (assoc applied

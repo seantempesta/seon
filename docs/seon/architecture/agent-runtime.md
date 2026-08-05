@@ -174,7 +174,7 @@ program.
 Contracted functions persist as `:seon.fn` rows. Their canonical `/spec`,
 Malli-derived arity rows, and parsed AST facts commit through the same producer.
 Namespace resolver inputs persist as `:seon.ns` plus owned alias/import/refer
-bindings. Uncontracted REPL definitions persist under `:seon.code.def`, keyed
+bindings. Uncontracted REPL definitions persist under `:seon.def`, keyed
 by namespace and name:
 
 - a proven replay-safe defining form uses `/source`;

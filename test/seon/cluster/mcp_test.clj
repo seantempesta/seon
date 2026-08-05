@@ -137,7 +137,7 @@
     (support/with-database
       {:seon.test-support/fresh-store? true}
       (fn [connection]
-        (config/apply! {:seon.config/connection connection
+        (config/apply! {:seon.db/connection connection
                         :seon.boot/cluster-name cluster-name})
         (support/seed-cluster! connection cluster-name)
         (db/transact! connection
@@ -244,7 +244,7 @@
     (support/with-database
       {:seon.test-support/fresh-store? true}
       (fn [connection]
-        (config/apply! {:seon.config/connection connection
+        (config/apply! {:seon.db/connection connection
                         :seon.boot/cluster-name cluster-name})
         (support/seed-cluster! connection cluster-name)
         (swap! running-instances assoc cluster-name
@@ -275,7 +275,7 @@
     (support/with-database
       {:seon.test-support/fresh-store? true}
       (fn [connection]
-        (config/apply! {:seon.config/connection connection
+        (config/apply! {:seon.db/connection connection
                         :seon.boot/cluster-name cluster-name})
         (support/seed-cluster! connection cluster-name)
         (swap! running-instances assoc cluster-name

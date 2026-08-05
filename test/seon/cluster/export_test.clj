@@ -68,10 +68,10 @@
     (.mkdirs (.getParentFile (io/file dir)))
     (let [opened (store/open-store! {:seon.store/dir dir})]
       (try
-        (db/transact! (:seon.store/connection opened) probe-schema)
-        (db/transact! (:seon.store/connection opened)
+        (db/transact! (:seon.store/connection-object opened) probe-schema)
+        (db/transact! (:seon.store/connection-object opened)
                     {:tx-data [{:seon.export.test/marker "on-main"}]})
-        (d/branch! (:seon.store/connection opened) :db other-branch)
+        (d/branch! (:seon.store/connection-object opened) :db other-branch)
         (let [connection (store/open-branch! opened other-branch)]
           (try
             (db/transact! connection
@@ -107,9 +107,9 @@
           (try
             (is (false? (:seon.store/created? exported))
                 "the export opens as an existing store — it was not recreated")
-            (is (= #{"on-main"} (markers (:seon.store/connection exported))))
+            (is (= #{"on-main"} (markers (:seon.store/connection-object exported))))
             (testing "EVERY branch head was re-identified, not only :db"
-              (is (contains? (d/branches (:seon.store/connection exported))
+              (is (contains? (d/branches (:seon.store/connection-object exported))
                              other-branch))
               (let [connection (store/open-branch! exported other-branch)]
                 (try
@@ -117,15 +117,15 @@
                   (finally
                     (d/release connection)))))
             (testing "the export is writable — a copy, not a read-only image"
-              (db/transact! (:seon.store/connection exported)
+              (db/transact! (:seon.store/connection-object exported)
                           {:tx-data [{:seon.export.test/marker "post-export"}]})
               (is (= #{"on-main" "post-export"}
-                     (markers (:seon.store/connection exported)))))
+                     (markers (:seon.store/connection-object exported)))))
             (finally
               (store/release-store! exported))))
         (testing "the source is untouched by its own export"
-          (is (= #{"on-main"} (markers (:seon.store/connection store))))
-          (is (contains? (d/branches (:seon.store/connection store))
+          (is (= #{"on-main"} (markers (:seon.store/connection-object store))))
+          (is (contains? (d/branches (:seon.store/connection-object store))
                          other-branch)))))))
 
 (deftest an-export-never-overwrites-a-store
@@ -186,7 +186,7 @@
         (is (= path (export/reidentify! path)) "twice changes nothing")
         (let [exported (store/open-store! {:seon.store/dir path})]
           (try
-            (is (= #{"on-main"} (markers (:seon.store/connection exported))))
+            (is (= #{"on-main"} (markers (:seon.store/connection-object exported))))
             (finally
               (store/release-store! exported))))))))
 
@@ -203,7 +203,7 @@
         (let [dir (str root "/half/store")]
           (.mkdirs (.getParentFile (io/file dir)))
           (let [opened (store/open-store! {:seon.store/dir dir})]
-            (db/transact! (:seon.store/connection opened) probe-schema)
+            (db/transact! (:seon.store/connection-object opened) probe-schema)
             (store/release-store! opened))
           ;; the first-create kill window, manufactured exactly as B1's
           ;; own suite manufactures it

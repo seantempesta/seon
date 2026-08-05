@@ -138,7 +138,7 @@
 (defn put!
   "Store UTF-8 content once and return its SHA-256 digest."
   {:malli/schema
-   [:=> [:cat :seon.store/branch-connection :seon.blob/content]
+   [:=> [:cat :seon.db/connection :seon.blob/content]
     :seon.blob/digest]}
   [connection content]
   (let [octets (utf8-bytes content)
@@ -155,7 +155,7 @@
   written to one staging file under the process root before publication."
   {:malli/schema
    [:=>
-    [:cat :seon.store/branch-connection :seon.blob/input-stream]
+    [:cat :seon.db/connection :seon.blob/input-stream]
     :seon.blob/write-result]}
   [connection ^InputStream input]
   (let [store (konserve-store connection)
@@ -213,7 +213,7 @@
   "Read at most length exact binary bytes beginning at offset."
   {:malli/schema
    [:=>
-    [:cat :seon.store/branch-connection :seon.blob/digest
+    [:cat :seon.db/connection :seon.blob/digest
      :seon.blob/offset :seon.blob/length]
     [:maybe :seon.blob/octet-array]]}
   [connection content-digest offset length]
@@ -223,7 +223,7 @@
 (defn get
   "Read and verify UTF-8 content by SHA-256 digest."
   {:malli/schema
-   [:=> [:cat :seon.store/branch-connection :seon.blob/digest]
+   [:=> [:cat :seon.db/connection :seon.blob/digest]
     [:maybe :seon.blob/content]]}
   [connection content-digest]
   (when-let [octets

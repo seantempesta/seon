@@ -34,7 +34,7 @@
     (let [opened (store/open-store! {:seon.store/dir (str root "/store")})]
       (try
         (db/transact!
-         (:seon.store/connection opened)
+         (:seon.store/connection-object opened)
          [{:db/ident :seon.config.eval.result/blob-threshold
            :db/valueType :db.type/long
            :db/cardinality :db.cardinality/one}])

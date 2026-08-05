@@ -112,7 +112,7 @@
                   :seon.render.web/completion completion
                   :seon.render.web/root-agent-id "root"
                   :seon.cluster.loop/cluster
-                  {:seon.store/branch-connection connection
+                  {:seon.db/connection connection
                    :seon.cluster.loop/stream-channel stream-channel
                    :seon.sci.admit/caps
                    {:seon.config.eval.result/max-depth 6
@@ -140,7 +140,7 @@
 
 (defn- handle
   [connection ctx]
-  {:seon.store/branch-connection connection
+  {:seon.db/connection connection
    :seon.cluster/name
    (db/q '[:find ?cluster . :where [_ :seon.config/cluster ?cluster]]
         @connection)

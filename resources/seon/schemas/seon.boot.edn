@@ -48,7 +48,7 @@
              [:seon.store/store {:optional true} :seon.store/store]
              [:seon.boot/cluster-connection
               {:optional true}
-              :seon.store/connection]
+              :seon.store/connection-object]
              [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx]
              [:seon.boot/config-result
               {:optional true}

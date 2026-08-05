@@ -1,11 +1,5 @@
 #:seon.store{:branch :keyword,
-             :branch-connection
-             [:fn
-              {:error/message
-               "must be a live unreleased Datahike branch connection from the calling cluster"
-               :gen/gen seon.cluster.store/connection-generator}
-              seon.cluster.store/connection?],
-             :connection
+             :connection-object
              [:fn
               {:error/message
                "must be a Datahike connection object, live or released"
@@ -17,7 +11,7 @@
              [:map
               [:seon.store/dir :seon.store/dir]
               [:seon.store/lock-file :seon.store/lock-file]
-              [:seon.store/connection
+              [:seon.store/connection-object
                [:fn
                 {:error/message
                  "must be a live unreleased Datahike connection held by this process root"

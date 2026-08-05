@@ -736,7 +736,7 @@ blocked by later ones):
    cross-cluster damage vector.
 3. Ctx-derived custody: attach custody at `cluster-ctx` build, bind the
    compiled `seon.db/*conn*` from it in `evaluate`, delete
-   `:seon.store/branch-connection` from the request schema. Strictly
+   `:seon.db/connection` from the request schema. Strictly
    simpler than today — one fact instead of two that must agree.
 4. The `seon.db` surface itself (ruling #41).
 5. OWNER DECISION PENDING — the SCI fork changes: generation-stamped
@@ -1169,7 +1169,7 @@ THE THREE DESIGN LANES RETURNED — all measured, all with slice 1s ready:
   283 ms leaving EVERY turn for ~215 ms once at boot. A 17-var writable
   residue still crosses independent inits (metadata fix in our sci fork).
 - `plan/stateless-resume-design-2026-08-01.md`: proven end to end in a
-  fresh JVM; the `:seon.code.def` fact family; forms-are-truth; order
+  fresh JVM; the `:seon.def` fact family; forms-are-truth; order
   irrelevance via pre-interning; the blob decision derived, not tuned.
 - `plan/print-path-design-2026-08-01.md`: SEALED (ruling #26) and
   amended by the parity mining.

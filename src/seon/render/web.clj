@@ -321,7 +321,7 @@
   whole live set."
   [{:keys [:seon.db/db :seon.cluster.agent/id
            :seon.render.web/root-agent-id
-           :seon.store/branch-connection] caps :seon.sci.admit/caps
+           :seon.db/connection] caps :seon.sci.admit/caps
     live-processes :seon.cluster.run/live-processes
     stream-partial :seon.ai/partial
     retained :seon.render.web/retained-fragments
@@ -329,7 +329,7 @@
     :as request}]
   (let [captured-calls (atom {})
         render-request (assoc (walk-request db caps id :seon.render/html
-                                            branch-connection request)
+                                            connection request)
                               :seon.render/retained-calls retained-calls
                               :seon.render/captured-calls captured-calls)
         walked-units (render.walk/neighborhood render-request)
@@ -344,7 +344,7 @@
             (:seon.config.eval/time-limit-ms request)
             :seon.config/on-core-error
             (:seon.config/on-core-error request)
-            :seon.store/branch-connection branch-connection
+            :seon.db/connection connection
             :seon.cluster.run/live-processes live-processes}))
         fleet-output
         (some-> fleet-call
@@ -511,7 +511,7 @@
                  (:seon.config.eval/time-limit-ms handle)
                  :seon.config/on-core-error
                  (:seon.config/on-core-error handle)
-                 :seon.store/branch-connection connection
+                 :seon.db/connection connection
                  :seon.cluster.run/live-processes #{}})
         page (dissoc (:seon.render.web/page result) stream-strip-id)
         ai-id (str "debug-ai-" agent-id)]
@@ -635,7 +635,7 @@
   and a repair keyframe assembled from bytes already serialized by this proc."
   [{registration :seon.render.web/registration :as state}]
   (let [handle (:seon.cluster.loop/cluster state)
-        connection (:seon.store/branch-connection handle)
+        connection (:seon.db/connection handle)
         caps (:seon.sci.admit/caps handle)
         db @connection
         watched (into (sorted-set-by #(compare (pr-str %1) (pr-str %2)))
@@ -676,7 +676,7 @@
                                     (:seon.config.eval/time-limit-ms handle)
                                     :seon.config/on-core-error
                                     (:seon.config/on-core-error handle)
-                                    :seon.store/branch-connection connection
+                                    :seon.db/connection connection
                                     :seon.cluster.run/live-processes
                                     #{(:seon.cluster.run/process handle)}
                                     :seon.render.web/retained-fragments
@@ -858,7 +858,7 @@
                            [::streams (:seon.cluster.agent/id message)]
                            message)
                  state)
-         connection (:seon.store/branch-connection
+         connection (:seon.db/connection
                      (:seon.cluster.loop/cluster state))
          floor (coalesce-floor @connection)
          elapsed-ms (quot (- (System/nanoTime)
@@ -932,7 +932,7 @@
   [{registration :seon.render.web/registration
     render-channel :seon.render.web/render-channel
     pages-mult :seon.render.web/pages-mult
-    connection :seon.store/connection
+    connection :seon.store/connection-object
     latest-packages :seon.render.web/latest-packages}
    registration-key]
   (let [tap (async/chan (async/sliding-buffer 1))]
@@ -973,7 +973,7 @@
   virtual thread and one revision number; nothing outlives the socket."
   {:malli/schema [:=> [:cat :any :seon.render.web/feed-request] :any]}
   [request {:keys [:seon.cluster.agent/id]
-            connection :seon.store/connection
+            connection :seon.store/connection-object
             pages-mult :seon.render.web/pages-mult
             registration :seon.render.web/registration
             latest-packages :seon.render.web/latest-packages
@@ -1135,7 +1135,8 @@
   {:malli/schema [:=> [:cat :seon.render.web/service
                        :seon.render.web/inbound]
                   :any]}
-  [{:keys [:seon.store/connection :seon.cluster.agent/id]
+  [{connection :seon.store/connection-object
+    :keys [:seon.cluster.agent/id]
     caps :seon.sci.admit/caps
     process :seon.cluster.run/process}
    inbound]
@@ -1222,7 +1223,7 @@
        db))
 
 (defn- ensure-namespace-owner!
-  [{:keys [:seon.store/connection]
+  [{connection :seon.store/connection-object
     process :seon.cluster.run/process}
    namespace-name]
   (or (cluster.agent/owner-of @connection namespace-name)
@@ -1256,7 +1257,7 @@
              :seon.config/on-core-error
              (:seon.config/on-core-error render-context)}
       connection
-      (assoc :seon.store/branch-connection connection)))
+      (assoc :seon.db/connection connection)))
 
 (defn- ai-walk
   [db caps agent-id render-context]
@@ -1331,7 +1332,7 @@
                    {:debug "true"})})}))
 
 (defn- canonical-namespace-response
-  [{:keys [:seon.store/connection] :as service} debug? request]
+  [{connection :seon.store/connection-object :as service} debug? request]
   (let [namespace-name (some-> (get-in request [:path-params :namespace])
                                route-namespace)]
     (if-not (and namespace-name (namespace-exists? @connection namespace-name))
@@ -1346,7 +1347,7 @@
            :body (:seon.error/message owner)})))))
 
 (defn- agent-alias-response
-  [{:keys [:seon.store/connection] :as service} debug? request]
+  [{connection :seon.store/connection-object :as service} debug? request]
   (let [agent-id (get-in request [:path-params :id])]
     (if (agent-namespace @connection agent-id)
       (if debug?
@@ -1377,7 +1378,7 @@
                 :seon.render.web/root-agent-id
                 (:seon.cluster.agent/id service)}
                (select-keys service
-                            [:seon.store/connection
+                            [:seon.store/connection-object
                              :seon.sci.admit/caps
                              :seon.cluster.run/process
                              :seon.render.web/pages-mult
@@ -1387,7 +1388,8 @@
                              :seon.render.web/fault-channel]))))
 
 (defn- data-response
-  [{:keys [:seon.store/connection :seon.cluster.agent/id]
+  [{connection :seon.store/connection-object
+    :keys [:seon.cluster.agent/id]
     caps :seon.sci.admit/caps}
    request]
   (let [db @connection
@@ -1564,7 +1566,7 @@
   a decision like that does not belong in a default."
   {:malli/schema [:=> [:cat :seon.render.web/service] :seon.render.web/server]}
   [service]
-  (let [connection (:seon.store/connection service)
+  (let [connection (:seon.store/connection-object service)
         process (:seon.cluster.run/process service)
         ;; Transaction provenance resolves to a durable process entity.
         ;; This is convergent: a running service creates its row once,

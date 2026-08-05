@@ -39,13 +39,13 @@ index time (`src/seon/program.cljc:262-279`) and read at
 answers "what does this function want" as a query. The two batteries the
 owner named have **51 existing declared consumers** in first-party code
 alone: 42 functions declare `:seon.db/database-value` and 9 declare
-`:seon.store/branch-connection` (the worked examples in the repository
+`:seon.db/connection` (the worked examples in the repository
 authority). They currently receive those values by being threaded them.
 
 **The ambient values are already assembled per evaluation.**
 `seon.effect/*context*` (`src/seon/effect.clj:26`) is bound at
 `src/seon/sci/eval.clj:1600-1608` for every run form and carries
-`:seon.store/branch-connection`, `:seon.cluster.run/id`,
+`:seon.db/connection`, `:seon.cluster.run/id`,
 `:seon.cluster.run.form/ordinal`, `:seon.cluster.agent/id`,
 `:seon.boot/cluster-name`, `:seon.flow/work-launcher`, and
 `:seon.sci.admit/caps`. `seon.db/*conn*` (`db.clj:65`) holds the live
@@ -71,7 +71,7 @@ declaring one row.** That is the whole extensibility story.
 | Key | Schema | Provider computes from | Consumers today |
 |---|---|---|---|
 | `:seon.db/db` | `:seon.db/database-value` | `*conn*` at current basis | 42 |
-| `:seon.store/branch-connection` | same | `*conn*` / `*context*` | 9 |
+| `:seon.db/connection` | same | `*conn*` / `*context*` | 9 |
 | `:seon.cluster.agent/id` | `:seon.cluster.agent/id` | `*context*` | — |
 | `:seon.boot/cluster-name` | `:seon.cluster/name` | `*context*` | — |
 | `:seon.cluster.run/id` | `:seon.cluster.run/id` | `*context*` | — |
@@ -83,7 +83,7 @@ real caller wants (the scheduled-fire path is the first candidate for
 run/agent identity).
 
 **Custody is a real decision, not an accident.** `:seon.db/db` is an
-immutable value; `:seon.store/branch-connection` is WRITE custody. The
+immutable value; `:seon.db/connection` is WRITE custody. The
 repository authority frames the 9 connection-declaring functions as
 exactly "which functions need cluster custody". Auto-supplying custody to
 anything that declares it is consistent with ruling #20 and the

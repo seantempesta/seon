@@ -411,7 +411,7 @@
 (defn apply-compiled!
   "Exact-reconcile one already-compiled desired config row."
   {:malli/schema
-   [:=> [:cat :seon.store/branch-connection :seon.config/compiled]
+   [:=> [:cat :seon.db/connection :seon.config/compiled]
     :seon.reconcile/result]}
   [connection compiled]
   (let [desired
@@ -463,7 +463,7 @@
    [:=> [:cat :seon.config/apply-request] :seon.reconcile/result]}
   [request]
   (apply-compiled!
-   (:seon.config/connection request)
+   (:seon.db/connection request)
    (compile-manifest
     (select-keys
      request

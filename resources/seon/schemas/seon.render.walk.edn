@@ -22,9 +22,9 @@
                    [:map
                     [:seon.db/db :seon.db/database-value]
                     [:seon.sci.eval/ctx :seon.sci.eval/ctx]
-                    [:seon.store/branch-connection
+                    [:seon.db/connection
                      {:optional true}
-                     :seon.store/branch-connection]
+                     :seon.db/connection]
                     [:seon.render.walk/lookup :seon.render.walk/lookup]
                     [:seon.render/output
                      [:enum :seon.render/ai :seon.render/html]]

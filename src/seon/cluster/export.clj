@@ -131,7 +131,7 @@
   into a branch forked from an already-populated `:db` would assert
   every shared datom twice."
   [store ^java.io.File target]
-  (let [source-connection (:seon.store/connection store)
+  (let [source-connection (:seon.store/connection-object store)
         others (disj (set (d/branches source-connection)) :db)
         configuration (store/datahike-configuration (.getPath target))
         datoms-dir (io/file (str (.getPath target) ".datoms"))]

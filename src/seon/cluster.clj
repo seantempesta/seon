@@ -575,7 +575,7 @@
      (locking root-store-holder
        (if-let [held (get @root-store-holder store-key)]
          (let [store (:seon.store/store held)
-               main-connection (:seon.store/connection store)
+               main-connection (:seon.store/connection-object store)
                held-keep-history?
                (get-in @main-connection [:config :keep-history?])]
            (when (and requested?
@@ -758,10 +758,10 @@
   bootstrap content lives in the source branch), and the canonical schema rows
   asserted with that process provenance."
   {:malli/schema
-   [:=> [:cat [:map [:seon.store/branch-connection
-                     :seon.store/branch-connection]]]
+   [:=> [:cat [:map [:seon.db/connection
+                     :seon.db/connection]]]
     :nil]}
-  [{connection :seon.store/branch-connection
+  [{connection :seon.db/connection
     manifest :seon.fn/manifest}]
   (accrete-schema-population! connection nil)
   (let [rows (bootstrap/population-tx @connection)]
@@ -785,7 +785,7 @@
                        [:seon.db.process/id boot-process-identity]}})
        {:seon.boot/population :seon.cluster.instruction/rows})))
   (seon.fn/index!
-   (cond-> {:seon.store/branch-connection connection
+   (cond-> {:seon.db/connection connection
             :seon.db/process
             [:seon.db.process/id boot-process-identity]}
      manifest (assoc :seon.fn/manifest manifest)
@@ -1180,7 +1180,7 @@
 (defn ensure-cluster-entity!
   "Exactly converge the branch-local cluster entity's shared base set."
   {:malli/schema
-   [:=> [:cat :seon.store/branch-connection
+   [:=> [:cat :seon.db/connection
          :seon.cluster/name
          :seon.db.process/id]
     :nil]}
@@ -1294,7 +1294,7 @@
   An existing agent resumes untouched, so the result is always derived from
   the committed database value rather than from the caller's request."
   {:malli/schema
-   [:=> [:cat :seon.store/branch-connection
+   [:=> [:cat :seon.db/connection
          :seon.db.process/id
          :seon.cluster.agent/creation-request]
     [:or :seon.cluster.agent/creation-result :seon.error/value]]}
@@ -1382,7 +1382,7 @@
                 ;; reads it from the config facts per pass (F2 §1.2), so
                 ;; a live dial change applies without restarting a tab.
                 (merge {:seon.render.web/port wanted
-                        :seon.store/connection connection
+                        :seon.store/connection-object connection
                         :seon.cluster.agent/id root-agent-id
                         :seon.sci.admit/caps (config/result-caps dials)}
                        (select-keys view
@@ -1578,7 +1578,7 @@
   [connection cluster-name process ctx work-launcher
    wake-channel stream-channel context-channel completion]
   (let [dials (config/effective @connection cluster-name)]
-    (cond-> {:seon.store/branch-connection connection
+    (cond-> {:seon.db/connection connection
               :seon.cluster/name cluster-name
               :seon.cluster.run/process process
               :seon.flow/work-launcher work-launcher
@@ -1810,7 +1810,7 @@
     (web/stop! served))
   (when-let [handle (:seon.cluster.loop/cluster instance)]
     (wake/unlisten! {:seon.cluster.wake/connection
-                     (:seon.store/branch-connection handle)
+                     (:seon.db/connection handle)
                      :seon.cluster.wake/key :seon.cluster.agent/route}))
   (when-let [handle (:seon.cluster.loop/cluster instance)]
     (let [armer-channel (:seon.cluster.wake/channel handle)

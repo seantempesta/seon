@@ -129,7 +129,7 @@ shape—bounded window, digest/size envelope, and binary payload—is smaller th
 the full inline receipt. Such receipts keep the bounded projection plus
 `:seon.cluster.eval/result-blob` and `/result-size`; provider attempts use the
 same digest family for large reasoning content; durable session definitions
-may use `:seon.code.def/blob` and `/size`.
+may use `:seon.def/blob` and `/size`.
 
 Blob state never becomes a second lifecycle or replay log. The referencing row
 carries the semantic identity, digest, and size. Consumer presentation is
@@ -175,7 +175,7 @@ Program rows provide the source side of a forensic answer:
 - `:seon.ns` retains source and effective resolver bindings;
 - `:seon.schema` retains canonical forms;
 - `:seon.test` and test observation rows retain recurring proof; and
-- `:seon.code.def` retains the namespace session image used by cold restore.
+- `:seon.def` retains the namespace session image used by cold restore.
 
 Effective AI settings are recorded on every provider attempt, so a config
 change after the call cannot rewrite history. The live config remains ordinary

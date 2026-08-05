@@ -412,7 +412,7 @@
   returning {::converged? false ::operations n}. Refusals are `plan`'s,
   surfaced before any transaction when the pre-check already sees them
   and atomically from inside the writer otherwise."
-  {:malli/schema [:=> [:cat :seon.store/branch-connection ::request] ::result]}
+  {:malli/schema [:=> [:cat :seon.db/connection ::request] ::result]}
   [connection request]
   (let [tx-data (plan @connection request)
         operations (count tx-data)]

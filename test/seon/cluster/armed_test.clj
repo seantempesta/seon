@@ -289,7 +289,7 @@
            ;; Boot must already have registered the routing listener.
            (test-support/await-event! primed "boot arm prime")
            (db/transact!
-            (:seon.store/branch-connection
+            (:seon.db/connection
              (:seon.cluster.loop/cluster request))
             [{:seon.cluster.message/id "boot-window-message"
               :seon.cluster.message/to [:seon.cluster.agent/id "root"]

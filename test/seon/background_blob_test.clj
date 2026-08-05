@@ -24,7 +24,7 @@
                   {:seon.store/dir (str root "/store")})]
       (try
         ((ns-resolve 'seon.test-support 'populate-database!)
-         (:seon.store/connection opened))
+         (:seon.store/connection-object opened))
         (registry/branch! {:seon.store/store opened
                            :seon.cluster.registry/from :db
                            :seon.store/branch :background-effect-binary-test})
@@ -118,7 +118,7 @@
                :seon.config.flow.io/queue-depth 2
                :seon.config.flow.io/concurrency 2}})
             context
-            {:seon.store/branch-connection connection
+            {:seon.db/connection connection
              :seon.cluster.agent/id "binary-agent"
              :seon.cluster.run/id "binary-run"
              :seon.cluster.run.form/ordinal 0

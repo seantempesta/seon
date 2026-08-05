@@ -89,7 +89,7 @@
        ;; boundary instead of replacing them with quoted lint values.
        (with-redefs [cluster.loop/lint-form
                      (fn [{source :seon.cluster.loop/source}] source)]
-         (body {:seon.store/branch-connection connection
+         (body {:seon.db/connection connection
                 :seon.cluster/name "generate-code-v0"
                 :seon.flow/work-launcher launcher
                 :seon.cluster.run/process process
@@ -118,7 +118,7 @@
   Production gives every agent its own turn proc; one thread asking each
   agent's OWN derivation in turn drives the same code."
   [cluster limit]
-  (let [connection (:seon.store/branch-connection cluster)]
+  (let [connection (:seon.db/connection cluster)]
     (loop [passes 0]
       (when (< passes limit)
         ;; a deterministic clock that still advances: run order is a
@@ -264,7 +264,7 @@
 (deftest a-goal-is-a-message-and-the-attempt-routes-its-own-failures
   (with-gen-cluster
    (fn [cluster]
-     (let [connection (:seon.store/branch-connection cluster)]
+     (let [connection (:seon.db/connection cluster)]
        ;; THE SURFACE: no new agent-facing construct — root's goal is an
        ;; ordinary message, and everything after it is the system's own
        ;; doing.
@@ -425,7 +425,7 @@
   ;; still complete with a confident lie.
   (with-gen-cluster
    (fn [cluster]
-     (let [connection (:seon.store/branch-connection cluster)]
+     (let [connection (:seon.db/connection cluster)]
        (db/transact! connection
                    [{:seon.cluster.message/id "goal-1"
                      :seon.cluster.message/to
@@ -464,7 +464,7 @@
   ;; convention — are what say so.
   (with-gen-cluster
    (fn [cluster]
-     (let [connection (:seon.store/branch-connection cluster)]
+     (let [connection (:seon.db/connection cluster)]
        (db/transact! connection
                    [{:seon.cluster.message/id "goal-1"
                      :seon.cluster.message/to

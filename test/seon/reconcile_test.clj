@@ -43,7 +43,7 @@
     (let [connection (d/connect configuration)]
       (try
         (cluster/populate-source!
-         {:seon.store/branch-connection connection
+         {:seon.db/connection connection
           :seon.fn/manifest @test-support/source-manifest})
         (db/transact! connection
                     {:tx-data

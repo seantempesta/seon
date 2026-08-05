@@ -166,7 +166,7 @@
              {:seon.source/digest source-digest})
             (populate-fn
              (merge population-data
-                    {:seon.store/branch-connection connection
+                    {:seon.db/connection connection
                      :seon.source/digest source-digest}))
             ;; The source seal is the genesis boundary. Population must first
             ;; install canonical schema/program rows and boot/config process

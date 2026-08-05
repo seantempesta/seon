@@ -233,7 +233,7 @@
      (if-some [_ready (async/<!! completion)]
        (try
          (let [agent-id (:seon.cluster.agent/id state)
-               connection (:seon.store/branch-connection cluster)
+               connection (:seon.db/connection cluster)
                process (:seon.cluster.run/process cluster)
                now (Date.)
                ;; SETTLE BEFORE DERIVING, scoped to this agent: an orphaned
@@ -413,7 +413,7 @@
     agent-id :seon.cluster.agent/id
     routing :seon.cluster.agent/routing}]
   (or (armed routing agent-id)
-      (let [connection (:seon.store/branch-connection handle)
+      (let [connection (:seon.db/connection handle)
             eid (db/q '[:find ?agent .
                        :in $ ?id
                        :where [?agent :seon.cluster.agent/id ?id]]
@@ -498,7 +498,7 @@
   [routing entry]
   (let [completion (:seon.cluster.loop/completion entry)
         turn-stopped (:seon.cluster.agent/turn-stopped entry)
-        {connection :seon.store/branch-connection
+        {connection :seon.db/connection
          cluster-name :seon.cluster/name}
         (:seon.cluster.loop/cluster entry)
         database-event (async/chan (async/sliding-buffer 1))
@@ -650,7 +650,7 @@
      :else
      (let [handle (:seon.cluster.loop/cluster state)
            routing (:seon.cluster.agent/routing state)
-           db @(:seon.store/branch-connection handle)
+           db @(:seon.db/connection handle)
            agents (db/q '[:find [?id ...]
                          :where [_ :seon.cluster.agent/id ?id]]
                        db)

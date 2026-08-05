@@ -209,7 +209,7 @@
   [run-tests]
   (test-support/with-database
     (fn [connection]
-      (config/apply! {:seon.config/connection connection
+      (config/apply! {:seon.db/connection connection
                       :seon.config/manifest
                       {:seon.config/on-core-error :record}})
       (binding [*database* @connection]

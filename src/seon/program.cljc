@@ -8,7 +8,7 @@
 (def identity-attributes
   "Program-row identity attributes in deterministic admission order."
   [:seon.ns/name :seon.fn/sym :seon.schema/key :seon.test/sym
-   :seon.code.def/id])
+   :seon.def/id])
 
 (def shapes
   "Program-row shapes keyed by their database identity attribute."
@@ -40,14 +40,14 @@
     [:seon.test/sym :seon.test/ns :seon.test/source :seon.fn/calls
      :seon.fn/keywords :seon.test/subject
      :seon.schema.admission/source]}
-   :seon.code.def/id
-   {:seon.program/identity-attribute :seon.code.def/id
-    :seon.program/source-attribute :seon.code.def/source
+   :seon.def/id
+   {:seon.program/identity-attribute :seon.def/id
+    :seon.program/source-attribute :seon.def/source
     :seon.program/owned-attributes
-    [:seon.code.def/id :seon.code.def/ns :seon.code.def/name
-     :seon.code.def/value-edn :seon.code.def/blob :seon.code.def/size
-     :seon.code.def/source :seon.code.def/unrestorable
-     :seon.code.def/ordinal :seon.schema.admission/source]}})
+    [:seon.def/id :seon.def/ns :seon.def/name
+     :seon.def/value-edn :seon.def/blob :seon.def/size
+     :seon.def/source :seon.def/unrestorable-reason
+     :seon.def/ordinal :seon.schema.admission/source]}})
 
 (defn shape
   "The program shape owned by `identity-attribute`."
@@ -371,8 +371,8 @@
                  :seon.fn/private?]
    :seon.schema/key [:seon.schema/form]
    :seon.test/sym [:seon.test/ns :seon.test/source]
-   :seon.code.def/id [:seon.code.def/ns :seon.code.def/name
-                      :seon.code.def/ordinal]})
+   :seon.def/id [:seon.def/ns :seon.def/name
+                      :seon.def/ordinal]})
 
 (defn declaration-row
   "Canonical declaration row for a reader event under a function policy.
@@ -393,7 +393,7 @@
           event
           (:seon.schema/key event) event
           (:seon.test/sym event) event
-          (:seon.code.def/id event) event
+          (:seon.def/id event) event
           :else nil)
         candidate
         (if (and (:seon.schema/key candidate)

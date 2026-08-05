@@ -50,8 +50,8 @@
                 :seon.effect/interrupted-at]],
               :request-context
               [:map
-               [:seon.store/branch-connection
-                :seon.store/branch-connection]
+               [:seon.db/connection
+                :seon.db/connection]
                [:seon.cluster.run/id :seon.cluster.run/id]
                [:seon.cluster.run.form/ordinal
                 :seon.cluster.run.form/ordinal]

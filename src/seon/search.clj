@@ -262,7 +262,7 @@
 (defn open!
   "Open the one derived index for `connection`, rebuilding from its current
   database value unless the on-disk commit records that exact basis."
-  {:malli/schema [:=> [:cat :seon.store/branch-connection :string] :string]}
+  {:malli/schema [:=> [:cat :seon.db/connection :string] :string]}
   [connection path]
   (let [index-id path]
     (when (get-in @owners [:seon.search/by-connection connection])

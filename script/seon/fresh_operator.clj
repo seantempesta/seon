@@ -2056,7 +2056,7 @@
         (throw (ex-info "The cluster is not running."
                         {:seon.boot/cluster-name ~name})))
       (seon.config/apply!
-       {:seon.config/connection
+       {:seon.db/connection
         (:seon.boot/cluster-connection instance#)
         :seon.boot/cluster-name ~name
         :seon.config/manifest ~manifest}))))

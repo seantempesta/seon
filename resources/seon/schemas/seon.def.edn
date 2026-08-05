@@ -1,0 +1,33 @@
+#:seon.def{:blob :seon.blob/digest,
+                :def
+                [:map
+                 #:seon.db{:entity true}
+                 [:seon.def/id :seon.def/id]
+                 [:seon.schema.admission/source
+                  :seon.schema.admission/source]
+                 [:seon.def/ns :seon.def/ns]
+                 [:seon.def/name :seon.def/name]
+                 [:seon.def/value-edn
+                  {:optional true}
+                  :seon.def/value-edn]
+                 [:seon.def/blob
+                  {:optional true}
+                  :seon.def/blob]
+                 [:seon.def/size
+                  {:optional true}
+                  :seon.def/size]
+                 [:seon.def/source
+                  {:optional true}
+                  :seon.def/source]
+                 [:seon.def/unrestorable-reason
+                  {:optional true}
+                  :seon.def/unrestorable-reason]
+                 [:seon.def/ordinal :seon.def/ordinal]],
+                :id [:string {:min 1, :seon.db/identity true}],
+                :name :symbol,
+                :ns :seon.db/ref,
+                :ordinal [:int {:min 0}],
+                :size [:int {:min 0}],
+                :source [:string {:min 1}],
+                :unrestorable-reason [:string {:min 1}],
+                :value-edn :string}

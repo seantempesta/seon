@@ -23,7 +23,7 @@
 (defn- settlement
   [connection result-edn]
   (#'loop/settlement-result
-   {:seon.store/branch-connection connection
+   {:seon.db/connection connection
     :seon.sci.admit/caps caps}
    {:seon.cluster.eval/result-edn result-edn}))
 

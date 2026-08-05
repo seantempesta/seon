@@ -33,7 +33,7 @@ the agent's own. The bootstrap teaches the contract explicitly.
 
 ## 2. Desk facts — `:seon.def/*` (the session-image mechanism dies)
 
-The separate `:seon.code.def` session-image family and its write path
+The separate `:seon.def` session-image family and its write path
 are DELETED. The capability survives as agent-scoped **desk facts**
 written through the one admission seam:
 
@@ -141,7 +141,7 @@ exists. The mappings told to agents:
 
 1. **W-A — desk facts**: `:seon.def/*` shapes declared; run-settlement
    write path through the admission seam; fork rehydration; the
-   `:seon.code.def` write path and restore machinery deleted in the
+   `:seon.def` write path and restore machinery deleted in the
    same commit. Proof: define fn + data + atom in run 1 → JVM kill →
    next run sees all three, atom snapshot stated, REPL states anything
    lost; explicit clear empties the desk.

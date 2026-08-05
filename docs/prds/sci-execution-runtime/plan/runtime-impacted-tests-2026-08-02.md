@@ -98,7 +98,7 @@ today. **The owner explicitly authorizes the fix at the one producer
 `unproven-called-vars` — "Non-builtin Vars occurring in call position",
 resolved through `sci/resolve` against the live ctx, plus
 `resolved-form-vars` (`eval.clj:521-537`) for every mentioned Var. Both
-are attached to `:seon.code.def` session rows
+are attached to `:seon.def` session rows
 (`changed-session-defs`, `eval.clj:600-632`) — and the contracted function
 is explicitly *removed* from that path (`eval.clj:608`), so the one row
 that most needs edges is the one row that never gets them.
@@ -208,7 +208,7 @@ Three changes, all at existing owners, no new namespace:
 2. **The runtime producer attaches edges.** `seon.sci.eval`'s
    `unproven-called-vars` (`eval.clj:539-559`) is already the correct
    resolver; route it onto the contracted-function row in `program-row`
-   (`eval.clj:426-450`) instead of only onto `:seon.code.def` rows,
+   (`eval.clj:426-450`) instead of only onto `:seon.def` rows,
    filtered to symbols that have a `:seon.fn/sym` row (the same
    first-party admission the build path applies at `fn.clj:220-223`).
    Symbols with no row are NOT dropped silently — they are the

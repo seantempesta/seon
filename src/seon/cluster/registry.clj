@@ -108,7 +108,7 @@
   (`reference-code/datahike/src/datahike/versioning.cljc:206-214`)."
   {:malli/schema [:=> [:cat :seon.store/store] :seon.cluster.registry/roster]}
   [store]
-  (set (d/branches (:seon.store/connection store))))
+  (set (d/branches (:seon.store/connection-object store))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Reading what the store already knows
@@ -121,7 +121,7 @@
 ;;; is exactly why the roster mutation is serialized by store id in the
 ;;; fork; for plain reads either instance answers the same bytes.
 (defn- konserve-store [store]
-  (:store @(:seon.store/connection store)))
+  (:store @(:seon.store/connection-object store)))
 
 (defn- head-record
   "The stored record under a branch keyword or a commit id."
@@ -179,7 +179,7 @@
   (if (contains? (roster store) branch)
     {:seon.store/branch branch :seon.cluster/created? false}
     (try
-      (d/branch! (:seon.store/connection store) source branch)
+      (d/branch! (:seon.store/connection-object store) source branch)
       {:seon.store/branch branch :seon.cluster/created? true}
       (catch clojure.lang.ExceptionInfo failure
         (case (:type (ex-data failure))
@@ -276,7 +276,7 @@
                (str "branch " branch " still has a connection in this process")
                {::dir (:seon.store/dir store) :seon.store/branch branch}))
     (try
-      (d/delete-branch! (:seon.store/connection store) branch)
+      (d/delete-branch! (:seon.store/connection-object store) branch)
       (catch clojure.lang.ExceptionInfo failure
         ; the roster is the fact: a branch already gone is already done
         (when-not (= :branch-does-not-exist (:type (ex-data failure)))
@@ -300,7 +300,7 @@
 
 (defn- branch-blobs
   [store branch]
-  (let [db (d/branch-as-db (:seon.store/connection store) branch)]
+  (let [db (d/branch-as-db (:seon.store/connection-object store) branch)]
     (try
       (let [digest-attributes (blob-digest-attributes db)
             history-view (db/history db)
@@ -355,5 +355,5 @@
                                (into reachable blob-keys)
                                cutoff
                                batch-size)))]
-        (count @(d/gc-storage (:seon.store/connection store)
+        (count @(d/gc-storage (:seon.store/connection-object store)
                               remove-before)))))))

@@ -276,7 +276,7 @@
 (defn- full-transcript [db agent-id instance settings]
   (transcript/render-ai
    {:seon.db/db db
-    :seon.store/branch-connection (:seon.boot/cluster-connection instance)
+    :seon.db/connection (:seon.boot/cluster-connection instance)
     :seon.sci.eval/ctx (:seon.sci.eval/ctx instance)
     :seon.cluster.agent/id agent-id
     :seon.sci.admit/caps (config/result-caps settings)

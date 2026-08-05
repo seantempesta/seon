@@ -27,7 +27,7 @@
   (d/create-database configuration)
   (let [connection (d/connect configuration)]
     (try
-      (cluster/populate-source! {:seon.store/branch-connection connection})
+      (cluster/populate-source! {:seon.db/connection connection})
       (db/transact! connection
                   {:tx-data
                    [{:seon.source/digest (apply str (repeat 64 "0"))}

@@ -101,7 +101,7 @@ entity. The architecture's durable natural keys are:
 | namespace | `:seon.ns/name` |
 | schema | `:seon.schema/key` |
 | test | `:seon.test/sym` |
-| durable REPL definition | `:seon.code.def/id` |
+| durable REPL definition | `:seon.def/id` |
 
 The test-observation families add `:seon.test.run/id`,
 `:seon.test.result/id`, and `:seon.test.failure/id`. No durable identity exists
@@ -127,7 +127,7 @@ The central plain connections are:
 - `:seon.cluster.message/about` → the fact a message assigns or explains;
 - `:seon.context.capture/run` and `:seon.ai.attempt/run` → their run; and
 - program-graph refs such as `:seon.fn/ns`, `:seon.fn/calls`,
-  `:seon.fn.arity/input`, and `:seon.code.def/ns` → canonical program rows.
+  `:seon.fn.arity/input`, and `:seon.def/ns` → canonical program rows.
 
 Component relationships are reserved for owned bounded children. The current
 families use them for context contributions, function arities and Malli AST
@@ -292,7 +292,7 @@ normalization and retry disposition derive at read.
 | `:seon.schema/schema` | `:seon.schema/key`, `:seon.schema.admission/source`, `/form`, optional `:seon.db.id/generator` |
 | `:seon.ns/ns` | `:seon.ns/name`, `:seon.schema.admission/source`, optional `/source`, `/doc`, `/requires`, `/aliases`, `/imports`, `/refers` |
 | `:seon.test/test` | `:seon.test/sym`, `:seon.schema.admission/source`, `/ns`, `/source`, optional `:seon.fn/calls`, `:seon.test/subject` |
-| `:seon.code.def/def` | `:seon.code.def/id`, `:seon.schema.admission/source`, `/ns`, `/name`, optional `/value-edn`, `/blob`, `/size`, `/source`, `/unrestorable`, plus `/ordinal` |
+| `:seon.def/def` | `:seon.def/id`, `:seon.schema.admission/source`, `/ns`, `/name`, optional `/value-edn`, `/blob`, `/size`, `/source`, `/unrestorable`, plus `/ordinal` |
 
 Function contracts persist twice through one producer: `/spec` retains the
 canonical Malli form, while `/arities` and `/ast` point to ordered component
@@ -314,7 +314,7 @@ queries derive projected, bypass, and unresolved consumer crossings without a
 hand-maintained sink list.
 
 Namespace alias, import, and refer bindings are owned component rows. They
-preserve SCI's effective resolver inputs. `:seon.code.def` stores one current
+preserve SCI's effective resolver inputs. `:seon.def` stores one current
 REPL definition per namespace/name: a replay-safe source, a faithful inline or
 blob value, or an honest unrestorable reason. Restore order derives from
 `/ordinal`; namespace identity, not an agent-private context, owns the image.

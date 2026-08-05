@@ -51,7 +51,7 @@
   ([connection]
    (request-context connection nil))
   ([connection launcher]
-   {:seon.store/branch-connection connection
+   {:seon.db/connection connection
     :seon.cluster.agent/id "effect-agent"
     :seon.cluster.run/id "effect-run"
     :seon.cluster.run.form/ordinal 3

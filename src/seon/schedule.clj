@@ -228,7 +228,7 @@
   manufacture an unbounded replay storm. Returns the number of newly committed
   fires."
   {:malli/schema
-   [:=> [:cat :seon.store/branch-connection :seon.cluster.agent/id :inst]
+   [:=> [:cat :seon.db/connection :seon.cluster.agent/id :inst]
     :seon.schedule/fire-count]}
   [connection agent-id observed-at]
   (reduce
@@ -344,7 +344,7 @@
           ::listener-key (random-uuid)))
   ([state transition]
    (let [connection (get-in state [:seon.cluster.loop/cluster
-                                   :seon.store/branch-connection])
+                                   :seon.db/connection])
          listener-key (::listener-key state)]
      (case transition
        ::flow/resume
@@ -370,7 +370,7 @@
        state)))
   ([state _input _message]
    (let [connection (get-in state [:seon.cluster.loop/cluster
-                                   :seon.store/branch-connection])
+                                   :seon.db/connection])
          agent-id (:seon.cluster.agent/id state)
          observed-at (Date.)
          fires (fire-due! connection agent-id observed-at)

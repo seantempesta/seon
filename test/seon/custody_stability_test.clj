@@ -17,11 +17,11 @@
 
 (def ^:private custody-output-schema-keys
   #{:seon.store/store
-    :seon.store/branch-connection
+    :seon.db/connection
     :seon.sci.eval/ctx})
 
 (def ^:private expected-custody-returning-functions
-  #{["seon.cluster.store/open-branch!" :seon.store/branch-connection]
+  #{["seon.cluster.store/open-branch!" :seon.db/connection]
     ["seon.cluster.store/open-store!" :seon.store/store]
     ["seon.sci.eval/build-base-ctx" :seon.sci.eval/ctx]
     ["seon.sci.eval/cluster-ctx" :seon.sci.eval/ctx]})

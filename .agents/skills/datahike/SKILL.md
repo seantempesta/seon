@@ -629,7 +629,7 @@ listener is the sanctioned alternative to polling or a tuned timeout
 | `test/seon/cluster/run_test.clj` | the fixture + how to assert commit and refusal |
 | `src/seon/fn.clj` | static first-party rows plus global schema EDN rows; `current-src` publication only |
 | `src/seon/sci/eval.clj` | selective runtime publication of contracted functions, schemas, tests |
-| `src/seon/cluster/loop.clj` | terminal receipt plus exact `:seon.code.def` reconciliation |
+| `src/seon/cluster/loop.clj` | terminal receipt plus exact `:seon.def` reconciliation |
 | program families under `resources/seon/schemas/` | program rows and durable session-image schemas |
 | `test/seon/sci/session_image_test.clj` | cold session-image restoration acceptance |
 | `reference-code/datahike/src/datahike/api/impl.cljc` | accepted transact argument shapes |
