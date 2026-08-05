@@ -377,6 +377,7 @@
   []
   (let [root (run-root "current-operator")
         _ (.mkdirs (io/file root))
+        init-result (process-output ["bin/seon" "--root" root "init"])
         start-result (process-output ["bin/seon" "--root" root "start"
                                       "writer-class-loading"])]
     (try
@@ -384,6 +385,11 @@
         (if-not (and (zero? (:writer-class-loading/exit start-result)) ad)
           {:writer-class-loading/experiment :current-immutable-operator-cache
            :writer-class-loading/status :operator-did-not-start
+           :writer-class-loading/init-exit (:writer-class-loading/exit init-result)
+           :writer-class-loading/init-output-tail
+           (vec (take-last 12
+                           (str/split-lines
+                            (:writer-class-loading/output init-result))))
            :writer-class-loading/start-exit (:writer-class-loading/exit start-result)
            :writer-class-loading/start-output-tail
            (vec (take-last 20
@@ -392,6 +398,10 @@
            :writer-class-loading/advertisement ad}
           (assoc (prepl-eval ad (current-operator-form))
                  :writer-class-loading/experiment :current-immutable-operator-cache
+                 :writer-class-loading/init-output-tail
+                 (vec (take-last 12
+                                 (str/split-lines
+                                  (:writer-class-loading/output init-result))))
                  :writer-class-loading/start-output-tail
                  (vec (take-last 12
                                  (str/split-lines
