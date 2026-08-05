@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, web, effect, admission]
 ---
@@ -50,3 +50,23 @@ result shape.
 - Direct and public effect search return the same declared result keys.
 - `:my.web/credits` survives admission and the stored effect result.
 - The focused `seon.web.jvm-test` namespace is green.
+
+## Resolution — 2026-08-05
+
+The failure was a test-fixture config defect, not result admission. The test
+transacted only its web-specific settings, but `seon.config/effective` requires
+the complete effective config row. It therefore handed the web handler a flat
+`:seon.config/missing-effective` error value; the assertion then read the
+absent `:my.web/credits` key from that error and incorrectly attributed the nil
+to admission.
+
+Commit `60b052341` fixed the root by merging `seon.config/defaults` into the
+test's effective config row before applying the local provider overrides. The
+same test now exercises the real search result through `my.web/search`, the one
+effect admission pass, and receipt settlement. Its returned value contains
+`:my.web/credits 1` and equals the EDN read from
+`:seon.effect/result-edn`.
+
+The focused `seon.web.jvm-test` gate passed 6 tests / 32 assertions with zero
+failures or errors at `60b052341`. This includes both the direct provider-shape
+test and `public-search-settles-one-receipt-with-provider-credits`.
