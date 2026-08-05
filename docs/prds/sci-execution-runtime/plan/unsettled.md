@@ -44,7 +44,7 @@ P1 = EXCLUSIVE SWEEP, design sealed
 one reachability gate, loud retryable start refusal, two-sided blob
 permit, MCP durable no-history artifact fact). P13 = THE TWO-WORLD DESK
 ([agent-desk-and-checkout-prd-2026-08-05.md](agent-desk-and-checkout-prd-2026-08-05.md):
-`:seon.def/*` session facts at run settlement, snapshot-stated atoms,
+`:seon.def/*` desk facts at turn settlement, snapshot-stated atoms,
 explicit-only session end, per-turn freshness, the agent checkout +
 per-run override, the git framing with `my.branch`). Maintenance is
 TURN-FREE with root's green/red report
@@ -66,10 +66,12 @@ pre-rename `401fd300e`), FIXES rename fallout itself, files issues for
 pre-existing classes. NOTE: no green FULL gate has been seen since
 before the 08-04 wave — do not assume the baseline was green.
 
-NEXT, in order (owner-ruled): (1) triage returns → review the
-attribution table; (2) FOUR PARALLEL implementation lanes on the
-renamed tree — ops/maintenance impl, desk W-A, sweep gate + falsifiers,
-P12 indexing — with each remaining red folded into the lane owning its
+LANDED: desk W-A (`190eed2fe`, `c124ffe56`, `f908a5939`, `0811e5bc6`,
+`55504e6fe`) supplies agent-scoped turn-settlement facts, per-turn forks,
+snapshot-stated atoms, explicit clearing, and a recurring two-JVM kill-9
+proof. P12 and ops/maintenance also landed. NEXT, in order (owner-ruled):
+(1) review remaining gate attribution; (2) finish sweep gates and remaining
+small fix lanes, with each remaining red folded into the lane owning its
 seam (disarm-wait → ops/agent lifecycle; blob staging → sweep; config
 application → ops) and disjoint reds (search apply-report!, web
 credits) as small fix lanes; (3) blob-permit slice after W-A, then the

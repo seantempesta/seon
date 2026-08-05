@@ -175,7 +175,7 @@ Program rows provide the source side of a forensic answer:
 - `:seon.ns` retains source and effective resolver bindings;
 - `:seon.schema` retains canonical forms;
 - `:seon.test` and test observation rows retain recurring proof; and
-- `:seon.def` retains the namespace session image used by cold restore.
+- `:seon.def` retains each agent's desk definitions used by per-turn restore.
 
 Effective AI settings are recorded on every provider attempt, so a config
 change after the call cannot rewrite history. The live config remains ordinary
@@ -234,7 +234,7 @@ and the ordinary message/run path.
   evidence shapes.
 - `src/seon/context.clj` commits captures from rendered context.
 - `src/seon/cluster/loop.clj` opens attempts and receipts, persists blobs and
-  session definitions, and settles the fold.
+  desk definitions, and settles the fold.
 - `src/seon/cluster/run.clj` owns settle-once and recovery transitions.
 - `src/seon/render/transcript.clj` owns the message/receipt queries and REPL
   interleave.

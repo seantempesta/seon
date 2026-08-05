@@ -112,7 +112,7 @@ exists. The mappings told to agents:
 | Seon | Git |
 |---|---|
 | the desk (uncommitted session defs/atoms) | the working tree |
-| run-settlement desk commit | commit |
+| turn-settlement desk commit | commit |
 | pinned agent (checkout fact) | detached-HEAD checkout |
 | cluster fork from a published commit | `checkout -b` |
 | `current-src` publication (expected-current guard) | `push --force-with-lease` |
@@ -152,6 +152,12 @@ exists. The mappings told to agents:
    same commit. Proof: define fn + data + atom in turn 1 → JVM kill →
    the next turn sees all three, atom snapshot stated, REPL states anything
    lost; explicit clear empties the desk.
+
+   **LANDED 2026-08-05:** commits `190eed2fe`, `c124ffe56`, `f908a5939`,
+   `0811e5bc6`, and `55504e6fe`. The recurring proof force-destroys the writer
+   JVM after terminal settlement, opens the same file database in a fresh JVM,
+   observes the function, data, and atom value with the stated atom and loss
+   notices, explicitly clears the desk, and observes zero remaining rows.
 2. **W-B — checkout**: the agent checkout attribute + per-run override
    resolution in the run loop; pinned-basis ctx build cached by commit
    id. Proof: a pinned agent at commit X does not see a function

@@ -4,10 +4,10 @@ status: active
 tags: [clojure, sci, program-graph]
 ---
 
-# Program graph, base context, run fork, and session image
+# Program graph, base context, turn fork, and agent desk
 
 Read this before describing whether an evaluated definition is static,
-process-live, run-private, or durable. Keep these boundaries separate.
+process-live, turn-private, or durable. Keep these boundaries separate.
 
 ## 1. Static build indexing
 
@@ -19,40 +19,41 @@ rows come from exact analyzed source artifacts (`src/seon/fn.clj:292-353`).
 
 An evaluated declaration becomes durable program data only through the
 terminal transaction. After that transaction succeeds, the loop installs the
-exact committed row from `db-after` into the supplied current context
-(`src/seon/cluster/loop.clj:1641-1653`; `src/seon/sci/eval.clj:1271-1361`).
-Agent-authored functions retain the complete Malli-contract requirement
-(`src/seon/sci/eval.clj:1666-1685`).
+exact committed row from `db-after` into the live base and current turn fork
+(`src/seon/cluster/loop.clj:1640-1659`). Agent-authored functions retain the
+complete Malli-contract requirement (`src/seon/sci/eval.clj:286-301`).
 
-## 3. Current cluster context; [TARGET] per-run forks
+## 3. Live base and per-turn forks
 
-**[CURRENT]** Boot builds one acquired cluster context
-(`src/seon/cluster.clj:1880-1885`; `src/seon/sci/eval.clj:1334-1361`), and
-current evaluations mutate the supplied context.
+Boot builds one program-only acquired cluster context
+(`src/seon/sci/eval.clj:1369-1392`). The loop makes one fresh `sci/fork` for
+each turn and uses it for every form in that turn
+(`src/seon/cluster/loop.clj:1496-1502`; `src/seon/sci/eval.clj:1309-1318`).
 
-**[TARGET — ruled, unbuilt]** Each run evaluates in a fresh generation-aware
-`sci/fork` of the acquired base. Cross-agent sharing is contracted definition
-→ admission → program fact → acquisition at a run boundary, never mutable
-context sharing (`docs/prds/sci-execution-runtime/plan/README.md:381-395`;
-`reference-code/sci/src/sci/core.cljc:331-337`).
+Cross-agent sharing is contracted definition → admission → program fact →
+install in the live base → next-turn fork. An existing fork cannot see a later
+base install; the pinned generation-aware fork remains copy-on-write
+(`reference-code/sci/src/sci/core.cljc:331-337`).
 
-## 4. Durable session-image facts
+## 4. Agent-scoped desk facts
 
-Ordinary session definitions are `:seon.def` facts, not contracted
-`:seon.fn` rows. Each row carries a faithful inline value, blob-backed value,
-proven source form, or explicit unrestorable reason
-(`resources/seon/schemas/seon.def.edn:1-38`). The loop exact-reconciles
-those rows beside the terminal receipt
-(`src/seon/cluster/loop.clj:389-491,1641-1653`).
+Ordinary session definitions are agent-scoped `:seon.def` facts, not
+contracted `:seon.fn` rows. Each row is identified by agent plus qualified
+name and carries a pure source form, a faithful inline/blob value, an atom's
+last settled value, or an explicit unrestorable reason
+(`resources/seon/schemas/seon.def.edn:1-45`). The loop selects that restore
+ladder and supplies the rows to the terminal receipt request
+(`src/seon/cluster/loop.clj:376-490,1623-1645`).
 
-Cold acquisition pre-interns image names, binds faithful values, evaluates
-only proven source rows in deterministic order, and leaves unrestorable names
-unbound with durable reasons (`src/seon/sci/eval.clj:1271-1361`). The recurring
-proof covers blob-backed values, nested functions, metadata, faithful data,
-proven source, and unrestorable closures
-(`test/seon/sci/session_image_test.clj:99-217,239-323`).
+Each fresh turn fork rehydrates only the selected agent's rows in deterministic
+order, recreates atoms around their snapshots with an honest notice, and
+states every loss (`src/seon/sci/eval.clj:1297-1367`). Exact replacement is
+inside `receipt-settle-call`; clearing is a separate explicit, agent-local
+transition (`src/seon/cluster/run.clj:990-1068`). The recurring proof crosses
+a force-destroyed writer JVM and fresh reader JVM, then clears the desk
+(`test/seon/sci/desk_test.clj:184-225`).
 
-Do not collapse the session image into receipts, program rows, or replay.
-Receipts share the terminal transaction boundary, but cold restore reads
-`:seon.def` rows directly (`src/seon/cluster/loop.clj:1641-1653`;
-`src/seon/sci/eval.clj:1282-1294`).
+Do not collapse the desk into program rows or replay. Desk facts share the
+terminal receipt transaction for atomicity, but every turn reads them directly
+for the selected agent (`src/seon/cluster/run.clj:990-1051`;
+`src/seon/sci/eval.clj:1317-1329`).

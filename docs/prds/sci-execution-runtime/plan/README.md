@@ -370,7 +370,7 @@ A JVM records and retains the exact digest directory on its classpath; refresh
 publishes another directory, and cleanup may delete only directories not
 referenced by a recorded live process identity.
 
-### Rulings 2026-08-04 (owner, conversational session) — per-run fork contexts and session curation
+### Rulings 2026-08-04/05 (owner, conversational session) — turn forks and session curation
 
 Full design, evidence, and wave order:
 [session-curation-prd-2026-08-04.md](session-curation-prd-2026-08-04.md);
@@ -378,7 +378,7 @@ tracking:
 [curation-findings-ledger-2026-08-04.md](curation-findings-ledger-2026-08-04.md).
 Evidence base: eight paired sol/Opus research lanes (indexed in the PRD).
 
-- **Per-run fork contexts.** Each run evaluates in a fresh `sci/fork` of
+- **Per-turn fork contexts (amended 2026-08-05).** Each turn evaluates in a fresh `sci/fork` of
   the cluster's base context; the base is derived from the program graph
   and refreshed from facts. Owner: "I'm happy with having each agent
   have independent state and just a shared graph that's always rebuilt
@@ -387,14 +387,15 @@ Evidence base: eight paired sol/Opus research lanes (indexed in the PRD).
   channel, not its substance: the ONE program is still shared by every
   agent — sharing moves from the mutable ctx to the durable graph.
   Cross-agent propagation is contracted `defn` → admission → program
-  fact → acquisition at a basis (the schema-registration pattern
-  generalized). Live mutations are run-private and evaporate; the
+  fact → install in the live base → next-turn fork. Live mutations are
+  turn-private and evaporate unless the agent's desk admits them; the
   "agent A wrecks agent B" class becomes unrepresentable rather than
   detected. Admissible because the pinned generation-aware `sci/fork`
   makes forked Vars copy-on-write (verified 2026-08-04, superseding the
   2026-08-02 leak probe). Ruling #20 untouched: every agent calls
   every function; gating applies only to durable DEFINITION placement
-  at the one admission seam.
+  at the one admission seam. The pinned SCI probe proved an existing fork
+  cannot observe a later base install, so the turn is the freshness boundary.
 - **Session curation is sealed as designed in the PRD.** Trigger at a
   run boundary on eval-error receipts; the editor is an ordinary agent
   whose deliverable is DATA — the REVISION, an ordered vector of form sources; THREE
@@ -612,11 +613,11 @@ and the GIT FRAMING adopted (conversational, owner-ruled):**
   explicitly in the bootstrap: the agent's DESK (session defs and
   atoms — fast, experimentation-first, not durable, not shared) and
   the SHARED SYSTEM (database facts, contracted functions with schemas
-  and tests, through the one admission seam). At run settlement the
+  and tests, through the one admission seam). At turn settlement the
   desk commits as agent-scoped `:seon.def/*` session facts: the
   provably-pure defining form (re-eval is exact — forms make restore
   STRONG), else the store-faithful value, else honestly unrestorable.
-  Each run's fresh fork rehydrates from those facts, so the desk
+  Each turn's fresh fork rehydrates from those facts, so the desk
   survives run boundaries and JVM bounces by the same path. ATOMS
   restore by SNAPSHOT, STATED — last settled value rebound, one honest
   REPL line — because losing an afternoon's experiment state to a
@@ -627,9 +628,10 @@ and the GIT FRAMING adopted (conversational, owner-ruled):**
   fact family.
 - **FRESHNESS IS PER TURN, NOT PER RUN** (owner: "why wait for the
   run?"): new functions/schemas/tests are visible in context next TURN
-  (ruling #16 already re-derives per turn) and CALLABLE the moment
-  admission installs them — the per-run fork copy-on-writes only its
-  own redefinitions, so foreign installs show through mid-run. Only
+  (ruling #16 already re-derives per turn) after admission installs them
+  into the live base. The prior claim that foreign installs show through an
+  existing fork was falsified by the pinned SCI probe; a new turn fork is what
+  makes them visible. Only
   the database value one form reads at its instant is pinned
   (snapshot isolation, L9).
 - **TWO AGENT TIME-MODES, ONE MECHANISM: the run's opening database
@@ -643,7 +645,7 @@ and the GIT FRAMING adopted (conversational, owner-ruled):**
 - **THE GIT FRAMING IS ADOPTED for the agent-facing story** (owner:
   "agents know git really well… could we bootstrap internal
   understanding?"): Datahike is genuinely git-shaped, and the sharpest
-  mappings are exact — desk = working tree; run-settlement commit =
+  mappings are exact — desk = working tree; turn-settlement commit =
   commit; pinned agent = detached-HEAD checkout; publication with
   expected-current guard = push --force-with-lease; messaging a
   namespace's owner = a pull request; the dependents-test gate = CI;

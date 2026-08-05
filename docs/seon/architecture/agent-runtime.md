@@ -15,11 +15,11 @@ derives the next work, performs only that work, and commits through the one
 cluster transaction owner. There is no central dispatcher, scheduler entity,
 private work queue, turn entity, or runtime status row.
 
-**[TARGET — ruled 2026-08-04]** Each cluster owns one acquired base SCI `ctx`,
-and each run evaluates in a fresh fork of that base. The fork is run-private
-mutable interpreter state; the database program graph and namespace session
-image are the durable shared authority. Agents share definitions by committing
-facts and acquiring them, never by observing another run's mutations.
+Each cluster owns one acquired base SCI `ctx`, and each turn evaluates in a
+fresh fork of that live base. The fork is turn-private mutable interpreter
+state; the database program graph and each agent's desk facts are the durable
+authority. Agents share contracted definitions by committing program facts;
+their uncontracted definitions remain in their own desks.
 
 ## State is attribute presence
 
@@ -44,7 +44,7 @@ process-local graph without inventing durable lifecycle state.
 A message opens one run with `:seon.cluster.run/id`, `/agent`, `/opened-at`,
 `/opening-commit-id`, `/starting-ns`, and optional `/trigger`, and asserts the
 agent's `/run` pointer in the same transaction. The opening commit fixes the
-program generation from which the run fork is built; the starting namespace is
+program generation recorded for the run; the starting namespace is
 the agent's assigned namespace. The transition refuses when the run identity
 already exists or the agent already points to an open run. The run's own
 `/agent` ref is the authority used when closing and retracting that pointer.
@@ -130,7 +130,7 @@ Agent code never transacts a delivery side channel.
 
 ## SCI interruption and admission
 
-**[TARGET — ruled 2026-08-04]** Agent-driven evaluation uses the run's fresh
+Agent-driven evaluation uses the turn's fresh
 fork of the cluster base SCI `ctx`. `seon.sci.kernel` is the one guarded owner,
 with exactly two entrances: `seon.sci.eval/evaluate` for a form, and
 `seon.sci.kernel/invoke` for a named live Var — the entrance every renderer call
@@ -161,32 +161,36 @@ decides which program and database facts the terminal transaction may commit;
 it does not restrict which functions an agent may call. A `defn` evaluates to
 the Var face, while an execution failure evaluates to its flat error face.
 
-## Live program graph and session image
+## Live program graph and agent desks
 
 One cluster has one live program graph and acquired base SCI context; no other
-cluster shares either. Every run forks that base at its recorded opening commit
-and begins in the assigned namespace. A definition becomes cross-run visible
-only after its facts join the program graph and are acquired into the base.
-Cold acquisition rebuilds from program and session facts at boot or recovery;
-run creation then uses the cheap fork operation rather than rebuilding the
-program.
+cluster shares either. Every turn forks that live base and begins from the
+run's current namespace. A contracted definition becomes cross-agent visible
+after its facts join the program graph and the terminal transaction installs
+the committed row into the base. The next turn's fork sees that install.
+Boot acquisition rebuilds the program-only base; the same per-turn fork path
+then rehydrates the selected agent's desk across turn boundaries, run
+boundaries, JVM bounces, and stateless resume.
 
 Contracted functions persist as `:seon.fn` rows. Their canonical `/spec`,
 Malli-derived arity rows, and parsed AST facts commit through the same producer.
 Namespace resolver inputs persist as `:seon.ns` plus owned alias/import/refer
-bindings. Uncontracted REPL definitions persist under `:seon.def`, keyed
-by namespace and name:
+bindings. Uncontracted REPL definitions persist under `:seon.def`, keyed by
+agent plus qualified name:
 
 - a proven replay-safe defining form uses `/source`;
 - an effectful but faithful value uses `/value-edn` or `/blob` plus `/size`;
-- a value that cannot be restored uses `/unrestorable`; and
+- a value that cannot be restored uses `/unrestorable-reason`;
+- an atom stores its last settled value and `/atom?`; and
 - `/ordinal` supplies deterministic restore order.
 
-Restore interns every name, binds faithful values, re-evaluates only forms
-whose purity is proven from analysis and capability reachability, then states
-unrestorable names. Nothing effectful re-executes during recovery. Namespace
-ownership is `:seon.cluster.agent/namespace`; it coordinates who should edit a
-namespace and never gates callability.
+Restore binds faithful values, re-evaluates only forms whose purity is proven
+from analysis and capability reachability, recreates atoms around their last
+settled values with one honest REPL notice, and states every unrestorable
+name. Nothing effectful re-executes during recovery. Exact desk replacement
+shares the terminal receipt transaction; clearing is explicit and agent-local.
+Namespace ownership is `:seon.cluster.agent/namespace`; it coordinates who
+should edit a namespace and never gates callability.
 
 ## Session curation
 

@@ -26,7 +26,7 @@ graph per cluster.
 One JVM process may host several named cluster instances. It owns one physical
 Datahike store under the process root and holds one exclusive `flock` for that
 store's lifetime. Each cluster owns one named branch and live connection, one
-acquired base SCI `ctx`, fresh per-run forks, its agent and render Flow graphs,
+acquired base SCI `ctx`, fresh per-turn forks, its agent and render Flow graphs,
 routing state, advertisement, and web service. The process root shares only the
 store holder and the bounded
 `:compute` and `:io` executors.
@@ -53,7 +53,7 @@ lease clock.
   cluster independently from its branch facts.
 - The browser SSE connection is an external wire. In-process movement uses
   Flow channels and database facts.
-- A committed and acquired program change is visible to later run forks within
+- A committed program change installed in the live base is visible to later turn forks within
   its cluster and never crosses into another cluster.
 
 ## Owners
@@ -64,7 +64,7 @@ lease clock.
   and transaction boundary.
 - `src/seon/db.clj` — co-located application reads over immutable database
   values.
-- `src/seon/sci/eval.clj` — one acquired base cluster `ctx`, per-run forks, and
+- `src/seon/sci/eval.clj` — one acquired base cluster `ctx`, per-turn forks, and
   cold acquisition.
 - `src/seon/cluster/run.clj` and `resources/seon/schemas/seon.cluster.run.edn` — presence
   custody and transactional recovery.

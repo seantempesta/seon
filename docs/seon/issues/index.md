@@ -74,7 +74,6 @@ See `README.md` for the convention.
 | [Derive the initial-paint census instead of hand-maintaining it](initial-paint-census-is-a-hand-maintained-count.md) | friction | render test repair |
 | [Blob get assumes the file-store callback shape](blob-get-assumes-file-store-callback-shape.md) | friction | blob storage repair wave |
 | [Delete Flow prototype procs beside the live agent graphs](flow-prototype-procs-survive-beside-the-live-agent-graphs.md) | friction | Flow prototype deletion wave |
-| [Keep session-image refusal evidence as facts, not derived prose](session-image-stores-derived-unrestorable-prose.md) | friction | session-image evidence wave |
 | [Derive namespace context without a stored `my.*` roster](cluster-toolkit-stores-a-prefix-derived-projection.md) | friction | context derivation wave |
 | [Split the turn and evaluation kernels at durable boundaries](runtime-turn-and-evaluate-kernels-conflate-boundaries.md) | friction | runtime boundary refactor |
 | [Give config-dial discovery one explicit authority](config-dial-discovery-has-three-authorities.md) | friction | config derivation wave |
@@ -134,7 +133,6 @@ See `README.md` for the convention.
 | [Admit definitions after dynamically hidden namespace movement](dynamic-in-ns-cannot-persist-definition-namespace.md) | friction | per-run fork context wave |
 | [Preserve the interrupted blob staging artifact until it can be observed](interrupted-blob-staging-leaves-no-observable-artifact.md) | friction | blob staging repair wave |
 | [Preserve the Datahike refusal kind in the flat error value](transaction-refusal-drops-datahike-kind.md) | friction | database rejection projection repair |
-| [Supply the starting namespace in agent lifecycle fixtures](agent-lifecycle-fixtures-omit-the-starting-namespace.md) | friction | agent lifecycle fixture repair |
 | [Keep disarm retryable after its loud backstop fires](disarm-backstop-drops-the-retryable-route.md) | friction | agent stop retry repair |
 | [Return structural edit feedback instead of nil](edit-feedback-returns-nil-for-structural-errors.md) | friction | edit feedback response repair |
 | [Reconcile the error-class catalog with declared schemas and renderers](error-class-catalog-and-renderers-disagree.md) | friction | error class contract repair |
