@@ -53,8 +53,8 @@
   (let [changed-bytes (utf8-bytes (subs source start end))]
     (if (> changed-bytes byte-limit)
       (let [context-end (prefix-end-within source start end byte-limit)]
-        {:my.edit/context (subs source start context-end)
-         :my.edit/context-complete? false})
+        {:my.edit/source-window (subs source start context-end)
+         :my.edit/source-window-complete? false})
       (let [remaining (- byte-limit changed-bytes)
             left-budget (quot remaining 2)
             right-budget (- remaining left-budget)
@@ -69,8 +69,8 @@
                                              unused-right)
             final-end (prefix-end-within source context-end (count source)
                                          unused-left)]
-        {:my.edit/context (subs source final-start final-end)
-         :my.edit/context-complete? true}))))
+        {:my.edit/source-window (subs source final-start final-end)
+         :my.edit/source-window-complete? true}))))
 
 (defn- line-starts
   [^String source]
@@ -435,7 +435,7 @@
                         {:my.edit/from-line from-line
                          :my.edit/to-line to-line
                          :my.edit/actual-window (subs actual 0 bounded-end)
-                         :my.edit/context-complete?
+                         :my.edit/source-window-complete?
                          (= bounded-end (count actual))}))
           (let [new-window (:my.edit/new-window request)
                 candidate-source (splice source start end new-window)

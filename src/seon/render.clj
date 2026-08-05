@@ -248,7 +248,7 @@
       :seon.sci.admit/caps caps
       :seon.config/on-core-error on-core-error}
       (:seon.render.call/captured-reads request)
-      (assoc :seon.db/capture-context
+      (assoc :seon.db/read-evidence-sink
              (:seon.render.call/captured-reads request))))))
 
 (defn- valid-projection?

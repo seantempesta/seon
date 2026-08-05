@@ -179,7 +179,7 @@
          (is (not (str/includes? plan-ai
                                  ":seon.cluster.run.form/source")))
          (is (not (str/includes? plan-ai
-                                 ":seon.bootstrap.plan.form/context"))))
+                                 ":seon.bootstrap.plan.form/help-text"))))
        (doseq [output [:seon.render/ai :seon.render/html]]
          (let [units (walk/neighborhood
                       {:seon.db/db database

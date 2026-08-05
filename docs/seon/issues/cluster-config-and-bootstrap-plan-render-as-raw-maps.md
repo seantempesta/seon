@@ -58,6 +58,15 @@ producers are the defect.
 Full census and ranking:
 [[render-coverage-audit-2026-08-03]].
 
+The 2026-08-05 rename-pass Unit 6 gate found the next render defect after the
+named producers landed. `seon.render-coverage-test` expected every important
+AI face to stay within one to three lines, but the configuration face rendered
+12 lines: its concise two-line cluster summary was followed by an "Available
+models" catalog containing every model, price, and input modality. The gate
+failed at `test/seon/render_coverage_test.clj:167`. This is readable but noisy
+recurring context, and it still violates the bounded, decision-oriented
+acceptance criterion below.
+
 ## Owner
 
 The three owning entity schemas and their owning namespaces:

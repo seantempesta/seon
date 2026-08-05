@@ -75,7 +75,7 @@
        connection
        [{:seon.config/cluster "shell-test"
          :seon.config.eval.result/blob-threshold 4096}])
-      (binding [effect/*context*
+      (binding [effect/*request-context*
                 {:seon.db/connection connection}]
         (f connection (handler) effective-map)))))
 
@@ -283,7 +283,7 @@
                 result
                 (with-redefs [config/effective
                               (fn [_database _cluster] effective-map)]
-                  (binding [effect/*context* context]
+                  (binding [effect/*request-context* context]
                     (shell/run
                      {:my.shell/argv
                       ["/bin/sh" "-c"

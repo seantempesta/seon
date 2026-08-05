@@ -155,7 +155,7 @@ independently identified; none requires new mechanism.
 | F4 | committed ending-ns per eval (`:seon.sci.eval/ending-ns` is derived then dropped; fold seeds nil and falls back to the reader's static track — order-dependent attribution, probed) | receipt settle | replay fidelity + forensics |
 | F5 | `:seon.fn/author` on program rows (rows carry no author today) | `row-tx` | provenance, curation attribution |
 | F6 | message → issuing-form ref. Commit `7cfb2435f` records the source-vector position as numeric `:seon.cluster.message/ordinal`, so ordering no longer depends on provenance embedded in the id; the direct form ref remains absent for S5 pinning. | message commit | S5 pinning |
-| F7 | tx provenance on agent-issued `seon.db/transact!` (`:tx-meta` from the already-bound `effect/*context*`: run + form ordinal) | `seon.db/transact!` | lifts the S5 fail-closed barrier |
+| F7 | tx provenance on agent-issued `seon.db/transact!` (`:tx-meta` from the already-bound `effect/*request-context*`: run + form ordinal) | `seon.db/transact!` | lifts the S5 fail-closed barrier |
 | F8 | normalized capability FAMILY on door receipts (owner/handler recorded; fs/web/llm/db family is a derivation away) | effect door | pinning policy by family |
 | F9 | `:seon.fn/calls` edges for agent-authored defns (today only clj-kondo-indexed first-party source has edges; agent code is a graph leaf) | program row install | advisory prediction, workload derivation |
 | F10 | session-image rows bypass the `row-tx` choke point | session image | closes the "one admission seam" claim |

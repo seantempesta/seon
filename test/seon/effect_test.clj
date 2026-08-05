@@ -86,7 +86,7 @@
             result-ref [:seon.effect/id effect-id]]
         (try
           (is (= result-ref
-                 (binding [effect/*context*
+                 (binding [effect/*request-context*
                            (request-context connection launcher)]
                    (effect/request!
                     #'capability-owner
@@ -143,7 +143,7 @@
                                 {:seon.cluster.run/id "effect-run"}])
       (install-capability! connection)
       (let [first-result
-            (binding [effect/*context* (request-context connection)]
+            (binding [effect/*request-context* (request-context connection)]
               (effect/request! #'capability-owner
                                {:seon.effect-test/value 7}))
             receipt
@@ -164,7 +164,7 @@
           (is (inst? (:seon.effect/settled-at receipt))))
         (testing "the same identity refuses redispatch"
           (let [second-result
-                (binding [effect/*context* (request-context connection)]
+                (binding [effect/*request-context* (request-context connection)]
                   (effect/request! #'capability-owner
                                    {:seon.effect-test/value 7}))]
             (is (= :seon.effect/already-recorded
@@ -176,7 +176,7 @@
     (fn [connection]
       (install-capability! connection)
       (let [result
-            (binding [effect/*context* (request-context connection)]
+            (binding [effect/*request-context* (request-context connection)]
               (effect/request! #'capability-owner
                                {:seon.effect-test/value "wrong"}))]
         (is (= :seon.effect/invalid-request (:seon.error/kind result)))
@@ -196,7 +196,7 @@
            (throw (InterruptedException. "test interruption")))}
         (fn []
           (let [result
-                (binding [effect/*context* (request-context connection)]
+                (binding [effect/*request-context* (request-context connection)]
                   (effect/request! #'capability-owner
                                    {:seon.effect-test/value 7}))
                 receipt

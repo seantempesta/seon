@@ -1,6 +1,6 @@
 [{:seon.cluster.run.form/source "(help)"
   :seon.ns/name-designation :agent
-  :seon.bootstrap.plan.form/context
+  :seon.bootstrap.plan.form/help-text
   "You are an agent in a Seon cluster. This is a real Clojure REPL and it is
 yours: what you evaluate here runs, and what you define here stays.
 

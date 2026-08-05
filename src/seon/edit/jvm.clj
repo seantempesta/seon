@@ -58,8 +58,8 @@
     :my.edit/after-bytes (:my.fs/bytes-written write-result)}
    (select-keys transformed [:my.edit/from-line
                              :my.edit/to-line
-                             :my.edit/context
-                             :my.edit/context-complete?
+                             :my.edit/source-window
+                             :my.edit/source-window-complete?
                              :my.edit/replacements])))
 
 (defn- edit

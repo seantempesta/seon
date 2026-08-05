@@ -71,7 +71,7 @@
     (is (every? #(= :agent (:seon.ns/name-designation %))
                 (cons (first forms) (drop 2 forms))))
     (is (= (bootstrap/help-text)
-           (:seon.bootstrap.plan.form/context (first forms))))
+           (:seon.bootstrap.plan.form/help-text (first forms))))
     (testing "the undefined contract is followed immediately by its concrete repair"
       (is (str/includes? (nth texts 7) "[:sequential :any]"))
       (is (str/includes? (nth texts 8)

@@ -5,9 +5,9 @@
               [:seon.edit/end [:int {:min 0}]]
               [:my.edit/from-line :my.edit/from-line]
               [:my.edit/to-line :my.edit/to-line]
-              [:my.edit/context :my.edit/context]
-              [:my.edit/context-complete?
-               :my.edit/context-complete?]
+              [:my.edit/source-window :my.edit/source-window]
+              [:my.edit/source-window-complete?
+               :my.edit/source-window-complete?]
               [:my.edit/replacements
                {:optional true}
                :my.edit/replacements]]

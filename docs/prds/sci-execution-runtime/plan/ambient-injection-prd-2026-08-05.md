@@ -43,13 +43,13 @@ alone: 42 functions declare `:seon.db/database-value` and 9 declare
 authority). They currently receive those values by being threaded them.
 
 **The ambient values are already assembled per evaluation.**
-`seon.effect/*context*` (`src/seon/effect.clj:26`) is bound at
+`seon.effect/*request-context*` (`src/seon/effect.clj:26`) is bound at
 `src/seon/sci/eval.clj:1600-1608` for every run form and carries
 `:seon.db/connection`, `:seon.cluster.run/id`,
 `:seon.cluster.run.form/ordinal`, `:seon.cluster.agent/id`,
 `:seon.boot/cluster-name`, `:seon.flow/work-launcher`, and
 `:seon.sci.admit/caps`. `seon.db/*conn*` (`db.clj:65`) holds the live
-branch connection. (`seon.db/*capture-context*` is an observation SINK,
+branch connection. (`seon.db/*read-evidence-sink*` is an observation SINK,
 not an input — it is never a battery.)
 
 **Nothing joins them.** Only `seon.db`'s own functions hand-resolve
@@ -71,14 +71,14 @@ declaring one row.** That is the whole extensibility story.
 | Key | Schema | Provider computes from | Consumers today |
 |---|---|---|---|
 | `:seon.db/db` | `:seon.db/database-value` | `*conn*` at current basis | 42 |
-| `:seon.db/connection` | same | `*conn*` / `*context*` | 9 |
-| `:seon.cluster.agent/id` | `:seon.cluster.agent/id` | `*context*` | — |
-| `:seon.boot/cluster-name` | `:seon.cluster/name` | `*context*` | — |
-| `:seon.cluster.run/id` | `:seon.cluster.run/id` | `*context*` | — |
-| `:seon.cluster.run.form/ordinal` | (ordinal) | `*context*` | — |
+| `:seon.db/connection` | same | `*conn*` / `*request-context*` | 9 |
+| `:seon.cluster.agent/id` | `:seon.cluster.agent/id` | `*request-context*` | — |
+| `:seon.boot/cluster-name` | `:seon.cluster/name` | `*request-context*` | — |
+| `:seon.cluster.run/id` | `:seon.cluster.run/id` | `*request-context*` | — |
+| `:seon.cluster.run.form/ordinal` | (ordinal) | `*request-context*` | — |
 
 The first two are the owner's ask and are worth landing alone. The rest
-are already in `*context*` and cost a declaration each; land only those a
+are already in `*request-context*` and cost a declaration each; land only those a
 real caller wants (the scheduled-fire path is the first candidate for
 run/agent identity).
 
@@ -130,7 +130,7 @@ declared batteries should be indistinguishable from today.
   battery receives nothing.
 - **Unused is free.** Maps are open (#48), so a declared-but-unused key
   changes nothing.
-- **Unavailable is an error, never nil.** `*context*` is nil outside a
+- **Unavailable is an error, never nil.** `*request-context*` is nil outside a
   run form (bare probes, some system paths). A declared battery that
   cannot be provided returns a flat `:seon.error` naming the missing
   ambient — never a silently injected nil, which would violate

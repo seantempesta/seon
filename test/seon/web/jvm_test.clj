@@ -341,7 +341,7 @@
                   {(ns-resolve 'seon.web.jvm 'credential)
                    (constantly "test-serper-key")}
                   #(binding [db/*conn* connection
-                             effect/*context* (effect-context connection)]
+                             effect/*request-context* (effect-context connection)]
                      (web/search
                       {:my.web/query "web capability evidence"
                        :my.web/max-results 2})))

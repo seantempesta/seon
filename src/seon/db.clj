@@ -66,7 +66,7 @@
   "The current cluster's live branch connection, bound by its owning pass."
   nil)
 
-(def ^:dynamic *capture-context*
+(def ^:dynamic *read-evidence-sink*
   "An optional invocation-local atom collecting Datahike read evidence."
   nil)
 
@@ -154,8 +154,8 @@
 
 (defn- append-read-evidence!
   [evidence]
-  (when *capture-context*
-    (swap! *capture-context* conj evidence))
+  (when *read-evidence-sink*
+    (swap! *read-evidence-sink* conj evidence))
   nil)
 
 (defn- append-database-evidence!
@@ -176,7 +176,7 @@
 
 (defn- append-query-evidence!
   [request response result]
-  (when *capture-context*
+  (when *read-evidence-sink*
     (let [arguments (:args request)
           database-positions (into []
                                    (keep-indexed
@@ -204,14 +204,15 @@
               :let [database (nth arguments position nil)]
               :when (db.utils/db? database)]
         (append-read-evidence!
-         {:seon.db/db database
-          :seon.db/source-argument-position position
-          :datahike.read/dependency-plan plan
-          :seon.db/read-request
-          (when replayable?
-            {:seon.db/read-operation :q
-             :seon.db/query-request replay-request})
-          :seon.db/read-result (stable-read-result result)}))))
+         (cond->
+          {:seon.db/db database
+           :seon.db/source-argument-position position
+           :datahike.read/dependency-plan plan}
+           replayable?
+           (assoc :seon.db/read-request
+                  {:seon.db/read-operation :q
+                   :seon.db/query-request replay-request}
+                  :seon.db/read-result (stable-read-result result)))))))
   nil)
 
 (defn- append-pull-evidence!
@@ -236,17 +237,20 @@
              :datahike.read/attributes :all
              :datahike.read/revision
              (:datahike.cache/commit-id context))
-      (assoc source-identity
-             :datahike.read/attributes attributes
-             :datahike.cache/conservative-revision
-             (:datahike.cache/conservative-revision context)
-             :datahike.cache/attribute-revisions
-             (select-keys (:datahike.cache/attribute-revisions context)
-                          attributes)))))
+      (cond->
+       (assoc source-identity
+              :datahike.read/attributes attributes
+              :datahike.cache/attribute-revisions
+              (select-keys (:datahike.cache/attribute-revisions context)
+                           attributes))
+        (:datahike.cache/conservative-revision context)
+        (assoc :datahike.cache/conservative-revision
+               (:datahike.cache/conservative-revision context))))))
 
 (defn read-evidence
   "Retain dependency revisions without retaining database values."
-  {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
+  {:malli/schema [:=> [:cat [:vector :seon.db/captured-read]]
+                  [:vector :seon.db/read-evidence]]}
   [captured]
   (mapv (fn [{database :seon.db/db
               source-position :seon.db/source-argument-position
@@ -292,7 +296,9 @@
 
 (defn read-evidence-current?
   "True when `database` still satisfies every retained dependency revision."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :map]] :boolean]}
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:vector :seon.db/read-evidence]]
+                  :boolean]}
   [database retained]
   (every?
    (fn [{source-position :seon.db/source-argument-position

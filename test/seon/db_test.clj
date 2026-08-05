@@ -247,13 +247,16 @@
          (db/q exam-query)
          (is (empty? @entries)))
        (binding [db/*conn* connection
-                 db/*capture-context* entries]
+                 db/*read-evidence-sink* entries]
          (db/q exam-query)
          (db/pull schema-pattern schema-ref)
          (db/pull-many schema-pattern [schema-ref missing-schema-ref]))
        (is (= [0 0 0]
               (mapv :seon.db/source-argument-position @entries)))
        (is (every? #(contains? % :datahike.read/dependency-plan)
+                   @entries))
+       (is (every? #(schema/valid-candidate-value?
+                     :seon.db/captured-read %)
                    @entries))))))
 
 (deftest retained-read-evidence-invalidates-only-on-a-depended-attribute
@@ -261,11 +264,14 @@
    (fn [connection]
      (db/transact! connection [{:seon.cluster/name "evidence-a"}])
      (let [captured (atom [])]
-       (binding [db/*capture-context* captured]
+       (binding [db/*read-evidence-sink* captured]
          (db/q '[:find [?name ...]
                  :where [_ :seon.cluster/name ?name]]
                @connection))
        (let [evidence (db/read-evidence @captured)]
+         (is (every? #(schema/valid-candidate-value?
+                       :seon.db/read-evidence %)
+                     evidence))
          (db/transact! connection
                        [{:seon.cluster.agent/id "unrelated-agent"}])
          (is (db/read-evidence-current? @connection evidence)
@@ -286,7 +292,7 @@
                      (fn [db-value pattern eids]
                        (swap! calls conj [db-value pattern eids])
                        (pull-many-with-evidence db-value pattern eids))]
-         (binding [db/*capture-context* entries]
+         (binding [db/*read-evidence-sink* entries]
            (let [result (db/pull-many database schema-pattern entity-ids)]
              (is (= [(d/pull database schema-pattern schema-ref)
                      nil

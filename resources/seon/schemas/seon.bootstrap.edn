@@ -3,9 +3,9 @@
                   [:seon.cluster.run.form/source
                    :seon.cluster.run.form/source]
                   [:seon.ns/name-designation :seon.ns/name-designation]
-                  [:seon.bootstrap.plan.form/context
+                  [:seon.bootstrap.plan.form/help-text
                    {:optional true}
-                   :seon.bootstrap.plan.form/context]],
+                   :seon.bootstrap.plan.form/help-text]],
                  :default-forms
                  [:vector {:min 1} :seon.bootstrap/default-form],
                 :resource [:string {:min 1}],

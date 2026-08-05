@@ -53,13 +53,9 @@
                  [:seon.sci.eval/time-limit-ms
                   :seon.sci.eval/time-limit-ms]
                  [:seon.sci.admit/caps :seon.sci.admit/caps]
-                 [:seon.db/capture-context
+                 [:seon.db/read-evidence-sink
                   {:optional true}
-                  [:fn
-                   {:error/message
-                    "must be a process-local atom collecting database read evidence"
-                    :gen/gen seon.flow/atom-reference-generator}
-                   seon.flow/atom-reference?]]
+                  :seon.db/read-evidence-sink]
                  [:seon.config/on-core-error
                   :seon.config/on-core-error]],
                 :invocation-result

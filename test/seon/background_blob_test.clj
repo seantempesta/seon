@@ -131,7 +131,7 @@
           (doseq [[ordinal size] (map-indexed vector sizes)]
             (testing (str size " invalid UTF-8 bytes")
               (let [result-ref
-                    (binding [effect/*context* context]
+                    (binding [effect/*request-context* context]
                       (effect/request!
                        #'binary-capability
                        {:seon.background-blob-test/size size}

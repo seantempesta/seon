@@ -1,6 +1,64 @@
 #:seon.db{:attributes :boolean,
           :component :boolean,
           :db :seon.db/database-value,
+          :read-evidence-sink
+          [:fn
+           {:error/message
+            "must be a process-local atom collecting database read evidence"
+            :gen/gen seon.flow/atom-reference-generator}
+           seon.flow/atom-reference?],
+          :source-argument-position [:int {:min 0}],
+          :read-dependency-attributes [:or [:= :all] [:set :qualified-keyword]],
+          :read-dependency-source
+          [:map
+           [:datahike.query.source/symbol :symbol]
+           [:datahike.query.source/argument-position [:int {:min 0}]]
+           [:datahike.query.source/attributes :seon.db/read-dependency-attributes]],
+          :read-dependency-plan
+          [:or
+           [:= :all]
+           [:map
+            [:datahike.query.dependency/sources
+             [:vector :seon.db/read-dependency-source]]]],
+          :read-operation [:enum :q :pull :pull-many],
+          :pull-arguments [:vector :seon.schema/value],
+          :read-request
+          [:or
+           [:map
+            [:seon.db/read-operation [:= :q]]
+            [:seon.db/query-request :seon.db/query-args]]
+           [:map
+            [:seon.db/read-operation [:enum :pull :pull-many]]
+            [:seon.db/pull-arguments :seon.db/pull-arguments]]],
+          :read-result :seon.schema/value,
+          :dependency-revision
+          [:or
+           [:map
+            [:datahike.cache/connection-id :seon.db/connection-id]
+            [:datahike.cache/generation :uuid]
+            [:datahike.read/attributes [:= :all]]
+            [:datahike.read/revision :uuid]]
+           [:map
+            [:datahike.cache/connection-id :seon.db/connection-id]
+            [:datahike.cache/generation :uuid]
+            [:datahike.read/attributes [:set :qualified-keyword]]
+            [:datahike.cache/conservative-revision {:optional true} :uuid]
+            [:datahike.cache/attribute-revisions
+             [:map-of :qualified-keyword :uuid]]]],
+          :captured-read
+          [:map
+           [:seon.db/db :seon.db/database-value]
+           [:seon.db/source-argument-position :seon.db/source-argument-position]
+           [:datahike.read/dependency-plan :seon.db/read-dependency-plan]
+           [:seon.db/read-request {:optional true} :seon.db/read-request]
+           [:seon.db/read-result {:optional true} :seon.db/read-result]],
+          :read-evidence
+          [:map
+           [:seon.db/source-argument-position :seon.db/source-argument-position]
+           [:datahike.read/dependency-plan :seon.db/read-dependency-plan]
+           [:datahike.read/revision :seon.db/dependency-revision]
+           [:seon.db/read-request {:optional true} :seon.db/read-request]
+           [:seon.db/read-result {:optional true} :seon.db/read-result]],
           :entity :boolean,
           :identity :boolean,
           :index :boolean,

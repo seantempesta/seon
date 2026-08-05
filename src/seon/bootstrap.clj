@@ -26,36 +26,36 @@
                 database eid)
           (keep :seon.ns/name-designation
                 (:seon.bootstrap.plan/forms unit)))
-        contexts
+        help-texts
         (if (and database eid)
-          (db/q '[:find [?context ...]
+          (db/q '[:find [?help-text ...]
                   :in $ ?plan
                   :where
                   [?plan :seon.bootstrap.plan/forms ?form]
-                  [?form :seon.bootstrap.plan.form/context ?context]]
+                  [?form :seon.bootstrap.plan.form/help-text ?help-text]]
                 database eid)
-          (keep :seon.bootstrap.plan.form/context
+          (keep :seon.bootstrap.plan.form/help-text
                 (:seon.bootstrap.plan/forms unit)))
         counts (frequencies designations)]
     {:forms (count designations)
      :agent (get counts :agent 0)
      :user (get counts :user 0)
-     :contexts (count contexts)
-     :context-tokens (reduce + 0 (map tokens/estimate contexts))}))
+     :help-texts (count help-texts)
+     :help-text-tokens (reduce + 0 (map tokens/estimate help-texts))}))
 
 (defn render-ai
   "`:seon.render/ai` — one bootstrap plan without its source payloads."
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
   [unit]
   (when-let [id (:seon.bootstrap.plan/id unit)]
-    (let [{:keys [forms agent user contexts context-tokens]}
+    (let [{:keys [forms agent user help-texts help-text-tokens]}
           (plan-summary unit)]
       (str "Bootstrap plan " id " · digest "
            (:seon.bootstrap.plan/digest unit) ".\n"
            forms " ordered evaluation forms: " agent " agent, " user
-           " user; " contexts " starting-context form"
-           (when-not (= 1 contexts) "s") " · approximately "
-           context-tokens " tokens."))))
+           " user; " help-texts " help-text form"
+           (when-not (= 1 help-texts) "s") " · approximately "
+           help-text-tokens " tokens."))))
 
 (defn render-html
   "`:seon.render/html` — one readable bootstrap-plan card."
@@ -63,7 +63,7 @@
                   [:maybe :seon.render/hiccup]]}
   [unit]
   (when-let [id (:seon.bootstrap.plan/id unit)]
-    (let [{:keys [forms agent user contexts context-tokens]}
+    (let [{:keys [forms agent user help-texts help-text-tokens]}
           (plan-summary unit)]
       [:article {:class "seon-family-entry seon-bootstrap-plan-entry"}
        [:h3 (str "Bootstrap plan " id)]
@@ -73,10 +73,10 @@
         [:div [:dt "Ordered forms"] [:dd (str forms)]]
         [:div [:dt "Namespace designation"]
          [:dd (str agent " agent / " user " user")]]
-        [:div [:dt "Starting context"]
-         [:dd (str contexts " form"
-                   (when-not (= 1 contexts) "s") " · approximately "
-                   context-tokens " tokens")]]]])))
+        [:div [:dt "Help text"]
+         [:dd (str help-texts " form"
+                   (when-not (= 1 help-texts) "s") " · approximately "
+                   help-text-tokens " tokens")]]]])))
 
 (def ^:private resource-path
   "seon/bootstrap.edn")
@@ -107,10 +107,10 @@
     forms))
 
 (defn help-text
-  "The prose context authored on the shipped help form map."
+  "The prose authored on the shipped help form map."
   {:malli/schema [:=> [:cat] :string]}
   []
-  (:seon.bootstrap.plan.form/context (first (packaged-forms))))
+  (:seon.bootstrap.plan.form/help-text (first (packaged-forms))))
 
 (defmacro help
   "Print the one prose guide to the agent REPL."

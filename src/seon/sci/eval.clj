@@ -1597,7 +1597,7 @@
         print-options (volatile! {})
         session-observation (volatile! nil)]
     (binding [db/*conn* connection
-              effect/*context*
+              effect/*request-context*
               (when (and run-id (some? form-ordinal) cluster-name)
                 {:seon.db/connection connection
                  :seon.cluster.run/id run-id

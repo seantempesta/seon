@@ -322,7 +322,7 @@
     arguments :seon.sci.eval/args
     time-limit-ms :seon.sci.eval/time-limit-ms
     caps :seon.sci.admit/caps
-    capture-context :seon.db/capture-context
+    read-evidence-sink :seon.db/read-evidence-sink
     on-core-error :seon.config/on-core-error}]
   (let [started-at (System/nanoTime)
         arm-state (volatile! nil)
@@ -336,8 +336,8 @@
                   (get-in ctx
                           [:seon.sci.eval/custody
                            :seon.db/connection])
-                  db/*capture-context*
-                  (or capture-context db/*capture-context*)]
+                  db/*read-evidence-sink*
+                  (or read-evidence-sink db/*read-evidence-sink*)]
           (let [sci-var (sci/resolve ctx function-symbol)]
             (when-not (sci.utils/var? sci-var)
               (throw

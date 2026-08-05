@@ -29,7 +29,7 @@
  :my.edit/to-line [:int {:min 1}]
  :my.edit/old-window :string
  :my.edit/new-window :string
- :my.edit/actual-window :my.edit/context
+ :my.edit/actual-window :my.edit/source-window
  :my.edit/lines-request
  [:map
   [:my.edit/path :my.edit/path]
@@ -43,8 +43,8 @@
  :my.edit/after-digest :my.fs/digest
  :my.edit/before-bytes :my.fs/byte-count
  :my.edit/after-bytes :my.fs/byte-count
- :my.edit/context :string
- :my.edit/context-complete? :boolean
+ :my.edit/source-window :string
+ :my.edit/source-window-complete? :boolean
  :my.edit/replacements [:int {:min 0}]
  :my.edit/result
  [:map
@@ -56,8 +56,8 @@
   [:my.edit/after-bytes :my.edit/after-bytes]
   [:my.edit/from-line :my.edit/from-line]
   [:my.edit/to-line :my.edit/to-line]
-  [:my.edit/context :my.edit/context]
-  [:my.edit/context-complete? :my.edit/context-complete?]
+  [:my.edit/source-window :my.edit/source-window]
+  [:my.edit/source-window-complete? :my.edit/source-window-complete?]
   [:my.edit/replacements {:optional true} :my.edit/replacements]],
  :my.edit/no-match :my.edit/path
  :my.edit/no-match-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path with no matching edit target"} [:my.edit/no-match :my.edit/no-match] [:seon.error/message :seon.error/message]]

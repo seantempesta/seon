@@ -23,7 +23,7 @@
            [java.util.concurrent ExecutionException FutureTask]
            [java.util.concurrent Executor]))
 
-(def ^:dynamic *context*
+(def ^:dynamic *request-context*
   "The current evaluation's durable identity and projection controls."
   nil)
 
@@ -188,8 +188,8 @@
   (admit/admit-value
    {:seon.sci.admit/value value
     :seon.sci.admit/interrupt-fn (constantly nil)
-    :seon.sci.admit/caps (:seon.sci.admit/caps *context*)
-    :seon.config/on-core-error (:seon.config/on-core-error *context*)}))
+    :seon.sci.admit/caps (:seon.sci.admit/caps *request-context*)
+    :seon.config/on-core-error (:seon.config/on-core-error *request-context*)}))
 
 (defn open-call
   "Open one never-before-recorded effect identity inside the writer."
@@ -396,7 +396,7 @@
   [owner request execution]
   (let [owner-sym (owner-symbol owner)]
      (cond
-       (nil? *context*)
+       (nil? *request-context*)
        (flat-error :seon.effect/no-evaluation-context
                    "Capability requests require a current run form."
                    {})
@@ -407,8 +407,8 @@
                    {})
 
        :else
-       (let [connection (:seon.db/connection *context*)
-             effect-ordinal (swap! (:seon.effect/counter *context*) inc)
+       (let [connection (:seon.db/connection *request-context*)
+             effect-ordinal (swap! (:seon.effect/counter *request-context*) inc)
              database @connection
              owner-row
              (db/pull database
@@ -445,8 +445,8 @@
                 {:seon.fn/sym (str owner-sym)})
                (let [background? (:seon.effect/background? execution)
                      effect-id
-                     (pr-str [(:seon.cluster.run/id *context*)
-                              (:seon.cluster.run.form/ordinal *context*)
+                     (pr-str [(:seon.cluster.run/id *request-context*)
+                              (:seon.cluster.run.form/ordinal *request-context*)
                               effect-ordinal])
                      result-ref [:seon.effect/id effect-id]
                      opened-at (Date.)
@@ -455,10 +455,10 @@
                       {:seon.effect/id effect-id
                        :seon.effect/run
                        [:seon.cluster.run/id
-                        (:seon.cluster.run/id *context*)]
+                        (:seon.cluster.run/id *request-context*)]
                        :seon.effect/owner [:seon.fn/sym (str owner-sym)]
                        :seon.effect/form-ordinal
-                       (:seon.cluster.run.form/ordinal *context*)
+                       (:seon.cluster.run.form/ordinal *request-context*)
                        :seon.effect/ordinal effect-ordinal
                        :seon.effect/request-edn
                        (admit/canonical-edn
@@ -467,7 +467,7 @@
                        background?
                        (assoc :seon.effect/notify
                               [:seon.cluster.agent/id
-                               (:seon.cluster.agent/id *context*)]))
+                               (:seon.cluster.agent/id *request-context*)]))
                      opened
                      (db/transact!
                       connection
@@ -476,13 +476,13 @@
                    opened
                    (let [effective
                          (config/effective
-                          @connection (:seon.boot/cluster-name *context*))
+                          @connection (:seon.boot/cluster-name *request-context*))
                          threshold
                          (:seon.config.eval.result/blob-threshold effective)]
                      (if background?
                        (do
                          (flow/submit!
-                          (:seon.flow/work-launcher *context*)
+                          (:seon.flow/work-launcher *request-context*)
                           {::flow/submission-id effect-id
                            ::flow/workload :io
                            ::flow/work-fn
