@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, testing, tooling, clocks]
 ---
@@ -48,3 +48,19 @@ The changed-test subprocess lifecycle, expressed through exact
   sleeps.
 - Signal, failure, and success teardown reap exact children before retaining or
   deleting the claimed `run.*` root; a retained root records why it is evidence.
+
+## Resolution
+
+Resolved by commit `7eeff3e70` on 2026-08-04. `bin/test` publishes its exact
+runner PID, forwards termination, awaits the runner's completion, records its
+exit and reap instant, and only then records a retention reason or deletes a
+successful root. Its EXIT trap closes abnormal launcher exits. Changed-test
+deleted descendant sampling and 10 ms polling; it signals that owning
+`bin/test` process and awaits `ProcessHandle.onExit`, retaining only a loud
+foreign-process backstop.
+
+The recurring proof creates a descendant after termination begins and proves
+the owner reaps it before exit. A real interrupted `bin/test` launcher then
+proves the child is dead and `runner-reaped-at` precedes `retained-reason`.
+The focused gate passed 9 tests / 30 assertions with zero failures or errors;
+`bash -n bin/test` and `git diff --check` also passed.

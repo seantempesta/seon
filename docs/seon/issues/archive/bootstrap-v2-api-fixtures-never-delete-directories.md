@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: cleanup
 tags: [issue, testing, database, storage]
 ---
@@ -34,3 +34,13 @@ fixture derived from its lessons.
   the pair.
 - No future embedded database fixture creates an unclaimed timestamp-named
   directory.
+
+## Resolution
+
+Superseded on 2026-08-04. The Datalevin bootstrap-v2 implementation and its
+paired-directory fixtures are deleted from the fresh source and test trees;
+they remain Git archaeology rather than a mechanism to port. Current file
+database fixtures use outer `finally` cleanup through the shared no-follow
+recursive-deletion owner. Commit `7eeff3e70` also makes the suite launcher
+await its exact runner before root retention or deletion. The focused fixture
+gate passed 9 tests / 30 assertions with zero failures or errors.

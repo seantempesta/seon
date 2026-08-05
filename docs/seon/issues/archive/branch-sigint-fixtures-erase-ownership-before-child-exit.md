@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: cleanup
 tags: [issue, testing, process, storage]
 ---
@@ -38,3 +38,11 @@ into the fresh test tree; otherwise deletion of the obsolete quarry tests.
   `finally` cannot run.
 - An interrupted regression leaves neither a live descendant nor an unclaimed
   `branch-sigint-*` root.
+
+## Resolution
+
+Superseded on 2026-08-04. The creating suite exists only under the disabled
+`test-old/` quarry and no fresh runner discovers or invokes it. The surviving
+test-root owner is `bin/test`; commit `7eeff3e70` makes it publish and await its
+exact runner process before retaining or deleting the root. The focused
+fixture gate passed 9 tests / 30 assertions with zero failures or errors.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: cleanup
 tags: [issue, testing, storage]
 ---
@@ -32,3 +32,12 @@ pod suite, plus the suite process lifecycle.
 - The suite exit owner records and reaps the exact root after children exit.
 - Interrupted and failed focused-suite proofs leave no unclaimed
   `autocomplete-test-*` root.
+
+## Resolution
+
+Superseded on 2026-08-04. The CLJS suite and its `autocomplete-test-*` creator
+are absent from the fresh `test/` tree, the CLJS build is off, and no current
+fixture recreates this directory family. Commit `7eeff3e70` closes the general
+fresh-suite interruption seam by awaiting the exact runner before root
+retention or deletion; its focused gate passed 9 tests / 30 assertions with
+zero failures or errors.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, testing, storage]
 ---
@@ -34,3 +34,14 @@ owning suite process lifecycle.
   children stop when framework teardown cannot run.
 - Interrupted and failed focused-suite proofs leave no unclaimed
   `blob-test-*` root.
+
+## Resolution
+
+Resolved on 2026-08-04. The CLJS after-hook creator is deleted. Its fresh JVM
+replacement in `test/seon/blob_test.clj` owns the file store with nested
+`try`/`finally`, releases the branch and store before calling the shared
+no-follow `seon.test-support/delete-recursively!` owner, and the background
+blob fixture has the same shape. Commit `7eeff3e70` additionally makes the
+suite launcher await its exact runner before root retention or deletion. The
+focused fixture gate passed 9 tests / 30 assertions with zero failures or
+errors.

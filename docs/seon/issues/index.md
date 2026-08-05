@@ -37,7 +37,7 @@ See `README.md` for the convention.
 | [Refuse the losing concurrent divergent schema declaration](concurrent-divergent-schema-declarations-falsely-both-succeed.md) | blocker | schema collision admission wave |
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 
-## Friction (90)
+## Friction (89)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -79,7 +79,6 @@ See `README.md` for the convention.
 | [Derive changed-test ownership instead of classifying paths](changed-test-selector-classifies-hosts-by-path-prefix.md) | friction | changed-test selector repair |
 | [Make the public-contract census prove its subjects exist](public-contract-census-can-pass-with-no-subjects.md) | friction | contract-gate repair |
 | [Generate fresh Flow contract values](flow-generators-reuse-one-mutable-sample.md) | friction | contract-generator repair |
-| [Await changed-test process exits instead of polling clocks](changed-test-process-cleanup-polls-observable-exit.md) | friction | changed-test process repair |
 | [Give thinking tool continuations one faithful request shape](thinking-tool-continuations-have-no-faithful-request-shape.md) | friction | future model-continuation wave |
 | [Fence the MCP parent watchdog by captured process identity](mcp-parent-watchdog-can-follow-a-reused-pid.md) | friction | MCP process-lifetime repair |
 | [Give the elision marker its count and identity](elided-marker-carries-no-count-or-identity.md) | friction | print-path follow-up |
@@ -133,14 +132,10 @@ See `README.md` for the convention.
 | [Select the latest closed run without comparing run ids](latest-closed-run-orders-by-id-string.md) | friction | work ordering follow-up |
 | [Admit definitions after dynamically hidden namespace movement](dynamic-in-ns-cannot-persist-definition-namespace.md) | friction | per-run fork context wave |
 
-## Cleanup (19)
+## Cleanup (15)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [Branch SIGINT fixtures can erase ownership before descendants exit](branch-sigint-fixtures-erase-ownership-before-child-exit.md) | cleanup | obsolete fixture deletion wave |
-| [Blob test roots depend on a framework after-hook](blob-test-roots-depend-on-framework-after-hook.md) | cleanup | filesystem fixture cleanup wave |
-| [Autocomplete test roots depend on a framework after-hook](autocomplete-test-roots-depend-on-framework-after-hook.md) | cleanup | filesystem fixture cleanup wave |
-| [Bootstrap v2 API fixtures never delete their Datalevin directories](bootstrap-v2-api-fixtures-never-delete-directories.md) | cleanup | obsolete fixture deletion wave |
 | [Make fresh CLJC namespaces portable or name them CLJ](fresh-cljc-files-are-jvm-only.md) | cleanup | fresh portability cleanup wave |
 | [Select duplicate-identity refusal evidence deterministically](duplicate-identity-refusal-evidence-is-unordered.md) | cleanup | reconcile evidence cleanup wave |
 | [Delete operator helpers maintained only by private tests](operator-private-helpers-have-only-test-readers.md) | cleanup | operator deletion wave |

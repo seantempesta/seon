@@ -34,6 +34,20 @@ The unrelated landed `seon.sci.eval-test` boundary remains red at 51 tests /
 243 assertions: five failures in the graph-derived `doc` face and acquired
 contract instrumentation; this wave did not edit that owner.
 
+**ADDENDUM — 2026-08-04, DISK-BURN FIX LANE PARTIALLY LANDED.** Commit
+`7eeff3e70` makes `bin/test` publish and await its exact runner before retaining
+or deleting an isolated root; changed-test now waits on `ProcessHandle.onExit`
+instead of sampling descendants and polling 10 ms clocks. The interrupted
+launcher/late-child proof passed in a 9-test / 30-assertion focused gate.
+Commit `ca0e9579a` replays the forensics incident's 132 equal
+`StackOverflowError` envelopes through the existing signature suppression and
+proves one durable fact plus one bounded stderr face; the Flow gate passed 25
+tests / 233 assertions. The operator governor remains at an owner design gate:
+no current stable-parent database lifecycle surface can commit an isolated
+root claim before creation. Directory claims, disk measurements/status,
+low-space warning, and config-owned log rotation remain unbuilt pending that
+parent-authority ruling.
+
 **ADDENDUM — 2026-08-04, UNIVERSAL OUTPUT SINK MEASUREMENT LANDED.** Commit
 `6af14d45c` adds the two sparse leaf facts `:seon.fn/external-sink` and
 `:seon.fn/projection-boundary`, lifts them through the existing static index,
