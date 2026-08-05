@@ -30,6 +30,7 @@
             [clojure.java.io :as io]
             [clojure.test.check.generators :as gen]
             [datahike.api :as d]
+            [datahike.gc-guard :as gc-guard]
             [seon.bootstrap :as bootstrap]
             [seon.cluster.source :as source]
             [seon.cluster.registry :as registry]
@@ -1877,16 +1878,30 @@
                 [:seon.config/effective :seon.config.db/keep-history?])
         store (acquire-root-store! (:seon.boot/store-dir config) keep-history?)
         instance (publish! (assoc instance :seon.store/store store))
+        store-id (get-in @(:seon.store/connection-object store)
+                         [:config :store :id])
+        start-permit (gc-guard/try-reachability-permit! store-id :roster)
+        _ (when-let [kind (:seon.error/kind start-permit)]
+            (throw
+             (ex-info
+              (if (= :sweep-in-progress kind)
+                "A reachability sweep is in progress; retry start later."
+                "Reachability publication is currently unavailable; retry start later.")
+              start-permit)))
         cluster-branch (registry/cluster-branch cluster-name)
         forked
-        (if (contains? (registry/roster store) cluster-branch)
-          {:seon.store/branch cluster-branch
-           :seon.cluster/created? false}
-          (registry/ensure-cluster!
-           {:seon.store/store store
-            :seon.boot/cluster-name cluster-name
-            :seon.source/commit-id
-            (:seon.source/commit-id (current-source! store))}))
+        (try
+          (if (contains? (registry/roster store) cluster-branch)
+            {:seon.store/branch cluster-branch
+             :seon.cluster/created? false}
+            (registry/ensure-cluster!
+             {:seon.store/store store
+              :seon.boot/cluster-name cluster-name
+              :seon.source/commit-id
+              (:seon.source/commit-id (current-source! store))
+              :datahike.gc-guard/reachability-permit start-permit}))
+          (finally
+            (gc-guard/release-reachability-permit! start-permit)))
         connection (store/open-branch! store (:seon.store/branch forked))
         instance (publish!
                   (assoc instance :seon.boot/cluster-connection connection))
