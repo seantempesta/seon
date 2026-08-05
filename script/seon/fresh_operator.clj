@@ -10,6 +10,8 @@
   (:import [java.io PushbackReader RandomAccessFile]
            [java.net InetSocketAddress ServerSocket Socket
             SocketTimeoutException]
+           [java.nio.channels FileChannel]
+           [java.nio.file OpenOption StandardOpenOption]
            [java.time Instant]
            [java.util.concurrent CompletableFuture ExecutionException
             LinkedBlockingQueue TimeUnit TimeoutException]
@@ -94,6 +96,10 @@
 (defn- cluster-directory
   [root name]
   (fs/path (cluster-root root) name))
+
+(defn- store-lock-path
+  [root]
+  (operator.state/store-lock-path (fs/path (cluster-root root) "store")))
 
 (defn- advertisement-path
   [root name]
@@ -2606,6 +2612,59 @@
      (str "  unreadable=" (:seon.fresh-operator/path error)
           " error=" (:seon.fresh-operator/error error)))))
 
+(defn- discard-unreadable-process-records!
+  [record-errors]
+  (doseq [error (sort-by :seon.fresh-operator/path record-errors)]
+    (let [path (:seon.fresh-operator/path error)
+          reason (:seon.fresh-operator/error error)]
+      (when (operator.state/delete-edn! path)
+        (println
+         (str "● discarded unreadable process record " path
+              " because " reason))))))
+
+(defn- with-exclusive-store-flock-probe!
+  [root transition]
+  (let [path (store-lock-path root)
+        file (io/file path)
+        _ (some-> (.getParentFile file) .mkdirs)
+        channel
+        (FileChannel/open
+         (.toPath file)
+         (into-array OpenOption [StandardOpenOption/CREATE
+                                 StandardOpenOption/WRITE]))
+        lock
+        (try
+          (.tryLock channel)
+          (catch Throwable failure
+            (if (= "java.nio.channels.OverlappingFileLockException"
+                   (.getName (class failure)))
+              ::overlapping-flock
+              (do
+                (.close channel)
+                (throw failure)))))]
+    (if (or (nil? lock) (= ::overlapping-flock lock))
+      (do
+        ;; Closing a second descriptor after an overlapping fcntl lock can
+        ;; drop this process's existing fence. The operator CLI never owns a
+        ;; store, but fail closed if this helper is probed in such a JVM.
+        (when (nil? lock)
+          (.close channel))
+        (fail!
+         "Refusing reset because a live JVM holds the process-root store flock."
+         {:seon.fresh-operator/root root
+          :seon.store/lock-file path}))
+      (try
+        (transition)
+        (finally
+          (try
+            (.close ^java.lang.AutoCloseable lock)
+            (finally
+              (.close channel))))))))
+
+(defn- confirm-exclusive-store-flock-free!
+  [root]
+  (with-exclusive-store-flock-probe! root #(store-lock-path root)))
+
 (defn- down-recorded-processes!
   ([root force? verify-store?]
    (down-recorded-processes! root force? verify-store? false))
@@ -2672,6 +2731,9 @@
                  {:seon.fresh-operator/process-failures failures})))
       (println "● no recorded JVMs to stop"))
     (clear-stale-advertisements! root)
+    (when (and discard-unreadable-after-flock? (seq record-errors))
+      (confirm-exclusive-store-flock-free! root)
+      (discard-unreadable-process-records! record-errors))
     (when verify-store?
       (let [roster (offline-roster root)]
         (println (str "● flock free; roster readable ("

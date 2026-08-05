@@ -21,6 +21,7 @@
             [clojure.test.check.generators :as gen]
             [seon.db :as db]
             [seon.fs :as fs]
+            [seon.operator.state :as operator.state]
             [seon.operator.runtime :refer [held-flocks]]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn])
@@ -127,7 +128,7 @@
   One derivation — no other code builds this path."
   {:malli/schema [:=> [:cat :seon.store/dir] :seon.store/lock-file]}
   [store-dir]
-  (str (canonical-path store-dir) ".lock"))
+  (operator.state/store-lock-path store-dir))
 
 (defn datahike-configuration
   "The creation configuration for a cluster store.

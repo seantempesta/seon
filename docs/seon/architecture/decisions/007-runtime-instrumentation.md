@@ -15,12 +15,12 @@ the CLJS build and per-turn context reconstruction.
 Rulings 2026-08-01 #29, #31, and #33 replace it with one acquired base SCI
 `ctx` per cluster, fresh per-run forks, host-Var instrumentation under the
 core-error dial, and
-interpreted-function contract wrapping at the one program-row installation
+interpreted-function contract wrapping at the one program row installation
 seam. The current owners are `src/seon/instrument.clj` and
 `src/seon/sci/eval.clj`.
 
 Re-evaluating a host `defn` requires `seon.instrument/apply!` because Malli's
-wrapper is replaced with the Var root. Runtime program-row publication wraps
+wrapper is replaced with the Var root. Runtime program row publication wraps
 interpreted functions from their committed contract as it installs them into
 the acquired base cluster `ctx`; later run forks observe that acquisition.
 

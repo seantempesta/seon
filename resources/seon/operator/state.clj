@@ -17,6 +17,12 @@
   [path]
   (.getCanonicalPath (java.io.File. (str path))))
 
+(defn store-lock-path
+  "The canonical sibling lock path for one store directory."
+  {:malli/schema [:=> [:cat :seon.store/dir] :seon.store/lock-file]}
+  [store-directory]
+  (str (canonical-path store-directory) ".lock"))
+
 (defn process-start-instant
   "Return the OS start instant for a live PID."
   [pid]

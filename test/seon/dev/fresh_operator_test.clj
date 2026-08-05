@@ -1236,6 +1236,39 @@
       (finally
         (delete-recursively! root)))))
 
+(deftest reset-discards-only-enumerated-unreadable-claims-after-the-flock
+  (let [root (fresh-root)
+        store-dir (str (io/file root "data" "clusters" "store"))
+        exact (io/file root "claims" "unreadable.edn")
+        survivor (io/file root "claims" "survivor.edn")
+        errors [{:seon.fresh-operator/path (.getCanonicalPath exact)
+                 :seon.fresh-operator/error "invalid claim"}]
+        opened (store/open-store! {:seon.store/dir store-dir})]
+    (try
+      (.mkdirs (.getParentFile exact))
+      (spit exact "unreadable")
+      (spit survivor "survivor")
+      (let [refused
+            (operator-private-outcome
+             'confirm-exclusive-store-flock-free! (str root))]
+        (is (= "Refusing reset because a live JVM holds the process-root store flock."
+               (::message refused)))
+        (is (.exists exact)
+            "a held flock leaves the unreadable claim untouched"))
+      (finally
+        (store/release-store! opened)))
+    (try
+      (is (= (operator.state/store-lock-path store-dir)
+             (operator-private-value
+              'confirm-exclusive-store-flock-free! (str root))))
+      (operator-private-value 'discard-unreadable-process-records! errors)
+      (is (not (.exists exact))
+          "the exact enumerated unreadable claim was discarded")
+      (is (.exists survivor)
+          "an unenumerated sibling was not glob-deleted")
+      (finally
+        (delete-recursively! root)))))
+
 (deftest ^{:seon.test/long "Boots a real JVM, SIGKILLs it, then proves forced reset self-recovers."}
   forced-reset-clears-an-exact-dead-process-record
   (let [root (fresh-root)
