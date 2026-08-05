@@ -1909,13 +1909,17 @@
 
           :failure
           (fail! (:seon.fresh-operator/message event)
-                 (merge
-                  {:seon.fresh-operator/name name
-                   :seon.boot/pid pid
-                   :seon.fresh-operator/phase phase}
-                  (dissoc event
-                          :seon.fresh-operator/event
-                          :seon.fresh-operator/message)))
+                 (cond->
+                  (merge
+                   {:seon.fresh-operator/name name
+                    :seon.boot/pid pid
+                    :seon.fresh-operator/phase phase}
+                   (dissoc event
+                           :seon.fresh-operator/event
+                           :seon.fresh-operator/message))
+                   (:seon.fresh-operator/error-kind event)
+                   (assoc :seon.error/kind
+                          (:seon.fresh-operator/error-kind event))))
 
           :closed
           (fail! "The cluster JVM closed readiness before READY."
