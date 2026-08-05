@@ -4,7 +4,17 @@ status: draft
 tags: [prd, runtime, platform, sci, database, program-graph]
 ---
 
-# Ambient injection r2 — draft for owner iteration
+# Ambient injection r2 — RULED (owner, 2026-08-05)
+
+Graduated from draft the same day: seam = the SCI-fork hook primitive;
+arity model = derived all-or-nothing shorter call shapes with
+`db?`/`connection?` predicate dispatch (owner reframing — supersedes
+this document's subset-expansion Choice 2 and OVERRULES its Choice 4
+Option A: ruling #41's positional db/conn omission survives through the
+general planner; only the bespoke seon.db implementation dies); maps =
+present top-level argument map, explicitly REQUIRED keys only, no
+nesting, no parent construction. Rulings recorded in
+[README.md](README.md). P17 remains hard-blocked on P12.
 
 ## Draft status and preparation record
 

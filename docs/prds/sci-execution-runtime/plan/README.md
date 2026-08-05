@@ -673,6 +673,32 @@ and the GIT FRAMING adopted (conversational, owner-ruled):**
   immutable content-addressed cache design closes the class (probe:
   3,628 dynamic-cache entries cleared, writer still committed from its
   immutable digest directory; `5e5294228`).
+- **AMBIENT INJECTION r2 IS RULED (owner, same day):**
+  [ambient-injection-prd-2026-08-05-r2-draft.md](ambient-injection-prd-2026-08-05-r2-draft.md)
+  graduates from draft with four rulings. (1) SEAM: one optional
+  hook-aware call-preparation primitive in the maintained SCI fork —
+  SCI's analyzed call path and `kernel/invoke` both route through it;
+  accepted only with the ubiquitous hot-path benchmark. (2) ARITY
+  MODEL — the owner's own reframing, superseding the draft's subset
+  expansion: the author writes ONE arity with the ambient slot in its
+  schema; the runtime derives AT MOST ONE shorter call shape per arity
+  (the arity minus ALL its ambient slots), disambiguated by Datahike's
+  own `db?`/`connection?` predicate on the first argument; the derived
+  shape renders in `(doc f)` and the program graph like a declared
+  arity; a hand-declared arity always wins. No middle-argument
+  omission combinatorics. This PRESERVES ruling #41's
+  leave-off-the-db positional shortcut through the general mechanism;
+  the draft's explicit-database-only `q` (its Choice 4 Option A) is
+  OVERRULED — what dies is only seon.db's bespoke elision
+  implementation, replaced by the same behavior through the one
+  planner. (3) MAPS, owner verbatim "opt in not bend over backwards":
+  inject only a top-level entry of a PRESENT argument map whose
+  contract EXPLICITLY REQUIRES that key; optional declared keys are
+  never injected (absence may be meaningful); no parent construction,
+  no nesting in v1. (4) P17 stays hard-blocked on P12's typed
+  argument-address facts (the verified premise failure: `input-refs`
+  is a bare schema-ref set with no address); P12 implementation is the
+  next indexing lane after the rename pass.
 - **THE EXCLUSIVE-SWEEP DESIGN IS SEALED (owner, same day):**
   [exclusive-sweep-design-2026-08-05.md](exclusive-sweep-design-2026-08-05.md)
   is ruled with its three core recommendations accepted — Datahike's
