@@ -1,0 +1,8 @@
+#:seon.maintenance.result{:id
+                          [:string {:min 1, :seon.db/identity true}],
+                          :entity
+                          [:map
+                           {:seon.db/entity true}
+                           [:seon.maintenance.result/id
+                            :seon.maintenance.result/id]],
+                          :value :map}

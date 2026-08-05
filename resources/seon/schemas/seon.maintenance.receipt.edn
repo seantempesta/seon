@@ -1,0 +1,47 @@
+#:seon.maintenance.receipt{:id
+                           [:string {:min 1, :seon.db/identity true}],
+                           :fire
+                           [:and #:seon.db{:index true} :seon.db/ref],
+                           :task
+                           [:and #:seon.db{:index true} :seon.db/ref],
+                           :handler
+                           [:and #:seon.db{:index true} :seon.db/ref],
+                           :request
+                           [:and #:seon.db{:component true} :seon.db/ref],
+                           :started-at
+                           [:and #:seon.db{:index true} :inst],
+                           :completed-at
+                           [:and #:seon.db{:index true} :inst],
+                           :result
+                           [:and #:seon.db{:component true} :seon.db/ref],
+                           :error
+                           [:and #:seon.db{:index true} :seon.db/ref],
+                           :interrupted-at
+                           [:and #:seon.db{:index true} :inst],
+                           :receipt
+                           [:map
+                            {:seon.db/entity true}
+                            [:seon.maintenance.receipt/id
+                             :seon.maintenance.receipt/id]
+                            [:seon.maintenance.receipt/fire
+                             :seon.maintenance.receipt/fire]
+                            [:seon.maintenance.receipt/task
+                             :seon.maintenance.receipt/task]
+                            [:seon.maintenance.receipt/handler
+                             :seon.maintenance.receipt/handler]
+                            [:seon.maintenance.receipt/request
+                             :seon.maintenance.receipt/request]
+                            [:seon.maintenance.receipt/started-at
+                             :seon.maintenance.receipt/started-at]
+                            [:seon.maintenance.receipt/completed-at
+                             {:optional true}
+                             :seon.maintenance.receipt/completed-at]
+                            [:seon.maintenance.receipt/result
+                             {:optional true}
+                             :seon.maintenance.receipt/result]
+                            [:seon.maintenance.receipt/error
+                             {:optional true}
+                             :seon.maintenance.receipt/error]
+                            [:seon.maintenance.receipt/interrupted-at
+                             {:optional true}
+                             :seon.maintenance.receipt/interrupted-at]]}

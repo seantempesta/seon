@@ -482,4 +482,56 @@
    :seon.ai.model/meta-free-requests-per-minute 60
    :seon.ai.model/meta-free-tokens-per-minute 2000000
    :seon.ai.model/meta-paid-requests-per-minute 3000
-   :seon.ai.model/meta-paid-tokens-per-minute 4000000}]}
+   :seon.ai.model/meta-paid-tokens-per-minute 4000000}
+
+  ; Root's maintenance portfolio. These schedule facts are the only cadence
+  ; authority; each task points directly at the public operator Var it runs.
+  {:seon.schedule/id "root/maintenance/footprint-schedule"
+   :seon.schedule/expression "0 2 * * *"
+   :seon.schedule/zone-id "UTC"}
+  {:seon.schedule.task/id "root/maintenance/footprint"
+   :seon.schedule.task/owner [:seon.cluster.agent/id "root"]
+   :seon.schedule.task/function
+   [:seon.fn/sym "seon.operator/observe-footprint!"]
+   :seon.schedule.task/schedule
+   [:seon.schedule/id "root/maintenance/footprint-schedule"]}
+
+  {:seon.schedule/id "root/maintenance/reap-dead-roots-schedule"
+   :seon.schedule/expression "15 2 * * *"
+   :seon.schedule/zone-id "UTC"}
+  {:seon.schedule.task/id "root/maintenance/reap-dead-roots"
+   :seon.schedule.task/owner [:seon.cluster.agent/id "root"]
+   :seon.schedule.task/function
+   [:seon.fn/sym "seon.operator/reap-dead-roots!"]
+   :seon.schedule.task/schedule
+   [:seon.schedule/id "root/maintenance/reap-dead-roots-schedule"]}
+
+  {:seon.schedule/id "root/maintenance/rotate-logs-schedule"
+   :seon.schedule/expression "30 2 * * *"
+   :seon.schedule/zone-id "UTC"}
+  {:seon.schedule.task/id "root/maintenance/rotate-logs"
+   :seon.schedule.task/owner [:seon.cluster.agent/id "root"]
+   :seon.schedule.task/function
+   [:seon.fn/sym "seon.operator/rotate-logs!"]
+   :seon.schedule.task/schedule
+   [:seon.schedule/id "root/maintenance/rotate-logs-schedule"]}
+
+  {:seon.schedule/id "root/maintenance/process-census-schedule"
+   :seon.schedule/expression "5 * * * *"
+   :seon.schedule/zone-id "UTC"}
+  {:seon.schedule.task/id "root/maintenance/process-census"
+   :seon.schedule.task/owner [:seon.cluster.agent/id "root"]
+   :seon.schedule.task/function
+   [:seon.fn/sym "seon.operator/census-processes!"]
+   :seon.schedule.task/schedule
+   [:seon.schedule/id "root/maintenance/process-census-schedule"]}
+
+  {:seon.schedule/id "root/maintenance/compact-schedule"
+   :seon.schedule/expression "0 3 * * 0"
+   :seon.schedule/zone-id "UTC"}
+  {:seon.schedule.task/id "root/maintenance/compact"
+   :seon.schedule.task/owner [:seon.cluster.agent/id "root"]
+   :seon.schedule.task/function
+   [:seon.fn/sym "seon.operator/collect!"]
+   :seon.schedule.task/schedule
+   [:seon.schedule/id "root/maintenance/compact-schedule"]}]}

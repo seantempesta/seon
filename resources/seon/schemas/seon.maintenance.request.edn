@@ -1,0 +1,84 @@
+#:seon.maintenance.request{:id
+                           [:string {:min 1, :seon.db/identity true}],
+                           :task
+                           [:and #:seon.db{:index true} :seon.db/ref],
+                           :fire
+                           [:and #:seon.db{:index true} :seon.db/ref],
+                           :handler
+                           [:and #:seon.db{:index true} :seon.db/ref],
+                           :agent
+                           [:and #:seon.db{:index true} :seon.db/ref],
+                           :cluster-name :seon.boot/cluster-name,
+                           :repository-root :seon.operator/repository-root,
+                           :managed-root :seon.operator/managed-root,
+                           :log-dir :seon.boot/log-dir,
+                           :nominal-at :seon.schedule.fire/nominal-at,
+                           :observed-at :seon.schedule.fire/observed-at,
+                           :entity
+                           [:map
+                            {:seon.db/entity true}
+                            [:seon.maintenance.request/id
+                             :seon.maintenance.request/id]
+                            [:seon.maintenance.request/task
+                             :seon.maintenance.request/task]
+                            [:seon.maintenance.request/fire
+                             :seon.maintenance.request/fire]
+                            [:seon.maintenance.request/handler
+                             :seon.maintenance.request/handler]
+                            [:seon.maintenance.request/agent
+                             :seon.maintenance.request/agent]
+                            [:seon.maintenance.request/cluster-name
+                             :seon.maintenance.request/cluster-name]
+                            [:seon.maintenance.request/repository-root
+                             :seon.maintenance.request/repository-root]
+                            [:seon.maintenance.request/managed-root
+                             :seon.maintenance.request/managed-root]
+                            [:seon.maintenance.request/log-dir
+                             :seon.maintenance.request/log-dir]
+                            [:seon.maintenance.request/nominal-at
+                             :seon.maintenance.request/nominal-at]
+                            [:seon.maintenance.request/observed-at
+                             :seon.maintenance.request/observed-at]
+                            [:seon.config.maintenance/min-usable-bytes
+                             {:optional true}
+                             :seon.config.maintenance/min-usable-bytes]
+                            [:seon.config.maintenance/min-usable-ratio
+                             {:optional true}
+                             :seon.config.maintenance/min-usable-ratio]
+                            [:seon.config.maintenance/log-max-bytes
+                             {:optional true}
+                             :seon.config.maintenance/log-max-bytes]
+                            [:seon.config.maintenance/log-retained-files
+                             {:optional true}
+                             :seon.config.maintenance/log-retained-files]],
+                           :value
+                           [:map
+                            [:seon.schedule.task/id
+                             :seon.schedule.task/id]
+                            [:seon.schedule.fire/id
+                             :seon.schedule.fire/id]
+                            [:seon.schedule.fire/nominal-at
+                             :seon.schedule.fire/nominal-at]
+                            [:seon.schedule.fire/observed-at
+                             :seon.schedule.fire/observed-at]
+                            [:seon.cluster.agent/id
+                             :seon.cluster.agent/id]
+                            [:seon.boot/cluster-name
+                             :seon.boot/cluster-name]
+                            [:seon.operator/repository-root
+                             :seon.operator/repository-root]
+                            [:seon.operator/managed-root
+                             :seon.operator/managed-root]
+                            [:seon.boot/log-dir :seon.boot/log-dir]
+                            [:seon.config.maintenance/min-usable-bytes
+                             {:optional true}
+                             :seon.config.maintenance/min-usable-bytes]
+                            [:seon.config.maintenance/min-usable-ratio
+                             {:optional true}
+                             :seon.config.maintenance/min-usable-ratio]
+                            [:seon.config.maintenance/log-max-bytes
+                             {:optional true}
+                             :seon.config.maintenance/log-max-bytes]
+                            [:seon.config.maintenance/log-retained-files
+                             {:optional true}
+                             :seon.config.maintenance/log-retained-files]]}
