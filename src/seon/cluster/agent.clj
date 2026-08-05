@@ -12,7 +12,7 @@
   receives, pausable/resumable through flow's own graph commands,
   parallel across agents by construction.
 
-  TWO PROCS, both pinned `:io`, both var step-fns through the one
+  THREE PROCS, all pinned `:io`, all var step-fns through the one
   `seon.flow/var-process` door (F0(a)):
 
   - `::mailbox` — total and instant: forward one payload-free
@@ -31,6 +31,9 @@
     through the surviving `seon.cluster.loop/turn` owner (custody law,
     pre-provider capture, terminal transactions all unchanged), then
     self-rewake into this agent's OWN mailbox when more remains.
+  - `::schedule` — one disposable timer and fact listener scoped to this
+    agent. It derives due nominal instants, atomically commits fire+message,
+    and waits on `:io`; it never polls another agent's schedules.
 
   Evals are NOT a proc here: the turn's resume branch submits every form
   through this cluster's `seon.flow/submit!!` launcher. That owner admits
@@ -70,6 +73,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.flow :as seon.flow]
+            [seon.schedule :as schedule]
             [seon.schema.edn :as schema.edn])
   (:import [java.util Date]))
 
@@ -137,7 +141,7 @@
        db namespace-name))
 
 ;;; ---------------------------------------------------------------------------
-;;; The two proc steps
+;;; The agent proc steps
 ;;; ---------------------------------------------------------------------------
 
 (defn mailbox-step
@@ -283,8 +287,9 @@
   "The ONE blueprint: (agent-id, handle) → a `create-flow` definition.
   Pure data — `create-flow` allocates no threads, so a stamped
   definition costs nothing until started. The handle already carries
-  this agent's own mailbox channel and armed-ready completion permit
-  (`arm!` puts them there), so the definition is a projection of its request. The one
+  this agent's own mailbox and schedule channels plus its armed-ready
+  completion permit (`arm!` puts them there), so the definition is a
+  projection of its request. The one
   conn rides `(sliding-buffer 1)`: a wake says only \"look\", the turn
   pass derives ALL of this agent's work from one fresh database value,
   so coalescing is free by the same argument that made the central
@@ -302,7 +307,14 @@
             #'turn-step :io
             {:seon.cluster.loop/cluster handle
              :seon.cluster.agent/id agent-id})
-     :chan-opts {::episode {:buf-or-n (async/sliding-buffer 1)}}}}
+     :chan-opts {::episode {:buf-or-n (async/sliding-buffer 1)}}}
+    ::schedule
+    {:proc (seon.flow/var-process
+            #'schedule/schedule-step :io
+            {:seon.cluster.loop/cluster handle
+             :seon.cluster.agent/id agent-id
+             :seon.schedule/channel
+             (:seon.schedule/channel handle)})}}
    :conns [[[::mailbox ::episode] [::turn ::episode]]]})
 
 ;;; ---------------------------------------------------------------------------
@@ -411,11 +423,13 @@
                                 {:seon.error/kind ::no-such-agent
                                  :seon.cluster.agent/id agent-id})))
             wake-channel (async/chan (async/sliding-buffer 1))
+            schedule-channel (async/chan (async/sliding-buffer 1))
             completion (async/chan 1)
             turn-stopped (async/promise-chan)
             _ (async/>!! completion ::ready)
             agent-handle (assoc handle
                                 :seon.cluster.wake/channel wake-channel
+                                :seon.schedule/channel schedule-channel
                                 :seon.cluster.loop/completion completion
                                 :seon.cluster.agent/turn-stopped turn-stopped)
             graph (flow/create-flow
@@ -428,6 +442,7 @@
                    :seon.cluster.loop/cluster handle
                    :seon.flow/graph graph
                    :seon.cluster.wake/channel wake-channel
+                   :seon.schedule/channel schedule-channel
                    :seon.cluster.loop/completion completion
                    :seon.cluster.agent/turn-stopped turn-stopped}]
         (seon.flow/join-error-fanout!

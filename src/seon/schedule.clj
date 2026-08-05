@@ -88,7 +88,7 @@
   "The first distinct scheduled instant after `reference-at`, or nil."
   {:malli/schema
    [:=> [:cat :seon.schedule/nominal-request]
-    [:or :inst [:= nil]]]}
+    [:or :inst :nil]]}
   [{expression :seon.schedule/cron
     timezone :seon.schedule/timezone
     reference-at :seon.schedule/reference-at}]
@@ -109,7 +109,7 @@
   overlapping local minutes retain their distinct instants."
   {:malli/schema
    [:=> [:cat :seon.schedule/nominal-request]
-    [:or :inst [:= nil]]]}
+    [:or :inst :nil]]}
   [{expression :seon.schedule/cron
     timezone :seon.schedule/timezone
     reference-at :seon.schedule/reference-at}]
@@ -364,6 +364,7 @@
        ::flow/stop
        (do
          (d/unlisten connection listener-key)
+         (async/close! (:seon.schedule/channel state))
          (cancel-timer state))
 
        state)))

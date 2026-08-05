@@ -3,6 +3,7 @@
             [clojure.core.async.flow :as flow]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [malli.core :as m]
             [seon.cluster.agent :as agent]
             [seon.cluster.wake :as wake]
             [seon.db :as db]
@@ -85,6 +86,13 @@
    (.countDown ^CountDownLatch (::delivered state))
    [(assoc state ::message message) nil]))
 
+(deftest every-public-schedule-contract-compiles
+  (doseq [[function-name function-var] (ns-publics 'seon.schedule)
+          :let [contract (:malli/schema (meta function-var))]
+          :when contract]
+    (is (some? (m/function-schema contract))
+        (str "invalid contract on seon.schedule/" function-name))))
+
 (deftest nominal-instants-obey-gap-and-overlap-rules
   (testing "a nonexistent spring-forward minute is skipped"
     (is (= (instant "2025-03-10T06:30:00Z")
@@ -144,38 +152,33 @@
             armer-channel (async/chan (async/sliding-buffer 1))
             render-channel (async/chan (async/sliding-buffer 1))
             fault-channel (async/chan (async/sliding-buffer 1))
+            schedule-channel (async/chan (async/sliding-buffer 1))
+            completion (async/chan 1)
+            turn-stopped (async/promise-chan)
             delivered (CountDownLatch. 1)
+            _ (async/>!! completion ::ready)
+            cluster-handle
+            {:seon.store/branch-connection @connection
+             :seon.cluster.wake/channel owner-channel
+             :seon.schedule/channel schedule-channel
+             :seon.cluster.loop/completion completion
+             :seon.cluster.agent/turn-stopped turn-stopped}
+            blueprint
+            (agent/graph-definition
+             {:seon.cluster.loop/cluster cluster-handle
+              :seon.cluster.agent/id "owner"})
             owner-graph
             (flow/create-flow
-             {:procs
-              {::mailbox
-               {:proc
-                (seon.flow/var-process
-                 #'agent/mailbox-step :io
-                 {:seon.cluster.wake/channel owner-channel})}
-               ::sink
-               {:proc
-                (seon.flow/var-process
-                 #'graph-sink-step :io
-                 {::delivered delivered})}}
-              :conns
-              [[[::mailbox ::agent/episode] [::sink ::episode]]]})
-            schedule-channel (async/chan (async/sliding-buffer 1))
-            schedule-graph
-            (flow/create-flow
-             {:procs
-              {::schedule
-               {:proc
-                (seon.flow/var-process
-                 #'schedule/schedule-step :io
-                 {:seon.cluster.loop/cluster
-                  {:seon.store/branch-connection @connection}
-                  :seon.cluster.agent/id "owner"
-                  :seon.schedule/channel schedule-channel})}}
-              :conns []})]
+             (-> blueprint
+                 (assoc-in [:procs ::sink :proc]
+                           (seon.flow/var-process
+                            #'graph-sink-step :io
+                            {::delivered delivered}))
+                 (assoc :conns
+                        [[[::agent/mailbox ::agent/episode]
+                          [::sink ::episode]]])))]
         (try
           (flow/start owner-graph)
-          (flow/resume owner-graph)
           (wake/route!
            {:seon.cluster.wake/connection @connection
             :seon.cluster.wake/channels
@@ -185,8 +188,7 @@
             :seon.cluster.wake/render-channel render-channel
             :seon.cluster.wake/fault-channel fault-channel
             :seon.cluster.wake/key ::route})
-          (flow/start schedule-graph)
-          (flow/resume schedule-graph)
+          (flow/resume owner-graph)
           (is (.await delivered 5 TimeUnit/SECONDS)
               "the ordinary message wake entered the owning agent graph")
           (is (= 1
@@ -198,8 +200,8 @@
           (finally
             (wake/unlisten! {:seon.cluster.wake/connection @connection
                              :seon.cluster.wake/key ::route})
-            (flow/stop schedule-graph)
             (flow/stop owner-graph)
             (doseq [channel [owner-channel other-channel armer-channel
-                             render-channel fault-channel schedule-channel]]
+                             render-channel fault-channel schedule-channel
+                             completion turn-stopped]]
               (async/close! channel))))))))
