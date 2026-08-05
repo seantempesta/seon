@@ -604,6 +604,69 @@ untracked roots removed, and `src-old/`+`test-old/` deleted
   land**, on a frozen tree, with the boot+query proof bar — before any
   new feature lanes launch.
 
+**Third ruling batch, same session — P13 sealed as the TWO-WORLD DESK,
+and the GIT FRAMING adopted (conversational, owner-ruled):**
+
+- **P13 IS SETTLED: delete the session-image mechanism, keep the
+  capability through the one admission seam.** Two worlds, taught
+  explicitly in the bootstrap: the agent's DESK (session defs and
+  atoms — fast, experimentation-first, not durable, not shared) and
+  the SHARED SYSTEM (database facts, contracted functions with schemas
+  and tests, through the one admission seam). At run settlement the
+  desk commits as agent-scoped `:seon.def/*` session facts: the
+  provably-pure defining form (re-eval is exact — forms make restore
+  STRONG), else the store-faithful value, else honestly unrestorable.
+  Each run's fresh fork rehydrates from those facts, so the desk
+  survives run boundaries and JVM bounces by the same path. ATOMS
+  restore by SNAPSHOT, STATED — last settled value rebound, one honest
+  REPL line — because losing an afternoon's experiment state to a
+  bounce is the frustration the desk exists to prevent. SESSION END IS
+  EXPLICIT ONLY — the desk lives as long as the agent; nothing expires
+  on a timer; clear = agent action, owner order, or reset/refork.
+  `:seon.code.def` dies in the rename pass; `:seon.def/*` is the desk's
+  fact family.
+- **FRESHNESS IS PER TURN, NOT PER RUN** (owner: "why wait for the
+  run?"): new functions/schemas/tests are visible in context next TURN
+  (ruling #16 already re-derives per turn) and CALLABLE the moment
+  admission installs them — the per-run fork copy-on-writes only its
+  own redefinitions, so foreign installs show through mid-run. Only
+  the database value one form reads at its instant is pinned
+  (snapshot isolation, L9).
+- **TWO AGENT TIME-MODES, ONE MECHANISM: the run's opening database
+  value.** A live namespace owner opens every run at the branch head
+  (declares nothing). A fork-in-time agent (editor, replayer,
+  side-world debugger) is CHECKED OUT: an agent attribute pins its
+  opening basis/branch, with a per-run override — most specific wins,
+  the initial-forms resolution rule. Cost sits where it belongs: live
+  forks are sub-microsecond off the live ctx; a pinned basis pays one
+  cold ctx build, cacheable by commit id.
+- **THE GIT FRAMING IS ADOPTED for the agent-facing story** (owner:
+  "agents know git really well… could we bootstrap internal
+  understanding?"): Datahike is genuinely git-shaped, and the sharpest
+  mappings are exact — desk = working tree; run-settlement commit =
+  commit; pinned agent = detached-HEAD checkout; publication with
+  expected-current guard = push --force-with-lease; messaging a
+  namespace's owner = a pull request; the dependents-test gate = CI;
+  curation = rebase -i; single-future adoption = a FAST-FORWARD-ONLY
+  repository (merge does not exist here and the bootstrap says so up
+  front). RULED: the ff-only + rebase framing is the story agents are
+  told; the context gains git-shaped STATUS (desk vs committed) and
+  LOG (branch history) views as ordinary declared renderers over
+  existing facts. OPEN, owner-flagged: the namespace NAME for the
+  agent-facing verbs — "my.git would imply normal git"; the verbs
+  carry the prior, the namespace must not overpromise (candidates
+  under discussion; nothing lands before the ruling). This direction
+  is consistent with the O1-inversion lesson: stop teaching invented
+  vocabulary where a strong prior already exists.
+- **Landed this session:** operator consolidation complete —
+  `7dacba8ba` (one process-record authority: claims; legacy location
+  and code deleted; SIGKILL→reset proof with zero manual deletion) and
+  `61cbb93ed` (ALL six operator wait literals deleted; event-driven
+  readiness with one declared silence backstop
+  `:seon.config.operator/event-silence-backstop-ms`; detach adoption
+  is a loopback-socket event; slow-but-progressing boot proven to
+  outlive the backstop; silent boot proven loud).
+
 ### Rulings 2026-07-27 session 2 (owner, conversational) — the fresh tree IS the project
 
 - **Stop thinking temporary; drop the "nucleus" vocabulary.** The fresh
