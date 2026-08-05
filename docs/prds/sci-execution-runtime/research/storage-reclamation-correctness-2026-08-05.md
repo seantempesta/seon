@@ -14,8 +14,8 @@ older commit nor remains valid during Konserve's multi-key, prefix-applied
 sweep. The correct construction is a store-id-scoped, two-sided reachability
 fence in vendored Datahike: operations that can publish an older previously
 unreachable object and the complete mark-plus-sweep pass are mutually
-exclusive, while ordinary Datahike commits remain concurrent under the
-existing values-before-head ordering and safe-point cutoff
+exclusive, while ordinary single-lineage Datahike commits remain concurrent
+under the existing values-before-head ordering and safe-point cutoff
 (`reference-code/datahike/src/datahike/writing.cljc:423-565`;
 `reference-code/datahike/src/datahike/gc.cljc:121-146`).
 
@@ -39,7 +39,8 @@ I read the following current sources end to end, not by keyword extraction:
 - Datahike `c15272730e74fb3f8bba91f6361c268492a99ba7`:
   `reference-code/datahike/src/datahike/gc.cljc`, `gc_guard.cljc`,
   `versioning.cljc`, `writing.cljc`, `writer.cljc`, `api.cljc`, and
-  `api/specification.cljc`; also both current reclamation test namespaces,
+  `api/specification.cljc`; `reference-code/datahike/doc/gc.md`; also both
+  current reclamation test namespaces,
   `test/datahike/test/gc_test.cljc` and
   `test/datahike/test/background_gc_test.cljc`.
 - Konserve `89795ae1b769aafd47adf4168e2393d7b4721bc2`:
@@ -94,8 +95,12 @@ The implementation has two different time points:
   (`reference-code/datahike/src/datahike/gc.cljc:22-27,31-42,61-74`). The
   no-argument form uses epoch, retaining all reachable ancestry
   (`reference-code/datahike/src/datahike/gc.cljc:83-87,118-120`). This is a
-  **policy knob**: narrowing the retained history deliberately makes more
-  segments reclaimable.
+  **policy knob** at the algorithm boundary: narrowing the retained history
+  deliberately makes more segments reclaimable. Operationally, Datahike also
+  documents it as the grace period protecting distributed readers that retain
+  old database values (`reference-code/datahike/doc/gc.md:55-92`). It is a
+  correctness bound for those readers only when deployments enforce a maximum
+  reader/snapshot lifetime no longer than the retained interval.
 - `cutoff` is internal and controls the sweep. It is the earlier of the pass's
   captured `now` and `gc-guard/safe-point`; only objects strictly older than it
   may be removed (`reference-code/datahike/src/datahike/gc.cljc:121-130,146`;
@@ -108,12 +113,15 @@ makes collection remove more; the safe point is sweep-side and makes it remove
 less (`reference-code/datahike/src/datahike/gc.cljc:89-106`). Calling the
 public time point an "age safety cutoff" conflates these separate roles.
 
-An additional age grace is correct only when the system enforces a maximum
-delay between an object's write and publication of its reference; the upstream
-store-reference design says exactly that for external uploads
+The public date is therefore semantically mark-side retention, not a
+mark/sweep synchronization fence; it can also carry reader correctness under a
+declared maximum snapshot lifetime. An additional object-age grace is likewise
+correct only when the system enforces a maximum delay between an object's write
+and publication of its reference; the upstream store-reference design says
+exactly that for external uploads
 (`reference-code/datahike@11426b97:doc/store-refs.md:79-100`). No finite age
-grace protects an arbitrarily old commit that a new branch can publish, so it
-cannot repair the branch-creation gap.
+grace protects an arbitrarily old commit that a new branch can publish, so
+neither grace-period use repairs the branch-creation gap.
 
 ### What the safe point covers
 
@@ -159,16 +167,27 @@ The collector first enumerates all candidates and then removes them in batches
 
 ### Concurrent transaction advances a head mid-pass
 
-**Datahike structural segments: prevented in the supported one-JVM model.** If
+**An ordinary transaction whose sole parent is the branch's prior head:
+prevented in the supported one-JVM model.** If
 the mark sees the old head, the old closure is marked and every node newly
 written by the concurrent commit is at or newer than the safe point. If the
 head changes between reading its commit ID and reading the branch record, the
 mark retains the old commit ID and walks the new record, which is a safe
 superset (`reference-code/datahike/src/datahike/gc.cljc:22-31`). The writer's
 pointer-last ordering and the cutoff protect both cases
-(`reference-code/datahike/src/datahike/writing.cljc:497-552`;
+(`reference-code/datahike/src/datahike/writing.cljc:467-474,497-552`;
 `reference-code/datahike/src/datahike/gc.cljc:121-146`). This is why ordinary
 commits need not be stopped by the new fence.
+
+**A merge that adds an explicit older parent: not generally prevented.** The
+writer resolves explicit branch/commit parents and stamps them into the new
+commit (`reference-code/datahike/src/datahike/writing.cljc:450-474`), while
+`merge!` deliberately routes such parent sets through the writer
+(`reference-code/datahike/src/datahike/versioning.cljc:688-702`). If an
+explicit parent was absent from the initial mark, the new commit record is
+young and spared but the older parent closure is not. Such a merge is a
+reachability-publication operation and must take the same fence as branch
+creation; only the ordinary prior-head case can remain unfenced.
 
 **An old out-of-line object newly named by that transaction: not generally
 prevented.** Seon's current blob key is not part of Datahike's native mark;
@@ -242,9 +261,12 @@ runs the reclamation channel in parallel, and its optional background loop can
 overlap other direct calls
 (`reference-code/datahike/src/datahike/writer.cljc:184-199,301-310`;
 `reference-code/datahike/src/datahike/gc.cljc:148-192`). Two passes over a
-stable root set only duplicate idempotent removals or retain a safe superset;
-they do not by themselves introduce a new live object. Each pass nevertheless
-retains the branch-creation and blob-publication gaps above.
+stable root set do not by themselves add still-live reachability loss, but raw
+file-store sweeps are not reliably idempotent under overlap: each removal
+checks existence and then calls `Files/delete`, so both passes can observe a
+key and one can fail after the other removes it
+(`reference-code/konserve/src/konserve/filestore.clj:258-263,336-351`). Each
+pass also retains the branch-creation and blob-publication gaps above.
 
 There is an additional current Seon hazard if any direct Datahike pass bypasses
 the sole owner: `collect!` extends the mark by process-wide `with-redefs` of
@@ -288,13 +310,14 @@ explicitly process-local and says all writers must be in one JVM; a second
 
 | Interleaving | Existing result | Mechanism or gap |
 | --- | --- | --- |
-| Datahike transaction advances a branch head | safe for structural segments | pointer-last ordering plus safe-point cutoff |
+| Ordinary prior-head transaction advances a branch head | safe for structural segments | pointer-last ordering plus safe-point cutoff |
+| Merge publishes an old explicit parent | **unsafe** | old parent closure is neither newly written nor in the completed mark |
 | Transaction newly names an old blob | unsafe | current mark already captured the blob whitelist |
 | Branch is created from an old commit | **unsafe** | new roster/head writes are guarded; old closure is not |
 | Blob write lands after cutoff | spared for this pass | `last-write >= cutoff` |
 | Blob write/reference sequence crosses the pass | **unsafe** | no guard across both operations |
 | Two `registry/collect!` calls | serialized | `collect-monitor` |
-| Direct/background Datahike passes | may overlap | no Datahike pass latch; global Seon mark extension is unsafe if bypassed |
+| Direct/background Datahike passes | may overlap and one can fail | file removal is exists-then-delete; no Datahike pass latch |
 | Cluster fork/refork from commit | **unsafe** | same as branch creation |
 | Cross-store fork while source changes/reclaims | unsafe without source fence | key-by-key copy |
 | Second Seon JVM using store owner | refused | process-root file lock |
@@ -350,8 +373,9 @@ snapshot. For correctness, reclamation must atomically change a store-wide
 reachability state from generation `G` to `sweeping(G)`, every operation that
 can add old reachability must refuse or wait while that state is held, and the
 state must remain held through the last removal. Branch-set generation alone
-is still incomplete: forced heads, explicit GC roots, and old blob references
-also add reachability without necessarily adding a branch.
+is still incomplete: explicit-parent merges, forced heads, explicit GC roots,
+and old blob references also add reachability without necessarily adding a
+branch.
 
 The current dependencies do not expose a durable multi-key CAS that could
 implement such a state across JVMs. Under Seon's enforced one-JVM model, one
@@ -377,13 +401,14 @@ The exact owners are:
 1. `gc-storage!` acquires the reclamation side before reading `:branches` and
    holds it through `sweep!`, releasing in `finally`
    (`reference-code/datahike/src/datahike/gc.cljc:120-146`).
-2. `branch!` and `force-branch!` acquire the publication side across their
-   existing guarded scopes
-   (`reference-code/datahike/src/datahike/versioning.cljc:246-291,355-444`).
+2. `branch!`, `force-branch!`, and merges with explicit parents acquire the
+   publication side across their existing guarded scopes
+   (`reference-code/datahike/src/datahike/versioning.cljc:246-291,355-444,688-702`;
+   `reference-code/datahike/src/datahike/writing.cljc:450-474`).
    Creation of the initial database and any API that publishes an explicit old
    GC root must follow the same rule when applicable.
-3. Ordinary `commit!` retains only the existing write token because its new
-   graph is the old head closure plus values written within that token
+3. Ordinary prior-head `commit!` retains only the existing write token because
+   its new graph is the old head closure plus values written within that token
    (`reference-code/datahike/src/datahike/writing.cljc:423-565`).
 4. A conflict waits on an observable release or returns a typed retriable
    refusal; it never relies on a tuned sleep. No Flow graph has to quiesce,
@@ -418,9 +443,12 @@ root; it cannot rely on the object's age.
 The public `remove-before` remains necessary as the declared retention policy:
 it defines which parent edges belong to the fixed root closure
 (`reference-code/datahike/src/datahike/gc.cljc:41-42,72,103-106`). It is not a
-safety hedge. The internal safe point remains necessary because a pass may run
-alongside ordinary values-before-head commits and must not remove their newly
-written unpublished values
+synchronization fence. It is also the operational grace period for
+uncoordinated readers, and is correctness-bearing for them only under an
+enforced maximum retained-database-value lifetime
+(`reference-code/datahike/doc/gc.md:55-92`). The internal safe point remains
+necessary because a pass may run alongside ordinary values-before-head commits
+and must not remove their newly written unpublished values
 (`reference-code/datahike/src/datahike/gc_guard.cljc:85-102`).
 
 An extra age floor belongs only to an external-object protocol with a stated,
@@ -455,9 +483,9 @@ exist after that point:
 
 The fork delta to maintain and offer upstream is therefore: adopt the
 store-reference mark and monotonic-clock pair, then add a store-id-scoped
-two-sided reachability fence around `branch!`/`force-branch!`/explicit-root
-publication and the complete mark-plus-sweep. Record that this fence is
-required whenever `remove-before` permits an old unrooted closure to be
+two-sided reachability fence around `branch!`/`force-branch!`/explicit-parent
+merge/explicit-root publication and the complete mark-plus-sweep. Record that
+this fence is required whenever `remove-before` permits an old unrooted closure to be
 reclaimed; the current safe point covers writes, not resurrection of old
 objects.
 
@@ -504,6 +532,15 @@ control proving reclamation is real: before the interleaving scenario, the
 same ranged pass on an equivalent unrooted old closure must remove a non-zero
 set and make an unrooted old commit unavailable. This prevents an
 over-retaining implementation from passing the correctness test vacuously.
+
+## Diagnostic observation
+
+The cold-open failure was unnecessarily noisy: `:node-not-found` includes the
+entire Konserve store record, including handlers and lock atoms, rather than the
+store ID (`reference-code/datahike/src/datahike/index/persistent_set.cljc:432-444`).
+The useful diagnostic is the missing address plus store ID. This output defect
+is already recorded in the independently landed analysis named above; it does
+not alter the reclamation verdict.
 
 ## Open issue
 
