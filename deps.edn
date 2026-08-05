@@ -1,8 +1,6 @@
-{;; THE SYSTEM (2026-07-27 tree split): fresh `src/` and `test/` are the
- ;; default project — the target system, built up block by block, all
- ;; lights green. The old system lives under `src-old/`/`test-old/` as the
- ;; quarry (git is the archive) and is DISABLED by default: it loads only
- ;; through the explicitly old-facing aliases below.
+{;; THE SYSTEM (2026-07-27 tree split): `src/` and `test/` are the
+ ;; project. The old system's quarry was deleted from the tree on
+ ;; 2026-08-05 — git history is the archive.
  ;; resources is the classpath authority for schema EDN and render assets
  ;; (css build products, bundled fonts once licensed).
  :paths ["src" "resources"]
@@ -139,7 +137,7 @@
           :ns-default build}
 
   ;; Linting — run via Babashka for speed.
-  ;; Usage: bb -M:lint src src-old        (Splint)
-  ;;        clj-kondo --lint src src-old  (system clj-kondo)
+  ;; Usage: bb -M:lint src        (Splint)
+  ;;        clj-kondo --lint src  (system clj-kondo)
   :lint {:extra-deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}
          :main-opts ["-m" "noahtheduke.splint"]}}}

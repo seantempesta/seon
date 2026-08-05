@@ -248,7 +248,10 @@ invalidates that fact, update the localized authority in the same commit.
 
 One JVM process runs everything, from source, REPL-first. CLJ only — the
 CLJS build is off (owner, 2026-07-27). Fresh `src/`+`test/` are the
-system; `src-old/`/`test-old/` are the quarry, disabled by default.
+system. The old system's quarry (`src-old/`/`test-old/`) was deleted
+from the working tree on 2026-08-05 (owner sweep ruling); git history
+is the archive — quarrying is `git show`/`git log`, never a checkout
+directory.
 
 Boot is a tower; each layer reads only the one below it and publishes
 its own readiness:
@@ -1013,7 +1016,7 @@ comment framing, or comment-only pseudo-entries as output.
 
 Detailed current ownership belongs in `docs/seon/architecture/`, its
 `library-grounding.md` read map, and the closest fresh source namespace.
-`src-old/**/AGENTS.md` files are quarry instructions only.
+The quarry lives only in git history (deleted from the tree 2026-08-05).
 
 ## Git and shared-tree safety
 
@@ -1329,8 +1332,7 @@ Everything goes in the repository from the first keystroke:
   PRD's `research/` directory, because an unreproducible number is an
   anecdote;
 - anything that will run again — a crash harness, an adversarial suite,
-  a regression — is real code. New nucleus tests belong under fresh `test/`;
-  State A tests remain under `test-old/` until explicitly adopted. A separate
+  a regression — is real code. Tests belong under `test/`; a separate
   top-level package is also valid; a scratch directory is not.
 
 The test: if the machine were wiped right now, what would be lost? If the
@@ -1364,8 +1366,7 @@ Git. Details live in `docs/seon/reference/llm-adapters.md`.
 - `docs/prds/sci-execution-runtime/AGENTS.md` — current chunk runbook;
 - `docs/conventions.md` — code/schema patterns;
 - `docs/seon/architecture/library-grounding.md` — current first-party and
-  dependency source map; `src-old/**` appears only as explicitly requested
-  quarry;
+  dependency source map (the old-system quarry is git history only);
 - `AGENT.md` — thin delegated-lane compatibility adapter.
 
 ## Lane-spec wording (owner-directed 2026-08-03)
