@@ -12,8 +12,10 @@ tags: [issue, bootstrap, eval, testing]
 Concurrent bootstrap experiments share `tmp/bootstrap-drives/` as the parent
 of their isolated database roots and raw EDN reports. During a live matrix the
 parent contents disappeared, invalidating completed evidence and faulting the
-writers of still-running roots. The deleting process or owner is not yet
-identified.
+writers of still-running roots. The owner later identified the remover as the
+orchestrator's emergency disk sweep; that sweep is halted and `tmp/` deletion
+is frozen. The incident remains the evidence for an explicit directory-claim
+owner rather than an unidentified-remover investigation.
 
 ## Evidence
 
@@ -28,11 +30,16 @@ identified.
 - Both writers then reported `java.nio.file.NoSuchFileException` for their own
   Konserve `.new` paths and emitted `:datahike/writer-shutdown` core faults.
 - No HTTP 402 or renderer invocation failure preceded the disappearance.
+- The owner attributed the deletion to the orchestrator's emergency disk
+  sweep and froze further `tmp/` deletion on 2026-08-04.
+- A replacement 100-attempt experiment completed with every raw report and
+  live database root isolated below
+  `tmp/bootstrap-drives-rerun-20260805T000202Z/`; this avoids collision but
+  does not supply the durable ownership claim required below.
 
 ## Owner
 
-First identify the operation that removed `tmp/bootstrap-drives/`. Then
-strengthen the shared bootstrap-drive scratch/report lifecycle so one drive,
+Strengthen the shared bootstrap-drive scratch/report lifecycle so one drive,
 test, or cleanup owner cannot remove another live drive's root or completed
 raw report.
 
