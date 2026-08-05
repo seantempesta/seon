@@ -36,6 +36,18 @@ concurrent lanes (`my.edit.edn`, `my.edit.form.edn`, `seon.config.flow.io.edn`,
 `seon.edit.edn`, `seon.operator.edn`) plus one from the kernel-merge lane
 (`seon.sci.kernel.edn`). No lane's change was wrong; the count was.
 
+The bare 2026-08-05 gate moved the same derived count again:
+
+```text
+FAIL in (the-initial-paint-sends-every-walk-surface-once) (web_test.clj:458)
+expected: (= 17 (count page))
+  actual: (not (= 17 25))
+```
+
+A focused reproduction at pre-rename commit `401fd300e` also produced 25.
+That identical pre-rename value proves the current red is this filed literal-
+census class, not rename fallout.
+
 ## Owner
 
 `test/seon/render/web_test.clj`, and whatever fact the census should be derived

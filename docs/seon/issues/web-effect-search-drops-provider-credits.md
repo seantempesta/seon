@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: correctness
+severity: friction
 tags: [issue, web, effect, admission]
 ---
 
@@ -27,6 +27,18 @@ This is independent of Unit 6's mechanical
 `effect/*context*` to `effect/*request-context*` Var rename: the binding and
 all reads changed together, and the other 68 shell, web, and background-effect
 assertions passed.
+
+The later bare 2026-08-05 gate reproduced the same exact var and value at
+`test/seon/web/jvm_test.clj:359`:
+
+```text
+expected: (= 1 (:my.web/credits result))
+  actual: (not (= 1 nil))
+```
+
+The direct provider-shape test in the same namespace remained green. This
+keeps the attribution at the public effect result-admission boundary rather
+than the provider transport or the rename pass.
 
 ## Owner
 

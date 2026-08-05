@@ -38,6 +38,23 @@ it as `:map`; the running graph supplies the process-local string path/ID. The
 schema collision is therefore not only latent registry drift: it produces a
 core fault on an otherwise clean scratch boot.
 
+The bare 2026-08-05 gate supplied two more exact consumers of the same broken
+`apply-report!` path:
+
+- `seon.search-test/an-exact-transaction-report-advances-the-index-basis`;
+- `seon.search-test/message-and-instruction-content-are-searchable-by-family`.
+
+Both errored at `src/seon/search.clj:228` while `long` cast a nil basis value:
+
+```text
+NullPointerException: Cannot invoke "java.lang.Number.doubleValue()"
+because "x" is null
+```
+
+This issue's clean-boot contract-fault evidence already names that exact
+function and its declared-versus-actual index-ID shape, so no separate issue
+owns the two derivative test errors.
+
 ## Owner
 
 The cluster search wiring owner after the stop-retry lane releases

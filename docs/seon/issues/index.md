@@ -38,7 +38,7 @@ See `README.md` for the convention.
 | [Refuse the losing concurrent divergent schema declaration](concurrent-divergent-schema-declarations-falsely-both-succeed.md) | blocker | schema collision admission wave |
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 
-## Friction (90)
+## Friction (101)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -132,6 +132,17 @@ See `README.md` for the convention.
 | [Order effect feedback by numeric facts](effect-feedback-orders-receipts-by-id.md) | friction | effect ordering follow-up |
 | [Select the latest closed run without comparing run ids](latest-closed-run-orders-by-id-string.md) | friction | work ordering follow-up |
 | [Admit definitions after dynamically hidden namespace movement](dynamic-in-ns-cannot-persist-definition-namespace.md) | friction | per-run fork context wave |
+| [Preserve the interrupted blob staging artifact until it can be observed](interrupted-blob-staging-leaves-no-observable-artifact.md) | friction | blob staging repair wave |
+| [Preserve the Datahike refusal kind in the flat error value](transaction-refusal-drops-datahike-kind.md) | friction | database rejection projection repair |
+| [Supply the starting namespace in agent lifecycle fixtures](agent-lifecycle-fixtures-omit-the-starting-namespace.md) | friction | agent lifecycle fixture repair |
+| [Keep disarm retryable after its loud backstop fires](disarm-backstop-drops-the-retryable-route.md) | friction | agent stop retry repair |
+| [Return structural edit feedback instead of nil](edit-feedback-returns-nil-for-structural-errors.md) | friction | edit feedback response repair |
+| [Reconcile the error-class catalog with declared schemas and renderers](error-class-catalog-and-renderers-disagree.md) | friction | error class contract repair |
+| [Build the work-launcher graph from complete Flow configuration](work-launcher-graph-build-adds-a-nil-config-value.md) | friction | Flow configuration fixture repair |
+| [Make the generative loop fixture commit the run facts it asserts](generative-loop-fixture-commits-no-run-facts.md) | friction | generative loop fixture repair |
+| [Give `seon.search/index-step` its public contract](search-index-step-has-no-public-contract.md) | friction | search public contract repair |
+| [Resolve schema aliases within one admitted declaration set](schema-alias-population-cannot-resolve-an-earlier-declaration.md) | friction | schema alias admission repair |
+| [Web effect search drops provider credits](web-effect-search-drops-provider-credits.md) | friction | web effect admission repair |
 
 ## Cleanup (15)
 

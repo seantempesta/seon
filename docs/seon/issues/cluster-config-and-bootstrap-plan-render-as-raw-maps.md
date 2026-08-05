@@ -67,6 +67,12 @@ failed at `test/seon/render_coverage_test.clj:167`. This is readable but noisy
 recurring context, and it still violates the bounded, decision-oriented
 acceptance criterion below.
 
+The bare 2026-08-05 gate reproduced the same var with the full configuration
+summary plus four-model catalog, including prices and input modalities. A
+focused run at pre-rename commit `401fd300e` failed identically. The 12-plus
+line recurring face is therefore pre-existing render output, not rename
+fallout.
+
 ## Owner
 
 The three owning entity schemas and their owning namespaces:
