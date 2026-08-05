@@ -79,20 +79,40 @@ values-then-pointer writes).
 
 ## Acceptance
 
-- `gc-guard`'s atom becomes a two-sided latch: `branch!`/`force-branch!` and the
-  sweep are mutually exclusive (one `swap!` each, no check/hold window);
-  ordinary commits stay unexcluded under the existing safe point.
-- `gc-storage!` refuses with a flat value (never a throw) when a
-  reachability-extending sequence is open, and holds the latch across mark AND
-  sweep.
-- `seon.blob` writes and their referencing transactions form one
-  `with-unreferenced-writes` sequence; the blob whitelist is derived inside the
-  guarded mark.
-- A recurring test in `bin/test` collects head-only while a writer commits, a
-  branch is forked from an old commit, and a blob is written — and after
-  RECONNECT every head, every branch (including the forked one), and every blob
-  is intact; a second pass sweeps zero. The negative control asserts the
-  uninterleaved run actually sweeps a non-zero count.
+- Datahike's existing store-ID branch-roster mutex becomes one reachability
+  gate. `branch!`, creating/republishing `force-branch!`, explicit-old-parent
+  merge, cross-store fork source reads, and blob write-through-root sequences
+  take publisher permits;
+  collection queues the exclusive permit before computing either whitelist
+  and holds it through the last physical delete. Ordinary prior-head commits
+  remain concurrent under the existing safe point.
+- A queued sweep closes admission to new publishers and drains admitted ones.
+  `bin/seon start` acquires before its roster check and refuses immediately
+  with a flat, retryable `:sweep-in-progress` value, leaving no partial cluster.
+  Direct branch operations wait eventfully and do not read their source before
+  admission.
+- Blob publication spans the content-addressed existence/reuse check, optional
+  physical write, and one transaction that installs direct,
+  collector-visible digest datoms. The collector derives
+  blob roots semantically from production schema references while exclusive:
+  `:seon.blob/digest` is the concrete base referenced by every persisted root
+  attribute. Exact serialized-form matching, opaque nested result EDN, and
+  manually spoofed schema rows do not count as roots. MCP artifact retrieval
+  either gains an identified no-history durable root and explicit retraction
+  lifecycle or stops promising durable retrieval.
+- A recurring `bin/test` falsifier pauses after Konserve has fixed a deletion
+  batch containing a node needed by an old commit, before its first delete.
+  Branch publication cannot overlap that batch; after release and a cold
+  reconnect every published head is readable. Its complementary ordering
+  proves that collection waits for a branch admitted first.
+- A reused-orphan blob falsifier pauses after a batch contains digest D,
+  attempts to publish identical content plus a direct root, and proves the
+  publication/sweep gate preserves D after cold reconnect. Refusal/crash cases
+  prove an uncommitted blob becomes collectable and a committed root survives.
+  The complementary ordering pauses a publication after its write but before
+  its root transaction and proves collection waits through that transaction.
+- The first unchanged pass sweeps nonzero data and the second sweeps zero;
+  warm cached reads never satisfy reconnect evidence.
 - The `gc_guard` docstring stops claiming the safe point covers everything
   written before it; it covers written objects, not resurrected ones.
 
@@ -100,6 +120,9 @@ values-then-pointer writes).
 
 Design, full source analysis, and the falsifier specification:
 [gc-correctness-cas-opus-2026-08-05.md](../../prds/sci-execution-runtime/research/gc-correctness-cas-opus-2026-08-05.md).
+The owner-ruled exclusive-sweep design that supersedes the report's
+preemptible/two-sided-latch recommendation is
+[exclusive-sweep-design-2026-08-05.md](../../prds/sci-execution-runtime/plan/exclusive-sweep-design-2026-08-05.md).
 The cutoff itself is owned by
 [storage-gc-runs-without-a-cutoff-so-it-reclaims-almost-nothing.md](storage-gc-runs-without-a-cutoff-so-it-reclaims-almost-nothing.md),
 whose 2026-08-02 disposition ("no cutoff should land by guess") this answers.
