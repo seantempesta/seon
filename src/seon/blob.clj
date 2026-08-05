@@ -204,9 +204,9 @@
                     (.close stage-output)
                     ;; The staging file is the observable artifact of an
                     ;; interrupted oversized write. It is not published into
-                    ;; Konserve, and the process-root cleanup owner removes it
-                    ;; after operators and tests have had a chance to inspect
-                    ;; the partial write.
+                    ;; Konserve and remains under the process root for
+                    ;; inspection until explicit root cleanup removes the
+                    ;; scratch state.
                     (throw error)))))))))))
 
 (defn read-chunk
