@@ -22,6 +22,11 @@
 (def ^:private project-root
   (.getCanonicalFile (io/file (System/getProperty "user.dir"))))
 
+(def ^:private operator-classpath
+  (str (io/file project-root "script")
+       java.io.File/pathSeparator
+       (io/file project-root "resources")))
+
 (defn- fresh-root
   []
   (let [root (io/file project-root "tmp" "fresh-operator-test"
@@ -96,6 +101,11 @@
    (str (io/file root "data" "clusters" "logs"
                  (str (.pid child) ".log")))})
 
+(defn- process-claim-file
+  [generation]
+  (io/file project-root "data" "operator" "claims" "processes"
+           (str generation ".edn")))
+
 (defn- advertisement-process-identity
   [root name]
   (select-keys
@@ -124,10 +134,10 @@
 (defn- operator-command
   [root & arguments]
   (into
-   ["bb"
+    ["bb"
     "--config" (str (io/file project-root "bb.edn"))
     "--deps-root" (str project-root)
-    "--classpath" (str (io/file project-root "script"))
+    "--classpath" operator-classpath
     "-m" "seon.fresh-operator"
     "--seon-root" (str root)]
    arguments))
@@ -145,7 +155,7 @@
         ["bb"
          "--config" (str (io/file project-root "bb.edn"))
          "--deps-root" (str project-root)
-         "--classpath" (str (io/file project-root "script"))
+         "--classpath" operator-classpath
          "-e" code]
         builder
         (doto (ProcessBuilder. ^java.util.List command)
@@ -182,7 +192,7 @@
            ["bb"
             "--config" (str (io/file project-root "bb.edn"))
             "--deps-root" (str project-root)
-            "--classpath" (str (io/file project-root "script"))
+            "--classpath" operator-classpath
             "-e" code])
            (.directory project-root)
            (.redirectErrorStream true)))
@@ -221,7 +231,7 @@
            ["bb"
             "--config" (str (io/file project-root "bb.edn"))
             "--deps-root" (str project-root)
-            "--classpath" (str (io/file project-root "script"))
+            "--classpath" operator-classpath
             "-e" code])
            (.directory project-root)
            (.redirectErrorStream true)))
@@ -299,7 +309,7 @@
            ["bb"
             "--config" (str (io/file project-root "bb.edn"))
             "--deps-root" (str project-root)
-            "--classpath" (str (io/file project-root "script"))
+            "--classpath" operator-classpath
             "-e" code])
            (.directory project-root)
            (.redirectErrorStream true)))
@@ -346,7 +356,7 @@
            ["bb"
             "--config" (str (io/file project-root "bb.edn"))
             "--deps-root" (str project-root)
-            "--classpath" (str (io/file project-root "script"))
+            "--classpath" operator-classpath
             "-e" code])
           (.directory root)
           (.redirectErrorStream true)))
@@ -481,7 +491,7 @@
           (.waitFor child 10 TimeUnit/SECONDS))
         (delete-recursively! root)))))
 
-(deftest process-records-cannot-authorize-another-operator-root
+(deftest installation-process-claims-remain-scoped-by-operator-root
   (let [root (fresh-root)
         foreign-root (fresh-root)
         record
@@ -495,20 +505,20 @@
       (let [read-result
             (operator-private-value 'read-process-records (str root))]
         (is (empty? (:seon.fresh-operator/process-records read-result)))
-        (is (str/includes?
-             (get-in read-result
-                     [:seon.fresh-operator/process-record-errors 0
-                      :seon.fresh-operator/error])
-             "another operator root")
+        (is (empty?
+             (:seon.fresh-operator/process-record-errors read-result))
             (pr-str read-result)))
-      (let [outcome
-            (operator-private-outcome
-             'require-readable-process-records! (str root))]
-        (is (str/includes?
-             (:seon.dev.fresh-operator-test/message outcome)
-             "unreadable process records")
-            (pr-str outcome)))
+      (is (= [record]
+             (:seon.fresh-operator/process-records
+              (operator-private-value
+               'read-process-records (str foreign-root))))
+          "the installation authority exposes the claim only to its root")
+      (is (= []
+             (operator-private-value
+              'require-readable-process-records! (str root))))
       (finally
+        (operator-private-value
+         'clear-process-record! (str foreign-root) record)
         (delete-recursively! root)
         (delete-recursively! foreign-root)))))
 
@@ -560,6 +570,32 @@
            (.redirectErrorStream true)))
         output-future (process-output process)]
     (await-process! process output-future "The fresh operator")))
+
+(deftest legacy-process-record-directory-is-not-an-authority
+  (let [root (fresh-root)
+        generation (random-uuid)
+        legacy-file
+        (io/file root "data" "clusters" "processes"
+                 (str generation ".edn"))
+        claim-file (process-claim-file generation)
+        record
+        {:seon.dev.process/generation generation
+         :seon.dev.process/pid 2147483647
+         :seon.dev.process/start-instant "2026-08-05T00:00:00Z"
+         :seon.dev.process/root (.getCanonicalPath root)
+         :seon.dev.process/log (str (io/file root "dead.log"))}]
+    (try
+      (.mkdirs (.getParentFile legacy-file))
+      (spit legacy-file (str (pr-str record) "\n"))
+      (is (= {:seon.fresh-operator/process-records []
+              :seon.fresh-operator/process-record-errors []}
+             (operator-private-value
+              'reconcile-process-records! (str root))))
+      (is (not (.exists claim-file))
+          "reconciliation never reads or relocates the legacy record")
+      (finally
+        (.delete claim-file)
+        (delete-recursively! root)))))
 
 (deftest down-without-a-name-stops-every-recorded-child
   (let [root (fresh-root)
@@ -964,7 +1000,7 @@
            ["bb"
             "--config" (str (io/file project-root "bb.edn"))
             "--deps-root" (str project-root)
-            "--classpath" (str (io/file project-root "script"))
+            "--classpath" operator-classpath
             "-e" code])
           (.directory project-root)
           (.redirectErrorStream true)))
@@ -1128,6 +1164,56 @@
           (finally
             (store/release-store! opened))))
       (finally
+        (delete-recursively! root)))))
+
+(deftest ^{:seon.test/long "Boots a real JVM, SIGKILLs it, then proves forced reset self-recovers."}
+  forced-reset-clears-an-exact-dead-process-record
+  (let [root (fresh-root)
+        record* (atom nil)]
+    (try
+      (let [published (run-operator root "init")]
+        (is (= 0 (::exit published)) (::output published)))
+      (let [started (run-operator root "start" "dead-reset")]
+        (is (= 0 (::exit started)) (::output started)))
+      (let [record
+            (first
+             (:seon.fresh-operator/process-records
+              (operator-private-value 'read-process-records (str root))))
+            _ (reset! record* record)
+            generation (:seon.dev.process/generation record)
+            legacy-file
+            (io/file root "data" "clusters" "processes"
+                     (str generation ".edn"))
+            handle
+            (some-> (java.lang.ProcessHandle/of
+                     (long (:seon.dev.process/pid record)))
+                    (.orElse nil))]
+        (is (map? record) "the booted JVM published its exact claim")
+        (is (some? handle) "the recorded JVM still has a process handle")
+        (.mkdirs (.getParentFile legacy-file))
+        (spit legacy-file (str (pr-str record) "\n"))
+        (.destroyForcibly ^java.lang.ProcessHandle handle)
+        (.get (.onExit ^java.lang.ProcessHandle handle)
+              10 TimeUnit/SECONDS)
+        (is (false? (operator-private-value 'record-alive? record)))
+        (let [reset (run-operator root "reset" "--force")]
+          (is (= 0 (::exit reset)) (::output reset))
+          (is (str/includes? (::output reset) "path=already-exited")
+              (::output reset))
+          (is (str/includes?
+               (::output reset)
+               "reset republished current-src and reforked default")
+              (::output reset)))
+        (is (not (.exists (process-claim-file generation)))
+            "forced reset removed the confirmed-dead exact claim")
+        (is (not (.exists legacy-file))
+            "reset wiped the ignored legacy managed-tree residue"))
+      (finally
+        (when-let [record @record*]
+          (when (operator-private-value 'record-alive? record)
+            (operator-private-value 'terminate-recorded-process! record))
+          (operator-private-value
+           'clear-process-record! (str root) record))
         (delete-recursively! root)))))
 
 (defn- live-cluster-counts

@@ -704,24 +704,12 @@
        (:seon.fresh-operator/cache-path observation)
        :seon.dev.process/log
        (or (:seon.fresh-operator/log observation)
-           (str (fs/path root "data" "clusters" "processes"
+           (str (fs/path root "data" "clusters" "logs"
                          (str "recovered-" pid ".log"))))})))
 
 (defn- reconcile-process-records!
   [root]
   (let [canonical-root (.getCanonicalPath (java.io.File. root))
-        legacy-directory (fs/path (cluster-root canonical-root) "processes")
-        _
-        (when (fs/directory? legacy-directory)
-          (doseq [path (fs/list-dir legacy-directory)
-                  :let [record (try (state/read-edn path)
-                                    (catch Throwable _ nil))]
-                  :when (and (valid-process-record? record)
-                             (= canonical-root
-                                (:seon.dev.process/root record)))]
-            ;; One-way relocation into the external authority. The old file is
-            ;; left until the next explicit reset removes the managed tree.
-            (write-process-record! canonical-root record)))
         existing (read-process-records canonical-root)
         generations
         (into #{}
