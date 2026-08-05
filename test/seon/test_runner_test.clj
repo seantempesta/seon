@@ -9,11 +9,13 @@
             [seon.test-runner-failure-fixture]
             [seon.test.runner :as runner]
             [seon.test-support :as test-support])
-  (:import [java.util.concurrent CountDownLatch]))
+  (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
 (def ^:private at (java.util.Date. 1785283200000))
 (def ^:private git-sha (apply str (repeat 40 "a")))
 (def ^:private run-id "test-run-1")
+(def ^:private project-root
+  (.getCanonicalFile (io/file (System/getProperty "user.dir"))))
 
 (defn- captured-run-with-output []
   (let [writer (java.io.StringWriter.)
@@ -164,3 +166,104 @@
         (.join thread)
         (when-let [dump-path @path]
           (io/delete-file dump-path true))))))
+
+(deftest interrupted-launcher-awaits-its-runner-before-retaining-the-root
+  (let [fixture-root
+        (io/file project-root "tmp" "test-runner-interrupt"
+                 (str (random-uuid)))
+        fake-bin (io/file fixture-root "bin")
+        fake-clojure (io/file fake-bin "clojure")
+        reaped-file (io/file fixture-root "child-reaped.txt")
+        run-parent (io/file fixture-root "runs")
+        fake-runner
+        (str
+         "#!/usr/bin/env bash\n"
+         "set -euo pipefail\n"
+         "child=\n"
+         "stop() {\n"
+         "  trap - TERM\n"
+         "  kill -TERM \"$child\" 2>/dev/null || true\n"
+         "  wait \"$child\" 2>/dev/null || true\n"
+         "  printf '%s\\n' \"$child\" >\"$SEON_FAKE_REAPED\"\n"
+         "  exit 143\n"
+         "}\n"
+         "trap stop TERM\n"
+         "/usr/bin/python3 -c 'import signal; signal.pause()' &\n"
+         "child=$!\n"
+         "echo \"FAKE_RUNNER_READY $child\"\n"
+         "wait \"$child\"\n")
+        process (atom nil)]
+    (try
+      (.mkdirs fake-bin)
+      (.mkdirs run-parent)
+      (spit fake-clojure fake-runner)
+      (is (.setExecutable fake-clojure true false))
+      (let [builder
+            (doto
+             (ProcessBuilder.
+              ^java.util.List
+              [(str (io/file project-root "bin" "test"))
+               "seon.test-runner-test"])
+              (.directory project-root)
+              (.redirectErrorStream true))
+            _ (.put (.environment builder)
+                    "SEON_TEST_RUN_PARENT" (.getCanonicalPath run-parent))
+            _ (.put (.environment builder)
+                    "SEON_FAKE_REAPED" (.getCanonicalPath reaped-file))
+            _ (.put (.environment builder)
+                    "PATH"
+                    (str (.getCanonicalPath fake-bin)
+                         java.io.File/pathSeparator
+                         (System/getenv "PATH")))
+            launched (.start builder)
+            _ (reset! process launched)
+            ready-prefix "FAKE_RUNNER_READY "
+            ready (promise)
+            output
+            (future
+              (with-open [reader (io/reader (.getInputStream launched))]
+                (loop [lines []]
+                  (if-let [line (.readLine ^java.io.BufferedReader reader)]
+                    (do
+                      (when (str/starts-with? line ready-prefix)
+                        (deliver ready line))
+                      (recur (conj lines line)))
+                    lines))))
+            ready-line (deref ready 20000 ::readiness-backstop)
+            _ (when (= ::readiness-backstop ready-line)
+                (throw
+                 (ex-info "The fake runner did not publish readiness."
+                          {:seon.test-runner/output
+                           (deref output 1000 :still-running)})))
+            child-pid
+            (Long/parseLong
+             (subs ready-line (count ready-prefix)))]
+        (.destroy launched)
+        (.get (.onExit (.toHandle launched)) 20 TimeUnit/SECONDS)
+        (let [complete-output (deref output 10000 :reader-did-not-finish)
+              children (some-> (java.lang.ProcessHandle/of child-pid)
+                               (.orElse nil))
+              run-roots (vec (.listFiles run-parent))
+              run-root (first run-roots)
+              record (when run-root
+                       (slurp (io/file run-root "test-run.txt")))]
+          (is (pos? (.exitValue launched))
+              (pr-str complete-output))
+          (is (= 1 (count run-roots))
+              "the interrupted invocation retained exactly its evidence root")
+          (is (not (and children (.isAlive children)))
+              "the runner owner reaped its exact child before launcher exit")
+          (is (= (str child-pid) (str/trim (slurp reaped-file))))
+          (is (str/includes? record "runner-pid="))
+          (is (str/includes? record "runner-reaped-at="))
+          (is (str/includes? record "retained-reason=signal-TERM"))
+          (is (< (str/index-of record "runner-reaped-at=")
+                 (str/index-of record "retained-reason="))
+              "the runner exit publication precedes root retention")))
+      (finally
+        (when-let [^Process launched @process]
+          (when (.isAlive launched)
+            (.destroyForcibly launched)
+            (.get (.onExit (.toHandle launched)) 10 TimeUnit/SECONDS)))
+        (when (.exists fixture-root)
+          (test-support/delete-recursively! fixture-root))))))

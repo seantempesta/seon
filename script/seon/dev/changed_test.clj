@@ -9,10 +9,10 @@
             [seon.dev.state :as state]
             [seon.dev.test-roots :as test-roots])
   (:import [java.io File]
-           [java.util.concurrent TimeUnit]))
+           [java.util.concurrent TimeUnit TimeoutException]))
 
 (def test-timeout-ms 300000)
-(def termination-wait-ms 2000)
+(def termination-wait-ms 12000)
 (declare normalize-paths)
 
 (defn configuration
@@ -236,66 +236,29 @@
                     (drop 20))]
     (fs/delete-if-exists path)))
 
-(defn- process-descendants [^java.lang.ProcessHandle handle]
-  (with-open [stream (.descendants handle)]
-    (vec (iterator-seq (.iterator stream)))))
-
-(defn- stable-process-handles
-  "Expand known handles until two descendant observations are equal."
-  [known]
-  (loop [prior nil handles known attempts 0]
-    (let [expanded
-          (reduce
-            (fn [result handle]
-              (into result
-                    (map (juxt #(.pid ^java.lang.ProcessHandle %) identity))
-                    (when (.isAlive ^java.lang.ProcessHandle handle)
-                      (process-descendants handle))))
-            handles
-            (vals handles))]
-      (if (or (= (set (keys prior)) (set (keys expanded)))
-              (= attempts 20))
-        expanded
-        (do (Thread/sleep 10)
-            (recur handles expanded (inc attempts)))))))
-
-(defn- stable-process-tree [^Process process]
-  (let [root (.toHandle process)]
-    (stable-process-handles {(.pid root) root})))
-
-(defn- process-depth [handles ^java.lang.ProcessHandle handle]
-  (loop [current handle depth 0]
-    (let [parent (.parent current)]
-      (if (and (.isPresent parent)
-               (contains? handles (.pid ^java.lang.ProcessHandle (.get parent))))
-        (recur (.get parent) (inc depth))
-        depth))))
-
-(defn- await-process-absence [handles timeout-ms]
-  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
-    (loop []
-      (if (every? #(not (.isAlive ^java.lang.ProcessHandle %)) (vals handles))
-        true
-        (if (< (System/currentTimeMillis) deadline)
-          (do (Thread/sleep 10) (recur))
-          false)))))
-
-(defn- signal-tree! [handles force?]
-  (doseq [handle (sort-by #(process-depth handles %) > (vals handles))
-          :when (.isAlive ^java.lang.ProcessHandle handle)]
-    (if force?
-      (.destroyForcibly ^java.lang.ProcessHandle handle)
-      (.destroy ^java.lang.ProcessHandle handle))))
+(defn- await-process-exit
+  [^Process process timeout-ms]
+  (try
+    (.get (.onExit (.toHandle process))
+          (long timeout-ms)
+          TimeUnit/MILLISECONDS)
+    true
+    (catch TimeoutException _
+      false)))
 
 (defn- terminate!
-  "Terminate one stable process tree descendants-first and await absence."
+  "Signal one process owner and await its exact exit publication.
+
+   The launched `bin/test` process owns and awaits its runner JVM before it
+   exits, so changed-test never samples an incomplete descendant tree. The
+   time limit is only the loud backstop around that foreign process."
   [^Process process]
-  (let [handles (stable-process-tree process)]
-    (signal-tree! handles false)
-    (or (await-process-absence handles termination-wait-ms)
-        (let [expanded (stable-process-handles handles)]
-          (signal-tree! expanded true)
-          (await-process-absence expanded termination-wait-ms)))))
+  (let [handle (.toHandle process)]
+    (.destroy handle)
+    (or (await-process-exit process termination-wait-ms)
+        (do
+          (.destroyForcibly handle)
+          (await-process-exit process termination-wait-ms)))))
 
 (defn failure-excerpts
   "Return bounded clojure.test failure blocks with expected and actual values."

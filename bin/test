@@ -258,16 +258,71 @@ printf 'pid=%s process-start=%s suite-start=%s git=%s selection=%s\n' \
   "$git_sha" \
   "$selection" >"$run_root/test-run.txt"
 
+suite_pid=
+runner_reap_backstop_seconds=10
+
+reap_runner() {
+  local requested_signal=$1
+  local runner_pid runner_exit reap_watchdog_pid
+  if [ -z "$suite_pid" ]; then
+    return 0
+  fi
+
+  runner_pid=$suite_pid
+  suite_pid=
+  if kill -0 "$runner_pid" 2>/dev/null; then
+    kill -"$requested_signal" "$runner_pid" 2>/dev/null || true
+    (
+      sleep "$runner_reap_backstop_seconds"
+      if kill -0 "$runner_pid" 2>/dev/null; then
+        echo "bin/test: RUNNER REAP BACKSTOP fired for pid=$runner_pid; forcing exit" >&2
+        kill -KILL "$runner_pid" 2>/dev/null || true
+      fi
+    ) &
+    reap_watchdog_pid=$!
+  else
+    reap_watchdog_pid=
+  fi
+
+  if wait "$runner_pid"; then
+    runner_exit=0
+  else
+    runner_exit=$?
+  fi
+  if [ -n "$reap_watchdog_pid" ]; then
+    kill "$reap_watchdog_pid" 2>/dev/null || true
+    wait "$reap_watchdog_pid" 2>/dev/null || true
+  fi
+  printf 'runner-exit=%s runner-reaped-at=%s\n' \
+    "$runner_exit" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+    >>"$run_root/test-run.txt"
+}
+
 retain_run_root() {
-  signal=$1
-  status=$2
-  echo "bin/test: interrupted by $signal; retained isolated operator root $run_root" >&2
+  local caught_signal=$1
+  local status=$2
   trap - HUP INT TERM
+  reap_runner TERM
+  printf 'retained-reason=signal-%s\n' "$caught_signal" >>"$run_root/test-run.txt"
+  echo "bin/test: interrupted by $caught_signal; retained isolated operator root $run_root" >&2
   exit "$status"
 }
+
+reap_runner_on_launcher_exit() {
+  local status=$?
+  trap - EXIT HUP INT TERM
+  if [ -n "$suite_pid" ]; then
+    reap_runner TERM
+    printf 'retained-reason=launcher-exit-%s\n' "$status" \
+      >>"$run_root/test-run.txt"
+  fi
+  exit "$status"
+}
+
 trap 'retain_run_root HUP 129' HUP
 trap 'retain_run_root INT 130' INT
 trap 'retain_run_root TERM 143' TERM
+trap reap_runner_on_launcher_exit EXIT
 
 echo "bin/test: isolated operator root $run_root pid=$$ selection=$selection"
 cd "$run_root"
@@ -277,8 +332,20 @@ clojure \
   "-J-Dseon.test.root=$run_root" \
   -M:test -m seon.test.runner \
   "${result_cluster:--}" "$result_root" "$git_sha" "$selection_mode" \
-  "${namespaces[@]}"
-status=$?
+  "${namespaces[@]}" &
+suite_pid=$!
+printf 'runner-pid=%s runner-started-at=%s\n' \
+  "$suite_pid" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+  >>"$run_root/test-run.txt"
+if wait "$suite_pid"; then
+  status=0
+else
+  status=$?
+fi
+printf 'runner-exit=%s runner-reaped-at=%s\n' \
+  "$status" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+  >>"$run_root/test-run.txt"
+suite_pid=
 set -e
 cd "$source_root"
 
@@ -300,4 +367,5 @@ else
   echo "bin/test: retained failed isolated operator root $run_root" >&2
 fi
 
+trap - EXIT HUP INT TERM
 exit "$status"
