@@ -658,6 +658,21 @@ and the GIT FRAMING adopted (conversational, owner-ruled):**
   under discussion; nothing lands before the ruling). This direction
   is consistent with the O1-inversion lesson: stop teaching invented
   vocabulary where a strong prior already exists.
+- **`my.branch` RULED (owner, same day)** as the home for the
+  agent-facing verbs (checkout, log, diff, status, fork) — "my.git
+  would imply normal git"; the verbs carry the prior, the namespace
+  does not overpromise. Real git on disk stays raw CLI via `my.shell`.
+  Full design: [agent-desk-and-checkout-prd-2026-08-05.md](agent-desk-and-checkout-prd-2026-08-05.md);
+  rename pass spec (audit units reconciled with newer rulings):
+  [rename-pass-2026-08-05.md](rename-pass-2026-08-05.md).
+- **Root-caused this session, both closed:** O4 "delegation broken"
+  was the grader scoping to a run `my.run/wait` correctly closes —
+  delegation live-proven end to end (`cdae0bd95`); the 08-03 writer
+  death was mutable dependency-cache replacement removing a
+  not-yet-linked AOT classfile — reproduced exactly, and the CURRENT
+  immutable content-addressed cache design closes the class (probe:
+  3,628 dynamic-cache entries cleared, writer still committed from its
+  immutable digest directory; `5e5294228`).
 - **Landed this session:** operator consolidation complete —
   `7dacba8ba` (one process-record authority: claims; legacy location
   and code deleted; SIGKILL→reset proof with zero manual deletion) and
