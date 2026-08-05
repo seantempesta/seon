@@ -10,7 +10,11 @@
  :seon.program/identity
  [:tuple :seon.program/identity-attribute :seon.schema/value]
  :seon.program/declaration-row
- [:or :seon.ns/ns :seon.fn/fn :seon.schema/schema :seon.test/test
+ [:or :seon.ns/ns :seon.fn/fn
+  [:map
+   [:seon.schema/key :seon.schema/key]
+   [:seon.schema/form :seon.schema/form]]
+  :seon.test/test
   :seon.def/def]
  :seon.program/delete-identities [:vector :seon.program/identity]
  :seon.program/source [:string {:min 1}]

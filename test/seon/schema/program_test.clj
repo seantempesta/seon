@@ -1,5 +1,6 @@
 (ns seon.schema.program-test
   (:require [clojure.test :refer [deftest is testing]]
+            [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
@@ -44,6 +45,11 @@
          :seon.fn/source "(defn f [x] x)"
          :seon.fn/arglists "([x])"
          :seon.fn/private? false}
+        schema-declaration
+        (program/declaration-row
+         {:seon.schema/key :sample/value
+          :seon.schema/form ":string"}
+         :contracted)
         deletion
         {:seon.program/delete-identities [[:seon.fn/sym "sample/f"]]
          :seon.program/source "(ns-unmap 'sample 'f)"}
@@ -58,6 +64,11 @@
          :seon.fn.manifest/artifacts [artifact]
          :seon.fn.manifest/identities [[:seon.fn/sym "sample/f"]]}]
     (is (schema/valid-candidate-value? :seon.program/row declaration))
+    (is (= {:seon.schema/key :sample/value
+            :seon.schema/form ":string"}
+           schema-declaration))
+    (is (schema/valid-candidate-value? :seon.program/row
+                                       schema-declaration))
     (is (schema/valid-candidate-value? :seon.program/row deletion))
     (is (schema/valid-candidate-value? :seon.program/rows
                                        [declaration deletion]))
