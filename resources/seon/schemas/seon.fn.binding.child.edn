@@ -1,0 +1,13 @@
+#:seon.fn.binding.child{:order :int,
+                        :role [:enum :element :rest :as],
+                        :binding
+                        [:and {:seon.db/component true} :seon.db/ref],
+                        :row
+                        [:map
+                         #:seon.db{:attributes true}
+                         [:seon.fn.binding.child/order
+                          :seon.fn.binding.child/order]
+                         [:seon.fn.binding.child/role
+                          :seon.fn.binding.child/role]
+                         [:seon.fn.binding.child/binding
+                          :seon.fn.binding.child/binding]]}

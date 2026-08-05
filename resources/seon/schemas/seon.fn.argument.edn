@@ -1,0 +1,37 @@
+#:seon.fn.argument{:order :int,
+                   :index :int,
+                   :rest? :boolean,
+                   :binding [:and {:seon.db/component true} :seon.db/ref],
+                   :schema :seon.db/ref,
+                   :rest-tail-schema :seon.db/ref,
+                   :rest-element-schema :seon.db/ref,
+                   :label-edn :string,
+                   :label-keyword :keyword,
+                   :label-string :string,
+                   :label-symbol :symbol,
+                   :row
+                   [:map
+                    #:seon.db{:attributes true}
+                    [:seon.fn.argument/order :seon.fn.argument/order]
+                    [:seon.fn.argument/index :seon.fn.argument/index]
+                    [:seon.fn.argument/rest? :seon.fn.argument/rest?]
+                    [:seon.fn.argument/binding :seon.fn.argument/binding]
+                    [:seon.fn.argument/schema :seon.fn.argument/schema]
+                    [:seon.fn.argument/rest-tail-schema
+                     {:optional true}
+                     :seon.fn.argument/rest-tail-schema]
+                    [:seon.fn.argument/rest-element-schema
+                     {:optional true}
+                     :seon.fn.argument/rest-element-schema]
+                    [:seon.fn.argument/label-edn
+                     {:optional true}
+                     :seon.fn.argument/label-edn]
+                    [:seon.fn.argument/label-keyword
+                     {:optional true}
+                     :seon.fn.argument/label-keyword]
+                    [:seon.fn.argument/label-string
+                     {:optional true}
+                     :seon.fn.argument/label-string]
+                    [:seon.fn.argument/label-symbol
+                     {:optional true}
+                     :seon.fn.argument/label-symbol]]}

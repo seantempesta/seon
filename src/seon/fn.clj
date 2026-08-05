@@ -1048,13 +1048,27 @@
         compile-options (:seon.schema.projection/compile-options projection)
         predicate-functions
         (:seon.schema.projection/predicate-functions projection)
-        schema-keys (set (keys schema-forms))]
+        schema-keys (set (keys schema-forms))
+        aliases-by-namespace
+        (into {}
+              (keep (fn [{namespace-name :seon.ns/name
+                          aliases :seon.ns/aliases}]
+                      (when namespace-name
+                        [namespace-name
+                         (into {}
+                               (map (juxt :seon.ns.alias/local
+                                          :seon.ns.alias/target-ns))
+                               aliases)])))
+              rows)]
     (mapv (fn [row]
             (program/with-contract-facts
              {:seon.program/row row
               :seon.program/compile-options compile-options
               :seon.program/predicate-functions predicate-functions
-              :seon.program/schema-keys schema-keys}))
+              :seon.program/schema-keys schema-keys
+              :seon.program/schema-forms schema-forms
+              :seon.program/reader-aliases
+              (get aliases-by-namespace (second (:seon.fn/ns row)) {})}))
           rows)))
 
 (defn backfill-contract-facts!
@@ -1077,28 +1091,48 @@
         predicate-functions
         (:seon.schema.projection/predicate-functions projection)
         schema-keys (set (keys (:seon.schema.projection/forms projection)))
-        missing
-        (db/q '[:find ?function ?function-symbol ?spec
+        contracted
+        (db/q '[:find ?function ?function-symbol ?spec ?source ?arglists
                :where
                [?function :seon.fn/sym ?function-symbol]
                [?function :seon.fn/spec ?spec]
-               (or (not [?function :seon.fn/arities])
-                   (not [?function :seon.fn/ast]))]
+               [?function :seon.fn/source ?source]
+               [?function :seon.fn/arglists ?arglists]]
              db)
+        missing
+        (filterv
+         (fn [[function]]
+           (let [row (db/pull db
+                              [:seon.fn/ast
+                               {:seon.fn/arities
+                                [:seon.fn.arity/argument-count
+                                 :seon.fn.arity/return-schema]}]
+                              function)
+                 arities (:seon.fn/arities row)]
+             (or (nil? (:seon.fn/ast row))
+                 (empty? arities)
+                 (some #(or (not (contains? % :seon.fn.arity/argument-count))
+                            (not (contains? % :seon.fn.arity/return-schema)))
+                       arities))))
+         contracted)
         tx-data
         (into
          []
          (mapcat
-          (fn [[function function-symbol spec]]
+          (fn [[function function-symbol spec source arglists]]
             (let [current (db/pull db [:seon.fn/arities :seon.fn/ast]
                                   function)
                   parsed
                   (program/contract-facts
                    {:seon.program/function-symbol function-symbol
                     :seon.program/spec spec
+                    :seon.program/source source
+                    :seon.program/arglists arglists
                     :seon.program/compile-options compile-options
                     :seon.program/predicate-functions predicate-functions
-                    :seon.program/schema-keys schema-keys})]
+                    :seon.program/schema-keys schema-keys
+                    :seon.program/schema-forms
+                    (:seon.schema.projection/forms projection)})]
               (concat
                (keep (fn [attribute]
                        (when (contains? current attribute)

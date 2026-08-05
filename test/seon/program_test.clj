@@ -1,6 +1,7 @@
 (ns seon.program-test
   "Recurring proof for the one build/runtime declaration contract."
   (:require [clojure.test :refer [deftest is testing]]
+            [malli.core :as m]
             [seon.db :as db]
             [seon.cluster.run :as run]
             [seon.program :as program]
@@ -27,15 +28,38 @@
 (defn- parsed-contract
   [function-symbol spec forms]
   (let [projection (schema/build-projection forms
-                                            {(symbol function-symbol) spec})]
+                                            {(symbol function-symbol) spec})
+        compiled (m/function-schema
+                  spec (:seon.schema.projection/compile-options projection))
+        bindings
+        (mapv (fn [arity]
+                (let [info (m/-function-info arity)
+                      child-count (count (m/children (:input info)))
+                      fixed-count (if (= :varargs (:arity info))
+                                    (dec child-count) child-count)
+                      fixed (mapv #(symbol (str "x" %)) (range fixed-count))]
+                  (if (= :varargs (:arity info))
+                    (into fixed ['& 'xs])
+                    fixed)))
+              (m/-function-schema-arities compiled))
+        function-name (name (symbol function-symbol))
+        source (if (= 1 (count bindings))
+                 (pr-str (list 'defn (symbol function-name)
+                               (first bindings) nil))
+                 (pr-str (list* 'defn (symbol function-name)
+                                (map (fn [binding]
+                                       (list binding nil)) bindings))))]
     (program/contract-facts
      {:seon.program/function-symbol function-symbol
       :seon.program/spec (pr-str spec)
+      :seon.program/source source
+      :seon.program/arglists (pr-str (apply list bindings))
       :seon.program/compile-options
       (:seon.schema.projection/compile-options projection)
       :seon.program/predicate-functions
       (:seon.schema.projection/predicate-functions projection)
-      :seon.program/schema-keys (set (keys forms))})))
+      :seon.program/schema-keys (set (keys forms))
+      :seon.program/schema-forms forms})))
 
 (defn- nested-maps
   [value]
@@ -48,7 +72,8 @@
         spec
         [:function
          [:=> [:cat [:map-of :sample/key :sample/value]] :sample/value]
-         [:=> [:cat [:repeat {:min 1 :max 2} :sample/value]]
+         [:=> [:cat :sample/value
+               [:repeat {:min 0 :max 1} :sample/value]]
           [:enum :sample/enum-value :other]]]
         facts (parsed-contract "sample/complete" spec forms)
         arities (:seon.fn/arities facts)

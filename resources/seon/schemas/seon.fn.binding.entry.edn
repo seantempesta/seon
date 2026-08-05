@@ -1,0 +1,48 @@
+#:seon.fn.binding.entry{:order :int,
+                        :spelling
+                        [:enum :explicit :keys :strs :syms],
+                        :binding
+                        [:and {:seon.db/component true} :seon.db/ref],
+                        :default-edn :string,
+                        :row
+                        [:map
+                         #:seon.db{:attributes true}
+                         [:seon.fn.binding.entry/order
+                          :seon.fn.binding.entry/order]
+                         [:seon.fn.binding.entry/spelling
+                          :seon.fn.binding.entry/spelling]
+                         [:seon.fn.binding.entry/binding
+                          :seon.fn.binding.entry/binding]
+                         [:seon.fn.binding.entry/default-edn
+                          {:optional true}
+                          :seon.fn.binding.entry/default-edn]
+                         [:seon.schema.map-entry/key-kind
+                          :seon.schema.map-entry/key-kind]
+                         [:seon.schema.map-entry/key-fingerprint
+                          :seon.schema.map-entry/key-fingerprint]
+                         [:seon.schema.map-entry/key-edn
+                          :seon.schema.map-entry/key-edn]
+                         [:seon.schema.map-entry/key-keyword
+                          {:optional true}
+                          :seon.schema.map-entry/key-keyword]
+                         [:seon.schema.map-entry/key-string
+                          {:optional true}
+                          :seon.schema.map-entry/key-string]
+                         [:seon.schema.map-entry/key-symbol
+                          {:optional true}
+                          :seon.schema.map-entry/key-symbol]
+                         [:seon.schema.map-entry/key-boolean
+                          {:optional true}
+                          :seon.schema.map-entry/key-boolean]
+                         [:seon.schema.map-entry/key-int
+                          {:optional true}
+                          :seon.schema.map-entry/key-int]
+                         [:seon.schema.map-entry/key-double
+                          {:optional true}
+                          :seon.schema.map-entry/key-double]
+                         [:seon.schema.map-entry/key-uuid
+                          {:optional true}
+                          :seon.schema.map-entry/key-uuid]
+                         [:seon.schema.map-entry/key-inst
+                          {:optional true}
+                          :seon.schema.map-entry/key-inst]]}

@@ -3,6 +3,7 @@
               [:keyword
                {:seon.db/identity true, :seon.search/index :symbol}],
               :form :string,
+              :shape :seon.db/ref,
               :identity :qualified-keyword,
               :identity-only :boolean,
               :identity-projection :qualified-symbol,
@@ -14,6 +15,7 @@
                [:seon.schema.admission/source
                 :seon.schema.admission/source]
                [:seon.schema/form :seon.schema/form]
+               [:seon.schema/shape {:optional true} :seon.schema/shape]
                [:seon.db.id/generator
                 {:optional true}
                 :seon.db.id/generator]],

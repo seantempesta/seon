@@ -3,6 +3,11 @@
                 :guard-refs [:set :seon.db/ref],
                 :input :seon.db/ref,
                 :input-refs [:set :seon.db/ref],
+                :arguments
+                [:vector {:seon.db/component true} :seon.db/ref],
+                :argument-count :int,
+                :return-schema :seon.db/ref,
+                :guard-schema :seon.db/ref,
                 :max :int,
                 :min :int,
                 :order :int,
@@ -19,6 +24,14 @@
                   :seon.fn.arity/max]
                  [:seon.fn.arity/input :seon.fn.arity/input]
                  [:seon.fn.arity/output :seon.fn.arity/output]
+                 [:seon.fn.arity/arguments :seon.fn.arity/arguments]
+                 [:seon.fn.arity/argument-count
+                  :seon.fn.arity/argument-count]
+                 [:seon.fn.arity/return-schema
+                  :seon.fn.arity/return-schema]
+                 [:seon.fn.arity/guard-schema
+                  {:optional true}
+                  :seon.fn.arity/guard-schema]
                  [:seon.fn.arity/guard
                   {:optional true}
                   :seon.fn.arity/guard]

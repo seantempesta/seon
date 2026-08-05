@@ -1,4 +1,5 @@
 #:seon.fn{:arglists :string,
+          :arglists-override? :boolean,
           :arities [:vector #:seon.db{:component true} :seon.db/ref],
           :ast [:and #:seon.db{:component true} :seon.db/ref],
           :calls [:set :seon.db/ref],
@@ -19,6 +20,9 @@
            [:seon.fn/ns :seon.fn/ns]
            [:seon.fn/source :seon.fn/source]
            [:seon.fn/arglists {:optional true} :seon.fn/arglists]
+           [:seon.fn/arglists-override?
+            {:optional true}
+            :seon.fn/arglists-override?]
            [:seon.fn/doc {:optional true} :seon.fn/doc]
            [:seon.fn/private? {:optional true} :seon.fn/private?]
            [:seon.fn/spec {:optional true} :seon.fn/spec]

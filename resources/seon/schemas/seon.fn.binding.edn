@@ -1,0 +1,21 @@
+#:seon.fn.binding{:form :string,
+                  :shape [:enum :symbol :map :sequential],
+                  :symbol :symbol,
+                  :children
+                  [:vector {:seon.db/component true} :seon.db/ref],
+                  :entries
+                  [:vector {:seon.db/component true} :seon.db/ref],
+                  :row
+                  [:map
+                   #:seon.db{:attributes true}
+                   [:seon.fn.binding/form :seon.fn.binding/form]
+                   [:seon.fn.binding/shape :seon.fn.binding/shape]
+                   [:seon.fn.binding/symbol
+                    {:optional true}
+                    :seon.fn.binding/symbol]
+                   [:seon.fn.binding/children
+                    {:optional true}
+                    :seon.fn.binding/children]
+                   [:seon.fn.binding/entries
+                    {:optional true}
+                    :seon.fn.binding/entries]]}
