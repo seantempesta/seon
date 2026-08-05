@@ -1467,9 +1467,9 @@ wakes/0 false vs 60/40; two-agent dedupe proven),
 
 Six-generation git archaeology (`research/registration-archaeology-2026-07-29.md`)
 confirmed the owner's report that function, schema, and test registration has
-already been rebuilt repeatedly. The fresh tree currently restates the same
-contract three times: `seon.fn/durable-row`, `seon.sci.eval/program-row`, and
-`seon.cluster.run/program-row-tx`. Their drift is observed, not hypothetical:
+already been rebuilt repeatedly. The naming pass now gives the shared value
+one declared owner, `:seon.program/row`, consumed by evaluator installation
+and `seon.cluster.run/row-tx`. The prior consumer aliases had drifted:
 runtime schema rows contain unevaluated syntax, tests commit but are neither
 installed nor acquired, `ns-unmap` deletes only functions, and one cluster's
 schema projection replaces process-global registry state.

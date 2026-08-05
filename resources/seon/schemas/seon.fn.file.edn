@@ -1,1 +1,11 @@
-{:seon.fn.file/path [:string {:min 1}]}
+{:seon.fn.file/path [:string {:min 1}]
+ :seon.fn.file/digest :seon.source/digest
+ :seon.fn.file/rows :seon.program/rows
+ :seon.fn.file/identities [:vector :seon.program/identity]
+ :seon.fn.file/first-party-functions [:vector :seon.fn/sym]
+ :seon.fn.file/artifact
+ [:map
+  [:seon.fn.file/path :seon.fn.file/path]
+  [:seon.fn.file/digest :seon.fn.file/digest]
+  [:seon.fn.file/rows :seon.fn.file/rows]
+  [:seon.fn.file/identities :seon.fn.file/identities]]}

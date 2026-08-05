@@ -53,9 +53,9 @@
                      [:seon.sci.eval/ending-ns
                       {:optional true}
                       :seon.sci.eval/ending-ns]
-                     [:seon.sci.eval/program-row
+                     [:seon.program/row
                       {:optional true}
-                      :seon.sci.eval/program-row]
+                      :seon.program/row]
                      [:seon.sci.eval/session-defs
                       {:optional true}
                       :seon.sci.eval/session-defs]
@@ -102,9 +102,9 @@
                      [:seon.sci.eval/ending-ns
                       {:optional true}
                       :seon.sci.eval/ending-ns]
-                     [:seon.sci.eval/program-row
+                     [:seon.program/row
                       {:optional true}
-                      :seon.sci.eval/program-row]
+                      :seon.program/row]
                      [:my.run/value {:optional true} :my.run/value]],
                     :turn-report
                     [:map

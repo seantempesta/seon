@@ -322,7 +322,7 @@ sharing half; the isolation half needs 2B).
 #### Slice 1B — per-row containment on the cold path
 
 *Deliverable.* Containment at the one place the cold path installs rows —
-`install-program-row!` (`src/seon/sci/eval.clj:552`), wrapped by
+`install-row!` (`src/seon/sci/eval.clj:552`), wrapped by
 `acquire!`'s row loop (`:837-849`). A failing row becomes a flat
 `:seon.error` value recorded as a problems-family fact naming the row;
 the remaining rows install; the cluster starts missing exactly the
@@ -597,7 +597,7 @@ representation a dead process cannot corrupt.
 | 1 | Between `cluster-ctx` build and the first turn | the ctx (heap only) | all facts | `start!` rebuilds the ctx from facts | safe — the ctx is a derived value |
 | 2 | Mid-eval, live ctx half-mutated | the interpreted form | the start receipt | existing recovery marks the dangling receipt `:interrupted`; the ctx dies with the process | safe — nothing re-executes |
 | 3 | After a form interned a name, before the terminal transaction | the intern | nothing | the name is simply absent; the agent adapts from derived context | safe — honest absence |
-| 4 | After the terminal transaction commits a program row, before `install-program-row!` (`loop.cljc:1220-1230`) | the install | the row | the next cold `acquire!` installs it from facts | safe — **facts lead the ctx**, never the reverse |
+| 4 | After the terminal transaction commits a program row, before `install-row!` (`loop.cljc:1220-1230`) | the install | the row | the next cold `acquire!` installs it from facts | safe — **facts lead the ctx**, never the reverse |
 | 5 | **No crash: terminal transaction REFUSED (`loop.cljc:1246-1251`) after the eval mutated the live ctx** | — | nothing | today the next turn's reinstall discards it; after 1A **nothing does** | **OPEN — §8 Q1.** The one genuinely new custody hazard, and it needs no crash |
 | 6 | Mid `install-session-image!` (1C) | partial interns | the image entries | pass 1 interns unbound then pass 2 binds, so a partial install is a subset; the next resume redoes it | safe — idempotent by construction |
 | 7 | Mid settle-seam image write (1C) | the entry rows | whatever committed | entries are ordinary datoms in the terminal transaction; a missing entry means the name is absent on resume | safe — the same honest-absence rule as row 3 |

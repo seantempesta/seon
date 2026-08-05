@@ -219,7 +219,7 @@
         doc-var (sci/copy-var bootstrap/doc bootstrap-ns)]
     ;; `dir` and `doc` are REPL operations, so every namespace resolves
     ;; them bare through the same clojure.core refer it already receives.
-    ;; `acquire!` replaces only `doc` with its program-row-derived macro.
+    ;; `acquire!` replaces only `doc` with its row-derived macro.
     (sci/add-namespace!
      ctx 'clojure.core
      {'dir dir-var
@@ -274,7 +274,7 @@
 
 (declare deleted-schema-key)
 
-(defn- program-row
+(defn- row
   "Return the one reader declaration eligible for durable publication.
   A function without its complete contract is deliberately absent."
   [event projection]
@@ -656,14 +656,14 @@
         function-symbol spec-edn projection on-core-error caps @sci-var))))
   nil)
 
-(defn install-program-row!
+(defn install-row!
   "Install one declaration from the terminal transaction's db-after.
   The exact committed row is resolved by identity. Receipts are never
   consulted."
   {:malli/schema [:=> [:cat :seon.sci.eval/install-request] :map]}
   [{ctx :seon.sci.eval/ctx
     db :seon.db/db
-    row :seon.sci.eval/program-row}]
+    row :seon.program/row}]
   (let [projection (or (context-projection ctx)
                        (schema/projection-from-database db))
         [identity-attribute value]
@@ -1168,12 +1168,12 @@
         install-row
         (fn [state row]
           (let [installed
-                (install-program-row!
+                (install-row!
                  {:seon.sci.eval/ctx
                   (assoc ctx :seon.schema/projection
                          (:seon.schema/projection state))
                   :seon.db/db db
-                  :seon.sci.eval/program-row row})]
+                  :seon.program/row row})]
             {:seon.schema/projection (:seon.schema/projection installed)
              :seon.sci.eval/installed
              (+ (:seon.sci.eval/installed state)
@@ -1364,7 +1364,7 @@
   [{event :seon.sci.eval/event
     eval-form! :seon.sci.eval/eval-form!
     projection :seon.schema/projection}]
-  (let [raw-row (program-row event projection)
+  (let [raw-row (row event projection)
         unregister-key (deleted-schema-key raw-row)
         schema-delta
         (when (or (:seon.schema/key raw-row) unregister-key)
@@ -1465,7 +1465,7 @@
               live-declaration? (assoc ::evaluated? true)
               (and namespace-changed? (or selected-row context-row))
               (assoc ::namespace-state after-namespace-state))]
-    {:seon.sci.eval/program-row row
+    {:seon.program/row row
      :seon.sci.eval/context-row context-row
      :seon.sci.eval/namespace-changed? namespace-changed?}))
 
@@ -1477,7 +1477,7 @@
     ending-namespace :seon.sci.eval/ending-namespace
     print-options :seon.print/options
     session-defs :seon.sci.eval/session-defs
-    row :seon.sci.eval/program-row}]
+    row :seon.program/row}]
   (cond-> {:seon.sci.admit/value (:seon.sci.admit/value admitted)
            :seon.cluster.eval/result-edn
            (:seon.cluster.eval/result-edn admitted)
@@ -1486,7 +1486,7 @@
            :seon.sci.eval/ending-ns ending-namespace
            :seon.sci.admit/capped? (:seon.sci.admit/capped? admitted)
            :seon.sci.admit/record (:seon.sci.admit/record admitted)}
-    row (assoc :seon.sci.eval/program-row row)
+    row (assoc :seon.program/row row)
     (seq session-defs) (assoc :seon.sci.eval/session-defs session-defs)
     (seq (str printed))
     (assoc :seon.cluster.eval/output (bounded-output printed caps))))
@@ -1683,7 +1683,7 @@
               :else (eval-form!))
             _ (when-let [declared-ns (:seon.ns/name base-declared-row)]
                 (vreset! ending-namespace declared-ns))
-            {row :seon.sci.eval/program-row
+            {row :seon.program/row
              context-row :seon.sci.eval/context-row}
             (unmap-row
              {:seon.sci.eval/execution-ctx execution-ctx
@@ -1723,7 +1723,7 @@
             :seon.sci.eval/ending-namespace @ending-namespace
             :seon.print/options @print-options
             :seon.sci.eval/session-defs session-defs
-            :seon.sci.eval/program-row row}))
+            :seon.program/row row}))
         (catch Throwable throwable
           (let [record (record (if (kernel/interrupted? throwable)
                                  :time :error))

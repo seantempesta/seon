@@ -196,7 +196,7 @@
     (set/difference (into #{} (map namespace) attributes)
                     (into #{} (map namespace) consumed))))
 
-(defn- source-program-rows []
+(defn- source-rows []
   (into []
         (mapcat :seon.fn.file/rows)
         (:seon.fn.manifest/artifacts
@@ -210,7 +210,7 @@
     (is (= #{:creation-fixed :arm-time :live :mixed}
            (set (vals application-modes))))
     (testing "the program graph, not a hand list, names each dial's consumer"
-      (let [rows (source-program-rows)]
+      (let [rows (source-rows)]
         (is (= #{} (unapplied-families rows registered))
             (str "a registered config family no indexed src/ function reads "
                  "is a dead dial: nothing in the running system applies it"))

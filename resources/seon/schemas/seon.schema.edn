@@ -1,4 +1,8 @@
 #:seon.schema{:arguments [:vector :any],
+              :key
+              [:keyword
+               {:seon.db/identity true, :seon.search/index :symbol}],
+              :form :string,
               :identity :qualified-keyword,
               :identity-only :boolean,
               :identity-projection :qualified-symbol,

@@ -51,7 +51,9 @@
 
 (defn shape
   "The program shape owned by `identity-attribute`."
-  {:malli/schema [:=> [:cat :keyword] [:maybe :map]]}
+  {:malli/schema
+   [:=> [:cat :seon.program/identity-attribute]
+    [:maybe :seon.program/shape]]}
   [identity-attribute]
   (get shapes identity-attribute))
 
@@ -59,7 +61,7 @@
   "The `[identity-attribute value]` pair carried by `row`."
   {:malli/schema
    [:=> [:cat [:maybe :map]]
-    [:maybe [:tuple :keyword :seon.schema/value]]]}
+    [:maybe :seon.program/identity]]}
   [row]
   (some (fn [identity-attribute]
           (when-some [value (get row identity-attribute)]
@@ -318,11 +320,11 @@
    [:=>
     [:cat
      [:map
-      [:seon.program/row :map]
+      [:seon.program/row :seon.program/declaration-row]
       [:seon.program/compile-options :map]
       [:seon.program/predicate-functions :map]
       [:seon.program/schema-keys [:set :keyword]]]]
-    :map]}
+    :seon.program/declaration-row]}
   [{row :seon.program/row
     compile-options :seon.program/compile-options
     predicate-functions :seon.program/predicate-functions
@@ -381,7 +383,8 @@
   input;
   `:contracted` admits only runtime functions carrying a complete contract."
   {:malli/schema
-   [:=> [:cat :map [:enum :all :contracted]] [:maybe :map]]}
+   [:=> [:cat :map [:enum :all :contracted]]
+    [:maybe :seon.program/declaration-row]]}
   [event function-policy]
   (let [candidate
         (cond
@@ -470,7 +473,8 @@
 
   `ns-unmap` removes the matching function and test identities. A reader-
   resolved `seon.schema/unregister!` removes one global schema identity."
-  {:malli/schema [:=> [:cat :map] [:maybe :map]]}
+  {:malli/schema
+   [:=> [:cat :map] [:maybe :seon.program/deletion-row]]}
   [event]
   (let [form (:seon.sci.reader/form event)
         schema-key (:seon.sci.reader/schema-unregister-key event)

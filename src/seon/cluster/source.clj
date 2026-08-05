@@ -238,7 +238,7 @@
   "Publish canonical safe upserts against one exact source commit."
   {:malli/schema [:=> [:cat :seon.source/upsert-request]
                   :seon.source/published]}
-  [{:keys [:seon.store/store :seon.source/rows :seon.db/process]
+  [{:keys [:seon.store/store :seon.program/rows :seon.db/process]
     expected-commit :seon.source/expected-commit-id
     source-digest :seon.source/digest}]
   (let [scratch (scratch-branch)]

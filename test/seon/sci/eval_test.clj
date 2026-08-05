@@ -434,7 +434,7 @@
     (is (ok? evaluation))
     (is (= #{[:seon.ns/name 'clojure.set]}
            (get-in evaluation
-                   [:seon.sci.eval/program-row :seon.ns/requires]))
+                   [:seon.program/row :seon.ns/requires]))
         "SCI symbols become canonical lookup refs only at persistence")))
 
 (deftest runtime-function-rows-carry-parsed-contract-facts
@@ -444,7 +444,7 @@
                 (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
                      "parsed-at-runtime [x] x)")
                 2000)
-        row (:seon.sci.eval/program-row evaluation)]
+        row (:seon.program/row evaluation)]
     (is (= "user/parsed-at-runtime" (:seon.fn/sym row)))
     (is (= 1 (count (:seon.fn/arities row))))
     (is (map? (:seon.fn/ast row)))))
@@ -581,7 +581,7 @@
           :seon.sci.eval/ending-namespace 'next
           :seon.print/options {:seon.print/length 4}
           :seon.sci.eval/session-defs session-defs
-          :seon.sci.eval/program-row row})]
+          :seon.program/row row})]
     (is (= {:seon.sci.admit/value 7
             :seon.cluster.eval/result-edn "7"
             :seon.print/options {:seon.print/length 4}
@@ -589,7 +589,7 @@
             :seon.sci.eval/ending-ns 'next
             :seon.sci.admit/capped? false
             :seon.sci.admit/record record
-            :seon.sci.eval/program-row row
+            :seon.program/row row
             :seon.sci.eval/session-defs session-defs
             :seon.cluster.eval/output "abc"}
            evaluation))))
@@ -666,7 +666,7 @@
           :seon.sci.eval/namespace-name 'user
           :seon.sci.eval/namespace-unmap? true
           :seon.cluster.run.form/source source})
-        row (:seon.sci.eval/program-row result)]
+        row (:seon.program/row result)]
     (is (true? (:seon.sci.eval/namespace-changed? result)))
     (is (= #{[:seon.fn/sym "user/discarded"]
              [:seon.test/sym "user/discarded"]
@@ -808,12 +808,13 @@
           (is (every? #(str/includes? read-output %)
                       ["my.fs/read"
                        "([request])"
-                       "Read one bounded byte window"
+                       "Read a bounded window of one file"
                        "  in:  :my.fs/read-request"
                        "[:my.fs/path :my.fs/path]"
                        "  out: :my.fs/read-result"
                        "[:my.fs/digest :my.fs/digest]"
-                       "       :seon.error/value"]))
+                       "       :seon.error/value"])
+              read-output)
           (is (= ["       :seon.error/value"]
                  (filterv #(str/includes? % ":seon.error/value")
                           (str/split-lines read-output)))
@@ -962,12 +963,15 @@
     (fn [connection]
       (db/transact!
        connection
-       [(merge {:seon.config/cluster "contract-acquire"
-                :seon.config/on-core-error :panic}
-               caps)
+       [(:seon.config/desired-row
+         (config/compile-manifest
+          {:seon.boot/cluster-name "contract-acquire"
+           :seon.config/manifest
+           (assoc caps :seon.config/on-core-error :panic)}))
         {:seon.ns/name 'authored.contract
          :seon.ns/source "(ns authored.contract)"}
         {:seon.fn/sym "authored.contract/accept"
+         :seon.schema.admission/source :agent
          :seon.fn/ns [:seon.ns/name 'authored.contract]
          :seon.fn/source
          (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "

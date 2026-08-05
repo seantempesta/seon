@@ -386,7 +386,7 @@ invisible to any test that only checks the returned value.
 1. **Before S1** — one turn whose evaluation carries
    `:seon.cluster.eval/result-blob`, `:seon.cluster.eval/interrupted-at`,
    `:seon.cluster.eval/error`, `:seon.cluster.eval/output`,
-   `:seon.sci.eval/program-row`, and a `:my.run/value` *simultaneously*,
+   `:seon.program/row`, and a `:my.run/value` *simultaneously*,
    asserting the committed receipt datoms. Today each attribute is asserted
    in a different test; nothing pins the combined projection that
    `receipt-request` will own. Add it to `seon.cluster.turn-test`.

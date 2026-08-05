@@ -185,7 +185,7 @@ serve as the standing concurrency gate.
 
 ### P11 — Naming: 4 real problems, 14 atomic units
 
-Undeclared program-row shapes; fragmented process identity; duplicate
+Undeclared program row shapes; fragmented process identity; duplicate
 connection/database-value names (rulings made, not yet applied);
 overloaded "context" (three meanings, one of them inside the bootstrap
 we use to teach vocabulary). The `seon.code.*` "migration" turned out to

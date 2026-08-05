@@ -79,7 +79,7 @@
   (source/upsert! {:seon.store/store opened
                    :seon.source/expected-commit-id expected-commit
                    :seon.source/digest digest
-                   :seon.source/rows rows}))
+                   :seon.program/rows rows}))
 
 (defn- markers
   [connection]

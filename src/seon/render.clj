@@ -223,7 +223,7 @@
                          :seon.db/connection)
         value (:seon.render/value argument)]
     {:seon.render.call/producer selected
-     :seon.render.call/program-row
+     :seon.render.call/declaration-row
      (sci.kernel/program-function (:seon.sci.eval/ctx request) selected)
      :seon.render.call/argument
      (cond-> argument

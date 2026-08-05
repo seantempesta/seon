@@ -379,7 +379,7 @@ the old root or the new one, never a torn state; sci Var roots are
 and reduced in urgency: with the rebuild off the hot path, a poisoned row
 can no longer re-throw every turn. It still must not abort a boot or a
 resume, so containment belongs at the one place the cold path installs
-rows — `install-program-row!` (`src/seon/sci/eval.clj:552`), wrapped by
+rows — `install-row!` (`src/seon/sci/eval.clj:552`), wrapped by
 `acquire!`'s row loop:
 
 - each row installs inside its own containment; a failure becomes a flat

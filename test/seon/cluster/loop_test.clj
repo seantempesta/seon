@@ -370,7 +370,7 @@
 (deftest receipt-request-projects-one-schema-valid-terminal-request
   (let [result-blob (apply str (repeat 64 "a"))
         completed (my.run/complete "done")
-        program-row {:seon.schema/key :my.agent/registered
+        row {:seon.schema/key :my.agent/registered
                      :seon.schema/form ":string"}
         request
         ((private-loop-fn 'receipt-request)
@@ -385,7 +385,7 @@
            :seon.cluster.eval/output "printed\n"
            :seon.cluster.eval/ns [:seon.ns/name 'my.agent]
            :seon.sci.eval/ending-ns 'my.agent.after
-           :seon.sci.eval/program-row program-row}
+           :seon.program/row row}
           :seon.cluster.loop/settlement-evaluation
           {:seon.cluster.eval/result-edn "{:result :projected}"
            :seon.cluster.eval/result-blob result-blob
@@ -406,7 +406,7 @@
             :seon.cluster.eval/output "printed\n"
             :seon.cluster.eval/ns [:seon.ns/name 'my.agent]
             :seon.sci.eval/ending-ns 'my.agent.after
-            :seon.sci.eval/program-row program-row
+            :seon.program/row row
             :my.run/value completed}
            request))
     (is (schema/valid-candidate-value?
@@ -527,7 +527,7 @@
                    (:seon.cluster.run.form/ns form)))
             (is (= "my.generated.after-resume/attributed-after-resume"
                    (get-in evaluation
-                           [:seon.sci.eval/program-row :seon.fn/sym])))))))))
+                           [:seon.program/row :seon.fn/sym])))))))))
 
 (deftest two-agents-resolve-one-config-row-with-ordinary-inheritance
   (test-support/with-database

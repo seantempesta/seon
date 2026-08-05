@@ -83,7 +83,7 @@
      connection
      {:tx-data (#'loop/session-image-tx @connection stored ordinal)})))
 
-(deftest session-macro-without-a-program-row-fails-closed
+(deftest session-macro-without-a-row-fails-closed
   (with-memory-database
    (fn [connection]
      (let [namespace-name 'my.agents.session-macro

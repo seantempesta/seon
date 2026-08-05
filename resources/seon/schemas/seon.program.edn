@@ -1,4 +1,34 @@
-{:seon.program/declaration-refused [:= true]
+{:seon.program/identity-attribute
+ [:enum :seon.ns/name :seon.fn/sym :seon.schema/key :seon.test/sym
+  :seon.def/id]
+ :seon.program/source-attribute
+ [:enum :seon.ns/source :seon.fn/source :seon.schema/form :seon.test/source
+  :seon.def/source]
+ :seon.program/schema-row-properties [:= :seon.program/schema-row-properties]
+ :seon.program/owned-attributes
+ [:or [:vector :qualified-keyword] :seon.program/schema-row-properties]
+ :seon.program/identity
+ [:tuple :seon.program/identity-attribute :seon.schema/value]
+ :seon.program/declaration-row
+ [:or :seon.ns/ns :seon.fn/fn :seon.schema/schema :seon.test/test
+  :seon.def/def]
+ :seon.program/delete-identities [:vector :seon.program/identity]
+ :seon.program/source [:string {:min 1}]
+ :seon.program/ns [:tuple [:= :seon.ns/name] :seon.ns/name]
+ :seon.program/deletion-row
+ [:map
+  [:seon.program/delete-identities :seon.program/delete-identities]
+  [:seon.program/source :seon.program/source]
+  [:seon.program/ns {:optional true} :seon.program/ns]]
+ :seon.program/row
+ [:or :seon.program/declaration-row :seon.program/deletion-row]
+ :seon.program/rows [:vector :seon.program/row]
+ :seon.program/shape
+ [:map
+  [:seon.program/identity-attribute :seon.program/identity-attribute]
+  [:seon.program/source-attribute :seon.program/source-attribute]
+  [:seon.program/owned-attributes :seon.program/owned-attributes]]
+ :seon.program/declaration-refused [:= true]
  :seon.program/declaration-refused-error
  [:map {:seon.error/class true
         :seon.render/ai seon.error/render-ai

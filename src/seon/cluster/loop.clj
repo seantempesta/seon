@@ -282,9 +282,9 @@
       (:seon.sci.eval/ending-ns evaluation)
       (assoc :seon.sci.eval/ending-ns
              (:seon.sci.eval/ending-ns evaluation))
-      (:seon.sci.eval/program-row evaluation)
-      (assoc :seon.sci.eval/program-row
-             (:seon.sci.eval/program-row evaluation))
+      (:seon.program/row evaluation)
+      (assoc :seon.program/row
+             (:seon.program/row evaluation))
       value (assoc :my.run/value value))))
 
 (defn terminal-tx
@@ -303,7 +303,7 @@
            :seon.cluster.eval/interrupted-at
            :seon.cluster.eval/output :seon.cluster.eval/ns
            :seon.sci.eval/ending-ns
-           :seon.sci.eval/program-row :seon.error/kind
+           :seon.program/row :seon.error/kind
            :my.run/value]}
    now]
   (let [receipt (cond-> {:seon.cluster.run/id id
@@ -321,7 +321,7 @@
                   kind (assoc :seon.error/kind kind)
                   ns (assoc :seon.cluster.eval/ns ns)
                   ending-ns (assoc :seon.sci.eval/ending-ns ending-ns)
-                  program-row (assoc :seon.sci.eval/program-row program-row)
+                  row (assoc :seon.program/row row)
                   ;; what the form printed is evidence, and evidence is
                   ;; durable or it is nothing
                   output (assoc :seon.cluster.eval/output output))]
@@ -348,13 +348,13 @@
   A called SCI Var absent from the program graph fails closed; SCI's
   independent host-interop observation closes the host-resolution side."
   [db roots unproven-called-vars]
-  (let [program-row
+  (let [row
         (fn [function-symbol]
           (db/pull db
                   [:seon.fn/sym :seon.effect/capability
                    {:seon.fn/calls [:seon.fn/sym]}]
                   [:seon.fn/sym (str function-symbol)]))]
-    (if (some #(nil? (:seon.fn/sym (program-row %)))
+    (if (some #(nil? (:seon.fn/sym (row %)))
               unproven-called-vars)
       false
       (loop [pending (seq (sort-by str roots))
@@ -362,7 +362,7 @@
         (if-let [function-symbol (first pending)]
           (if (contains? visited function-symbol)
             (recur (next pending) visited)
-            (let [row (program-row function-symbol)
+            (let [row (row function-symbol)
                   called (map (comp symbol :seon.fn/sym)
                               (:seon.fn/calls row))]
               (if (:seon.effect/capability row)
@@ -466,7 +466,7 @@
                             "Defining form reaches a capability leaf."))))))
          (:seon.sci.eval/session-defs evaluation))
         contracted-id
-        (get-in evaluation [:seon.sci.eval/program-row :seon.fn/sym])
+        (get-in evaluation [:seon.program/row :seon.fn/sym])
         contracted-entry
         (when contracted-id
           (db/pull db [:db/id]
@@ -1652,13 +1652,13 @@
                                    session-evaluation
                                    ordinal)))})
                   _
-                  (if (and (:seon.sci.eval/program-row evaluation)
+                  (if (and (:seon.program/row evaluation)
                            (not (:seon.error/kind outcome)))
-                    (sci.eval/install-program-row!
+                    (sci.eval/install-row!
                      {:seon.sci.eval/ctx ctx
                       :seon.db/db (:db-after outcome)
-                      :seon.sci.eval/program-row
-                      (:seon.sci.eval/program-row evaluation)})
+                      :seon.program/row
+                      (:seon.program/row evaluation)})
                     nil)
                   ran (inc ran)
                   ;; THE FOLD'S OWN NEXT ORDINAL IS PER-AGENT (F1

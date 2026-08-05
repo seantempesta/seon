@@ -715,7 +715,7 @@
                            (= :db.fn/call (first operation))
                            (= #'run/receipt-settle-call (second operation))
                            (some-> (get-in operation
-                                         [2 :seon.sci.eval/program-row
+                                         [2 :seon.program/row
                                           :seon.ns/source])
                                    (str/includes? "ns-unmap"))))
                     tx-data)]
@@ -791,7 +791,7 @@
                 connection (:seon.db/connection cluster)
                 calls (atom [])
                 transact! db/transact!
-                original-install! sci.eval/install-program-row!
+                original-install! sci.eval/install-row!
                 installations (atom [])]
             (db/transact!
              connection
@@ -831,7 +831,7 @@
                                   (second operation))
                                (seq
                                 (get-in operation
-                                        [2 :seon.sci.eval/program-row
+                                        [2 :seon.program/row
                                          :seon.program/delete-identities]))))
                         tx-data)]
                    (if deletion?
@@ -840,7 +840,7 @@
                       "injected terminal program refusal"
                       :seon.error/data {:error :transact/program}}
                      (transact! target transaction))))
-               sci.eval/install-program-row!
+               sci.eval/install-row!
                (fn [request]
                  (swap! installations conj request)
                  (original-install! request))]
@@ -886,7 +886,7 @@
                           @connection))
                     "a returned error value creates no delivery wake")
                 (is (not-any?
-                     #(seq (get-in % [:seon.sci.eval/program-row
+                     #(seq (get-in % [:seon.program/row
                                       :seon.program/delete-identities]))
                      @installations)
                     "the refused deletion never installs")
@@ -1123,7 +1123,7 @@
                     @connection))
               "parse/eval divergence is a direct fact query, never silent"))))))
 
-(deftest contracted-redefinition-exactly-replaces-the-program-row
+(deftest contracted-redefinition-exactly-replaces-the-row
   (with-cluster
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
@@ -1156,7 +1156,7 @@
             (is (not (contains? row :seon.fn/doc)))
             (is (not (contains? row :seon.fn/workload)))))))))
 
-(deftest a-refused-contract-commits-a-receipt-and-no-program-row
+(deftest a-refused-contract-commits-a-receipt-and-no-row
   (with-cluster
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
@@ -1319,7 +1319,7 @@
             connection (:seon.db/connection cluster)
             schema-key :my.agents.agent-a/not-committed
             transact! db/transact!
-            install! sci.eval/install-program-row!
+            install! sci.eval/install-row!
             installations (atom [])
             global-forms (schema/registered-schemas)]
         (with-redefs
@@ -1343,7 +1343,7 @@
                            (= #'run/receipt-settle-call (second operation))
                            (= schema-key
                               (get-in operation
-                                      [2 :seon.sci.eval/program-row
+                                      [2 :seon.program/row
                                        :seon.schema/key]))))
                     tx-data)]
                (if declaration?
@@ -1351,7 +1351,7 @@
                   :seon.error/message "injected declaration refusal"
                   :seon.error/data {:error :transact/schema}}
                  (transact! target transaction))))
-           sci.eval/install-program-row!
+           sci.eval/install-row!
            (fn [request]
              (swap! installations conj request)
              (install! request))]
@@ -1360,7 +1360,7 @@
                             [:seon.schema/key schema-key])))
           (is (not (contains? (:schema @connection) schema-key)))
           (is (not-any? #(= schema-key
-                            (get-in % [:seon.sci.eval/program-row
+                            (get-in % [:seon.program/row
                                        :seon.schema/key]))
                         @installations)
               "a rejected transaction report never reaches installation")
@@ -1613,7 +1613,7 @@
                            (= #'run/receipt-settle-call (second operation))
                            (= function-sym
                               (get-in operation
-                                      [2 :seon.sci.eval/program-row
+                                      [2 :seon.program/row
                                        :seon.fn/sym]))))
                     tx-data)]
                (if refused-definition?
@@ -2012,7 +2012,7 @@
             result (my.run/complete "combined receipt")
             result-edn (pr-str result)
             result-blob (apply str (repeat 64 "a"))
-            program-row {:seon.schema/key
+            row {:seon.schema/key
                          :my.agents.agent-a/combined-receipt
                          :seon.schema/form ":string"}
             installed (atom [])]
@@ -2020,7 +2020,7 @@
                       (fn [_]
                         {:seon.ai/text
                          "(my.run/complete \"combined receipt\")"})
-                      sci.eval/install-program-row!
+                      sci.eval/install-row!
                       (fn [request]
                         (swap! installed conj request))]
           (binding [*evaluation*
@@ -2030,7 +2030,7 @@
                      :seon.cluster.eval/interrupted-at now
                      :seon.cluster.eval/error "combined error"
                      :seon.cluster.eval/output "combined output\n"
-                     :seon.sci.eval/program-row program-row}]
+                     :seon.program/row row}]
             (is (= [:open :call :resume]
                    (mapv :seon.cluster.work/situation
                          (drive-agent! cluster "agent-a" 10))))
@@ -2068,8 +2068,8 @@
                      receipt))
               (is (= 1 (count terminal-txs))
                   "receipt facts, program row, and completion close commit together")
-              (is (= [program-row]
-                     (mapv :seon.sci.eval/program-row @installed))
+              (is (= [row]
+                     (mapv :seon.program/row @installed))
                   "installation receives the committed program row afterwards"))))))))
 
 (deftest a-waiting-disposition-frees-the-agent-and-keeps-its-note

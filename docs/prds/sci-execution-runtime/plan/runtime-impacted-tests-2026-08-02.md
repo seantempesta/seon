@@ -73,8 +73,8 @@ re-attaches it outside the shape immediately after canonicalization:
 That escape hatch is the whole reason the build graph has edges — and it
 is exactly what the runtime producer lacks.
 
-**Runtime** (`src/seon/cluster/run.cljc:643-733`, `program-row-tx`, and
-`src/seon/sci/eval.clj:426-450`, `program-row`): both call
+**Runtime** (`src/seon/cluster/run.cljc:643-733`, `row-tx`, and
+`src/seon/sci/eval.clj:426-450`, `row`): both call
 `(program/declaration-row row :contracted)`, which canonicalizes and
 therefore strips calls. Probe P2 falsified this at the pure function —
 `:seon.fn/calls` supplied explicitly, absent from the returned row:
@@ -207,7 +207,7 @@ Three changes, all at existing owners, no new namespace:
    bridge change is required.
 2. **The runtime producer attaches edges.** `seon.sci.eval`'s
    `unproven-called-vars` (`eval.clj:539-559`) is already the correct
-   resolver; route it onto the contracted-function row in `program-row`
+   resolver; route it onto the contracted-function row in `row`
    (`eval.clj:426-450`) instead of only onto `:seon.def` rows,
    filtered to symbols that have a `:seon.fn/sym` row (the same
    first-party admission the build path applies at `fn.clj:220-223`).

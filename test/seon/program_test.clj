@@ -164,13 +164,13 @@
                         :seon.fn/private? false
                         :seon.fn/spec (pr-str spec)}
                        (parsed-contract function-symbol spec {}))
-            program-row-tx (ns-resolve 'seon.cluster.run 'program-row-tx)]
+            row-tx (ns-resolve 'seon.cluster.run 'row-tx)]
         (db/transact! connection [{:seon.ns/name 'sample
                                    :seon.ns/source "(ns sample)"}])
-        (db/transact! connection (program-row-tx @connection {} row))
+        (db/transact! connection (row-tx @connection {} row))
         (let [before (db/pull @connection '[*]
                               [:seon.fn/sym function-symbol])
-              replacement (program-row-tx @connection {} row)]
+              replacement (row-tx @connection {} row)]
           (is (empty? replacement))
           (is (= before
                  (db/pull @connection '[*]
@@ -193,14 +193,14 @@
             changed
             (assoc original :seon.fn/source
                    "(defn redefined {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
-            program-row-tx (ns-resolve 'seon.cluster.run 'program-row-tx)
+            row-tx (ns-resolve 'seon.cluster.run 'row-tx)
             declared-content (ns-resolve 'seon.cluster.run 'declared-content)]
         (db/transact! connection [{:seon.ns/name 'sample
                                    :seon.ns/source "(ns sample)"}])
-        (db/transact! connection (program-row-tx @connection {} original))
+        (db/transact! connection (row-tx @connection {} original))
         (let [current (db/pull @connection '[*]
                                [:seon.fn/sym function-symbol])
-              replacement (program-row-tx @connection {} changed)]
+              replacement (row-tx @connection {} changed)]
           (is (not= (declared-content @connection current)
                     (declared-content @connection changed))
               "declared content receives the database before the row")
@@ -361,7 +361,7 @@
              :seon.cluster.eval/result-edn "nil"
              :seon.cluster.eval/ns
              [:seon.ns/name 'my.agents.someone-else]
-             :seon.sci.eval/program-row deletion}]
+             :seon.program/row deletion}]
         (db/transact!
          connection
          [{:seon.ns/name namespace-name

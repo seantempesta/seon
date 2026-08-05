@@ -34,7 +34,6 @@
                [:seon.source/digest :seon.source/digest]
                [:seon.source/built? :seon.source/built?]],
               :roots [:vector [:string {:min 1}]],
-              :rows [:vector :map],
               :snapshot
               [:map
                [:seon.source/digest :seon.source/digest]
@@ -45,5 +44,5 @@
                [:seon.source/expected-commit-id
                 :seon.source/expected-commit-id]
                [:seon.source/digest :seon.source/digest]
-               [:seon.source/rows :seon.source/rows]
+               [:seon.program/rows :seon.program/rows]
                [:seon.db/process {:optional true} :seon.db/ref]]}

@@ -107,7 +107,7 @@ enforced and mostly should not be.** Assignment
 (`:seon.cluster.agent/namespace`) is `:db.unique/value`; identity is the
 id. Qualified foreign `defn` is refused by Clojure semantics; `in-ns`,
 `intern`, `alter-var-root` reach any namespace cluster-wide. The one
-durable admission seam is `receipt-settle-call` → `program-row-tx` —
+durable admission seam is `receipt-settle-call` → `row-tx` —
 where an ownership refusal would be ~5 lines, and where BOTH lanes
 locate any future check; the Opus lane recommends against building the
 refusal at all (no evidence of a real problem — the no-hobbling ruling;
@@ -153,12 +153,12 @@ independently identified; none requires new mechanism.
 | F2 | run's opening COMMIT ID (only basis `t` recorded; recovery is an O(n) parent walk) | run open-tx | S3 fork point |
 | F3 | starting namespace as a run fact ("run this vector as agent Y starting in X") | plan-tx / system-run-tx | replay fidelity |
 | F4 | committed ending-ns per eval (`:seon.sci.eval/ending-ns` is derived then dropped; fold seeds nil and falls back to the reader's static track — order-dependent attribution, probed) | receipt settle | replay fidelity + forensics |
-| F5 | `:seon.fn/author` on program rows (rows carry no author today) | `program-row-tx` | provenance, curation attribution |
+| F5 | `:seon.fn/author` on program rows (rows carry no author today) | `row-tx` | provenance, curation attribution |
 | F6 | message → issuing-form ref. Commit `7cfb2435f` records the source-vector position as numeric `:seon.cluster.message/ordinal`, so ordering no longer depends on provenance embedded in the id; the direct form ref remains absent for S5 pinning. | message commit | S5 pinning |
 | F7 | tx provenance on agent-issued `seon.db/transact!` (`:tx-meta` from the already-bound `effect/*context*`: run + form ordinal) | `seon.db/transact!` | lifts the S5 fail-closed barrier |
 | F8 | normalized capability FAMILY on door receipts (owner/handler recorded; fs/web/llm/db family is a derivation away) | effect door | pinning policy by family |
-| F9 | `:seon.fn/calls` edges for agent-authored defns (today only clj-kondo-indexed first-party source has edges; agent code is a graph leaf) | program-row install | advisory prediction, workload derivation |
-| F10 | session-image rows bypass the `program-row-tx` choke point | session image | closes the "one admission seam" claim |
+| F9 | `:seon.fn/calls` edges for agent-authored defns (today only clj-kondo-indexed first-party source has edges; agent code is a graph leaf) | program row install | advisory prediction, workload derivation |
+| F10 | session-image rows bypass the `row-tx` choke point | session image | closes the "one admission seam" claim |
 | F11 | test→function call edge (`:seon.test` rows carry only sym/ns/source) | test indexing | Q6 quality gate; definition-time accretion testing |
 
 ## 4. Namespace decisions folded in
@@ -202,7 +202,7 @@ in-branch only (fail-closed barriers never trigger).
   Closed by commits `bcee99a74` and `cce3d5a14`: unresolved capability
   reachability fails closed.
 - Filed by lanes, not blocking:
-  [program-row-replacement-churns-identical-redeclarations.md](../../../seon/issues/archive/program-row-replacement-churns-identical-redeclarations.md),
+  the archived issue for row-replacement churn,
   [forked-cluster-inherits-the-ancestors-config-cluster-name.md](../../../seon/issues/forked-cluster-inherits-the-ancestors-config-cluster-name.md),
   [transcript-orders-same-instant-receipts-lexically.md](../../../seon/issues/transcript-orders-same-instant-receipts-lexically.md).
 
@@ -260,7 +260,7 @@ See [plan/README.md](README.md), “Rulings 2026-08-04.”
   sealed; W1 and W2 are complete, and W3 is the working edge.
 - **Q2 RULED: gate durable placement, and record the author.** Owner:
   "we can gate where they can define things." Both land at the ONE
-  admission seam (`program-row-tx`): `:seon.fn/author` recorded on
+  admission seam (`row-tx`): `:seon.fn/author` recorded on
   every program row, and durable definition placement checked against
   namespace assignment. Live-tier definitions need no gate — they are
   fork-private and evaporate, which is what makes the placement gate

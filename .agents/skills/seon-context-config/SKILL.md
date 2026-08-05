@@ -104,7 +104,7 @@ source boundary too; the acquisition matrix is:
 | per-terminal evaluation | session-value blob threshold | `store-session-values!` reads the threshold from the current database immediately before terminal transaction data is committed; the next terminal evaluation sees an applied change (`src/seon/cluster/loop.cljc:432-458,1411-1424`) |
 | per-render pass/request | render coalescing; data-drill collection page size | the render proc queries coalescing before each pass; `/data` reads page size from the request's database value (`src/seon/render/web.clj:473-480,636-662,1126-1145`) |
 | explicit walk fallback | result caps | an agent walk normally receives the arm-time caps in its ambient context; only a call lacking those caps re-reads the current cluster config (`src/seon/render.clj:169-211`) |
-| program-row installation | core-error mode and result caps | installing a contracted interpreted function reads the committed row's database value before wrapping it, both on cold acquisition and after a successful terminal transaction (`src/seon/sci/eval.clj:762-786,789-895`) |
+| program row installation | core-error mode and result caps | installing a contracted interpreted function reads the committed row's database value before wrapping it, both on cold acquisition and after a successful terminal transaction (`src/seon/sci/eval.clj:762-786,789-895`) |
 | per-fault | recurrence/escalation facts and the fan-out's core-error decision | fault commit reads recurrence/escalation from the fault's database value, while the fan-out callback reads `on-core-error` again for each fault (`src/seon/cluster.clj:1000-1034,1151-1164`) |
 
 `:seon.config/on-core-error` is deliberately split: the loop handle carries

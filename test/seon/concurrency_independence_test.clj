@@ -342,7 +342,7 @@
     (is (= (* rows-per-agent (count specs)) (count actual))
         "the one writer lost none of the concurrent agent transactions")))
 
-(defn- assert-program-rows!
+(defn- assert-rows!
   [database specs]
   (doseq [spec specs]
     (let [definition-source
@@ -497,7 +497,7 @@
         (assert-custody! database process specs)
         (assert-concurrent-progress! database specs)
         (assert-owned-rows! database specs)
-        (assert-program-rows! database specs)
+        (assert-rows! database specs)
         (assert-ring! database specs)
         (assert-transcripts! instance database specs)
         (assert-plan-results! database specs))

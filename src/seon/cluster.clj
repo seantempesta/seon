@@ -1070,7 +1070,7 @@
                  {:seon.store/store store
                   :seon.source/expected-commit-id expected-commit
                   :seon.source/digest digest-after
-                  :seon.source/rows rows
+                  :seon.program/rows rows
                   :seon.db/process
                   [:seon.db.process/id boot-process-identity]})]
             (write-source-artifact! root

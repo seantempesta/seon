@@ -177,7 +177,7 @@
                    "{:malli/schema [:=> [:cat :map] :map]\n   :seon.workload :io\n   :seon.effect/capability sample.capability/handler}"
                    "request")))))))
 
-(deftest static-index-preserves-the-jvm-program-row-contract
+(deftest static-index-preserves-the-jvm-row-contract
   (let [root (fixture-root)
         source
         (str "(ns sample.core\n"
@@ -305,7 +305,7 @@
                     (not [?required :seon.ns/name])]
                   db)))))))
 
-(deftest contracted-program-rows-carry-queryable-facts-in-their-spec-transaction
+(deftest contracted-rows-carry-queryable-facts-in-their-spec-transaction
   (test-support/with-database
     (fn [connection]
       (let [db @connection

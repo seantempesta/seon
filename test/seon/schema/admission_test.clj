@@ -124,7 +124,7 @@
                  :seon.schema.admission/source])))
         (is (schema/projection-validator projection :seon.ai/usage))))))
 
-(deftest source-publication-records-core-on-every-program-row
+(deftest source-publication-records-core-on-every-row
   (with-published-source
     (fn [connection]
       (let [database @connection

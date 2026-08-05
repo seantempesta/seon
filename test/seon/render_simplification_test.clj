@@ -197,12 +197,12 @@
                :seon.sci.admit/caps caps
                :seon.sci.eval/time-limit-ms 2000
                :seon.config/on-core-error :panic})
-             row (:seon.sci.eval/program-row evaluation)]
+             row (:seon.program/row evaluation)]
          (db/transact! connection [(dissoc row :seon.sci.eval/evaluated?)])
-         (eval/install-program-row!
+         (eval/install-row!
           {:seon.sci.eval/ctx ctx
            :seon.db/db @connection
-           :seon.sci.eval/program-row row})
+           :seon.program/row row})
          (is (some #{'seon.render-simplification.fixture-a/live-html}
                    (kernel/public-functions-in ctx fixture-a))
              "the terminal install publishes a new renderer candidate")
@@ -212,7 +212,7 @@
                                  {:seon.ns/name fixture-a})))
              "an ordinary durable defn auto-wires onto the next render"))))))
 
-(deftest cold-context-reacquires-the-same-program-row
+(deftest cold-context-reacquires-the-same-row
   (support/with-database
    (fn [connection]
      (let [database @connection

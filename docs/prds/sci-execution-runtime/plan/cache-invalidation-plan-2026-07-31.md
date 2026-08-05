@@ -29,7 +29,7 @@ database value (`reference-code/datahike/src/datahike/query.cljc:2568-2589`).
 | Seon flow/graph wiring | same | `src/seon/cluster.clj:1002-1019` cluster graph definition, `:1041-1151` `arm-agents!` (where every process-local render resource is created), `:1153-1210` `disarm-agents!`; `src/seon/cluster/agent.clj:251-275` the ONE agent blueprint, `:348-410` `arm!` |
 | Seon wake | same | `src/seon/cluster/wake.cljc:12-33` the two absolute listener prohibitions, `:163-228` `route!`, `:212` the unconditional render wake |
 | Seon schema projection | same | `src/seon/schema.cljc:1993-2007` `activate-projection!` (the ONE publication), `:2009` `activate!`, `:2457` `matching-shapes` |
-| Seon corpus install | same | `src/seon/sci/eval.clj:533+` `install-program-row!` |
+| Seon corpus install | same | `src/seon/sci/eval.clj:533+` `install-row!` |
 | research (baselines, not re-derived) | — | `research/render-invalidation-caching-2026-07-31.md`, `render-invalidation-falsification-2026-07-31.md`, `render-scheduling-design-2026-07-31.md`, `flow-control-protocol-2026-07-31.md`, `agent-flow-render-falsification-2026-07-29.md`, `render-pipeline-design-2026-07-29.md` |
 | probes (committed, reproducible) | `tmp/render-invalidation/{dependency_plan,falsify,family_pull,union_selector,reverse_cost,selector_sweep}_probe.clj` | run `clojure -M:dev <path>`; they ARE the regression baselines (§8) |
 
@@ -203,7 +203,7 @@ UUIDs to look like Datahike's).
    ONE atomic projection publication, covering B3 case 3 (an agent registers a
    schema whose Datahike attributes already exist, so no conservative bump
    occurs yet `matching-shapes` picks a different winner);
-2. `seon.sci.eval/install-program-row!` (`src/seon/sci/eval.clj:533+`) —
+2. `seon.sci.eval/install-row!` (`src/seon/sci/eval.clj:533+`) —
    covering B3 case 2 (an agent publishes a renderer: `:seon.fn/*` datoms move
    a user attribute's revision but bump nothing conservative).
 

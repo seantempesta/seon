@@ -28,9 +28,9 @@
                   :seon.cluster.eval/output]
                  [:seon.cluster.eval/ns :seon.cluster.eval/ns]
                  [:seon.sci.eval/ending-ns :seon.sci.eval/ending-ns]
-                 [:seon.sci.eval/program-row
+                 [:seon.program/row
                   {:optional true}
-                  :seon.sci.eval/program-row]
+                  :seon.program/row]
                  [:seon.sci.eval/session-defs
                   {:optional true}
                   :seon.sci.eval/session-defs]
@@ -42,8 +42,8 @@
                 [:map
                  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
                  [:seon.db/db :seon.db/database-value]
-                 [:seon.sci.eval/program-row
-                  :seon.sci.eval/program-row]],
+                 [:seon.program/row
+                  :seon.program/row]],
                 :invocation-request
                 [:map
                  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
@@ -69,7 +69,6 @@
                  [:seon.sci.admit/capped? :seon.sci.admit/capped?]
                  [:seon.sci.admit/record :seon.sci.admit/record]],
                 :nondeterministic-calls [:set :symbol],
-                :program-row :map,
                 :referenced-vars [:set :symbol],
                 :request
                 [:map

@@ -692,18 +692,6 @@
                             :string
                             [:tuple :keyword :seon.db/lookup-ref-value]]))
 
-;; Canonical schema rows must describe themselves before any other registered
-;; form can become database data. These declarations therefore belong to the
-;; portable schema authority, not to a CLJS application namespace that happens
-;; to index them during boot.
-(defonce ^:private _canonical-schema-row-types
-  (update-candidate-forms!
-   merge
-   {:seon.schema/key
-    [:keyword {:seon.db/identity true, :seon.search/index :symbol}]
-    :seon.schema/form :string
-    :seon.schema.admission/source [:enum :core :agent]}))
-
 ;; Generated persistent identity syntax is owned by `seon.db.id`, which loads
 ;; before `seon.db` registers slots that refer to `:seon.db/id`.  Keeping an
 ;; older bootstrap copy here let namespace load order silently restore the

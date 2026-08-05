@@ -614,8 +614,8 @@
           [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns]
           [:seon.sci.eval/ending-ns {:optional true}
            :seon.sci.eval/ending-ns]
-          [:seon.sci.eval/program-row {:optional true}
-           :seon.sci.eval/program-row]]]
+          [:seon.program/row {:optional true}
+           :seon.program/row]]]
     [:vector :some]]}
   [request]
   [[:db.fn/call
@@ -780,7 +780,7 @@
   (when-some [canonical (program/canonical-row value)]
     (declared-map db (dissoc canonical :seon.fn/arities :seon.fn/ast))))
 
-(defn- program-row-tx
+(defn- row-tx
   "Validate and exact-upsert one reader-produced durable declaration."
   [db request row]
   (if-let [deleted-identities (:seon.program/delete-identities row)]
@@ -820,7 +820,7 @@
                    (assoc row :seon.schema.admission/source :agent)
                    :contracted)
                   (refuse! `receipt-settle-call
-                           ::program-row-not-admitted request))
+                           ::row-not-admitted request))
           [identity identity-value] (program/row-identity row)
           namespace-ref (or (:seon.fn/ns row)
                             (:seon.test/ns row))
@@ -935,8 +935,8 @@
           [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns]
           [:seon.sci.eval/ending-ns {:optional true}
            :seon.sci.eval/ending-ns]
-          [:seon.sci.eval/program-row {:optional true}
-           :seon.sci.eval/program-row]]]
+          [:seon.program/row {:optional true}
+           :seon.program/row]]]
     [:vector :some]]}
   [db request]
   (let [{::keys [id]
@@ -959,8 +959,8 @@
       (not (terminal? request))
       (refuse! `receipt-settle-call ::no-terminal-fact request))
     (into
-     (if-let [row (:seon.sci.eval/program-row request)]
-       (program-row-tx db request row)
+     (if-let [row (:seon.program/row request)]
+       (row-tx db request row)
        [])
      (receipt-terminal-assertions receipt request))))
 

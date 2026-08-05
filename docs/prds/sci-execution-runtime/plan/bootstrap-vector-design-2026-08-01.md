@@ -51,7 +51,7 @@ At agent creation, one transaction commits `run/open-tx`, `run/claim-tx`
 and `run/plan-tx` with the bootstrap sources. The existing `:resume` fold
 (loop.cljc:1200-1459) then does everything: per-form receipt-start, lint,
 `seon.sci.eval/evaluate` on the cluster's live ctx, terminal receipt with
-`result-edn`, `install-program-row!` for declarations, next ordinal. The
+`result-edn`, `install-row!` for declarations, next ordinal. The
 run reaches `:close` when the forms run out (no disposition needed — the
 `:close` arm at loop.cljc:1477 handles exactly that).
 

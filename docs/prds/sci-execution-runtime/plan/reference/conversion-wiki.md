@@ -1141,7 +1141,7 @@ the anchor stays the state ledger.
 
 ## Fixture boot-population scars (2026-07-23)
 
-- **Genesis forms were CLJS-captive.** Canonical program-row entity forms and
+- **Genesis forms were CLJS-captive.** Canonical program row entity forms and
   database-attribute selection lived in `seon.client`, so a JVM fixture could
   load the leaf forms yet still miss the production genesis population.
   Registration and its computed database projection belong to the portable
@@ -1155,11 +1155,12 @@ the anchor stays the state ledger.
 - **The JVM cannot reproduce CLJS analyzer rows.** Re-reading program source
   with `seon.host.record` changed function metadata and namespace edges, proving
   it is a second indexer rather than a portable reconstruction. The build must
-  publish the byte-faithful, digest-bound `program-rows.edn` artifact from the
+  publish the byte-faithful, digest-bound program rows artifact from the
   live analyzer derivation. Both runtime tiers and fixtures consume those
   rows; neither tier reconstructs them.
 - **Fixture consumption starts from the selected artifact manifest.** Resolve
-  `program-sources.edn` and `program-rows.edn` beneath the manifest's immutable
+  the program sources and program rows artifacts beneath the manifest's
+  immutable
   runtime root, verify both exact byte digests, and use the manifest's
   application digest as initialization identity before reading transaction
   data. A missing member, stale version, path escape, or digest mismatch is a
@@ -1195,7 +1196,7 @@ the anchor stays the state ledger.
   `shadow.build.node/flush-unoptimized`. Do not terminate the correct
   derivation after a timeout or manipulate its socket. The managed-watcher
   regression is a first flush that publishes manifest v11 while no
-  `.program-rows-build-*` Bun process remains
+  program rows build process remains
   (`script/seon/dev/program_artifact.clj`).
 - **Every boot-read inventory is an immutable runtime member.** The pod reads
   `program-inventory.edn` beside both its client output and the selected
@@ -1210,7 +1211,7 @@ the anchor stays the state ledger.
   executes it.** The shell config-fact conversion changed portable
   `run-request` to require the acquired configuration, but the still-alive pod
   leaf retained both its deleted default var and old arity. Ordinary JVM gates
-  did not exercise that caller; program-row derivation did, so the watcher
+  did not exercise that caller; program row derivation did, so the watcher
   failed loudly before publishing the v11 manifest. Any public signature
   conversion that leaves a canonical build alive must compile both `client`
   and `test` with zero first-party arity or undeclared-var warnings. A focused
@@ -1232,7 +1233,7 @@ the anchor stays the state ledger.
 
 - **A sidecar cannot embed an identity that includes the sidecar itself.**
   `page-plan.edn` is keyed by the SHA-256 of the exact
-  `program-rows.edn` artifact bytes plus the resolved config-manifest digest.
+  program rows artifact bytes plus the resolved config-manifest digest.
   The release-wide application digest includes the page-plan digest and is
   stamped only after apply completes. Trying to place that final digest inside
   the page plan creates an unsatisfiable digest cycle.

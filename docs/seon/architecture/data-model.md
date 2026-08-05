@@ -292,7 +292,16 @@ normalization and retry disposition derive at read.
 | `:seon.schema/schema` | `:seon.schema/key`, `:seon.schema.admission/source`, `/form`, optional `:seon.db.id/generator` |
 | `:seon.ns/ns` | `:seon.ns/name`, `:seon.schema.admission/source`, optional `/source`, `/doc`, `/requires`, `/aliases`, `/imports`, `/refers` |
 | `:seon.test/test` | `:seon.test/sym`, `:seon.schema.admission/source`, `/ns`, `/source`, optional `:seon.fn/calls`, `:seon.test/subject` |
-| `:seon.def/def` | `:seon.def/id`, `:seon.schema.admission/source`, `/ns`, `/name`, optional `/value-edn`, `/blob`, `/size`, `/source`, `/unrestorable`, plus `/ordinal` |
+| `:seon.def/def` | `:seon.def/id`, `:seon.schema.admission/source`, `/ns`, `/name`, optional `/value-edn`, `/blob`, `/size`, `/source`, `/unrestorable-reason`, plus `/ordinal` |
+
+Program transport values also have one declared owner. `:seon.program/identity`
+is the identity-attribute/value tuple; `/declaration-row` is the union of the
+five entity schemas above; `/deletion-row` carries explicit identities, source,
+and optional namespace; `/row` and `/rows` compose those values; and `/shape`
+declares the identity, source, and owned-attribute description used by
+canonicalization. `:seon.fn.file/artifact` and
+`:seon.fn.manifest/manifest` name the static indexer's file and complete-source
+products rather than weakening them to arbitrary maps.
 
 Function contracts persist twice through one producer: `/spec` retains the
 canonical Malli form, while `/arities` and `/ast` point to ordered component
@@ -385,7 +394,7 @@ per-agent AI overlay plus attempt settings use the families above.
   persistence.
 - `src/seon/render/{route,transcript,agent,web}.clj` owns the current route
   table and the queries that join agents, messages, runs, forms, and receipts.
-- `src/seon/program.cljc` and `src/seon/sci/eval.clj` own program-row identity,
+- `src/seon/program.cljc` and `src/seon/sci/eval.clj` own program row identity,
   parsed contract persistence, cluster acquisition, and session restoration.
 
 ## See also

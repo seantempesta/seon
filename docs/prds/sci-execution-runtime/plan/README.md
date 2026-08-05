@@ -2113,7 +2113,7 @@ and the GIT FRAMING adopted (conversational, owner-ruled):**
   ctx is only an optimization.** An agent's session state must be
   restorable from the database or disk in a fresh JVM — better and
   simpler than replay-with-safety-analysis. Interpreted fns are already
-  program-row facts; data defs become facts too (small inline, large as
+  program row facts; data defs become facts too (small inline, large as
   content-addressed blobs, so branch and dedup come free); anything
   genuinely not restorable is STATED by the REPL, never faked. Design
   lane: `plan/stateless-resume-design-2026-08-01.md`.

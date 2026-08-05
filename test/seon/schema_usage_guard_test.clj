@@ -39,9 +39,9 @@
     (catch Throwable error
       {:error (deepest-ex-data error)})))
 
-(defn- program-row-tx
+(defn- row-tx
   [row]
-  [[:db.fn/call #'run/program-row-tx {} row]])
+  [[:db.fn/call #'run/row-tx {} row]])
 
 (defn- schema-row
   [schema-key definition]
@@ -127,7 +127,7 @@
                 result
                 (transact-result
                  connection
-                 (program-row-tx
+                 (row-tx
                   {:seon.program/delete-identities
                    [[:seon.schema/key base-key]]}))]
             (is (= :seon.schema/schema-in-use
@@ -148,7 +148,7 @@
                 result
                 (transact-result
                  connection
-                 (program-row-tx
+                 (row-tx
                   (schema-row base-key
                               [:string {:seon.db/index true}])))]
             (is (= :seon.schema/current-data-blocks-change
@@ -176,7 +176,7 @@
       (let [result
             (transact-result
              connection
-             (program-row-tx (schema-row base-key (get forms base-key))))]
+             (row-tx (schema-row base-key (get forms base-key))))]
         (is (nil? (:error result)))
         (is (= (pr-str (get forms base-key))
                (:seon.schema/form
@@ -205,7 +205,7 @@
         (let [result
               (transact-result
                connection
-               (program-row-tx
+               (row-tx
                 (schema-row base-key
                             [:int {:min 1 :seon.db/index true}])))]
           (is (nil? (:error result)))
@@ -247,7 +247,7 @@
               refusal
               (transact-result
                connection
-               (program-row-tx (schema-row entity-key replacement-form)))]
+               (row-tx (schema-row entity-key replacement-form)))]
           (is (= :seon.schema/current-data-blocks-change
                  (get-in refusal [:error :seon.schema/error])))
           (is (= [entity-child-key]
@@ -266,7 +266,7 @@
           (let [result
                 (transact-result
                  connection
-                 (program-row-tx
+                 (row-tx
                   (schema-row entity-key replacement-form)))]
             (is (nil? (:error result)))
             (is (= (pr-str replacement-form)
@@ -297,13 +297,13 @@
              (:error
               (transact-result
                connection
-               (program-row-tx
+               (row-tx
                 (schema-row entity-key reduced-entity-form))))))
         (is (nil?
              (:error
               (transact-result
                connection
-               (program-row-tx
+               (row-tx
                 {:seon.program/delete-identities
                  [[:seon.schema/key entity-key]]})))))
         (is (nil? (db/pull @connection [:db/id]
@@ -329,7 +329,7 @@
       (let [result
             (transact-result
              connection
-             (program-row-tx
+             (row-tx
               {:seon.program/delete-identities
                [[:seon.schema/key base-key]]}))]
         (is (nil? (:error result)))
@@ -352,7 +352,7 @@
         (let [result
               (transact-result
                connection
-               (program-row-tx
+               (row-tx
                 {:seon.program/delete-identities
                  [[:seon.schema/key base-key]]}))
               past (db/as-of @connection data-t)

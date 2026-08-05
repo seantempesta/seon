@@ -741,7 +741,7 @@
            [:seon.fn.file/path [:string {:min 1}]]
            [:seon.fn.file/first-party-functions
             [:vector [:string {:min 1}]]]]]
-    [:map]]}
+    :seon.fn.file/artifact]}
   [{path :seon.fn.file/path
     known-functions :seon.fn.file/first-party-functions}]
   (let [file (rooted-file path)]
@@ -765,16 +765,16 @@
   {:malli/schema
    [:=>
     [:catn
-     [:manifest :map]
+     [:manifest :seon.fn.manifest/manifest]
      [:canonical-path [:string {:min 1}]]]
-    [:maybe :map]]}
+    [:maybe :seon.fn.file/artifact]]}
   [manifest canonical-path]
   (some #(when (= canonical-path (:seon.fn.file/path %)) %)
         (:seon.fn.manifest/artifacts manifest)))
 
 (defn manifest-function-symbols
   "Sorted first-party function symbols contributed by a manifest."
-  {:malli/schema [:=> [:catn [:manifest :map]]
+  {:malli/schema [:=> [:catn [:manifest :seon.fn.manifest/manifest]]
                   [:vector [:string {:min 1}]]]}
   [manifest]
   (->> (:seon.fn.manifest/identities manifest)
@@ -809,9 +809,9 @@
   {:malli/schema
    [:=>
     [:catn
-     [:manifest :map]
-     [:desired-artifacts [:vector :map]]]
-    :map]}
+     [:manifest :seon.fn.manifest/manifest]
+     [:desired-artifacts [:vector :seon.fn.file/artifact]]]
+    :seon.fn.manifest/manifest]}
   [manifest desired-artifacts]
   (when-let [duplicate-path
              (some (fn [[path n]] (when (> n 1) path))
@@ -832,7 +832,7 @@
   {:malli/schema
    [:=> [:cat [:map
               [:seon.fn/roots :seon.fn/roots]]]
-    [:map]]}
+    :seon.fn.manifest/manifest]}
   [request]
   (let [roots (:seon.fn/roots request)
         files (source-files roots)
@@ -993,7 +993,7 @@
 
 (defn rows
   "Canonical program rows discovered statically from exact JVM source."
-  {:malli/schema [:=> [:cat :seon.fn/index-request] [:vector :map]]}
+  {:malli/schema [:=> [:cat :seon.fn/index-request] :seon.program/rows]}
   [request]
   (into []
         (mapcat :seon.fn.file/rows)
@@ -1029,21 +1029,21 @@
          ::missing-population identity-attr})))))
 
 (defn- add-contract-facts
-  [program-rows]
+  [rows]
   (let [schema-forms
         (into (sorted-map)
               (keep (fn [{schema-key :seon.schema/key
                           form-string :seon.schema/form}]
                       (when schema-key
                         [schema-key (edn/read-string form-string)])))
-              program-rows)
+              rows)
         function-contracts
         (into (sorted-map)
               (keep (fn [{function-symbol :seon.fn/sym
                           spec :seon.fn/spec}]
                       (when spec
                         [(symbol function-symbol) (edn/read-string spec)])))
-              program-rows)
+              rows)
         projection (schema/build-projection schema-forms function-contracts)
         compile-options (:seon.schema.projection/compile-options projection)
         predicate-functions
@@ -1055,7 +1055,7 @@
               :seon.program/compile-options compile-options
               :seon.program/predicate-functions predicate-functions
               :seon.program/schema-keys schema-keys}))
-          program-rows)))
+          rows)))
 
 (defn backfill-contract-facts!
   "Backfill every contracted function missing either parsed component root.
@@ -1115,7 +1115,7 @@
     {:seon.reconcile/converged? (empty? tx-data)
      :seon.reconcile/operations (count missing)}))
 
-(defn- desired-program-rows
+(defn- desired-rows
   [request]
   (let [source-rows (rows request)
         canonical-schemas
@@ -1157,9 +1157,9 @@
   "Populate one fresh source scratch branch from static analysis."
   {:malli/schema [:=> [:cat :seon.fn/index-request] :seon.reconcile/result]}
   [{connection :seon.db/connection process :seon.db/process :as request}]
-  (let [program-rows (desired-program-rows request)
-        _ (assert-one-row-per-identity! program-rows)
-        _ (assert-populated! program-rows)
+  (let [rows (desired-rows request)
+        _ (assert-one-row-per-identity! rows)
+        _ (assert-populated! rows)
         existing (some (fn [identity-attribute]
                          (db/q '[:find ?entity .
                                 :in $ ?attribute
@@ -1170,7 +1170,7 @@
       (throw (ex-info "Program indexing requires a fresh source scratch branch."
                       {:seon.error/kind ::index-refused
                        ::existing-program-entity existing})))
-    (let [namespaces (filterv :seon.ns/name program-rows)
+    (let [namespaces (filterv :seon.ns/name rows)
           namespace-bases
           (mapv #(dissoc % :seon.ns/requires) namespaces)
           namespace-relations
@@ -1180,7 +1180,7 @@
                           (select-keys row
                                        [:seon.ns/name :seon.ns/requires]))))
                 namespaces)
-          declarations (filterv #(not (:seon.ns/name %)) program-rows)
+          declarations (filterv #(not (:seon.ns/name %)) rows)
           declaration-bases
           (mapv #(dissoc % :seon.fn/calls :seon.test/subject :seon.fn/keywords)
                 declarations)
@@ -1223,4 +1223,4 @@
       (commit-phase! :seon.fn/keywords keyword-rows)
       (commit-phase! :seon.fn/calls call-rows)
       {:seon.reconcile/converged? false
-       :seon.reconcile/operations (count program-rows)})))
+       :seon.reconcile/operations (count rows)})))

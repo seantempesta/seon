@@ -43,7 +43,9 @@
             :seon.db/connection]
            [:seon.db/process {:optional true} :seon.db/ref]
            [:seon.fn/roots {:optional true} :seon.fn/roots]
-           [:seon.fn/manifest {:optional true} :map]],
+           [:seon.fn/manifest
+            {:optional true}
+            :seon.fn.manifest/manifest]],
           :ns :seon.db/ref,
           :private? :boolean,
           :projection-boundary
