@@ -430,6 +430,56 @@ Evidence base: eight paired sol/Opus research lanes (indexed in the PRD).
   door receipts, declared by the capability leaf, never guessed (joins
   F8's capability family). Bare agent `transact!` spans stay uncurated
   until write provenance (F7) lands.
+- **Naming rulings (owner, 2026-08-05).** `:seon.code.*` is RETIRED
+  entirely — a definition is `:seon.def/*` (Clojure's own word; the
+  vocabulary table's `seon.code.fn/.ns/.schema/.test` rename note is
+  superseded documentation and is deleted, not executed). The database
+  value is key `:seon.db/db`, schema `:seon.db/database-value`; the live
+  connection is `:seon.db/connection` — matching Datahike's own
+  vocabulary (its operations are categorized `:connection`; `conn` is
+  its idiomatic binding). `:seon.store/branch-connection` is DELETED as
+  an invented compound and redundant, since a Datahike connection
+  identity is already `[store-id branch]`. Evidence:
+  [naming-coherence-audit](../research/naming-coherence-audit-2026-08-05.md),
+  [indexing-completeness](../research/indexing-completeness-2026-08-05.md).
+- **NO MIGRATION, NO PARALLEL CODE** (owner, 2026-08-05, verbatim):
+  *"Format and reset the database so there is no existing data and after
+  the rename a full rebuild of the codebase gets indexed and loaded. NO
+  MIGRATION OR PARALLEL CODE REMAINS."* Renames are landed outright:
+  zero migration code, zero compatibility aliases, zero old spellings
+  anywhere in `src/`, `resources/`, `test/`, `docs/`, or
+  `.agents/skills/`, verified by search. The proof of a rename is the
+  clean path — reset, complete `current-src` republication, fresh index,
+  cluster boots. Code that exists only to read an old spelling is
+  deleted in the same commit. This generalizes: existing cluster data is
+  never a reason to keep a name, because clusters are cheap and
+  reforkable.
+- **Indexing keeps the whole parse** (owner, 2026-08-05): *"during
+  indexing we should be taking all the useful parts of the parse we are
+  doing… our understanding of the entire system happens via querying and
+  if we don't understand what we have (indexed) then we are hobbling
+  ourselves."* Complete per-arity argument facts (index, schema, and
+  destructuring shape for positional, map, sequential, symbol, and rest
+  arguments, plus the return) join clj-kondo bindings with Malli slots.
+  Inline schemas are first-class: a normalized shape FINGERPRINT
+  recognizes an anonymous schema as its registered twin, and an
+  unmatched inline shape is still indexed by fingerprint so "what else
+  accepts this shape" and "has anyone named this" are queries. A
+  computed coverage guard proves no analyzer field is silently dropped
+  in future.
+- **Ambient injection** (owner, 2026-08-05): a function's own
+  `:malli/schema` IS its request — no injection metadata, ever. The
+  runtime supplies declared-and-absent ambient values (`:seon.db/db`,
+  `:seon.db/connection`, and further batteries as declared provider
+  rows); the caller always wins, undeclared functions receive nothing,
+  unavailable ambients are flat errors never nil. Design:
+  [ambient-injection-prd](ambient-injection-prd-2026-08-05.md).
+- **Initial forms exist at BOTH levels; the most specific wins** (owner,
+  2026-08-05): a cluster declares initial forms and an agent may declare
+  its own; an agent's declaration resolves over the cluster's. One
+  mechanism seeds whichever resolves (the `system-run-tx` path), and the
+  plan digest reflects the RESOLVED forms so two differently-prepared
+  agents are honestly distinguishable.
 - **cron-utils 9.2.1 is an approved pinned dependency** (owner review,
   2026-08-05): schedules stay declared FACTS (expression + IANA zone);
   the vendored parser is confined to one pure namespace and exists so
