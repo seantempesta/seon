@@ -65,6 +65,36 @@ loader-lifecycle edge. The former claim that these particular Datahike classes
 were retained only by the soft cache is therefore rejected. The operational
 repair does not depend on recovering that unavailable attribution.
 
+### Qualified incident verdict, 2026-08-05
+
+The complete
+[writer class-loading investigation](../../../prds/sci-execution-runtime/research/writer-class-loading-incident-2026-08-05.md)
+narrows the historical explanation further. The mutable cache replacement is
+recorded as having occurred earlier in the same live default JVM. In an
+isolated child using the real JVM flags and the historical mutable-classpath
+shape, loading the Datahike writer method and then removing its delayed nested
+AOT classfiles reproduced the exact
+`NoClassDefFoundError -> ClassNotFoundException` chain while the JVM stayed
+alive. A separate source reload produced a new writer loader generation but
+left the existing writer transaction incomplete rather than reproducing that
+exception.
+
+The best-supported historical explanation is therefore a delayed dependency
+AOT linkage after the mutable cache directory was replaced. This remains a
+qualified attribution rather than unique forensic proof because the failed
+JVM's process identity, loader identities, code sources, and exact class
+resources were not retained.
+
+**The current implementation delivers the ruled immutability guarantee:** the
+supported cache refresh and cleanup paths cannot construct replacement beneath
+a live JVM. Publication admits a complete cache into a content-addressed
+directory without replacement; launch records that exact path; cleanup
+protects both the selected path and every path referenced by a matching live
+`(pid, start-instant)`. A fresh isolated operator loaded both incident owners
+from its exact digest directory through `AppClassLoader`, cleared all 3,628
+dynamic-cache entries, and still committed five datoms with the dynamic cache
+remaining empty.
+
 ## Repair
 
 The dependency-cache mechanism landed immediately after this issue was filed:
@@ -146,6 +176,19 @@ Verification completed on 2026-08-03:
   failures and zero errors. The child JVM used `-Xmx96m` and policy `0`,
   exhausted the heap, then loaded a previously unused nested function class
   and a second namespace from the old process-pinned cache after refresh.
+
+Verification repeated on 2026-08-05 after operator consolidation:
+
+- the fresh isolated operator discriminator reached READY under
+  `-XX:MaxRAMPercentage=12.5`, G1, and
+  `-XX:G1PeriodicGCInterval=30000`; both incident owners reported
+  `AppClassLoader` and the same exact digest code source; clearing the dynamic
+  cache from 3,628 entries to zero left it at zero while a five-datom
+  transaction succeeded; and
+- `bin/test seon.dev.dependency-cache-test` again passed one test, ten
+  assertions, zero failures, and zero errors. During refresh, the live process
+  protected both selected and process-referenced paths; after child exit, the
+  old path was reaped.
 
 Only an hours-long live JVM can add operational soak evidence about natural
 allocation timing and workload history. It cannot strengthen the repaired
