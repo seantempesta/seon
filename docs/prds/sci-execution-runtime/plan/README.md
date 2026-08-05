@@ -430,6 +430,17 @@ Evidence base: eight paired sol/Opus research lanes (indexed in the PRD).
   door receipts, declared by the capability leaf, never guessed (joins
   F8's capability family). Bare agent `transact!` spans stay uncurated
   until write provenance (F7) lands.
+- **The root agent owns ALL system maintenance** (owner, 2026-08-04
+  night): store GC, disk footprint observation, dead-root reaping, log
+  rotation, and every recurring health chore are the ROOT AGENT'S
+  scheduled tasks — "we can't expect our users to have expertise but we
+  can expect our agents to." Users never perform maintenance; the
+  system maintains itself through the same agent machinery everything
+  else uses (declared scheduled-task facts firing as messages into
+  root's graph). Operator commands (`bin/seon reset` etc.) remain the
+  manual entry points and MUST invoke the same one cleanup owner the
+  scheduled tasks use — reset genuinely reclaims everything; there are
+  never two cleanup implementations.
 - **Open maps extend to agent-authored function contracts** (owner,
   2026-08-04 late): the `{:closed true}` admission requirement on
   authored `:malli/schema` input maps is DELETED — ruling #48's
