@@ -9,8 +9,8 @@ tags: [architecture, schema, database, agent]
 > **Target design** (present tense). Implementation state, gaps, order, and
 > evidence live only in [[roadmap]].
 
-Seon's durable model is the admitted EDN population in
-`resources/seon/schema.edn`. A database entity is identified by the attributes it
+Seon's durable model is the admitted EDN population under
+`resources/seon/schemas/`. A database entity is identified by the attributes it
 carries and the connections it follows; there are no entity kinds, route rows,
 turn rows, or compatibility identities. This document names the durable
 families that architecture prose may rely on. Function request/response maps
@@ -21,7 +21,7 @@ own their projections. [[observability]] owns forensic use of the receipts.
 
 ## Modeling laws
 
-- Every stored attribute is declared once in `resources/seon/schema.edn`.
+- Every stored attribute is declared once under `resources/seon/schemas/`.
   `seon.schema.datahike/malli->datahike-schema` derives Datahike value type,
   cardinality, uniqueness, indexing, component ownership, and history facets.
 - An entity is found by attribute presence and identified by a unique identity
@@ -32,6 +32,13 @@ own their projections. [[observability]] owns forensic use of the receipts.
   ordered children carry their own ordinal.
 - Stored optional values are absent, never nil. Clearing an attribute is an
   explicit retraction; omitting it from an upsert leaves the current value.
+- Every Malli map is open. Required declared keys validate rigorously; extra
+  keys are ignored until declared. Adding is accretion, while changing an
+  existing key's shape or relationship to output is breakage.
+- A registered reference predicate declares
+  `:seon.schema/identity-only` and a qualified projection. Admission walks only
+  that identity data at every depth; it never admits a live database or
+  connection record graph.
 - Transaction provenance is `:seon.db/user` and `:seon.db/process` on the
   transaction entity, plus Datahike's `:db/txInstant`. Domain rows do not copy
   `created-by`, `created-at`, turn, or eval provenance.
@@ -61,6 +68,10 @@ to the same run and ordinal. The receipt's optional result, error, and
 interruption attributes are its state. Context captures and provider attempts
 point to the run as independent evidence. Program rows and durable session
 definitions belong to the cluster-wide program graph.
+
+An adopted revision points from the proved run to the original through
+`:seon.cluster.run/supersedes`. Active-run projections exclude originals that
+have a superseding run; both histories remain durable.
 
 The root agent is the ordinary agent with `:seon.cluster.agent/id "root"`.
 Root has no parent attribute, lifecycle kind, grant row, or second identity.
@@ -109,6 +120,7 @@ The central plain connections are:
 - `:seon.cluster.agent/instructions` → additive instruction rows;
 - `:seon.cluster.agent/run` → the current open run;
 - `:seon.cluster.run/agent` → owning agent;
+- `:seon.cluster.run/supersedes` → original run;
 - `:seon.cluster.run.form/run` and `:seon.cluster.eval/run` → their run;
 - `:seon.cluster.run.form/ns` and `:seon.cluster.eval/ns` → canonical namespace;
 - `:seon.cluster.message/to` and optional `/from` → recipient and sender agents;
@@ -154,7 +166,11 @@ entity; they are not competing kinds. Formal creation writes the namespace and
 agent rows in one transaction, including `:seon.cluster.agent/cluster`.
 Absence of `:seon.cluster.agent/run` means idle. Namespace reassignment is an
 ordinary cardinality-one transaction. There are no parent, termination,
-default-turn-limit, home-requires, schedule, or agent-status attributes.
+default-turn-limit, home-requires, or agent-status attributes.
+
+**[TARGET — ruled 2026-08-04]** Task, schedule, and fire identities attach
+declared scheduled work to its owning agent. Root's maintenance tasks use the
+same families; they are not a second scheduler or operator-only registry.
 
 AI configuration follows ruling #34 without a second override schema. Every AI
 leaf registration marked `:seon.config/per-agent true` contributes the same
@@ -186,7 +202,7 @@ metadata and message relations.
 
 | Entity schema | Persisted attributes |
 |---|---|
-| `:seon.cluster.run/run` | `:seon.cluster.run/id`, `/agent`, `/opened-at`, optional `/closed-at`, optional `/process`, optional `/plan-digest`, optional `/error` |
+| `:seon.cluster.run/run` | `:seon.cluster.run/id`, `/agent`, `/opened-at`, `/opening-commit-id`, `/starting-ns`, optional `/trigger`, `/closed-at`, `/process`, `/plan-digest`, `/error`, cardinality-many `/supersedes` |
 | `:seon.cluster.run.form/form` | `:seon.cluster.run.form/id`, `/run`, `/ordinal`, `/source`, optional `/ns` |
 
 Run state is presence:
@@ -214,7 +230,8 @@ in effect for that form.
 | `:seon.cluster.eval/run` | ref | owning run |
 | `:seon.cluster.eval/ordinal` | nonnegative int | joins the planned form |
 | `:seon.cluster.eval/at` | instant | receipt opening time |
-| `:seon.cluster.eval/ns` | optional ref | namespace after evaluation |
+| `:seon.cluster.eval/ns` | optional ref | namespace used for evaluation |
+| `:seon.sci.eval/ending-ns` | optional symbol | namespace after evaluation |
 | `:seon.cluster.eval/result-edn` | optional string | bounded result projection |
 | `:seon.cluster.eval/result-blob` | optional SHA-256 digest | full result address |
 | `:seon.cluster.eval/result-size` | optional nonnegative int | full serialized size |
@@ -271,7 +288,7 @@ normalization and retry disposition derive at read.
 
 | Entity schema | Persisted attributes |
 |---|---|
-| `:seon.fn/fn` | `:seon.fn/sym`, `:seon.schema.admission/source`, `/ns`, `/source`, optional `/arglists`, `/doc`, `/private?`, `/spec`, `/calls`, `/arities`, `/ast`, `/workload` |
+| `:seon.fn/fn` | `:seon.fn/sym`, `:seon.schema.admission/source`, `/ns`, `/source`, optional `/arglists`, `/doc`, `/private?`, `/spec`, `/calls`, `/arities`, `/ast`, `/workload`, `/external-sink`, `/projection-boundary` |
 | `:seon.schema/schema` | `:seon.schema/key`, `:seon.schema.admission/source`, `/form`, optional `:seon.db.id/generator` |
 | `:seon.ns/ns` | `:seon.ns/name`, `:seon.schema.admission/source`, optional `/source`, `/doc`, `/requires`, `/aliases`, `/imports`, `/refers` |
 | `:seon.test/test` | `:seon.test/sym`, `:seon.schema.admission/source`, `/ns`, `/source`, optional `:seon.fn/calls`, `:seon.test/subject` |
@@ -291,6 +308,11 @@ test whose subject is not reached through a call, such as a schema property,
 may instead declare the optional `:seon.test/subject` function ref. Test and
 function identities remain separate even when their symbol strings match.
 
+Output linkage is declared in that graph too. Leaf functions carry
+`:seon.fn/external-sink` and `:seon.fn/projection-boundary`; shortest-path
+queries derive projected, bypass, and unresolved consumer crossings without a
+hand-maintained sink list.
+
 Namespace alias, import, and refer bindings are owned component rows. They
 preserve SCI's effective resolver inputs. `:seon.code.def` stores one current
 REPL definition per namespace/name: a replay-safe source, a faithful inline or
@@ -302,8 +324,10 @@ source publication writes `:core`; a runtime declaration writes `:agent`.
 Contract strictness reads that fact and fails closed when it is absent or
 ambiguous. It never derives trust from optional temporal history.
 
-The program graph is live per cluster. Every agent in one cluster calls the
-same graph; another cluster has another database branch and SCI context.
+The program graph and acquired base context are live per cluster. Every agent
+in one cluster calls the same graph; **[TARGET — ruled 2026-08-04]** each run
+uses a fresh fork of the base, and durable acquisition is the cross-run sharing
+boundary. Another cluster has another database branch and base context.
 Callability is never stored as an allowlist or grant.
 
 ### Durable errors
@@ -353,7 +377,7 @@ per-agent AI overlay plus attempt settings use the families above.
 
 ## Source authority
 
-- The named family sections in `resources/seon/schema.edn` own the entity,
+- The named family declarations under `resources/seon/schemas/` own the entity,
   cluster, configuration, transaction-provenance, and test-observation facts
   in this census. Sections are editorial; every identity is global.
 - `src/seon/cluster/{agent,run,message,loop}.clj*` owns agent creation, run

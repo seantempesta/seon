@@ -49,8 +49,11 @@ eval facts.
 
 ## The projection contract — two typed outputs
 
-Rendering is not a UI mechanism that other things borrow; it is one contract
-the UI is the largest consumer of. A **unit** is schema'd data discovered by
+Rendering is the complete output boundary. Every consumer-visible text value—
+agent prompt, MCP or tool result, runner output, log, fault, and terminal or
+operator face—crosses `:seon.render/ai`. Every semantic page value crosses
+`:seon.render/html`. JSON and SSE framing plus literal authored static copy are
+transport bytes after that boundary, not third projections. A **unit** is schema'd data discovered by
 the recursive entity walk. The boundary requests an output kind, and the
 renderer resolves one projection through the program graph. First-party Vars
 remain live under re-evaluation. A nonidentical base-Var redefinition is
@@ -59,11 +62,11 @@ functions are installed SCI values invoked through the guarded door, never
 host-resolved Vars.
 
 Explicit declarations ride on the value being projected; otherwise the
-selector queries the program graph and schema metadata. Logs use the error or
-problem domain's ordinary log function. A recursion-fence failure, overflow
-callback, development panic, or startup/export invariant may still write a
-brief direct stderr diagnostic because it reports the projection or durability
-machinery itself.
+selector queries the program graph and schema metadata. A failure inside the
+projection machinery may emit one bounded emergency diagnostic; that escape is
+a fault to repair, not a third normal output path. Program rows declare
+`:seon.fn/external-sink` and `:seon.fn/projection-boundary`, so the remaining
+projected, bypass, and unresolved paths are graph queries rather than a roster.
 
 Failures are flat `:seon.error` values, never throws. No declaration is
 required: a value with no specialist reaches the structural floor. An
@@ -166,6 +169,14 @@ walk discipline. It can render any value without throwing, preserves
 identities/indices and explicit elision markers, and pays only for opened data.
 Specialized message, source, error, and hiccup projections sit above it through
 the one resolution chain; they do not create another walker or floor.
+
+**Fit belongs to the consumer profile.** Profiles are database-derived config
+facts carrying token, depth, child, blob, and composition policy.
+`seon.print/fit` is the one owner that applies them after semantic producer
+selection. Producers never invent local truncation rules. A value that does
+not fit contains an ordinary elision value carrying its omitted count, known
+total, path, next offset, producing profile, and requery identity or explicit
+refusal. Elision can therefore be rendered and inspected like any other value.
 
 **The transcript has one bounded projection.** Eval receipts order by their
 durable instants, while messages appear as explicit query forms followed by

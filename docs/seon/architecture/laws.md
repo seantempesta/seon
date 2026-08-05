@@ -18,6 +18,11 @@ sample sizes, and acceptance evidence belong in PRD research and roadmaps.
 - **Minimal standing context.** Skills remain absent by default. Prefer the
   owning namespace, schema, or docstring before adding prompt prose; admit a
   standing instruction only after behavioral evidence supports it.
+- **Teach non-guessable discovery operations explicitly.** Find-by-input-shape
+  scored 10/10 when its discovery form was shown and 0/10 with help alone,
+  while broader already-known authoring scored 8/10 versus 10/10. Keep the
+  proven discovery beat and do not generalize it into a larger standing block.
+  (`docs/prds/sci-execution-runtime/research/bootstrap-baseline-2026-08-04.md`.)
 - **Cache stability.** Aged transcript clips and stable-prefix material remain
   byte-identical. Eviction does not reflow retained content.
 - **Explicit-input render determinism.** The same renderer function, immutable
@@ -87,12 +92,28 @@ sample sizes, and acceptance evidence belong in PRD research and roadmaps.
   settled fact. (`flow-mechanics-2026-07-28.md`.)
 - **Build once, fork everywhere.** Expensive values are derived once and
   forked by consumers — never rebuilt, never shared mutably: the sci base
-  `ctx` forks per evaluation; a database value at a basis is a free fork
+  `ctx` forks once per run; a database value at a basis is a free fork
   (`as-of`/`since` are temporal forks); every cluster branch forks from the
   same immutable bootstrap ancestor containing indexed code and initialization
   pages; and a proc restart derives from facts at `init` state 0. Structural
   sharing keeps the ancestor single while branch divergence remains local.
   Mutation exists in exactly one serial transaction path per physical store.
+- **Fit in the consumer's unit after identity-only admission.** A nested
+  database value placed 993,583 characters behind a 589-character identity
+  face, while the shared fitter reduced a 262,147-character scalar to 2,051
+  characters. Semantic producers stay independent of consumer caps; one
+  profile-owned fitter bounds the result.
+  (`docs/prds/sci-execution-runtime/research/universal-output-floor-opus-2026-08-04.md`.)
+- **GC policy is correctness.** No-cutoff retention reclaimed only 3.97 GiB;
+  head-plus-referenced-blob retention marked 357.36 GiB reclaimable while
+  retaining 17.08 GiB. Reclamation therefore requires an explicit cutoff,
+  branch and blob verification, and a zero-reclaim second pass.
+  (`docs/prds/sci-execution-runtime/research/disk-burn-forensics-2026-08-04.md`.)
+- **Deletable paths require declared ownership and event-driven reaping.** A
+  survivor census found 1,884 entries occupying 242.67 GiB. Names, mtimes, and
+  process-text searches do not prove ownership; the owning process or task
+  publishes readiness and completion.
+  (`docs/prds/sci-execution-runtime/research/disk-burn-forensics-2026-08-04.md`.)
 - **Reset, never migrate.** A cluster reconciles to current code and schema by
   resetting and reinstalling from the manifest and program facts. No data
   migration path exists; a live proof runs on a freshly reset cluster at the

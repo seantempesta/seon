@@ -20,7 +20,8 @@ are explicit data or capacity boundaries.
 
 Every protective limit is a resolved database configuration fact with:
 
-- a closed Malli schema and explicit unit;
+- a declared, rigorously validated Malli schema with open map shapes and an
+  explicit unit;
 - a docstring naming the protected resource and firing meaning;
 - calibration provenance;
 - a default at least one hundred times legitimate measured P99.9 work; and

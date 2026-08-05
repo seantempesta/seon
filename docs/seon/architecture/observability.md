@@ -112,6 +112,15 @@ Printed REPL text is rendered from durable source, output, and result data.
 `result-edn` remains the data projection; the text and HTML faces come from the
 one print grammar and may re-render without changing the receipt.
 
+## Curated and forensic history
+
+A run records its opening commit and starting namespace; each receipt records
+its ending namespace. These facts expose the replay basis and namespace
+progression. An adopted revision points through
+`:seon.cluster.run/supersedes` to its original. Active transcript queries omit
+superseded originals, while forensic queries retain both complete histories and
+their relationship.
+
 ## Large values and blobs
 
 Content-addressed blobs use SHA-256 `:seon.blob/digest`. A result above the
@@ -122,10 +131,11 @@ the full inline receipt. Such receipts keep the bounded projection plus
 same digest family for large reasoning content; durable session definitions
 may use `:seon.code.def/blob` and `/size`.
 
-Blob state never becomes a second lifecycle or replay log. The referencing
-row carries the semantic identity, digest, and size. Capped presentation derives
-from the size and configured threshold. A missing blob is a loud forensic
-failure attached to the referencing fact.
+Blob state never becomes a second lifecycle or replay log. The referencing row
+carries the semantic identity, digest, and size. Consumer presentation is
+fitted separately by its render profile; blob eligibility does not choose the
+displayed face. A missing blob is a loud forensic failure attached to the
+referencing fact.
 
 ## Error facts
 
@@ -154,8 +164,9 @@ list, determines which escalation policy applies.
 Every datom already names its transaction. `:seon.db/user`,
 `:seon.db/process`, and `:db/txInstant` answer who, through which path, and when.
 Joining a program row's datom through that transaction distinguishes admitted
-source publication from agent-authored changes without storing a duplicate
-author field.
+source publication from agent-authored changes. **[TARGET — ruled 2026-08-04]**
+`:seon.fn/author` records the function author directly for curation and
+accountability queries.
 
 Program rows provide the source side of a forensic answer:
 
@@ -169,6 +180,15 @@ Program rows provide the source side of a forensic answer:
 Effective AI settings are recorded on every provider attempt, so a config
 change after the call cannot rewrite history. The live config remains ordinary
 database facts and can still be inspected at any temporal basis.
+
+## Projection-boundary evidence
+
+Program rows carry queryable `:seon.fn/external-sink` and
+`:seon.fn/projection-boundary` leaf facts. `seon.fn/output-path-report` derives
+the shortest projected, bypass, and unresolved paths to every sink. At a
+particular crossing, the render profile identity and structured elision values
+record why the consumer received a bounded face and how omitted data can be
+queried—or why continuation is refused.
 
 ## Crash forensics
 
@@ -204,8 +224,8 @@ uses an isolated cluster fork and the ordinary message/run path.
 
 ## Source authority
 
-- The context, AI, run, error, program, and test sections of
-  `resources/seon/schema.edn` own the durable evidence shapes.
+- The family declarations under `resources/seon/schemas/` own the durable
+  evidence shapes.
 - `src/seon/context.clj` commits captures from rendered context.
 - `src/seon/cluster/loop.clj` opens attempts and receipts, persists blobs and
   session definitions, and settles the fold.

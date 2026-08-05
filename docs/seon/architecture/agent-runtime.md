@@ -15,6 +15,12 @@ derives the next work, performs only that work, and commits through the one
 cluster transaction owner. There is no central dispatcher, scheduler entity,
 private work queue, turn entity, or runtime status row.
 
+**[TARGET — ruled 2026-08-04]** Each cluster owns one acquired base SCI `ctx`,
+and each run evaluates in a fresh fork of that base. The fork is run-private
+mutable interpreter state; the database program graph and namespace session
+image are the durable shared authority. Agents share definitions by committing
+facts and acquiring them, never by observing another run's mutations.
+
 ## State is attribute presence
 
 The agent and run store primitives:
@@ -35,11 +41,18 @@ process-local graph without inventing durable lifecycle state.
 
 ## Runs are claimable database state
 
-A message opens one run with `:seon.cluster.run/id`, `/agent`, and `/opened-at`,
-and asserts the agent's `/run` pointer in the same transaction. The transition
-refuses when the run identity already exists or the agent already points to an
-open run. The run's own `/agent` ref is the authority used when closing and
-retracting that pointer.
+A message opens one run with `:seon.cluster.run/id`, `/agent`, `/opened-at`,
+`/opening-commit-id`, `/starting-ns`, and optional `/trigger`, and asserts the
+agent's `/run` pointer in the same transaction. The opening commit fixes the
+program generation from which the run fork is built; the starting namespace is
+the agent's assigned namespace. The transition refuses when the run identity
+already exists or the agent already points to an open run. The run's own
+`/agent` ref is the authority used when closing and retracting that pointer.
+
+A revision run may point through `:seon.cluster.run/supersedes` to the original
+run. An original with an adopted revision is absent from the active-run
+projection without being deleted, so history and the replacement relationship
+remain queryable.
 
 Custody is the one `:seon.cluster.run/process` string:
 
@@ -117,12 +130,13 @@ Agent code never transacts a delivery side channel.
 
 ## SCI interruption and admission
 
-Agent-driven evaluation uses the cluster's one live SCI `ctx`. `seon.sci.kernel`
-is the one guarded owner, with exactly two entrances: `seon.sci.eval/evaluate`
-for a form, and `seon.sci.kernel/invoke` for a named live Var — the entrance
-every renderer call takes. They share one process guard, one arming rule, one
-deadline, one admission, and one failure classifier, so their semantics cannot
-drift; the invoked symbol is the only difference between the two error faces.
+**[TARGET — ruled 2026-08-04]** Agent-driven evaluation uses the run's fresh
+fork of the cluster base SCI `ctx`. `seon.sci.kernel` is the one guarded owner,
+with exactly two entrances: `seon.sci.eval/evaluate` for a form, and
+`seon.sci.kernel/invoke` for a named live Var — the entrance every renderer call
+takes. They share one process guard, one arming rule, one deadline, one
+admission, and one failure classifier, so their semantics cannot drift; the
+invoked symbol is the only difference between the two error faces.
 
 The context carries one stable zero-argument `:interrupt-fn`; SCI calls it at
 every interpreted function-body entrance. The configured
@@ -141,17 +155,21 @@ eligibility floor keeps a bounded projection plus
 `:seon.cluster.eval/result-blob` and `/result-size` only when that complete
 stored shape is smaller than retaining the full result inline.
 
-The session is a faithful REPL. A definition becomes live in the cluster `ctx`
-when SCI evaluates it, even if later persistence refuses. The persistence gate
+The run is a faithful REPL. A definition becomes live in that run's fork when
+SCI evaluates it, even if later persistence refuses. The persistence gate
 decides which program and database facts the terminal transaction may commit;
-it does not restrict which functions an agent may call.
+it does not restrict which functions an agent may call. A `defn` evaluates to
+the Var face, while an execution failure evaluates to its flat error face.
 
 ## Live program graph and session image
 
-One cluster has one live program graph and SCI context. An agent definition is
-immediately visible to every agent in that cluster; no other cluster shares it.
-Cold acquisition rebuilds from program and session facts at boot or recovery,
-not at each turn.
+One cluster has one live program graph and acquired base SCI context; no other
+cluster shares either. Every run forks that base at its recorded opening commit
+and begins in the assigned namespace. A definition becomes cross-run visible
+only after its facts join the program graph and are acquired into the base.
+Cold acquisition rebuilds from program and session facts at boot or recovery;
+run creation then uses the cheap fork operation rather than rebuilding the
+program.
 
 Contracted functions persist as `:seon.fn` rows. Their canonical `/spec`,
 Malli-derived arity rows, and parsed AST facts commit through the same producer.
@@ -169,6 +187,23 @@ whose purity is proven from analysis and capability reachability, then states
 unrestorable names. Nothing effectful re-executes during recovery. Namespace
 ownership is `:seon.cluster.agent/namespace`; it coordinates who should edit a
 namespace and never gates callability.
+
+## Session curation
+
+**[TARGET — ruled 2026-08-04]** An editor may revise a run it did not author.
+It works in its own candidate context and scratch branch and returns a
+**revision**: an ordered vector of form sources as data, not the editor's own
+session. The system then performs a **proof** by mechanically re-executing the
+revision on a fresh fork at the original run's opening commit. Proof makes no
+model call and fails closed before any external sink.
+
+Adoption requires zero error receipts, a terminal completed result, declared
+content, and equivalence to the original intent. One transaction commits the
+proved forms and receipts as a new run and connects it to the original with
+`:seon.cluster.run/supersedes`. The original remains forensic history, but
+queries for active runs exclude superseded runs. There is one future per
+original: no context merge, replay of the editor's exploratory session, or
+destructive rewrite of history.
 
 ## Messages and agent creation
 
@@ -189,9 +224,17 @@ message or a temporal transaction artifact. Outbound delivery records the
 trigger as the message's `/caused-by` ref, making conversation depth an
 ordinary ref walk.
 
-There is no durable parent tree, schedule entity, interaction entity, browser
-session, hop counter, or delivery acknowledgement in the runtime model.
-Subagents are ordinary agents connected by messages and namespace ownership.
+There is no durable parent tree, interaction entity, browser session, hop
+counter, or delivery acknowledgement in the runtime model. Subagents are
+ordinary agents connected by messages and namespace ownership.
+
+**[TARGET — ruled 2026-08-04]** Scheduling is also per agent. Declared task,
+schedule, and fire identities feed a schedule proc in the owning agent's graph;
+a due fire commits an ordinary message to that agent. There is no central
+ticker. Root owns the maintenance portfolio—database and blob reclamation,
+footprint inspection, dead-root cleanup, log retention, and related repair—as
+ordinary root tasks; the operator invokes the same owners for explicit manual
+maintenance.
 
 ## Crash recovery
 
@@ -234,8 +277,7 @@ platform worker.
 
 ## Source authority
 
-- The agent, run, message, context, AI, eval, and program sections of
-  `resources/seon/schema.edn` own runtime shapes.
+- The family declarations under `resources/seon/schemas/` own runtime shapes.
 - `src/seon/cluster/run.clj` owns in-transaction run and receipt transitions.
 - `src/seon/cluster/{agent,wake,work,loop}.clj*` owns per-agent graph lifecycle,
   wake routing, work derivation, and the fold.

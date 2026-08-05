@@ -12,8 +12,9 @@ complete reconstructed program, delta reinstrumentation, and Shadow reload
 selection for replaceable runtime contexts. That lifecycle was deleted with
 the CLJS build and per-turn context reconstruction.
 
-Rulings 2026-08-01 #29, #31, and #33 replace it with one live SCI `ctx` per
-cluster, host-Var instrumentation under the core-error dial, and
+Rulings 2026-08-01 #29, #31, and #33 replace it with one acquired base SCI
+`ctx` per cluster, fresh per-run forks, host-Var instrumentation under the
+core-error dial, and
 interpreted-function contract wrapping at the one program-row installation
 seam. The current owners are `src/seon/instrument.clj` and
 `src/seon/sci/eval.clj`.
@@ -21,7 +22,7 @@ seam. The current owners are `src/seon/instrument.clj` and
 Re-evaluating a host `defn` requires `seon.instrument/apply!` because Malli's
 wrapper is replaced with the Var root. Runtime program-row publication wraps
 interpreted functions from their committed contract as it installs them into
-the live cluster `ctx`.
+the acquired base cluster `ctx`; later run forks observe that acquisition.
 
 ## Related
 

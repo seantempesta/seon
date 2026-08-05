@@ -12,7 +12,7 @@ tags: [decision, architecture, database, runtime, flow]
 Datahike serializes transactions through the connection writer. Its branches
 give each cluster an independent database lineage without duplicating the
 physical store. The JVM can share process-local capacity across clusters while
-keeping each cluster's database connection, program context, Flow graphs,
+keeping each cluster's database connection, acquired base program context, Flow graphs,
 routing state, web service, and lifecycle independent.
 
 The owner replaced one store and JVM per cluster on 2026-07-27 with a single
@@ -26,12 +26,13 @@ graph per cluster.
 One JVM process may host several named cluster instances. It owns one physical
 Datahike store under the process root and holds one exclusive `flock` for that
 store's lifetime. Each cluster owns one named branch and live connection, one
-SCI `ctx`, its agent and render Flow graphs, routing state, advertisement, and web
-service. The process root shares only the store holder and the bounded
+acquired base SCI `ctx`, fresh per-run forks, its agent and render Flow graphs,
+routing state, advertisement, and web service. The process root shares only the
+store holder and the bounded
 `:compute` and `:io` executors.
 
 Database access is co-located. `seon.db` reads immutable database values from
-the current cluster connection; `seon.cluster.store/transact!` calls
+the current cluster connection; `seon.db/transact!` calls
 Datahike's writer and returns either the transaction report or a flat error
 value. No internal database wire, remote replica, protocol version, or second
 mutation owner exists.
@@ -52,8 +53,8 @@ lease clock.
   cluster independently from its branch facts.
 - The browser SSE connection is an external wire. In-process movement uses
   Flow channels and database facts.
-- A live program change is immediately visible within its cluster and never
-  crosses into another cluster.
+- A committed and acquired program change is visible to later run forks within
+  its cluster and never crosses into another cluster.
 
 ## Owners
 
@@ -63,8 +64,9 @@ lease clock.
   and transaction boundary.
 - `src/seon/db.clj` — co-located application reads over immutable database
   values.
-- `src/seon/sci/eval.clj` — one live cluster `ctx` and cold acquisition.
-- `src/seon/cluster/run.clj` and the run section of `resources/seon/schema.edn` — presence
+- `src/seon/sci/eval.clj` — one acquired base cluster `ctx`, per-run forks, and
+  cold acquisition.
+- `src/seon/cluster/run.clj` and `resources/seon/schemas/seon.cluster.run.edn` — presence
   custody and transactional recovery.
 
 ## Related
