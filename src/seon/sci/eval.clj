@@ -792,18 +792,21 @@
   "Bind loaded first-party namespaces as their actual compiled JVM Vars.
 
   Namespace membership is the intersection of core-provenanced program rows
-  and Clojure's loaded namespace set. `ns-publics` supplies the namespace's
-  public real Vars. Direct bindings retain those Vars; a target named by a
-  declared refer becomes an SCI Var whose root is the real Var, because SCI's
-  resolver requires that shape. Both paths therefore observe a re-evaluated
-  `defn` without reacquisition. Private implementation Vars are excluded in
-  agreement with every program-graph projection of the agent-facing surface.
+  and Clojure's loaded namespace set. Existing public bindings remain
+  available, and every indexed function Var is added regardless of its
+  `:seon.fn/private?` attribute. Direct bindings retain those Vars; a target
+  named by a declared refer becomes an SCI Var whose root is the real Var,
+  because SCI's resolver requires that shape. Both paths therefore observe a
+  re-evaluated `defn` without reacquisition. Privacy is a rendering and
+  curation fact, never an execution boundary; non-function private Vars remain
+  outside publication.
 
   Safety residual from ruling #20: once execution enters one compiled host
   call, SCI's interrupt hook sees no interpreted function entrance. Runaway
   work inside that call is bounded by the submit-level wedge backstop, not the
   evaluation time-limit."
-  [ctx namespace-assertions source-for-transaction namespace-rows]
+  [ctx namespace-assertions source-for-transaction namespace-rows
+   function-rows]
   (let [first-party-names
         (into #{}
               (comp
@@ -812,6 +815,13 @@
                (map first))
               namespace-assertions)
         loaded-by-name (into {} (map (juxt ns-name identity)) (all-ns))
+        indexed-function-names
+        (reduce (fn [by-namespace [function-symbol _source namespace-name
+                                  _source-tx _private?]]
+                  (update by-namespace namespace-name (fnil conj #{})
+                          (symbol (name (symbol function-symbol)))))
+                {}
+                function-rows)
         referred-symbols
         (into #{}
               (comp (map row-bindings) (mapcat (comp vals :refers)))
@@ -831,7 +841,10 @@
                         (symbol (str namespace-name) (str local-name)))
                      (forwarding-host-var host-var sci-namespace)
                      host-var)]))
-               (ns-publics host-namespace)))))))
+               (select-keys
+                (ns-interns host-namespace)
+                (into (set (keys (ns-publics host-namespace)))
+                      (get indexed-function-names namespace-name)))))))))
 
 (defn- install-host-namespace!
   [ctx namespace-name intern-map]
@@ -1191,7 +1204,8 @@
     ;; bindings then populate the same SCI namespaces without being erased by
     ;; that declaration install. Selected definitions overwrite only their Vars.
     (install-loaded-first-party-namespaces!
-     ctx namespace-assertions source-for-transaction all-namespace-rows)
+     ctx namespace-assertions source-for-transaction all-namespace-rows
+     all-function-rows)
     (let [functions-installed
           (reduce
            (fn [state namespace-name]

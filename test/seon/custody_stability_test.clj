@@ -33,7 +33,6 @@
     [?schema :seon.schema/key ?schema-key]
     [?arity :seon.fn.arity/output-refs ?schema]
     [?function :seon.fn/arities ?arity]
-    [?function :seon.fn/private? false]
     [?function :seon.fn/sym ?function-symbol]])
 
 (def ^:private namespace-assertions-query
@@ -111,19 +110,18 @@
     :seon.sci.eval/time-limit-ms 5000
     :seon.config/on-core-error :panic}))
 
-(deftest public-custody-returning-surface-is-derived-and-exact
+(deftest indexed-custody-returning-surface-is-derived-and-exact
   (test-support/with-database
     (fn [connection]
       (let [db @connection
-            public-contracted-functions
+            contracted-functions
             (db/q '[:find (count ?function) .
                    :where
-                   [?function :seon.fn/private? false]
                    [?function :seon.fn/arities]]
                  db)
             actual
             (db/q custody-returning-query db custody-output-schema-keys)]
-        (is (pos? public-contracted-functions)
+        (is (pos? contracted-functions)
             "a missing program graph is failure, never a healthy empty census")
         ;; Exact is deliberate: a maximum would let one of today's custody
         ;; returners disappear silently, while this snapshot makes both a fifth
@@ -131,50 +129,41 @@
         (is (= expected-custody-returning-functions actual)
             (pr-str {:seon.custody-stability/actual actual}))))))
 
-(deftest acquired-first-party-reachability-is-exactly-public
+(deftest acquired-first-party-reachability-is-public-plus-every-indexed-function
   (test-support/with-database
     (fn [connection]
       (let [db @connection
             host-namespaces (loaded-core-namespaces db)
+            indexed-function-names
+            (reduce
+             (fn [by-namespace [function-symbol namespace-name]]
+               (update by-namespace namespace-name (fnil conj #{})
+                       (symbol (name (symbol function-symbol)))))
+             {}
+             (db/q '[:find ?function-symbol ?namespace-name
+                     :where
+                     [?function :seon.fn/sym ?function-symbol]
+                     [?function :seon.fn/ns ?namespace]
+                     [?namespace :seon.ns/name ?namespace-name]]
+                   db))
             expected
             (into (sorted-map)
                   (map (fn [[namespace-name host-namespace]]
                          [namespace-name
                           (into (sorted-set)
-                                (keys (ns-publics host-namespace)))]))
-                  host-namespaces)
-            private
-            (into (sorted-map)
-                  (keep
-                   (fn [[namespace-name host-namespace]]
-                     (let [names
-                           (into (sorted-set)
-                                 (comp
-                                  (filter (comp :private meta val))
-                                  (map key))
-                                 (ns-interns host-namespace))]
-                       (when (seq names) [namespace-name names]))))
+                                (concat
+                                 (keys (ns-publics host-namespace))
+                                 (get indexed-function-names
+                                      namespace-name)))]))
                   host-namespaces)
             installed-all (sci/namespace-interns
                            (eval/cluster-ctx db connection))
             installed
             (select-keys
              installed-all
-             (keys host-namespaces))
-            leaked-private
-            (into (sorted-map)
-                  (keep
-                   (fn [[namespace-name private-names]]
-                     (let [leaked
-                           (into (sorted-set)
-                                 (filter (get installed namespace-name))
-                                 private-names)]
-                       (when (seq leaked) [namespace-name leaked]))))
-                  private)]
+             (keys host-namespaces))]
         (is (seq host-namespaces)
             "a missing loaded program graph is failure, never a healthy census")
-        (is (seq private)
-            "the census must exercise first-party namespaces with private Vars")
         (is (not (contains? host-namespaces 'seon.operator.runtime))
             "operator custody has no indexed program-graph namespace row")
         (is (not (contains? installed-all 'seon.operator.runtime))
@@ -188,10 +177,33 @@
                        :seon.custody-stability/root-var root-var})))
         (is (= expected installed)
             (pr-str {:seon.custody-stability/expected expected
-                     :seon.custody-stability/installed installed}))
-        (is (empty? leaked-private)
-            (pr-str {:seon.custody-stability/leaked-private
-                     leaked-private}))))))
+                     :seon.custody-stability/installed installed}))))))
+
+(deftest non-function-private-custody-roots-and-operator-state-stay-unreachable
+  (test-support/with-database
+    (fn [connection]
+      (let [ctx (eval/cluster-ctx @connection connection)
+            forbidden
+            ['seon.cluster/running-instances
+             'seon.cluster/root-store-holder
+             'seon.cluster.store/held-flocks
+             'seon.sci.eval/generator-ctx]
+            installed (sci/namespace-interns ctx)]
+        (doseq [qualified forbidden
+                :let [namespace-name (symbol (namespace qualified))
+                      local-name (symbol (name qualified))]]
+          (is (nil? (get-in installed [namespace-name local-name]))
+              (pr-str {:seon.custody-stability/forbidden qualified})))
+        (is (nil? (:seon.sci.admit/value
+                   (evaluate-in
+                    ctx
+                    "(resolve 'seon.operator.runtime/running-instances)"))))
+        (doseq [source ["@@#'seon.cluster/running-instances"
+                        "@@#'seon.cluster/root-store-holder"
+                        "@@#'seon.cluster.store/held-flocks"
+                        "@@#'seon.sci.eval/generator-ctx"]]
+          (is (some? (:seon.cluster.eval/error (evaluate-in ctx source)))
+              source))))))
 
 (deftest foreign-context-integrity-is-invariant-under-agent-evaluation
   (let [property
