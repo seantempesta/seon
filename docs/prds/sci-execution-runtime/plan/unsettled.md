@@ -16,6 +16,26 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**WORKING EDGE — 2026-08-04 NIGHT.** The earliest unsettled curation contract
+is W3: trigger an editor from the failed run boundary and receive a revision as
+ordered form-source data. Its integrated proof remains Arm C of the bootstrap
+drive. The dependency-ready portfolio is:
+
+- implement the ruled per-run SCI fork boundary, then prove N agents can work
+  in one namespace without observing one another's uncommitted definitions;
+- continue universal-output-floor steps 3–8 from the landed recursive floor,
+  identity-only admission, and MCP wrong-node regression;
+- rerun experiment O5 with the repaired predicate, diagnose O4 independently,
+  and then run generation 1;
+- implement per-agent schedule procs and root's maintenance portfolio, repair
+  reset semantics, and perform the verified one-time reclaim; and
+- repair the two red concurrency-independence harness defects before treating
+  that long harness as a gate.
+
+The final graduation gates remain a clean proof/adopt curation loop, zero
+projected-path bypasses or unresolved sinks, and reset-boundary live proof of
+the integrated runtime.
+
 **ADDENDUM — 2026-08-04, RULING #48 IS ENFORCED OPEN EVERYWHERE.** Commit
 `ce099ce79` removes every live first-party closed-map contract found by the
 repository-wide census, deletes the authored open-map refusal, makes config
@@ -42,13 +62,12 @@ launcher/late-child proof passed in a 9-test / 30-assertion focused gate.
 Commit `ca0e9579a` replays the forensics incident's 132 equal
 `StackOverflowError` envelopes through the existing signature suppression and
 proves one durable fact plus one bounded stderr face; the Flow gate passed 25
-tests / 233 assertions. The operator governor remains at an owner design gate:
-no current stable-parent database lifecycle surface can commit an isolated
-root claim before creation. Directory claims, disk measurements/status,
-low-space warning, and config-owned log rotation remain unbuilt pending that
-parent-authority ruling.
+tests / 233 assertions. Per-agent scheduling and root ownership of the
+maintenance portfolio are now ruled. Their implementation, reset-semantics
+repair, directory ownership, disk measurements/status, low-space warning, log
+retention, and the verified one-time reclaim remain dependency-ready work.
 
-**ADDENDUM — 2026-08-04, UNIVERSAL OUTPUT SINK MEASUREMENT LANDED.** Commit
+**ADDENDUM — 2026-08-04, UNIVERSAL OUTPUT BASELINE AND FIRST TWO STEPS.** Commit
 `6af14d45c` adds the two sparse leaf facts `:seon.fn/external-sink` and
 `:seon.fn/projection-boundary`, lifts them through the existing static index,
 and derives classified sink reachability through
@@ -57,9 +76,12 @@ unresolved, and codec paths plus the shortest bypass counterexample; the long
 diagnostic records the current totals without a ratchet assertion. Focused
 gate: 18 tests / 118 assertions, zero failures or errors. Fresh published-fork
 door proof: 9 indexed sinks, 34 AI path classes, 41 HTML path classes, 1 codec
-path class, 0 projected, 0 unresolved, 75 bypasses. This is measurement only:
-no crossing was converted, and the final zero-bypass/zero-unresolved assertion
-remains at the ladder's graduation step. MCP/operator script annotations lift
+path class, 0 projected, 0 unresolved, 75 bypasses. That measurement remains
+baseline evidence. Conversion step 1 subsequently landed recursive producers,
+the single `seon.print/fit` owner, profiles, and structured elisions; step 2
+landed identity-only admission. Commit `e03e4a7c9` landed the MCP wrong-node
+regression and projected-node fix. The final zero-bypass/zero-unresolved
+assertion remains at the ladder's graduation step. MCP/operator script annotations lift
 under direct analysis but remain outside the default `src/`+`test/` database
 graph; the scope gap is filed at
 `docs/seon/issues/output-sink-query-excludes-operator-and-mcp-scripts.md`.
@@ -3313,8 +3335,8 @@ no call edge and was returned by the reachability query. The focused indexing,
 program, schema, and Datahike gates passed 43 tests / 207 assertions; the
 `seon.db`/`db_test` design probe derived calls for all 16 tests.
 
-**GUARDED-KERNEL MERGE LANDED (2026-08-03, `04fe5f247` + `db0d78368`
-+ `dd62545c3`):** ruling #46's kernel had already landed as
+**GUARDED-KERNEL MERGE LANDED (2026-08-03, `04fe5f247`, `db0d78368`,
+and `dd62545c3`):** ruling #46's kernel had already landed as
 `seon.sci.kernel` (`094127076`), but its SEMANTICS were still two
 copies. Falsified before the change: arming a context and calling
 `evaluate` on it threw `:seon.sci.kernel/already-armed` out of the
@@ -3442,9 +3464,9 @@ keyword-edges WIP was gated and fixed at `bd4494239` — root cause was
 DATAHIKE MISREADING a sorted two-keyword cardinality-many collection
 beginning with `:seon.cluster.agent/id` as a lookup ref; the fix emits
 one native fact per keyword; fresh isolated `bin/seon init` green
-(2,213 rows with keywords, 14,083 edges, +20.6% store). `my-web`
-landed the owner's no-hobbling deletion (`e99b7c2ea`: blocked-hostnames
-+ private-address? + DNS pre-resolution deleted, bounds kept, jsoup in
+(2,213 rows with keywords, 14,083 edges, 20.6% larger store). `my-web`
+landed the owner's no-hobbling deletion (`e99b7c2ea`: blocked-hostnames,
+private-address checks, and DNS pre-resolution deleted; bounds kept, jsoup in
 deps, through-`effect/request!` receipt proof green). `wave-close` and
 `cache-economics` resumed on the green publication; `operator-stale-vars`
 (operator PRD slice 3) and `render-coverage` (audit) launched. The

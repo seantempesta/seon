@@ -1,7 +1,7 @@
 ---
 type: prd
 status: active
-tags: [prd, rendering, output-bounds, runtime, agent]
+tags: [prd, rendering, runtime, agent]
 ---
 
 # The universal output floor — PRD (2026-08-04)
@@ -111,12 +111,12 @@ authored copy (usage strings, CSS/JS assets) is not a value conversion
    consumers convert. The original `render.value/print-node-window`
    implementation is deleted; its temporary compatibility call delegates to
    the one `seon.print/fit` owner.
-2. Admission identity-only refusal for reference values; delete the
-   hand-stripper (with W2's landed `transact!` face as first consumer).
-3. Kill the wrong-node bug + route MCP value/envelope/`runtime_status`/
-   `get_value` through the AI projection under an MCP profile (fix lane
-   for the one-symbol defect dispatched immediately — it is a plain
-   bug, not design).
+2. **DONE — commit `2a625bcb1`.** Admission uses registered identity-only
+   projections for reference values at every depth and deletes the local
+   database-report hand-stripper.
+3. The wrong-node regression and projected-node fix landed in `e03e4a7c9`.
+   Route MCP value/envelope/`runtime_status`/`get_value` through the AI
+   projection under an MCP profile.
 4. Error data as values (delete `data-edn`, instrument strings) — D6
    dies here.
 5. doc/dir as values; transcript's local printers removed.
@@ -206,10 +206,8 @@ plus `99,968 more children of 100,000`, path `[]`, next offset `32`, profile
 `:seon.render.profile/agent`, and requery digest
 `f09029ee10a50fbde2ea1fb3459502f769df6b8779a95f7158fc6c7c4f793f38`.
 
-The complete config-application gate is temporarily blocked by a foreign
-in-flight boundary: `:seon.config/initialization` is registered but absent from
-that test's application-mode roster. The four render-profile dials themselves
-are present in the roster and their zero-overlay/default config gates pass.
+The four render-profile dials are in the derived config population and their
+zero-overlay/default config gates pass.
 
 ## 5. Graduation
 
@@ -229,8 +227,8 @@ transport.
   runner `:fail` fallthrough); sol's probes P1–P7 are their repros.
 - Ladder steps 1–2 are landed. Consumer conversion begins at step 3; later
   consumers must use the one profile/fit owner rather than add local caps.
-- The wrong-node fix (ladder 3a) is dispatched as an immediate defect
-  lane; the rest of step 3 waits on step 1.
+- The wrong-node fix and regression landed in `e03e4a7c9`; the remaining MCP
+  crossings are the current step-3 boundary.
 - The graph measurement is landed, but the runtime construction proof and the
   final zero-bypass/zero-unresolved graduation assertion remain unbuilt by
   design. The query's non-installed script scope is tracked separately above.

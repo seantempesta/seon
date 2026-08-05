@@ -189,20 +189,18 @@ in-branch only (fail-closed barriers never trigger).
 
 ## 6. In-flight fixes this PRD depends on or produced
 
-- **Transcript same-instant ordering** (BLOCKER for every arm): receipts
-  settling in the same millisecond render in lexical receipt-id order —
-  the live bootstrap renders scrambled. Issue:
-  [transcript-orders-same-instant-receipts-lexically.md](../../../seon/issues/transcript-orders-same-instant-receipts-lexically.md).
+- **Transcript same-instant ordering is closed** by commits `2e6f1344e` and
+  `d03a5b7bc`: receipt entry order derives from numeric form ordinals.
 - **Message same-transaction ordering** is closed by commit `7cfb2435f`:
   every delivered row records its numeric source-vector ordinal, and work plus
   both transcript projections order by numeric/temporal facts. The direct F6
   issuing-form ref remains a separate W4 provenance lift.
-  Fix lane running (numeric ordinal tie-break + regression).
 - **Capability walk fails open** on host-bound capability Vars
   (`capability-free-references?` true for `(my.fs/read …)`) — weakens an
   existing admissibility guarantee beyond curation. Issue:
   [capability-reachability-cannot-see-capability-calls.md](../../../seon/issues/capability-reachability-cannot-see-capability-calls.md).
-  Fix lane running (fail-closed classification + regression).
+  Closed by commits `bcee99a74` and `cce3d5a14`: unresolved capability
+  reachability fails closed.
 - Filed by lanes, not blocking:
   [program-row-replacement-churns-identical-redeclarations.md](../../../seon/issues/archive/program-row-replacement-churns-identical-redeclarations.md),
   [forked-cluster-inherits-the-ancestors-config-cluster-name.md](../../../seon/issues/forked-cluster-inherits-the-ancestors-config-cluster-name.md),
@@ -259,7 +257,7 @@ See [plan/README.md](README.md), “Rulings 2026-08-04.”
   each run evaluates in a fresh `sci/fork` of the cluster's base ctx;
   cross-agent propagation is through the durable graph (admission →
   fact → acquisition), never the live ctx. The curation loop below is
-  sealed; W1 starts after the in-flight fix lanes land.
+  sealed; W1 and W2 are complete, and W3 is the working edge.
 - **Q2 RULED: gate durable placement, and record the author.** Owner:
   "we can gate where they can define things." Both land at the ONE
   admission seam (`program-row-tx`): `:seon.fn/author` recorded on

@@ -464,10 +464,11 @@ Evidence base: eight paired sol/Opus research lanes (indexed in the PRD).
   DEPENDENTS' tests against the candidate — "testing other functions'
   dependencies is a pretty good test, as we aren't breaking contracts."
   Accretion is checked by construction at the one admission seam, not
-  reviewed by convention. Enabling fact this names: the test→function
-  edge (`:seon.test` rows carry no call edge today — the known
-  counterexample in the repository authority); acquisition by other
-  agents then follows at their next run boundary from main.
+  reviewed by convention. Commit `093670eff` supplied the enabling fact:
+  `:seon.test` rows carry direct `:seon.fn/calls` refs and
+  `seon.fn/tests-reaching` derives the transitive dependent-test set.
+  Acquisition by other agents then follows at their next run boundary from
+  main.
 
 ### Rulings 2026-07-27 session 2 (owner, conversational) — the fresh tree IS the project
 

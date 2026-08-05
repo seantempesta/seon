@@ -57,8 +57,8 @@ drive rendered a complete transcript without an invocation failure (3 tests /
 
 | # | Problem | Elegant solution | Status |
 |---|---|---|---|
-| B1 | `seon.db/transact!` renders ~2 MB for a 7-datom write (`:db-before`/`:db-after` serialized whole) | agent-facing return is the transaction-report projection (tx id, commit id, datom count, tempids, bounded datoms); declare `:seon.render/ai`+`html` producers for the report shape | lane `ugly-db-faces` |
-| B2 | `:seon.db/rejected` faces show bare entity ids — agent cannot see WHICH agent owns a namespace | rejection error VALUE carries the conflict as data with the owner resolved to its identity attribute; face renders it | lane `ugly-db-faces` |
+| B1 | `seon.db/transact!` renders ~2 MB for a 7-datom write (`:db-before`/`:db-after` serialized whole) | agent-facing return is the transaction-report projection (tx id, commit id, datom count, tempids, bounded datoms); declare `:seon.render/ai`+`html` producers for the report shape | **DONE** — commit `59edb37fa` |
+| B2 | `:seon.db/rejected` faces show bare entity ids — agent cannot see WHICH agent owns a namespace | rejection error VALUE carries the conflict as data with the owner resolved to its identity attribute; face renders it | **DONE** — commit `59edb37fa` |
 | B3 | agent creation returns ~3 MB | creation returns the useful projection (agent id, namespace, cluster, bootstrap run id); declared producers for the agent shape | **DONE** — commit `89fe1a287`; creation returns the four-field projection, producers declared; issue archived |
 | B4 | `config/effective` ⇒ `{}` on live forked/scratch clusters ⇒ 5 KB per-dial missing-key wall (hits `eval.drive`/`bootstrap-drive` caps) | fix the empty read at its root; failure is ONE flat `:seon.error` naming cluster + missing config facts | **DONE** — commit `89fe1a287`; missing effective config is one concise error preserved by result-caps |
 | B5 | every `eval_clj` mode:jvm exception reports the io-prepl serving frame, not the throw site | served error envelope carries the actual throw-site location as data | **DONE** — commit `c683c7149`; MCP clients must restart to load the new bridge |
@@ -70,7 +70,7 @@ drive rendered a complete transcript without an invocation failure (3 tests /
 | # | Problem | Elegant solution | Blocked on |
 |---|---|---|---|
 | C1 | `defn` returns a string; a stock REPL prints `#'ns/name` (REPL parity, most common agent form) | the eval result carries the var face like `def` does; fix at the result-shaping seam in `seon.sci.eval` | **DONE** — commit `d6329faa4`; live proof: contracted defn now returns the Var face; parity issue updated |
-| C2 | error receipts without triage render as ambiguous naked prose | error receipts render as execution errors (the REPL-parity face), from the receipt's own error data | lane `receipt-error-triage-face` dispatched (A1 landed, file free) |
+| C2 | error receipts without triage render as ambiguous naked prose | error receipts render as execution errors (the REPL-parity face), from the receipt's own error data | **DONE** — commit `c91de41a5` |
 
 ## D. Issues filed by lanes — need owners/lanes (not yet dispatched)
 
@@ -91,7 +91,7 @@ drive rendered a complete transcript without an invocation failure (3 tests /
 | D13 | `test/seon/cluster/agent_test.clj:89` supplies only compute configuration while `flow.clj:475` now requires compute AND io facts — foreign boundary break | whichever lane changed the flow contract updates the fixture in the same beat; needs owner identification via git log | **DONE** — commit `8127dc987` repairs all three stale direct fixtures; the combined gate cleared the configuration refusal, then stopped at the unrelated `disarm-has-a-provider-derived-loud-backstop` retryability assertion in the concurrently dirty tree |
 | D14 | `disarm-has-a-provider-derived-loud-backstop` fails at `agent_test.clj:870` (`agent/armed` nil) after the D13 repair | judge only once `cluster.clj`'s interleaved in-flight hunks are committed — dirty-tree suspicion first, per the verify-before-attributing rule | open; re-run at the A0 full close |
 | D15 | changed-test selector emits a 478K single-line result dominated by unrelated lint warnings; on timeout it deletes its operator root while leaving the child JVM alive (orphan `96727` verified + reaped by the orchestrator) | selector report gets a bounded structured face; teardown reaps its child BEFORE removing records (joins the existing changed-test-process-cleanup issue) | open |
-| D16 | a 1 MB top-level string is blob-backed but still returns 262,147 inline characters through MCP | pass the projected print node to the evaluation face; retain one digest-backed remainder | [mcp-door-top-level-string-bypasses-value-window.md](../../../seon/issues/mcp-door-top-level-string-bypasses-value-window.md) |
+| D16 | a 1 MB top-level string is blob-backed but still returns 262,147 inline characters through MCP | pass the projected print node to the evaluation face; retain one digest-backed remainder | **DONE** — commit `e03e4a7c9` |
 | D17 | time-limit face exposes SCI's private interrupt marker as an opaque host object | retain kind/message/diagnostic record; omit interpreter-private marker from agent data | [time-limit-face-exposes-interpreter-interrupt-marker.md](../../../seon/issues/time-limit-face-exposes-interpreter-interrupt-marker.md) |
 | D18 | a nested flat error hides the exception's own throw-site message | preserve bounded causal context without recursively nesting error objects | [nested-error-data-hides-the-throw-site-message.md](../../../seon/issues/nested-error-data-hides-the-throw-site-message.md) |
 | D19 | clean isolated `runtime_status` returns a `seon.problems/problems` output-contract violation | make the bounded selected-cluster health projection satisfy its declared shape for partial signature rows | [dev-mcp-envelopes-misdirect-errors-and-sprawl-status.md](../../../seon/issues/dev-mcp-envelopes-misdirect-errors-and-sprawl-status.md) |
@@ -119,9 +119,9 @@ W2 is complete: `system-run-tx` is owned by `seon.cluster.run` (so
 rendered only the curated history, and retained the superseded original as a
 queryable run.
 
-- `agent-namespace` string-builds `my.agents.<id>` — read the assignment
-  fact; overlaps existing `evals-ignore-the-agents-assigned-namespace`.
+- `agent-namespace` reads the committed assignment fact — **DONE** in commit
+  `3a6264724`.
 - Session-image rows bypass `program-row-tx` (F10) — route through the
   one admission seam.
-- Owner questions Q1–Q4 (PRD §9) — awaiting ruling.
+- Owner questions Q1–Q3 are ruled in the plan README; Q4 is deferred.
 - AGENTS.md `sci/fork` vocabulary row corrected (landed with the PRD).
