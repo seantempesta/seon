@@ -153,8 +153,9 @@
                               {:sync? true})))
         (let [staging-files (seq (.listFiles (io/file root "blob-staging")))]
           (is (= 1 (count staging-files)))
-          (is (> (.length ^java.io.File (first staging-files))
-                 binary-threshold)))))))
+          (when-let [staging-file (first staging-files)]
+            (is (> (.length ^java.io.File staging-file)
+                   binary-threshold))))))))
 
 (deftest large-binary-write-and-small-chunk-have-bounded-allocation
   (with-file-blob-store

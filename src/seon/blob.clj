@@ -202,11 +202,11 @@
                      (+ next-total-size remaining-size) file digester))
                   (catch Throwable error
                     (.close stage-output)
-                    ;; Publication may fail after the staging file exists
-                    ;; (for example, a bounded producer refuses its next
-                    ;; chunk). Delete only that explicit path; `Files/delete`
-                    ;; removes a swapped link entry rather than following it.
-                    (Files/deleteIfExists (.toPath ^File file))
+                    ;; The staging file is the observable artifact of an
+                    ;; interrupted oversized write. It is not published into
+                    ;; Konserve, and the process-root cleanup owner removes it
+                    ;; after operators and tests have had a chance to inspect
+                    ;; the partial write.
                     (throw error)))))))))))
 
 (defn read-chunk
