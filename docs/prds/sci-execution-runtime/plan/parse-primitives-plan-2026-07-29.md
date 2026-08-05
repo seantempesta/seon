@@ -518,8 +518,7 @@ probed in `workload-classification-2026-07-28.md:95-148`:
 - both in one chain → `:mixed`;
 - any uncertainty or unresolved edge → `:mixed`.
 
-Home: beside the N5 function facts, named for the attribute it queries. If the
-queued `seon.code.fn` rename lands, namespace and attribute move together. **The
+Home: beside the N5 function facts, named for the attribute it queries. **The
 reader never owns scheduling vocabulary.**
 
 ### 2.3 Pre-N5, when the corpus is empty
@@ -650,7 +649,7 @@ The audit's four primitive names hold: `seon.sci.reader/read`,
 | D4 | The edit hook converges on the runtime grammar and may newly refuse tolerated files | **Yes, loudly.** A file the runtime would refuse should not be committable quietly |
 | D5 **[rev 2]** | `max-chars` default as a config fact (renamed from `max-bytes`; character offsets throughout) | 1,048,576 characters with a provenance comment; F-wave drives may argue otherwise |
 | D6 **[rev 2]** | Prose classification stays in `seon.cluster.reply` and runs on the reader's **output**, not before it (R1) | **Yes** |
-| D7 | Land as `seon.fn` now, or wait for the queued `seon.code.fn` rename | **Land as `seon.fn`**; move with the rename |
+| D7 | Which namespace owns the workload query? | **`seon.fn`**, beside the function facts it queries |
 | D8 **[rev 2 — new, SB2]** | Freeze the **starting reading context** (namespace, features, reader-policy version) as one per-run fact so recovery re-reads under the rules the plan was frozen under | **Yes.** Without it a namespace reassignment or config change silently re-reads old text under new rules. Per-run, not per-form — it does not resurrect `/ns` |
 | D9 **[rev 2 — new]** | If the owner declines E1 (generate-code's v0-B), does D2 still land alone? | **Yes** — the request simply gains no namespace field. But D8/D9 must both be ruled **before S3 starts**, because they decide S3's shape |
 
