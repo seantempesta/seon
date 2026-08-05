@@ -9,7 +9,7 @@ tags: [issue, ai, architecture]
 
 ## Problem
 
-Fresh `seon.ai` represents one prompt and one visible completion. Its closed
+Fresh `seon.ai` represents one prompt and one visible completion. Its open
 request and completion schemas have no assistant message history, tool calls,
 tool results, or reasoning content, so a DeepSeek thinking-mode tool
 continuation cannot preserve the provider's required context.
@@ -32,7 +32,7 @@ visible reply text.
 
 ## Acceptance
 
-- One closed request/completion schema represents assistant tool-call messages,
+- One open request/completion schema represents assistant tool-call messages,
   tool results, visible content, and complete reasoning content.
 - Every request following an assistant tool call replays that complete
   assistant message, including non-null content and `reasoning_content`.

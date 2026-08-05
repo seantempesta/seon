@@ -72,10 +72,14 @@
                 (cons (first forms) (drop 2 forms))))
     (is (= (bootstrap/help-text)
            (:seon.bootstrap.plan.form/context (first forms))))
-    (testing "the refusal is followed immediately by its closed-map repair"
-      (is (str/includes? (nth texts 7) "[:map [:label :string]"))
-      (is (not (str/includes? (nth texts 7) "{:closed true}")))
-      (is (str/includes? (nth texts 8) "{:closed true}")))
+    (testing "the undefined contract is followed immediately by its concrete repair"
+      (is (str/includes? (nth texts 7) "[:sequential :any]"))
+      (is (str/includes? (nth texts 8)
+                         "[:map [:label :string] [:amount :int]]"))
+      (is (not-any? #(str/includes? % "{:closed true}")
+                    [(bootstrap/help-text) (nth texts 7) (nth texts 8)])))
+    (is (str/includes? (bootstrap/help-text)
+                       "declared map keys are rigorously\nvalidated, extra keys are ignored"))
     (is (= "(largest)" (nth texts 10)))
     (is (= "(largest [])" (nth texts 11)))
     (is (str/includes? (nth texts 12) "{{seon.ns/name}}/largest"))

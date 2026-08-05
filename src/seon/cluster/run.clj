@@ -316,7 +316,7 @@
   There are no observed-* fields; the mid-transaction db is the only
   truth consulted."
   {:malli/schema [:=> [:cat :seon.db/database-value
-                       [:map {:closed true}
+                       [:map
                         [::id ::id]
                         [::process ::process]
                         [::live-processes [:set ::process]]
@@ -338,7 +338,7 @@
 
 (defn release-tx
   "Transaction data cleanly releasing `::process`'s custody."
-  {:malli/schema [:=> [:cat [:map {:closed true}
+  {:malli/schema [:=> [:cat [:map
                              [::id ::id]
                              [::process ::process]]]
                   [:vector :some]]}
@@ -350,7 +350,7 @@
   Retracts the process. Refuses unless the run is open and held by
   exactly `::process`."
   {:malli/schema [:=> [:cat :seon.db/database-value
-                       [:map {:closed true}
+                       [:map
                         [::id ::id]
                         [::process ::process]]]
                   [:vector :some]]}
@@ -359,7 +359,7 @@
 
 (defn close-tx
   "Transaction data closing the run held by `::process`."
-  {:malli/schema [:=> [:cat [:map {:closed true}
+  {:malli/schema [:=> [:cat [:map
                              [::id ::id]
                              [::process ::process]
                              [::closed-at ::closed-at]]]
@@ -377,7 +377,7 @@
   agent's pointer does not point at this run: a broken relation is
   settled loudly, never by silently omitting the retraction."
   {:malli/schema [:=> [:cat :seon.db/database-value
-                       [:map {:closed true}
+                       [:map
                         [::id ::id]
                         [::process ::process]
                         [::closed-at ::closed-at]]]
@@ -397,7 +397,7 @@
 
 (defn plan-tx
   "Transaction data freezing one ordered form plan on the held run."
-  {:malli/schema [:=> [:cat [:map {:closed true}
+  {:malli/schema [:=> [:cat [:map
                              [::id ::id]
                              [::process ::process]
                              [::plan-digest ::plan-digest]
@@ -415,7 +415,7 @@
   concurrent replies are mutually exclusive because the second one
   reads the first one's digest and refuses."
   {:malli/schema [:=> [:cat :seon.db/database-value
-                       [:map {:closed true}
+                       [:map
                         [::id ::id]
                         [::process ::process]
                         [::plan-digest ::plan-digest]
@@ -557,7 +557,7 @@
   "Transaction data starting one absent receipt.
   A started receipt carries no terminal fact — that absence IS running."
   {:malli/schema
-   [:=> [:cat [:map {:closed true}
+   [:=> [:cat [:map
                [::id ::id]
                [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
                [:seon.cluster.eval/at :seon.cluster.eval/at]]]
@@ -572,7 +572,7 @@
   nothing re-executes."
   {:malli/schema
    [:=> [:cat :seon.db/database-value
-         [:map {:closed true}
+         [:map
           [::id ::id]
           [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
           [:seon.cluster.eval/at :seon.cluster.eval/at]]]
@@ -595,7 +595,7 @@
   `interrupted-at` — at least one, and there is no status label."
   {:malli/schema
    [:=> [:cat
-         [:map {:closed true}
+         [:map
           [::id ::id]
           [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
           [:seon.cluster.eval/result-edn {:optional true}
@@ -636,7 +636,7 @@
   proof that it committed."
   {:malli/schema
    [:=> [:cat
-         [:map {:closed true}
+         [:map
           [::id ::id]
           [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
           [::closed-at ::closed-at]
@@ -916,7 +916,7 @@
   nothing settled\" is a caller bug."
   {:malli/schema
    [:=> [:cat :seon.db/database-value
-         [:map {:closed true}
+         [:map
           [::id ::id]
           [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
           [:seon.cluster.eval/result-edn {:optional true}
@@ -976,7 +976,7 @@
   retry."
   {:malli/schema
    [:=> [:cat :seon.db/database-value
-         [:map {:closed true}
+         [:map
           [::id ::id]
           [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
           [::closed-at ::closed-at]
@@ -1013,7 +1013,7 @@
 
 (defn recover-tx
   "Transaction data recovering one run from dead-process facts."
-  {:malli/schema [:=> [:cat [:map {:closed true}
+  {:malli/schema [:=> [:cat [:map
                              [::id ::id]
                              [::live-processes [:set ::process]]
                              [::now :inst]]]
@@ -1056,7 +1056,7 @@
   was trying to rescue. So the pointer is retracted exactly when it
   points at this run, and the run closes either way."
   {:malli/schema [:=> [:cat :seon.db/database-value
-                       [:map {:closed true}
+                       [:map
                         [::id ::id]
                         [::live-processes [:set ::process]]
                         [::now :inst]]]

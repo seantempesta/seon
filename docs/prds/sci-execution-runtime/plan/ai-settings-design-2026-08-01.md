@@ -197,7 +197,7 @@ A dial declares itself overridable with one property on its registration:
 
 ```clojure
 :seon.config/agent-overlay
-(into [:map {:closed true}] per-agent-entries)   ; every entry {:optional true}
+(into [:map] per-agent-entries)   ; every entry {:optional true}
 ```
 
 No hand list anywhere: the overlay schema, the admissible attribute set, and

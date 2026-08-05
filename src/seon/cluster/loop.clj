@@ -78,7 +78,7 @@
   {:malli/schema
    [:=>
     [:cat
-     [:map {:closed true}
+     [:map
       [:seon.ns/name :seon.ns/name]
       [::namespace-row {:optional true} :map]
       [::available-functions {:optional true} [:vector :map]]
@@ -236,11 +236,9 @@
   else is not a delivery, and a form that returns an ordinary value
   simply sends nothing.
 
-  A form's value is ONE instruction, so a value is either a disposition
-  or a delivery and never both. That is not enforced here by a check —
-  the two schemas are closed maps with disjoint keys, so it is enforced
-  by the shapes, and a turn that both sends and finishes does it in two
-  forms, which is also how a reader can see the order it happened in."
+  Disposition and delivery schemas are open for accretion and are interpreted
+  independently. A turn that intentionally sends and finishes uses two forms,
+  which makes their order visible to a reader."
   {:malli/schema [:=> [:cat :any] [:maybe :my.message/value]]}
   [value]
   (when (schema/valid-candidate-value? :my.message/value value)

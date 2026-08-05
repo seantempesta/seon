@@ -572,7 +572,7 @@
    [:=> [:cat :map]
     [:or
      [:vector :map]
-     [:map {:closed true}
+     [:map
       [:seon.error/kind :keyword]
       [:seon.error/message :string]
       [:seon.error/data :map]]]]}

@@ -281,15 +281,15 @@
         (.delete path)
         (.delete directory)))))
 
-(deftest compiler-gate-refuses-unknown-keys-and-invalid-values
+(deftest compiler-ignores-extra-keys-and-refuses-invalid-declared-values
   (testing "unknown means no registered config attribute schema"
-    (let [data
-          (test-support/refusal-data
-           #(config/compile-manifest
-             {:seon.config/manifest
-              {:seon.config.old/transport-timeout-ms 60000}}))]
-      (is (= ::config/unknown-key (::config/rule data)))
-      (is (= :seon.config.old/transport-timeout-ms (::config/key data)))))
+    (let [compiled
+          (config/compile-manifest
+           {:seon.config/manifest
+            {:seon.config.old/transport-timeout-ms 60000}})]
+      (is (not (contains? (:seon.config/effective compiled)
+                          :seon.config.old/transport-timeout-ms))
+          "an extra key is ignored until a declaration gives it meaning")))
   (testing "a registered attribute with the wrong value carries Malli's explanation"
     (let [data
           (test-support/refusal-data

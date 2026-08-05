@@ -83,7 +83,9 @@
 (defn- agent-row
   "One agent; prompt membership is derived by the namespace walk."
   [agent-id]
-  {:seon.cluster.agent/id agent-id})
+  {:seon.cluster.agent/id agent-id
+   :seon.cluster.agent/namespace
+   {:seon.ns/name (symbol (str "my.agents." agent-id))}})
 
 (defn- with-render-context-proc
   [_connection cluster-handle body]
@@ -473,9 +475,11 @@
            (fn [_]
              {:seon.ai/text
               (str
-               "(defn ^{:malli/schema [:=> [:cat :int] :int]} durable "
-               "[x] (inc x))\n"
-               "(def x 42)\n"
+               "(defn ^{:malli/schema [:=> [:cat [:map "
+               "[:my.agents.agent-a/value :int]]] :int]} durable "
+               "[request] (inc (:my.agents.agent-a/value request)))\n"
+               "(def x {:my.agents.agent-a/value 42 "
+               ":my.agents.agent-a/extra :ignored})\n"
                "(durable x)")})]
           (drive! cluster 10)
           (testing "all forms leave inert receipt history"
@@ -494,12 +498,15 @@
                           [?receipt :seon.cluster.eval/result-edn ?result]]
                          @connection)))))
           (testing "only the contracted defn enters the program graph"
-            (is (some?
-                 (db/q '[:find ?fn .
+            (is (=
+                 "[:=> [:cat [:map [:my.agents.agent-a/value :int]]] :int]"
+                 (db/q '[:find ?spec .
                         :in $ ?sym
                         :where
-                        [?fn :seon.fn/sym ?sym]]
-                      @connection "my.agents.agent-a/durable")))
+                        [?fn :seon.fn/sym ?sym]
+                        [?fn :seon.fn/spec ?spec]]
+                      @connection "my.agents.agent-a/durable"))
+                "the open input-map contract admits and persists")
             (is (empty?
                  (db/q '[:find ?entity
                         :where
@@ -1949,7 +1956,8 @@
           (is (= ["; I explained the result without another form."]
                  (db/q '[:find [?source ...]
                         :where
-                        [?form :seon.cluster.run.form/source ?source]]
+                        [?form :seon.cluster.run.form/source ?source]
+                        [?form :seon.cluster.run.form/run ?run]]
                        @connection)))
           (is (empty?
                (db/q '[:find [?receipt ...]
@@ -1972,7 +1980,7 @@
                   :seon.render.transcript/token-budget 100000})]
             (is (str/includes?
                  rendered
-                 "user=> ; I explained the result without another form."))
+                 "my.agents.agent-a=> ; I explained the result without another form."))
             (is (not (str/includes? rendered "failed")))
             (is (not (str/includes? rendered "nil")))))))))
 

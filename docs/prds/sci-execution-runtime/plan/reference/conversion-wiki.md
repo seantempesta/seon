@@ -26,7 +26,7 @@ the anchor stays the state ledger.
   value) into the one projection compiler before enabling R31 on reload
   ([[../../../seon/issues/committed-contract-admission-lacks-source-provenance]]).
 - **Malli spell-checking and the wrong-namespace hint are complementary.**
-  `me/with-spell-checking` classifies similar extra keys on closed maps, while
+  `me/with-spell-checking` formerly classified similar extra keys on closed maps, while
   the retained `seon.error.instrument/hint-for` covers the previously-proven
   same-name/different-namespace miss that Malli's distance threshold omitted.
   Compose spell-checking before `me/humanize`, keep the fallback, and bound the
@@ -96,7 +96,7 @@ the anchor stays the state ledger.
   pod is guarded by installing a timer around `cljs.js`.
 - **Config-fact ownership includes `seon.config.resolve`, not only
   `seon.config`.** New aero keys cannot become validated singleton datoms by
-  editing `config/system.edn` plus `src/seon/config.cljs`: leaf schemas, closed
+  editing `config/system.edn` plus `src/seon/config.cljs`: leaf schemas, complete
   section/manifest shapes, the singleton entity, and flattening live in
   `src/seon/config/resolve.cljc:54-63,278-302,675-764`. Grant that owner in any
   unit requiring a new config fact; bypassing it creates an unvalidated or
@@ -143,10 +143,9 @@ the anchor stays the state ledger.
   CLJS function remains the SDK-object compatibility edge
   (`src/seon/ai/{openai_compat,anthropic}.cljs`,
   `test/seon/ai/portable_test.cljc`).
-- **A prose-closed request needs `{:closed true}` in its Malli map.** Web fetch
-  and search documented closed option sets but their schemas admitted unknown
-  resource dials; the portable drift test caught the mismatch
-  (`src/seon/agent/web.cljc:69-75,127-133`).
+- **Prose never closes a request map.** Declared option keys remain rigorously
+  validated and extra keys remain available for accretion under ruling #48;
+  finite prose is not authority to add `{:closed true}`.
 - **Async is contagious upward.** Don't sprinkle reader conditionals
   through logic — push the async/sync difference down to the ONE
   transport/capability leaf; everything above is plain portable
@@ -172,7 +171,7 @@ the anchor stays the state ledger.
   replay gate before extracting the shared entry function.
 - **Inventory effects from the child inward, not the host wrapper
   outward.** Start at the census LEFT symbol, record every arity and
-  closed-map key, follow it through its internal choke point to the
+  declared map key, follow it through its internal choke point to the
   exact native binding, then compare the host counterpart. This exposed
   drift beyond the familiar three cases: omitted database arities and
   resource caps, `db` renamed to host-only `head`, host-only op-id keys,

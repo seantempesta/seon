@@ -19,7 +19,7 @@ publish directly.
 remaining call sites. The hard core observes idle-pass counts and armer/routing
 settlement. `seon.cluster.agent/arm!` receives Flow's started map, including
 the report channel, but omits it from the armed handle
-(`src/seon/cluster/agent.clj:376-390`). The closed
+(`src/seon/cluster/agent.clj:376-390`). The open
 `:seon.cluster.agent/armed` schema likewise has no report channel
 (`resources/seon/schema.edn:106`). Tests therefore cannot await those named
 graph events through the public handle.
@@ -53,7 +53,7 @@ do not change the intentional child wait-to-be-killed sleeps.
 
 The issue remains open because the 12 agent polling call sites cannot all be
 removed within test-only ownership. Closing them requires the armed handle to
-retain the existing Flow report channel and the closed schema to admit it; a
+retain the existing Flow report channel and its open schema to admit it; a
 hidden test-only channel would recreate the interface defect rather than fix
 it.
 

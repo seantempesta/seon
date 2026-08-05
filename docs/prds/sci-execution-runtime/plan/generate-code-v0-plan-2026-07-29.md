@@ -690,7 +690,7 @@ Registered beside the existing message shapes:
 ```clojure
 :my.message/reason [:string {:min 1}]
 :my.message/declination
-[:map {:closed true}
+[:map
  [:my.message/to :my.message/to]
  [:my.message/about :my.message/about]
  [:my.message/reason :my.message/reason]]

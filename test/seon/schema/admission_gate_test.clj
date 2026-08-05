@@ -1,11 +1,45 @@
 (ns seon.schema.admission-gate-test
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.schema.admission :as admission]))
 
 (defn- findings-of-type
   [finding-type findings]
   (filterv #(= finding-type (:type %)) findings))
+
+(deftest open-maps-cannot-regress-in-declarations-or-contract-admission
+  (let [closed-property (str "{" ":closed true}")
+        closed-property?
+        (fn [value]
+          (boolean
+           (some #(and (map? %) (true? (:closed %)))
+                 (tree-seq coll? seq value))))
+        schema-files
+        (->> (file-seq (io/file "resources/seon/schemas"))
+             (filter #(.isFile ^java.io.File %))
+             (filter #(str/ends-with? (.getName ^java.io.File %) ".edn")))
+        admission-files
+        (map io/file ["src/seon/schema.clj"
+                      "src/seon/schema/internal.cljc"
+                      "src/seon/sci/eval.clj"])
+        declaration-offenders
+        (keep (fn [file]
+                (when (closed-property? (edn/read-string (slurp file)))
+                  (.getPath ^java.io.File file)))
+              schema-files)
+        admission-offenders
+        (keep (fn [file]
+                (when (str/includes? (slurp file) closed-property)
+                  (.getPath ^java.io.File file)))
+              admission-files)
+        offenders (into [] (concat declaration-offenders
+                                   admission-offenders))]
+    (is (empty? offenders)
+        (str "ruling #48 requires open map declarations and authored "
+             "contract admission paths; remove " closed-property " from "
+             (pr-str offenders)))))
 
 (deftest malformed-inputs-name-the-reader-or-malli-finding
   (testing "non-EDN-readable source retains the reader location"

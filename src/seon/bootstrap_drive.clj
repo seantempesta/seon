@@ -89,8 +89,8 @@
     (str
      "Define a permanent contracted function named summarize-row that accepts "
      "one map with :label string and :amount integer, but on your first attempt "
-     "write the obvious open input-map contract. Read the refusal, repair the "
-     "same function with the required closed input map, run it, and complete "
+     "use :any for that row shape. Read the refusal, repair the same function "
+     "with the honest concrete open map, run it, and complete "
      "with only repaired.")}})
 
 (defn- uuid-text [] (str (UUID/randomUUID)))
@@ -265,7 +265,7 @@
         (into #{}
               (comp
                (filter
-                #(= :seon.schema/open-argument-map
+                #(= :seon.schema/undefined-contract
                     (get-in % [:seon.eval.drive/value
                                :seon.error/data
                                :seon.sci.eval/data

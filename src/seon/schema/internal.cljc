@@ -134,7 +134,7 @@
              (contract-error!
               identity definition path :seon.schema/nilable-return
               (str identity
-                   " has a bare nilable return. Return a closed result/error "
+                   " has a bare nilable return. Return an explicit result/error "
                    "envelope, an empty collection, or an explicit named sum.")
               {})
 

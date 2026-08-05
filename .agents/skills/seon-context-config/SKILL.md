@@ -30,15 +30,16 @@ Configuration design and database schema design are one act:
 4. Prove whether the consumer reads live database values or captures the value
    during arming/start.
 
-`seon.config/default-decisions` refuses missing and unknown defaults
-(`src/seon/config.cljc:137-168`). Do not add an environment-variable read at
-the consumer or a second config registry.
+`seon.config/default-decisions` refuses missing or invalid declared defaults
+and ignores extra keys under ruling #48 (`src/seon/config.clj:268-305`). Do
+not add an environment-variable read at the consumer or a second config
+registry.
 
 ## Compile a sparse overlay
 
-An overlay is one plain EDN map. Omitted keys inherit shipped defaults.
-Unknown keys and invalid values are refused
-(`src/seon/config.cljc:104-135,170-229`).
+An overlay is one plain EDN map. Omitted keys inherit shipped defaults. Extra
+keys are ignored; declared keys are rigorously validated
+(`src/seon/config.clj:169-187,307-348`).
 
 Precedence is:
 
@@ -141,7 +142,7 @@ First identify the surviving database facts and deriving owner.
 
 - Use fully namespaced config attributes.
 - Keep defaults complete and overlays sparse.
-- Refuse unknown keys.
+- Ignore extra keys until a declaration gives them meaning.
 - Store absence by omitting the datom, never by storing nil.
 - Read runtime decisions from the database.
 - Apply one reconcile mechanism through `seon.config/apply!`.

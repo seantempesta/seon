@@ -211,7 +211,7 @@ global population; no key is registered twice.
  ; presence IS "failed"; :seon.render/kind rides here (request-argument
  ; territory) even though the durable row drops it.
  :seon.context/contribution
- [:map {:closed true}
+ [:map
   [:seon.block/name :seon.block/name]
   [:seon.render/kind :seon.render/kind]
   [:seon.context.contribution/position :seon.context.contribution/position]
@@ -227,7 +227,7 @@ global population; no key is registered twice.
  ; What capture-tx receives: the rendered context plus the run it is
  ; evidence for. Pure in, tx-data out; the LOOP commits.
  :seon.context/capture-request
- [:map {:closed true}
+ [:map
   [:seon.cluster.run/id :seon.cluster.run/id]
   [:seon.cluster.prompt/rendered-context :seon.cluster.prompt/rendered-context]
   [:seon.cluster.run/live-processes {:optional true}
@@ -244,7 +244,7 @@ global population; no key is registered twice.
  ; seon.cluster.message/trigger reads it back, so a later queued message
  ; can never replace the recorded cause (review finding 6, repaired).
  :seon.cluster.prompt/request
- [:map {:closed true}
+ [:map
   [:seon.cluster.run/id :seon.cluster.run/id]
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
@@ -258,7 +258,7 @@ global population; no key is registered twice.
  ; accounting, cache measurement) reads WITHOUT rerunning a projection,
  ; and the exact database value it was derived at. In-memory only.
  :seon.cluster.prompt/rendered-context
- [:map {:closed true}
+ [:map
   [:seon.cluster.prompt/text :seon.cluster.prompt/text]
   [:seon.context/contributions :seon.context/contributions]
   [:seon.db/db :any]]}
@@ -298,7 +298,7 @@ each named in §8):
  ; caps + trusted inputs now ride the request — the ONE builder threads
  ; them into every projection (review finding 3).
  :seon.render/surfaces-request
- [:map {:closed true}
+ [:map
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.render/kind :seon.render/kind]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
@@ -306,7 +306,7 @@ each named in §8):
    :seon.cluster.run/live-processes]]
 
  :seon.render/page-request
- [:map {:closed true}
+ [:map
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
   [:seon.cluster.run/live-processes {:optional true}
@@ -314,7 +314,7 @@ each named in §8):
 
  ; the unit builder's input — one shape for prompt, page, debug, capture
  :seon.render/unit-request
- [:map {:closed true}
+ [:map
   [:seon.db/db :any]
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.sci.admit/caps :seon.sci.admit/caps]
@@ -360,7 +360,7 @@ uses to put it on the unit and `page` uses to seed the expansion.
 Scope: DATA hops only (ref-following through the existing expansion). Code
 hops over the program graph remain N5's.
 
-`:seon.render/surface` (the union of two closed maps) is UNCHANGED in shape:
+`:seon.render/surface` (the union of two open maps) is UNCHANGED in shape:
 `:seon.render/output` is `:any`, so a nil output already validates — omission
 needs no third arm (§8, supersession 1). `render.edn` is untouched.
 

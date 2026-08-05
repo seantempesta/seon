@@ -111,13 +111,12 @@ distinct reasons:
 | Rule | Refusal kind | Triggered by the obvious thing a model writes |
 |---|---|---|
 | no `:any`/`:some`/`:nil` | `:seon.schema/undefined-contract` | `[:=> [:cat :any] :any]` |
-| every input map `{:closed true}` | `:seon.schema/open-argument-map` | `[:map [:amount :int]]` |
 | `[:fn …]` needs a qualified pure predicate + `:error/message` + a `:gen/*` | `:seon.schema/incomplete-predicate-contract` | `[:fn pos?]` |
 | no `[:maybe …]` as a map value | `:seon.schema/nilable-map-value` | `[:map [:note [:maybe :string]]]` |
 | no bare `[:maybe …]` return | `:seon.schema/nilable-return` | `[:=> … [:maybe :map]]` |
 
-Both of the first two shapes were tripped by *my own first draft* of the
-bootstrap's exemplar function, live:
+The `:any` rule was tripped by an early draft of the bootstrap exemplar. An
+older live transcript also captured the now-deleted open-map refusal:
 
 ```text
 my.agents.tally=> (defn largest
@@ -126,7 +125,7 @@ my.agents.tally=> (defn largest
                   [:map [:label :string] [:amount :int]]]}
   [rows]
   (last (sort-by :amount rows)))
-Execution error: my.agents.tally/largest has an open agent-authored argument map. Declare `{:closed true}` on every input map; `malli.util/closed-schema` shows the recursively closed shape, but admission will not rewrite the authored contract.
+Historical execution error (superseded by ruling #48): my.agents.tally/largest has an open agent-authored argument map.
 ```
 
 The refusal messages are genuinely good — each names its own repair. That
@@ -321,9 +320,9 @@ author a function, then call it.
   reinstall.)
 
 **O5 — Repair a refused contract.** A task whose natural contract trips
-the closed-map rule.
+the surviving `:any` rule.
 
-- `P5` an eval error receipt carrying `:seon.schema/open-argument-map`
+- `P5` an eval error receipt carrying `:seon.schema/undefined-contract`
   exists AND a later `:seon.fn/spec` row for the same symbol exists in
   the same run — i.e. the agent read the refusal and repaired it
   in-session. This is the direct falsifier for the §3 refusal→repair

@@ -22,8 +22,9 @@ you.
 
 A `defn` with a complete `:malli/schema` becomes a durable fact other
 agents can find and call; without one it lives only in this session. The
-contract is checked, so write it honestly: input maps must say
-`{:closed true}`, and a return may not be a bare `[:maybe ...]`.
+contract is checked, so write it honestly: declared map keys are rigorously
+validated, extra keys are ignored, and a return may not be a bare
+`[:maybe ...]`.
 
 Other agents and the human reach you by message and you reach them with
 `(my.message/send \"id\" \"text\")`. End your run with
@@ -49,7 +50,7 @@ that note.
  {:seon.cluster.run.form/source
   "(defn largest
   \"The row with the largest :amount.\"
-  {:malli/schema [:=> [:cat [:sequential [:map [:label :string] [:amount :int]]]]
+  {:malli/schema [:=> [:cat [:sequential :any]]
                   [:map [:label :string] [:amount :int]]]}
   [rows]
   (last (sort-by :amount rows)))"
@@ -57,8 +58,8 @@ that note.
  {:seon.cluster.run.form/source
   "(defn largest
   \"The row with the largest :amount; {} when there are none.\"
-  {:malli/schema [:=> [:cat [:sequential [:map {:closed true} [:label :string] [:amount :int]]]]
-                  [:map {:closed true} [:label {:optional true} :string] [:amount {:optional true} :int]]]}
+  {:malli/schema [:=> [:cat [:sequential [:map [:label :string] [:amount :int]]]]
+                  [:map [:label {:optional true} :string] [:amount {:optional true} :int]]]}
   [rows]
   (or (last (sort-by :amount rows)) {}))"
   :seon.ns/name-designation :agent}

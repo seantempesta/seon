@@ -320,13 +320,13 @@
   "Analyze ordered source forms in one existing namespace context."
   {:malli/schema
    [:=>
-    [:cat [:map {:closed true}
+    [:cat [:map
            [::namespace-name :symbol]
            [::namespace-row {:optional true} :map]
            [::available-functions {:optional true} [:vector :map]]
            [::sources [:vector {:min 1} :string]]]]
     [:vector
-     [:map {:closed true}
+     [:map
       [::source :string]
       [::findings [:vector :map]]]]]}
   [{::keys [namespace-name namespace-row available-functions sources]}]

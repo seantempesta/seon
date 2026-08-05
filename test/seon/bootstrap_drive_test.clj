@@ -8,7 +8,7 @@
   (str
    "(defn total-by-label\n"
    "  \"Total each label's amounts.\"\n"
-   "  {:malli/schema [:=> [:cat [:sequential [:map {:closed true} [:label :string] [:amount :int]]]]\n"
+   "  {:malli/schema [:=> [:cat [:sequential [:map [:label :string] [:amount :int]]]]\n"
    "                  [:map-of :string :int]]}\n"
    "  [rows]\n"
    "  (reduce (fn [totals {:keys [label amount]}]\n"

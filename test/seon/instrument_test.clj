@@ -67,17 +67,25 @@
 
 (defn ^{:malli/schema
         [:=>
-         [:cat [:map {:closed true} [:seon.instrument-test/expected :int]]]
+         [:cat [:map [:seon.instrument-test/expected :int]]]
          :int]}
-  closed-map-input
+  declared-map-input
   [_]
   1)
 
 (defn ^{:malli/schema
         [:=>
-         [:cat :map]
-         [:map {:closed true} [:seon.instrument-test/expected :int]]]}
-  closed-map-output
+         [:cat [:vector :int]]
+         :int]}
+  many-problem-input
+  [_]
+  1)
+
+(defn ^{:malli/schema
+        [:=>
+         [:cat :any]
+         [:vector :int]]}
+  many-problem-output
   [value]
   value)
 
@@ -85,12 +93,9 @@
   [value]
   value)
 
-(defn- many-key-map
+(defn- many-invalid-values
   []
-  (into {:seon.instrument-test/expected 1}
-        (map (fn [index]
-               [(keyword "seon.instrument-test.unexpected" (str index)) index]))
-        (range 200)))
+  (vec (repeat 200 "not an integer")))
 
 ;;; ---------------------------------------------------------------------------
 ;;; It catches, and it throws
@@ -193,7 +198,7 @@
                           :seon.sci.admit/caps caps})
       (let [failure
             (try
-              (closed-map-input
+              (declared-map-input
                {:seon.instrument-test/expected "not an int"})
               (catch Exception thrown thrown))
             data (ex-data failure)
@@ -219,17 +224,17 @@
               :seon.config.eval.result/max-collection 4
               :seon.config.eval.result/max-string 64
               :seon.config.eval.result/max-nodes 64}
-        offending (many-key-map)]
+        offending (many-invalid-values)]
     (try
       (instrument/apply! {:seon.config/on-core-error :panic
                           :seon.sci.admit/caps caps})
       (doseq [[expected-arm expected-kind function-name invoke]
               [[:input :malli.core/invalid-input
-                "seon.instrument-test/closed-map-input"
-                #(closed-map-input offending)]
+                "seon.instrument-test/many-problem-input"
+                #(many-problem-input offending)]
                [:output :malli.core/invalid-output
-                "seon.instrument-test/closed-map-output"
-                #(closed-map-output offending)]]]
+                "seon.instrument-test/many-problem-output"
+                #(many-problem-output offending)]]]
         (let [failure (try (invoke) (catch Exception thrown thrown))
               data (ex-data failure)
               message (:seon.error/message data)

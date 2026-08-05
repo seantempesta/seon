@@ -4,7 +4,7 @@
   `config/default.edn` makes one explicit decision for every registered config
   attribute. A selected manifest is a sparse overlay. The caller may pass one
   more explicit, typed environment map; compilation applies exactly the
-  precedence defaults → overlay → environment, validates the closed result,
+  precedence defaults → overlay → environment, validates every declared key,
   and derives one canonical effective map, digest, and desired row.
 
   Runtime consumers read only the database row. Omission from a sparse overlay
@@ -181,15 +181,13 @@
 
 (defn- validate-layer
   [layer]
-  (let [dials (dial-attributes)]
-    (doseq [key (keys layer)]
-      (cond
-        (= initialization-key key)
-        (refuse! ::initialization-not-allowed {::key key} nil)
-
-        (not (contains? dials key))
-        (refuse! ::unknown-key {::key key} nil)))
-    (doseq [[key value] layer]
+  (let [dials (set (dial-attributes))
+        declared (select-keys layer dials)]
+    (when (contains? layer initialization-key)
+      (refuse! ::initialization-not-allowed
+               {::key initialization-key}
+               nil))
+    (doseq [[key value] declared]
       (when-not (or (= absent value)
                     (schema/valid-candidate-value? key value))
         (refuse!
@@ -197,7 +195,7 @@
          {::key key
           ::explanation (schema/explain-candidate-value key value)}
          nil)))
-    layer))
+    declared))
 
 (defn- row-identity
   [row]
@@ -270,11 +268,9 @@
 (defn- validate-default-decisions
   [document]
   (let [dials (dial-attributes)
-        decisions (merge (registration-defaults) document)
+        decisions (merge (registration-defaults)
+                         (select-keys document dials))
         missing (set/difference dials (set (keys decisions)))]
-    (doseq [key (keys document)]
-      (when-not (contains? dials key)
-        (refuse! ::unknown-key {::key key} nil)))
     (when (seq missing)
       (refuse!
        ::missing-default

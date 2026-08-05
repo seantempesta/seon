@@ -419,10 +419,10 @@ contributions, AI attempts, forms, eval receipts, and errors.
 Fresh configuration is one compiled and reconciled database row per cluster.
 `config/default.edn` supplies one shipped decision for every registered dial;
 an explicitly selected sparse EDN overlay may replace those decisions for one
-start or apply operation. Omitted overlay keys inherit defaults, unknown keys
-are refused, and the caller may supply a typed environment map while compiling
-that input. Runtime consumers never read ambient environment variables or a
-configuration file.
+start or apply operation. Omitted overlay keys inherit defaults, extra keys are
+ignored, and every declared key is rigorously validated. The caller may supply
+a typed environment map while compiling that input. Runtime consumers never
+read ambient environment variables or a configuration file.
 
 `seon.config/apply!` is the one exact reconciliation mechanism and
 `seon.config/effective` reads the ordinary effective map from an immutable

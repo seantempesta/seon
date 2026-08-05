@@ -21,10 +21,10 @@ reporter's docstring describes a flat, bounded value.
   `:seon.sci.admit/caps` optional.
 - `src/seon/instrument.clj:156-188` sends problems through admission only when
   caps exist and otherwise calls `pr-str` without a bound.
-- `test/seon/instrument_test.clj:93-113` checks that args are omitted without
-  caps, while `:115-145` checks headline size only with caps supplied.
+- `test/seon/instrument_test.clj` checks that args are omitted without caps,
+  while the many-problem case checks headline size with caps supplied.
 - `tmp/audit-20260801b/src/contract_message_probe.clj` invoked the public
-  no-caps path with 200 closed-map problems. The message was 5,002 characters;
+  no-caps path with 200 contract problems. The message was 5,002 characters;
   the problem count was 200 and args were absent.
 
 ## Owner

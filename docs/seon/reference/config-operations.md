@@ -9,9 +9,9 @@ tags: [reference, database, config]
 Seon configuration is a flat EDN map of registered `:seon.config.*` dials.
 `config/default.edn` decides every shipped dial. A selected manifest is a sparse
 overlay: omitted keys inherit the shipped decision, while
-`:seon.config/absent` explicitly retracts an optional dial. Unknown keys,
-invalid values, and attempts to retract required dials are refused by
-`seon.config/compile-manifest` before reconciliation.
+`:seon.config/absent` explicitly retracts an optional dial. Extra keys are
+ignored; invalid declared values and attempts to retract required dials are
+refused by `seon.config/compile-manifest` before reconciliation.
 
 The compiled effective map is reconciled onto the cluster's
 `:seon.config/cluster` entity. Runtime consumers read that database row through

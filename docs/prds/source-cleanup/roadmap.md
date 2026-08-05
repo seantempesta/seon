@@ -601,17 +601,17 @@ bounded stuck-child retirement, and replacement-process proof. The remaining
 G1/G2 exit is the fresh-agent rejection/correction probe.
 
 G8's non-canvas checkpoint is `d883bb05` with issue evidence in `f14219a3`:
-the registry-derived audit covers 25 request maps across `my.blob`, `my.data`,
-`my.kb`, `my.ns`, and `my.ui`; 19 formerly open public schemas are now closed
-and all reject unknown keys through Malli's schema rule. The five owner suites
-plus the audit passed 55 tests / 289 assertions. The issue remains open until
-the ten `my.canvas` request maps, now free of the G11 ownership collision, pass
-the same derived acceptance gate.
+the registry-derived audit covered 25 request maps across `my.blob`, `my.data`,
+`my.kb`, `my.ns`, and `my.ui`; 19 public schemas were closed at that historical
+checkpoint. Ruling #48 supersedes that strictness: request maps are open,
+declared keys validate rigorously, and extra keys are ignored. The five owner
+suites plus the audit passed 55 tests / 289 assertions. The issue remained open
+until the ten `my.canvas` request maps cleared the G11 ownership collision.
 
-G8 is now closed by `94e38e15`+`ee6dde8c`: the ten canvas request maps use the
-same Malli closed-map semantics, the registry-derived audit covers all 35
-request maps, and the combined canvas/audit gate passed 9 tests / 104
-assertions. No parallel runtime key guard was introduced.
+G8 was closed by `94e38e15`+`ee6dde8c`: the registry-derived audit covered all
+35 request maps and the combined canvas/audit gate passed 9 tests / 104
+assertions. Ruling #48 later opened those maps; no parallel runtime key guard
+is retained.
 
 Corrective-steering G6 is closed by `cd7ffdf0`+`5aae790b`: an incomplete eval
 row now names its eval ID, states that no result was recorded, and directs the

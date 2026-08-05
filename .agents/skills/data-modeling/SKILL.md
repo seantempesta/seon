@@ -126,12 +126,13 @@ duct-tape by inlining.
 
 Declare each config attribute exactly once in `resources/seon/schema.edn`.
 `seon.schema.edn/derive-config-forms` discovers those leaf registrations and
-derives the closed `:seon.config/manifest`, `:seon.config/effective`, and
-`:seon.config/entity` schemas. Never add the same dial to hand-maintained
-composite maps or a separate roster. `config/default.edn` is the complete
-shipped decision document and `seon.config/compile-manifest` applies defaults,
-overlay, and explicit environment data once
-(`src/seon/schema/edn.clj:87-111`; `src/seon/config.cljc:137-229`).
+derives open `:seon.config/manifest`, `:seon.config/effective`,
+`:seon.config/agent-overlay`, and `:seon.config/entity` schemas. Never add the
+same dial to hand-maintained composite maps or a separate roster.
+`config/default.edn` is the complete shipped decision document and
+`seon.config/compile-manifest` applies defaults, overlay, and explicit
+environment data once
+(`src/seon/schema/edn.clj:95-126`; `src/seon/config.clj:137-229`).
 
 ## Provenance is NOT a domain attribute — the tx already records it
 

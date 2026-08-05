@@ -269,7 +269,7 @@
 
 (defn open-store!
   "Open the one fenced physical store this process owns.
-  Creates it when absent and opens its main branch. B2 revision: one closed map argument;
+  Creates it when absent and opens its main branch. B2 revision: one map argument;
   under branch-per-cluster the store is PER PROCESS ROOT and every
   cluster is a branch of it.
   Order is the contract: acquire the non-blocking exclusive flock on
@@ -281,7 +281,7 @@
   is connected and its main branch verified readable. Returns the store
   value; the flock descriptor stays held inside it until
   `release-store!`."
-  {:malli/schema [:=> [:cat [:map {:closed true}
+  {:malli/schema [:=> [:cat [:map
                              [:seon.store/dir :seon.store/dir]
                              [:seon.config.db/keep-history?
                               {:optional true}

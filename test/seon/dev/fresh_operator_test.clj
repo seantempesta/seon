@@ -1262,13 +1262,14 @@
          :seon.config/manifest {}}
         stale-schema
         [:=> [:cat
-              [:map {:closed true}
+              [:map
                [:seon.boot/root :string]
-               [:seon.boot/cluster-name :string]]]
+               [:seon.boot/cluster-name :string]
+               [:seon.config/manifest :string]]]
          :map]
         current-schema
         [:=> [:cat
-              [:map {:closed true}
+              [:map
                [:seon.boot/root :string]
                [:seon.boot/cluster-name :string]
                [:seon.config/manifest :map]]]
@@ -1296,7 +1297,7 @@
         (mi/instrument! {:filters [start-filter]})
         (alter-meta! start-var assoc :malli/schema current-schema)
         (is (thrown? Exception (cluster/start! current-request))
-            "the installed wrapper still enforces the old closed request")
+            "the installed wrapper still enforces the old value shape")
         (reset!
          (var-get instances-var)
          {"live"

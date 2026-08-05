@@ -405,9 +405,9 @@
   carries the real port), log-dir derived as <root>/<name>/logs,
   store-dir derived as <root>/store — the PROCESS-root store every
   cluster branches from.
-  Refuses (throws ex-info {:seon.error/kind :seon.boot/refused ...}) on
-  any unknown key or invalid value — the closed schema is the gate, not
-  a convention."
+  Refuses (throws ex-info {:seon.error/kind :seon.boot/refused ...}) when a
+  declared key has an invalid value. Extra keys remain available for
+  accretion."
   {:malli/schema [:=> [:cat :seon.boot/overrides] :seon.boot/config]}
   [overrides]
   (require-candidate-value
@@ -440,7 +440,7 @@
   never a per-cluster derivation. One derivation — no other code builds
   these paths."
   {:malli/schema [:=> [:cat :seon.boot/root :seon.boot/cluster-name]
-                  [:map {:closed true}
+                  [:map
                    [:seon.boot/cluster-dir :string]
                    [:seon.boot/advertisement-file :string]
                    [:seon.boot/log-dir :string]
