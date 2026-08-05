@@ -1,15 +1,53 @@
 (ns seon.sci.desk-test
   "Recurring acceptance for agent-scoped SCI desk facts."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.edn :as edn]
+            [clojure.test :refer [deftest is testing]]
             [sci.core :as sci]
             [seon.cluster.loop :as loop]
             [seon.cluster.run :as run]
             [seon.config :as config]
             [seon.db :as db]
             [seon.sci.eval :as eval]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support])
+  (:import [java.io File]
+           [java.util.concurrent TimeUnit]))
 
 (def ^:private caps (config/result-caps (config/defaults)))
+
+(defn- start-child!
+  [mode database-path store-id output-path log-path]
+  (let [java-command (.getPath
+                      (File. (System/getProperty "java.home") "bin/java"))]
+    (-> (ProcessBuilder.
+         ^java.util.List
+         [java-command
+          "-cp" (System/getProperty "java.class.path")
+          "clojure.main" "-m" "seon.sci.desk-child"
+          mode database-path (str store-id) output-path])
+        (.redirectErrorStream true)
+        (.redirectOutput (File. log-path))
+        (.start))))
+
+(defn- await-file!
+  [path process]
+  (loop [attempt 0]
+    (cond
+      (.exists (File. path)) true
+      (not (.isAlive process)) false
+      (< attempt 2400) (do (Thread/sleep 25) (recur (inc attempt)))
+      :else false)))
+
+(defn- assert-child-exit!
+  [process mode log-path]
+  (when-not (.waitFor process 90 TimeUnit/SECONDS)
+    (.destroyForcibly process)
+    (throw (ex-info "Desk proof child exceeded its backstop."
+                    {:seon.sci.desk/mode mode})))
+  (when-not (zero? (.exitValue process))
+    (throw (ex-info "Desk proof child failed."
+                    {:seon.sci.desk/mode mode
+                     :seon.sci.desk/exit (.exitValue process)
+                     :seon.sci.desk/output (slurp log-path)}))))
 
 (defn- evaluate!
   [ctx namespace-name source]
@@ -142,3 +180,46 @@
        (is (true? (:seon.def/atom? atom-row)))
        (is (= "9" (:seon.def/value-edn atom-row)))
        (is (not (contains? atom-row :seon.def/source)))))))
+
+(deftest ^{:seon.test/long
+           "Forcibly kills the writer JVM after terminal settlement."}
+  desk-survives-kill-9-and-explicit-clear
+  (let [root (str "tmp/desk-kill/" (random-uuid))
+        database-path (str root "/database")
+        store-id (random-uuid)
+        ready-path (str root "/committed.edn")
+        result-path (str root "/restored.edn")
+        writer-log (str root "/writer.log")
+        reader-log (str root "/reader.log")]
+    (.mkdirs (File. root))
+    (try
+      (let [writer (start-child! "write" database-path store-id ready-path
+                                 writer-log)
+            ready? (await-file! ready-path writer)]
+        (when-not ready?
+          (.destroyForcibly writer)
+          (.waitFor writer 30 TimeUnit/SECONDS)
+          (throw
+           (ex-info "Writer did not settle its desk before the backstop."
+                    {:seon.sci.desk/output
+                     (when (.exists (File. writer-log))
+                       (slurp writer-log))})))
+        (is (= :committed (edn/read-string (slurp ready-path))))
+        (.destroyForcibly writer)
+        (is (.waitFor writer 30 TimeUnit/SECONDS))
+        (is (not (.isAlive writer)) "the exact writer JVM was forcibly killed"))
+      (let [reader (start-child! "read-clear" database-path store-id
+                                 result-path reader-log)]
+        (assert-child-exit! reader "read-clear" reader-log))
+      (is (= {:helper 5
+              :data {:answer 42}
+              :atom 7
+              :notices
+              ["could not restore `lost`: Defining form touched host interop."
+               "restored `scratch` from its last settled value"]
+              :desk-count 0
+              :data-after-clear nil
+              :notices-after-clear []}
+             (edn/read-string (slurp result-path))))
+      (finally
+        (test-support/delete-recursively! root)))))
