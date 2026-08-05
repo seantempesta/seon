@@ -48,6 +48,7 @@
             [seon.render.data :as render.data]
             [seon.print :as print]
             [seon.render.value :as render.value]
+            [seon.schedule :as schedule]
             [seon.sci.admit :as admit]
             [seon.render.web :as web]
             [seon.sci.eval :as sci.eval]
@@ -1340,7 +1341,7 @@
            :seon.error/data {:seon.cluster.agent/id agent-id}})))))
 
 (defn- seed-root-agent!
-  "Ensure the root agent exists without changing a resumed entity."
+  "Ensure root and its agent-owned maintenance initialization exist."
   [connection cluster-name process]
   (require-committed!
    (ensure-entity!
@@ -1350,7 +1351,14 @@
      :seon.cluster/name cluster-name
      :seon.ns/name 'my.agents.root})
    {:seon.cluster.agent/id root-agent-id
-    :seon.boot/population :seon.cluster.agent/agent}))
+    :seon.boot/population :seon.cluster.agent/agent})
+  (require-committed!
+   (db/transact!
+    connection
+    {:tx-data [[:db.fn/call #'schedule/root-maintenance-seed-call]]
+     :tx-meta {:seon.db/process [:seon.db.process/id process]}})
+   {:seon.cluster.agent/id root-agent-id
+    :seon.boot/population :seon.schedule/root-maintenance}))
 
 (defn- serve!
   "Bind the cluster's web view, or refuse LOUDLY.

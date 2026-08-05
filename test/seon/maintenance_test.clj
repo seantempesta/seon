@@ -230,31 +230,31 @@
 
 (defn- receipt
   [task-id handler receipt-id started-at terminal]
-  (merge
-   {:seon.schedule.fire/id (str receipt-id "/fire")
+  [{:seon.schedule.fire/id (str receipt-id "/fire")
     :seon.schedule.fire/task [:seon.schedule.task/id task-id]
     :seon.schedule.fire/nominal-at started-at
     :seon.schedule.fire/observed-at started-at}
-   {:seon.maintenance.receipt/id receipt-id
-    :seon.maintenance.receipt/fire
-    [:seon.schedule.fire/id (str receipt-id "/fire")]
-    :seon.maintenance.receipt/task [:seon.schedule.task/id task-id]
-    :seon.maintenance.receipt/handler [:seon.fn/sym handler]
-    :seon.maintenance.receipt/request
-    {:seon.maintenance.request/id (str receipt-id "/request")
-     :seon.maintenance.request/task [:seon.schedule.task/id task-id]
-     :seon.maintenance.request/fire
+   (merge
+    {:seon.maintenance.receipt/id receipt-id
+     :seon.maintenance.receipt/fire
      [:seon.schedule.fire/id (str receipt-id "/fire")]
-     :seon.maintenance.request/handler [:seon.fn/sym handler]
-     :seon.maintenance.request/agent [:seon.cluster.agent/id "root"]
-     :seon.maintenance.request/cluster-name "default"
-     :seon.maintenance.request/repository-root "/repo"
-     :seon.maintenance.request/managed-root "/repo/operator"
-     :seon.maintenance.request/log-dir "/repo/operator/logs"
-     :seon.maintenance.request/nominal-at started-at
-     :seon.maintenance.request/observed-at started-at}
-    :seon.maintenance.receipt/started-at started-at}
-   terminal))
+     :seon.maintenance.receipt/task [:seon.schedule.task/id task-id]
+     :seon.maintenance.receipt/handler [:seon.fn/sym handler]
+     :seon.maintenance.receipt/request
+     {:seon.maintenance.request/id (str receipt-id "/request")
+      :seon.maintenance.request/task [:seon.schedule.task/id task-id]
+      :seon.maintenance.request/fire
+      [:seon.schedule.fire/id (str receipt-id "/fire")]
+      :seon.maintenance.request/handler [:seon.fn/sym handler]
+      :seon.maintenance.request/agent [:seon.cluster.agent/id "root"]
+      :seon.maintenance.request/cluster-name "default"
+      :seon.maintenance.request/repository-root "/repo"
+      :seon.maintenance.request/managed-root "/repo/operator"
+      :seon.maintenance.request/log-dir "/repo/operator/logs"
+      :seon.maintenance.request/nominal-at started-at
+      :seon.maintenance.request/observed-at started-at}
+     :seon.maintenance.receipt/started-at started-at}
+    terminal)])
 
 (defn- seed-report!
   [connection]
@@ -285,7 +285,8 @@
                   (maintenance/report @connection)))))
         (db/transact!
          connection
-         [(receipt
+         (into [] cat
+          [(receipt
            footprint-task footprint-handler "footprint/1" at-1
            {:seon.maintenance.receipt/completed-at at-1
             :seon.maintenance.receipt/result
@@ -307,7 +308,7 @@
                            :seon.operator.process-census/unresponsive []
                            :seon.operator.process-census/unclaimed []
                            :seon.operator.process-census/claim-errors []))
-                   :seon.maintenance.result/id "census-result/2")})])
+                   :seon.maintenance.result/id "census-result/2")})]))
         (testing "all latest receipts render one green line"
           (let [report-value (maintenance/report @connection)]
             (is (= "Maintenance: 2 tasks succeeded; latest 2026-08-05T12:34:00Z; 0 errors."
@@ -316,8 +317,8 @@
                                     report-value))))))
         (db/transact!
          connection
-         [(receipt census-task census-handler "census/2" at-2
-                   {:seon.maintenance.receipt/interrupted-at at-2})])
+         (receipt census-task census-handler "census/2" at-2
+                  {:seon.maintenance.receipt/interrupted-at at-2}))
         (testing "only the latest receipt per task determines the red face"
           (let [report-value (maintenance/report @connection)
                 rendered (maintenance/render-report-ai report-value)]

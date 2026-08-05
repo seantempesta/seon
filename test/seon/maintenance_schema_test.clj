@@ -1,8 +1,8 @@
 (ns seon.maintenance-schema-test
   "Schema and initialization proofs for turn-free maintenance receipts."
   (:require [clojure.test :refer [deftest is testing]]
-            [seon.config :as config]
             [seon.db :as db]
+            [seon.schedule :as schedule]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
@@ -154,30 +154,22 @@
                   [?result :seon.operator/low-space? ?low-space]]
                 @connection)))))))
 
-(deftest shipped-portfolio-applies-as-queryable-schedule-facts
+(deftest root-owned-portfolio-initializes-as-queryable-schedule-facts
   (test-support/with-database
     (fn [connection]
+      (is (empty? (db/q '[:find ?task-id
+                          :where [?task :seon.schedule.task/id ?task-id]]
+                        @connection))
+          "the config population does not own agent schedule rows")
       (db/transact!
        connection
        (into [{:seon.cluster.agent/id "root"}]
              (map (fn [row] {:seon.fn/sym (:seon.fn/sym row)}))
              portfolio))
-      (let [result (config/apply! {:seon.db/connection connection})
-            schedules
-            (db/q
-             '[:find ?task-id ?schedule-id ?expression ?zone-id ?handler
-               :where
-               [?task :seon.schedule.task/id ?task-id]
-               [?task :seon.schedule.task/owner ?owner]
-               [?owner :seon.cluster.agent/id "root"]
-               [?task :seon.schedule.task/function ?function]
-               [?function :seon.fn/sym ?handler]
-               [?task :seon.schedule.task/schedule ?schedule]
-               [?schedule :seon.schedule/id ?schedule-id]
-               [?schedule :seon.schedule/expression ?expression]
-               [?schedule :seon.schedule/zone-id ?zone-id]]
-             @connection)]
-        (is (false? (:seon.reconcile/converged? result)))
+      (let [first-result
+            (db/transact!
+             connection [[:db.fn/call #'schedule/root-maintenance-seed-call]])]
+        (is (nil? (:seon.error/kind first-result)))
         (is (= (set (map (fn [row]
                            [(:seon.schedule.task/id row)
                             (:seon.schedule/id row)
@@ -185,4 +177,34 @@
                             "UTC"
                             (:seon.fn/sym row)])
                          portfolio))
-               schedules))))))
+               (db/q
+                '[:find ?task-id ?schedule-id ?expression ?zone-id ?handler
+                  :where
+                  [?task :seon.schedule.task/id ?task-id]
+                  [?task :seon.schedule.task/owner ?owner]
+                  [?owner :seon.cluster.agent/id "root"]
+                  [?task :seon.schedule.task/function ?function]
+                  [?function :seon.fn/sym ?handler]
+                  [?task :seon.schedule.task/schedule ?schedule]
+                  [?schedule :seon.schedule/id ?schedule-id]
+                  [?schedule :seon.schedule/expression ?expression]
+                  [?schedule :seon.schedule/zone-id ?zone-id]]
+                @connection))))
+      (db/transact!
+       connection
+       [{:seon.schedule/id "root/maintenance/footprint-schedule"
+         :seon.schedule/expression "7 4 * * *"}])
+      (let [second-result
+            (db/transact!
+             connection [[:db.fn/call #'schedule/root-maintenance-seed-call]])]
+        (is (= "7 4 * * *"
+               (db/q '[:find ?expression .
+                       :where
+                       [?schedule :seon.schedule/id
+                        "root/maintenance/footprint-schedule"]
+                       [?schedule :seon.schedule/expression ?expression]]
+                     @connection))
+            "a later ordinary cadence transaction remains authoritative")
+        (is (empty? (filter #(#{:seon.schedule.task/id :seon.schedule/id}
+                               (:a %))
+                            (:tx-data second-result))))))))

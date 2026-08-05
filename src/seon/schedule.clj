@@ -31,6 +31,72 @@
 
 (def ^:private cron-parser (CronParser. unix-definition))
 
+(def ^:private root-maintenance-portfolio
+  [{:seon.schedule/id "root/maintenance/footprint-schedule"
+    :seon.schedule/expression "0 2 * * *"
+    :seon.schedule/zone-id "UTC"
+    :seon.schedule.task/id "root/maintenance/footprint"
+    :seon.fn/sym "seon.operator/observe-footprint!"}
+   {:seon.schedule/id "root/maintenance/reap-dead-roots-schedule"
+    :seon.schedule/expression "15 2 * * *"
+    :seon.schedule/zone-id "UTC"
+    :seon.schedule.task/id "root/maintenance/reap-dead-roots"
+    :seon.fn/sym "seon.operator/reap-dead-roots!"}
+   {:seon.schedule/id "root/maintenance/rotate-logs-schedule"
+    :seon.schedule/expression "30 2 * * *"
+    :seon.schedule/zone-id "UTC"
+    :seon.schedule.task/id "root/maintenance/rotate-logs"
+    :seon.fn/sym "seon.operator/rotate-logs!"}
+   {:seon.schedule/id "root/maintenance/process-census-schedule"
+    :seon.schedule/expression "5 * * * *"
+    :seon.schedule/zone-id "UTC"
+    :seon.schedule.task/id "root/maintenance/process-census"
+    :seon.fn/sym "seon.operator/census-processes!"}
+   {:seon.schedule/id "root/maintenance/compact-schedule"
+    :seon.schedule/expression "0 3 * * 0"
+    :seon.schedule/zone-id "UTC"
+    :seon.schedule.task/id "root/maintenance/compact"
+    :seon.fn/sym "seon.operator/collect!"}])
+
+(defn root-maintenance-seed-call
+  "Return initialization data for root's five absent maintenance tasks.
+
+  Existing task identities are sovereign. In particular, reopening a cluster
+  never restores the recommended cron or timezone over an ordinary cadence
+  transaction. This function runs through `:db.fn/call`, so absence is decided
+  by the serial writer rather than by a caller pre-read."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value] :seon.store/transaction-data]}
+  [database]
+  (into []
+        (mapcat
+         (fn [{schedule-id :seon.schedule/id
+               expression :seon.schedule/expression
+               zone-id :seon.schedule/zone-id
+               task-id :seon.schedule.task/id
+               function :seon.fn/sym}]
+           (when-not
+            (db/q '[:find ?task .
+                    :in $ ?task-id
+                    :where [?task :seon.schedule.task/id ?task-id]]
+                  database task-id)
+             (cond-> []
+               (not (db/q '[:find ?schedule .
+                            :in $ ?schedule-id
+                            :where [?schedule :seon.schedule/id ?schedule-id]]
+                          database schedule-id))
+               (conj {:seon.schedule/id schedule-id
+                      :seon.schedule/expression expression
+                      :seon.schedule/zone-id zone-id})
+               true
+               (conj {:seon.schedule.task/id task-id
+                      :seon.schedule.task/owner
+                      [:seon.cluster.agent/id "root"]
+                      :seon.schedule.task/function [:seon.fn/sym function]
+                      :seon.schedule.task/schedule
+                      [:seon.schedule/id schedule-id]}))))
+         root-maintenance-portfolio)))
+
 (defn valid-cron?
   "True when `expression` is a valid five-field Unix cron expression."
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}

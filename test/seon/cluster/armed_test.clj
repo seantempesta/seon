@@ -119,12 +119,33 @@
     "armed"
     (fn [instance]
       (let [connection (:seon.boot/cluster-connection instance)]
+        (testing "fresh boot reaches READY"
+          (is (some? (:seon.boot/ready-ms (cluster/readiness instance)))))
         (testing "the root agent exists, so the escalation dial names
         something real rather than something hoped for"
           (is (= "root"
                  (db/q '[:find ?id . :in $ ?id
                         :where [?agent :seon.cluster.agent/id ?id]]
                       @connection "root"))))
+        (testing "root owns the five queryable maintenance tasks"
+          (is (= #{["root/maintenance/footprint"
+                    "root/maintenance/footprint-schedule"]
+                   ["root/maintenance/reap-dead-roots"
+                    "root/maintenance/reap-dead-roots-schedule"]
+                   ["root/maintenance/rotate-logs"
+                    "root/maintenance/rotate-logs-schedule"]
+                   ["root/maintenance/process-census"
+                    "root/maintenance/process-census-schedule"]
+                   ["root/maintenance/compact"
+                    "root/maintenance/compact-schedule"]}
+                 (db/q '[:find ?task-id ?schedule-id
+                         :where
+                         [?owner :seon.cluster.agent/id "root"]
+                         [?task :seon.schedule.task/owner ?owner]
+                         [?task :seon.schedule.task/id ?task-id]
+                         [?task :seon.schedule.task/schedule ?schedule]
+                         [?schedule :seon.schedule/id ?schedule-id]]
+                       @connection))))
         (testing "the ARMER proc is running on the cluster's own graph"
           (is (= :running
                  (:clojure.core.async.flow/status
