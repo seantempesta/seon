@@ -348,22 +348,31 @@ across sovereign branches. Its key uses transactions, not a database value.
 The provider basis is derived as the newest transaction that asserted or
 retracted any provider-row fact; it is not a stored counter.
 
-Acquisition registers a Datahike listener for every provider-row attribute
-*before* deriving the complete current provider snapshot. The cluster context
-stores that immutable snapshot plus its derived basis in one atom adjacent to
-the program snapshot. A provider transaction report replaces the snapshot,
-advances the basis, and clears affected plans before its terminal publication
-is made call-visible. Runtime function publication likewise evicts that
-function identity before the new root is visible. Invocation reads the context
-snapshot/basis once, then looks up the matching plan; it never queries history
-on the hot path. Thus a formerly empty plan cannot survive a new row or new
-ambiguity, and the listener-before-derive order closes the registration race.
+Acquisition derives the provider attributes from the declared provider-row
+schema, registers a Datahike listener for those attributes, and stores the
+complete provider snapshot plus its checked-through basis in one cluster-local
+atom adjacent to the program snapshot. The attribute set is therefore a query,
+not an embedded watch list.
 
-A newly acquired context starts with an empty plan cache. The fast path for an
-empty plan is one context-state read plus one cache lookup followed by the
-original invocation: no provider call, database query, argument copy, or map
-allocation. The benchmark includes that state read and concurrent provider
-publication has a deterministic before/after basis boundary.
+The listener is an eager invalidation optimization, not the correctness
+boundary. Datahike exposes the committed database on its connection before it
+delivers public listener callbacks. Every invocation therefore dereferences
+the calling connection once and defines its linearization point at that
+database value's basis transaction. If the context snapshot is checked through
+that basis, invocation uses its plan immediately. If the database basis is
+newer, invocation synchronously derives the complete provider snapshot from
+that immutable database value and CASes the context state before plan lookup.
+Concurrent refreshes keep the newest checked-through basis. Unrelated
+transactions may cause one conservative refresh; no stale empty plan can
+survive a provider addition, retraction, or new ambiguity.
+
+Runtime function publication likewise evicts that function identity before
+the new root is visible. A newly acquired context starts with an empty plan
+cache. The steady empty-plan path is one connection dereference, one
+context-state read/basis comparison, and one cache lookup followed by the
+original invocation: no provider call, Datalog query, argument copy, or map
+allocation. The benchmark includes those operations and a concurrent-provider
+publication falsifier proves the basis boundary.
 
 ### Map preparation
 
@@ -580,6 +589,11 @@ joined per-arity address facts, not the absence of all recoverable structure.
   cluster A, then call the same identity in sovereign cluster B where its
   contract has a different or no ambient declaration. B must compile from its
   own acquired facts rather than reuse A's plan.
+- **Provider publication race:** warm an empty plan, commit a matching provider
+  row, and coordinate an invocation after the connection exposes the new basis
+  but before the listener callback updates context state. The basis comparison
+  must synchronously refresh and use the new plan; no sleep or listener timing
+  is the proof.
 - **Rest:** a declared ambient rest tail is indexed but an elided call returns
   the explicit unsupported/ambiguity value; it never invents a count.
 - **Schedule:** until the turn-free operations target lands, the existing test
@@ -731,17 +745,25 @@ not make a value absent from those current contract slots.
 Delete every bespoke short ambient arm. Make the complete positional contract
 put database/connection in its own leading slot: `db` takes connection;
 `transact!` takes connection plus transaction; entity/index/history functions
-take database plus their ordinary inputs; and `q` takes database,
-query-or-Datahike-request, then query inputs. Ambient shorter calls become
-ordinary unique leading-slot injection. For `pull`/`pull-many` and any other
-count collision, keep the full explicit positional form and make the ambient
-form the one open Datahike-key request map (`:selector` plus `:eid`/`:eids`)
-whose contract also declares `:seon.db/db`; callers write only the Datahike
-keys and injection supplies the missing Seon database key. `q` may still place
-that already-explicit database into Datahike's parsed `$` input position; that
-is dependency translation, not custody lookup. Cost: a breaking caller sweep
-and deletion of ambiguous short positional forms. Guarantee: no wrong-shaped
-explicit database is silently reinterpreted.
+take database plus their ordinary inputs. Their ambient shorter calls become
+ordinary unique leading-slot injection.
+
+Variadic positional `q` is different: `[database query & inputs]` overlaps
+ambient `(q query & inputs)` at every supplied count of two or more, so exact
+full-arity precedence cannot distinguish them. Its positional interface is
+therefore explicit-database-only. Ambient `q` uses the one open Datahike-key
+request map (`:query` and optional `:args`) whose contract also declares
+`:seon.db/db`; callers write the Datahike keys and injection supplies the
+missing Seon database key. The implementation may place that already-explicit
+database into Datahike's parsed `$` input position; that is dependency
+translation, not custody lookup.
+
+For `pull`/`pull-many` and any other count collision, likewise keep the full
+explicit positional form and make the ambient form the one open Datahike-key
+request map (`:selector` plus `:eid`/`:eids`) whose contract declares
+`:seon.db/db`. Cost: a breaking caller sweep and deletion of ambient positional
+`q`, ambiguous short `pull` forms, and other colliding spellings. Guarantee: no
+wrong-shaped explicit database is silently reinterpreted.
 
 **Option B — schema-aware overload fallback.** Preserve short positional
 `pull` forms by trying the exact-count contract first and considering ambient
