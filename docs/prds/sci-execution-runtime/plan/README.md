@@ -395,7 +395,8 @@ Evidence base: eight paired sol/Opus research lanes (indexed in the PRD).
   2026-08-02 leak probe). Ruling #20 untouched: every agent calls
   every function; gating applies only to durable DEFINITION placement
   at the one admission seam. The pinned SCI probe proved an existing fork
-  cannot observe a later base install, so the turn is the freshness boundary.
+  cannot observe a newly installed base binding, so the turn is the freshness
+  boundary.
 - **Session curation is sealed as designed in the PRD.** Trigger at a
   run boundary on eval-error receipts; the editor is an ordinary agent
   whose deliverable is DATA — the REVISION, an ordered vector of form sources; THREE

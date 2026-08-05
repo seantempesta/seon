@@ -11,9 +11,10 @@ process-live, turn-private, or durable. Keep these boundaries separate.
 
 ## 1. Static build indexing
 
-Build indexing analyzes first-party `src/` and `test/` without evaluating
-application forms (`src/seon/fn/analyzer.clj:117-145`). The resulting canonical
-rows come from exact analyzed source artifacts (`src/seon/fn.clj:292-353`).
+Build indexing selects the first-party `src/` and `test/` roots and analyzes
+their files without evaluating application forms (`src/seon/fn.clj:20-22,
+831-856`; `src/seon/fn/analyzer.clj:117-145`). Exact analyzed source becomes
+canonical artifact rows at `src/seon/fn.clj:293-399`.
 
 ## 2. Contracted runtime publication
 
@@ -31,9 +32,11 @@ each turn and uses it for every form in that turn
 (`src/seon/cluster/loop.clj:1496-1502`; `src/seon/sci/eval.clj:1309-1318`).
 
 Cross-agent sharing is contracted definition → admission → program fact →
-install in the live base → next-turn fork. An existing fork cannot see a later
-base install; the pinned generation-aware fork remains copy-on-write
-(`reference-code/sci/src/sci/core.cljc:331-337`).
+install in the live base → next-turn fork. An existing fork cannot see a newly
+installed base binding, while an inherited Var remains shared until a
+generation-owned write copies it (`reference-code/sci/src/sci/core.cljc:331-337`;
+`reference-code/sci/src/sci/impl/utils.cljc:362-379`;
+`reference-code/sci/src/sci/impl/evaluator.cljc:25-49`).
 
 ## 4. Agent-scoped desk facts
 
