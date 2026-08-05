@@ -1,0 +1,65 @@
+#:seon.operator.reap{:reason :qualified-keyword
+                     :stop-path
+                     [:enum :prepl :sigterm :sigkill :already-exited]
+                     :request
+                     [:map
+                      [:seon.operator/repository-root
+                       :seon.operator/repository-root]
+                      [:seon.operator/managed-root
+                       :seon.operator/managed-root]
+                      [:seon.config.operator/event-silence-backstop-ms
+                       {:optional true}
+                       :seon.config.operator/event-silence-backstop-ms]]
+                     :stopped-process
+                     [:map
+                      [:seon.dev.process/generation
+                       :seon.dev.process/generation]
+                      [:seon.dev.process/pid :seon.dev.process/pid]
+                      [:seon.dev.process/start-instant
+                       :seon.dev.process/start-instant]
+                      [:seon.operator.reap/stop-path
+                       :seon.operator.reap/stop-path]]
+                     :root
+                     [:map
+                      [:seon.operator.claim/id :seon.operator.claim/id]
+                      [:seon.operator.claim/root :seon.operator.claim/root]
+                      [:seon.operator.cleanup/reclaimed-bytes
+                       [:int {:min 0}]]]
+                     :refusal
+                     [:map
+                      [:seon.operator.claim/id :seon.operator.claim/id]
+                      [:seon.operator.reap/reason
+                       :seon.operator.reap/reason]
+                      [:seon.error/message :seon.error/message]]
+                     :observed-at :inst
+                     :census :seon.operator.process-census/result
+                     :eligible-root-claims
+                     [:vector :seon.operator.claim/id]
+                     :stopped-processes
+                     [:vector :seon.operator.reap/stopped-process]
+                     :roots [:vector :seon.operator.reap/root]
+                     :refused
+                     [:vector
+                      {:seon.maintenance/attention-when :non-empty}
+                      :seon.operator.reap/refusal]
+                     :reclaimed-bytes [:int {:min 0}]
+                     :complete?
+                     [:boolean {:seon.maintenance/attention-when :false}]
+                     :result
+                     [:map
+                      [:seon.operator.reap/observed-at
+                       :seon.operator.reap/observed-at]
+                      [:seon.operator.reap/census
+                       :seon.operator.reap/census]
+                      [:seon.operator.reap/eligible-root-claims
+                       :seon.operator.reap/eligible-root-claims]
+                      [:seon.operator.reap/stopped-processes
+                       :seon.operator.reap/stopped-processes]
+                      [:seon.operator.reap/roots
+                       :seon.operator.reap/roots]
+                      [:seon.operator.reap/refused
+                       :seon.operator.reap/refused]
+                      [:seon.operator.reap/reclaimed-bytes
+                       :seon.operator.reap/reclaimed-bytes]
+                      [:seon.operator.reap/complete?
+                       :seon.operator.reap/complete?]]}

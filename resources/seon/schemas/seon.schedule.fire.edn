@@ -40,4 +40,7 @@
                        :seon.config.maintenance/log-max-bytes]
                       [:seon.config.maintenance/log-retained-files
                        {:optional true}
-                       :seon.config.maintenance/log-retained-files]]}
+                       :seon.config.maintenance/log-retained-files]
+                      [:seon.config.operator/event-silence-backstop-ms
+                       {:optional true}
+                       :seon.config.operator/event-silence-backstop-ms]]}

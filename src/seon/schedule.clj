@@ -391,7 +391,8 @@
   [:seon.config.maintenance/min-usable-bytes
    :seon.config.maintenance/min-usable-ratio
    :seon.config.maintenance/log-max-bytes
-   :seon.config.maintenance/log-retained-files])
+   :seon.config.maintenance/log-retained-files
+   :seon.config.operator/event-silence-backstop-ms])
 
 (defn- canonical-path
   [path]

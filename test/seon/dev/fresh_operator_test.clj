@@ -762,7 +762,7 @@
       (operator.state/claim-root!
        (.getCanonicalPath project-root)
        (.getCanonicalPath root)
-       false
+       nil
        nil)
       (operator-private-value 'write-process-record! (str root) record)
       (let [process

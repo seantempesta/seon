@@ -34,6 +34,20 @@
       .getParentFile
       .getParentFile))
 
+(defn- ephemeral-owner
+  []
+  (when-let [pid-value (System/getenv "SEON_OPERATOR_EPHEMERAL_OWNER_PID")]
+    (let [pid (parse-long pid-value)
+          start-instant (and pid (operator.state/process-start-instant pid))]
+      (when-not (and (pos-int? pid) start-instant)
+        (throw
+         (ex-info "The declared ephemeral operator owner is not alive."
+                  {:seon.error/kind
+                   :seon.fresh-operator/ephemeral-owner-not-alive
+                   :seon.boot/pid pid})))
+      {:seon.boot/pid pid
+       :seon.boot/start-instant start-instant})))
+
 (def ^:private detach-python
   (str "import socket,subprocess,sys\n"
        "log=open(sys.argv[2],'ab',buffering=0)\n"
@@ -1446,7 +1460,7 @@
   [root name manifest ready-port adoption-port silence-ms
    dependency-cache-path]
   (let [_ (operator.state/claim-root-under-lock!
-           (repository-root) root false name)
+           (repository-root) root (ephemeral-owner) name)
         log (create-log! root name)
         generation (random-uuid)
         process
@@ -1546,48 +1560,13 @@
                            :seon.fresh-operator/process-record record)
                     error)))))))
 
-(defn- signal-recorded-process!
-  [^java.lang.ProcessHandle handle force?]
-  (if force?
-    (.destroyForcibly handle)
-    (.destroy handle)))
-
 (defn- terminate-recorded-process!
   "Terminate only the exact recorded process generation."
   ([record]
    (terminate-recorded-process!
     record (operator-silence-backstop-ms {})))
   ([record silence-ms]
-    (if-let [handle (matching-process-handle record)]
-      (do
-        (signal-recorded-process! handle false)
-        (try
-          (.get (.onExit handle) silence-ms TimeUnit/MILLISECONDS)
-          (catch TimeoutException _
-            (report-silence-backstop! "exact process exit after SIGTERM"
-                                      silence-ms)))
-        ;; `onExit` is only notification for a detached/non-child process.
-        ;; Re-read the recorded identity before escalation so PID reuse is
-        ;; never signaled.
-        (if-let [remaining (matching-process-handle record)]
-          (do
-            (signal-recorded-process! remaining true)
-            (try
-              (.get (.onExit remaining) silence-ms TimeUnit/MILLISECONDS)
-              (catch TimeoutException _
-                (report-silence-backstop! "exact process exit after SIGKILL"
-                                          silence-ms)))
-            (when (matching-process-handle record)
-              (fail! "The recorded cluster JVM survived SIGKILL."
-                     {:seon.operator.process-record/generation
-                      (:seon.operator.process-record/generation record)
-                      :seon.boot/pid (:seon.boot/pid record)}))
-            :sigkill)
-          :sigterm))
-      (if (some? (state/process-start-instant
-                  (:seon.boot/pid record)))
-        :pid-reused
-        :already-exited))))
+   (operator.state/terminate-recorded-process! record silence-ms)))
 
 (defn- terminate-observed-process!
   "Terminate the process generation observed at this call site."
@@ -2046,7 +2025,7 @@
   (let [{:seon.fresh-operator/keys [name force? changed-paths]}
         (parse-init-arguments arguments)
         _ (operator.state/claim-root-under-lock!
-           (repository-root) root false name)
+           (repository-root) root (ephemeral-owner) name)
         dependency-cache (dev.kondo/ensure-dependency-cache! root)
         _ (when (= :unavailable
                    (:seon.dev.clj-kondo/status dependency-cache))
@@ -2177,7 +2156,7 @@
           rows))
         _ (doseq [row rows]
             (operator.state/claim-root-under-lock!
-             (repository-root) root false
+             (repository-root) root (ephemeral-owner)
              (:seon.fresh-operator/name row)))
         _ (when (.exists (java.io.File. root))
             (operator.state/mark-root-created-under-lock!
@@ -2382,20 +2361,6 @@
         ;; the client terminate a JVM whose last advertisement is gone.
         (stop-empty-jvm! root ad name)))))
 
-(defn- stop-all-form
-  []
-  (pr-str
-   `(let [instances# @@(ns-resolve 'seon.cluster
-                                   (symbol "running-instances"))
-          names# (vec (sort (keys instances#)))]
-      (doseq [[name# instance#] instances#]
-        (if (map? instance#)
-          (seon.cluster/stop! instance#)
-          (swap! (var-get
-                  (ns-resolve 'seon.cluster (symbol "running-instances")))
-                 dissoc name#)))
-      names#)))
-
 (defn- advertisement-for-process-record
   [root record]
   (some
@@ -2526,17 +2491,15 @@
                    (let [advertisement
                          (when-not force?
                            (advertisement-for-process-record root record))
-                         graceful
-                         (when (and advertisement (record-alive? record))
-                           (try
-                             (prepl-eval! advertisement (stop-all-form))
-                             :prepl
-                             (catch Throwable error
-                               (println
-                                (str "! prepl unavailable for recorded JVM pid "
-                                     pid " (" (ex-message error) ")"))
-                               nil)))
-                         signal-path (terminate-recorded-process! record)]
+                         stopped
+                         (operator.state/stop-recorded-process-under-lock!
+                          (repository-root)
+                          record
+                          (if advertisement
+                            [{:seon.operator.state/advertisement advertisement}]
+                            [])
+                          (operator-silence-backstop-ms {}))
+                         signal-path (:seon.operator.reap/stop-path stopped)]
                      (when (record-alive? record)
                        (fail! "The exact recorded JVM remained alive after down."
                               {:seon.operator.process-record/generation
@@ -2545,9 +2508,7 @@
                      (clear-process-record! root record)
                      (println
                       (str "● JVM pid " pid " path="
-                           (if graceful
-                             (str "prepl+" (process-path-label signal-path))
-                             (process-path-label signal-path))))
+                           (process-path-label signal-path)))
                      failures)
                    (catch Throwable error
                      (conj failures
@@ -2584,10 +2545,9 @@
       (println
        ~cleanup-result-prefix
        (pr-str
-        ((ns-resolve 'seon.operator (symbol "cleanup-root!"))
-         {:seon.operator/repository-root ~(str (repository-root))
-          :seon.operator/managed-root ~root
-          :seon.operator/control-lock-held? true}))))))
+        ((ns-resolve 'seon.operator (symbol "cleanup-root-under-lock!"))
+         ~(str (repository-root))
+         ~root))))))
 
 (defn- cleanup-managed-root!
   [root]

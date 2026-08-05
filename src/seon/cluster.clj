@@ -2023,7 +2023,7 @@
         managed-root (operator-root (:seon.boot/root config))
         claim-here? (not= "true" (System/getProperty "seon.operator.claimed"))
         _ (when claim-here?
-            (operator.state/claim-root! repository-root managed-root false
+            (operator.state/claim-root! repository-root managed-root nil
                                         cluster-name))
         _ (warn-low-space! managed-root (:seon.config/effective compiled-config))
         server-symbol (server-name cluster-name)]

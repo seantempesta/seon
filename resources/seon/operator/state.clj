@@ -13,7 +13,8 @@
            [java.nio.channels FileChannel]
            [java.nio.file Files LinkOption OpenOption StandardOpenOption]
            [java.time Instant]
-           [java.util Date UUID]))
+           [java.util Date UUID]
+           [java.util.concurrent ExecutionException TimeUnit TimeoutException]))
 
 (defn- instant-ms
   [instant]
@@ -46,6 +47,81 @@
   (and (integer? pid)
        (inst? start-instant)
        (= start-instant (process-start-instant pid))))
+
+(defn- matching-process-handle
+  [record]
+  (let [optional (java.lang.ProcessHandle/of
+                  (long (:seon.boot/pid record)))]
+    (when (.isPresent optional)
+      (let [handle (.get optional)]
+        (when (= (:seon.boot/start-instant record)
+                 (process-start-instant (.pid handle)))
+          handle)))))
+
+(defn terminate-recorded-process!
+  "Terminate only the exact recorded process identity, rechecking before KILL."
+  [record silence-ms]
+  (if-let [handle (matching-process-handle record)]
+    (do
+      (.destroy handle)
+      (try
+        (.get (.onExit handle) silence-ms TimeUnit/MILLISECONDS)
+        (catch TimeoutException _ nil)
+        (catch ExecutionException error (throw (.getCause error))))
+      (if-let [remaining (matching-process-handle record)]
+        (do
+          (.destroyForcibly remaining)
+          (try
+            (.get (.onExit remaining) silence-ms TimeUnit/MILLISECONDS)
+            (catch TimeoutException _ nil)
+            (catch ExecutionException error (throw (.getCause error))))
+          (when (matching-process-handle record)
+            (throw
+             (ex-info "The exact recorded process survived SIGKILL."
+                      {:seon.error/kind :seon.operator/process-survived-sigkill
+                       :seon.operator.process-record/generation
+                       (:seon.operator.process-record/generation record)
+                       :seon.boot/pid (:seon.boot/pid record)})))
+          :sigkill)
+        :sigterm))
+    :already-exited))
+
+(defn- graceful-stop!
+  [advertisement silence-ms]
+  (try
+    (with-open [socket (Socket.)]
+      (.connect socket
+                (InetSocketAddress.
+                 ^String (:seon.boot/prepl-host advertisement)
+                 (int (:seon.boot/prepl-port advertisement)))
+                silence-ms)
+      (.setSoTimeout socket silence-ms)
+      (with-open [writer (java.io.OutputStreamWriter.
+                          (.getOutputStream socket)
+                          java.nio.charset.StandardCharsets/UTF_8)
+                  reader (PushbackReader.
+                          (java.io.InputStreamReader.
+                           (.getInputStream socket)
+                           java.nio.charset.StandardCharsets/UTF_8))]
+        (.write
+         writer
+         (str
+          "(let [instances @(var-get (ns-resolve 'seon.cluster "
+          "(symbol \"running-instances\")))] "
+          "(doseq [[name instance] instances] "
+          "(if (map? instance) (seon.cluster/stop! instance) "
+          "(swap! (var-get (ns-resolve 'seon.cluster "
+          "(symbol \"running-instances\"))) dissoc name))) "
+          "(vec (sort (keys instances))))\n"))
+        (.flush writer)
+        (loop []
+          (let [event (edn/read {:eof ::eof} reader)]
+            (cond
+              (= ::eof event) false
+              (and (map? event) (= :ret (:tag event)))
+              (not (:exception event))
+              :else (recur))))))
+    (catch Throwable _ false)))
 
 (defn advertisement-identity-alive?
   "True when an advertisement still names its exact OS process."
@@ -132,9 +208,14 @@
       (.lock channel)
       (transition))))
 
+(defn with-control-lock!
+  "Run one lifecycle transition under the installation control lock."
+  [repository-root transition]
+  (with-control-lock* repository-root transition))
+
 (defn claim-root-under-lock!
   "Publish a root claim while the caller holds the control lifecycle lock."
-  [repository-root managed-root ephemeral? cluster-name]
+  [repository-root managed-root ephemeral-owner cluster-name]
   (let [root (canonical-path managed-root)
         path (root-claim-path repository-root root)
         previous (or (read-edn path) {})
@@ -148,10 +229,33 @@
                            :seon.operator.claim/footprint
                            :seon.operator.claim/clusters)
                    previous)
+        _ (when (and ephemeral-owner
+                     (not (process-identity-alive? ephemeral-owner)))
+            (throw
+             (ex-info "The declared ephemeral root owner is not alive."
+                      {:seon.error/kind
+                       :seon.operator/ephemeral-owner-not-alive
+                       :seon.operator/ephemeral-owner ephemeral-owner})))
+        previous-creator (:seon.operator.claim/creator previous)
+        _ (when (and (not new-lifecycle?)
+                     previous-creator
+                     ephemeral-owner
+                     (not= previous-creator ephemeral-owner))
+            (throw
+             (ex-info "The managed root already has a different creator."
+                      {:seon.error/kind
+                       :seon.operator/root-creator-mismatch
+                       :seon.operator.claim/creator previous-creator
+                       :seon.operator/ephemeral-owner ephemeral-owner})))
         creator (if new-lifecycle?
-                  (current-process-identity)
-                  (or (:seon.operator.claim/creator previous)
+                  (or ephemeral-owner (current-process-identity))
+                  (or previous-creator
+                      ephemeral-owner
                       (current-process-identity)))
+        ephemeral? (if new-lifecycle?
+                     (some? ephemeral-owner)
+                     (or (:seon.operator.claim/ephemeral? previous)
+                         (some? ephemeral-owner)))
         store-path (str (fs/path root "data" "clusters" "store"))
         clusters (cond-> (set (:seon.operator.claim/clusters previous))
                    cluster-name (conj cluster-name))
@@ -177,11 +281,11 @@
 
 (defn claim-root!
   "Publish root/store/cluster intent before creating anything below the root."
-  [repository-root managed-root ephemeral? cluster-name]
+  [repository-root managed-root ephemeral-owner cluster-name]
   (with-control-lock*
     repository-root
     #(claim-root-under-lock! repository-root managed-root
-                             ephemeral? cluster-name)))
+                             ephemeral-owner cluster-name)))
 
 (defn mark-root-created-under-lock!
   [repository-root managed-root]
@@ -255,6 +359,50 @@
   [repository-root]
   (read-claim-records (process-claim-directory repository-root)
                       process-record?))
+
+(defn stop-recorded-process-under-lock!
+  "Stop a freshly re-read exact process claim through graceful prepl then signal."
+  [repository-root record advertisements silence-ms]
+  (let [generation (:seon.operator.process-record/generation record)
+        current (read-edn (process-claim-path repository-root generation))
+        identity-keys [:seon.operator.process-record/generation
+                       :seon.operator.process-record/root
+                       :seon.boot/pid
+                       :seon.boot/start-instant]]
+    (when-not (= (select-keys record identity-keys)
+                 (select-keys current identity-keys))
+      (throw
+       (ex-info "The external process claim changed before exact stop."
+                {:seon.error/kind :seon.operator/process-claim-mismatch
+                 :seon.operator.process-record/generation generation})))
+    (let [advertisement
+          (some
+           (fn [observation]
+             (let [candidate (:seon.operator.state/advertisement observation)]
+               (when (and (= (:seon.boot/pid record)
+                             (:seon.boot/pid candidate))
+                          (= (:seon.boot/start-instant record)
+                             (:seon.boot/start-instant candidate)))
+                 candidate)))
+           advertisements)
+          graceful? (and advertisement
+                         (process-identity-alive? record)
+                         (graceful-stop! advertisement silence-ms))
+          signal-path (terminate-recorded-process! record silence-ms)
+          stop-path (if (and graceful? (= :already-exited signal-path))
+                      :prepl
+                      signal-path)]
+      (when (process-identity-alive? record)
+        (throw
+         (ex-info "The exact recorded process remained alive after stop."
+                  {:seon.error/kind :seon.operator/process-remained-alive
+                   :seon.operator.process-record/generation generation
+                   :seon.boot/pid (:seon.boot/pid record)})))
+      (delete-process-claim! repository-root generation)
+      {:seon.operator.process-record/generation generation
+       :seon.boot/pid (:seon.boot/pid record)
+       :seon.boot/start-instant (:seon.boot/start-instant record)
+       :seon.operator.reap/stop-path stop-path})))
 
 (defn root-claims
   [repository-root]
@@ -338,7 +486,7 @@
   [(:seon.boot/pid process)
    (instant-ms (:seon.boot/start-instant process))])
 
-(defn- event-silence-backstop-ms
+(defn event-silence-backstop-ms
   [repository-root request]
   (or (:seon.config.operator/event-silence-backstop-ms request)
       (get (read-edn (fs/path repository-root "config" "default.edn"))

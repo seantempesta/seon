@@ -35,6 +35,10 @@
 
 set -eu
 
+# Isolated operator roots created by this lane belong to the long-lived lane
+# wrapper, never to a short-lived bin/seon invocation below it.
+export SEON_OPERATOR_EPHEMERAL_OWNER_PID=$$
+
 # codex-cli 0.144.6 logs a spurious models-cache error on every load/TTL
 # renew (missing `supports_reasoning_summaries`; harmless — see
 # docs/seon/reference/driving-codex-agents.md §Known harmless noise).

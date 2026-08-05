@@ -132,10 +132,10 @@
     [:or :map :seon.error/value]]}
   [{repository-root :seon.operator/repository-root
     managed-root :seon.operator/managed-root
-    ephemeral? :seon.operator/ephemeral?
+    ephemeral-owner :seon.operator/ephemeral-owner
     cluster-name :seon.boot/cluster-name}]
   (attempt #(state/claim-root! repository-root managed-root
-                               ephemeral? cluster-name)))
+                               ephemeral-owner cluster-name)))
 
 (defn existence
   "Return the claim-first root/store/cluster census without opening Datahike."
@@ -192,21 +192,9 @@
       (mapv #(.getCanonicalPath ^java.io.File %) (or (.listFiles file) []))
       [])))
 
-(defn cleanup-root!
-  "Unconditionally remove a managed root's database, scratch, and logs.
-
-  Authorization is the explicit call itself. This function never opens the
-  database or consults liveness claims; callers must reap exact processes
-  before entering it. The returned contract is success-shaped only when no
-  managed path remains."
-  {:malli/schema
-   [:=> [:cat :seon.operator/cleanup-request]
-    [:or :seon.operator/cleanup-result :seon.error/value]]}
-  [{repository-root :seon.operator/repository-root
-    managed-root :seon.operator/managed-root
-    control-lock-held? :seon.operator/control-lock-held?}]
-  (attempt
-   #(let [managed-root (.getCanonicalPath (io/file managed-root))
+(defn- cleanup-root-under-lock!
+  [repository-root managed-root]
+  (let [managed-root (.getCanonicalPath (io/file managed-root))
           target (.getCanonicalPath (io/file managed-root "data" "clusters"))
           before (state/footprint target)
           present? (.exists (io/file target))
@@ -220,15 +208,160 @@
                   (:seon.operator.footprint/file-bytes before)
                   :seon.operator.cleanup/remaining remaining
                   :seon.operator.cleanup/complete? complete?}]
-      (if control-lock-held?
-        ((requiring-resolve
-          'seon.operator.state/mark-root-destroyed-under-lock!)
-         repository-root managed-root result)
-        (state/mark-root-destroyed! repository-root managed-root result))
+      (state/mark-root-destroyed-under-lock!
+       repository-root managed-root result)
       (when-not complete?
         (throw (ex-info "Managed root cleanup left residual paths."
                         {:seon.operator/cleanup result})))
-      result)))
+      result))
+
+(defn cleanup-root!
+  "Unconditionally remove a managed root after exact processes are gone."
+  {:malli/schema
+   [:=> [:cat :seon.operator/cleanup-request]
+    [:or :seon.operator/cleanup-result :seon.error/value]]}
+  [{repository-root :seon.operator/repository-root
+    managed-root :seon.operator/managed-root}]
+  (attempt
+   #(state/with-control-lock!
+     repository-root
+     (fn [] (cleanup-root-under-lock! repository-root managed-root)))))
+
+(defn- public-stopped-process
+  [stopped]
+  {:seon.dev.process/generation
+   (:seon.operator.process-record/generation stopped)
+   :seon.dev.process/pid (:seon.boot/pid stopped)
+   :seon.dev.process/start-instant
+   (str (.toInstant ^java.util.Date (:seon.boot/start-instant stopped)))
+   :seon.operator.reap/stop-path (:seon.operator.reap/stop-path stopped)})
+
+(defn- refusal
+  [claim reason message]
+  {:seon.operator.claim/id (:seon.operator.claim/id claim)
+   :seon.operator.reap/reason reason
+   :seon.error/message message})
+
+(defn reap-dead-roots!
+  "Stop and remove explicitly ephemeral roots whose exact creator is dead."
+  {:malli/schema
+   [:=> [:cat :seon.operator.reap/request]
+    [:or :seon.operator.reap/result :seon.error/value]]}
+  [{repository-root :seon.operator/repository-root
+    caller-root :seon.operator/managed-root
+    :as request}]
+  (attempt
+   (fn []
+     (state/with-control-lock!
+      repository-root
+      (fn []
+       (let [silence-ms (state/event-silence-backstop-ms
+                         repository-root request)
+             observed (state/census-observations request)
+             census (state/process-census request)
+             claims (:seon.operator.state/roots observed)
+             processes-by-root
+             (group-by :seon.operator.state/root
+                       (:seon.operator.state/processes observed))
+             unclaimed-roots
+             (into #{} (map :seon.operator.state/root)
+                   (:seon.operator.state/unclaimed observed))
+             candidates
+             (filter #(and (:seon.operator.claim/reap-on-owner-exit? %)
+                           (not (:seon.operator.claim/destroyed-at %)))
+                     claims)
+             initial
+             (reduce
+              (fn [result claim]
+                (let [root (:seon.operator.claim/root claim)
+                      creator (:seon.operator.claim/creator claim)]
+                  (cond
+                    (= (state/canonical-path caller-root) root)
+                    (update result :refused conj
+                            (refusal claim :seon.operator.reap/current-root
+                                     "The reaper cannot remove its own root."))
+
+                    (state/process-identity-alive? creator)
+                    result
+
+                    (contains? unclaimed-roots root)
+                    (update result :refused conj
+                            (refusal claim :seon.operator.reap/unclaimed-process
+                                     "An observed process has no exact claim."))
+
+                    :else
+                    (update result :eligible conj claim))))
+              {:eligible [] :refused []}
+              candidates)
+             stopped
+             (mapcat
+              (fn [claim]
+                (map
+                 #(state/stop-recorded-process-under-lock!
+                   repository-root
+                   (:seon.operator.state/process-record %)
+                   (:seon.operator.state/advertisements observed)
+                   silence-ms)
+                 (get processes-by-root (:seon.operator.claim/root claim))))
+              (:eligible initial))
+             after (state/census-observations request)
+             live-roots
+             (into #{}
+                   (comp
+                    (filter :seon.operator.state/alive?)
+                    (map :seon.operator.state/root))
+                   (:seon.operator.state/processes after))
+             answering-roots
+             (into #{}
+                   (comp
+                    (filter :seon.operator.state/alive?)
+                    (map :seon.operator.state/root))
+                   (:seon.operator.state/advertisements after))
+             cleanup-ready
+             (remove #(contains? (into live-roots answering-roots)
+                                 (:seon.operator.claim/root %))
+                     (:eligible initial))
+             newly-refused
+             (for [claim (:eligible initial)
+                   :when (not (some #{claim} cleanup-ready))]
+               (refusal claim :seon.operator.reap/process-remained
+                        "An exact process or advertisement remains alive."))
+             roots
+             (mapv
+              (fn [claim]
+                (let [cleanup (cleanup-root-under-lock!
+                               repository-root
+                               (:seon.operator.claim/root claim))]
+                  {:seon.operator.claim/id (:seon.operator.claim/id claim)
+                   :seon.operator.claim/root
+                   (:seon.operator.claim/root claim)
+                   :seon.operator.cleanup/reclaimed-bytes
+                   (:seon.operator.cleanup/removed-file-bytes cleanup)}))
+              cleanup-ready)
+             refused (into (:refused initial) newly-refused)
+             result
+             {:seon.operator.reap/observed-at (java.util.Date.)
+              :seon.operator.reap/census census
+              :seon.operator.reap/eligible-root-claims
+              (mapv :seon.operator.claim/id (:eligible initial))
+              :seon.operator.reap/stopped-processes
+              (mapv public-stopped-process stopped)
+              :seon.operator.reap/roots roots
+              :seon.operator.reap/refused (vec refused)
+              :seon.operator.reap/reclaimed-bytes
+              (reduce + 0 (map :seon.operator.cleanup/reclaimed-bytes roots))
+              :seon.operator.reap/complete? (empty? refused)}]
+         (when (seq (:seon.operator.state/claim-errors observed))
+           (throw
+            (ex-info "The reaper cannot read every external claim."
+                     {:seon.error/kind :seon.operator/reap-incomplete
+                      :seon.operator.reap/result result})))
+         (when (seq refused)
+           (throw
+            (ex-info "One or more ephemeral roots were refused."
+                     {:seon.error/kind :seon.operator/reap-incomplete
+                      :seon.operator.reap/result result})))
+         result))))))
 
 (defn- archive-path
   [log-path index]

@@ -29,9 +29,10 @@
         managed-root (str (io/file repository-root "experiment"))]
     (try
       (operator/claim-root!
-       {:seon.operator/repository-root repository-root
+        {:seon.operator/repository-root repository-root
         :seon.operator/managed-root managed-root
-        :seon.operator/ephemeral? true
+        :seon.operator/ephemeral-owner
+        (operator.state/current-process-identity)
         :seon.boot/cluster-name "dead-target"})
       (is (false? (.exists (io/file managed-root))))
       (let [claim (-> (operator/existence
@@ -42,6 +43,8 @@
         (is (= #{"dead-target"} (:seon.operator.claim/clusters claim)))
         (is (true? (:seon.operator.claim/ephemeral? claim)))
         (is (true? (:seon.operator.claim/reap-on-owner-exit? claim)))
+        (is (= (operator.state/current-process-identity)
+               (:seon.operator.claim/creator claim)))
         (is (false? (:seon.operator.claim/live? claim)))
         (is (= :file
                (get-in claim
@@ -49,6 +52,135 @@
         (is (uuid? (get-in claim
                            [:seon.operator.claim/store :seon.store/id]))))
       (finally
+        (test-support/delete-recursively! repository-root)))))
+
+(deftest ephemeral-creator-is-explicit-stable-and-live-at-publication
+  (let [repository-root (owned-root)
+        managed-root (str (io/file repository-root "ephemeral"))
+        owner (operator.state/current-process-identity)]
+    (try
+      (is (map? (operator/claim-root!
+                 {:seon.operator/repository-root repository-root
+                  :seon.operator/managed-root managed-root
+                  :seon.operator/ephemeral-owner owner})))
+      (is (map? (operator/claim-root!
+                 {:seon.operator/repository-root repository-root
+                  :seon.operator/managed-root managed-root})))
+      (let [claim (-> (operator/existence
+                       {:seon.operator/repository-root repository-root})
+                      :seon.operator/roots first)]
+        (is (= owner (:seon.operator.claim/creator claim)))
+        (is (true? (:seon.operator.claim/ephemeral? claim))))
+      (is (= :seon.operator/ephemeral-owner-not-alive
+             (:seon.error/kind
+              (operator/claim-root!
+               {:seon.operator/repository-root repository-root
+                :seon.operator/managed-root (str managed-root "-dead")
+                :seon.operator/ephemeral-owner
+                {:seon.boot/pid Long/MAX_VALUE
+                 :seon.boot/start-instant (java.util.Date.)}}))))
+      (finally
+        (test-support/delete-recursively! repository-root)))))
+
+(deftest reaper-removes-dead-owner-roots-including-a-vanished-root
+  (let [repository-root (owned-root)
+        caller-root (str (io/file repository-root "caller"))
+        abandoned-root (str (io/file repository-root "abandoned"))
+        vanished-root (str (io/file repository-root "vanished"))
+        owner (.start (ProcessBuilder. ^java.util.List ["/bin/sleep" "60"]))]
+    (try
+      (let [owner-identity
+            {:seon.boot/pid (.pid owner)
+             :seon.boot/start-instant
+             (operator.state/process-start-instant (.pid owner))}]
+        (operator/claim-root!
+         {:seon.operator/repository-root repository-root
+          :seon.operator/managed-root abandoned-root
+          :seon.operator/ephemeral-owner owner-identity})
+        (operator/claim-root!
+         {:seon.operator/repository-root repository-root
+          :seon.operator/managed-root vanished-root
+          :seon.operator/ephemeral-owner owner-identity})
+        (.mkdirs (io/file abandoned-root "data" "clusters" "default"))
+        (spit (io/file abandoned-root "data" "clusters" "default" "proof")
+              "abandoned")
+        (.destroyForcibly owner)
+        (.waitFor owner)
+        (let [result (operator/reap-dead-roots!
+                      {:seon.operator/repository-root repository-root
+                       :seon.operator/managed-root caller-root
+                       :seon.config.operator/event-silence-backstop-ms 1000})]
+          (is (true? (:seon.operator.reap/complete? result)))
+          (is (= #{(.getCanonicalPath (io/file abandoned-root))
+                   (.getCanonicalPath (io/file vanished-root))}
+                 (into #{} (map :seon.operator.claim/root)
+                       (:seon.operator.reap/roots result))))
+          (is (false? (.exists (io/file abandoned-root "data" "clusters"))))))
+      (finally
+        (when (.isAlive owner) (.destroyForcibly owner))
+        (test-support/delete-recursively! repository-root)))))
+
+(deftest exact-stop-refuses-a-changed-generation-without-signaling-the-pid
+  (let [repository-root (owned-root)
+        identity (operator.state/current-process-identity)
+        generation (random-uuid)
+        record (merge identity
+                      {:seon.operator.process-record/generation generation
+                       :seon.operator.process-record/root repository-root})]
+    (try
+      (operator.state/write-process-claim! repository-root record)
+      (let [failure
+            (caught
+             #(operator.state/stop-recorded-process-under-lock!
+               repository-root
+               (assoc record :seon.boot/start-instant (java.util.Date. 0))
+               [] 10))]
+        (is (= :seon.operator/process-claim-mismatch
+               (:seon.error/kind (ex-data failure))))
+        (is (operator.state/process-identity-alive? identity)))
+      (finally
+        (test-support/delete-recursively! repository-root)))))
+
+(deftest reaper-refuses-an-observed-process-without-an-exact-claim
+  (let [repository-root (owned-root)
+        caller-root (str (io/file repository-root "caller"))
+        managed-root (str (io/file repository-root "refused"))
+        owner (.start (ProcessBuilder. ^java.util.List ["/bin/sleep" "60"]))]
+    (try
+      (let [owner-identity
+            {:seon.boot/pid (.pid owner)
+             :seon.boot/start-instant
+             (operator.state/process-start-instant (.pid owner))}]
+        (operator/claim-root!
+         {:seon.operator/repository-root repository-root
+          :seon.operator/managed-root managed-root
+          :seon.operator/ephemeral-owner owner-identity})
+        (.mkdirs (io/file managed-root "data" "clusters"))
+        (.destroyForcibly owner)
+        (.waitFor owner)
+        (with-redefs [operator.state/observed-property-processes
+                      (fn []
+                        [{:seon.operator.state/root
+                          (.getCanonicalPath (io/file managed-root))
+                          :seon.boot/pid (:seon.boot/pid
+                                          (operator.state/current-process-identity))
+                          :seon.boot/start-instant
+                          (:seon.boot/start-instant
+                           (operator.state/current-process-identity))}])]
+          (let [result (operator/reap-dead-roots!
+                        {:seon.operator/repository-root repository-root
+                         :seon.operator/managed-root caller-root
+                         :seon.config.operator/event-silence-backstop-ms 1000})]
+            (is (= :seon.operator/reap-incomplete
+                   (:seon.error/kind result)))
+            (is (= :seon.operator.reap/unclaimed-process
+                   (-> result :seon.error/data
+                       :seon.operator.reap/result
+                       :seon.operator.reap/refused first
+                       :seon.operator.reap/reason)))
+            (is (.exists (io/file managed-root "data" "clusters"))))))
+      (finally
+        (when (.isAlive owner) (.destroyForcibly owner))
         (test-support/delete-recursively! repository-root)))))
 
 (deftest cleanup-is-complete-truthful-and-never-follows-a-symlink
