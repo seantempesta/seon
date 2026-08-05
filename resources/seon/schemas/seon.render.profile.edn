@@ -2,7 +2,6 @@
                       :token-budget [:int {:min 1}],
                       :max-depth [:int {:min 0}],
                       :max-children [:int {:min 0}],
-                      :blob-threshold [:int {:min 1}],
                       :composition
                       [:enum :single-line :multiline :tabular],
                       :profile
@@ -15,7 +14,5 @@
                         :seon.render.profile/max-depth]
                        [:seon.render.profile/max-children
                         :seon.render.profile/max-children]
-                       [:seon.render.profile/blob-threshold
-                        :seon.render.profile/blob-threshold]
                        [:seon.render.profile/composition
                         :seon.render.profile/composition]]}

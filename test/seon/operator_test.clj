@@ -78,8 +78,8 @@
             result (operator/cleanup-root!
                     {:seon.operator/repository-root repository-root
                      :seon.operator/managed-root managed-root})]
-        (is (pos? (:seon.operator.footprint/bytes observed)))
-        (is (= (dissoc observed :seon.operator.footprint/low-space?)
+        (is (pos? (:seon.operator.footprint/file-bytes observed)))
+        (is (= (dissoc observed :seon.operator/low-space?)
                (-> (operator/existence
                     {:seon.operator/repository-root repository-root})
                    :seon.operator/roots first

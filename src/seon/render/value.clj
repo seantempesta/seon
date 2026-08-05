@@ -338,7 +338,6 @@
                :seon.render.profile/token-budget 1048576
                :seon.render.profile/max-depth 64
                :seon.render.profile/max-children (max 0 (dec size))
-               :seon.render.profile/blob-threshold 4096
                :seon.render.profile/composition :multiline
                :seon.print/requery-refusal
                "the legacy caller supplied no stable identity"}))
@@ -349,7 +348,6 @@
                (max 1 (tokens/estimate (apply str (repeat max-size "x"))))
                :seon.render.profile/max-depth (max 0 level)
                :seon.render.profile/max-children (max 0 (dec size))
-               :seon.render.profile/blob-threshold max-size
                :seon.render.profile/composition :multiline
                :seon.print/requery-refusal
                "the legacy caller supplied no stable identity"})))

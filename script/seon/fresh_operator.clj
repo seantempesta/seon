@@ -2378,7 +2378,7 @@
     (println (str alive-count "/" live-state-count " clusters alive"))
     (println
      (format "root footprint: %.2f GiB; filesystem usable: %.2f GiB (%.1f%%)"
-             (/ (double (:seon.operator.footprint/bytes footprint))
+             (/ (double (:seon.operator.footprint/file-bytes footprint))
                 1073741824.0)
              (/ (double (:seon.operator.footprint/usable-bytes footprint))
                 1073741824.0)
@@ -2735,7 +2735,7 @@
   (let [cleanup (cleanup-managed-root! root)]
     (println
      (str "● cleanup complete; reclaimed "
-          (:seon.operator.cleanup/reclaimed-bytes cleanup)
+          (:seon.operator.cleanup/removed-file-bytes cleanup)
           " bytes; removed "
           (str/join ", " (:seon.operator.cleanup/removed cleanup)))))
   (init! root [])

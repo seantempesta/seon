@@ -36,20 +36,27 @@
                  :existence-request
                  [:map
                   [:seon.operator/repository-root :seon.operator/repository-root]],
+                 :low-space? :boolean,
                  :footprint
                  [:map
                   [:seon.operator.footprint/root :string]
-                  [:seon.operator.footprint/bytes [:int {:min 0}]]
+                  [:seon.operator.footprint/file-bytes [:int {:min 0}]]
                   [:seon.operator.footprint/usable-bytes [:int {:min 0}]]
                   [:seon.operator.footprint/total-bytes [:int {:min 0}]]
                   [:seon.operator.footprint/usable-ratio :double]
                   [:seon.operator.footprint/observed-at :inst]],
+                 :footprint-observation
+                 [:and
+                  :seon.operator/footprint
+                  [:map
+                   [:seon.operator/low-space? :seon.operator/low-space?]]],
                  :cleanup-result
                  [:map
                   [:seon.operator.cleanup/root :string]
                   [:seon.operator.cleanup/target :string]
                   [:seon.operator.cleanup/removed [:vector :string]]
-                  [:seon.operator.cleanup/reclaimed-bytes [:int {:min 0}]]
+                  [:seon.operator.cleanup/removed-file-bytes
+                   [:int {:min 0}]]
                   [:seon.operator.cleanup/remaining [:vector :string]]
                   [:seon.operator.cleanup/complete? :boolean]],
                  :claim-errors [:vector :seon.operator.claim/read-error],

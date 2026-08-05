@@ -51,8 +51,6 @@
      (:seon.config.render.agent/max-depth effective)
      :seon.render.profile/max-children
      (:seon.config.render.agent/max-children effective)
-     :seon.render.profile/blob-threshold
-     (:seon.config.eval.result/blob-threshold effective)
      :seon.render.profile/composition
      (:seon.config.render.agent/composition effective)}))
 

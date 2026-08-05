@@ -277,7 +277,7 @@
                       :else (Files/size path)))]
             (size-of root-path)))]
     (assoc (filesystem-space managed-root)
-           :seon.operator.footprint/bytes bytes)))
+           :seon.operator.footprint/file-bytes bytes)))
 
 (defn record-footprint-under-lock!
   "Record one observation while the caller holds the lifecycle lock."

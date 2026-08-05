@@ -156,7 +156,7 @@
   "Record and return one managed root's current disk footprint."
   {:malli/schema
    [:=> [:cat :seon.operator/footprint-request]
-    [:or :seon.operator/footprint :seon.error/value]]}
+    [:or :seon.operator/footprint-observation :seon.error/value]]}
   [{repository-root :seon.operator/repository-root
     managed-root :seon.operator/managed-root
     :as request}]
@@ -166,7 +166,7 @@
    ;; recursive walk of the whole managed root bought nothing.
    #(let [observation (state/record-footprint! repository-root managed-root)]
       (assoc observation
-             :seon.operator.footprint/low-space?
+             :seon.operator/low-space?
              (boolean (low-space? observation request))))))
 
 (defn- existing-children
@@ -200,8 +200,8 @@
           result {:seon.operator.cleanup/root managed-root
                   :seon.operator.cleanup/target target
                   :seon.operator.cleanup/removed (if present? [target] [])
-                  :seon.operator.cleanup/reclaimed-bytes
-                  (:seon.operator.footprint/bytes before)
+                  :seon.operator.cleanup/removed-file-bytes
+                  (:seon.operator.footprint/file-bytes before)
                   :seon.operator.cleanup/remaining remaining
                   :seon.operator.cleanup/complete? complete?}]
       (if control-lock-held?
