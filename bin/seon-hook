@@ -13,7 +13,7 @@
 ;; It has no running Seon-process dependency. Pure linter namespaces load
 ;; directly into Babashka only for the file type that needs them.
 
-(require '[babashka.deps :as deps]
+(require '[babashka.classpath :as classpath]
          '[babashka.process :as process]
          '[cheshire.core :as json]
          '[clojure.edn :as edn]
@@ -209,6 +209,17 @@
     (str "clj-kondo analysis failed: "
      (:seon.hook.analysis/reason analysis))))
 
+(defn- throwable-message
+  "The first non-blank message in a throwable's cause chain."
+  [error]
+  (loop [throwable error]
+    (if throwable
+      (let [message (.getMessage throwable)]
+        (if (str/blank? message)
+          (recur (.getCause throwable))
+          message))
+      (str (class error)))))
+
 (defn- schema-resource-path?
   "True for one flat split-registry EDN resource."
   [file-path]
@@ -280,10 +291,17 @@
                 :my.edit/new-string (or (:new_string tool-input) "")
                 :my.edit/replace-all? (true? (:replace_all tool-input))}
                1)]
-          (:seon.edit/source transformed))
+          (if-let [source (:seon.edit/source transformed)]
+            {:seon.hook.reconstruction/status :available
+             :seon.hook.reconstruction/source source}
+            {:seon.hook.reconstruction/status :refused
+             :seon.hook.reconstruction/reason
+             (:seon.error/message transformed)}))
         (catch Exception error
-          (log! "EXACT_RECONSTRUCTION_ERROR" (.getMessage error))
-          nil)))))
+          (let [message (throwable-message error)]
+            (log! "EXACT_RECONSTRUCTION_ERROR" message)
+            {:seon.hook.reconstruction/status :unavailable
+             :seon.hook.reconstruction/reason message}))))))
 
 (defn- reconstruct-file-content [event]
   (let [tool-name (:tool_name event)
@@ -291,14 +309,17 @@
         file-path (get-file-path event)]
     (cond
       (= tool-name "Write")
-      (:content tool-input)
+      {:seon.hook.reconstruction/status :available
+       :seon.hook.reconstruction/source (:content tool-input)}
 
       (= tool-name "Edit")
       (when (and file-path (:old_string tool-input))
-          (try
-            (reconstruct-exact-edit
-             (slurp (absolute-file-path file-path)) tool-input)
-            (catch Exception _ nil)))
+        (try
+          (reconstruct-exact-edit
+           (slurp (absolute-file-path file-path)) tool-input)
+          (catch Exception error
+            {:seon.hook.reconstruction/status :unavailable
+             :seon.hook.reconstruction/reason (throwable-message error)})))
 
       :else nil)))
 
@@ -312,24 +333,30 @@
   (let [file-path (get-file-path event)]
     (when (and (= (:hook_event_name event) "PreToolUse")
                (clojure-file? file-path))
-      (when-let [new-content (reconstruct-file-content event)]
-        (let [analysis (run-clj-kondo
-                        {:seon.hook/file-paths [file-path]
-                         :seon.hook/prospective-content new-content})
-              errors (filterv #(= :error (:level %))
-                              (:seon.hook.analysis/findings analysis))]
-          (cond
-            (analysis-error analysis)
-            {:decision "block"
-             :reason (str "BLOCKED: " (analysis-error analysis))}
+      (when-let [reconstruction (reconstruct-file-content event)]
+        (if (= :unavailable (:seon.hook.reconstruction/status reconstruction))
+          {:decision "block"
+           :reason (str "BLOCKED: edit reconstruction failed: "
+                        (:seon.hook.reconstruction/reason reconstruction))}
+          (when (= :available (:seon.hook.reconstruction/status reconstruction))
+            (let [analysis (run-clj-kondo
+                            {:seon.hook/file-paths [file-path]
+                             :seon.hook/prospective-content
+                             (:seon.hook.reconstruction/source reconstruction)})
+                  errors (filterv #(= :error (:level %))
+                                  (:seon.hook.analysis/findings analysis))]
+              (cond
+                (analysis-error analysis)
+                {:decision "block"
+                 :reason (str "BLOCKED: " (analysis-error analysis))}
 
-            (seq errors)
-            {:decision "block"
-             :reason (str "BLOCKED: clj-kondo found error-level issues in the "
-                          "prospective Clojure edit:\n"
-                          (format-clj-kondo-findings errors))}
+                (seq errors)
+                {:decision "block"
+                 :reason (str "BLOCKED: clj-kondo found error-level issues in the "
+                              "prospective Clojure edit:\n"
+                              (format-clj-kondo-findings errors))}
 
-            :else nil))))))
+                :else nil))))))))
 
 (defn- validate-schema-edit
   "Block a reconstructed split-schema edit on admission errors."
@@ -337,26 +364,50 @@
   (let [file-path (get-file-path event)]
     (when (and (= (:hook_event_name event) "PreToolUse")
                (schema-resource-path? file-path))
-      (when-let [new-content (reconstruct-file-content event)]
-        (let [analysis
-              (run-schema-admission
-               {:seon.hook/file-paths [file-path]
-                :seon.hook/prospective-content new-content})
-              errors (filterv #(= :error (:level %))
-                              (:seon.hook.analysis/findings analysis))]
-          (cond
-            (schema-admission-error analysis)
-            {:decision "block"
-             :reason (str "BLOCKED: " (schema-admission-error analysis))}
+      (when-let [reconstruction (reconstruct-file-content event)]
+        (if (= :unavailable (:seon.hook.reconstruction/status reconstruction))
+          {:decision "block"
+           :reason (str "BLOCKED: edit reconstruction failed: "
+                        (:seon.hook.reconstruction/reason reconstruction))}
+          (when (= :available (:seon.hook.reconstruction/status reconstruction))
+            (let [analysis
+                  (run-schema-admission
+                   {:seon.hook/file-paths [file-path]
+                    :seon.hook/prospective-content
+                    (:seon.hook.reconstruction/source reconstruction)})
+                  errors (filterv #(= :error (:level %))
+                                  (:seon.hook.analysis/findings analysis))]
+              (cond
+                (schema-admission-error analysis)
+                {:decision "block"
+                 :reason (str "BLOCKED: " (schema-admission-error analysis))}
 
-            (seq errors)
-            {:decision "block"
-             :reason
-             (str "BLOCKED: schema admission found error-level issues in the "
-                  "prospective schema edit:\n"
-                  (format-clj-kondo-findings errors))}
+                (seq errors)
+                {:decision "block"
+                 :reason
+                 (str "BLOCKED: schema admission found error-level issues in the "
+                      "prospective schema edit:\n"
+                      (format-clj-kondo-findings errors))}
 
-            :else nil))))))
+                :else nil))))))))
+
+(defn- findings-feedback
+  "Format blocking findings first and cap the advisory finding tail."
+  [config heading findings]
+  (let [errors (filterv #(= :error (:level %)) findings)
+        advisories (filterv #(not= :error (:level %)) findings)
+        advisory-limit (max 0 (get-in config
+                                      [:feedback :max-advisory-findings]
+                                      20))
+        shown-advisories (subvec advisories 0 (min advisory-limit
+                                                   (count advisories)))
+        omitted (- (count advisories) (count shown-advisories))]
+    (clip-feedback
+     config
+     (str heading "\n"
+          (format-clj-kondo-findings (into errors shown-advisories))
+          (when (pos? omitted)
+            (str "\n… " omitted " advisory finding(s) omitted."))))))
 
 (defn- schema-admission-feedback
   "Return the post-edit split-schema findings and whether publication may run."
@@ -377,10 +428,7 @@
            (str "ADVISORY — " (schema-admission-error analysis))
 
            (seq findings)
-           (clip-feedback
-            config
-            (str "schema admission findings:\n"
-                 (format-clj-kondo-findings findings)))
+           (findings-feedback config "schema admission findings:" findings)
 
            :else nil)}))))
 
@@ -399,10 +447,7 @@
           (str "ADVISORY — " (analysis-error analysis))
 
           (seq findings)
-          (clip-feedback
-           config
-           (str "clj-kondo findings:\n"
-                (format-clj-kondo-findings findings)))
+          (findings-feedback config "clj-kondo findings:" findings)
 
           :else nil)))))
 
@@ -428,12 +473,8 @@
   ;; Resolve from this script's checkout even when a global hook fires from
   ;; another cwd. Babashka already supplies clj-kondo's SCI dependency; the
   ;; root's JVM analyzer coordinate would otherwise conflict with it.
-  (deps/add-deps
-   {:deps {'seon/hook-source
-           {:local/root repo-root
-            :exclusions ['clj-kondo/clj-kondo
-                         'dev.data-star.clojure/sdk
-                         'dev.data-star.clojure/http-kit]}}})
+  (classpath/add-classpath
+   (str (root-file "src") java.io.File/pathSeparator (root-file "script")))
   (require namespace))
 
 (defn- clip-feedback [config message]
@@ -1099,10 +1140,11 @@
                   gate (when clojure-event (core-fault-gate! clojure-event))]
               (output! (or gate (feedback-response feedback))))))
         (catch Exception e
-          (log! "ERROR" (.getMessage e))
-          (binding [*out* *err*]
-            (println "HOOK ERROR:" (.getMessage e)))
-          (output! {:continue true})))))))
+          (let [message (throwable-message e)]
+            (log! "ERROR" message)
+            (binding [*out* *err*]
+              (println "HOOK ERROR:" message))
+            (output! {:continue true}))))))))
 
 (if (= "--review-worker" (first *command-line-args*))
   (run-review-worker!

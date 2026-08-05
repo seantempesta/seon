@@ -89,6 +89,13 @@
           (is (zero? (::exit result)) (::stderr result))
           (is (true? (:continue response)))
           (is (nil? (:decision response)))))
+      (testing "a reconstruction failure carries its actual exception message"
+        (.delete source)
+        (let [result (invoke "(def value 1)" "(def value")
+              response (json/parse-string (str/trim (::stdout result)) true)]
+          (is (zero? (::exit result)) (::stderr result))
+          (is (= "block" (:decision response)))
+          (is (str/includes? (:reason response) "prospective.clj"))))
       (finally
         (delete-files! [source config directory])))))
 
@@ -114,6 +121,7 @@
                  " :markdown-lint {:enabled false}\n"
                  " :docstring-lint {:enabled false}\n"
                  " :current-source {:enabled false}\n"
+                 " :feedback {:max-tokens 10000}\n"
                  " :changed-tests {:enabled false}\n"
                  " :review {:enabled false}}\n"))
       (testing "error findings block a reconstructed schema edit"
@@ -148,7 +156,7 @@
           (is (true? (:continue response)))
           (is (str/includes? feedback
                              "[warning/schema-exact-reuse]"))
-          (is (str/includes? feedback "same shape exists as"))))
+          (is (str/includes? feedback "same shape as existing"))))
       (finally
         (delete-files! [schema-file config directory])))))
 
@@ -165,9 +173,20 @@
                    "*** End Patch")]
     (try
       (spit config
-            "{:seon.config/on-core-error :log\n :feedback {:max-tokens 10000}\n :docstring-lint {:enabled false}\n :changed-tests {:enabled false}}\n")
+            (str "{:seon.config/on-core-error :log\n"
+                 " :feedback {:max-tokens 10000"
+                 " :max-advisory-findings 3}\n"
+                 " :docstring-lint {:enabled false}\n"
+                 " :current-source {:enabled false}\n"
+                 " :changed-tests {:enabled false}\n"
+                 " :review {:enabled false}}\n"))
       (spit broken "(ns broken\n")
-      (spit valid "(ns valid)\n(defn f [unused] :ok)\n")
+      (spit valid
+            (str "(ns valid)\n"
+                 (str/join "\n"
+                           (map #(str "(defn f" % " [unused] :ok)")
+                                (range 30)))
+                 "\n"))
       (let [result (run-process
                     {::command [(str (io/file repo-root "bin/seon-hook"))]
                      ::directory (.getParentFile repo-root)
@@ -186,7 +205,11 @@
                            (str (relative broken) ":1:1 [error/syntax]")))
         (is (str/includes? feedback
                            (str (relative valid)
-                                ":2:10 [warning/unused-binding]"))))
+                                ":2:11 [warning/unused-binding]")))
+        (is (< (str/index-of feedback "[error/syntax]")
+               (str/index-of feedback "[warning/unused-binding]")))
+        (is (str/includes? feedback "27 advisory finding(s) omitted"))
+        (is (< (count feedback) 2500)))
       (finally
         (delete-files! [broken valid config directory])))))
 
