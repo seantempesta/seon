@@ -2,7 +2,8 @@
                  [:map
                   [:seon.cluster.run.form/source
                    :seon.cluster.run.form/source]
-                  [:seon.ns/name-designation :seon.ns/name-designation]
+                  [:seon.bootstrap.plan.form/namespace-source
+                   :seon.bootstrap.plan.form/namespace-source]
                   [:seon.bootstrap.plan.form/help-text
                    {:optional true}
                    :seon.bootstrap.plan.form/help-text]],

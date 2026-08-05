@@ -89,10 +89,10 @@
   {:malli/schema
    [:=> [:cat :seon.schedule/nominal-request]
     [:or :inst :nil]]}
-  [{expression :seon.schedule/cron
-    timezone :seon.schedule/timezone
+  [{expression :seon.schedule/expression
+    zone-id :seon.schedule/zone-id
     reference-at :seon.schedule/reference-at}]
-  (let [zone (ZoneId/of timezone)
+  (let [zone (ZoneId/of zone-id)
         schedule (execution-time expression)
         reference (date->zoned reference-at zone)
         library-next (optional-value (.nextExecution schedule reference))
@@ -110,10 +110,10 @@
   {:malli/schema
    [:=> [:cat :seon.schedule/nominal-request]
     [:or :inst :nil]]}
-  [{expression :seon.schedule/cron
-    timezone :seon.schedule/timezone
+  [{expression :seon.schedule/expression
+    zone-id :seon.schedule/zone-id
     reference-at :seon.schedule/reference-at}]
-  (let [zone (ZoneId/of timezone)
+  (let [zone (ZoneId/of zone-id)
         schedule (execution-time expression)
         reference (.plusNanos (date->zoned reference-at zone) 1)
         nominal (optional-value (.lastExecution schedule reference))]
@@ -121,7 +121,7 @@
 
 (defn- task-rows
   [database agent-id]
-  (->> (db/q '[:find ?task ?task-id ?function ?cron ?timezone
+  (->> (db/q '[:find ?task ?task-id ?function ?expression ?zone-id
                :in $ ?agent-id
                :where
                [?owner :seon.cluster.agent/id ?agent-id]
@@ -130,15 +130,15 @@
                [?task :seon.schedule.task/function ?function-row]
                [?function-row :seon.fn/sym ?function]
                [?task :seon.schedule.task/schedule ?schedule]
-               [?schedule :seon.schedule/cron ?cron]
-               [?schedule :seon.schedule/timezone ?timezone]]
+               [?schedule :seon.schedule/expression ?expression]
+               [?schedule :seon.schedule/zone-id ?zone-id]]
              database agent-id)
-       (map (fn [[task task-id function cron timezone]]
+       (map (fn [[task task-id function expression zone-id]]
               {:db/id task
                :seon.schedule.task/id task-id
                :seon.fn/sym function
-               :seon.schedule/cron cron
-               :seon.schedule/timezone timezone}))
+               :seon.schedule/expression expression
+               :seon.schedule/zone-id zone-id}))
        (sort-by :seon.schedule.task/id)))
 
 (defn- latest-fire-at
@@ -237,8 +237,8 @@
            last-fire (latest-fire-at database (:db/id task))
            nominal
            (latest-nominal-at-or-before
-            {:seon.schedule/cron (:seon.schedule/cron task)
-             :seon.schedule/timezone (:seon.schedule/timezone task)
+            {:seon.schedule/expression (:seon.schedule/expression task)
+             :seon.schedule/zone-id (:seon.schedule/zone-id task)
              :seon.schedule/reference-at observed-at})]
        (if (and nominal
                 (or (nil? last-fire) (.after ^Date nominal ^Date last-fire)))
@@ -271,8 +271,8 @@
   (->> (task-rows database agent-id)
        (keep (fn [task]
                (next-nominal-after
-                {:seon.schedule/cron (:seon.schedule/cron task)
-                 :seon.schedule/timezone (:seon.schedule/timezone task)
+                {:seon.schedule/expression (:seon.schedule/expression task)
+                 :seon.schedule/zone-id (:seon.schedule/zone-id task)
                  :seon.schedule/reference-at reference-at})))
        sort
        first))
@@ -309,8 +309,8 @@
     :seon.schedule.task/function
     :seon.schedule.task/schedule
     :seon.schedule/id
-    :seon.schedule/cron
-    :seon.schedule/timezone})
+    :seon.schedule/expression
+    :seon.schedule/zone-id})
 
 (defn- relevant-report?
   [report]

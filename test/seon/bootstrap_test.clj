@@ -67,8 +67,8 @@
             "(dir my.message)"]
            (subvec texts 0 5)))
     (is (= [:agent :user]
-           (mapv :seon.ns/name-designation (take 2 forms))))
-    (is (every? #(= :agent (:seon.ns/name-designation %))
+           (mapv :seon.bootstrap.plan.form/namespace-source (take 2 forms))))
+    (is (every? #(= :agent (:seon.bootstrap.plan.form/namespace-source %))
                 (cons (first forms) (drop 2 forms))))
     (is (= (bootstrap/help-text)
            (:seon.bootstrap.plan.form/help-text (first forms))))
@@ -195,7 +195,7 @@
              {:db/id "inserted-bootstrap-form"
               :seon.cluster.run.form/ordinal 1
               :seon.cluster.run.form/source inserted-source
-              :seon.ns/name-designation :agent}
+              :seon.bootstrap.plan.form/namespace-source :agent}
              [:db/add
               [:seon.bootstrap.plan/id bootstrap/plan-id]
               :seon.bootstrap.plan/forms

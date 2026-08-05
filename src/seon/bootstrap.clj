@@ -16,15 +16,16 @@
   [unit]
   (let [database (:seon.db/db unit)
         eid (:db/id unit)
-        designations
+        namespace-sources
         (if (and database eid)
-          (db/q '[:find [?designation ...]
+          (db/q '[:find [?namespace-source ...]
                   :in $ ?plan
                   :where
                   [?plan :seon.bootstrap.plan/forms ?form]
-                  [?form :seon.ns/name-designation ?designation]]
+                  [?form :seon.bootstrap.plan.form/namespace-source
+                   ?namespace-source]]
                 database eid)
-          (keep :seon.ns/name-designation
+          (keep :seon.bootstrap.plan.form/namespace-source
                 (:seon.bootstrap.plan/forms unit)))
         help-texts
         (if (and database eid)
@@ -36,8 +37,8 @@
                 database eid)
           (keep :seon.bootstrap.plan.form/help-text
                 (:seon.bootstrap.plan/forms unit)))
-        counts (frequencies designations)]
-    {:forms (count designations)
+        counts (frequencies namespace-sources)]
+    {:forms (count namespace-sources)
      :agent (get counts :agent 0)
      :user (get counts :user 0)
      :help-texts (count help-texts)
@@ -71,7 +72,7 @@
         [:div [:dt "Digest"]
          [:dd [:code (:seon.bootstrap.plan/digest unit)]]]
         [:div [:dt "Ordered forms"] [:dd (str forms)]]
-        [:div [:dt "Namespace designation"]
+        [:div [:dt "Namespace source"]
          [:dd (str agent " agent / " user " user")]]
         [:div [:dt "Help text"]
          [:dd (str help-texts " form"
@@ -185,7 +186,7 @@
             [?plan :seon.bootstrap.plan/forms ?form]
             [?form :seon.cluster.run.form/ordinal ?ordinal]
             [?form :seon.cluster.run.form/source ?source]
-            [?form :seon.ns/name-designation ?designation]]
+            [?form :seon.bootstrap.plan.form/namespace-source ?designation]]
           :args [db cluster-name]
           :order-by '[?ordinal :asc]})
         actual-ordinals (mapv first rows)

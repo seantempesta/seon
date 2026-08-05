@@ -24,8 +24,8 @@
    :seon.cluster.agent/namespace
    :seon.fn/sym
    :seon.schedule/id
-   :seon.schedule/cron
-   :seon.schedule/timezone
+   :seon.schedule/expression
+   :seon.schedule/zone-id
    :seon.schedule.task/id
    :seon.schedule.task/owner
    :seon.schedule.task/function
@@ -65,8 +65,8 @@
      :seon.cluster.agent/namespace [:seon.ns/name namespace-name]}
     {:seon.fn/sym (str namespace-name "/run")}
     {:seon.schedule/id (str task-id "/schedule")
-     :seon.schedule/cron expression
-     :seon.schedule/timezone "UTC"}
+     :seon.schedule/expression expression
+     :seon.schedule/zone-id "UTC"}
     {:seon.schedule.task/id task-id
      :seon.schedule.task/owner [:seon.cluster.agent/id agent-id]
      :seon.schedule.task/function
@@ -97,15 +97,15 @@
   (testing "a nonexistent spring-forward minute is skipped"
     (is (= (instant "2025-03-10T06:30:00Z")
            (schedule/next-nominal-after
-            {:seon.schedule/cron "30 2 * * *"
-             :seon.schedule/timezone "America/New_York"
+            {:seon.schedule/expression "30 2 * * *"
+             :seon.schedule/zone-id "America/New_York"
              :seon.schedule/reference-at (instant "2025-03-09T05:00:00Z")}))))
   (testing "a repeated fall-back minute has two distinct nominal instants"
     (let [first-at (instant "2025-11-02T05:30:00Z")]
       (is (= (instant "2025-11-02T06:30:00Z")
              (schedule/next-nominal-after
-              {:seon.schedule/cron "30 1 * * *"
-               :seon.schedule/timezone "America/New_York"
+              {:seon.schedule/expression "30 1 * * *"
+               :seon.schedule/zone-id "America/New_York"
                :seon.schedule/reference-at first-at}))))))
 
 (deftest fire-identity-is-idempotent-across-rederivation

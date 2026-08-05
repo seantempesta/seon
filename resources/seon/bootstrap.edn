@@ -1,5 +1,5 @@
 [{:seon.cluster.run.form/source "(help)"
-  :seon.ns/name-designation :agent
+  :seon.bootstrap.plan.form/namespace-source :agent
   :seon.bootstrap.plan.form/help-text
   "You are an agent in a Seon cluster. This is a real Clojure REPL and it is
 yours: what you evaluate here runs, and what you define here stays.
@@ -34,19 +34,19 @@ first — your next run starts fresh, so put everything it will need into
 that note.
 "}
  {:seon.cluster.run.form/source "(in-ns '{{seon.ns/name}})"
-  :seon.ns/name-designation :user}
+  :seon.bootstrap.plan.form/namespace-source :user}
  {:seon.cluster.run.form/source "(dir my.run)"
-  :seon.ns/name-designation :agent}
+  :seon.bootstrap.plan.form/namespace-source :agent}
  {:seon.cluster.run.form/source "(doc my.run/complete)"
-  :seon.ns/name-designation :agent}
+  :seon.bootstrap.plan.form/namespace-source :agent}
  {:seon.cluster.run.form/source "(dir my.message)"
-  :seon.ns/name-designation :agent}
+  :seon.bootstrap.plan.form/namespace-source :agent}
  {:seon.cluster.run.form/source
   "(seon.db/q '[:find (count ?f) . :where [?f :seon.fn/sym _]])"
-  :seon.ns/name-designation :agent}
+  :seon.bootstrap.plan.form/namespace-source :agent}
  {:seon.cluster.run.form/source
   "(seon.db/q '[:find ?sym :where [?s :seon.schema/key :my.run/result] [?a :seon.fn.arity/input-refs ?s] [?f :seon.fn/arities ?a] [?f :seon.fn/sym ?sym]])"
-  :seon.ns/name-designation :agent}
+  :seon.bootstrap.plan.form/namespace-source :agent}
  {:seon.cluster.run.form/source
   "(defn largest
   \"The row with the largest :amount.\"
@@ -54,7 +54,7 @@ that note.
                   [:map [:label :string] [:amount :int]]]}
   [rows]
   (last (sort-by :amount rows)))"
-  :seon.ns/name-designation :agent}
+  :seon.bootstrap.plan.form/namespace-source :agent}
  {:seon.cluster.run.form/source
   "(defn largest
   \"The row with the largest :amount; {} when there are none.\"
@@ -62,14 +62,14 @@ that note.
                   [:map [:label {:optional true} :string] [:amount {:optional true} :int]]]}
   [rows]
   (or (last (sort-by :amount rows)) {}))"
-  :seon.ns/name-designation :agent}
+  :seon.bootstrap.plan.form/namespace-source :agent}
  {:seon.cluster.run.form/source
   "(largest [{:label \"a\" :amount 3} {:label \"b\" :amount 9}])"
-  :seon.ns/name-designation :agent}
+  :seon.bootstrap.plan.form/namespace-source :agent}
  {:seon.cluster.run.form/source "(largest)"
-  :seon.ns/name-designation :agent}
+  :seon.bootstrap.plan.form/namespace-source :agent}
  {:seon.cluster.run.form/source "(largest [])"
-  :seon.ns/name-designation :agent}
+  :seon.bootstrap.plan.form/namespace-source :agent}
  {:seon.cluster.run.form/source
   "(seon.db/q '[:find ?spec . :in $ ?sym :where [?f :seon.fn/sym ?sym] [?f :seon.fn/spec ?spec]] \"{{seon.ns/name}}/largest\")"
-  :seon.ns/name-designation :agent}]
+  :seon.bootstrap.plan.form/namespace-source :agent}]

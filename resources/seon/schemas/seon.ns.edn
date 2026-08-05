@@ -4,7 +4,6 @@
           :name
           [:symbol
            {:seon.db/identity true, :seon.search/index :symbol}],
-          :name-designation [:enum :agent :user],
           :ns
           [:map
            {:seon.db/entity true,

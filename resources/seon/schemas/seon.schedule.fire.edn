@@ -21,5 +21,4 @@
                       [:seon.schedule.fire/nominal-at
                        :seon.schedule.fire/nominal-at]
                       [:seon.schedule.fire/observed-at
-                       :seon.schedule.fire/observed-at]],
-                     :transaction-data [:vector :map]}
+                       :seon.schedule.fire/observed-at]]}
