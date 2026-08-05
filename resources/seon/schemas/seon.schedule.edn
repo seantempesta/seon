@@ -1,0 +1,22 @@
+#:seon.schedule{:id [:string {:min 1, :seon.db/identity true}],
+                :cron [:string {:min 1}],
+                :timezone [:string {:min 1}],
+                :schedule
+                [:map
+                 {:seon.db/entity true}
+                 [:seon.schedule/id :seon.schedule/id]
+                 [:seon.schedule/cron :seon.schedule/cron]
+                 [:seon.schedule/timezone :seon.schedule/timezone]],
+                :nominal-request
+                [:map
+                 [:seon.schedule/cron :seon.schedule/cron]
+                 [:seon.schedule/timezone :seon.schedule/timezone]
+                 [:seon.schedule/reference-at :inst]],
+                :reference-at :inst,
+                :proc-request
+                [:map
+                 [:seon.cluster.loop/cluster :seon.cluster.loop/cluster]
+                 [:seon.cluster.agent/id :seon.cluster.agent/id]
+                 [:seon.schedule/channel :seon.flow/channel]],
+                :channel :seon.flow/channel,
+                :fire-count [:int {:min 0}]}

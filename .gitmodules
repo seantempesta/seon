@@ -366,3 +366,7 @@
 [submodule "reference-code/jsoup"]
 	path = reference-code/jsoup
 	url = https://github.com/jhy/jsoup.git
+[submodule "reference-code/cron-utils"]
+	path = reference-code/cron-utils
+	url = https://github.com/jmrozanec/cron-utils.git
+	ignore = dirty

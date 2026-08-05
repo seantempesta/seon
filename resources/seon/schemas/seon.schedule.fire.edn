@@ -1,0 +1,24 @@
+#:seon.schedule.fire{:id
+                     [:string {:min 1, :seon.db/identity true}],
+                     :task [:and #:seon.db{:index true} :seon.db/ref],
+                     :nominal-at [:inst #:seon.db{:index true}],
+                     :observed-at :inst,
+                     :fire
+                     [:map
+                      {:seon.db/entity true}
+                      [:seon.schedule.fire/id :seon.schedule.fire/id]
+                      [:seon.schedule.fire/task :seon.schedule.fire/task]
+                      [:seon.schedule.fire/nominal-at
+                       :seon.schedule.fire/nominal-at]
+                      [:seon.schedule.fire/observed-at
+                       :seon.schedule.fire/observed-at]],
+                     :request
+                     [:map
+                      [:seon.schedule.task/id :seon.schedule.task/id]
+                      [:seon.cluster.agent/id :seon.cluster.agent/id]
+                      [:seon.fn/sym :seon.fn/sym]
+                      [:seon.schedule.fire/nominal-at
+                       :seon.schedule.fire/nominal-at]
+                      [:seon.schedule.fire/observed-at
+                       :seon.schedule.fire/observed-at]],
+                     :transaction-data [:vector :map]}
