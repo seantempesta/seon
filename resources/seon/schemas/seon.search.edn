@@ -1,5 +1,6 @@
 #:seon.search{:family :qualified-keyword,
               :path :string,
+              :index-id :string,
               :index [:enum :text :symbol],
               :channel :seon.flow/channel,
               :completion :seon.flow/channel,

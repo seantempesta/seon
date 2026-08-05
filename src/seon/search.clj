@@ -213,7 +213,8 @@
 (defn apply-report!
   "Advance one derived index by one exact transaction report. A coalesced
   or otherwise non-contiguous report rebuilds from `db-after`."
-  {:malli/schema [:=> [:cat :map :map] :nil]}
+  {:malli/schema
+   [:=> [:cat :seon.search/index-id :map] :nil]}
   [index-id report]
   (let [owner (owner-by-id index-id)]
     (when-not owner
@@ -262,7 +263,9 @@
 (defn open!
   "Open the one derived index for `connection`, rebuilding from its current
   database value unless the on-disk commit records that exact basis."
-  {:malli/schema [:=> [:cat :seon.db/connection :string] :string]}
+  {:malli/schema
+   [:=> [:cat :seon.db/connection :seon.search/path]
+    :seon.search/index-id]}
   [connection path]
   (let [index-id path]
     (when (get-in @owners [:seon.search/by-connection connection])
@@ -301,7 +304,7 @@
 
 (defn close!
   "Close and forget one process-local index owner. Idempotent."
-  {:malli/schema [:=> [:cat :string] :nil]}
+  {:malli/schema [:=> [:cat :seon.search/index-id] :nil]}
   [index-id]
   (when-let [owner (owner-by-id index-id)]
     (when (compare-and-set! (:closed? owner) false true)
@@ -432,13 +435,13 @@
    (assoc state
           ::flow/in-ports {::transactions channel}
           ::flow/out-ports {}
-          ::index index
+          ::index-id index
           ::completion completion))
   ([state transition]
    (when (= ::flow/stop transition)
-     (close! (::index state))
+     (close! (::index-id state))
      (async/offer! (::completion state) ::stopped))
    state)
   ([state _ report]
-   (apply-report! (::index state) report)
+   (apply-report! (::index-id state) report)
    [state nil]))

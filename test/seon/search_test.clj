@@ -14,11 +14,15 @@
      (let [path (str "tmp/search-test-" (random-uuid))
            index (search/open! connection path)]
        (try
-         (binding [db/*conn* connection]
-           (f connection index))
+         (f connection index)
          (finally
            (search/close! index)
            (test-support/delete-recursively! path)))))))
+
+(defn- search-with-connection
+  [connection request]
+  (binding [db/*conn* connection]
+    (search/search request)))
 
 (deftest tokenization-follows-natural-name-separators
   (is (= ["invoice" "line" "item" "count"]
@@ -53,9 +57,10 @@
 
 (deftest search-scopes-by-declared-fact-family-and-namespace-prefix
   (with-index
-    (fn [_ _]
+    (fn [connection _]
       (let [response
-            (search/search
+            (search-with-connection
+             connection
              {:seon.search/query "search"
               :seon.search/families #{:seon.fn/sym}
               :seon.search/namespace-prefix 'seon.search
@@ -88,7 +93,8 @@
                :seon.fn/doc "uniquelyincrementalneedle"}])]
         (search/apply-report! index report)
         (let [response
-              (search/search
+              (search-with-connection
+               connection
                {:seon.search/query "uniquelyincrementalneedle"
                 :seon.search/families #{:seon.fn/sym}
                 :seon.search/namespace-prefix 'fixture.search
@@ -121,12 +127,14 @@
                :seon.search/limit 5}
               instruction-results
               (:seon.search/results
-               (search/search
+               (search-with-connection
+                connection
                 (assoc request :seon.search/families
                        #{:seon.cluster.instruction/id})))
               message-results
               (:seon.search/results
-               (search/search
+               (search-with-connection
+                connection
                 (assoc request :seon.search/families
                        #{:seon.cluster.message/id})))]
           (is (= [{:seon.search/family :seon.cluster.instruction/id
