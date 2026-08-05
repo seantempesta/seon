@@ -25,7 +25,7 @@ When every function has:
 - **Malli schemas** → Contracts are machine-readable, generatively testable, and the thing a review checks a call against.
 - **Fully spec'd args (the hard rule)** → Contracts are complete. Map-in/map-out helps API *accretion* (add an optional field without breaking callers); fully-spec'd positional (`:catn`) is often the better shape for utilities. Pick by fit; the invariant is that every arg is named, spec'd, and validated.
 - **Registered schemas** → One admitted population of queryable shapes.
-  First-party declarations live in `resources/seon/schema.edn`; runtime
+  First-party declarations live under `resources/seon/schemas/`; runtime
   registrations pass through the same admission rules.
 
 The result: agents can discover, compose, and validate code without
@@ -120,14 +120,14 @@ or docstring examples showing external callers.
 
 ### Schema Registration
 
-Author shipped first-party schemas in the one EDN map at
-`resources/seon/schema.edn`. Section comments are editorial:
+Author shipped first-party schemas in the family EDN files under
+`resources/seon/schemas/`. File boundaries are editorial:
 `seon.schema.edn` loads the complete population, refuses duplicate keys or unresolved
 references, and `seon.schema.datahike` derives Datahike attribute declarations
 from the admitted Malli forms.
 
 ```clojure
-;; resources/seon/schema.edn — search section
+;; resources/seon/schemas/seon.search.edn
 {:seon.search/pattern
  [:string {:min 1 :description "ripgrep regex pattern"}]
 
@@ -311,7 +311,7 @@ retract it explicitly — omitting a key means "leave unchanged".)
 
 Expected failures at an agent/runtime boundary are flat `:seon.error` values;
 they do not throw into the run loop. The shared shape is declared once in
-the error section of `resources/seon/schema.edn`:
+`resources/seon/schemas/seon.error.edn`:
 
 ```clojure
 {:seon.error/kind :seon.example/invalid-request
@@ -342,7 +342,7 @@ database enforcing a fence, not an error-handling style — see
 `src/seon/cluster/run.clj`.
 
 Use a qualified, source-owned `:seon.error/kind`; do not maintain a closed
-central enum of error kinds. The error section of `resources/seon/schema.edn`
+central enum of error kinds. `resources/seon/schemas/seon.error.edn`
 deliberately
 defines it as a qualified keyword.
 
@@ -395,13 +395,9 @@ are admit-clean for SCI contexts; reads never cross a remote protocol.
 It is not called a "facade" — it is the db namespace, intercepting
 Datahike's calls only for error-value and ambient-custody semantics.
 
-All first-party code calls `seon.db`; only `seon.db` itself and the
-store/registry custody owners (flock, open/release, branch management)
-require `datahike.api`. Migration in flight: `transact!` now lives at
-`seon.db/transact!`, and the core namespace surface has landed. The
-remaining migration is the counted first-party direct-call sweep in
-`docs/seon/issues/seon-db-is-not-the-one-database-namespace.md`; new code
-never adds a direct `datahike.api` call site.
+All first-party core reads and writes call `seon.db`; only `seon.db` itself,
+store/registry branch-custody owners, and system-side listeners may require
+`datahike.api`. New code never adds another direct core read/write call site.
 
 ```clojure
 (require '[seon.db :as db])
@@ -448,23 +444,19 @@ same move: declare each leaf once and reference it from composite EDN forms.
 Every public function carries a correct `:malli/schema`, including functions
 that accept connections, channels, sinks, or other process-local objects.
 Declare a named predicate schema with an honest generator, as
-the store and web sections of `resources/seon/schema.edn` do. Do not
+the owning files under `resources/seon/schemas/` do. Do not
 omit the contract merely because the value is opaque.
 
-### `:any` at third-party interface boundaries
+### Authored contract admission refusals
 
-The no-`:any` rule is the default **for Seon-authored data**. At a
-**third-party interface boundary** — where the value is whatever a library or
-HTTP peer returns and Seon does not control its shape — `:any` is acceptable
-because there is no honest tighter type.
-
-```clojure
-;; A decoded provider response is a foreign document.
-{:seon.ai/decoded-body :any}
-```
-
-The compliance checker flags **all** `:any`/`:some`/`:maybe` as a non-blocking
-nudge; at a genuine boundary that warning is an accepted judgment call.
+Authored function and schema contracts refuse `:any`, `:some`, and `:nil`.
+Use a named predicate schema with an honest generator for genuine polymorphism.
+Schema-file admission also refuses unqualified or misplaced keys, unexempt
+polymorphism, `{:closed true}`, and direct `:db.type/ref`. Complete function
+contracts remain required: every argument is named and every input/output
+schema ref resolves. These are admission errors, not warning-only lint
+(`src/seon/schema/internal.cljc:20,59-105`;
+`src/seon/schema/admission.clj:220-267`).
 
 ### Test Code Exemptions
 
@@ -504,8 +496,9 @@ under `test/` on the source classpath with in-memory Datahike — no artifact, n
 operator, seconds per cycle. Its exit code is the verdict.
 
 ```bash
-bin/test                        # every suite under test/
-bin/test seon.cluster.run-test  # exactly these namespaces
+bin/test                        # fast non-long tier
+bin/test --full                 # complete checkpoint tier
+bin/test seon.cluster.run-test  # named namespaces, including long tests
 ```
 
 Use the selection while iterating and the full run at the natural unit
@@ -526,18 +519,18 @@ and deletes it in a `finally`.
 ```clojure
 (ns seon.cluster.run-test
   (:require [clojure.test :refer [deftest is testing]]
-            [datahike.api :as d]
+            [seon.db :as db]
             [seon.test-support :as test-support]))
 
 (deftest reads-back-a-row
   (testing "a transacted value comes back out"
     (test-support/with-database
       (fn [connection]
-        (d/transact connection [{:seon.cluster.run/id "r1"}])
+        (db/transact! connection [{:seon.cluster.run/id "r1"}])
         (is (= "r1"
-               (d/q '[:find ?id .
-                      :where [_ :seon.cluster.run/id ?id]]
-                    @connection)))))))
+               (db/q '[:find ?id .
+                       :where [_ :seon.cluster.run/id ?id]]
+                     @connection)))))))
 ```
 
 Use `:seon.test-support/extra-schema` only when schema installation itself is
@@ -614,7 +607,7 @@ Promote heavy plumbing to a sibling `<ns>.internal` namespace (see
 split into `core.clj` / `schema.clj` prematurely.
 
 ```
-resources/seon/schema.edn     ; admitted first-party declarations
+resources/seon/schemas/       ; admitted first-party family declarations
 
 src/seon/
 ├── schema.clj                 ; registry and runtime registration
@@ -693,10 +686,19 @@ namespace debug route renders the same walk through the HTML projection; it is
 not a second hand-built context surface.
 
 The transcript is ordered forms, outputs, and receipts. Forms remain reader
-input; outputs use the stock-REPL-shaped `seon.print` text sink and are not
-rewritten into comments merely to make the whole transcript readable as one
-file. Admission stores the data projection, while render time chooses text,
-hiccup, or the tee sink so both faces come from one traversal.
+input and are not rewritten into comments. Admission stores the data
+projection. Every consumer-visible text value crosses `:seon.render/ai`; every
+semantic page value crosses `:seon.render/html`. Important schemas declare both
+producers: literal static content may be inline, while computed producers are
+fully qualified symbols naming functions. The generic floor is the total
+fallback, not the destination for important shapes.
+
+Semantic producers do not cap output. Database-derived consumer profiles feed
+the one `seon.print/fit` owner after projection. Values that do not fit contain
+ordinary elision values with path, counts, offset, profile, and requery identity
+or explicit refusal (`resources/seon/schemas/seon.render.profile.edn:1-21`;
+`resources/seon/schemas/seon.print.edn:214-263`;
+`src/seon/print.cljc:602-718,750-785`).
 
 ### Comment levels — prose vs code
 
