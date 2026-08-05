@@ -291,6 +291,19 @@
               "worst-recurring first, so the pattern is the first thing
                read rather than something to scan for"))))))
 
+(deftest signature-only-rows-are-not-error-facts
+  (with-db
+    (fn [connection]
+      (db/transact!
+       connection
+       [{:seon.error/signature (apply str (repeat 64 "a"))}])
+      (let [value (found connection)]
+        (is (= {} value)
+            "a comparison signature without error identity is not an error")
+        (is (seon.schema/valid-candidate-value?
+             :seon.problems/problems value)
+            "partial signature rows cannot invalidate runtime health")))))
+
 (deftest a-run-held-by-a-dead-process-is-wedged
   (with-db
     (fn [connection]

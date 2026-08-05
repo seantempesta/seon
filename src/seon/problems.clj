@@ -80,7 +80,12 @@
   "Every committed error, grouped by signature, worst-recurring first."
   [db]
   (->> (db/q '[:find [(pull ?error [*]) ...]
-              :where [?error :seon.error/signature _]]
+              :where
+              ;; Membership is the declared error identity, not any row
+              ;; that happens to carry a signature. Signature-only rows
+              ;; are comparison evidence, not committed error facts.
+              [?error :seon.error/id _]
+              [?error :seon.error/signature _]]
             db)
        (group-by :seon.error/signature)
        (mapv (fn [[signature facts]]
