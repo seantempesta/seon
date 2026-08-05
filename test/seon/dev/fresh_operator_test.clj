@@ -1496,6 +1496,38 @@
         (alter-meta! start-var (constantly start-meta))
         (reset! (var-get instances-var) instances-before)))))
 
+(deftest start-sweep-refusal-is-retryable-and-unwinds-the-partial-instance
+  (let [root (fresh-root)
+        instance {:seon.boot/config
+                  {:seon.boot/root (str (io/file root "data" "clusters"))
+                   :seon.boot/cluster-name "blocked"}}
+        form (operator-private-value 'start-cluster-form
+                                     (str root) "blocked" {})
+        stopped (atom [])
+        failure
+        (ex-info
+         "The cluster instance failed above the REPL."
+         {:seon.error/kind :seon.boot/refused
+          :seon.boot/instance instance}
+         (ex-info
+          "A reachability sweep is in progress."
+          {:type :sweep-in-progress
+           :retryable? true
+           :store-id (random-uuid)
+           :maintenance-receipt {:seon.maintenance.receipt/id "sweep-1"}}))]
+    (with-redefs [cluster/start! (fn [_request] (throw failure))
+                  cluster/stop! (fn [stopped-instance]
+                                  (swap! stopped conj stopped-instance))]
+      (let [refusal (try
+                      (eval form)
+                      ::committed
+                      (catch clojure.lang.ExceptionInfo error
+                        (ex-data error)))]
+        (is (= :sweep-in-progress (:type refusal)))
+        (is (= :sweep-in-progress (:seon.error/kind refusal)))
+        (is (true? (:retryable? refusal)))
+        (is (= [instance] @stopped))))))
+
 (deftest ^{:seon.test/long "Loads and instruments schemas in a genuinely fresh operator process."}
   fresh-process-loads-schema-before-every-operator-instrumentation
   (let [root (fresh-root)]

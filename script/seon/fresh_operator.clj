@@ -1511,6 +1511,32 @@
        (when ~anchor
          ~(instrument-form anchor anchor-name)))))
 
+(defn- start-cluster-form
+  [root name manifest]
+  `(try
+     ((ns-resolve 'seon.cluster (symbol "start!"))
+      {:seon.boot/root ~(str (cluster-root root))
+       :seon.boot/cluster-name ~name
+       :seon.config/manifest ~manifest})
+     (catch Throwable failure#
+       (let [sweep-data#
+             (loop [cause# failure#]
+               (when cause#
+                 (let [data# (ex-data cause#)]
+                   (if (= :sweep-in-progress (:type data#))
+                     data#
+                     (recur (ex-cause cause#))))))]
+         (if-not sweep-data#
+           (throw failure#)
+           (do
+             (when-let [instance# (:seon.boot/instance (ex-data failure#))]
+               ((ns-resolve 'seon.cluster (symbol "stop!")) instance#))
+             (throw
+              (ex-info
+               "A reachability sweep is in progress; retry start later."
+               (assoc sweep-data# :seon.error/kind :sweep-in-progress)
+               failure#))))))))
+
 (defn- launch-form
   [root name manifest ready-port]
   (let [instance (gensym "instance")]
@@ -1538,10 +1564,7 @@
                     ~instance
                     (with-bindings
                       {progress-var# progress!#}
-                      ((ns-resolve 'seon.cluster (symbol "start!"))
-                       {:seon.boot/root ~(str (cluster-root root))
-                        :seon.boot/cluster-name ~name
-                        :seon.config/manifest ~manifest}))
+                      ~(start-cluster-form root name manifest))
                     _# (require 'seon.operator)
                     dials#
                     ((ns-resolve 'seon.config (symbol "effective"))
@@ -1602,10 +1625,7 @@
               ~instance
               (with-bindings
                 {progress-var# progress!#}
-                ((ns-resolve 'seon.cluster (symbol "start!"))
-                 {:seon.boot/root ~(str (cluster-root root))
-                  :seon.boot/cluster-name ~name
-                  :seon.config/manifest ~manifest}))
+                ~(start-cluster-form root name manifest))
               applied# ~(instrument-form instance name)]
           (println "seon" ~name "added — instrumented"
                    (:seon.instrument/instrumented applied#) "vars")
