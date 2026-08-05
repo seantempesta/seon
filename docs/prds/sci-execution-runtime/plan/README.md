@@ -430,6 +430,14 @@ Evidence base: eight paired sol/Opus research lanes (indexed in the PRD).
   door receipts, declared by the capability leaf, never guessed (joins
   F8's capability family). Bare agent `transact!` spans stay uncurated
   until write provenance (F7) lands.
+- **cron-utils 9.2.1 is an approved pinned dependency** (owner review,
+  2026-08-05): schedules stay declared FACTS (expression + IANA zone);
+  the vendored parser is confined to one pure namespace and exists so
+  Seon does not own a second cron grammar and evaluator — DST gaps and
+  repeated local minutes are subtle enough that the mechanism's own
+  regression covers both fall-back instants. No quarry parser copy and
+  no regex enter production. Pin `a3d31f7445376b19d1337c604d3d3b7e986302cc`,
+  landed with the scheduler mechanism (`fa0095a26`).
 - **The root agent owns ALL system maintenance** (owner, 2026-08-04
   night): store GC, disk footprint observation, dead-root reaping, log
   rotation, and every recurring health chore are the ROOT AGENT'S
