@@ -6,12 +6,19 @@
   Babashka launcher and the JVM operator; it is the one atomic-record
   mechanism for roots, processes, stores, and clusters."
   (:require [babashka.fs :as fs]
-            [clojure.edn :as edn])
-  (:import [java.io RandomAccessFile]
+            [clojure.edn :as edn]
+            [clojure.string :as str])
+  (:import [java.io PushbackReader RandomAccessFile]
+           [java.net InetSocketAddress Socket]
            [java.nio.channels FileChannel]
            [java.nio.file Files LinkOption OpenOption StandardOpenOption]
            [java.time Instant]
            [java.util Date UUID]))
+
+(defn- instant-ms
+  [instant]
+  (when (inst? instant)
+    (.getTime ^Date instant)))
 
 (defn canonical-path
   [path]
@@ -39,6 +46,12 @@
   (and (integer? pid)
        (inst? start-instant)
        (= start-instant (process-start-instant pid))))
+
+(defn advertisement-identity-alive?
+  "True when an advertisement still names its exact OS process."
+  [advertisement]
+  (process-identity-alive?
+   (select-keys advertisement [:seon.boot/pid :seon.boot/start-instant])))
 
 (defn current-process-identity
   []
@@ -195,29 +208,307 @@
   [repository-root generation]
   (delete-edn! (process-claim-path repository-root generation)))
 
-(defn- read-directory-records
-  [directory]
+(defn- process-record?
+  [record]
+  (and (map? record)
+       (uuid? (:seon.operator.process-record/generation record))
+       (pos-int? (:seon.boot/pid record))
+       (inst? (:seon.boot/start-instant record))
+       (string? (:seon.operator.process-record/root record))))
+
+(defn- root-claim?
+  [claim]
+  (and (map? claim)
+       (uuid? (:seon.operator.claim/id claim))
+       (string? (:seon.operator.claim/root claim))
+       (map? (:seon.operator.claim/creator claim))
+       (pos-int? (get-in claim [:seon.operator.claim/creator :seon.boot/pid]))
+       (inst? (get-in claim
+                      [:seon.operator.claim/creator
+                       :seon.boot/start-instant]))))
+
+(defn- read-claim-records
+  [directory valid?]
   (if-not (fs/directory? directory)
     {:records [] :errors []}
     (reduce
      (fn [result path]
        (try
-         (update result :records conj (read-edn path))
+         (let [record (read-edn path)]
+           (if (valid? record)
+             (update result :records conj record)
+             (update result :errors conj
+                     {:seon.error/kind :seon.operator/unreadable-claim
+                      :seon.error/message "The external claim is invalid."
+                      :seon.error/data {:seon.operator.claim/path (str path)}
+                      :seon.operator.claim/path (str path)})))
          (catch Throwable error
            (update result :errors conj
-                   {:seon.operator.claim/path (str path)
-                    :seon.error/message (ex-message error)}))))
+                   {:seon.error/kind :seon.operator/unreadable-claim
+                    :seon.error/message (ex-message error)
+                    :seon.error/data {:seon.operator.claim/path (str path)}
+                    :seon.operator.claim/path (str path)}))))
      {:records [] :errors []}
      (sort-by str (fs/list-dir directory)))))
 
 (defn process-claims
   [repository-root]
-  (read-directory-records (process-claim-directory repository-root)))
+  (read-claim-records (process-claim-directory repository-root)
+                      process-record?))
 
 (defn root-claims
   [repository-root]
-  (read-directory-records
-   (fs/path (control-root repository-root) "claims" "roots")))
+  (read-claim-records
+   (fs/path (control-root repository-root) "claims" "roots")
+   root-claim?))
+
+(defn read-advertisement
+  "Read one cluster advertisement as ordinary data when valid EDN exists."
+  [managed-root cluster-name]
+  (try
+    (let [path (fs/path managed-root "data" "clusters" cluster-name "prepl.edn")
+          value (read-edn path)]
+      (when (map? value) value))
+    (catch Throwable _ nil)))
+
+(defn advertisement-observations
+  "Observe every advertisement below one exact managed root."
+  [managed-root]
+  (let [root (canonical-path managed-root)
+        directory (fs/path root "data" "clusters")]
+    (if-not (fs/directory? directory)
+      []
+      (into
+       []
+       (comp
+        (filter fs/directory?)
+        (keep
+         (fn [cluster-directory]
+           (let [cluster-name (str (fs/file-name cluster-directory))
+                 path (fs/path cluster-directory "prepl.edn")]
+             (when (fs/regular-file? path)
+               (let [advertisement (read-advertisement root cluster-name)]
+                 {:seon.operator.state/name cluster-name
+                  :seon.operator.state/root root
+                  :seon.operator.state/path (str path)
+                  :seon.operator.state/advertisement advertisement
+                  :seon.operator.state/alive?
+                  (boolean (advertisement-identity-alive? advertisement))}))))))
+       (sort-by str (fs/list-dir directory))))))
+
+(defn- optional-value
+  [optional]
+  (when (.isPresent optional)
+    (.get optional)))
+
+(defn- process-property
+  [^java.lang.ProcessHandle handle property-name]
+  (let [arguments (some-> (optional-value (.arguments (.info handle))) vec)
+        prefix (str "-D" property-name "=")]
+    (some
+     (fn [argument]
+       (when (and (string? argument) (str/starts-with? argument prefix))
+         (subs argument (count prefix))))
+     arguments)))
+
+(defn observed-property-processes
+  "Observe exact JVM identities that explicitly declare an operator root."
+  []
+  (with-open [processes (java.lang.ProcessHandle/allProcesses)]
+    (->> (iterator-seq (.iterator processes))
+         (keep
+          (fn [^java.lang.ProcessHandle handle]
+            (when-let [root (process-property handle "seon.operator.root")]
+              (when-let [start (process-start-instant (.pid handle))]
+                {:seon.operator.state/root (canonical-path root)
+                 :seon.operator.state/generation
+                 (when-let [generation
+                            (process-property handle
+                                              "seon.operator.generation")]
+                   (try
+                     (parse-uuid generation)
+                     (catch Throwable _ nil)))
+                 :seon.boot/pid (.pid handle)
+                 :seon.boot/start-instant start}))))
+         (sort-by :seon.boot/pid)
+         vec)))
+
+(defn- process-key
+  [process]
+  [(:seon.boot/pid process)
+   (instant-ms (:seon.boot/start-instant process))])
+
+(defn- event-silence-backstop-ms
+  [repository-root request]
+  (or (:seon.config.operator/event-silence-backstop-ms request)
+      (get (read-edn (fs/path repository-root "config" "default.edn"))
+           :seon.config.operator/event-silence-backstop-ms)
+      (throw (ex-info "The operator event-silence backstop is undeclared."
+                      {:seon.error/kind
+                       :seon.operator/missing-event-silence-backstop}))))
+
+(defn- responsive-advertisement?
+  [advertisement silence-ms]
+  (try
+    (with-open [socket (Socket.)]
+      (.connect socket
+                (InetSocketAddress.
+                 ^String (:seon.boot/prepl-host advertisement)
+                 (int (:seon.boot/prepl-port advertisement)))
+                silence-ms)
+      (.setSoTimeout socket silence-ms)
+      (with-open [writer (java.io.OutputStreamWriter.
+                          (.getOutputStream socket)
+                          java.nio.charset.StandardCharsets/UTF_8)
+                  reader (PushbackReader.
+                          (java.io.InputStreamReader.
+                           (.getInputStream socket)
+                           java.nio.charset.StandardCharsets/UTF_8))]
+        (.write writer ":seon.operator/process-census\n")
+        (.flush writer)
+        (loop []
+          (let [event (edn/read {:eof ::eof} reader)]
+            (cond
+              (= ::eof event) false
+              (and (map? event) (= :ret (:tag event)))
+              (not (:exception event))
+              :else (recur))))))
+    (catch Throwable _ false)))
+
+(defn census-observations
+  "Derive claims, exact processes, and advertisements from one observation."
+  [{repository-root :seon.operator/repository-root
+    managed-root :seon.operator/managed-root
+    :as request}]
+  (let [repository-root (canonical-path repository-root)
+        managed-root (canonical-path managed-root)
+        {roots :records root-errors :errors} (root-claims repository-root)
+        {claims :records process-errors :errors} (process-claims repository-root)
+        claimed-roots (into #{managed-root}
+                            (map :seon.operator.claim/root)
+                            roots)
+        property-processes
+        (filterv #(contains? claimed-roots (:seon.operator.state/root %))
+                 (observed-property-processes))
+        advertisements (into [] (mapcat advertisement-observations) claimed-roots)
+        advertised-processes
+        (into
+         []
+         (keep
+          (fn [observation]
+            (let [advertisement (:seon.operator.state/advertisement observation)]
+              (when (and (:seon.operator.state/alive? observation)
+                         (pos-int? (:seon.boot/pid advertisement))
+                         (inst? (:seon.boot/start-instant advertisement)))
+                {:seon.operator.state/root
+                 (:seon.operator.state/root observation)
+                 :seon.boot/pid (:seon.boot/pid advertisement)
+                 :seon.boot/start-instant
+                 (:seon.boot/start-instant advertisement)}))))
+         advertisements)
+        observed-by-key
+        (into {}
+              (map (juxt process-key identity))
+              (concat advertised-processes property-processes))
+        advertisements-by-key
+        (group-by #(process-key (:seon.operator.state/advertisement %))
+                  advertisements)
+        silence-ms (event-silence-backstop-ms repository-root request)
+        claim-observations
+        (mapv
+         (fn [claim]
+           (let [identity (select-keys claim
+                                       [:seon.boot/pid
+                                        :seon.boot/start-instant])
+                 exact-advertisements (get advertisements-by-key
+                                           (process-key identity) [])
+                 alive? (process-identity-alive? identity)]
+             {:seon.operator.state/process-record claim
+              :seon.operator.state/root
+              (canonical-path (:seon.operator.process-record/root claim))
+              :seon.boot/pid (:seon.boot/pid claim)
+              :seon.boot/start-instant (:seon.boot/start-instant claim)
+              :seon.operator.state/generation
+              (:seon.operator.process-record/generation claim)
+              :seon.operator.state/alive? (boolean alive?)
+              :seon.operator.state/responsive?
+              (boolean
+               (and alive?
+                    (some #(responsive-advertisement?
+                            (:seon.operator.state/advertisement %)
+                            silence-ms)
+                          exact-advertisements)))
+              :seon.operator.state/advertisements exact-advertisements}))
+         (sort-by (juxt :seon.operator.process-record/root :seon.boot/pid)
+                  claims))
+        claimed-keys (into #{} (map process-key) claims)
+        unclaimed (into []
+                        (remove #(contains? claimed-keys (process-key %)))
+                        (vals observed-by-key))]
+    {:seon.operator.state/observed-at (Date.)
+     :seon.operator.state/roots (vec (sort-by :seon.operator.claim/root roots))
+     :seon.operator.state/processes claim-observations
+     :seon.operator.state/unclaimed (vec (sort-by :seon.boot/pid unclaimed))
+     :seon.operator.state/advertisements advertisements
+     :seon.operator.state/claim-errors (into root-errors process-errors)}))
+
+(defn- public-process-identity
+  [process]
+  (cond->
+   {:seon.dev.process/pid (:seon.boot/pid process)
+    :seon.dev.process/start-instant
+    (str (.toInstant ^Date (:seon.boot/start-instant process)))
+    :seon.dev.process/root (:seon.operator.state/root process)}
+    (:seon.operator.state/generation process)
+    (assoc :seon.dev.process/generation
+           (:seon.operator.state/generation process))))
+
+(defn process-census
+  "Return one complete, exact-identity process census."
+  [request]
+  (let [observations (census-observations request)
+        processes (:seon.operator.state/processes observations)
+        process-values
+        (mapv
+         (fn [process]
+           (assoc (public-process-identity process)
+                  :seon.operator.process-census/alive?
+                  (:seon.operator.state/alive? process)
+                  :seon.operator.process-census/responsive?
+                  (:seon.operator.state/responsive? process)
+                  :seon.operator.process-census/advertisements
+                  (mapv :seon.operator.state/name
+                        (:seon.operator.state/advertisements process))))
+         processes)
+        roots
+        (mapv
+         (fn [claim]
+           (let [creator (:seon.operator.claim/creator claim)]
+             {:seon.operator.claim/id (:seon.operator.claim/id claim)
+              :seon.operator.claim/root (:seon.operator.claim/root claim)
+              :seon.operator.claim/creator
+              {:seon.dev.process/pid (:seon.boot/pid creator)
+               :seon.dev.process/start-instant
+               (str (.toInstant ^Date (:seon.boot/start-instant creator)))}
+              :seon.operator.claim/reap-on-owner-exit?
+              (:seon.operator.claim/reap-on-owner-exit? claim)}))
+         (:seon.operator.state/roots observations))
+        errors (:seon.operator.state/claim-errors observations)]
+    {:seon.operator.process-census/observed-at
+     (:seon.operator.state/observed-at observations)
+     :seon.operator.process-census/roots roots
+     :seon.operator.process-census/processes process-values
+     :seon.operator.process-census/dead
+     (into [] (comp (remove :seon.operator.state/alive?)
+                    (map public-process-identity)) processes)
+     :seon.operator.process-census/unresponsive
+     (into [] (comp (filter :seon.operator.state/alive?)
+                    (remove :seon.operator.state/responsive?)
+                    (map public-process-identity)) processes)
+     :seon.operator.process-census/unclaimed
+     (mapv public-process-identity (:seon.operator.state/unclaimed observations))
+     :seon.operator.process-census/claim-errors errors
+     :seon.operator.process-census/complete? (empty? errors)}))
 
 (defn existence
   "Read claim files only. Never opens Datahike or a managed root database."

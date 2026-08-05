@@ -7,6 +7,7 @@
             [seon.instrument :as instrument]
             [seon.operator :as operator]
             [seon.operator.runtime :as runtime]
+            [seon.operator.state :as operator.state]
             [seon.test-support :as test-support]))
 
 (defn- caught
@@ -107,6 +108,82 @@
         (is (= 32 (.length (io/file (str (.getCanonicalPath log-file) ".1"))))))
       (finally
         (test-support/delete-recursively! root)))))
+
+(deftest process-census-derives-exact-identity-classifications
+  (let [observed-at (java.util.Date. 1785945600000)
+        started-at (java.util.Date. 1785942000000)
+        generation (random-uuid)
+        claim-id (random-uuid)
+        root (.getCanonicalPath (io/file "tmp/operator-census"))
+        observations
+        {:seon.operator.state/observed-at observed-at
+         :seon.operator.state/roots
+         [{:seon.operator.claim/id claim-id
+           :seon.operator.claim/root root
+           :seon.operator.claim/creator
+           {:seon.boot/pid 41 :seon.boot/start-instant started-at}
+           :seon.operator.claim/reap-on-owner-exit? true}]
+         :seon.operator.state/processes
+         [{:seon.operator.state/root root
+           :seon.operator.state/generation generation
+           :seon.boot/pid 42
+           :seon.boot/start-instant started-at
+           :seon.operator.state/alive? true
+           :seon.operator.state/responsive? false
+           :seon.operator.state/advertisements
+           [{:seon.operator.state/name "default"}]}]
+         :seon.operator.state/unclaimed
+         [{:seon.operator.state/root root
+           :seon.boot/pid 43
+           :seon.boot/start-instant started-at}]
+         :seon.operator.state/claim-errors []}]
+    (with-redefs [operator.state/census-observations (constantly observations)]
+      (let [result
+            (operator/census-processes!
+             {:seon.operator/repository-root "."
+              :seon.operator/managed-root root})
+            process (first (:seon.operator.process-census/processes result))]
+        (is (true? (:seon.operator.process-census/complete? result)))
+        (is (= generation (:seon.dev.process/generation process)))
+        (is (= 42 (:seon.dev.process/pid process)))
+        (is (true? (:seon.operator.process-census/alive? process)))
+        (is (false? (:seon.operator.process-census/responsive? process)))
+        (is (= ["default"]
+               (:seon.operator.process-census/advertisements process)))
+        (is (= [42]
+               (mapv :seon.dev.process/pid
+                     (:seon.operator.process-census/unresponsive result))))
+        (is (= [43]
+               (mapv :seon.dev.process/pid
+                     (:seon.operator.process-census/unclaimed result))))
+        (is (= claim-id
+               (get-in result
+                       [:seon.operator.process-census/roots 0
+                        :seon.operator.claim/id])))))))
+
+(deftest process-census-refuses-unreadable-external-claims-as-data
+  (let [claim-error
+        {:seon.error/kind :seon.operator/unreadable-claim
+         :seon.error/message "Unreadable claim."
+         :seon.error/data {:seon.operator.claim/path "claim.edn"}}
+        observations
+        {:seon.operator.state/observed-at (java.util.Date. 1785945600000)
+         :seon.operator.state/roots []
+         :seon.operator.state/processes []
+         :seon.operator.state/unclaimed []
+         :seon.operator.state/claim-errors [claim-error]}]
+    (with-redefs [operator.state/census-observations (constantly observations)]
+      (let [result
+            (operator/census-processes!
+             {:seon.operator/repository-root "."
+              :seon.operator/managed-root "tmp/operator-census"})]
+        (is (= :seon.operator/process-census-incomplete
+               (:seon.error/kind result)))
+        (is (= [claim-error]
+               (get-in result
+                       [:seon.error/data
+                        :seon.operator.process-census/result
+                        :seon.operator.process-census/claim-errors])))))))
 
 (deftest start-refusals-are-flat-and-never-stop-the-running-instance
   (let [stop-calls (atom [])

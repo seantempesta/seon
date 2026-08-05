@@ -36,6 +36,13 @@
                  :existence-request
                  [:map
                   [:seon.operator/repository-root :seon.operator/repository-root]],
+                 :process-census-request
+                 [:map
+                  [:seon.operator/repository-root :seon.operator/repository-root]
+                  [:seon.operator/managed-root :seon.operator/managed-root]
+                  [:seon.config.operator/event-silence-backstop-ms
+                   {:optional true}
+                   :seon.config.operator/event-silence-backstop-ms]],
                  :low-space? :boolean,
                  :footprint
                  [:map

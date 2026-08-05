@@ -1,0 +1,13 @@
+#:seon.dev.process{:pid [:int {:min 1}]
+                   :start-instant [:string {:min 1}]
+                   :generation :uuid
+                   :root :seon.operator/managed-root
+                   :identity
+                   [:map
+                    [:seon.dev.process/pid :seon.dev.process/pid]
+                    [:seon.dev.process/start-instant
+                     :seon.dev.process/start-instant]
+                    [:seon.dev.process/root :seon.dev.process/root]
+                    [:seon.dev.process/generation
+                     {:optional true}
+                     :seon.dev.process/generation]]}

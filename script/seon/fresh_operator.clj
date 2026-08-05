@@ -137,30 +137,17 @@
 (defn- read-process-records
   [root]
   (let [canonical-root (.getCanonicalPath (java.io.File. root))
-        directory (process-record-directory canonical-root)]
-    (if-not (fs/directory? directory)
-      {:seon.fresh-operator/process-records []
-       :seon.fresh-operator/process-record-errors []}
-      (reduce
-       (fn [result path]
-         (try
-           (let [record (state/read-edn path)]
-            (if (and (valid-process-record? record)
-                     (= canonical-root (:seon.operator.process-record/root record)))
-              (update result :seon.fresh-operator/process-records conj record)
-              (if (valid-process-record? record)
-                result
-                (update result :seon.fresh-operator/process-record-errors conj
-                        {:seon.fresh-operator/path (str path)
-                         :seon.fresh-operator/error
-                         "The recorded child process file is invalid."}))))
-           (catch Throwable error
-             (update result :seon.fresh-operator/process-record-errors conj
-                     {:seon.fresh-operator/path (str path)
-                      :seon.fresh-operator/error (ex-message error)}))))
-       {:seon.fresh-operator/process-records []
-        :seon.fresh-operator/process-record-errors []}
-       (sort-by str (fs/list-dir directory))))))
+        {records :records errors :errors}
+        (operator.state/process-claims (repository-root))]
+    {:seon.fresh-operator/process-records
+     (filterv #(= canonical-root
+                  (:seon.operator.process-record/root %))
+              records)
+     :seon.fresh-operator/process-record-errors
+     (mapv (fn [error]
+             {:seon.fresh-operator/path (:seon.operator.claim/path error)
+              :seon.fresh-operator/error (:seon.error/message error)})
+           errors)}))
 
 (defn- write-process-record!
   [root record]
@@ -484,129 +471,27 @@
                {:seon.config/path (str selected)}))
       manifest)))
 
-(defn- process-start-instant
-  [pid]
-  (try
-    (let [optional (java.lang.ProcessHandle/of (long pid))]
-      (when (.isPresent optional)
-        (let [handle (.get optional)
-              start (.startInstant (.info handle))]
-          (when (and (.isAlive handle) (.isPresent start))
-            (.get start)))))
-    (catch Throwable _
-      nil)))
-
 (defn- alive?
   [advertisement]
-  (let [recorded (:seon.boot/start-instant advertisement)
-        current (process-start-instant (:seon.boot/pid advertisement))]
-    (and (inst? recorded)
-         current
-         (= (inst-ms recorded)
-            (.toEpochMilli ^Instant current)))))
-
-(defn- read-advertisement-path
-  [path]
-  (try
-    (let [value (edn/read-string (slurp (str path)))]
-      (when (map? value) value))
-    (catch Throwable _
-      nil)))
+  (operator.state/advertisement-identity-alive? advertisement))
 
 (defn- advertisement
   [root name]
-  (read-advertisement-path (advertisement-path root name)))
+  (operator.state/read-advertisement root name))
 
 (defn- advertisement-observations
   [root]
-  (let [root (.getCanonicalPath (java.io.File. root))
-        directory (cluster-root root)]
-    (if-not (fs/directory? directory)
-      []
-      (->> (fs/list-dir directory)
-           (keep
-            (fn [cluster-dir]
-              (when (fs/directory? cluster-dir)
-                (let [path (fs/path cluster-dir "prepl.edn")
-                      advertised? (fs/regular-file? path)]
-                  (when advertised?
-                    (let [value (read-advertisement-path path)]
-                      {:seon.fresh-operator/name
-                       (str (fs/file-name cluster-dir))
-                       :seon.fresh-operator/root root
-                       :seon.fresh-operator/path (str path)
-                       :seon.fresh-operator/advertised? true
-                       :seon.fresh-operator/advertisement value
-                       :seon.fresh-operator/process-alive?
-                       (boolean (alive? value))}))))))
-           (sort-by :seon.fresh-operator/name)
-           vec))))
-
-(defn- optional-value
-  [optional]
-  (when (.isPresent optional)
-    (.get optional)))
-
-(defn- operator-launch-process?
-  [^java.lang.ProcessHandle handle]
-  (let [info (.info handle)
-        command (optional-value (.command info))
-        arguments (some-> (optional-value (.arguments info)) vec)
-        [main option form] (take-last 3 arguments)]
-    (and (.isAlive handle)
-         (string? command)
-         (str/ends-with? command "/java")
-         (= "clojure.main" main)
-         (= "-e" option)
-         (string? form)
-         (str/includes? form "(seon.cluster/start!")
-         (str/includes? form "\"ready — instrumented\"")
-         (str/includes? form
-                        "(clojure.core/deref (clojure.core/promise))"))))
-
-(defn- legacy-operator-arguments?
-  "True for the retired multi-process JVM roles that a fresh operator must
-   report instead of losing outside its advertisement census."
-  [arguments]
-  (let [arguments (vec arguments)]
-    (boolean
-     (or
-      (some
-       (fn [argument]
-         (and
-          (string? argument)
-          (some #(str/includes? argument %)
-                ["seon.web.server"
-                 "seon.host"
-                 "seon-database-server-standalone.jar"])))
-       arguments)
-      (and (some #{"shadow.cljs.devtools.cli"} arguments)
-           (some #{"watch"} arguments))))))
-
-(defn- operator-process?
-  [^java.lang.ProcessHandle handle]
-  (or
-   (operator-launch-process? handle)
-   (let [info (.info handle)
-         command (optional-value (.command info))
-         arguments (some-> (optional-value (.arguments info)) vec)]
-     (and (.isAlive handle)
-          (string? command)
-          (str/ends-with? command "/java")
-          (legacy-operator-arguments? arguments)))))
-
-(defn- seon-cluster-jvm?
-  [^java.lang.ProcessHandle handle]
-  (let [info (.info handle)
-        command (optional-value (.command info))
-        arguments (some-> (optional-value (.arguments info)) vec)
-        form (last arguments)]
-    (and (.isAlive handle)
-         (string? command)
-         (str/ends-with? command "/java")
-         (string? form)
-         (str/includes? form "seon.cluster")
-         (str/includes? form "start!"))))
+  (mapv
+   (fn [observation]
+     {:seon.fresh-operator/name (:seon.operator.state/name observation)
+      :seon.fresh-operator/root (:seon.operator.state/root observation)
+      :seon.fresh-operator/path (:seon.operator.state/path observation)
+      :seon.fresh-operator/advertised? true
+      :seon.fresh-operator/advertisement
+      (:seon.operator.state/advertisement observation)
+      :seon.fresh-operator/process-alive?
+      (:seon.operator.state/alive? observation)})
+   (operator.state/advertisement-observations root)))
 
 (defn- live-process-handle
   [pid]
@@ -618,125 +503,24 @@
     (catch Throwable _
       nil)))
 
-(defn- process-property
-  [^java.lang.ProcessHandle handle property-name]
-  (let [arguments (some-> (optional-value (.arguments (.info handle))) vec)]
-    (some
-     (fn [argument]
-       (let [prefix (str "-D" property-name "=")]
-         (when (str/starts-with? argument prefix)
-           (subs argument (count prefix)))))
-     arguments)))
-
-(defn- process-root-property
-  [handle]
-  (process-property handle "seon.operator.root"))
-
-(defn- proc-working-directory
-  [pid]
-  (try
-    (let [path (java.nio.file.Path/of
-                (str "/proc/" pid "/cwd")
-                (make-array String 0))]
-      (when (java.nio.file.Files/isSymbolicLink path)
-        (str (java.nio.file.Files/readSymbolicLink path))))
-    (catch Throwable _
-      nil)))
-
-(defn- lsof-working-directory
-  [pid]
-  (try
-    (let [process
-          (.start
-           (ProcessBuilder.
-            ^java.util.List
-            ["lsof" "-a" "-p" (str pid) "-d" "cwd" "-Fn"]))
-          completed? (.waitFor process 3 TimeUnit/SECONDS)]
-      (when-not completed?
-        (.destroyForcibly process))
-      (when completed?
-        (some
-         #(when (str/starts-with? % "n") (subs % 1))
-         (str/split-lines (slurp (.getInputStream process))))))
-    (catch Throwable _
-      nil)))
-
-(defn- process-root
-  [^java.lang.ProcessHandle handle]
-  (some-> (or (process-root-property handle)
-              (proc-working-directory (.pid handle))
-              (lsof-working-directory (.pid handle)))
-          java.io.File.
-          .getCanonicalPath))
-
 (defn- operator-process-observations
   []
-  (with-open [processes (java.lang.ProcessHandle/allProcesses)]
-    (->> (iterator-seq (.iterator processes))
-         (filter operator-process?)
-         (keep
-          (fn [^java.lang.ProcessHandle handle]
-            (when-let [start (process-start-instant (.pid handle))]
-              (let [generation-text
-                    (process-property handle "seon.operator.generation")]
-                {:seon.fresh-operator/root (process-root handle)
-                 :seon.fresh-operator/generation
-                 (when generation-text
-                   (try (parse-uuid generation-text)
-                        (catch Throwable _ nil)))
-                 :seon.fresh-operator/log
-                 (process-property handle "seon.operator.log")
-                 :seon.fresh-operator/cache-path
-                 (process-property handle "seon.dependency-cache.path")
-                 :seon.fresh-operator/process
-                 {:seon.boot/pid (.pid handle)
-                  :seon.boot/start-instant (java.util.Date/from start)
-                  :seon.fresh-operator/alive? true}}))))
-         (sort-by #(get-in % [:seon.fresh-operator/process :seon.boot/pid]))
-         vec)))
-
-(defn- observation->process-record
-  [observation]
-  (when-let [root (:seon.fresh-operator/root observation)]
-    (let [pid
-          (get-in observation [:seon.fresh-operator/process :seon.boot/pid])
-          start-instant
-          (get-in observation
-                  [:seon.fresh-operator/process
-                   :seon.boot/start-instant])
-          generation
-          (or
-           (:seon.fresh-operator/generation observation)
-           (java.util.UUID/nameUUIDFromBytes
-            (.getBytes (str root "\u0000" pid "\u0000" start-instant)
-                       java.nio.charset.StandardCharsets/UTF_8)))]
-      {:seon.operator.process-record/generation generation
-       :seon.boot/pid pid
-       :seon.boot/start-instant start-instant
-       :seon.operator.process-record/root root
-       :seon.operator.process-record/cache-path
-       (:seon.fresh-operator/cache-path observation)
-       :seon.operator.process-record/log
-       (or (:seon.fresh-operator/log observation)
-           (str (fs/path root "data" "clusters" "logs"
-                         (str "recovered-" pid ".log"))))})))
+  (mapv
+   (fn [process]
+     {:seon.fresh-operator/root (:seon.operator.state/root process)
+      :seon.fresh-operator/generation
+      (:seon.operator.state/generation process)
+      :seon.fresh-operator/process
+      {:seon.boot/pid (:seon.boot/pid process)
+       :seon.boot/start-instant (:seon.boot/start-instant process)
+       :seon.fresh-operator/alive? true}})
+   (operator.state/observed-property-processes)))
 
 (defn- reconcile-process-records!
   [root]
-  (let [canonical-root (.getCanonicalPath (java.io.File. root))
-        existing (read-process-records canonical-root)
-        generations
-        (into #{}
-              (map :seon.operator.process-record/generation)
-              (:seon.fresh-operator/process-records existing))]
-    (doseq [observation (operator-process-observations)
-            :when (= canonical-root (:seon.fresh-operator/root observation))
-            :let [record (observation->process-record observation)]
-            :when (and record
-                       (not (contains? generations
-                                       (:seon.operator.process-record/generation record))))]
-      (write-process-record! canonical-root record))
-    (read-process-records canonical-root)))
+  ;; Observation never manufactures an authorization claim. A launcher writes
+  ;; the external process record before the process becomes actionable.
+  (read-process-records root))
 
 (defn- branch-cluster-name
   [branch]
@@ -908,79 +692,85 @@
     root {:seon.fresh-operator/probe-jvms? true}))
   ([root options]
    (let [root (.getCanonicalPath (java.io.File. root))
-        probe-jvms?
-        (not= false (:seon.fresh-operator/probe-jvms? options))
-        {:seon.fresh-operator/keys
-         [process-records process-record-errors]}
-        (reconcile-process-records! root)
-        recorded-processes
-        (into
-         []
-         (map
-          (fn [record]
-            {:seon.fresh-operator/root (:seon.operator.process-record/root record)
-             :seon.fresh-operator/process-record record
-             :seon.fresh-operator/process (record->boot-process record)}))
-         process-records)
-        discovered-processes
-        (filterv
-         #(= root (:seon.fresh-operator/root %))
-         (operator-process-observations))
-        ;; An operator root is sovereign. Cross-root JVMs and advertisements
-        ;; are outside this invocation's observation graph, not merely filtered
-        ;; from its destructive selection after probing.
-        roots #{root}
-        advertisements (into [] (mapcat advertisement-observations) roots)
-        advertised-processes
-        (into
-         []
-         (keep
-          (fn [observation]
-            (when-let [handle
-                       (and
-                        (:seon.fresh-operator/process-alive? observation)
-                        (live-process-handle
-                         (get-in observation
-                                 [:seon.fresh-operator/advertisement
-                                  :seon.boot/pid])))]
-              (when (seon-cluster-jvm? handle)
-                {:seon.fresh-operator/root
-                 (:seon.fresh-operator/root observation)
-                 :seon.fresh-operator/process
-                 (assoc
-                  (select-keys
-                   (:seon.fresh-operator/advertisement observation)
-                   [:seon.boot/pid :seon.boot/start-instant])
-                  :seon.fresh-operator/alive? true)}))))
-         advertisements)
-        processes
-        (->> (concat discovered-processes advertised-processes
-                     recorded-processes)
-             (reduce
-              (fn [by-process process]
-                (assoc
-                 by-process
-                 [(get-in process [:seon.fresh-operator/process
-                                   :seon.boot/pid])
-                  (get-in process [:seon.fresh-operator/process
-                                   :seon.boot/start-instant])]
-                 process))
-              {})
-             vals
-             (sort-by #(get-in % [:seon.fresh-operator/process
-                                  :seon.boot/pid]))
-             vec)
-        jvms
-        (into
-         []
-         (map #(if probe-jvms?
-                 (observe-jvm % advertisements)
-                 (assoc % :seon.fresh-operator/reachable? false)))
-         processes)]
-    {:seon.fresh-operator/advertisements advertisements
-     :seon.fresh-operator/jvms jvms
-     :seon.fresh-operator/process-records process-records
-     :seon.fresh-operator/process-record-errors process-record-errors})))
+         probe-jvms?
+         (not= false (:seon.fresh-operator/probe-jvms? options))
+         observations
+         (operator.state/census-observations
+          {:seon.operator/repository-root (str (repository-root))
+           :seon.operator/managed-root root
+           :seon.config.operator/event-silence-backstop-ms
+           (operator-silence-backstop-ms {})})
+         process-records
+         (into
+          []
+          (comp
+           (keep :seon.operator.state/process-record)
+           (filter #(= root (:seon.operator.process-record/root %))))
+          (:seon.operator.state/processes observations))
+         process-record-errors
+         (mapv
+          (fn [error]
+            {:seon.fresh-operator/path (:seon.operator.claim/path error)
+             :seon.fresh-operator/error (:seon.error/message error)})
+          (:seon.operator.state/claim-errors observations))
+         advertisements
+         (into
+          []
+          (comp
+           (filter #(= root (:seon.operator.state/root %)))
+           (map
+            (fn [observation]
+              {:seon.fresh-operator/name (:seon.operator.state/name observation)
+               :seon.fresh-operator/root (:seon.operator.state/root observation)
+               :seon.fresh-operator/path (:seon.operator.state/path observation)
+               :seon.fresh-operator/advertised? true
+               :seon.fresh-operator/advertisement
+               (:seon.operator.state/advertisement observation)
+               :seon.fresh-operator/process-alive?
+               (:seon.operator.state/alive? observation)})))
+          (:seon.operator.state/advertisements observations))
+         claimed-processes
+         (into
+          []
+          (comp
+           (filter #(= root (:seon.operator.state/root %)))
+           (map
+            (fn [process]
+              {:seon.fresh-operator/root (:seon.operator.state/root process)
+               :seon.fresh-operator/process-record
+               (:seon.operator.state/process-record process)
+               :seon.fresh-operator/process
+               {:seon.boot/pid (:seon.boot/pid process)
+                :seon.boot/start-instant (:seon.boot/start-instant process)
+                :seon.fresh-operator/alive?
+                (:seon.operator.state/alive? process)}})))
+          (:seon.operator.state/processes observations))
+         unclaimed-processes
+         (into
+          []
+          (comp
+           (filter #(= root (:seon.operator.state/root %)))
+           (map
+            (fn [process]
+              {:seon.fresh-operator/root (:seon.operator.state/root process)
+               :seon.fresh-operator/process
+               {:seon.boot/pid (:seon.boot/pid process)
+                :seon.boot/start-instant (:seon.boot/start-instant process)
+                :seon.fresh-operator/alive? true}})))
+          (:seon.operator.state/unclaimed observations))
+         processes (vec (sort-by #(get-in % [:seon.fresh-operator/process
+                                             :seon.boot/pid])
+                                 (concat claimed-processes
+                                         unclaimed-processes)))
+         jvms
+         (mapv #(if probe-jvms?
+                  (observe-jvm % advertisements)
+                  (assoc % :seon.fresh-operator/reachable? false))
+               processes)]
+     {:seon.fresh-operator/advertisements advertisements
+      :seon.fresh-operator/jvms jvms
+      :seon.fresh-operator/process-records process-records
+      :seon.fresh-operator/process-record-errors process-record-errors})))
 
 (defn- expected-branch
   [cluster-name]
@@ -1523,7 +1313,7 @@
              (loop [cause# failure#]
                (when cause#
                  (let [data# (ex-data cause#)]
-                   (if (= :sweep-in-progress (:type data#))
+                   (if (= :sweep-in-progress (:seon.error/kind data#))
                      data#
                      (recur (ex-cause cause#))))))]
          (if-not sweep-data#

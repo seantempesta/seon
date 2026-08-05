@@ -145,6 +145,22 @@
   [{repository-root :seon.operator/repository-root}]
   (attempt #(state/existence repository-root)))
 
+(defn census-processes!
+  "Observe external claims, exact OS identities, and advertisements."
+  {:malli/schema
+   [:=> [:cat :seon.operator/process-census-request]
+    [:or :seon.operator.process-census/result :seon.error/value]]}
+  [request]
+  (attempt
+   #(let [result (state/process-census request)]
+      (if (:seon.operator.process-census/complete? result)
+        result
+        (throw
+         (ex-info
+          "The process census could not read every external claim."
+          {:seon.error/kind :seon.operator/process-census-incomplete
+           :seon.operator.process-census/result result}))))))
+
 (defn- low-space?
   [footprint request]
   (or (when-let [minimum (:seon.config.maintenance/min-usable-bytes request)]

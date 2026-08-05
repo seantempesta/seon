@@ -1,0 +1,57 @@
+#:seon.operator.process-census{:alive? :boolean
+                               :responsive? :boolean
+                               :advertisements
+                               [:vector :seon.boot/cluster-name]
+                               :process
+                               [:and
+                                :seon.dev.process/identity
+                                [:map
+                                 [:seon.dev.process/generation
+                                  :seon.dev.process/generation]
+                                 [:seon.operator.process-census/alive?
+                                  :seon.operator.process-census/alive?]
+                                 [:seon.operator.process-census/responsive?
+                                  :seon.operator.process-census/responsive?]
+                                 [:seon.operator.process-census/advertisements
+                                  :seon.operator.process-census/advertisements]]]
+                               :root
+                               [:map
+                                [:seon.operator.claim/id
+                                 :seon.operator.claim/id]
+                                [:seon.operator.claim/root
+                                 :seon.operator.claim/root]
+                                [:seon.operator.claim/creator
+                                 [:map
+                                  [:seon.dev.process/pid
+                                   :seon.dev.process/pid]
+                                  [:seon.dev.process/start-instant
+                                   :seon.dev.process/start-instant]]]
+                                [:seon.operator.claim/reap-on-owner-exit?
+                                 :seon.operator.claim/reap-on-owner-exit?]]
+                               :observed-at :inst
+                               :roots [:vector :seon.operator.process-census/root]
+                               :processes
+                               [:vector :seon.operator.process-census/process]
+                               :dead [:vector :seon.dev.process/identity]
+                               :unresponsive [:vector :seon.dev.process/identity]
+                               :unclaimed [:vector :seon.dev.process/identity]
+                               :claim-errors [:vector :seon.error/value]
+                               :complete? :boolean
+                               :result
+                               [:map
+                                [:seon.operator.process-census/observed-at
+                                 :seon.operator.process-census/observed-at]
+                                [:seon.operator.process-census/roots
+                                 :seon.operator.process-census/roots]
+                                [:seon.operator.process-census/processes
+                                 :seon.operator.process-census/processes]
+                                [:seon.operator.process-census/dead
+                                 :seon.operator.process-census/dead]
+                                [:seon.operator.process-census/unresponsive
+                                 :seon.operator.process-census/unresponsive]
+                                [:seon.operator.process-census/unclaimed
+                                 :seon.operator.process-census/unclaimed]
+                                [:seon.operator.process-census/claim-errors
+                                 :seon.operator.process-census/claim-errors]
+                                [:seon.operator.process-census/complete?
+                                 :seon.operator.process-census/complete?]]}
