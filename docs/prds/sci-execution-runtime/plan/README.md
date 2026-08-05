@@ -673,6 +673,20 @@ and the GIT FRAMING adopted (conversational, owner-ruled):**
   immutable content-addressed cache design closes the class (probe:
   3,628 dynamic-cache entries cleared, writer still committed from its
   immutable digest directory; `5e5294228`).
+- **PRIVATE IS AN ATTRIBUTE, NOT A WALL (owner, same day, verbatim:
+  "It's also a function it just has a private attribute")**: ruling #20
+  restored to its full letter — ANY indexed function resolves and is
+  callable from the evaluation world: contract predicates, agent evals,
+  everything. `:seon.fn/private?` is a rendering/curation fact (hidden
+  from doc/context surfaces by default; a nudge to message the owner)
+  and NEVER an execution boundary. The install seam's public-only
+  publication (ADDENDUM 19's reachability change) is superseded: its
+  custody motivation is solved structurally by the never-installed
+  operator namespaces, which remain the one real wall. The custody
+  stability properties must be RE-PROVEN under full publication, never
+  deleted. Provenance: P12's strict contract compilation exposed a
+  schema referencing the private `seon.flow/atom-reference?` — the
+  correct fix resolves it, not a public-predicates-only admission rule.
 - **AMBIENT INJECTION r2 IS RULED (owner, same day):**
   [ambient-injection-prd-2026-08-05-r2-draft.md](ambient-injection-prd-2026-08-05-r2-draft.md)
   graduates from draft with four rulings. (1) SEAM: one optional
