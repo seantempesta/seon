@@ -1072,10 +1072,7 @@
         repeated-fault
         {::flow/pid :eval
          ::flow/op :step
-         ::flow/ex (ex-info repeated-message
-                            {:seon.error/kind ::repeated-failure
-                             :seon.flow-test/payload
-                             (apply str (repeat 10000 "x"))})}
+         ::flow/ex (StackOverflowError. repeated-message)}
         distinct-fault
         {::flow/pid :eval
          ::flow/op :step
@@ -1084,39 +1081,55 @@
         (fn [_database _cluster-name]
           {:seon.config.error/recurrence-limit 3
            :seon.config.eval.result/blob-threshold inline-ceiling})]
-    (testing "a writable database retains one bounded fact per signature"
+    (testing "132 equal faults produce one bounded durable fact and stderr face"
       (test-support/with-database
         (fn [connection]
           (with-redefs [config/effective effective]
-            (let [[first-fact first-outcome]
-                  (commit-core-fault! connection "fault-test" "process-1"
-                                      caps repeated-fault)
-                  [duplicate-fact duplicate-outcome]
-                  (commit-core-fault! connection "fault-test" "process-1"
-                                      caps repeated-fault)
-                  [distinct-fact distinct-outcome]
-                  (commit-core-fault! connection "fault-test" "process-1"
-                                      caps distinct-fault)
-                  signatures
-                  (db/q '[:find ?signature
-                          :where [_ :seon.error/signature ?signature]]
-                        @connection)]
-              (is (= ::sut/committed first-outcome))
-              (is (= ::sut/already-committed duplicate-outcome))
-              (is (= ::sut/committed distinct-outcome))
-              (is (= (:seon.error/signature first-fact)
-                     (:seon.error/signature duplicate-fact)))
-              (is (not= (:seon.error/signature first-fact)
-                        (:seon.error/signature distinct-fact)))
-              (is (= 2 (count signatures)))
-              (is (= #{1} (set (vals (frequencies (map first signatures)))))
-                  "each content signature owns one durable fact")
-              (is (= inline-ceiling
-                     (count (:seon.error/message first-fact))))
-              (is (str/ends-with? (:seon.error/message first-fact) "…"))
-              (is (true? (:seon.error/capped? first-fact)))
-              (is (< (count (:seon.error/data-edn first-fact)) 10000)
-                  "the normalizer caps the retained stack and ex-data"))))))
+            (let [initial-state
+                  (committer-step
+                   {::sut/fault-channel (async/chan 1)
+                    ::sut/completion (async/promise-chan)
+                    ::sut/read-core-error-mode (constantly :panic)
+                    ::sut/commit-fault!
+                    #(commit-core-fault! connection "fault-test" "process-1"
+                                         caps %)
+                    ::sut/panic!
+                    #(emit-core-fault!
+                      {:seon.config.eval.result/blob-threshold inline-ceiling}
+                      %)})
+                  stderr-writer (java.io.StringWriter.)
+                  final-state
+                  (binding [*err* stderr-writer]
+                    (reduce
+                     (fn [state _]
+                       (first
+                        (committer-step state ::sut/core-fault repeated-fault)))
+                     initial-state
+                     (range 132)))
+                  facts
+                  (db/q '[:find ?signature ?message ?capped? ?data-edn
+                          :where
+                          [?error :seon.error/signature ?signature]
+                          [?error :seon.error/message ?message]
+                          [?error :seon.error/capped? ?capped?]
+                          [?error :seon.error/data-edn ?data-edn]]
+                        @connection)
+                  [_signature message capped? data-edn] (first facts)
+                  lines (str/split-lines (str stderr-writer))]
+              (is (= 1 (count facts))
+                  "all 132 equal envelopes own one durable fact")
+              (is (= 1 (::sut/committed final-state)))
+              (is (= 1 (::sut/panicked final-state)))
+              (is (= 1 (count (::sut/seen-signatures final-state))))
+              (is (= inline-ceiling (count message)))
+              (is (str/ends-with? message "…"))
+              (is (true? capped?))
+              (is (< (count data-edn) 10000)
+                  "the normalizer caps the retained stack and ex-data")
+              (is (= 1 (count lines))
+                  "all 132 equal envelopes own one emitted face")
+              (is (<= (count (first lines)) (+ (* 2 inline-ceiling) 192))
+                  "the emitted face remains bounded"))))))
 
     (testing "a rebuilt proc does not print a signature already durable"
       (test-support/with-database
