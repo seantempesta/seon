@@ -16,12 +16,13 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (16)
+## Blocker (17)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Observe and claim every deletable directory](deletable-directories-have-no-claim-or-size-facts.md) | blocker | operator directory-claim governor wave |
 | [Preserve every live bootstrap drive root and raw report](shared-bootstrap-drive-root-disappears-during-live-experiments.md) | blocker | bootstrap drive root-isolation wave |
+| [Make bootstrap O4 wait for the causal delegation](bootstrap-o4-stops-before-causal-delegation-settles.md) | blocker | bootstrap delegation-drive repair wave |
 | [Refuse malformed SSE data before it can change agent code](malformed-sse-data-can-change-agent-code.md) | blocker | AI provider-integrity wave |
 | [Bound work submission before Flow injection can block](work-submission-can-block-before-its-time-limit.md) | blocker | Flow bounded-submission wave |
 | [Cut the ~42 MB of store each eval sample costs](eval-samples-cost-42mb-of-store-each.md) | blocker | eval-scale economics wave |
