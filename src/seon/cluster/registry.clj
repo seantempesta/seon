@@ -67,7 +67,6 @@
             [datahike.connections :as connections]
             [datahike.store :as datahike.store]
             [konserve.core :as k]
-            [konserve.gc :as konserve.gc]
             [seon.cluster.store :as store]
             [seon.schema.edn :as schema.edn]))
 
@@ -175,11 +174,19 @@
   {:malli/schema [:=> [:cat :seon.cluster.registry/branch-request]
                   :seon.cluster.registry/branch-result]}
   [{:keys [:seon.store/store :seon.store/branch]
-    source :seon.cluster.registry/from}]
+    source :seon.cluster.registry/from
+    reachability-permit :datahike.gc-guard/reachability-permit}]
   (if (contains? (roster store) branch)
     {:seon.store/branch branch :seon.cluster/created? false}
     (try
-      (d/branch! (:seon.store/connection-object store) source branch)
+      (if reachability-permit
+        (d/branch! (:seon.store/connection-object store)
+                   source
+                   branch
+                   {:sync? true
+                    :datahike.gc-guard/reachability-permit
+                    reachability-permit})
+        (d/branch! (:seon.store/connection-object store) source branch))
       {:seon.store/branch branch :seon.cluster/created? true}
       (catch clojure.lang.ExceptionInfo failure
         (case (:type (ex-data failure))
@@ -210,7 +217,8 @@
   {:malli/schema [:=> [:cat :seon.cluster.registry/cluster-request]
                   :seon.cluster.registry/branch-result]}
   [{:keys [:seon.store/store :seon.boot/cluster-name]
-    source-commit :seon.source/commit-id}]
+    source-commit :seon.source/commit-id
+    reachability-permit :datahike.gc-guard/reachability-permit}]
   (when-not (commit-present? store source-commit)
     (refuse! ::source-absent
              (str "the source commit " source-commit " is unavailable")
@@ -219,7 +227,8 @@
               :seon.boot/cluster-name cluster-name}))
   (branch! {:seon.store/store store
             :seon.cluster.registry/from source-commit
-            :seon.store/branch (cluster-branch cluster-name)}))
+            :seon.store/branch (cluster-branch cluster-name)
+            :datahike.gc-guard/reachability-permit reachability-permit}))
 
 (defn reset-cluster!
   "Return a cluster to an exact source commit.
@@ -283,8 +292,6 @@
           (throw failure)))))
   nil)
 
-(defonce ^:private collect-monitor (Object.))
-
 (defn- blob-digest-attributes
   [db]
   (into []
@@ -319,10 +326,10 @@
         (d/release-materialized-db db)))))
 
 (defn- referenced-blobs
-  [store]
+  [store branches]
   (into #{}
         (mapcat #(branch-blobs store %))
-        (roster store)))
+        branches))
 
 (defn collect!
   "Collect this store's unreachable objects; returns how many were swept.
@@ -335,25 +342,19 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.store/store] :seon.cluster.registry/swept]
-    [:=> [:cat :seon.store/store :inst] :seon.cluster.registry/swept]]}
+    [:=> [:cat :seon.store/store :inst] :seon.cluster.registry/swept]
+    [:=> [:cat :seon.store/store :inst [:map]]
+     :seon.cluster.registry/swept]]}
   ([store]
    (collect! store (java.util.Date. 0)))
   ([store remove-before]
-   (locking collect-monitor
-     (let [blob-keys (referenced-blobs store)
-           sweep! konserve.gc/sweep!]
-      ;; Datahike refers this exact Var. Rebinding it keeps Datahike's one
-      ;; safe-point mark/sweep operation intact while extending the mark by
-      ;; one fact-derived hop. `collect-monitor` serializes Seon's sole GC
-      ;; entry point so no store observes another store's derived set.
-      (with-redefs [konserve.gc/sweep!
-                    (fn
-                      ([konserve reachable cutoff]
-                       (sweep! konserve (into reachable blob-keys) cutoff))
-                      ([konserve reachable cutoff batch-size]
-                       (sweep! konserve
-                               (into reachable blob-keys)
-                               cutoff
-                               batch-size)))]
-        (count @(d/gc-storage (:seon.store/connection-object store)
-                              remove-before)))))))
+   (collect! store remove-before {}))
+  ([store remove-before options]
+   (count
+    @(d/gc-storage
+      (:seon.store/connection-object store)
+      remove-before
+      (assoc options
+             :datahike.gc/reachable-extension
+             (fn [{:datahike.gc/keys [branches]}]
+               (referenced-blobs store branches)))))))
