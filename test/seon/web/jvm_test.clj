@@ -189,10 +189,18 @@
           (recur (+ offset (alength ^bytes octets))))))
     (.toByteArray output)))
 
+(defn- publish-result!
+  [connection result]
+  (blob/with-publication!
+   connection (:seon.blob/staged-writes result)
+   #(dissoc result :seon.blob/staged-writes)))
+
 (defn- fetch
   [connection request effective]
   (binding [db/*conn* connection]
-    ((handler-var 'seon.web.jvm 'fetch) request effective)))
+    (publish-result!
+     connection
+     ((handler-var 'seon.web.jvm 'fetch) request effective))))
 
 (defn- effect-context
   [connection]
@@ -301,6 +309,7 @@
                       {:my.web/query "web capability evidence"
                        :my.web/max-results 2}
                       effective)))
+                result (publish-result! connection result)
                 observed (deref search-request 1000 ::not-observed)
                 raw (exact-blob connection (:my.web/raw-response result)
                                 (:my.web/raw-response-bytes result))]
@@ -310,7 +319,7 @@
                     :body (json/write-str
                            {"q" "web capability evidence" "num" 2})}
                    observed))
-            (is (= 1 (:my.web/credits result)))
+            (is (= 1 (:my.web/credits result)) (pr-str result))
             (is (= 3 (:my.web/result-count result)))
             (is (= 2 (:my.web/returned result)))
             (is (= [{:my.web.result/title "First"
@@ -331,7 +340,9 @@
         (fn [{:keys [base-url]}]
           (db/transact!
            connection
-           [(merge {:seon.config/cluster "default"} (config base-url))
+           [(merge (seon-config/defaults)
+                   {:seon.config/cluster "default"}
+                   (config base-url))
             {:seon.cluster.agent/id "web-agent"}
             {:seon.cluster.run/id "web-receipt-run"
              :seon.cluster.run/agent
@@ -356,7 +367,7 @@
                         :in $ ?id
                         :where [?receipt :seon.effect/id ?id]]
                       @connection receipt-id)]
-            (is (= 1 (:my.web/credits result)))
+            (is (= 1 (:my.web/credits result)) (pr-str result))
             (is (= result stored-result))
             (is (= 1 receipt-count))
             (is (inst? (:seon.effect/opened-at receipt)))

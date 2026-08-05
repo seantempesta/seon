@@ -40,7 +40,11 @@
                 small (#'loop/settlement-result
                        {:seon.db/connection connection
                         :seon.sci.admit/caps caps}
-                       {:seon.cluster.eval/result-edn "42"})]
+                       {:seon.cluster.eval/result-edn "42"})
+                large
+                (blob/with-publication!
+                 connection (:seon.blob/staged-writes large)
+                 #(dissoc large :seon.blob/staged-writes))]
             (is (= (count full) (:seon.cluster.eval/result-size large)))
             (is (< (count (:seon.cluster.eval/result-edn large)) (count full)))
             (is (= [0 1 :seon.print/elided]

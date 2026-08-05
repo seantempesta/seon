@@ -77,7 +77,13 @@
          :seon.config.eval.result/blob-threshold 4096}])
       (binding [effect/*request-context*
                 {:seon.db/connection connection}]
-        (f connection (handler) effective-map)))))
+        (f connection
+           (fn [request effective]
+             (let [result ((handler) request effective)]
+               (blob/with-publication!
+                connection (:seon.blob/staged-writes result)
+                #(dissoc result :seon.blob/staged-writes))))
+           effective-map)))))
 
 (defn- sha-256
   [octets]

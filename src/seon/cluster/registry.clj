@@ -294,16 +294,32 @@
 
 (defn- blob-digest-attributes
   [db]
-  (into []
-        (keep (fn [[attribute serialized-form]]
-                (when (= :seon.blob/digest
-                         (edn/read-string serialized-form))
-                  attribute)))
-        (db/q '[:find ?attribute ?form
-               :where
-               [?schema :seon.schema/key ?attribute]
-               [?schema :seon.schema/form ?form]]
-             db)))
+  (let [forms
+        (into {}
+              (map (fn [[schema-key serialized-form]]
+                     [schema-key (edn/read-string serialized-form)]))
+              (db/q '[:find ?schema-key ?form
+                      :where
+                      [?schema :seon.schema/key ?schema-key]
+                      [?schema :seon.schema/form ?form]]
+                    db))
+        digest-schema?
+        (fn digest-schema? [form seen]
+          (cond
+            (= :seon.blob/digest form) true
+            (and (keyword? form)
+                 (not (contains? seen form)))
+            (when-let [referenced (get forms form)]
+              (digest-schema? referenced (conj seen form)))
+            (coll? form)
+            (boolean (some #(digest-schema? % seen) form))
+            :else false))]
+    (into []
+          (keep (fn [[attribute form]]
+                  (when (and (not= attribute :seon.blob/digest)
+                             (digest-schema? form #{attribute}))
+                    attribute)))
+          forms)))
 
 (defn- branch-blobs
   [store branch]

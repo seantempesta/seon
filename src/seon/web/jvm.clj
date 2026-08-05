@@ -422,10 +422,14 @@
                              {:my.web/query query})
 
                 :else
-                (merge {:my.web/query query
-                        :my.web/raw-response (:my.web.body/blob body)
-                        :my.web/raw-response-bytes (:my.web.body/bytes body)}
-                       projected)))))
+                (cond->
+                 (merge {:my.web/query query
+                         :my.web/raw-response (:my.web.body/blob body)
+                         :my.web/raw-response-bytes (:my.web.body/bytes body)}
+                        projected)
+                  (:seon.blob/staged-write captured)
+                  (assoc :seon.blob/staged-writes
+                         [(:seon.blob/staged-write captured)]))))))
         (catch java.net.http.HttpTimeoutException _
           (error-value :my.web/timeout
                        "The remote search request exceeded its configured deadline."
