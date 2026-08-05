@@ -16,12 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (16)
+## Blocker (15)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Preserve every live bootstrap drive root and raw report](shared-bootstrap-drive-root-disappears-during-live-experiments.md) | blocker | bootstrap drive root-isolation wave |
-| [Remove closed map contracts outside the canonical schema population](closed-map-contracts-survive-outside-schema-population.md) | blocker | open-maps accretion wave |
 | [Refuse malformed SSE data before it can change agent code](malformed-sse-data-can-change-agent-code.md) | blocker | AI provider-integrity wave |
 | [Bound work submission before Flow injection can block](work-submission-can-block-before-its-time-limit.md) | blocker | Flow bounded-submission wave |
 | [Cut the ~42 MB of store each eval sample costs](eval-samples-cost-42mb-of-store-each.md) | blocker | eval-scale economics wave |

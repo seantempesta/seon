@@ -16,6 +16,24 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**ADDENDUM — 2026-08-04, RULING #48 IS ENFORCED OPEN EVERYWHERE.** Commit
+`ce099ce79` removes every live first-party closed-map contract found by the
+repository-wide census, deletes the authored open-map refusal, makes config
+ignore extra keys while validating declared keys, and installs one standing
+guard over schema declarations and authored-contract admission paths. The
+bootstrap refusal/repair beat now demonstrates the surviving `:any` refusal
+and concrete repair. The plan digest changed: existing clusters retain their
+sovereign old plan, and only new populations receive this one. Focused proof
+passed 55 tests / 256 assertions plus the complete 47-test / 272-assertion turn
+suite. A newly populated isolated cluster persisted an open-map contracted
+function and returned `43` when called with an extra key; packaged form 8
+rendered `:seon.schema/undefined-contract`. The issue and exhaustive census are
+archived at
+`docs/seon/issues/archive/closed-map-contracts-survive-outside-schema-population.md`.
+The unrelated landed `seon.sci.eval-test` boundary remains red at 51 tests /
+243 assertions: five failures in the graph-derived `doc` face and acquired
+contract instrumentation; this wave did not edit that owner.
+
 **ADDENDUM — 2026-08-04, UNIVERSAL OUTPUT SINK MEASUREMENT LANDED.** Commit
 `6af14d45c` adds the two sparse leaf facts `:seon.fn/external-sink` and
 `:seon.fn/projection-boundary`, lifts them through the existing static index,
