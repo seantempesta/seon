@@ -38,6 +38,14 @@ exactly 40 = 40. This is the predicted three-authority failure, not a separate
 missing-consumer issue: both dials are real and consumed; only the copied test
 authorities are stale.
 
+The operator event-wait repair on 2026-08-05 supplied another direct example:
+the registry-derived `seon.config-test` accepted
+`:seon.config.operator/event-silence-backstop-ms` and passed all 15 tests and
+73 assertions without a roster edit, while the copied `application-ledger` in
+`test/seon/config_application_test.clj` has no row for it. That test file was
+outside the operator lane's ownership; the right repair remains this issue's
+derived application contract, not another hand-list entry.
+
 ## Owner
 
 The schema form properties for config leaves, plus program-graph facts for

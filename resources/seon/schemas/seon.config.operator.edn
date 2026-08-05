@@ -1,0 +1,1 @@
+#:seon.config.operator{:event-silence-backstop-ms [:int {:min 1}]}

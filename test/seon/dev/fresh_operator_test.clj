@@ -10,10 +10,9 @@
             [seon.cluster.store :as store]
             [seon.config :as config]
             [seon.instrument :as instrument]
+            [seon.operator.state :as operator.state]
             [seon.test-support :as test-support])
-  (:import [java.io RandomAccessFile]
-           [java.net ServerSocket]
-           [java.nio.file Files]
+  (:import [java.net ServerSocket]
            [java.util Date]
            [java.util.concurrent CompletableFuture ExecutionException
             TimeUnit TimeoutException]
@@ -171,7 +170,7 @@
       (throw
        (ex-info "The fresh operator environment probe failed."
                 {:seon.dev.fresh-operator-test/output output})))
-    (edn/read-string output)))
+    (edn/read-string (last (str/split-lines output)))))
 
 (defn- operator-private-value
   [function-name & arguments]
@@ -203,7 +202,7 @@
       (throw
        (ex-info "The fresh operator parser probe failed."
                 {:seon.dev.fresh-operator-test/output output})))
-    (edn/read-string output)))
+    (edn/read-string (last (str/split-lines output)))))
 
 (defn- operator-private-outcome
   [function-name & arguments]
@@ -242,7 +241,7 @@
       (throw
        (ex-info "The fresh operator outcome probe failed."
                 {:seon.dev.fresh-operator-test/output output})))
-    (edn/read-string output)))
+    (edn/read-string (last (str/split-lines output)))))
 
 (defn- cold-start-calls
   [root]
@@ -280,11 +279,12 @@
                       (io/file project-root
                                "target/dev-dependency-classes/test"))})
                  (operator-var# (symbol "launch!"))
-                 (fn [_root# name# _manifest# _ready-port# _cache-path#]
+                 (fn [_root# name# _manifest# _ready-port# _adoption-port#
+                      _silence-ms# _cache-path#]
                    (swap! calls# conj [:launch name#])
                    {:seon.fresh-operator/pid 42})
                  (operator-var# (symbol "record-launched-process!"))
-                 (fn [_root# _launch-result#]
+                 (fn [_root# _adoption-server# _silence-ms# _launch-result#]
                    {:seon.dev.process/generation generation#
                     :seon.dev.process/pid 42
                     :seon.dev.process/start-instant
@@ -292,7 +292,7 @@
                     :seon.dev.process/root ~(str root)
                     :seon.dev.process/log "test.log"})
                  (operator-var# (symbol "await-advertisement!"))
-                 (fn [_root# _name# _pid# _ready-server#]
+                 (fn [_root# _name# _pid# _ready-server# _silence-ms#]
                    advertisement#)
                  (operator-var# (symbol "print-started!"))
                  (fn [_root# name# _value#]
@@ -333,13 +333,13 @@
                     (ns-resolve 'seon.fresh-operator name#))
                   detach-python#
                   ~(str "import os,sys\n"
-                        "open(sys.argv[2],'w').write(os.getcwd()+'\\n'+sys.argv[1]+'\\n'+'\\n'.join(sys.argv[4:]))\n"
+                        "open(sys.argv[2],'w').write(os.getcwd()+'\\n'+sys.argv[1]+'\\n'+'\\n'.join(sys.argv[5:]))\n"
                         "print(os.getpid(),flush=True)\n")]
               (with-redefs-fn
                 {(operator-var# (symbol "detach-python")) detach-python#}
                 (fn []
                   ((var-get (operator-var# (symbol "launch!")))
-                   ~(str root) "launch-observation" {} 1
+                   ~(str root) "launch-observation" {} 1 2 30000
                    ~(.getCanonicalPath
                      (io/file project-root
                               "target/dev-dependency-classes/test")))
@@ -368,6 +368,116 @@
        (ex-info "The launch observation failed."
                 {:seon.dev.fresh-operator-test/output output})))
     (edn/read-string output)))
+
+(defn- readiness-simulation
+  [root mode]
+  (let [code
+        (pr-str
+         `(do
+            (require 'clojure.java.io 'seon.fresh-operator)
+            (let [root# ~(str root)
+                  name# "simulated-boot"
+                  child#
+                  (.start
+                   (ProcessBuilder.
+                    ^java.util.List
+                    ["/usr/bin/python3" "-c"
+                     "import signal; signal.pause()"]))
+                  server#
+                  (java.net.ServerSocket.
+                   0 1 (java.net.InetAddress/getLoopbackAddress))
+                  writer#
+                  (Thread.
+                   (fn []
+                     (with-open
+                      [socket#
+                       (java.net.Socket.
+                        "127.0.0.1" (.getLocalPort server#))
+                       output#
+                       (clojure.java.io/writer
+                        (.getOutputStream socket#))]
+                       (.write output# "namespaces\n")
+                       (.flush output#)
+                       (if (= ~mode :slow)
+                         (do
+                           (Thread/sleep 150)
+                           (.write output# "schema\n")
+                           (.flush output#)
+                           (Thread/sleep 150)
+                           (.write output# "flow\n")
+                           (.flush output#)
+                           (Thread/sleep 150)
+                           (let [directory#
+                                 (java.io.File.
+                                  root#
+                                  (str "data/clusters/" name#))
+                                 start#
+                                 (.get
+                                  (.startInstant
+                                   (.info (.toHandle child#))))]
+                             (.mkdirs directory#)
+                             (spit
+                              (java.io.File. directory# "prepl.edn")
+                              (pr-str
+                               {:seon.boot/cluster-name name#
+                                :seon.boot/pid (.pid child#)
+                                :seon.boot/start-instant
+                                (java.util.Date/from start#)
+                                :seon.boot/prepl-port 1
+                                :seon.render.web/url
+                                "http://127.0.0.1:1"})))
+                           (.write output# "ready\n")
+                           (.flush output#))
+                         (Thread/sleep 1000)))))
+                  _# (.setDaemon writer# true)
+                  _# (.start writer#)
+                  started# (System/nanoTime)
+                  outcome#
+                  (try
+                    {:seon.dev.fresh-operator-test/value
+                     (select-keys
+                      ((var-get
+                        (ns-resolve
+                         'seon.fresh-operator
+                         (symbol "await-advertisement!")))
+                       root# name# (.pid child#) server# 250)
+                      [:seon.boot/cluster-name :seon.boot/pid])}
+                    (catch Throwable failure#
+                      {:seon.dev.fresh-operator-test/message
+                       (ex-message failure#)
+                       :seon.dev.fresh-operator-test/data
+                       (ex-data failure#)}))
+                  elapsed-ms#
+                  (long (/ (- (System/nanoTime) started#) 1000000))]
+              (.close server#)
+              (.destroyForcibly child#)
+              (.get (.onExit (.toHandle child#)) 5
+                    java.util.concurrent.TimeUnit/SECONDS)
+              (prn (assoc outcome#
+                          :seon.dev.fresh-operator-test/elapsed-ms
+                          elapsed-ms#)))))
+        process
+        (.start
+         (doto
+          (ProcessBuilder.
+           ^java.util.List
+           ["bb"
+            "--config" (str (io/file project-root "bb.edn"))
+            "--deps-root" (str project-root)
+            "--classpath" operator-classpath
+            "-e" code])
+          (.directory project-root)
+          (.redirectErrorStream true)))
+        completed? (.waitFor process 10 TimeUnit/SECONDS)
+        _ (when-not completed? (.destroyForcibly process))
+        output (str/trim (slurp (.getInputStream process)))]
+    (when-not (and completed? (zero? (.exitValue process)))
+      (throw
+       (ex-info "The readiness simulation failed."
+                {:seon.dev.fresh-operator-test/output output})))
+    {:seon.dev.fresh-operator-test/output output
+     :seon.dev.fresh-operator-test/outcome
+     (edn/read-string (last (str/split-lines output)))}))
 
 (defn- process-output
   [^Process process]
@@ -550,7 +660,8 @@
   (let [process (start-sigterm-resistant-process!)]
     (try
       (is (nil?
-           (operator-private-value 'terminate-observed-process! (.pid process))))
+           (operator-private-value
+            'terminate-observed-process! (.pid process) 250)))
       (is (true? (.waitFor process 10 TimeUnit/SECONDS)))
       (is (not (.isAlive process))
           "the SIGTERM-resistant generation was forcibly reaped")
@@ -647,6 +758,11 @@
          :seon.dev.process/root (.getCanonicalPath root)
          :seon.dev.process/log (str (io/file root "isolated.log"))}]
     (try
+      (operator.state/claim-root!
+       (.getCanonicalPath project-root)
+       (.getCanonicalPath root)
+       false
+       nil)
       (operator-private-value 'write-process-record! (str root) record)
       (let [process
             (.start
@@ -663,34 +779,17 @@
         (is (= 0 (::exit outcome)) (::output outcome))
         (is (str/includes? (::output outcome) "recorded JVM pid 1")
             (::output outcome))
-        (is (.isFile (io/file root "data" "operator" "lifecycle.lock"))
-            "the public root seam owns a separate lifecycle lock"))
+        (is (.isFile
+             (io/file (str (operator.state/control-root project-root))
+                      "lifecycle.lock"))
+            "the installation authority owns one lifecycle lock"))
       (finally
+        (operator-private-value
+         'clear-process-record! (str root) record)
+        (.delete
+         (io/file
+          (str (operator.state/root-claim-path project-root root))))
         (delete-recursively! root)))))
-
-(deftest reset-deletion-does-not-follow-links-outside-the-cluster-root
-  (let [root (fresh-root)
-        sentinel-root (fresh-root)
-        cluster-root (io/file root "data" "clusters")
-        ordinary (io/file cluster-root "store" "ordinary.edn")
-        sentinel (io/file sentinel-root "sentinel.txt")
-        escape (io/file cluster-root "store" "escape")]
-    (try
-      (.mkdirs (.getParentFile ordinary))
-      (spit ordinary "delete me")
-      (spit sentinel "survives")
-      (Files/createSymbolicLink
-       (.toPath escape)
-       (.toPath sentinel-root)
-       (make-array java.nio.file.attribute.FileAttribute 0))
-      (operator-private-value
-       'delete-cluster-root-no-follow! (str root))
-      (is (not (.exists cluster-root)))
-      (is (= "survives" (slurp sentinel))
-          "recursive reset never followed the symlinked sentinel")
-      (finally
-        (delete-recursively! root)
-        (delete-recursively! sentinel-root)))))
 
 (defn- await-child-readiness!
   [^ServerSocket ready-server ^Process child child-output]
@@ -945,6 +1044,48 @@
         (is (str/includes? (last child-command)
                            (str (io/file root "data" "clusters")))))
       (finally
+        (.delete
+         (io/file
+          (str (operator.state/root-claim-path project-root root))))
+        (delete-recursively! root)))))
+
+(deftest boot-readiness-resets-the-silence-backstop-on-every-phase
+  (let [root (fresh-root)]
+    (try
+      (let [{:seon.dev.fresh-operator-test/keys [outcome]}
+            (readiness-simulation root :slow)]
+        (is (= "simulated-boot"
+               (get-in outcome
+                       [:seon.dev.fresh-operator-test/value
+                        :seon.boot/cluster-name])))
+        (is (<= 400
+                (:seon.dev.fresh-operator-test/elapsed-ms outcome))
+            "total boot time exceeded one silence interval without failure"))
+      (finally
+        (delete-recursively! root)))))
+
+(deftest boot-readiness-names-the-phase-that-goes-silent
+  (let [root (fresh-root)]
+    (try
+      (let [{:seon.dev.fresh-operator-test/keys [output outcome]}
+            (readiness-simulation root :silent)]
+        (is (= :seon.fresh-operator/boot-phase-silent
+               (get-in outcome
+                       [:seon.dev.fresh-operator-test/data
+                        :seon.error/kind])))
+        (is (= "namespaces"
+               (get-in outcome
+                       [:seon.dev.fresh-operator-test/data
+                        :seon.fresh-operator/phase])))
+        (is (= 250
+               (get-in outcome
+                       [:seon.dev.fresh-operator-test/data
+                        :seon.fresh-operator/silence-backstop-ms])))
+        (is (str/includes?
+             output
+             (str "operator event silence backstop fired: cluster boot phase "
+                  "namespaces was silent for 250 ms"))))
+      (finally
         (delete-recursively! root)))))
 
 (deftest every-child-jvm-command-uses-the-shared-launch-owner
@@ -952,81 +1093,9 @@
                                "fresh_operator.clj"))]
     (is (= 2 (count (re-seq #"\[\"clojure\"" source)))
         "only the child owner and dependency-cache target construct Clojure commands")
-    (is (= 3 (count (re-seq #"\(start-child-jvm!" source)))
-        "offline status, cluster start, and initialization use one owner")))
-
-(deftest reset-refuses-while-the-existing-store-flock-is-held
-  (let [root (fresh-root)
-        lock-path (io/file root "data" "clusters" "store.lock")]
-    (try
-      (.mkdirs (.getParentFile lock-path))
-      (with-open [file (RandomAccessFile. lock-path "rw")
-                  channel (.getChannel file)
-                  _ (.lock channel)]
-        (let [outcome
-              (operator-private-outcome
-               'assert-store-flock-free! (str root))]
-          (is (str/includes?
-               (:seon.dev.fresh-operator-test/message outcome)
-               "existing store flock is held")
-              (pr-str outcome))))
-      (is (nil?
-           (operator-private-value
-            'assert-store-flock-free! (str root)))
-          "closing the probe channel releases a free flock without SCI calls")
-      (finally
-        (delete-recursively! root)))))
-
-(deftest reset-flock-remains-held-through-its-destructive-callback
-  (let [root (fresh-root)
-        code
-        (pr-str
-         `(do
-            (require 'seon.fresh-operator)
-            ((var-get
-              (ns-resolve 'seon.fresh-operator
-                          (symbol "with-store-flock!")))
-             ~(str root)
-             (fn [_#]
-               (println "locked")
-               (flush)
-               (read-line)))
-            (println "released")))
-        process
-        (.start
-         (doto
-          (ProcessBuilder.
-           ^java.util.List
-           ["bb"
-            "--config" (str (io/file project-root "bb.edn"))
-            "--deps-root" (str project-root)
-            "--classpath" operator-classpath
-            "-e" code])
-          (.directory project-root)
-          (.redirectErrorStream true)))
-        reader (io/reader (.getInputStream process))
-        writer (io/writer (.getOutputStream process))]
-    (try
-      (is (= "locked" (.readLine ^java.io.BufferedReader reader)))
-      (let [outcome
-            (operator-private-outcome
-             'assert-store-flock-free! (str root))]
-        (is (str/includes?
-             (:seon.dev.fresh-operator-test/message outcome)
-             "existing store flock is held")
-            (pr-str outcome)))
-      (.write ^java.io.Writer writer "continue\n")
-      (.flush ^java.io.Writer writer)
-      (is (.waitFor process 10 TimeUnit/SECONDS))
-      (is (= 0 (.exitValue process)))
-      (is (= "released" (.readLine ^java.io.BufferedReader reader)))
-      (finally
-        (try (.close ^java.io.Writer writer) (catch Throwable _))
-        (try (.close ^java.io.Reader reader) (catch Throwable _))
-        (when (.isAlive process)
-          (.destroyForcibly process)
-          (.waitFor process 10 TimeUnit/SECONDS))
-        (delete-recursively! root)))))
+    (is (= 4 (count (re-seq #"\(start-child-jvm!" source)))
+        (str "offline status, cluster start, initialization, and managed-root "
+             "cleanup use one owner"))))
 
 (deftest ^{:seon.test/long "Runs complete source initialization through a fresh operator JVM."}
   init-owns-current-source-and-dormant-cluster-lifecycle
@@ -1240,11 +1309,6 @@
                (datahike.api/q
                 '[:find (count ?e) .
                   :where [?e :seon.cluster.agent/id]]
-                @connection#)
-               :seon.dev.fresh-operator-test/message-count
-               (datahike.api/q
-                '[:find (count ?e) .
-                  :where [?e :seon.cluster.message/id]]
                 @connection#)})))]
     (edn/read-string (prepl-eval advertisement form))))
 

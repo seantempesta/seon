@@ -223,6 +223,18 @@
  ; Unit: prior bounded log files retained beside the live inode.
  :seon.config.maintenance/log-retained-files 4
 
+ ; THE OPERATOR WAITS ON EVENTS, NEVER A FLAT OPERATION CLOCK. This is the
+ ; one last-resort silence circuit breaker for a boot phase, prepl connect or
+ ; response, exact-process exit after SIGTERM, or the detached adoption gate.
+ ; Every observed event starts a fresh interval. Firing names the silent event
+ ; and this governing fact; it is a bug report, never successful completion.
+ ; Provenance: P19 measured 11 s for dependency namespace loading and 2.6 s
+ ; for the remaining boot tower, while the former flat 30 s readiness deadline
+ ; abandoned a live JVM during unrelated filesystem work. Thirty seconds keeps
+ ; the measured legitimate phase intact while bounding absent foreign events.
+ ; Unit: milliseconds without the next declared operator event.
+ :seon.config.operator/event-silence-backstop-ms 30000
+
  ; THE VIEW'S PORT IS EXPLICITLY ABSENT, and absence is the state: with
  ; no dial the port is DERIVED from the cluster name (7700-7999, FNV-1a
  ; over the name — `seon.render.web/derived-port`), so every named

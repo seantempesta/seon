@@ -8,19 +8,15 @@
             [seon.dev.state :as state]
             [seon.operator.state :as operator.state])
   (:import [java.io PushbackReader RandomAccessFile]
-           [java.net InetSocketAddress ServerSocket Socket]
+           [java.net InetSocketAddress ServerSocket Socket
+            SocketTimeoutException]
            [java.time Instant]
            [java.util.concurrent CompletableFuture ExecutionException
-            TimeUnit TimeoutException]
+            LinkedBlockingQueue TimeUnit TimeoutException]
            [java.util.function Function Supplier]))
 
 (def ^:private cluster-name-pattern
   #"\A[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62})\z")
-(def ^:private advertisement-wait-ms 30000)
-(def ^:private prepl-connect-ms 3000)
-(def ^:private prepl-eval-ms 30000)
-(def ^:private operator-probe-ms 3000)
-(def ^:private shutdown-grace-ms 5000)
 (def ^:private log-name "seon.log")
 (def ^:private init-result-prefix "SEON-INIT-RESULT ")
 (def ^:private roster-result-prefix "SEON-ROSTER-RESULT ")
@@ -37,15 +33,17 @@
       .getParentFile))
 
 (def ^:private detach-python
-  (str "import os,subprocess,sys,time\n"
+  (str "import socket,subprocess,sys\n"
        "log=open(sys.argv[2],'ab',buffering=0)\n"
-       "child='import os,sys,time\\n'"
-       "+'gate=sys.argv[1]; deadline=time.monotonic()+30\\n'"
-       "+'while not os.path.exists(gate):\\n'"
-       "+'  if time.monotonic() >= deadline: sys.exit(75)\\n'"
-       "+'  time.sleep(0.01)\\n'"
-       "+'os.execvp(sys.argv[2],sys.argv[2:])\\n'\n"
-       "p=subprocess.Popen([sys.executable,'-c',child,sys.argv[3],*sys.argv[4:]],cwd=sys.argv[1],"
+       "child='import os,socket,sys\\n'"
+       "+'silence=float(sys.argv[2])/1000\\n'"
+       "+'s=socket.create_connection((\"127.0.0.1\",int(sys.argv[1])),timeout=silence)\\n'"
+       "+'s.settimeout(silence)\\n'"
+       "+'adopted=s.recv(1)\\n'"
+       "+'s.close()\\n'"
+       "+'if not adopted: sys.exit(75)\\n'"
+       "+'os.execvp(sys.argv[3],sys.argv[3:])\\n'\n"
+       "p=subprocess.Popen([sys.executable,'-c',child,sys.argv[3],sys.argv[4],*sys.argv[5:]],cwd=sys.argv[1],"
        "stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT,"
        "close_fds=True,start_new_session=True)\n"
        "print(p.pid,flush=True)\n"))
@@ -53,6 +51,31 @@
 (defn- fail!
   [message data]
   (throw (ex-info message data)))
+
+(def ^:private shipped-default-decisions
+  (delay
+    (edn/read-string
+     (slurp (str (fs/path (repository-root) "config" "default.edn"))))))
+
+(defn- operator-silence-backstop-ms
+  [manifest]
+  (let [attribute :seon.config.operator/event-silence-backstop-ms
+        value (get manifest attribute (get @shipped-default-decisions attribute))]
+    (when-not (pos-int? value)
+      (fail! "The operator event-silence backstop is missing or invalid."
+             {:seon.error/kind
+              :seon.fresh-operator/invalid-event-silence-backstop
+              :seon.config/attribute attribute
+              :seon.config/value value}))
+    value))
+
+(defn- report-silence-backstop!
+  [event silence-ms]
+  (println
+   (str "! operator event silence backstop fired: " event
+        " was silent for " silence-ms " ms; config="
+        ":seon.config.operator/event-silence-backstop-ms"))
+  (flush))
 
 (defn- parse-root
   [arguments]
@@ -87,11 +110,6 @@
 (defn- process-record-path
   [_root generation]
   (operator.state/process-claim-path (repository-root) generation))
-
-(defn- process-adoption-path
-  [root generation]
-  (fs/path root "data" "operator" "adoptions"
-           (str generation ".ready")))
 
 (defn- dependency-cache-reference-path
   [generation]
@@ -162,7 +180,6 @@
   (let [generation (:seon.dev.process/generation record)
         deleted? (state/delete-edn! (process-record-path root generation))]
     (state/delete-edn! (dependency-cache-reference-path generation))
-    (fs/delete-if-exists (process-adoption-path root generation))
     deleted?))
 
 (defn- record-process-identity
@@ -279,7 +296,8 @@
           (into ["python3" "-c" detach-python
                  (str (repository-root))
                  (:seon.fresh-operator/log detach)
-                 (:seon.fresh-operator/adoption-path detach)]
+                 (str (:seon.fresh-operator/adoption-port detach))
+                 (str (:seon.fresh-operator/silence-backstop-ms detach))]
                 child-command)
           child-command)
         builder (doto (ProcessBuilder. ^java.util.List command)
@@ -845,7 +863,7 @@
 
 (defn- prepl-value!
   ([advertisement form]
-   (prepl-value! advertisement form prepl-eval-ms))
+   (prepl-value! advertisement form (operator-silence-backstop-ms {})))
   ([advertisement form timeout-ms]
    (edn/read-string
     (terminal-value (prepl-eval! advertisement form timeout-ms)))))
@@ -878,7 +896,8 @@
       (try
         (merge
          process-observation
-         (prepl-value! probe (jvm-snapshot-form) operator-probe-ms)
+         (prepl-value! probe (jvm-snapshot-form)
+                       (operator-silence-backstop-ms {}))
          {:seon.fresh-operator/probe-advertisement probe
           :seon.fresh-operator/reachable? true})
         (catch Throwable error
@@ -1390,16 +1409,27 @@
 
 (defn- prepl-eval!
   ([advertisement form]
-   (prepl-eval! advertisement form prepl-eval-ms))
+   (prepl-eval! advertisement form (operator-silence-backstop-ms {})))
   ([advertisement form timeout-ms]
    (prepl-eval! advertisement form timeout-ms (constantly nil)))
   ([advertisement form timeout-ms observe!]
    (with-open [socket (Socket.)]
-     (.connect socket
-               (InetSocketAddress.
-                ^String (:seon.boot/prepl-host advertisement)
-                (int (:seon.boot/prepl-port advertisement)))
-               prepl-connect-ms)
+     (try
+       (.connect socket
+                 (InetSocketAddress.
+                  ^String (:seon.boot/prepl-host advertisement)
+                  (int (:seon.boot/prepl-port advertisement)))
+                 timeout-ms)
+       (catch SocketTimeoutException _
+         (report-silence-backstop! "prepl connection" timeout-ms)
+         (fail! (str "The prepl connection went silent for " timeout-ms
+                     " ms.")
+                {:seon.error/kind
+                 :seon.fresh-operator/prepl-connection-silent
+                 :seon.fresh-operator/phase :prepl-connection
+                 :seon.fresh-operator/silence-backstop-ms timeout-ms
+                 :seon.config/attribute
+                 :seon.config.operator/event-silence-backstop-ms})))
      (.setSoTimeout socket timeout-ms)
      (with-open [writer (java.io.OutputStreamWriter.
                          (.getOutputStream socket)
@@ -1411,27 +1441,38 @@
        (.write writer form)
        (.write writer "\n")
        (.flush writer)
-       (loop [events []]
-         (let [event (edn/read {:eof ::eof} reader)]
-           (observe! event)
-           (cond
-             (= ::eof event)
-             (fail! "The cluster closed its prepl before returning."
-                    {:seon.fresh-operator/events events})
+       (try
+         (loop [events []]
+           (let [event (edn/read {:eof ::eof} reader)]
+             (observe! event)
+             (cond
+               (= ::eof event)
+               (fail! "The cluster closed its prepl before returning."
+                      {:seon.fresh-operator/events events})
 
-             (not (map? event))
-             (fail! "The cluster returned malformed prepl data."
-                    {:seon.fresh-operator/event event})
+               (not (map? event))
+               (fail! "The cluster returned malformed prepl data."
+                      {:seon.fresh-operator/event event})
 
-             (= :ret (:tag event))
-             (let [events (conj events event)]
-               (when (:exception event)
-                 (fail! "The cluster rejected the prepl operation."
-                        {:seon.fresh-operator/events events}))
-               events)
+               (= :ret (:tag event))
+               (let [events (conj events event)]
+                 (when (:exception event)
+                   (fail! "The cluster rejected the prepl operation."
+                          {:seon.fresh-operator/events events}))
+                 events)
 
-             :else
-             (recur (conj events event)))))))))
+               :else
+               (recur (conj events event)))))
+         (catch SocketTimeoutException _
+           (report-silence-backstop! "prepl response" timeout-ms)
+           (fail! (str "The prepl response went silent for " timeout-ms
+                       " ms.")
+                  {:seon.error/kind
+                   :seon.fresh-operator/prepl-response-silent
+                   :seon.fresh-operator/phase :prepl-response
+                   :seon.fresh-operator/silence-backstop-ms timeout-ms
+                   :seon.config/attribute
+                   :seon.config.operator/event-silence-backstop-ms})))))))
 
 (defn- terminal-value
   [events]
@@ -1585,14 +1626,12 @@
     path))
 
 (defn- launch!
-  [root name manifest ready-port dependency-cache-path]
+  [root name manifest ready-port adoption-port silence-ms
+   dependency-cache-path]
   (let [_ (operator.state/claim-root-under-lock!
            (repository-root) root false name)
         log (create-log! root name)
         generation (random-uuid)
-        adoption-path (process-adoption-path root generation)
-        _ (do (fs/create-dirs (fs/parent adoption-path))
-              (fs/delete-if-exists adoption-path))
         process
         (start-child-jvm!
          {:seon.fresh-operator/root root
@@ -1604,7 +1643,8 @@
           ["-e" (launch-form root name manifest ready-port)]
           :seon.fresh-operator/detach
           {:seon.fresh-operator/log (str log)
-           :seon.fresh-operator/adoption-path (str adoption-path)}})
+           :seon.fresh-operator/adoption-port adoption-port
+           :seon.fresh-operator/silence-backstop-ms silence-ms}})
         output (str/trim (slurp (.getInputStream process)))
         exit (.waitFor process)]
     (when-not (zero? exit)
@@ -1614,12 +1654,11 @@
     {:seon.fresh-operator/generation generation
      :seon.fresh-operator/pid (parse-long output)
      :seon.fresh-operator/cache-path dependency-cache-path
-     :seon.fresh-operator/adoption-path (str adoption-path)
      :seon.fresh-operator/log (str log)}))
 
 (defn- record-launched-process!
-  [root {:seon.fresh-operator/keys
-         [generation pid log adoption-path cache-path]}]
+  [root ^ServerSocket adoption-server silence-ms
+   {:seon.fresh-operator/keys [generation pid log cache-path]}]
   (let [start-instant (state/process-start-instant pid)]
     (when-not start-instant
       (fail! "The cluster JVM exited before its identity could be recorded."
@@ -1636,12 +1675,58 @@
       (try
         (write-process-record! root record)
         (operator.state/mark-root-created-under-lock! (repository-root) root)
-        (spit adoption-path "adopted\n")
+        (let [handle
+              (or (matching-process-handle record)
+                  (fail! "The cluster JVM exited before adoption."
+                         {:seon.error/kind
+                          :seon.fresh-operator/detached-child-exited
+                          :seon.boot/pid pid}))
+              accepted
+              (CompletableFuture/supplyAsync
+               (reify Supplier
+                 (get [_]
+                   {:seon.fresh-operator/event :adoption-connection
+                    :seon.fresh-operator/socket (.accept adoption-server)})))
+              exited
+              (.thenApply
+               (.onExit handle)
+               (reify Function
+                 (apply [_ _]
+                   {:seon.fresh-operator/event :exit})))
+              winner
+              (try
+                (.get (CompletableFuture/anyOf
+                       (into-array CompletableFuture [accepted exited]))
+                      silence-ms TimeUnit/MILLISECONDS)
+                (catch ExecutionException error
+                  (throw (.getCause error)))
+                (catch TimeoutException _
+                  (report-silence-backstop!
+                   "detached child adoption connection" silence-ms)
+                  (fail!
+                   (str "Detached child adoption went silent for " silence-ms
+                        " ms.")
+                   {:seon.error/kind
+                    :seon.fresh-operator/detached-adoption-silent
+                    :seon.fresh-operator/phase :detached-adoption
+                    :seon.fresh-operator/silence-backstop-ms silence-ms
+                    :seon.config/attribute
+                    :seon.config.operator/event-silence-backstop-ms})))]
+          (when (= :exit (:seon.fresh-operator/event winner))
+            (fail! "The cluster JVM exited before adoption."
+                   {:seon.error/kind
+                    :seon.fresh-operator/detached-child-exited
+                    :seon.boot/pid pid}))
+          (with-open [socket ^Socket (:seon.fresh-operator/socket winner)
+                      output (.getOutputStream socket)]
+            (.write output (int 1))
+            (.flush output)))
         record
         (catch Throwable error
           (throw
-           (ex-info "The child process identity could not be adopted."
-                    {:seon.fresh-operator/process-record record}
+           (ex-info (ex-message error)
+                    (assoc (ex-data error)
+                           :seon.fresh-operator/process-record record)
                     error)))))))
 
 (defn- signal-recorded-process!
@@ -1652,44 +1737,56 @@
 
 (defn- terminate-recorded-process!
   "Terminate only the exact recorded process generation."
-  [record]
-  (if-let [handle (matching-process-handle record)]
-    (do
-      (signal-recorded-process! handle false)
-      (try
-        (.get (.onExit handle) shutdown-grace-ms TimeUnit/MILLISECONDS)
-        (catch TimeoutException _))
-      ;; `onExit` is only notification for a detached/non-child process. Re-read
-      ;; the recorded identity before escalation so PID reuse is never signaled.
-      (if-let [remaining (matching-process-handle record)]
-        (do
-          (signal-recorded-process! remaining true)
-          (try
-            (.get (.onExit remaining) shutdown-grace-ms TimeUnit/MILLISECONDS)
-            (catch TimeoutException _))
-          (when (matching-process-handle record)
-            (fail! "The recorded cluster JVM survived SIGKILL."
-                   {:seon.dev.process/generation
-                    (:seon.dev.process/generation record)
-                    :seon.dev.process/pid (:seon.dev.process/pid record)}))
-          :sigkill)
-        :sigterm))
-    (if (some? (state/process-start-instant
-                (:seon.dev.process/pid record)))
-      :pid-reused
-      :already-exited)))
+  ([record]
+   (terminate-recorded-process!
+    record (operator-silence-backstop-ms {})))
+  ([record silence-ms]
+    (if-let [handle (matching-process-handle record)]
+      (do
+        (signal-recorded-process! handle false)
+        (try
+          (.get (.onExit handle) silence-ms TimeUnit/MILLISECONDS)
+          (catch TimeoutException _
+            (report-silence-backstop! "exact process exit after SIGTERM"
+                                      silence-ms)))
+        ;; `onExit` is only notification for a detached/non-child process.
+        ;; Re-read the recorded identity before escalation so PID reuse is
+        ;; never signaled.
+        (if-let [remaining (matching-process-handle record)]
+          (do
+            (signal-recorded-process! remaining true)
+            (try
+              (.get (.onExit remaining) silence-ms TimeUnit/MILLISECONDS)
+              (catch TimeoutException _
+                (report-silence-backstop! "exact process exit after SIGKILL"
+                                          silence-ms)))
+            (when (matching-process-handle record)
+              (fail! "The recorded cluster JVM survived SIGKILL."
+                     {:seon.dev.process/generation
+                      (:seon.dev.process/generation record)
+                      :seon.dev.process/pid (:seon.dev.process/pid record)}))
+            :sigkill)
+          :sigterm))
+      (if (some? (state/process-start-instant
+                  (:seon.dev.process/pid record)))
+        :pid-reused
+        :already-exited))))
 
 (defn- terminate-observed-process!
   "Terminate the process generation observed at this call site."
-  [pid]
-  (when-let [start-instant (state/process-start-instant pid)]
-    (terminate-recorded-process!
-     {:seon.dev.process/generation (random-uuid)
-      :seon.dev.process/pid pid
-      :seon.dev.process/start-instant start-instant
-      :seon.dev.process/root ""
-      :seon.dev.process/log ""}))
-  nil)
+  ([pid]
+   (terminate-observed-process!
+    pid (operator-silence-backstop-ms {})))
+  ([pid silence-ms]
+   (when-let [start-instant (state/process-start-instant pid)]
+     (terminate-recorded-process!
+      {:seon.dev.process/generation (random-uuid)
+       :seon.dev.process/pid pid
+       :seon.dev.process/start-instant start-instant
+       :seon.dev.process/root ""
+       :seon.dev.process/log ""}
+      silence-ms))
+   nil))
 
 (defn- readiness-failure
   [value]
@@ -1712,76 +1809,110 @@
     (clojure.core/name path)))
 
 (defn- await-advertisement!
-  [root name pid ^ServerSocket ready-server]
+  [root name pid ^ServerSocket ready-server silence-ms]
   (let [handle
         (or (live-process-handle pid)
             (fail! "The cluster JVM exited before readiness."
                    {:seon.fresh-operator/name name
                     :seon.boot/pid pid}))
-        readiness
-        (CompletableFuture/supplyAsync
-         (reify Supplier
-           (get [_]
-             (with-open [socket (.accept ready-server)
-                         reader (java.io.BufferedReader.
-                                 (java.io.InputStreamReader.
-                                  (.getInputStream socket)
-                                  java.nio.charset.StandardCharsets/UTF_8))]
-               (loop []
-                 (let [value (.readLine reader)
-                       failure (readiness-failure value)]
-                   (cond
-                     (nil? value)
-                     {:seon.fresh-operator/event :closed}
+        events (LinkedBlockingQueue.)]
+    (CompletableFuture/runAsync
+     (reify Runnable
+       (run [_]
+         (try
+           (with-open [socket (.accept ready-server)
+                       reader (java.io.BufferedReader.
+                               (java.io.InputStreamReader.
+                                (.getInputStream socket)
+                                java.nio.charset.StandardCharsets/UTF_8))]
+             (loop []
+               (let [value (.readLine reader)
+                     failure (readiness-failure value)
+                     event
+                     (cond
+                       (nil? value)
+                       {:seon.fresh-operator/event :closed}
 
-                     (= "ready" value)
-                     {:seon.fresh-operator/event :ready
-                      :seon.fresh-operator/value value}
+                       (= "ready" value)
+                       {:seon.fresh-operator/event :ready}
 
-                     failure
-                     failure
+                       failure
+                       failure
 
-                     :else
-                     (do
-                       (println (str "● " name " boot: " value))
-                       (flush)
-                       (recur)))))))))
-        exited
-        (.thenApply
-         (.onExit handle)
-         (reify Function
-           (apply [_ _]
-             {:seon.fresh-operator/event :exit})))
-        winner
-        (try
-          (.get (CompletableFuture/anyOf
-                 (into-array CompletableFuture [readiness exited]))
-                advertisement-wait-ms TimeUnit/MILLISECONDS)
-          (catch ExecutionException error
-            (throw (.getCause error)))
-          (catch TimeoutException _
-            (fail! "Timed out waiting for cluster readiness or process exit."
-                   {:seon.fresh-operator/name name
-                    :seon.boot/pid pid
-                    :seon.fresh-operator/timeout-ms
-                    advertisement-wait-ms})))]
-    (when (= :exit (:seon.fresh-operator/event winner))
-      (fail! "The cluster JVM exited before readiness."
-             {:seon.fresh-operator/name name
-              :seon.boot/pid pid}))
-    (when (= :failure (:seon.fresh-operator/event winner))
-      (fail! (:seon.fresh-operator/message winner)
-             (cond->
-              {:seon.fresh-operator/name name
-               :seon.boot/pid pid}
-               (:seon.fresh-operator/error-kind winner)
-               (assoc :seon.error/kind
-                      (:seon.fresh-operator/error-kind winner)))))
-    (when-not (and (= :ready (:seon.fresh-operator/event winner))
-                   (= "ready" (:seon.fresh-operator/value winner)))
-      (fail! "The cluster JVM sent malformed readiness."
-             {:seon.fresh-operator/name name
-              :seon.boot/pid pid})))
+                       :else
+                       {:seon.fresh-operator/event :phase
+                        :seon.fresh-operator/phase value})]
+                 (.offer events event)
+                 (when (= :phase (:seon.fresh-operator/event event))
+                   (recur)))))
+           (catch Throwable error
+             (.offer events
+                     {:seon.fresh-operator/event :reader-error
+                      :seon.fresh-operator/cause error}))))))
+    (.thenRun
+     (.onExit handle)
+     (reify Runnable
+       (run [_]
+         (.offer events {:seon.fresh-operator/event :exit}))))
+    (loop [phase "launch"]
+      (let [event (.poll events silence-ms TimeUnit/MILLISECONDS)]
+        (when-not event
+          (report-silence-backstop!
+           (str "cluster boot phase " phase) silence-ms)
+          (fail! (str "Cluster boot phase " phase " went silent for "
+                      silence-ms " ms.")
+                 {:seon.error/kind
+                  :seon.fresh-operator/boot-phase-silent
+                  :seon.fresh-operator/name name
+                  :seon.boot/pid pid
+                  :seon.fresh-operator/phase phase
+                  :seon.fresh-operator/silence-backstop-ms silence-ms
+                  :seon.config/attribute
+                  :seon.config.operator/event-silence-backstop-ms}))
+        (case (:seon.fresh-operator/event event)
+          :phase
+          (let [next-phase (:seon.fresh-operator/phase event)]
+            (println (str "● " name " boot: " next-phase))
+            (flush)
+            (recur next-phase))
+
+          :ready nil
+
+          :exit
+          (fail! "The cluster JVM exited before readiness."
+                 {:seon.error/kind
+                  :seon.fresh-operator/boot-process-exited
+                  :seon.fresh-operator/name name
+                  :seon.boot/pid pid
+                  :seon.fresh-operator/phase phase})
+
+          :failure
+          (fail! (:seon.fresh-operator/message event)
+                 (cond->
+                  {:seon.fresh-operator/name name
+                   :seon.boot/pid pid
+                   :seon.fresh-operator/phase phase}
+                   (:seon.fresh-operator/error-kind event)
+                   (assoc :seon.error/kind
+                          (:seon.fresh-operator/error-kind event))))
+
+          :closed
+          (fail! "The cluster JVM closed readiness before READY."
+                 {:seon.error/kind
+                  :seon.fresh-operator/readiness-closed
+                  :seon.fresh-operator/name name
+                  :seon.boot/pid pid
+                  :seon.fresh-operator/phase phase})
+
+          :reader-error
+          (throw (:seon.fresh-operator/cause event))
+
+          (fail! "The cluster JVM sent malformed readiness."
+                 {:seon.error/kind
+                  :seon.fresh-operator/malformed-readiness
+                  :seon.fresh-operator/name name
+                  :seon.boot/pid pid
+                  :seon.fresh-operator/event event})))))
   (let [value (advertisement root name)]
     (when-not (and value (alive? value) (:seon.render.web/url value))
       (fail! "The ready JVM did not publish a complete advertisement."
@@ -1803,6 +1934,7 @@
   (let [{:seon.fresh-operator/keys [name config-path]}
         (parse-start-arguments arguments)
         manifest (if config-path (sparse-manifest root config-path) {})
+        silence-ms (operator-silence-backstop-ms manifest)
         truth
         (reconciled-truth!
          root {:seon.fresh-operator/read-offline-roster? false})
@@ -1837,7 +1969,7 @@
               (prepl-eval!
                anchor-ad
                (add-form root name manifest)
-               prepl-eval-ms
+               silence-ms
                (fn [event]
                  (when (= :out (:tag event))
                    (print (:val event))
@@ -1870,40 +2002,49 @@
       (let [dependency-cache (ensure-dependency-cache!)
             dependency-cache-path (:seon.dev-cache/path dependency-cache)]
         (with-open [ready-server
-                  (ServerSocket.
-                   0 1 (java.net.InetAddress/getLoopbackAddress))]
-        (let [launch-result
-              (launch! root name manifest (.getLocalPort ready-server)
-                       dependency-cache-path)
-              pid (:seon.fresh-operator/pid launch-result)
-              record
-              (try
-                (record-launched-process! root launch-result)
-                (catch Throwable failure
-                  (when-let [failed-record
-                             (:seon.fresh-operator/process-record
-                              (ex-data failure))]
-                    (terminate-recorded-process! failed-record)
-                    (when-not (record-alive? failed-record)
-                      (clear-process-record! root failed-record)))
-                  (throw failure)))
-              value
-              (try
-                (await-advertisement! root name pid ready-server)
-                (catch Throwable failure
-                  (terminate-recorded-process! record)
-                  (when-not (record-alive? record)
-                    (clear-process-record! root record))
-                  (throw failure)))]
-          (when-not (process-record-matches-advertisement? record value)
-            (terminate-recorded-process! record)
-            (when-not (record-alive? record)
-              (clear-process-record! root record))
-            (fail! "The ready advertisement does not match the launched JVM."
-                   {:seon.dev.process/generation
-                    (:seon.dev.process/generation record)
-                    :seon.fresh-operator/advertisement value}))
-          (print-started! root name value)))))))
+                    (ServerSocket.
+                     0 1 (java.net.InetAddress/getLoopbackAddress))
+                    adoption-server
+                    (ServerSocket.
+                     0 1 (java.net.InetAddress/getLoopbackAddress))]
+          (let [launch-result
+                (launch! root name manifest
+                         (.getLocalPort ready-server)
+                         (.getLocalPort adoption-server)
+                         silence-ms
+                         dependency-cache-path)
+                pid (:seon.fresh-operator/pid launch-result)
+                record
+                (try
+                  (record-launched-process!
+                   root adoption-server silence-ms launch-result)
+                  (catch Throwable failure
+                    (when-let [failed-record
+                               (:seon.fresh-operator/process-record
+                                (ex-data failure))]
+                      (terminate-recorded-process! failed-record)
+                      (when-not (record-alive? failed-record)
+                        (clear-process-record! root failed-record)))
+                    (throw failure)))
+                value
+                (try
+                  (await-advertisement!
+                   root name pid ready-server silence-ms)
+                  (catch Throwable failure
+                    (terminate-recorded-process! record)
+                    (when-not (record-alive? record)
+                      (clear-process-record! root record))
+                    (throw failure)))]
+            (when-not (process-record-matches-advertisement? record value)
+              (terminate-recorded-process! record)
+              (when-not (record-alive? record)
+                (clear-process-record! root record))
+              (fail!
+               "The ready advertisement does not match the launched JVM."
+               {:seon.dev.process/generation
+                (:seon.dev.process/generation record)
+                :seon.fresh-operator/advertisement value}))
+            (print-started! root name value)))))))
 
 (defn- config-apply-form
   [name manifest]
