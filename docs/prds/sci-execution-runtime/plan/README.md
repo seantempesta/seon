@@ -687,6 +687,17 @@ and the GIT FRAMING adopted (conversational, owner-ruled):**
   deleted. Provenance: P12's strict contract compilation exposed a
   schema referencing the private `seon.flow/atom-reference?` — the
   correct fix resolves it, not a public-predicates-only admission rule.
+  REFINED same session (owner): PUBLIC FUNCTIONS ARE THE NAMESPACE'S
+  API — "the public functions [are] the namespace's API that other
+  namespaces use to get and put into relating to their namespace." So
+  the render walk shows a FOREIGN namespace as its public surface by
+  default (the d2 card is the API card); an agent's OWN namespace
+  renders in full including its private helpers; private functions
+  elsewhere render only on an explicit ask (`doc`, a deeper walk
+  argument) — asking IS the curation override. Cross-namespace
+  interaction goes through the owner's public API by convention,
+  composing with the distributed-ownership message-the-owner protocol;
+  nothing enforces it as a wall.
 - **AMBIENT INJECTION r2 IS RULED (owner, same day):**
   [ambient-injection-prd-2026-08-05-r2-draft.md](ambient-injection-prd-2026-08-05-r2-draft.md)
   graduates from draft with four rulings. (1) SEAM: one optional
