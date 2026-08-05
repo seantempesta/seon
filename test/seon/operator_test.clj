@@ -4,6 +4,7 @@
             [clojure.java.io :as io]
             [seon.cluster :as cluster]
             [seon.cluster.registry :as registry]
+            [seon.cluster.store :as store]
             [seon.instrument :as instrument]
             [seon.operator :as operator]
             [seon.operator.runtime :as runtime]
@@ -232,7 +233,6 @@
         cluster-dir (io/file cluster-root cluster-name)
         sentinel-root (io/file repository-root "cluster-sentinel")
         sentinel (io/file sentinel-root "survives.txt")
-        lock-file (io/file repository-root "operation.lock")
         calls (atom [])]
     (try
       (.mkdirs cluster-dir)
@@ -246,11 +246,13 @@
        {:seon.operator/repository-root repository-root
         :seon.operator/managed-root managed-root
         :seon.boot/cluster-name cluster-name})
-      (with-open [file (java.io.RandomAccessFile. lock-file "rw")
-                  lock (.lock (.getChannel file))]
-        (let [operation-store {:seon.store/lock lock}
-              instance {:seon.boot/config
-                        {:seon.boot/cluster-name cluster-name}}]
+      (let [operation-store
+            (store/open-store!
+             {:seon.store/dir (str (io/file cluster-root "store"))})
+            instance {:seon.boot/config
+                      {:seon.boot/cluster-name cluster-name}}
+            sweeps (atom [3 0])]
+        (try
           (with-redefs [runtime/running-instances (atom {cluster-name instance})
                         cluster/stop!
                         (fn [value] (swap! calls conj [:stop value]))
@@ -259,7 +261,9 @@
                         registry/collect!
                         (fn [store _]
                           (swap! calls conj [:collect store])
-                          3)
+                          (let [swept (first @sweeps)]
+                            (swap! sweeps next)
+                            swept))
                         registry/roster (fn [_] #{})]
             (let [result
                   (operator/cleanup-cluster!
@@ -272,13 +276,17 @@
               (is (true?
                    (:seon.operator.cluster-cleanup/live-instance-stopped?
                     result)))
-              (is (= 3 (get-in result
-                               [:seon.operator.cluster-cleanup/collection
-                                :seon.error/data
-                                :seon.cluster.registry/swept])))
-              (is (= [:stop :retire :collect] (mapv first @calls)))
+              (is (= 3
+                     (get-in
+                      result
+                      [:seon.operator.cluster-cleanup/collection
+                       :seon.operator.collect/swept-objects])))
+              (is (= [:stop :retire :collect :collect]
+                     (mapv first @calls)))
               (is (false? (.exists cluster-dir)))
-              (is (= "alive" (slurp sentinel)))))))
+              (is (= "alive" (slurp sentinel)))))
+          (finally
+            (store/release-store! operation-store))))
       (finally
         (test-support/delete-recursively! repository-root)))))
 
@@ -505,6 +513,64 @@
               {:seon.boot/root "root"
                :seon.operator/changed-paths ["src/seon/operator.clj"]})))
       (is (= [["root"] ["root" ["src/seon/operator.clj"]]] @calls)))))
+
+(deftest collection-reports-and-verifies-the-exact-store
+  (let [repository-root (owned-root)
+        managed-root (.getCanonicalPath
+                      (io/file repository-root "managed"))]
+    (try
+      (let [result
+            (operator/collect!
+             {:seon.operator/repository-root repository-root
+              :seon.operator/managed-root managed-root})]
+        (is (uuid? (:seon.operator.collect/store-id result)))
+        (is (= managed-root
+               (:seon.operator.collect/managed-root result)))
+        (is (= [:db]
+               (mapv :seon.store/branch
+                     (:seon.operator.collect/branches result))))
+        (is (every? uuid?
+                    (map :seon.source/commit-id
+                         (:seon.operator.collect/branches result))))
+        (is (<= (:seon.operator.collect/objects-after result)
+                (:seon.operator.collect/objects-before result)))
+        (is (<= (:seon.operator.collect/bytes-after result)
+                (:seon.operator.collect/bytes-before result)))
+        (is (zero?
+             (:seon.operator.collect/verification-pass-swept result)))
+        (is (true? (:seon.operator.collect/complete? result))))
+      (finally
+        (test-support/delete-recursively! repository-root)))))
+
+(deftest collection-refuses-a-nonzero-verification-pass-with-partial-evidence
+  (let [repository-root (owned-root)
+        managed-root (.getCanonicalPath
+                      (io/file repository-root "managed"))
+        sweeps (atom [2 1])]
+    (try
+      (with-redefs [registry/collect!
+                    (fn [_ _]
+                      (let [swept (first @sweeps)]
+                        (swap! sweeps next)
+                        swept))]
+        (let [result
+              (operator/collect!
+               {:seon.operator/repository-root repository-root
+                :seon.operator/managed-root managed-root})
+              partial-result
+              (get-in result
+                      [:seon.error/data
+                       :seon.operator.collect/result])]
+          (is (= :seon.operator/collection-incomplete
+                 (:seon.error/kind result)))
+          (is (= 2 (:seon.operator.collect/swept-objects partial-result)))
+          (is (= 1
+                 (:seon.operator.collect/verification-pass-swept
+                  partial-result)))
+          (is (false?
+               (:seon.operator.collect/complete? partial-result)))))
+      (finally
+        (test-support/delete-recursively! repository-root)))))
 
 (deftest public-contracts-refuse-invalid-input-and-output
   (let [delegate-calls (atom 0)]

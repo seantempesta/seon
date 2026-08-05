@@ -14,11 +14,15 @@
   `status` describes this JVM's current instances; the foreign-process
   `bin/seon status` additionally reconciles process records and possibly stale
   advertisements."
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.java.io :as io]
+            [datahike.api :as d]
+            [konserve.core :as k]
             [seon.cluster :as cluster]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
+            [seon.db :as db]
             [seon.fs :as fs]
             [seon.operator.runtime :as runtime]
             [seon.operator.state :as state]
@@ -437,6 +441,8 @@
       (valid-store? held) [held false]
       :else [(store/open-store! {:seon.store/dir path}) true])))
 
+(declare collect-under-lock!)
+
 (defn cleanup-cluster!
   "Stop, retire, delete, and collect one exactly claimed cluster."
   {:malli/schema
@@ -490,7 +496,7 @@
                     present? (.exists (io/file cluster-dir))
                     _ (when present?
                         (fs/delete-recursively! cluster-root cluster-dir))
-                    swept (registry/collect! operation-store (java.util.Date.))
+                    collection (collect-under-lock! managed-root operation-store)
                     remaining (cond-> []
                                 (.exists (io/file cluster-dir))
                                 (conj cluster-dir)
@@ -508,11 +514,7 @@
                      :seon.operator.cluster-cleanup/removed
                      (if present? [cluster-dir] [])
                      :seon.operator.cluster-cleanup/collection
-                     {:seon.error/kind :seon.error/not-yet
-                      :seon.error/message
-                      "Public collection evidence lands in Unit 6."
-                      :seon.error/data
-                      {:seon.cluster.registry/swept swept}}
+                     collection
                      :seon.operator.cluster-cleanup/remaining remaining
                      :seon.operator.cluster-cleanup/reclaimed-bytes
                      (:seon.operator.footprint/file-bytes before)
@@ -527,15 +529,205 @@
               (finally
                 (when release? (store/release-store! operation-store)))))))))))
 
+(defn- operation-konserve
+  [operation-store]
+  (:store @(:seon.store/connection-object operation-store)))
+
+(defn- collection-observation
+  [operation-store]
+  {:seon.operator.collect/objects
+   (count (k/keys (operation-konserve operation-store) {:sync? true}))
+   :seon.operator.collect/bytes
+   (:seon.operator.footprint/file-bytes
+    (state/footprint (:seon.store/dir operation-store)))})
+
+(defn- resolves-to-digest?
+  [forms form]
+  (loop [current form
+         visited #{}]
+    (cond
+      (= :seon.blob/digest current) true
+      (or (not (keyword? current))
+          (contains? visited current)
+          (not (contains? forms current))) false
+      :else (recur (get forms current) (conj visited current)))))
+
+(defn- digest-attributes
+  [database]
+  (let [serialized
+        (db/q '[:find ?attribute ?form
+                :where
+                [?schema :seon.schema/key ?attribute]
+                [?schema :seon.schema/form ?form]]
+              database)
+        forms (into {} (map (fn [[schema-key form]]
+                              [schema-key (edn/read-string form)]))
+                    serialized)]
+    (into []
+          (keep (fn [[attribute form]]
+                  (when (resolves-to-digest? forms (edn/read-string form))
+                    attribute)))
+          serialized)))
+
+(defn- branch-digests
+  [operation-store branch]
+  (let [database (d/branch-as-db
+                  (:seon.store/connection-object operation-store) branch)]
+    (try
+      (let [history-value (db/history database)
+            searchable (if (error-value? history-value)
+                         database
+                         history-value)]
+        (into #{}
+              (mapcat
+               (fn [attribute]
+                 (db/q '[:find [?digest ...]
+                         :in $ ?attribute
+                         :where [_ ?attribute ?digest]]
+                       searchable attribute)))
+              (digest-attributes database)))
+      (finally
+        (d/release-materialized-db database)))))
+
+(defn- collection-evidence
+  [operation-store]
+  (let [branches (sort-by str (registry/roster operation-store))]
+    {:seon.operator.collect/branches
+     (mapv (fn [branch]
+             {:seon.store/branch branch
+              :seon.source/commit-id
+              (registry/branch-commit-id
+               {:seon.store/store operation-store
+                :seon.store/branch branch})})
+           branches)
+     :seon.operator.collect/digests
+     (into #{} (mapcat #(branch-digests operation-store %)) branches)}))
+
+(defn- evidence-reopens?
+  [operation-store evidence]
+  (and
+   (every?
+    (fn [{branch :seon.store/branch
+          expected :seon.source/commit-id}]
+      (when expected
+        (let [database
+              (d/branch-as-db
+               (:seon.store/connection-object operation-store) branch)]
+          (try
+            (= expected (d/commit-id database))
+            (finally
+              (d/release-materialized-db database))))))
+    (:seon.operator.collect/branches evidence))
+   (every?
+    (fn [digest]
+      (true?
+       (k/bget (operation-konserve operation-store)
+               digest
+               (fn [{input :input-stream}]
+                 ;; Force one physical read. EOF is a valid empty blob, so
+                 ;; successful callback entry—not a positive byte—is proof.
+                 (.read ^java.io.InputStream input)
+                 true)
+               {:sync? true})))
+    (:seon.operator.collect/digests evidence))))
+
+(defn- incomplete-collection!
+  [result failure]
+  (throw
+   (ex-info
+    "Collection did not preserve and verify every recorded root."
+    {:seon.error/kind :seon.operator/collection-incomplete
+     :seon.operator.collect/result result}
+    failure)))
+
+(defn- collect-under-lock!
+  [managed-root operation-store]
+  (let [store-id
+        (get-in @(:seon.store/connection-object operation-store)
+                [:config :store :id])
+        before (collection-observation operation-store)
+        base-result
+        {:seon.operator.collect/store-id store-id
+         :seon.operator.collect/managed-root managed-root
+         :seon.operator.collect/branches []
+         :seon.operator.collect/objects-before
+         (:seon.operator.collect/objects before)
+         :seon.operator.collect/objects-after
+         (:seon.operator.collect/objects before)
+         :seon.operator.collect/swept-objects 0
+         :seon.operator.collect/bytes-before
+         (:seon.operator.collect/bytes before)
+         :seon.operator.collect/bytes-after
+         (:seon.operator.collect/bytes before)
+         :seon.operator.collect/reclaimed-bytes 0
+         :seon.operator.collect/verification-pass-swept 0
+         :seon.operator.collect/complete? false}]
+    (try
+      (let [swept (registry/collect! operation-store (java.util.Date.))
+            after-first (collection-observation operation-store)
+            first-result
+            (assoc base-result
+                   :seon.operator.collect/objects-after
+                   (:seon.operator.collect/objects after-first)
+                   :seon.operator.collect/swept-objects swept
+                   :seon.operator.collect/bytes-after
+                   (:seon.operator.collect/bytes after-first)
+                   :seon.operator.collect/reclaimed-bytes
+                   (max 0 (- (:seon.operator.collect/bytes before)
+                             (:seon.operator.collect/bytes after-first))))]
+        (try
+          (let [verification-swept
+                (registry/collect! operation-store (java.util.Date.))
+                after (collection-observation operation-store)
+                evidence (collection-evidence operation-store)
+                complete? (and (zero? verification-swept)
+                               (evidence-reopens? operation-store evidence))
+                result
+                (assoc first-result
+                       :seon.operator.collect/branches
+                       (:seon.operator.collect/branches evidence)
+                       :seon.operator.collect/objects-after
+                       (:seon.operator.collect/objects after)
+                       :seon.operator.collect/bytes-after
+                       (:seon.operator.collect/bytes after)
+                       :seon.operator.collect/reclaimed-bytes
+                       (max 0 (- (:seon.operator.collect/bytes before)
+                                 (:seon.operator.collect/bytes after)))
+                       :seon.operator.collect/verification-pass-swept
+                       verification-swept
+                       :seon.operator.collect/complete? complete?)]
+            (if complete?
+              result
+              (incomplete-collection! result nil)))
+          (catch Throwable failure
+            (if (= :seon.operator/collection-incomplete
+                   (:seon.error/kind (ex-data failure)))
+              (throw failure)
+              (incomplete-collection! first-result failure)))))
+      (catch Throwable failure
+        (if (= :seon.operator/collection-incomplete
+               (:seon.error/kind (ex-data failure)))
+          (throw failure)
+          (incomplete-collection! base-result failure))))))
+
 (defn collect!
-  "Declared Unit 6 contract; implementation waits for its portfolio proof."
+  "Collect one managed store and verify every recorded root."
   {:malli/schema
    [:=> [:cat :seon.operator.collect/request]
     [:or :seon.operator.collect/result :seon.error/value]]}
-  [_]
-  {:seon.error/kind :seon.error/not-yet
-   :seon.error/message "Collection implementation has not landed."
-   :seon.error/data {}})
+  [{repository-root :seon.operator/repository-root
+    managed-root :seon.operator/managed-root}]
+  (attempt
+   #(state/with-control-lock!
+     repository-root
+     (fn []
+       (let [managed-root (state/canonical-path managed-root)
+             [operation-store release?]
+             (acquire-operation-store! managed-root nil)]
+         (try
+           (collect-under-lock! managed-root operation-store)
+           (finally
+             (when release? (store/release-store! operation-store)))))))))
 
 (defn refork!
   "Compose the one cluster cleanup with an exact source refork."
