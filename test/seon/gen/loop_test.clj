@@ -23,6 +23,7 @@
   splitter, the freeze, the fold, admission, delivery and the
   derivations are all the production ones."
   (:require [clojure.core.async :as async]
+            [clojure.core.async.flow :as flow.core]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
@@ -34,6 +35,7 @@
             [seon.cluster.work :as work]
             [seon.config :as config]
             [seon.flow :as seon.flow]
+            [seon.render.web :as web]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
   (:import [java.util Date]))
@@ -63,6 +65,43 @@
          ["alpha" 'my.gen.alpha]
          ["beta" 'my.gen.beta]]))
 
+(defn- with-render-context-proc
+  "Run the production render proc that answers prompt context requests."
+  [cluster body]
+  (let [context-channel (async/chan)
+        render-channel (async/chan (async/sliding-buffer 1))
+        pages-channel (async/chan (async/sliding-buffer 1))
+        stream-channel (async/chan (async/sliding-buffer 1))
+        completion (async/promise-chan)
+        cluster (assoc cluster
+                       :seon.render/context-channel context-channel
+                       :seon.cluster.loop/stream-channel stream-channel)
+        graph
+        (flow.core/create-flow
+         {:procs
+          {:seon.render.web/render
+           {:proc
+            (seon.flow/var-process
+             #'web/render-step :io
+             {:seon.render.web/render-channel render-channel
+              :seon.render/context-channel context-channel
+              :seon.render.web/pages-channel pages-channel
+              :seon.render.web/registration (atom {})
+              :seon.render.web/latest-packages (atom {})
+              :seon.render.web/completion completion
+              :seon.render.web/root-agent-id "planner"
+              :seon.cluster.loop/cluster cluster})}}
+          :conns []})
+        {:keys [report-chan error-chan]} (flow.core/start graph)]
+    (async/go-loop [] (when (async/<! report-chan) (recur)))
+    (async/go-loop [] (when (async/<! error-chan) (recur)))
+    (try
+      (flow.core/resume graph)
+      (body cluster)
+      (finally
+        (flow.core/stop graph)
+        (async/<!! completion)))))
+
 (defn- with-gen-cluster
   "One in-process cluster with the v0 cast and the production dials."
   [body]
@@ -89,23 +128,25 @@
        ;; boundary instead of replacing them with quoted lint values.
        (with-redefs [cluster.loop/lint-form
                      (fn [{source :seon.cluster.loop/source}] source)]
-         (body {:seon.db/connection connection
-                :seon.cluster/name "generate-code-v0"
-                :seon.flow/work-launcher launcher
-                :seon.cluster.run/process process
-                :seon.sci.eval/ctx (sci.eval/cluster-ctx @connection)
-                :seon.cluster.wake/channel
-                (async/chan (async/sliding-buffer 1))
-                :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
-                :seon.config.eval/time-limit-ms 2000
-                :seon.config/on-core-error :panic
-                :seon.config.error/recurrence-limit 3
-                :seon.config.message/max-chain 4
-                :seon.sci.admit/caps
-                {:seon.config.eval.result/max-depth 6
-                 :seon.config.eval.result/max-collection 8
-                 :seon.config.eval.result/max-string 4096
-                 :seon.config.eval.result/max-nodes 256}}))
+         (with-render-context-proc
+           {:seon.db/connection connection
+            :seon.cluster/name "generate-code-v0"
+            :seon.flow/work-launcher launcher
+            :seon.cluster.run/process process
+            :seon.sci.eval/ctx (sci.eval/cluster-ctx @connection)
+            :seon.cluster.wake/channel
+            (async/chan (async/sliding-buffer 1))
+            :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
+            :seon.config.eval/time-limit-ms 2000
+            :seon.config/on-core-error :panic
+            :seon.config.error/recurrence-limit 3
+            :seon.config.message/max-chain 4
+            :seon.sci.admit/caps
+            {:seon.config.eval.result/max-depth 6
+             :seon.config.eval.result/max-collection 8
+             :seon.config.eval.result/max-string 4096
+             :seon.config.eval.result/max-nodes 256}}
+           body))
        (finally
          (seon.flow/stop-work-launcher! launcher)))))))
 
@@ -207,19 +248,56 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- planner-run
-  "The planner's FIRST run — the attempt this suite is about.
+  "The planner's first run after its complete form census commits.
+
   A re-triggered planner attempts again, and asserting over \"the\"
-  planner run would quietly change subject when it does."
-  [db]
-  (->> (db/q '[:find ?id ?opened
-              :where
-              [?run :seon.cluster.run/id ?id]
-              [?run :seon.cluster.run/opened-at ?opened]
-              [?run :seon.cluster.run/agent ?agent]
-              [?agent :seon.cluster.agent/id "planner"]]
-            db)
-       (sort-by (comp inst-ms second))
-       ffirst))
+  planner run would quietly change subject when it does. Refuse the
+  fixture at this boundary when the frozen forms and their receipts do
+  not exist, before routing assertions can settle over absence."
+  [db expected-form-count]
+  (let [run-id
+        (->> (db/q '[:find ?id ?opened
+                    :where
+                    [?run :seon.cluster.run/id ?id]
+                    [?run :seon.cluster.run/opened-at ?opened]
+                    [?run :seon.cluster.run/agent ?agent]
+                    [?agent :seon.cluster.agent/id "planner"]]
+                  db)
+             (sort-by (comp inst-ms second))
+             ffirst)
+        form-count
+        (count (db/q '[:find ?form
+                       :in $ ?run-id
+                       :where
+                       [?run :seon.cluster.run/id ?run-id]
+                       [?form :seon.cluster.run.form/run ?run]]
+                     db run-id))
+        receipt-count
+        (count (db/q '[:find ?receipt
+                       :in $ ?run-id
+                       :where
+                       [?run :seon.cluster.run/id ?run-id]
+                       [?receipt :seon.cluster.eval/run ?run]]
+                     db run-id))]
+    (if (and (some? run-id)
+             (= expected-form-count form-count receipt-count))
+      run-id
+      (throw
+       (ex-info
+        "Generative loop fixture refused routing assertions: the planner attempt census did not commit."
+        (cond->
+         {:seon.gen.loop/expected-form-count expected-form-count
+          :seon.gen.loop/run-id run-id
+          :seon.gen.loop/form-count form-count
+          :seon.gen.loop/receipt-count receipt-count}
+          run-id
+          (assoc :seon.cluster.run/error
+                 (db/q '[:find ?error .
+                         :in $ ?run-id
+                         :where
+                         [?run :seon.cluster.run/id ?run-id]
+                         [?run :seon.cluster.run/error ?error]]
+                       db run-id))))))))
 
 (defn- form-namespaces
   "Ordinal → parse-time namespace, for the forms that carry one."
@@ -281,11 +359,11 @@
        (with-redefs [ai/complete staged-reply]
          (drive! cluster 12))
        (let [db @connection
-             run-id (planner-run db)]
+             run-id (planner-run db 7)]
 
          (testing "the attempt froze one plan whose forms carry the
                    namespace each was WRITTEN under"
-           (is (= {0 'my.agents.planner
+           (is (= {0 'my.gen.planner
                    1 'my.gen.alpha
                    2 'my.gen.alpha
                    3 'my.gen.alpha
@@ -447,7 +525,7 @@
                           "(my.run/wait \"nothing\")")})]
          (drive! cluster 6))
        (let [db @connection
-             run-id (planner-run db)
+             run-id (planner-run db 3)
              state (states db run-id)]
          (is (= :routed (get state 1))
              "the failed def itself is red and routed")
@@ -484,7 +562,7 @@
                           "(my.run/wait \"saying nothing\")")})]
          (drive! cluster 12))
        (let [db @connection
-             run-id (planner-run db)]
+             run-id (planner-run db 7)]
          (is (= "the program is built"
                 (db/q '[:find ?content .
                        :where
