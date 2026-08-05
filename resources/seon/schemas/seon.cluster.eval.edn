@@ -52,7 +52,7 @@
                      [:seon.cluster.eval/output
                       {:optional true}
                       :seon.cluster.eval/output]],
-                    :result-blob [:re "^[0-9a-f]{64}$"],
+                    :result-blob :seon.blob/digest,
                     :result-edn [:string #:seon.db{:no-history? true}],
                     :result-size [:int {:min 0}],
                     :run :seon.db/ref}

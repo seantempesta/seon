@@ -114,10 +114,10 @@
 (defn- capture-task
   [connection name ^InputStream input]
   (virtual-task
-   name
+     name
    (fn []
      (with-open [stream input]
-       (blob/put-binary! connection stream)))))
+       (blob/stage-binary! connection stream)))))
 
 (defn- write-array!
   [^OutputStream output ^bytes octets limit]
@@ -259,9 +259,7 @@
         preview-limit (:seon.config.shell/preview-bytes effective)
         inline? (<= size inline-limit)
         retained-length (if inline? size (min size preview-limit))
-        retained (or (blob/read-chunk connection content-digest
-                                      0 retained-length)
-                     (byte-array 0))
+        retained (blob/read-staged-chunk captured 0 retained-length)
         decoded (try (strict-utf8 retained)
                      (catch java.nio.charset.CharacterCodingException _ nil))
         base {:my.shell.output/bytes size
@@ -276,10 +274,11 @@
 
 (defn- finish-evidence
   [connection stdout-task stderr-task effective]
-  {:my.shell/stdout
-   (output-descriptor connection (task-result stdout-task) effective)
-   :my.shell/stderr
-   (output-descriptor connection (task-result stderr-task) effective)})
+  (let [stdout (task-result stdout-task)
+        stderr (task-result stderr-task)]
+    {:my.shell/stdout (output-descriptor connection stdout effective)
+     :my.shell/stderr (output-descriptor connection stderr effective)
+     :seon.blob/staged-writes [stdout stderr]}))
 
 (defn- execute
   [request effective cwd]

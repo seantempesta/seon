@@ -164,11 +164,12 @@
          :seon.web.jvm/octet-array prefix}
         (let [source (SequenceInputStream.
                       (ByteArrayInputStream. prefix) bounded)
-              stored (blob/put-binary! connection source)]
+              stored (blob/stage-binary! connection source)]
           {:seon.web.jvm/body
            {:my.web.body/bytes (:seon.blob/size stored)
             :my.web.body/digest (:seon.blob/digest stored)
-            :my.web.body/blob (:seon.blob/digest stored)}})))))
+            :my.web.body/blob (:seon.blob/digest stored)}
+           :seon.blob/staged-write stored})))))
 
 (defn- read-blob
   [connection digest size]
@@ -189,9 +190,15 @@
 (defn- captured-octets
   [connection captured]
   (or (:seon.web.jvm/octet-array captured)
-      (let [body (:seon.web.jvm/body captured)]
-        (read-blob connection (:my.web.body/blob body)
-                   (:my.web.body/bytes body)))))
+      (let [body (:seon.web.jvm/body captured)
+            staged (:seon.blob/staged-write captured)
+            output (ByteArrayOutputStream.)]
+        (loop [offset 0]
+          (when (< offset (:my.web.body/bytes body))
+            (let [octets (blob/read-staged-chunk staged offset io-buffer-bytes)]
+              (.write output ^bytes octets)
+              (recur (+ offset (alength ^bytes octets))))))
+        (.toByteArray output))))
 
 (defn- split-once
   [text separator]
@@ -308,6 +315,9 @@
                           :my.web/status status
                           :my.web/redirects redirects
                           :my.web/body (:seon.web.jvm/body captured)}
+                          (:seon.blob/staged-write captured)
+                          (assoc :seon.blob/staged-writes
+                                 [(:seon.blob/staged-write captured)])
                           content-type
                           (assoc :my.web/content-type content-type))]
                     (if content-type

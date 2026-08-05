@@ -1,4 +1,5 @@
 #:seon.effect{:capability :qualified-symbol,
+              :content-blobs [:vector :seon.blob/digest],
               :background? :boolean,
               :disposition [:enum :interrupted],
               :execution-options
@@ -36,6 +37,9 @@
                [:seon.effect/result-blob
                 {:optional true}
                 :seon.effect/result-blob]
+               [:seon.effect/content-blobs
+                {:optional true}
+                :seon.effect/content-blobs]
                [:seon.effect/result-size
                 {:optional true}
                 :seon.effect/result-size]
@@ -78,6 +82,9 @@
                [:seon.effect/result-blob
                 {:optional true}
                 :seon.effect/result-blob]
+               [:seon.effect/content-blobs
+                {:optional true}
+                :seon.effect/content-blobs]
                [:seon.effect/result-size
                 {:optional true}
                 :seon.effect/result-size]

@@ -1,5 +1,5 @@
 #:seon.blob{:content :string,
-            :digest :seon.cluster.eval/result-blob,
+            :digest [:re "^[0-9a-f]{64}$"],
             :inline-prefix :seon.blob/octet-array,
             :input-stream
             [:fn
@@ -14,6 +14,15 @@
              seon.schema/byte-array?],
             :offset [:int {:min 0}],
             :size [:int {:min 0}],
+            :staged-path :string,
+            :staged-octets :seon.blob/octet-array,
+            :staged-write
+            [:map
+             [:seon.blob/digest :seon.blob/digest]
+             [:seon.blob/size :seon.blob/size]
+             [:seon.blob/inline-prefix :seon.blob/inline-prefix]
+             [:seon.blob/staged-path {:optional true} :seon.blob/staged-path]
+             [:seon.blob/staged-octets {:optional true} :seon.blob/staged-octets]],
             :write-result
             [:map
              [:seon.blob/digest :seon.blob/digest]

@@ -241,6 +241,12 @@
         (conj [:db/add (:db/id receipt) :seon.effect/result-blob
                (:seon.effect/result-blob request)])
 
+        (seq (:seon.effect/content-blobs request))
+        (into (map (fn [content-digest]
+                     [:db/add (:db/id receipt) :seon.effect/content-blobs
+                      content-digest])
+                   (:seon.effect/content-blobs request)))
+
         (:seon.effect/notify receipt)
         (into [[:db/retract (:db/id receipt) :seon.effect/notify
                 (:db/id (:seon.effect/notify receipt))]
@@ -322,7 +328,7 @@
 
 (def ^:private byte-array-class (class (byte-array 0)))
 
-(defn- stored-result
+(defn- staged-result
   [connection threshold raw-value admitted-result]
   (let [result-edn (admit/canonical-edn admitted-result)
         octets
@@ -332,33 +338,50 @@
         blob-backed?
         (or (instance? byte-array-class raw-value)
             (and threshold (> (alength ^bytes octets) threshold)))
-        stored
+        staged
         (when blob-backed?
-          (blob/put-binary!
+          (blob/stage-binary!
            connection (ByteArrayInputStream. ^bytes octets)))]
-    (cond->
-     {:seon.effect/result-edn result-edn
-      :seon.effect/result-size (alength ^bytes octets)}
-      stored
-      (assoc :seon.effect/result-blob (:seon.blob/digest stored)))))
+    {:seon.effect/stored-result
+     (cond->
+      {:seon.effect/result-edn result-edn
+       :seon.effect/result-size (alength ^bytes octets)}
+       staged
+       (assoc :seon.effect/result-blob (:seon.blob/digest staged)))
+     :seon.blob/staged-writes (cond-> [] staged (conj staged))}))
 
 (defn- settle-value!
   [connection effect-id opened-at threshold raw-value]
-  (let [admitted-result (admitted-value raw-value)
+  (let [content-stages (if (map? raw-value)
+                         (:seon.blob/staged-writes raw-value)
+                         [])
+        public-value (if (map? raw-value)
+                       (dissoc raw-value :seon.blob/staged-writes)
+                       raw-value)
+        admitted-result (admitted-value public-value)
         result (:seon.sci.admit/value admitted-result)
         settled-at (Date.)
+        staged-result (staged-result connection threshold public-value result)
+        staged-writes (into (vec content-stages)
+                            (:seon.blob/staged-writes staged-result))
         request
         (merge
          {:seon.effect/id effect-id
           :seon.effect/settled-at settled-at
           :seon.effect/duration-ms
           (max 0 (- (.getTime settled-at) (.getTime opened-at)))}
-         (stored-result connection threshold raw-value result))]
+         (:seon.effect/stored-result staged-result)
+         (when (seq content-stages)
+           {:seon.effect/content-blobs
+            (mapv :seon.blob/digest content-stages)}))]
     {:seon.effect/value result
      :seon.effect/transaction
-     (db/transact!
-      connection
-      [[:db.fn/call #'settle-call request]])}))
+     (blob/with-publication!
+      connection staged-writes
+      (fn []
+        (db/transact!
+         connection
+         [[:db.fn/call #'settle-call request]])))}))
 
 (defn- interrupt!
   ([connection effect-id]

@@ -470,24 +470,32 @@
 (defn- store-desk-values!
   [connection evaluation]
   (let [threshold (result-blob-threshold @connection)]
-    (update
-     evaluation :seon.sci.eval/desk-defs
-     (fn [candidates]
-       (mapv
-        (fn [candidate]
-          (if-let [serialized
-                   (sci.eval/store-faithful-edn
-                    (:seon.sci.eval/value candidate))]
-            (let [size (long (count serialized))]
-              (cond-> (assoc candidate :seon.def/size size)
-                (and threshold (> size threshold))
-                (assoc :seon.def/blob
-                       (blob/put! connection serialized))
+    (let [result
+          (reduce
+           (fn [acc candidate]
+             (if-let [serialized
+                      (sci.eval/store-faithful-edn
+                       (:seon.sci.eval/value candidate))]
+               (let [size (long (count serialized))
+                     staged (when (and threshold (> size threshold))
+                              (blob/stage! connection serialized))]
+                 (cond->
+                  (update acc :seon.sci.eval/desk-defs
+                          conj
+                          (cond-> (assoc candidate :seon.def/size size)
+                            staged
+                            (assoc :seon.def/blob
+                                   (:seon.blob/digest staged))
 
-                (or (nil? threshold) (<= size threshold))
-                (assoc :seon.def/value-edn serialized)))
-            candidate))
-        candidates)))))
+                            (or (nil? threshold) (<= size threshold))
+                            (assoc :seon.def/value-edn serialized)))
+                   staged
+                   (update :seon.blob/staged-writes conj staged)))
+               (update acc :seon.sci.eval/desk-defs conj candidate)))
+           {:seon.sci.eval/desk-defs []
+            :seon.blob/staged-writes []}
+           (:seon.sci.eval/desk-defs evaluation))]
+      (merge evaluation result))))
 
 (defn- result-window-page-size
   [db]
@@ -534,11 +542,13 @@
                (result-window-page-size db)}}
              result-edn))]
       (if (and window-edn (result-blob-smaller? result-edn window-edn))
-        (assoc evaluation
-               :seon.cluster.eval/result-edn window-edn
-               :seon.cluster.eval/result-blob
-               (blob/put! connection result-edn)
-               :seon.cluster.eval/result-size result-size)
+        (let [staged (blob/stage! connection result-edn)]
+          (assoc evaluation
+                 :seon.cluster.eval/result-edn window-edn
+                 :seon.cluster.eval/result-blob
+                 (:seon.blob/digest staged)
+                 :seon.cluster.eval/result-size result-size
+                 :seon.blob/staged-writes [staged]))
         (assoc evaluation :seon.cluster.eval/result-size result-size)))
     evaluation))
 
@@ -955,9 +965,10 @@
         reasoning-size (when (seq reasoning-content)
                          (long (count reasoning-content)))
         threshold (result-blob-threshold db)
-        reasoning-blob (when (and reasoning-size threshold
-                                  (> reasoning-size threshold))
-                         (blob/put! connection reasoning-content))
+        reasoning-stage (when (and reasoning-size threshold
+                                   (> reasoning-size threshold))
+                          (blob/stage! connection reasoning-content))
+        reasoning-blob (:seon.blob/digest reasoning-stage)
         commit (when failure
                  (error-tx cluster db failure now
                            {:seon.cluster.agent/id agent-id
@@ -1002,8 +1013,11 @@
            (assoc :seon.ai.model/last-latency-ms latency-ms)
            usage (assoc :seon.ai/usage usage)))
         outcome
-        (db/transact! connection
-                      (into (conj (vec commit) row) observation-tx))]
+        (blob/with-publication!
+         connection (cond-> [] reasoning-stage (conj reasoning-stage))
+         (fn []
+           (db/transact! connection
+                         (into (conj (vec commit) row) observation-tx))))]
     (when-not (:seon.error/kind outcome)
       (some-> commit first (dissoc :db/id)))))
 
@@ -1622,8 +1636,16 @@
                   refusals (:seon.error/values-tx delivery)
                   settlement-evaluation
                   (settlement-result cluster evaluation)
+                  settlement-stages
+                  (:seon.blob/staged-writes settlement-evaluation)
+                  settlement-evaluation
+                  (dissoc settlement-evaluation :seon.blob/staged-writes)
                   desk-evaluation
                   (store-desk-values! connection evaluation)
+                  desk-stages
+                  (:seon.blob/staged-writes desk-evaluation)
+                  desk-evaluation
+                  (dissoc desk-evaluation :seon.blob/staged-writes)
                   desk-rows
                   (desk-rows @connection agent-id desk-evaluation ordinal)
                   receipt
@@ -1637,12 +1659,15 @@
                      problem (assoc :seon.problems/form-problem problem)
                      settled (assoc :my.run/value settled)))
                   outcome
-                  (db/transact!
-                   connection
-                   {:tx-data
-                    (into (terminal-tx receipt now)
-                          (concat rows
-                                  refusals))})
+                  (blob/with-publication!
+                   connection (into (vec settlement-stages) desk-stages)
+                   (fn []
+                     (db/transact!
+                      connection
+                      {:tx-data
+                       (into (terminal-tx receipt now)
+                             (concat rows
+                                     refusals))})))
                   _
                   (if (and (:seon.program/row evaluation)
                            (not (:seon.error/kind outcome)))

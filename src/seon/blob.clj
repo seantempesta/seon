@@ -3,11 +3,13 @@
   (:refer-clojure :exclude [get])
   (:require [clojure.java.io :as io]
             [clojure.test.check.generators :as gen]
+            [datahike.gc-guard :as gc-guard]
             [konserve.core :as k]
             [seon.db :as db]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn])
-  (:import [java.io ByteArrayInputStream File InputStream OutputStream]
+  (:import [java.io ByteArrayInputStream File InputStream OutputStream
+            RandomAccessFile]
            [java.nio.charset StandardCharsets]
            [java.nio.file Files]
            [java.security DigestOutputStream MessageDigest]
@@ -74,16 +76,26 @@
 (defn- stored-digest-and-size
   [store content-digest buffer-size]
   (let [digester (MessageDigest/getInstance "SHA-256")]
-    (loop [offset 0]
-      (when-let [octets (k/bget-range store content-digest
-                                      offset buffer-size {:sync? true})]
-        (let [read-count (alength ^bytes octets)
-              next-offset (+ offset read-count)]
-          (.update digester octets)
-          (if (< read-count buffer-size)
-            {:seon.blob/digest (digest-string digester)
-             :seon.blob/size next-offset}
-            (recur next-offset)))))))
+    (k/bget
+     store content-digest
+     (fn [binary]
+       (let [payload (if (map? binary) (:input-stream binary) binary)]
+       (if (instance? (class (byte-array 0)) payload)
+         (do
+           (.update digester ^bytes payload)
+           {:seon.blob/digest (digest-string digester)
+            :seon.blob/size (alength ^bytes payload)})
+         (with-open [input ^InputStream payload]
+           (let [buffer (byte-array buffer-size)]
+             (loop [total-size 0]
+               (let [read-count (.read input buffer)]
+                 (if (neg? read-count)
+                   {:seon.blob/digest (digest-string digester)
+                    :seon.blob/size total-size}
+                   (do
+                     (.update digester buffer 0 read-count)
+                     (recur (+ total-size read-count)))))))))))
+     {:sync? true})))
 
 (defn- verify-stored!
   [store content-digest expected-size buffer-size]
@@ -100,20 +112,44 @@
          :seon.blob/actual actual}))))
   nil)
 
-(defn- publish-binary!
-  [store threshold ^bytes prefix prefix-size total-size staged-file
-   ^MessageDigest digester]
+(defn- staged-write
+  [^bytes prefix prefix-size total-size staged-file ^MessageDigest digester]
   (let [content-digest (digest-string digester)
-        inline-prefix (Arrays/copyOf prefix prefix-size)
-        source (or staged-file inline-prefix)]
+        inline-prefix (Arrays/copyOf prefix prefix-size)]
+    (cond-> {:seon.blob/digest content-digest
+             :seon.blob/size total-size
+             :seon.blob/inline-prefix inline-prefix}
+      staged-file
+      (assoc :seon.blob/staged-path (.getAbsolutePath ^File staged-file))
+
+      (nil? staged-file)
+      (assoc :seon.blob/staged-octets inline-prefix))))
+
+(defn- store-id
+  [connection]
+  (get-in @connection [:config :store :id]))
+
+(defn- staged-source
+  [staged]
+  (if-let [path (:seon.blob/staged-path staged)]
+    (io/file path)
+    (:seon.blob/staged-octets staged)))
+
+(defn- publish-staged!
+  [connection staged]
+  (let [store (konserve-store connection)
+        content-digest (:seon.blob/digest staged)
+        expected-size (:seon.blob/size staged)
+        verification-buffer-size
+        (max 1 (alength ^bytes (:seon.blob/inline-prefix staged)))]
+    ;; This existence check must remain inside the publication permit. An
+    ;; issued sweep batch may already contain an orphan with the same digest.
     (when-not (k/exists? store content-digest {:sync? true})
-      (k/bassoc store content-digest source {:sync? true}))
-    (verify-stored! store content-digest total-size threshold)
-    (when staged-file
-      (Files/delete (.toPath ^File staged-file)))
-    {:seon.blob/digest content-digest
-     :seon.blob/size total-size
-     :seon.blob/inline-prefix inline-prefix}))
+      (k/bassoc store content-digest (staged-source staged) {:sync? true}))
+    (verify-stored! store content-digest expected-size verification-buffer-size)
+    (when-let [path (:seon.blob/staged-path staged)]
+      (Files/deleteIfExists (.toPath (io/file path))))
+    (dissoc staged :seon.blob/staged-path :seon.blob/staged-octets)))
 
 (defn- utf8-bytes
   ^bytes [content]
@@ -135,28 +171,26 @@
   [content]
   (schema/sha-256 [(utf8-bytes content)]))
 
-(defn put!
-  "Store UTF-8 content once and return its SHA-256 digest."
+(defn stage!
+  "Stage UTF-8 content without publishing it into the blob store."
   {:malli/schema
    [:=> [:cat :seon.db/connection :seon.blob/content]
-    :seon.blob/digest]}
+    :seon.blob/staged-write]}
   [connection content]
   (let [octets (utf8-bytes content)
-        content-digest (digest content)
-        store (konserve-store connection)]
-    (when-not (k/exists? store content-digest {:sync? true})
-      (k/bassoc store content-digest octets {:sync? true}))
-    content-digest))
+        digester (doto (MessageDigest/getInstance "SHA-256")
+                   (.update octets))]
+    (staged-write octets (alength octets) (alength octets) nil digester)))
 
-(defn put-binary!
-  "Stream binary content into the content-addressed blob store.
+(defn stage-binary!
+  "Stage binary content without publishing it into the blob store.
 
   Retains only the configured inline prefix. Content beyond that prefix is
-  written to one staging file under the process root before publication."
+  written to one staging file under the process root."
   {:malli/schema
    [:=>
     [:cat :seon.db/connection :seon.blob/input-stream]
-    :seon.blob/write-result]}
+    :seon.blob/staged-write]}
   [connection ^InputStream input]
   (let [store (konserve-store connection)
         threshold (binary-threshold connection)
@@ -169,8 +203,7 @@
             (.read input buffer)]
         (cond
           (neg? read-count)
-          (publish-binary!
-           store threshold prefix prefix-size total-size nil digester)
+          (staged-write prefix prefix-size total-size nil digester)
 
           (zero? read-count)
           (throw
@@ -197,17 +230,75 @@
                         (DigestOutputStream. stage-output digester)
                         remaining-size (.transferTo input digest-output)]
                     (.close digest-output)
-                    (publish-binary!
-                     store threshold prefix next-prefix-size
+                    (staged-write
+                     prefix next-prefix-size
                      (+ next-total-size remaining-size) file digester))
                   (catch Throwable error
                     (.close stage-output)
                     ;; The staging file is the observable artifact of an
-                    ;; interrupted oversized write. It is not published into
-                    ;; Konserve and remains under the process root for
-                    ;; inspection until explicit root cleanup removes the
-                    ;; scratch state.
+                    ;; interrupted oversized write. It remains under the
+                    ;; process root for inspection until explicit cleanup.
                     (throw error)))))))))))
+
+(defn with-publication!
+  "Publish staged blobs and commit their direct roots under one permit."
+  {:malli/schema
+   [:=>
+    [:cat :seon.db/connection [:vector :seon.blob/staged-write]
+     [:fn clojure.core/fn?]]
+    :seon.schema/value]}
+  [connection staged-writes commit-roots!]
+  (if (seq staged-writes)
+    (let [permit (gc-guard/acquire-reachability-permit!
+                  (store-id connection) :blob)]
+      (try
+        (run! #(publish-staged! connection %) staged-writes)
+        (commit-roots!)
+        (finally
+          (gc-guard/release-reachability-permit! permit))))
+    (commit-roots!)))
+
+(defn put!
+  "Store UTF-8 content once and return its SHA-256 digest."
+  {:malli/schema
+   [:=> [:cat :seon.db/connection :seon.blob/content]
+    :seon.blob/digest]}
+  [connection content]
+  (let [staged (stage! connection content)]
+    (with-publication! connection [staged]
+      (fn [] (:seon.blob/digest staged)))))
+
+(defn put-binary!
+  "Stream binary content into the content-addressed blob store."
+  {:malli/schema
+   [:=>
+    [:cat :seon.db/connection :seon.blob/input-stream]
+    :seon.blob/write-result]}
+  [connection input]
+  (let [staged (stage-binary! connection input)]
+    (with-publication! connection [staged]
+      (fn []
+        (dissoc staged :seon.blob/staged-path :seon.blob/staged-octets)))))
+
+(defn read-staged-chunk
+  "Read at most length staged bytes beginning at offset."
+  {:malli/schema
+   [:=>
+    [:cat :seon.blob/staged-write :seon.blob/offset :seon.blob/length]
+    :seon.blob/octet-array]}
+  [staged offset length]
+  (if-let [octets (:seon.blob/staged-octets staged)]
+    (let [start (min (alength ^bytes octets) offset)
+          end (min (alength ^bytes octets) (+ start length))]
+      (Arrays/copyOfRange ^bytes octets start end))
+    (with-open [file (RandomAccessFile. ^String (:seon.blob/staged-path staged)
+                                        "r")]
+      (.seek file (long offset))
+      (let [buffer (byte-array length)
+            read-count (.read file buffer)]
+        (if (neg? read-count)
+          (byte-array 0)
+          (Arrays/copyOf buffer read-count))))))
 
 (defn read-chunk
   "Read at most length exact binary bytes beginning at offset."
