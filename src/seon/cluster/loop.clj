@@ -489,15 +489,6 @@
             candidate))
         candidates)))))
 
-(defn- with-desk-notices
-  [evaluation notices]
-  (if (seq notices)
-    (update evaluation :seon.cluster.eval/output
-            (fn [output]
-              (str (str/join "\n" notices)
-                   (when (seq output) (str "\n" output)))))
-    evaluation))
-
 (defn- result-window-page-size
   [db]
   (db/q '[:find ?size .
@@ -1565,20 +1556,22 @@
                   evaluation-namespace
                   (second (:seon.cluster.run.form/ns form))
                   evaluation
-                  (with-desk-notices
-                    (submit-evaluation!!
-                     cluster
-                     evaluate
-                     receipt-id
-                     (evaluation-request
-                      {::admitted-form form
-                       ::evaluation-namespace evaluation-namespace
-                       ::cluster cluster
-                       :seon.sci.eval/ctx ctx
-                       :seon.cluster.agent/id agent-id
-                       :seon.cluster.run/id run-id
-                       :seon.cluster.run.form/ordinal ordinal}))
-                    (when (zero? ran) desk-notices))
+                  (submit-evaluation!!
+                   cluster
+                   evaluate
+                   receipt-id
+                   (evaluation-request
+                    (cond->
+                     {::admitted-form form
+                      ::evaluation-namespace evaluation-namespace
+                      ::cluster cluster
+                      :seon.sci.eval/ctx ctx
+                      :seon.cluster.agent/id agent-id
+                      :seon.cluster.run/id run-id
+                      :seon.cluster.run.form/ordinal ordinal}
+                      (and (zero? ran) (seq desk-notices))
+                      (assoc :seon.sci.eval/output-prefix
+                             (str/join "\n" desk-notices)))))
                   problem
                   (problems/form-problem
                    @connection

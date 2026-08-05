@@ -271,6 +271,16 @@
       text
       (subs text 0 limit))))
 
+(defn- evaluation-output
+  [prefix printed caps]
+  (let [printed (str printed)]
+    (when (or (seq prefix) (seq printed))
+      (bounded-output
+       (str prefix
+            (when (and (seq prefix) (seq printed)) "\n")
+            printed)
+       caps))))
+
 (declare deleted-schema-key)
 
 (defn- row
@@ -1493,6 +1503,7 @@
 (defn- success-evaluation
   [{admitted :seon.sci.eval/admitted
     caps :seon.sci.admit/caps
+    output-prefix :seon.sci.eval/output-prefix
     printed :seon.sci.eval/printed
     namespace-name :seon.sci.eval/namespace-name
     ending-namespace :seon.sci.eval/ending-namespace
@@ -1509,12 +1520,14 @@
            :seon.sci.admit/record (:seon.sci.admit/record admitted)}
     row (assoc :seon.program/row row)
     (seq desk-definitions) (assoc :seon.sci.eval/desk-defs desk-definitions)
-    (seq (str printed))
-    (assoc :seon.cluster.eval/output (bounded-output printed caps))))
+    (or (seq output-prefix) (seq (str printed)))
+    (assoc :seon.cluster.eval/output
+           (evaluation-output output-prefix printed caps))))
 
 (defn- failed-evaluation
   [{admitted :seon.sci.eval/admitted
     caps :seon.sci.admit/caps
+    output-prefix :seon.sci.eval/output-prefix
     printed :seon.sci.eval/printed
     namespace-name :seon.sci.eval/namespace-name
     print-options :seon.print/options
@@ -1538,8 +1551,9 @@
     (seq desk-definitions) (assoc :seon.sci.eval/desk-defs desk-definitions)
     (contains? request :seon.cluster.eval/interrupted-at)
     (assoc :seon.cluster.eval/interrupted-at interrupted-at)
-    (seq (str printed))
-    (assoc :seon.cluster.eval/output (bounded-output printed caps))))
+    (or (seq output-prefix) (seq (str printed)))
+    (assoc :seon.cluster.eval/output
+           (evaluation-output output-prefix printed caps))))
 
 (defn evaluate
   "Evaluate one form source and return what may leave the boundary.

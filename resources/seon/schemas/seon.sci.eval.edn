@@ -90,6 +90,9 @@
                  [:seon.cluster.run.form/ordinal
                   {:optional true}
                   :seon.cluster.run.form/ordinal]
+                 [:seon.sci.eval/output-prefix
+                  {:optional true}
+                  :string]
                  [:seon.boot/cluster-name
                   {:optional true}
                   :seon.boot/cluster-name]],

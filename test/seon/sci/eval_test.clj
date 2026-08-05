@@ -612,6 +612,7 @@
            :seon.sci.admit/record record}
           :seon.sci.admit/caps
           (assoc caps :seon.config.eval.result/max-string 3)
+          :seon.sci.eval/output-prefix "restored"
           :seon.sci.eval/printed printed
           :seon.sci.eval/namespace-name 'user
           :seon.sci.eval/ending-namespace 'next
@@ -627,7 +628,7 @@
             :seon.sci.admit/record record
             :seon.program/row row
             :seon.sci.eval/desk-defs desk-defs
-            :seon.cluster.eval/output "abc"}
+            :seon.cluster.eval/output "res"}
            evaluation))))
 
 (deftest failed-evaluation-assembles-failure-presence-facts
@@ -645,6 +646,7 @@
          {:seon.sci.eval/admitted admitted
           :seon.sci.admit/caps
           (assoc caps :seon.config.eval.result/max-string 6)
+          :seon.sci.eval/output-prefix "lost"
           :seon.sci.eval/printed printed
           :seon.sci.eval/namespace-name 'user
           :seon.print/options {:seon.print/level 3}
@@ -662,7 +664,7 @@
             :seon.sci.admit/record record
             :seon.sci.eval/desk-defs desk-defs
             :seon.cluster.eval/interrupted-at interrupted-at
-            :seon.cluster.eval/output "before"}
+            :seon.cluster.eval/output "lost\nb"}
            evaluation))))
 
 (deftest evaluation-projection-prefers-the-live-context
