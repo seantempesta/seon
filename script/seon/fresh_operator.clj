@@ -1497,7 +1497,13 @@
                              java.nio.charset.StandardCharsets/UTF_8)]
           (try
             (let [progress!#
+                  ;; The socket line drives the waiting operator; the
+                  ;; stdout line lands in the cluster log so a boot that
+                  ;; never reaches readiness still says how far it got.
                   (fn [phase#]
+                    (println (str "boot phase: "
+                                  (clojure.core/name phase#)))
+                    (flush)
                     (.write writer# (str (clojure.core/name phase#) "\n"))
                     (.flush writer#))]
               (progress!# :seon.boot.phase/namespaces)
@@ -1533,17 +1539,17 @@
                 (.write writer# "ready\n")
                 (.flush writer#)))
             (catch Throwable failure#
-              (.write
-               writer#
-               (str
-                (clojure.core/pr-str
-                 {:seon.fresh-operator/event :failure
-                  :seon.fresh-operator/message
-                  (or (clojure.core/ex-message failure#) (str failure#))
-                  :seon.fresh-operator/error-kind
-                  (:seon.error/kind (clojure.core/ex-data failure#))})
-                "\n"))
-              (.flush writer#)
+              (let [face#
+                    (clojure.core/pr-str
+                     {:seon.fresh-operator/event :failure
+                      :seon.fresh-operator/message
+                      (or (clojure.core/ex-message failure#) (str failure#))
+                      :seon.fresh-operator/error-kind
+                      (:seon.error/kind (clojure.core/ex-data failure#))})]
+                (println (str "boot failure: " face#))
+                (flush)
+                (.write writer# (str face# "\n"))
+                (.flush writer#))
               (throw failure#))))
         @(promise)))))
 

@@ -513,7 +513,10 @@
 
 (defn- warn-low-space!
   [managed-root effective]
-  (let [footprint (operator.state/footprint managed-root)
+  ;; statfs only — the boot path must never pay a recursive directory
+  ;; walk (a checkout carrying frozen tmp/ evidence took ~94 s, which is
+  ;; the P19 boot-readiness failure of 2026-08-05).
+  (let [footprint (operator.state/filesystem-space managed-root)
         low? (or (< (:seon.operator.footprint/usable-bytes footprint)
                     (:seon.config.maintenance/min-usable-bytes effective))
                  (< (:seon.operator.footprint/usable-ratio footprint)

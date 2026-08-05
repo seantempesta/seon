@@ -161,10 +161,13 @@
     managed-root :seon.operator/managed-root
     :as request}]
   (attempt
-   #(assoc (state/record-footprint! repository-root managed-root)
-           :seon.operator.footprint/low-space? (boolean (low-space?
-                                                         (state/footprint managed-root)
-                                                         request)))))
+   ;; low-space? reads only the statfs fields, which the recorded
+   ;; observation already carries for the same volume — a second
+   ;; recursive walk of the whole managed root bought nothing.
+   #(let [observation (state/record-footprint! repository-root managed-root)]
+      (assoc observation
+             :seon.operator.footprint/low-space?
+             (boolean (low-space? observation request))))))
 
 (defn- existing-children
   [path]

@@ -236,8 +236,32 @@
       (sort-by :seon.operator.claim/root roots))
      :seon.operator/claim-errors (into root-errors process-errors)}))
 
+(defn filesystem-space
+  "Observe usable and total filesystem space for the root's volume.
+  Two statfs calls, never a directory walk — safe on any path, hot
+  paths included. The boot low-space gate reads exactly this."
+  [managed-root]
+  (let [root-path (.normalize (.toAbsolutePath (fs/path managed-root)))
+        no-follow (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])
+        filesystem-file
+        (.toFile (if (Files/exists root-path no-follow)
+                   root-path
+                   (.getParent root-path)))
+        total (.getTotalSpace filesystem-file)
+        usable (.getUsableSpace filesystem-file)]
+    {:seon.operator.footprint/root (str root-path)
+     :seon.operator.footprint/usable-bytes usable
+     :seon.operator.footprint/total-bytes total
+     :seon.operator.footprint/usable-ratio
+     (if (pos? total) (/ (double usable) (double total)) 0.0)
+     :seon.operator.footprint/observed-at (Date.)}))
+
 (defn footprint
-  "Observe allocated bytes and usable filesystem space without following links."
+  "Observe allocated bytes and usable filesystem space without following links.
+  The allocated-bytes half recursively stats every file under the root, so
+  its cost is proportional to the tree — call it only on managed data roots
+  (status, cleanup accounting, scheduled observation), never on a boot path
+  and never on a repository checkout."
   [managed-root]
   (let [root-path (.normalize (.toAbsolutePath (fs/path managed-root)))
         no-follow (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])
@@ -251,20 +275,9 @@
                       (with-open [children (Files/newDirectoryStream path)]
                         (reduce + 0 (map size-of (vec children))))
                       :else (Files/size path)))]
-            (size-of root-path)))
-        filesystem-file
-        (.toFile (if (Files/exists root-path no-follow)
-                   root-path
-                   (.getParent root-path)))
-        total (.getTotalSpace filesystem-file)
-        usable (.getUsableSpace filesystem-file)]
-    {:seon.operator.footprint/root (str root-path)
-     :seon.operator.footprint/bytes bytes
-     :seon.operator.footprint/usable-bytes usable
-     :seon.operator.footprint/total-bytes total
-     :seon.operator.footprint/usable-ratio
-     (if (pos? total) (/ (double usable) (double total)) 0.0)
-     :seon.operator.footprint/observed-at (Date.)}))
+            (size-of root-path)))]
+    (assoc (filesystem-space managed-root)
+           :seon.operator.footprint/bytes bytes)))
 
 (defn record-footprint-under-lock!
   "Record one observation while the caller holds the lifecycle lock."

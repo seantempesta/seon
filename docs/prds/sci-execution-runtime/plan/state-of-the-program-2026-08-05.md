@@ -254,7 +254,34 @@ declaration + resolver.
 
 ---
 
-### P19 — THE CLUSTER DOES NOT BOOT (new, blocking, discovered at reset)
+### P19 — THE CLUSTER DOES NOT BOOT — **RESOLVED 2026-08-05 (fresh session, first probe)**
+
+The direct-boot probe answered the open question in one thread dump:
+the JVM was SLOW, not wedged. `warn-low-space!` (added to `start!` by
+the governor wave, `fdbb6e45d`) called `seon.operator.state/footprint`,
+whose recursive `size-of` stats every file under the managed root —
+and `operator-root` of `data/clusters` resolves to the WHOLE REPOSITORY
+CHECKOUT, including ~240 GiB of frozen `tmp/` evidence, `evals/runs/`,
+`.git`, and the vendored submodules. Measured: 11 s namespace load,
+**~94 s in the walk**, then the entire tower repl→ready in 2.6 s. The
+wrapper's 30 s timeout fired a third of the way into the walk. The
+decisive detail: the low-space decision reads ONLY the statfs fields
+(`usable-bytes`/`usable-ratio`) — the walk's result was never consulted.
+
+Fix (same day): `seon.operator.state/filesystem-space` (statfs only) is
+what `warn-low-space!` and `observe-footprint!`'s low-space flag read;
+the recursive `footprint` walk survives only for status/cleanup
+accounting over `data/clusters`. The empty-log defect is also fixed:
+`launch-form` now prints each boot phase and any boot failure to stdout
+(→ the cluster log) as well as the ready socket. Verified: `bin/seon
+start default` reaches READY through the wrapper, all phases in the
+log, advertisement published, status alive. The 30 s
+`advertisement-wait-ms` clock itself remains the banned shape and is
+still open (see the fresh session's slowness/fragility program).
+
+Original record follows.
+
+### P19 (original record) — THE CLUSTER DOES NOT BOOT (new, blocking, discovered at reset)
 
 After the full reset the default cluster **cannot reach readiness**.
 Reproduced four times. `bin/seon start default` prints
