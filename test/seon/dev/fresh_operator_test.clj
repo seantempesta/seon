@@ -1501,8 +1501,7 @@
         instance {:seon.boot/config
                   {:seon.boot/root (str (io/file root "data" "clusters"))
                    :seon.boot/cluster-name "blocked"}}
-        form (operator-private-value 'start-cluster-form
-                                     (str root) "blocked" {})
+        form (operator-private-value 'add-form (str root) "blocked" {})
         stopped (atom [])
         failure
         (ex-info
@@ -1517,12 +1516,11 @@
            :maintenance-receipt {:seon.maintenance.receipt/id "sweep-1"}}))]
     (with-redefs [cluster/start! (fn [_request] (throw failure))
                   cluster/stop! (fn [stopped-instance]
-                                  (swap! stopped conj stopped-instance))]
-      (let [refusal (try
-                      (eval form)
-                      ::committed
-                      (catch clojure.lang.ExceptionInfo error
-                        (ex-data error)))]
+                                  (swap! stopped conj stopped-instance))
+                  instrument/apply!
+                  (fn [_request]
+                    (throw (ex-info "a refused start must not instrument" {})))]
+      (let [refusal (eval (read-string form))]
         (is (= :sweep-in-progress (:type refusal)))
         (is (= :sweep-in-progress (:seon.error/kind refusal)))
         (is (true? (:retryable? refusal)))

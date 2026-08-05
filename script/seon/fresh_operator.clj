@@ -1531,11 +1531,10 @@
            (do
              (when-let [instance# (:seon.boot/instance (ex-data failure#))]
                ((ns-resolve 'seon.cluster (symbol "stop!")) instance#))
-             (throw
-              (ex-info
-               "A reachability sweep is in progress; retry start later."
-               (assoc sweep-data# :seon.error/kind :sweep-in-progress)
-               failure#))))))))
+             (assoc sweep-data#
+                    :seon.error/kind :sweep-in-progress
+                    :seon.error/message
+                    "A reachability sweep is in progress; retry start later.")))))))
 
 (defn- launch-form
   [root name manifest ready-port]
@@ -1565,6 +1564,11 @@
                     (with-bindings
                       {progress-var# progress!#}
                       ~(start-cluster-form root name manifest))
+                    _#
+                    (when (= :sweep-in-progress
+                             (:seon.error/kind ~instance))
+                      (throw (ex-info (:seon.error/message ~instance)
+                                      ~instance)))
                     _# (require 'seon.operator)
                     dials#
                     ((ns-resolve 'seon.config (symbol "effective"))
@@ -1630,11 +1634,13 @@
               ~instance
               (with-bindings
                 {progress-var# progress!#}
-                ~(start-cluster-form root name manifest))
-              applied# ~(instrument-form instance name)]
-          (println "seon" ~name "added — instrumented"
-                   (:seon.instrument/instrumented applied#) "vars")
-          ~name)))))
+                ~(start-cluster-form root name manifest))]
+          (if (= :sweep-in-progress (:seon.error/kind ~instance))
+            ~instance
+            (let [applied# ~(instrument-form instance name)]
+              (println "seon" ~name "added — instrumented"
+                       (:seon.instrument/instrumented applied#) "vars")
+              ~name)))))))
 
 (defn- create-log!
   {:seon.fn/external-sink :codec-storage
@@ -1989,7 +1995,7 @@
     (if anchor
       (let [anchor-ad
             (:seon.fresh-operator/transport-advertisement anchor)
-            _
+            start-events
             (try
               (prepl-eval!
                anchor-ad
@@ -2012,6 +2018,12 @@
                   (assoc (ex-data error)
                          :seon.fresh-operator/name name)
                   error))))
+            start-result (edn/read-string (terminal-value start-events))
+            _ (when (= :sweep-in-progress
+                       (:seon.error/kind start-result))
+                (throw (ex-info (:seon.error/message start-result)
+                                (assoc start-result
+                                       :seon.fresh-operator/name name))))
             value
             (:seon.fresh-operator/registered-advertisement
              (named-cluster-row (reconciled-truth! root) name))]
