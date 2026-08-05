@@ -157,8 +157,15 @@ Readings, in confidence order:
    about the SCHEDULED reaper (which must not eat live work), not about reset —
    and even there the operator's existing process records are the mechanism;
    my emergency `ps`-grep sweep was a hand-rolled substitute and that is why it
-   destroyed a live experiment's workspace. Do not build a new claim API before
-   trying the operator's own records.
+   destroyed a live experiment's workspace.
+   ANSWERED by
+   [store-existence-authority](../research/store-existence-authority-2026-08-04.md)
+   (`07ef1b7a8`): Datahike's `:branches` roster is store-LOCAL and konserve only
+   checks caller-supplied paths — neither dependency maintains a parent catalog,
+   so a non-database record is genuinely required. The recommendation is to
+   EXTEND the operator's existing atomic records into a claim-first authority
+   living outside the managed roots (survives the target's death), not to invent
+   a registry file. Two `bin/seon status` output defects were filed alongside.
 7. **The one-time reclaim, owner-approved, still pending**: head-only store GC
    (**357 GiB reclaim, 17 GiB retained**) + delete the frozen `tmp/` evidence.
    Run as ONE quiesced pass after the leak fixes land. Recipe and measurements:
