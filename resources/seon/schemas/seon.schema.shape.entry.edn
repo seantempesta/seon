@@ -1,0 +1,49 @@
+#:seon.schema.shape.entry{:id [:string {:seon.db/identity true}],
+                          :order :int,
+                          :optional? :boolean,
+                          :schema :seon.db/ref,
+                          :properties :string,
+                          :row
+                          [:map
+                           #:seon.db{:attributes true}
+                           [:seon.schema.shape.entry/id
+                            :seon.schema.shape.entry/id]
+                           [:seon.schema.shape.entry/order
+                            :seon.schema.shape.entry/order]
+                           [:seon.schema.shape.entry/optional?
+                            :seon.schema.shape.entry/optional?]
+                           [:seon.schema.shape.entry/schema
+                            :seon.schema.shape.entry/schema]
+                           [:seon.schema.map-entry/key-kind
+                            :seon.schema.map-entry/key-kind]
+                           [:seon.schema.map-entry/key-fingerprint
+                            :seon.schema.map-entry/key-fingerprint]
+                           [:seon.schema.map-entry/key-edn
+                            :seon.schema.map-entry/key-edn]
+                           [:seon.schema.map-entry/key-keyword
+                            {:optional true}
+                            :seon.schema.map-entry/key-keyword]
+                           [:seon.schema.map-entry/key-string
+                            {:optional true}
+                            :seon.schema.map-entry/key-string]
+                           [:seon.schema.map-entry/key-symbol
+                            {:optional true}
+                            :seon.schema.map-entry/key-symbol]
+                           [:seon.schema.map-entry/key-boolean
+                            {:optional true}
+                            :seon.schema.map-entry/key-boolean]
+                           [:seon.schema.map-entry/key-int
+                            {:optional true}
+                            :seon.schema.map-entry/key-int]
+                           [:seon.schema.map-entry/key-double
+                            {:optional true}
+                            :seon.schema.map-entry/key-double]
+                           [:seon.schema.map-entry/key-uuid
+                            {:optional true}
+                            :seon.schema.map-entry/key-uuid]
+                           [:seon.schema.map-entry/key-inst
+                            {:optional true}
+                            :seon.schema.map-entry/key-inst]
+                           [:seon.schema.shape.entry/properties
+                            {:optional true}
+                            :seon.schema.shape.entry/properties]]}

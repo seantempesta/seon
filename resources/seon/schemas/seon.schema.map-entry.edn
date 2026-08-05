@@ -1,0 +1,14 @@
+#:seon.schema.map-entry{:key-kind
+                        [:enum
+                         :nil :keyword :string :symbol :boolean :int :double
+                         :uuid :inst :vector :map :set :sequential],
+                        :key-fingerprint [:and :seon.source/digest],
+                        :key-edn :string,
+                        :key-keyword :keyword,
+                        :key-string :string,
+                        :key-symbol :symbol,
+                        :key-boolean :boolean,
+                        :key-int :int,
+                        :key-double :double,
+                        :key-uuid :uuid,
+                        :key-inst :inst}

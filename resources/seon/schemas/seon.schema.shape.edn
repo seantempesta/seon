@@ -1,0 +1,31 @@
+#:seon.schema.shape{:fingerprint
+                    [:and {:seon.db/identity true} :seon.source/digest],
+                    :normalization-revision :string,
+                    :form :string,
+                    :comparison [:enum :exact :structural-only],
+                    :type :keyword,
+                    :properties :string,
+                    :children
+                    [:vector {:seon.db/component true} :seon.db/ref],
+                    :entries
+                    [:vector {:seon.db/component true} :seon.db/ref],
+                    :row
+                    [:map
+                     #:seon.db{:entity true}
+                     [:seon.schema.shape/fingerprint
+                      :seon.schema.shape/fingerprint]
+                     [:seon.schema.shape/normalization-revision
+                      :seon.schema.shape/normalization-revision]
+                     [:seon.schema.shape/form :seon.schema.shape/form]
+                     [:seon.schema.shape/comparison
+                      :seon.schema.shape/comparison]
+                     [:seon.schema.shape/type :seon.schema.shape/type]
+                     [:seon.schema.shape/properties
+                      {:optional true}
+                      :seon.schema.shape/properties]
+                     [:seon.schema.shape/children
+                      {:optional true}
+                      :seon.schema.shape/children]
+                     [:seon.schema.shape/entries
+                      {:optional true}
+                      :seon.schema.shape/entries]]}

@@ -1,0 +1,17 @@
+#:seon.schema.shape.child{:id [:string {:seon.db/identity true}],
+                          :order :int,
+                          :schema :seon.db/ref,
+                          :value-edn :string,
+                          :row
+                          [:map
+                           #:seon.db{:attributes true}
+                           [:seon.schema.shape.child/id
+                            :seon.schema.shape.child/id]
+                           [:seon.schema.shape.child/order
+                            :seon.schema.shape.child/order]
+                           [:seon.schema.shape.child/schema
+                            {:optional true}
+                            :seon.schema.shape.child/schema]
+                           [:seon.schema.shape.child/value-edn
+                            {:optional true}
+                            :seon.schema.shape.child/value-edn]]}
