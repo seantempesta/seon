@@ -1,5 +1,6 @@
 #:seon.db{:attributes :boolean,
           :component :boolean,
+          :db :seon.db/database-value,
           :entity :boolean,
           :identity :boolean,
           :index :boolean,
