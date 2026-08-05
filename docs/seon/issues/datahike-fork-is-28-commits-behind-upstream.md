@@ -65,6 +65,14 @@ execution contracts. A no-commit merge produced 50 hunks in 12 files,
 including 27 in `query/execute.cljc`. It was aborted without a commit, push,
 or gitlink change. The maintained branch remains `9b3be9d5`.
 
+## Maintained divergence added 2026-08-04
+
+Fork commit `c1527273` classifies structured expected transaction refusals at
+the `datahike.writer/create-thread` catch seam and replaces their complete
+exception/invocation/argument log with one bounded error face. The next
+upstream merge must preserve or deliberately supersede that distinction while
+leaving unclassified writer failures complete and loud.
+
 ## Acceptance
 
 - `git rev-list --count HEAD..upstream/main` is 0, or every commit not taken

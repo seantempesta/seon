@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, database, diagnostics]
 ---
@@ -51,3 +51,22 @@ faults.
 An expected Datahike refusal or invalid read remains one flat, structured
 `:seon.error` value without printing a second log line or writer stack, while
 unexpected database faults stay loud and retain their diagnostic trace.
+
+## Resolution
+
+Resolved for the writer path in maintained Datahike fork commit `c1527273`.
+`datahike.writer/create-thread` now classifies refusals from their structured
+`:seon.error/kind` or `:error` data and logs only a bounded face containing the
+kind, optional attribute, and a single-line cause capped at 256 characters.
+Unclassified failures retain the complete `:datahike/write-error` payload with
+the throwable, invocation, and arguments.
+
+The fork-native real-writer regression passed in all three Datahike suites: 18
+tests, 99 assertions, zero failures. It drives a 4,097-character multiline
+refusal through `:db.fn/call`, asserts no more than three stderr lines and 512
+characters, and independently proves an unexpected writer failure retains its
+complete diagnostic payload.
+
+The previously noisy gate passed unchanged at 13 tests and 82 assertions. Its
+captured output fell from 12,846 lines / 1,086,528 bytes to 328 lines / 51,578
+bytes: reductions of 97.45% by line count and 95.25% by byte count.
