@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, bootstrap, eval, testing]
 ---
@@ -62,3 +62,18 @@ identity/liveness, evidence/reap disposition, and latest measured bytes.
 Deletion refuses while a live claim exists or ownership is absent/ambiguous.
 Teardown awaits every claimed child before releasing the claim or removing
 records and files.
+
+## Resolution
+
+Resolved by the external operator existence authority. The installation's one
+control root now holds atomic, one-record-per-identity root and process claims
+outside every managed `data/clusters` tree. `seon.operator/claim-root!` publishes
+canonical path, creator, disposition, store, and cluster intent before creation;
+`seon.operator/existence` derives exact process liveness from those records
+without opening Datahike. The record therefore survives both process death and
+explicit managed-tree cleanup. Fixture launchers also await exact children
+before deleting their isolated roots.
+
+Recurring regressions prove a claim remains queryable while its target is
+absent, cleanup does not follow a symlink, and fixture roots do not survive
+their owning test.

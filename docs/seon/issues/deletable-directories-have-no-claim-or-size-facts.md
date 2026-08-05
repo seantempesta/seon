@@ -46,3 +46,12 @@ surface; fixture and experiment launchers consume that one mechanism.
   mode without imposing a quota or refusing work.
 - Owner exit reaps and awaits exact children before removing process records,
   releasing claims, or deleting a root.
+
+## Implemented boundary
+
+The external claim-first authority, exact process liveness, per-root footprint
+observation, low-space boot warning, configured log retention, truthful reset
+cleanup, and fixture child reaping are implemented. The remaining acceptance
+work is the scheduler lane's conservative ephemeral-root reaper and database
+maintenance-result facts; it consumes the existing `seon.operator` functions
+rather than adding another cleanup implementation.

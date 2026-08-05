@@ -36,6 +36,31 @@ The final graduation gates remain a clean proof/adopt curation loop, zero
 projected-path bypasses or unresolved sinks, and reset-boundary live proof of
 the integrated runtime.
 
+**ADDENDUM — 2026-08-05, OPERATOR EXISTENCE AND CLEANUP OWNERS LANDED.** The
+existing fsync-and-atomic-replace process record mechanism is promoted into one
+installation control-root authority outside every managed `data/clusters`
+tree. Root claims precede directory/log/JVM creation and record canonical path,
+store, clusters, durable/ephemeral disposition, creator, and exact process
+generations; `seon.operator/existence` reads those claims and derives liveness
+without opening Datahike. `bin/seon status` now shows root footprint, expands
+for long cluster names, and describes its claim/advertisement degradation
+honestly instead of reporting the intentionally unprobed prepl unreachable.
+Boot emits a loud, non-quota low-space warning from configured 50 GiB / 10%
+thresholds, and configured log rotation truncates the live inode after archiving
+bounded predecessors. One `seon.operator/cleanup-root!` no-follow owner returns
+removed paths, reclaimed bytes, residual paths, and completion; reset calls it
+after exact process reaping and cannot report success with residue. Live and
+dormant forced reforks delete cluster logs/scratch and immediately collect the
+retired branch with an explicit cutoff. The scheduler lane calls these same
+operations through this contract; it does not own a second cleanup path. Focused operator proof covers
+dead-target existence, recorded footprint, complete cleanup with a symlink
+sentinel, and live-log bounding. The combined config gate is temporarily blocked
+at source publication by the independently landed scheduler contracts in
+`src/seon/schedule.clj`: both nil-return arms use `[:= nil]`, which EDN reads as
+an equality schema with no child. `seon.schema/build-projection` reproduces the
+`:malli.core/child-error`; replacing that foreign arm with Malli's `:nil`
+compiles in the same probe. This lane does not edit that foreign boundary.
+
 **ADDENDUM — 2026-08-04, RULING #48 IS ENFORCED OPEN EVERYWHERE.** Commit
 `ce099ce79` removes every live first-party closed-map contract found by the
 repository-wide census, deletes the authored open-map refusal, makes config

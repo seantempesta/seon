@@ -236,6 +236,13 @@ footprint inspection, dead-root cleanup, log retention, and related repair—as
 ordinary root tasks; the operator invokes the same owners for explicit manual
 maintenance.
 
+The manual owners are live in `seon.operator`: root claiming and existence
+queries, footprint observation, live-inode log rotation, and unconditional
+no-follow cleanup. `bin/seon` invokes those functions; scheduled root tasks call
+the same functions once their per-agent schedule procs land. Explicit reset is
+authorization to remove the complete managed `data/clusters` tree and succeeds
+only when its returned cleanup result reports no residual paths.
+
 ## Crash recovery
 
 Nothing re-executes after a process dies. Recovery scans open runs and compares

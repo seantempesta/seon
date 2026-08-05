@@ -219,8 +219,14 @@ drill navigation, and show AI/HTML projections from the same render owners.
 They do not store a display selection or route entity.
 
 The operator separately reports process identities, branches, ports, readiness,
-and logs. Those facts govern process lifecycle, not agent history. Reproduction
-uses an isolated cluster fork and the ordinary message/run path.
+logs, and per-root disk footprint. Before creating a managed root, store, log,
+or cluster, it publishes one atomic EDN claim under the installation control
+root outside `data/clusters`. That catalog records the canonical root, store,
+clusters, durable/ephemeral disposition, creator, and exact process generations;
+status derives liveness from `(pid, start-instant)` without opening Datahike.
+The claim survives the process and managed tree it describes. These facts govern
+process lifecycle, not agent history. Reproduction uses an isolated cluster fork
+and the ordinary message/run path.
 
 ## Source authority
 
