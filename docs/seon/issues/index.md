@@ -37,7 +37,7 @@ See `README.md` for the convention.
 | [Refuse the losing concurrent divergent schema declaration](concurrent-divergent-schema-declarations-falsely-both-succeed.md) | blocker | schema collision admission wave |
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 
-## Friction (89)
+## Friction (90)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -56,6 +56,7 @@ See `README.md` for the convention.
 | [Make the provider descriptor own its output-token wire key](provider-output-token-wire-key-is-hard-coded.md) | friction | AI provider protocol wave |
 | [Give eval episode backstops one declared owner](eval-drives-duplicate-a-four-minute-run-clock.md) | friction | eval-driver lifecycle wave |
 | [Replace recurring anonymous runtime contracts with named predicates](anonymous-runtime-contracts-have-recurred.md) | friction | contract-gate repair |
+| [Name the offending Var in Malli registration failures](malli-registration-errors-hide-the-offending-var.md) | friction | contract-gate repair |
 | [Derive operator process identity without command substring lists](operator-classifies-processes-by-command-substrings.md) | friction | operator process-identity wave |
 | [Bound operator subprocess reads and waits](operator-subprocesses-have-unbounded-read-and-wait-paths.md) | friction | operator child-lifecycle wave |
 | [Teach namespaced data in the bootstrap contract example](bootstrap-teaches-bare-map-keys.md) | friction | bootstrap instruction wave |
