@@ -24,6 +24,14 @@ captured `ProcessHandle` publishes `onExit`.
 The external child may legitimately need a deadline as a loud backstop. Its
 exact exit is not external or unobservable once the handle has been captured.
 
+The disk emergency survivor census found four `tmp/test-runs/run.*` roots,
+each 6,200 allocated KiB, created between 19:12 and 19:14 on 2026-08-04.
+`bin/test:261-270` exits from its signal trap while retaining the root; normal
+successful cleanup occurs only after the child command returns at lines
+275-298. The missing ordering is explicit: publish/capture every child, reap
+and await those children, then decide whether the root is retained evidence or
+released and deleted.
+
 ## Owner
 
 The changed-test subprocess lifecycle, expressed through exact
@@ -38,3 +46,5 @@ The changed-test subprocess lifecycle, expressed through exact
   boundary; no attempt count stands in for a complete process tree.
 - A regression starts a late descendant and proves it is reaped without tuned
   sleeps.
+- Signal, failure, and success teardown reap exact children before retaining or
+  deleting the claimed `run.*` root; a retained root records why it is evidence.

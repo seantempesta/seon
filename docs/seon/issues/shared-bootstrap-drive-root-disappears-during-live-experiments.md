@@ -36,6 +36,12 @@ strengthen the shared bootstrap-drive scratch/report lifecycle so one drive,
 test, or cleanup owner cannot remove another live drive's root or completed
 raw report.
 
+The strengthened owner is a declared directory claim in a stable parent
+database, recorded before creating the drive root. It connects the canonical
+path to the drive/experiment fact and exact process identity. Liveness is
+derived from that identity; a path prefix, mtime, or `ps` text match is never a
+claim. The claim authority must not live only inside the directory it protects.
+
 ## Acceptance
 
 A recurring proof runs multiple bootstrap drives concurrently, settles raw
@@ -43,3 +49,9 @@ reports in each, and tears them down independently. Every sibling database
 root remains writable until its own drive stops, every completed raw report
 survives, and the proof records the remover if any declared cleanup attempts
 to cross its owned root.
+
+Every drive root is queryable by canonical path for its owner, exact process
+identity/liveness, evidence/reap disposition, and latest measured bytes.
+Deletion refuses while a live claim exists or ownership is absent/ambiguous.
+Teardown awaits every claimed child before releasing the claim or removing
+records and files.

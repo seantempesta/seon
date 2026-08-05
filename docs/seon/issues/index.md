@@ -16,10 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (15)
+## Blocker (16)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Observe and claim every deletable directory](deletable-directories-have-no-claim-or-size-facts.md) | blocker | operator directory-claim governor wave |
 | [Preserve every live bootstrap drive root and raw report](shared-bootstrap-drive-root-disappears-during-live-experiments.md) | blocker | bootstrap drive root-isolation wave |
 | [Refuse malformed SSE data before it can change agent code](malformed-sse-data-can-change-agent-code.md) | blocker | AI provider-integrity wave |
 | [Bound work submission before Flow injection can block](work-submission-can-block-before-its-time-limit.md) | blocker | Flow bounded-submission wave |
@@ -36,10 +37,12 @@ See `README.md` for the convention.
 | [Refuse the losing concurrent divergent schema declaration](concurrent-divergent-schema-declarations-falsely-both-succeed.md) | blocker | schema collision admission wave |
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 
-## Friction (88)
+## Friction (90)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Render live-proof roots have no declared lifecycle owner](render-live-proof-roots-have-no-lifecycle-owner.md) | friction | operator directory-claim governor wave |
+| [Render adversarial roots outlive their fault experiment](render-adversarial-roots-outlive-their-experiment.md) | friction | operator directory-claim governor wave |
 | [Include non-installed operator and MCP leaves in the sink proof](output-sink-query-excludes-operator-and-mcp-scripts.md) | friction | universal output floor graduation wave |
 | [`bin/seon init` reports only `✗ Read timed out` while the operation succeeds](seon-init-reports-read-timed-out-while-succeeding.md) | friction | operator integration wave |
 | [Stop reporting an MCP-proven live prepl as unreachable](status-reports-a-live-mcp-proven-prepl-unreachable.md) | friction | operator status-truth wave |
@@ -130,10 +133,14 @@ See `README.md` for the convention.
 | [Select the latest closed run without comparing run ids](latest-closed-run-orders-by-id-string.md) | friction | work ordering follow-up |
 | [Admit definitions after dynamically hidden namespace movement](dynamic-in-ns-cannot-persist-definition-namespace.md) | friction | per-run fork context wave |
 
-## Cleanup (15)
+## Cleanup (19)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Branch SIGINT fixtures can erase ownership before descendants exit](branch-sigint-fixtures-erase-ownership-before-child-exit.md) | cleanup | obsolete fixture deletion wave |
+| [Blob test roots depend on a framework after-hook](blob-test-roots-depend-on-framework-after-hook.md) | cleanup | filesystem fixture cleanup wave |
+| [Autocomplete test roots depend on a framework after-hook](autocomplete-test-roots-depend-on-framework-after-hook.md) | cleanup | filesystem fixture cleanup wave |
+| [Bootstrap v2 API fixtures never delete their Datalevin directories](bootstrap-v2-api-fixtures-never-delete-directories.md) | cleanup | obsolete fixture deletion wave |
 | [Make fresh CLJC namespaces portable or name them CLJ](fresh-cljc-files-are-jvm-only.md) | cleanup | fresh portability cleanup wave |
 | [Select duplicate-identity refusal evidence deterministically](duplicate-identity-refusal-evidence-is-unordered.md) | cleanup | reconcile evidence cleanup wave |
 | [Delete operator helpers maintained only by private tests](operator-private-helpers-have-only-test-readers.md) | cleanup | operator deletion wave |
