@@ -254,6 +254,95 @@ declaration + resolver.
 
 ---
 
+### P19 — THE CLUSTER DOES NOT BOOT (new, blocking, discovered at reset)
+
+After the full reset the default cluster **cannot reach readiness**.
+Reproduced four times. `bin/seon start default` prints
+`● default boot: namespaces` then
+`✗ Timed out waiting for cluster readiness or process exit.` and the JVM
+is gone afterwards. No advertisement is written; the cluster log
+(`data/clusters/default/logs/seon.log`) contains only two JVM warning
+lines — nothing from Seon at all.
+
+What is known:
+
+- **The timeout is a hardcoded 30 s magic number**:
+  `advertisement-wait-ms` at `script/seon/fresh_operator.clj:19`, awaited
+  at `:1761-1773` via `CompletableFuture/anyOf [readiness exited]`. It
+  fired on NEITHER — so at 30 s the JVM was alive and had neither
+  advertised nor exited. Owner's response on seeing it: *"yeah fuck that
+  timeout"* — it is exactly the banned shape (a clock standing in for an
+  observable event) and it is REPORTING the failure, not causing it.
+- **Namespace loading is not the cause**: `clojure -M:dev -e "(require
+  'seon.cluster)"` completes in **11.9 s** wall on this machine.
+  Something after namespace loading is slow or hangs.
+- **Machine load was not the cause**: it reproduces with the machine
+  idle (see P20).
+- **It is not the old store**: the reset destroyed and rebuilt
+  everything; publication and the default fork both SUCCEEDED
+  (`:current-src` commit `6a73496e…`, default forked from
+  `6a734995…`, identical digests).
+- **Not yet determined**: whether the JVM would eventually become ready
+  if the wrapper did not give up, or whether it is genuinely wedged.
+  The wrapper's failure path appears to leave no live JVM, so the two
+  cases have not been distinguished. THAT is the first probe for the
+  fresh session: run the boot JVM directly (not through the wrapper),
+  with output to a terminal, and see what it prints after "namespaces".
+- The empty cluster log is itself a defect: a boot that fails must say
+  why, in the log, where the operator can read it.
+
+Nothing in the reset itself failed. **Whether this predates today's
+work is UNKNOWN** — the last known-good boot was pid 3885 started
+2026-08-03, before the entire 08-04/08-05 wave. `git bisect` over
+today's commits against a scratch root is the honest way to find it,
+and it is cheap now that a boot attempt takes ~40 s.
+
+### P20 — Orphaned JVMs: two distinct causes, both real
+
+Fourteen leftover Seon JVMs were found running at reset time. The two
+mechanisms are different and only one is a defect in the code:
+
+1. **Lane-abandoned clusters (12 of 14).** `bin/seon start` launches a
+   DETACHED daemon JVM by design; nothing ties a cluster's lifetime to
+   the lifetime of the lane that started it. When a lane finishes or is
+   stopped, its clusters keep running. These are fully recoverable —
+   `bin/seon --root <path> down --force` reaped all twelve — but nothing
+   ever does it automatically, so they accumulate for the whole session
+   and hold ~12.5 % of RAM each. This is the reaping arm of root's
+   maintenance portfolio (P3), and it is why that portfolio matters more
+   than it looked.
+2. **Test-harness children reparented to init (2 of 14, plus one
+   earlier).** Both had `ppid=1` and roots under
+   `tmp/test-runs/run.*/tmp/fresh-operator-test/…` whose directories no
+   longer existed. The changed-test selector deletes its records and
+   root **before** reaping its child, so the child survives with no
+   record pointing at it — unreapable by the operator, invisible to
+   `bin/seon status` (which is root-scoped), and only findable by
+   `pgrep`. This is ledger item D15 and it is now confirmed three times.
+
+Their combined memory pressure was the first suspect for P19 and was
+ruled out: P19 reproduces with all of them reaped.
+
+### P21 — Stale process records block `reset`, and there are TWO record locations
+
+`bin/seon reset --force` refused repeatedly with *"Recorded JVMs remain
+after forced down"* for pid 3885 — a process the same census had already
+printed as `state=not-alive` / `path=already-exited`. A confirmed-dead
+record must not block a forced reset.
+
+Worse, the record existed in **two places** and deleting one was not
+enough: `data/clusters/processes/<generation>.edn` (the original) AND
+`data/operator/claims/processes/<generation>.edn` (the claim authority
+added by the governor work). Removing only the claim let it be
+re-derived from the old location on the next attempt. **The claim-first
+authority duplicated the old records instead of replacing them** — a
+parallel mechanism, which the no-parallel-code ruling forbids, and a
+concrete instance of the "fragmented process identity" the naming audit
+ranked as a top-three problem (P11).
+
+The reset only completed after both files were removed by hand. That
+manual step is itself the evidence: reset is not yet self-sufficient.
+
 ## PART 4 — What was rushed, in retrospect (my honest audit)
 
 These are the calls I would want re-examined rather than inherited.
