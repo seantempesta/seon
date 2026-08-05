@@ -269,7 +269,7 @@ Five findings that matter for Seon:
 
    ```clojure
    (clojure.main/ex-str (clojure.main/ex-triage (assoc data :phase :execution)))
-   ;; produced: "Execution error (ArithmeticException) at user/eval136$fn (REPL:3).\nDivide by zero\n"
+   "Execution error (ArithmeticException) at user/eval136$fn (REPL:3).\nDivide by zero\n"
    ```
 
    That is byte-identical in shape to what the interactive REPL printed.
@@ -328,11 +328,11 @@ Measured on the live `default` cluster (2026-08-03):
 
 ```clojure
 (reply/sources "Here is a note.\n(* 2 21)\nAnd a trailing thought." 'user)
-;; => [{:seon.cluster.run.form/source "; Here is a note.\n(* 2 21)", :seon.ns/name user}
-;;     {:seon.cluster.run.form/source "; And a trailing thought."}]
+[{:seon.cluster.run.form/source "; Here is a note.\n(* 2 21)", :seon.ns/name user}
+ {:seon.cluster.run.form/source "; And a trailing thought."}]
 
 (reader/read {:seon.sci.reader/text "; just prose\n"})
-;; => []
+[]
 ```
 
 ### Divergence table
