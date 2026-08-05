@@ -1,5 +1,7 @@
 ---
 name: data-oriented-clojure
+type: skill
+status: active
 description: "Foundational mindset for writing Clojure the Seon way — data-oriented, immutable, schema-first, EAV, errors-as-values, derive-don't-store. Use this BEFORE writing or reviewing ANY Seon .clj/.cljc OR maintaining a vendored Clojure fork that Seon owns under reference-code/; this does not trigger for unrelated third-party work. Also use it when designing a data model or capability, or whenever you catch an imperative/OO reflex: a mutable accumulator loop, a :type/:kind discriminator, a 'table' of records, bare map keys, a thrown exception at an agent-facing boundary, :pre/:post or hand-rolled validation, stored derived state, threading a db/conn through call sites, a caller pre-read where a transaction function belongs, an unordered collection driving a tied decision, or a parallel namespace to house a fix. Use before guessing library behavior instead of reading reference-code/. For EAV mechanics see datahike; for schema EDN design see data-modeling."
 ---
 
@@ -42,31 +44,20 @@ as-of point; `memoize` on a db value walks the entire index on a cache *hit*;
 and under `:schema-flexibility :write` an attribute is NOT installed lazily —
 transacting an uninstalled attribute throws.
 
-**Current schema path:** first-party attribute/entity/value schemas are one EDN
-map at `resources/seon/schema.edn`, loaded by `seon.schema.edn/load!` as one
+**Current schema path:** first-party attribute/entity/value schemas are the EDN
+files under `resources/seon/schemas/`, loaded by `seon.schema.edn/load!` as one
 validated population. Shipped Clojure does not author those schemas with
 load-time `schema/register!`. Runtime agent registrations still pass through
 the same admission gate (`src/seon/schema/edn.clj:143-225,234-324`).
 
 **One config authority:** declare a config attribute once in that EDN
-population. `seon.schema.edn/derive-config-forms` derives the manifest,
-effective, and database-entity composites from the leaf registrations.
+population. `seon.schema.edn/derive-config-forms` derives the open manifest,
+effective, agent-overlay, and database-entity composites from the leaf registrations.
 `config/default.edn` supplies one complete shipped decision map; never maintain
-a second dial roster (`src/seon/schema/edn.clj:87-111`;
-`src/seon/config.cljc:137-229`).
+a second dial roster (`src/seon/schema/edn.clj:95-130`;
+`src/seon/config.clj:137-229`).
 
-**Program state has four boundaries.** Static indexing analyzes first-party
-`src/` and `test/` without evaluation (`src/seon/fn/analyzer.clj:117-145`;
-`src/seon/fn.clj:19-21`). Contracted declarations publish as program rows only
-through the terminal transaction (`src/seon/cluster/loop.cljc:1411-1447`).
-Each cluster also owns one process-live SCI context in which ordinary defs
-accumulate immediately (`src/seon/cluster.clj:1337-1363`;
-`src/seon/sci/eval.clj:1230-1275`). Separately, the same terminal transaction
-exact-reconciles durable `:seon.code.def` session-image facts for faithful
-values/blobs, proven deterministic pure forms, or explicit unrestorable rows;
-cold acquisition restores those facts once into the cluster context
-(`src/seon/cluster/loop.cljc:325-430,1411-1424`;
-`src/seon/sci/eval.clj:1142-1228`). Read the single checked semantic source,
+**Program state has four boundaries.** Read the single checked semantic source,
 [`references/program-state.md`](references/program-state.md), before changing
 or describing any of these boundaries.
 
@@ -134,8 +125,9 @@ clusters remain sovereign. `bin/seon init CLUSTER --force` is the destructive re
 Use concrete types. The omission ruling is exact: `[:maybe]` is allowed in
 in-memory function RETURN contracts (stored attributes stay nil-free — the
 bridge forces absence there). Stored optional fields use `{:optional true}` in
-a map and omit the key. `:any` is reserved for a genuine third-party boundary
-where no tighter honest type exists.
+a map and omit the key. Authored contracts refuse `:any`, `:some`, and `:nil`;
+declare a named predicate schema for genuine polymorphism
+(`src/seon/schema/internal.cljc:20,59-105`).
 
 ### Docstring line 1 is a complete ≤72-char sentence — it renders as the summary
 
@@ -282,7 +274,7 @@ shape once, reference everywhere": duplication guarantees drift.
 
 ### Schema EDN and function code have separate homes
 
-Put shipped schema declarations in `resources/seon/schema.edn`, then require
+Put shipped schema declarations under `resources/seon/schemas/`, then require
 only what function code actually calls:
 
 ```clojure
@@ -293,7 +285,7 @@ only what function code actually calls:
 ```
 
 ```clojure
-;; resources/seon/schema.edn — expense section
+;; resources/seon/schemas/ — owning expense family
 {:seon.expense/amount :int}
 ```
 

@@ -1,6 +1,8 @@
 ---
 name: repl
-description: "Distinguish and probe Seon's agent-reply reader, an agent turn in the shared live SCI context, a cluster io-prepl/MCP eval_clj session, and a raw JVM REPL. Use for reply parsing, prose-vs-code classification, Markdown fences, reader refusals, session-image persistence, source fidelity, namespace attribution, private-Var probes, or reload-before-retest work. Do not load it merely for ordinary Clojure syntax or application code that happens to be evaluated at a REPL."
+type: skill
+status: active
+description: "Distinguish and probe Seon's agent-reply reader, an agent turn in its SCI evaluation context, a cluster io-prepl/MCP eval_clj session, and a raw JVM REPL. Use for reply parsing, prose-vs-code classification, Markdown fences, reader refusals, session-image persistence, source fidelity, namespace attribution, private-Var probes, or reload-before-retest work. Do not load it merely for ordinary Clojure syntax or application code that happens to be evaluated at a REPL."
 ---
 
 # REPL — distinguish the four surfaces
@@ -12,13 +14,13 @@ Four surfaces share Clojure syntax but not an execution contract:
   `seon.cluster.reply/sources` over `seon.sci.reader/read`; the retired
   `src-old/seon/repl/parse.cljc` repair system is not on this path
   (`src/seon/cluster/reply.clj:1-48,310-355`).
-- **An agent turn in the live SCI context** executes those frozen sources
-  through `seon.sci.eval/evaluate` with the cluster's supplied context. Ordinary
-  defs accumulate immediately in that one cluster context; the terminal
-  transaction separately publishes admitted program rows and exact-reconciles
-  `:seon.code.def` session-image facts
-  (`src/seon/cluster/loop.clj:1460-1654`;
-  `src/seon/sci/eval.clj:1230-1294`).
+- **An agent turn in SCI** executes frozen sources through
+  `seon.sci.eval/evaluate`. **[CURRENT]** it receives the cluster's supplied
+  context; **[TARGET — ruled, unbuilt]** each run receives a fresh
+  generation-aware fork of the acquired base. Durable cross-run sharing remains
+  program publication and session-image acquisition
+  (`src/seon/cluster.clj:1880-1885`; `src/seon/sci/eval.clj:1334-1361`;
+  `reference-code/sci/src/sci/core.cljc:331-337`).
 - **Cluster `io-prepl` / MCP `eval_clj`** sends a form to the live cluster
   JVM's `clojure.core.server/io-prepl`. It reads, evaluates, and returns a
   structured envelope; a bare value evaluates normally, and the agent-reply
@@ -32,7 +34,7 @@ Four surfaces share Clojure syntax but not an execution contract:
 If a generic REPL probe behaves differently from an agent turn, that is not a
 contradiction; first name which surface you are on.
 
-### Operating clusters from a REPL session
+## Operating clusters from a REPL session
 
 `seon.operator` is the sanctioned control surface on the `io-prepl`/`eval_clj`
 jvm surface: eight thin-delegation verbs — `start!`, `stop!`, `restart!`,
@@ -49,21 +51,29 @@ server exists.
 
 ### Prove the agent session boundary
 
-Use an actual agent turn when the claim concerns the shared SCI context,
+Use an actual agent turn when the claim concerns the SCI evaluation context,
 terminal receipt, contracted program publication, or session-image facts. A
 direct `io-prepl` form proves only host-JVM evaluation; it never passes through
 the agent reply reader or the turn's terminal transaction
 (`reference-code/clojure/src/clj/clojure/core/server.clj:228-296`;
 `src/seon/cluster/loop.clj:1279-1306,1460-1654`).
 
-Within a live cluster, an ordinary def remains visible to later agent forms
-because `evaluate` uses the supplied context as given. The narrow exception is
-namespace unmapping: that form runs in a fork and installs its exact namespace
-state only after commit (`src/seon/sci/eval.clj:1262-1299,885-895`). Across a
-cold cluster acquisition, inspect `:seon.code.def` facts and then probe the
-restored context: acquisition pre-interns names, binds faithful inline/blob
-values, evaluates proven source rows, and reports unrestorable definitions
-(`src/seon/sci/eval.clj:1142-1228`).
+For the full current/target split between program rows, base context, per-run
+fork, and durable session image, read
+[`program-state.md`](../data-oriented-clojure/references/program-state.md).
+
+An evaluation's namespace precedence is explicit form namespace → committed
+agent assignment → `user`. `agent-namespace` queries
+`:seon.cluster.agent/namespace`; it never reconstructs `my.agents.<id>`
+(`src/seon/sci/eval.clj:238-254,1588-1596`;
+`test/seon/sci/eval_test.clj:1040-1060`). A successful contracted `defn`
+returns SCI's Var value and admits as the same `:seon.print/var` face as `def`,
+rendered `#'namespace/name` (`src/seon/sci/eval.clj:1666-1685`;
+`test/seon/sci/eval_test.clj:452-466`). An untriaged failed receipt renders in
+both transcript projections as a Clojure execution-error face; triage data,
+when present, remains the receipt's own error presentation
+(`src/seon/render/transcript.clj:512-531`;
+`test/seon/render/transcript_test.clj:249-286`).
 
 ## The agent-reply surface
 
@@ -163,7 +173,7 @@ not program-graph indexing”).
 
 | Symptom | Surface and next move |
 |---|---|
-| Reply became prose or the wrong plan forms | Agent reply: call `(seon.cluster.reply/sources exact-text 'user)` with an explicit namespace symbol. |
+| Reply became prose or the wrong plan forms | Agent reply: call `seon.cluster.reply/sources` with the actual run/form namespace or the result of `seon.sci.eval/agent-namespace`. |
 | `:seon.cluster.reply/unreadable` | Agent reply: fix malformed Clojure; no repair layer will close it. |
 | A def is live now but missing after restart | Agent turn: inspect its terminal receipt plus `:seon.code.def` row, then cold-acquire a fresh cluster context (`src/seon/cluster/loop.clj:380-465,1552-1644`; `src/seon/sci/eval.clj:1142-1228`). |
 | Bare map/keyword evaluates and prints | Expected in `io-prepl` and raw JVM REPLs. |

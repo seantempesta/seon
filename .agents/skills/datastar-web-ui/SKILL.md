@@ -1,5 +1,7 @@
 ---
 name: datastar-web-ui
+type: skill
+status: active
 description: "Work on Seon's Datastar web renderer, route table, namespace pages, debug pages, SSE feeds, message submission, block morphs, backpressure, layout, or render cost. Load before changing seon.render.web, seon.render.route, or another seon.render.* web owner, and before proposing a broader canvas or control surface."
 ---
 
@@ -65,6 +67,16 @@ page derives both projections from the same database value and shows AI on the
 left and every walked HTML unit on the right
 (`src/seon/render/web.clj:428-441,1041-1072`). Do not add a parallel page
 renderer or a debug-only traversal.
+
+AI and HTML remain distinct projections: AI returns text and HTML returns
+Hiccup. Recursive producer selection applies at every admitted value depth,
+and selected producer output is terminal (`src/seon/render.clj:300-334,344-369`).
+Generic preparation enriches elisions and calls the single `seon.print/fit`
+owner (`src/seon/render/value.clj:220-269`;
+`src/seon/print.cljc:669-675,750-785`). The current agent profile derives from
+config facts (`src/seon/render.clj:37-57`; `config/default.edn:60-70`).
+Consumer-specific MCP, operator, runner, and log profiles remain **[TARGET]**;
+do not add local caps while those output-floor conversions are pending.
 
 ## Preserve the live delivery path
 

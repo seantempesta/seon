@@ -1,5 +1,7 @@
 ---
 name: clojure-testing
+type: skill
+status: active
 description: "Test patterns for Seon. Use when writing or debugging a test, when a test needs a fresh in-memory Datahike connection, when choosing between an example test and a generative property, or when a suite is green for the wrong reason. Covers bin/test and its focused selection, clojure.test shape, the per-test database fixture, seeded test.check state-transition properties, and the honest-generator rules."
 ---
 
@@ -90,7 +92,7 @@ separate invocations are separate JVMs.
 
 Use the production population owner through `seon.test-support/with-database`.
 It opens a fresh `:memory` store, calls `cluster/populate-source!` to install
-the current `resources/seon/schema.edn` population and program rows, and
+the current `resources/seon/schemas/` population and program rows, and
 releases and deletes it in a `finally`. There is no ambient connection
 (`test/seon/test_support.clj:184-216`).
 
@@ -198,7 +200,7 @@ old value is intentionally unavailable
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `Bad entity attribute … not defined in current schema` | current EDN population was not installed on this connection | use `test-support/with-database`; add `extra-schema` only when installation is the subject |
-| "Unregistered attributes" from a Seon boundary | missing `resources/seon/schema.edn` declaration or activation | add it to the one EDN resource and use the production population owner |
+| "Unregistered attributes" from a Seon boundary | missing declaration or activation under `resources/seon/schemas/` | add it to the owning family and use the production population owner |
 | Empty `#{}` from a query that should match | attr misspelled, type mismatch, or a ref-join written as keyword-in-slot | see the `datahike` skill's read traps |
 | A property passes but the code is wrong | the property observes only the returned value, or its checker never reads the facts the command wrote | observe durable facts independently of the return; extend the checker |
 | Tests pass alone, fail together | the fixture shares one store, or restores less than it replaced | fresh `:id` per test AND per mutating generative trial; nothing global to restore |
@@ -317,7 +319,7 @@ for a foreign process, and its firing is a bug report
 
 Grounding and the pitfall catalog:
 `docs/prds/sci-execution-runtime/research/malli-generative-patterns-2026-07-26.md`
-+ `research/spec-authorship-relational-properties-2026-07-26.md` (the guard
+and `research/spec-authorship-relational-properties-2026-07-26.md` (the guard
 vs state-transition boundary).
 
 ## Structure dissolves failure classes
@@ -329,6 +331,15 @@ transition that refuses inside the transaction — and keep ONE regression per
 class. A pile of point tests fencing symptoms is the sign the invariant has no
 owner.
 
+## Tests are queryable program facts
+
+Static indexing records direct first-party calls from each `:seon.test` row
+through the shared cardinality-many `:seon.fn/calls` attribute.
+`seon.fn/tests-reaching` derives direct and transitive dependent tests from
+facts rather than naming conventions (`src/seon/fn.clj:292-323,402-439`;
+`resources/seon/schemas/seon.test.edn:7-17`;
+`test/seon/fn_test.clj:716-770`).
+
 ## Key test files
 
 | File | What it teaches |
@@ -337,6 +348,8 @@ owner.
 | `test/seon/cluster/boot_test.clj` | a live falsifier in-suite: real prepl sockets, project-local `tmp/` fixtures, a ruling (the ten-second bound) asserted as a test |
 | `test/seon/cluster/store_test.clj` | cross-process falsifiers with a real child JVM, event-driven readiness, and the two-halves interaction test |
 | `test/seon/flow/loop_test.clj` | exercising a `core.async.flow` graph from a test |
+| `test/seon/concurrency_streams_test.clj` | latch-driven unique-namespace collision and 12-message ordering/loss proof (`:1-18,57-149`) |
+| `test/seon/concurrency_independence_test.clj` | long N-agent, one-cluster fact-space harness (`:1-35,508-527`); currently red for two harness defects and not yet a passing gate |
 | `reference-code/datahike/` | the fork's source — read it, don't guess semantics |
 
 Full history — the buried harnesses, the eight root causes, and the testing
