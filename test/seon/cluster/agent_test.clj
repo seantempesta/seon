@@ -182,6 +182,12 @@
                :seon.cluster.agent/id agent-id
                :seon.cluster.agent/routing routing}))
 
+(defn- agent-row
+  [agent-id]
+  {:seon.cluster.agent/id agent-id
+   :seon.cluster.agent/namespace
+   {:seon.ns/name (symbol (str "my.agents." agent-id))}})
+
 (defn- disarm-all!
   [routing]
   (doseq [agent-id (sort (keys (:seon.cluster.agent/armed @routing)))]
@@ -361,7 +367,7 @@
             events (database-events connection)]
         (db/transact!
          connection
-         [{:seon.cluster.agent/id "prompt-refusal-cap"}
+         [(agent-row "prompt-refusal-cap")
           (config-row "prompt-refusal-cap"
                       {:seon.config.run/max-episode-runs 3})])
         (try
@@ -424,7 +430,7 @@
                 calls (async/chan 4)
                 events (database-events connection)]
             (db/transact! connection
-                        [{:seon.cluster.agent/id "all-refused"}
+                        [(agent-row "all-refused")
                          (config-row "r22-all-refused"
                                      {:seon.config.run/max-episode-runs 3})])
             (try
@@ -479,7 +485,7 @@
                 calls (async/chan 4)
                 events (database-events connection)]
             (db/transact! connection
-                        [{:seon.cluster.agent/id "mixed-refusal"}
+                        [(agent-row "mixed-refusal")
                          (config-row "r22-mixed-refusal"
                                      {:seon.config.run/max-episode-runs 3})])
             (try
@@ -532,7 +538,7 @@
                          :seon.cluster.run/process process
                          :seon.cluster.work/now (Date.)}]
             (db/transact! connection
-                        [{:seon.cluster.agent/id "capped-refusal"}
+                        [(agent-row "capped-refusal")
                          (config-row "r22-capped-refusal"
                                      {:seon.config.run/max-episode-runs 1})])
             (try
@@ -582,8 +588,7 @@
                     (into [(config-row
                             "trial"
                             {:seon.config.run/max-episode-runs 100})]
-                          (map (fn [agent-id]
-                                 {:seon.cluster.agent/id agent-id}))
+                          (map agent-row)
                           agent-ids))
         (try
           (with-redefs [ai/complete
@@ -886,7 +891,7 @@
       (let [routing (armory)
             ledger (atom [])]
         (db/transact! connection
-                    [{:seon.cluster.agent/id "parked"}
+                    [(agent-row "parked")
                      (config-row "park-2026072812"
                                  {:seon.config.run/max-episode-runs 100})])
         (try
@@ -940,7 +945,7 @@
             provider-entered (CountDownLatch. 1)
             events (database-events connection)]
         (db/transact! connection
-                    [{:seon.cluster.agent/id "pausable"}
+                    [(agent-row "pausable")
                      (config-row "pause-2026072813"
                                  {:seon.config.run/max-episode-runs 100})])
         (try
@@ -1231,8 +1236,8 @@
             evaluation-sources (atom [])
             evaluate fake-evaluate]
         (db/transact! connection
-                    [{:seon.cluster.agent/id "midfold"}
-                     {:seon.cluster.agent/id "waiting"}
+                    [(agent-row "midfold")
+                     (agent-row "waiting")
                      (config-row "restamp-2026072816"
                                  {:seon.config.run/max-episode-runs 100})])
         ;; the dead process's history: open+claim on an outside
@@ -1516,7 +1521,7 @@
                 (case op
                   :create
                   (do (db/transact! connection
-                                  [{:seon.cluster.agent/id agent-id}])
+                                  [(agent-row agent-id)])
                       (swap! created conj agent-id))
 
                   :create-and-message
@@ -1524,7 +1529,7 @@
                   ;; the recipient's graph cannot exist yet
                   (do (db/transact!
                        connection
-                       [{:seon.cluster.agent/id agent-id}
+                       [(agent-row agent-id)
                         {:seon.cluster.message/id
                          (str "rm-" index)
                          :seon.cluster.message/to
@@ -1598,7 +1603,7 @@
       (let [routing (armory)
             ledger (atom [])]
         (db/transact! connection
-                    [{:seon.cluster.agent/id "waiter"}
+                    [(agent-row "waiter")
                      (config-row "wait-2026072820"
                                  {:seon.config.run/max-episode-runs 100})])
         (try
