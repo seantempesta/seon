@@ -437,7 +437,7 @@ Evidence base: eight paired sol/Opus research lanes (indexed in the PRD).
   value is key `:seon.db/db`, schema `:seon.db/database-value`; the live
   connection is `:seon.db/connection` — matching Datahike's own
   vocabulary (its operations are categorized `:connection`; `conn` is
-  its idiomatic binding). `:seon.db/connection` is DELETED as
+  its idiomatic binding). `:seon.store/branch-connection` is DELETED as
   an invented compound and redundant, since a Datahike connection
   identity is already `[store-id branch]`. Evidence:
   [naming-coherence-audit](../research/naming-coherence-audit-2026-08-05.md),
@@ -623,7 +623,7 @@ and the GIT FRAMING adopted (conversational, owner-ruled):**
   bounce is the frustration the desk exists to prevent. SESSION END IS
   EXPLICIT ONLY — the desk lives as long as the agent; nothing expires
   on a timer; clear = agent action, owner order, or reset/refork.
-  `:seon.def` dies in the rename pass; `:seon.def/*` is the desk's
+  `:seon.code.def` dies in the rename pass; `:seon.def/*` is the desk's
   fact family.
 - **FRESHNESS IS PER TURN, NOT PER RUN** (owner: "why wait for the
   run?"): new functions/schemas/tests are visible in context next TURN
@@ -2113,7 +2113,7 @@ and the GIT FRAMING adopted (conversational, owner-ruled):**
   ctx is only an optimization.** An agent's session state must be
   restorable from the database or disk in a fresh JVM — better and
   simpler than replay-with-safety-analysis. Interpreted fns are already
-  program row facts; data defs become facts too (small inline, large as
+  program-row facts; data defs become facts too (small inline, large as
   content-addressed blobs, so branch and dedup come free); anything
   genuinely not restorable is STATED by the REPL, never faked. Design
   lane: `plan/stateless-resume-design-2026-08-01.md`.
@@ -2138,7 +2138,7 @@ and the GIT FRAMING adopted (conversational, owner-ruled):**
   `plan/stateless-resume-design-2026-08-01.md` demonstrated a fresh JVM
   restoring a session end to end — turn-10 forms evaluating against a
   turn-1 blob-backed 200,000-element vector, with nothing from the
-  writing process surviving. Fact model: one `:seon.def` entry per
+  writing process surviving. Fact model: one `:seon.code.def` entry per
   live `[namespace name]` (a fifth `seon.program/shapes` family, not a
   second mechanism) carrying exactly one of `/value-edn`, `/blob`+`/size`,
   `/source` (the pure defining form), or `/unrestorable` with an honest

@@ -136,7 +136,7 @@
   "Ordered fact-space receipt values for `run-ids`."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:vector :seon.cluster.run/id]]
-                  [:vector :map]]}
+                  [:vector :seon.cluster.curate/proof-receipt]]}
   [db run-ids]
   (if (seq run-ids)
     (->> (db/q '[:find ?run-id ?ordinal ?source ?result ?error ?error-kind ?at
@@ -174,7 +174,7 @@
 
 (defn completed-result
   "The last completed result represented by ordered grader receipts."
-  {:malli/schema [:=> [:cat [:vector :map]]
+  {:malli/schema [:=> [:cat [:vector :seon.cluster.curate/proof-receipt]]
                   [:maybe :seon.schema/value]]}
   [receipts]
   (:my.run/result (last (completion-values receipts))))
@@ -226,12 +226,12 @@
    [:function
     [:=> [:cat :seon.db/database-value :seon.cluster.agent/id
           :seon.cluster.run/process :seon.cluster.message/id [:int {:min 1}]]
-     [:maybe :map]]
+     [:maybe :seon.eval.drive/terminal-state]]
     [:=> [:cat :seon.db/database-value :seon.cluster.agent/id
           :seon.cluster.run/process
-          [:map [:seon.eval.drive/run-ids [:vector :seon.cluster.run/id]]
-           [:seon.eval.drive/run-cap [:int {:min 1}]]]]
-     [:maybe :map]]]}
+          [:map [:seon.eval.drive/run-ids :seon.eval.drive/run-ids]
+           [:seon.eval.drive/run-cap :seon.eval.drive/run-cap]]]
+     [:maybe :seon.eval.drive/terminal-state]]]}
   ([db agent-id process message-id run-cap]
    (terminal-state db agent-id process
                    {:seon.eval.drive/run-ids

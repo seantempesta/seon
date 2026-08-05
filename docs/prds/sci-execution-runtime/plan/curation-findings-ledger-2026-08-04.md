@@ -76,7 +76,7 @@ drive rendered a complete transcript without an invocation failure (3 tests /
 
 | # | Problem | Elegant solution | Issue |
 |---|---|---|---|
-| D1 | identical redeclaration churns 69 datoms (34 retractions) — `changed-attributes` compares pulled vs desired shape | equality over declared content before building retractions; idempotent redeclare ⇒ 0 datoms | **DONE** — commit `8763b4b17`; correct argument order, identical/no-op, changed/replacement, and bootstrap 13/13 regressions green; issue archived under row-replacement churn |
+| D1 | identical redeclaration churns 69 datoms (34 retractions) — `changed-attributes` compares pulled vs desired shape | equality over declared content before building retractions; idempotent redeclare ⇒ 0 datoms | **DONE** — commit `8763b4b17`; correct argument order, identical/no-op, changed/replacement, and bootstrap 13/13 regressions green; [issue archived](../../../seon/issues/archive/program-row-replacement-churns-identical-redeclarations.md) |
 | D2 | forked cluster inherits the ancestor's `:seon.config` cluster name | fork rewrites the one config identity fact at fork time (it is data on the branch) | **DONE** — commit `89fe1a287`, issue archived (fixed by the creation/config lane alongside B4) |
 | D3 | `:summary` detail tier is inert (`best-summary` output byte-identical to `:full`) | one detail policy honored by the three text producers; owned by the existing render-token-budgets issue | existing issue |
 | D4 | no public render-unit constructor — seven required keys discovered via five successive contract failures | one documented constructor fn with a complete contract | to file |
@@ -123,7 +123,7 @@ queryable run.
 
 - `agent-namespace` reads the committed assignment fact — **DONE** in commit
   `3a6264724`.
-- Session-image rows bypass `row-tx` (F10) — route through the
+- Session-image rows bypass `program-row-tx` (F10) — route through the
   one admission seam.
 - Owner questions Q1–Q3 are ruled in the plan README; Q4 is deferred.
 - AGENTS.md `sci/fork` vocabulary row corrected (landed with the PRD).

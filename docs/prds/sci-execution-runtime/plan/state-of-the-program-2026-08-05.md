@@ -35,7 +35,7 @@ escalates to the user by message; continuous REPL dogfooding.
 retired entirely in favour of `:seon.def/*`; database value = key
 `:seon.db/db` + schema `:seon.db/database-value`; live connection =
 `:seon.db/connection` (Datahike's own word) with
-`:seon.db/connection` deleted; **NO MIGRATION, NO PARALLEL
+`:seon.store/branch-connection` deleted; **NO MIGRATION, NO PARALLEL
 CODE** (format/reset/rebuild instead); indexing keeps the whole parse;
 ambient injection driven by a function's own `:malli/schema`; initial
 forms exist at both cluster and agent level with **most specific wins**;
@@ -185,7 +185,7 @@ serve as the standing concurrency gate.
 
 ### P11 — Naming: 4 real problems, 14 atomic units
 
-Undeclared program row shapes; fragmented process identity; duplicate
+Undeclared program-row shapes; fragmented process identity; duplicate
 connection/database-value names (rulings made, not yet applied);
 overloaded "context" (three meanings, one of them inside the bootstrap
 we use to teach vocabulary). The `seon.code.*` "migration" turned out to
@@ -201,7 +201,7 @@ blocked on them.
 
 ### P13 — Session image: keep, rename, or delete (OPEN)
 
-`:seon.def/*` (9 attrs, 5 files) records session defs for
+`:seon.code.def/*` (9 attrs, 5 files) records session defs for
 restoration. Ruled to become `:seon.def/*`, but whether the MECHANISM
 survives is open. The owner's position: *"I want to record everything
 and ideally restore everything that's immutable. We have some way of

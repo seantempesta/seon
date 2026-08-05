@@ -1,2 +1,10 @@
 {:seon.eval.drive/absent [:= true]
+ :seon.eval.drive/value :seon.schema/value
+ :seon.eval.drive/run-ids [:vector :seon.cluster.run/id]
+ :seon.eval.drive/run-cap [:int {:min 1}]
+ :seon.eval.drive/outcome [:enum :completed :capped :stopped]
+ :seon.eval.drive/terminal-state
+ [:map
+  [:seon.eval.drive/outcome :seon.eval.drive/outcome]
+  [:seon.eval.drive/run-ids :seon.eval.drive/run-ids]]
  :seon.eval.drive/absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an absent evaluation-drive result"} [:seon.eval.drive/absent :seon.eval.drive/absent] [:seon.error/message :seon.error/message]]}

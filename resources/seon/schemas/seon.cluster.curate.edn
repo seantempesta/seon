@@ -2,9 +2,26 @@
                        :revision :seon.cluster.reply/sources
                        :proof-branch :seon.store/branch
                        :predicate :qualified-keyword
-                       :receipts [:vector :map]
-                       :terminal :map
-                       :declarations [:vector :map]
+                       :proof-receipt
+                       [:map
+                        [:seon.cluster.run/id :seon.cluster.run/id]
+                        [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
+                        [:seon.cluster.run.form/source :seon.cluster.run.form/source]
+                        [:seon.cluster.eval/result-edn :seon.cluster.eval/result-edn]
+                        [:seon.eval.drive/value :seon.eval.drive/value]
+                        [:seon.cluster.eval/error :seon.cluster.eval/error]
+                        [:seon.error/kind :seon.error/kind]
+                        [:seon.cluster.eval/at :seon.cluster.eval/at]]
+                       :receipts [:vector :seon.cluster.curate/proof-receipt]
+                       :terminal :seon.eval.drive/terminal-state
+                       :declaration
+                       [:map
+                        [:seon.cluster.run/id :seon.cluster.run/id]
+                        [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
+                        [:seon.program/identity :seon.program/identity]
+                        [:seon.program/source-attribute :seon.program/source-attribute]
+                        [:seon.program/source :seon.program/source]]
+                       :declarations [:vector :seon.cluster.curate/declaration]
                        :adopted-commit-id :uuid
                        :proof-request
                        [:map

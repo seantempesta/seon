@@ -2372,7 +2372,7 @@ MORNING ITEMS (accumulating):
 - CHECKPOINT BREAK #2 (same class, client build): shell
   internal.cljs:120 exec still passes 2 args to core/run-request
   (3 since the shell config-fact conversion) — R28-era breakage on a
-  STILL-ALIVE pod surface, exposed because the program row derivation
+  STILL-ALIVE pod surface, exposed because the program-row derivation
   executes the client build. CLIENTFIX lane dispatched: fix the
   caller via proper config acquisition + compile BOTH canonical
   builds (client AND test — r43fix proved only :test) to zero
@@ -2386,9 +2386,9 @@ MORNING ITEMS (accumulating):
   dependency-owned SCI/Datahike inference warnings plus the known
   `cljs/analyzer/api.cljc` resource warnings. V11 PUBLICATION REMAINS
   BLOCKED by a distinct artifact-hook lifetime defect: the watch-derived
-  temporary program row Bun process retains its Shadow devtools socket,
+  temporary program-row Bun process retains its Shadow devtools socket,
   so the managed watcher times out before its first client flush. Recorded
-  in the issue for row derivation retaining the Shadow devtools socket;
+  as `docs/seon/issues/program-row-derivation-retains-shadow-devtools-socket.md`;
   clientfix did not expand into that separate mechanism.
 - BREAK #1 FIXED (52124e45e, accepted): exactly one stale call site
   (exhaustive-search proven); fixtures made honest under the
@@ -2399,7 +2399,7 @@ MORNING ITEMS (accumulating):
 - CHECKPOINT BREAK #1 (found by the gate, as designed): the fresh
   build fails — execution_test.cljs:1073 still calls single-arg
   fault-for (R43 focused gates never compiled the full canonical
-  test build) → client compile error → program row derivation fails
+  test build) → client compile error → program-row derivation fails
   LOUD → no v11 manifest → watcher flush timeout. ONE causal chain,
   every stage failing correctly. R43 session resumed: fix every
   stale call site with honest projection fixtures + prove the class
@@ -2470,7 +2470,7 @@ MORNING ITEMS (accumulating):
   JVM vs (if still executable) Bun self-host on a representative
   workload matrix, through the REAL guarded door, guard cost
   isolated, plus a COMPUTED glue-vs-compute-heavy classification of
-  the actual program rows artifact sample feeding P6 placement;
+  the actual corpus (program-rows.edn sample) feeding P6 placement;
   (2) runtime-cost — 10-15 agent live load on an isolated cluster:
   per-turn phase latency from receipts (coordination vs LLM vs eval
   columns), writer tx/s, jstat GC per JVM, RSS idle/load/after,
@@ -2486,7 +2486,7 @@ MORNING ITEMS (accumulating):
   internals interpreter-steps-*. TWO lanes remain before the freeze:
   fixseed (consumption) + r43trust.
 - S2 TRANSACTION-DATA ACCEPTED (4b3d32093, verified path-limited,
-  58/313 green): the program rows artifact published per supported build +
+  58/313 green): program-rows.edn published per supported build +
   release under the grounded name — compiled index derivation, row
   bytes preserved exactly, program-sources digest binding, artifact
   manifest + application digest membership; 5,487 rows current
@@ -2552,7 +2552,7 @@ MORNING ITEMS (accumulating):
   entity-map membership + persistence facets; agent-bootstrap-attrs
   = computed delegation (hand list DEAD, the fixed genesis list too);
   production still seeds through the one paged path. Registry-gate
-  red (15F/3E) = attributed fixture rows gap awaiting S2;
+  red (15F/3E) = attributed fixture-program-rows gap awaiting S2;
   session resumes on S2's landing. REVIEW FLAG for rowsidecar: its
   in-flight hook requires babashka.process outside the test-hook
   classpath and blocked the focused CLJS execution manifest — its
@@ -2563,10 +2563,10 @@ MORNING ITEMS (accumulating):
 - FIXSEED STOP #3 RULED (2026-07-23 eve, convergent): the fixture's
   JVM reconstruction of index-core! rows cannot equal the CLJS
   analyzer's output — the portable answer is the build-emitted exact
-  program row artifact, WHICH IS S2 (rowsidecar), already in flight.
+  program-row artifact, WHICH IS S2 (rowsidecar), already in flight.
   Fixseed extraction landed (13183c222); ruled: wrap cleanly (commit
   the shared-pager genesis fix, document the sidecar-dependent
-  residual, gate red 15F/3E = attributed fixture rows gap,
+  residual, gate red 15F/3E = attributed fixture-program-rows gap,
   not production), resume on S2's landing. CHECKPOINT SEQUENCING:
   hold for rowsidecar → fixseed-resume → green registry gate →
   bootfast → freeze → checkpoint (honest green over speed; parallel
@@ -2577,7 +2577,7 @@ MORNING ITEMS (accumulating):
   error.cljc + render/core.cljc, fixes live my.plan rendering before
   the checkpoint demo), testsimp-audit (read-only: the migration
   worklist onto the one seeding path + F-row folds), rowsidecar (S2:
-  build-side program rows sidecar, production only, byte-faithful
+  build-side program-rows sidecar, production only, byte-faithful
   regression vs live derivation; consumption stays S3/S4). Four
   lanes live total.
 - B2 LIVE-PROVEN BROKEN + R46 SETTLED (2026-07-23 eve): the probe

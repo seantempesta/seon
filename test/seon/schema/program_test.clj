@@ -64,6 +64,42 @@
     (is (schema/valid-candidate-value? :seon.fn.file/artifact artifact))
     (is (schema/valid-candidate-value? :seon.fn.manifest/manifest manifest))))
 
+(deftest curation-proof-values-have-declared-leaf-shapes
+  (let [run-id "proof:sample"
+        receipt {:seon.cluster.run/id run-id
+                 :seon.cluster.eval/ordinal 0
+                 :seon.cluster.run.form/source "(+ 1 1)"
+                 :seon.cluster.eval/result-edn "2"
+                 :seon.eval.drive/value 2
+                 :seon.cluster.eval/error ""
+                 :seon.error/kind :seon.eval.drive/absent
+                 :seon.cluster.eval/at (java.util.Date.)}
+        declaration {:seon.cluster.run/id run-id
+                     :seon.cluster.eval/ordinal 0
+                     :seon.program/identity [:seon.fn/sym "sample/f"]
+                     :seon.program/source-attribute :seon.fn/source
+                     :seon.program/source "(defn f [] 1)"}
+        terminal {:seon.eval.drive/outcome :completed
+                  :seon.eval.drive/run-ids [run-id]}]
+    (is (schema/valid-candidate-value?
+         :seon.cluster.curate/proof-receipt receipt))
+    (is (schema/valid-candidate-value?
+         :seon.cluster.curate/receipts [receipt]))
+    (is (schema/valid-candidate-value?
+         :seon.cluster.curate/declaration declaration))
+    (is (schema/valid-candidate-value?
+         :seon.cluster.curate/declarations [declaration]))
+    (is (schema/valid-candidate-value?
+         :seon.eval.drive/terminal-state terminal))
+    (is (schema/valid-candidate-value?
+         :seon.cluster.curate/terminal terminal))
+    (is (not (schema/valid-candidate-value?
+              :seon.cluster.curate/proof-receipt
+              (dissoc receipt :seon.cluster.eval/at))))
+    (is (not (schema/valid-candidate-value?
+              :seon.eval.drive/terminal-state
+              (assoc terminal :seon.eval.drive/outcome :unknown))))))
+
 (deftest catalog-render-declarations-resolve
   (let [catalog (schema/entity-catalog)
         program-keys #{:seon.fn/fn :seon.ns/ns :seon.schema/schema}]
