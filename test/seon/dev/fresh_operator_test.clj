@@ -1338,7 +1338,8 @@
 (deftest ^{:seon.test/long "Carries boot refusal and readiness over the cached phase protocol."}
   isolated-cached-boot-reports-refusal-then-reaches-readiness
   (let [root (fresh-root)
-        name "cached-readiness"]
+        name "cached-readiness"
+        launched-identities (atom [])]
     (try
       (let [refused (run-operator root "start" name)]
         (is (= 1 (::exit refused)) (::output refused))
@@ -1367,12 +1368,23 @@
               (edn/read-string
                (slurp (io/file root "data" "clusters" name "prepl.edn")))]
           (is (= name (:seon.boot/cluster-name advertisement)))
-          (is (string? (:seon.render.web/url advertisement)))))
+          (is (string? (:seon.render.web/url advertisement))))
+        (swap! launched-identities conj
+               (advertisement-process-identity root name)))
       (finally
+        (try
+          (when (.isFile (io/file root "data" "clusters" name "prepl.edn"))
+            (swap! launched-identities conj
+                   (advertisement-process-identity root name)))
+          (catch Throwable _))
         (try
           (run-operator root "down")
           (catch Throwable _))
-        (delete-recursively! root)))))
+        (doseq [process-identity (distinct @launched-identities)]
+          (reap-process-identity! process-identity))
+        (delete-recursively! root)))
+    (is (not (.exists root))
+        "the cached-boot fixture root was deleted after its exact JVM exited")))
 
 (deftest child-environment-loads-dotenv-beneath-shell-overrides
   (let [root (fresh-root)

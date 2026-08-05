@@ -5,7 +5,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]])
   (:import [java.io PushbackReader]
-           [java.util.concurrent TimeUnit]))
+           [java.util.concurrent TimeUnit TimeoutException]))
 
 (def ^:private project-root
   (io/file (System/getProperty "user.dir")))
@@ -49,6 +49,21 @@
     (when (.exists ^java.io.File file)
       (is (.delete ^java.io.File file)
           (str "Could not delete MCP fixture path " file)))))
+
+(defn- reap-process-handle!
+  [^java.lang.ProcessHandle handle]
+  (when (.isAlive handle)
+    (.destroy handle))
+  (try
+    (.get (.onExit handle) 10 TimeUnit/SECONDS)
+    (catch TimeoutException _
+      (.destroyForcibly handle)
+      (.get (.onExit handle) 10 TimeUnit/SECONDS)))
+  nil)
+
+(defn- reap-process!
+  [^Process process]
+  (reap-process-handle! (.toHandle process)))
 
 (defn- rpc-responses
   [requests]
@@ -651,11 +666,12 @@
           (is (not (.isAlive ^java.lang.ProcessHandle child-handle)))))
       (finally
         (when-let [parent @parent*]
-          (when (.isAlive ^Process parent) (.destroyForcibly ^Process parent)))
+          (reap-process! parent))
         (when-let [child-handle @child-handle*]
-          (when (.isAlive ^java.lang.ProcessHandle child-handle)
-            (.destroyForcibly ^java.lang.ProcessHandle child-handle)))
+          (reap-process-handle! child-handle))
         (when-let [fifo-output @fifo-output*]
           (when-not (= ::timeout fifo-output)
             (.close ^java.io.OutputStream fifo-output)))
-        (delete-known-files! known-paths)))))
+        (delete-known-files! known-paths)))
+    (is (not (.exists fixture-root))
+        "the parent-watchdog fixture root was deleted after exact child exit")))
