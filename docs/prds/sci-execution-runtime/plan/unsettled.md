@@ -16,7 +16,71 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
-**WORKING EDGE — 2026-08-04 NIGHT.** The earliest unsettled curation contract
+**WORKING EDGE — 2026-08-05 STEWARDSHIP SESSION (supersedes the 08-04
+night block below).** The owner's fresh session ran root-causes-first:
+converse, rule, plan, delete — no rushing.
+
+CLOSED AT THE CAUSE THIS SESSION (all pushed): P19 (boot was a ~94 s
+recursive footprint walk of the whole checkout, pre-REPL, feeding a
+decision that only reads statfs — `9e44815f5`; warm wrapper boot now
+7.09 s, ten-second law satisfied); P21 (claims are the ONE
+process-record authority, legacy location + code deleted `7dacba8ba`;
+reset is self-sufficient via the raw flock probe `db911dddc`); the six
+operator wait literals (event-driven readiness + one declared silence
+backstop `61cbb93ed`); O4 "delegation broken" (GRADER scoping defect —
+delegation live-proven end to end, `cdae0bd95`); the 08-03 writer death
+(mutable dependency-cache replacement removing a not-yet-linked AOT
+classfile — reproduced; the immutable content-addressed cache design
+closes the class, `5e5294228`). DELETED: 245 GB `tmp/` (disk 667→911
+GiB usable), `src-old/`+`test-old/` (124,580 lines, `099cdfa99`), the
+CLJS-era untracked roots. THE RENAME + RESET + REBUILD PASS IS
+COMPLETE: ten units `3473f18fe`…`db911dddc`, dead spellings zero over
+the graduation scope (independently verified), reset→republish→refork
+→READY 2.7 s, all four graduation queries green.
+
+RULED (all in README's three 2026-08-05 batches + the sealed docs):
+P1 = EXCLUSIVE SWEEP, design sealed
+([exclusive-sweep-design-2026-08-05.md](exclusive-sweep-design-2026-08-05.md):
+one reachability gate, loud retryable start refusal, two-sided blob
+permit, MCP durable no-history artifact fact). P13 = THE TWO-WORLD DESK
+([agent-desk-and-checkout-prd-2026-08-05.md](agent-desk-and-checkout-prd-2026-08-05.md):
+`:seon.def/*` session facts at run settlement, snapshot-stated atoms,
+explicit-only session end, per-turn freshness, the agent checkout +
+per-run override, the git framing with `my.branch`). Maintenance is
+TURN-FREE with root's green/red report
+([operations-and-maintenance-spec-2026-08-05.md](operations-and-maintenance-spec-2026-08-05.md)
+sealed: five recommendations + explicit ephemeral root claims).
+Ambient injection r2 RULED
+([ambient-injection-prd-2026-08-05-r2-draft.md](ambient-injection-prd-2026-08-05-r2-draft.md):
+SCI-fork hook seam; derived all-or-nothing shorter arities with
+`db?`/`connection?` predicate dispatch — ruling #41's positional
+shortcut survives; required-key-only map injection; hard-blocked on
+P12's typed argument-address facts). Curation W3 PARKED until after
+this wave; experiment repair (O4 grader scoping + O5 stale predicate +
+O1 replication) is one queued grader wave.
+
+IN FLIGHT: `gate-red-triage` — bare `bin/test` at `db911dddc` is 987
+tests / 6302 assertions, 48 F + 13 E across ~26 vars; the lane
+attributes each var with evidence (filed-issue match or reproduction at
+pre-rename `401fd300e`), FIXES rename fallout itself, files issues for
+pre-existing classes. NOTE: no green FULL gate has been seen since
+before the 08-04 wave — do not assume the baseline was green.
+
+NEXT, in order (owner-ruled): (1) triage returns → review the
+attribution table; (2) FOUR PARALLEL implementation lanes on the
+renamed tree — ops/maintenance impl, desk W-A, sweep gate + falsifiers,
+P12 indexing — with each remaining red folded into the lane owning its
+seam (disarm-wait → ops/agent lifecycle; blob staging → sweep; config
+application → ops) and disjoint reds (search apply-report!, web
+credits) as small fix lanes; (3) blob-permit slice after W-A, then the
+dry-run + one-time 357 GiB reclaim per the sweep runbook; (4) the
+grader wave, then rerun the experiment matrix once; (5) desk W-B/W-C
+(checkout, my.branch + status/log views), then W-D bootstrap teaching;
+(6) curation W3. THE WAVE EXIT IS A GREEN BARE `bin/test` ON A QUIET
+TREE (owner instruction 2026-08-05: "resolve the test errors and
+failures when the timing is right").
+
+**WORKING EDGE — 2026-08-04 NIGHT (superseded above).** The earliest unsettled curation contract
 is W3: trigger an editor from the failed run boundary and receive a revision as
 ordered form-source data. Its integrated proof remains Arm C of the bootstrap
 drive. The dependency-ready portfolio is:

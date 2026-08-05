@@ -22,6 +22,51 @@ research reports linked below.
 
 ---
 
+## SESSION OUTCOME — 2026-08-05 stewardship session (read this first)
+
+The fresh session this document requested has run. Current authority:
+the "WORKING EDGE — 2026-08-05 STEWARDSHIP SESSION" block in
+[unsettled.md](unsettled.md) and the three "Rulings 2026-08-05" batches
+in [README.md](README.md). Per-problem status after the session:
+
+- **P1** — RULED (exclusive sweep) and design SEALED; implementation
+  queued (gate first, blob-permit slice after desk W-A, then the
+  reclaim runbook).
+- **P2** — the 245 GB `tmp/` evidence is DELETED (disk 667→911 GiB
+  usable); the store reclaim awaits the sweep implementation.
+- **P3/P4** — the operations/maintenance spec is SEALED (turn-free
+  fires, green/red report, reaper with explicit ephemeral claims);
+  implementation queued.
+- **P5** — still deliberately open.
+- **P6** — unchanged (output-floor ladder steps 3–8).
+- **P7** — curation W3 PARKED until after the implementation wave.
+- **P8** — unchanged; the desk PRD records its coupling to the fork
+  model.
+- **P9** — O4 was a GRADER defect (delegation live-proven working,
+  `cdae0bd95`); one grader wave (O4 scoping + O5 predicate + O1
+  replication) is queued.
+- **P10** — unchanged (harness defects ride the gate-red triage).
+- **P11** — the rename pass EXECUTED the audit's units
+  ([rename-pass-2026-08-05.md](rename-pass-2026-08-05.md), ten commits,
+  graduation proven).
+- **P12/P17** — ambient r2 RULED; P17 hard-blocked on P12, whose
+  implementation lane is next.
+- **P13** — SETTLED: the two-world desk
+  ([agent-desk-and-checkout-prd-2026-08-05.md](agent-desk-and-checkout-prd-2026-08-05.md));
+  the session-image mechanism dies into `:seon.def/*` facts.
+- **P14/P15/P16/P18** — unchanged; new ugly-output findings appended to
+  the ledger and issues.
+- **P19** — RESOLVED (see the resolution block below).
+- **P20** — the reaper is designed and ruled (explicit ephemeral
+  claims); implementation rides the ops lane.
+- **P21** — RESOLVED: one claims authority (`7dacba8ba`) and a
+  self-sufficient reset via the raw flock probe (`db911dddc`).
+- The rushed-decision audit (Part 4): R1 answered by the sealed sweep
+  design; R3/R4/R5's process lessons are standing practice; R6/P9's O1
+  datum rides the grader wave; R7's ambient PRD was rebuilt as r2 and
+  ruled; R8 answered by turn-free maintenance; R10 still open (a real
+  failing session has yet to be curated — parked with W3.
+
 ## PART 1 — What was decided (owner rulings, all durable in README.md)
 
 **08-04 night:** per-run fork contexts; session curation sealed
