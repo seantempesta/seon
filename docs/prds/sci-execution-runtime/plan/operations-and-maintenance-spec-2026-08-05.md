@@ -1,6 +1,6 @@
 ---
 type: prd
-status: proposed
+status: active
 tags: [prd, operator, maintenance, scheduling, flow, storage]
 ---
 
@@ -9,6 +9,10 @@ tags: [prd, operator, maintenance, scheduling, flow, storage]
 ## Status and sources read
 
 This is planning only. It makes no production change.
+
+SEALED by owner ruling 2026-08-05 (recorded in [README.md](README.md)):
+all five recommendations accepted; ephemeral roots carry explicit owner
+claims; implementation runs post-rename in parallel with the desk waves.
 
 I read the repository `AGENTS.md` end to end; P3, P4, and P20 in
 `state-of-the-program-2026-08-05.md`; the complete

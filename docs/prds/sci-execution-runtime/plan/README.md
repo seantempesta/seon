@@ -673,6 +673,23 @@ and the GIT FRAMING adopted (conversational, owner-ruled):**
   immutable content-addressed cache design closes the class (probe:
   3,628 dynamic-cache entries cleared, writer still committed from its
   immutable digest directory; `5e5294228`).
+- **THE OPERATIONS/MAINTENANCE SPEC IS SEALED (owner, same day):**
+  [operations-and-maintenance-spec-2026-08-05.md](operations-and-maintenance-spec-2026-08-05.md)
+  is ruled with ALL FIVE of its recommendations accepted — schedule
+  facts are the only cadence authority; the existing per-agent
+  schedule proc executes turn-free fires (claim receipt → direct Var
+  call → terminal receipt, no model call on success); results are
+  queryable receipts plus operation-specific attributes; reaper
+  eligibility is the explicit reap-on-exit claim + dead creator +
+  exact stop + verification conjunction; weekly collection + daily
+  footprint observation. ALSO RULED: ephemeral roots carry EXPLICIT
+  owner claims — a lane or harness creating a scratch root declares
+  its own (pid, start-instant) as the ephemeral owner at claim time
+  (the short-lived wrapper never records itself as creator); an
+  undeclared root is reported, never reaped. POST-RENAME SEQUENCING:
+  ops/maintenance implementation and the desk/checkout waves run as
+  PARALLEL lanes on the renamed tree (disjoint owners); only
+  `collect!` waits for the exclusive-sweep design.
 - **Landed this session:** operator consolidation complete —
   `7dacba8ba` (one process-record authority: claims; legacy location
   and code deleted; SIGKILL→reset proof with zero manual deletion) and
