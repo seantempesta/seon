@@ -563,16 +563,17 @@
   "Orderly stop of one agent's graph, idempotent.
   Arm publishes one completion permit before scheduling the turn proc.
   An active transform holds it and republishes it from `finally`; an idle
-  graph leaves it ready. Stop, consume that event, and close it before
-  dropping the routing entry and mailbox. Thus disarm waits through a
+  graph leaves it ready. Request stop, consume that event, then drop the
+  routing entry before closing its channels. Thus disarm waits through a
   seconds-long active model call, while an accepted-but-never-started proc
-  cannot strand teardown. Stop drops conn contents — safe by the transport
-  law; triggers are rows and survive.
+  cannot strand teardown. If the loud backstop fires, the entry remains so
+  disarm can be retried after the turn settles. Stop drops conn contents —
+  safe by the transport law; triggers are rows and survive.
 
-  THE ORDER OF THE LAST TWO STEPS IS LOAD-BEARING, not stylistic: the
-  The entry is dropped BEFORE the channel is closed and the graph is stopped,
-  so `wake/route!` can
-  never reach a channel this function closed. That is what makes a
+  THE ORDER OF THE LAST STEPS IS LOAD-BEARING, not stylistic: completion is
+  observed before destructive cleanup, then the entry is dropped BEFORE its
+  channel is closed, so `wake/route!` can never reach a channel this function
+  closed. That is what makes a
   closed-but-reachable route mean exactly one thing — the terminal
   settlement fence — and lets `fenced-route?` make the exact route
   recognizable to `wake/delivery` without a flag. Closing first would
@@ -582,6 +583,8 @@
   [{agent-id :seon.cluster.agent/id
     routing :seon.cluster.agent/routing}]
   (when-let [entry (armed routing agent-id)]
+    (flow/stop (:seon.flow/graph entry))
+    (await-turn-completion! routing entry)
     (swap! routing
            (fn [current]
              (-> current
@@ -589,8 +592,6 @@
                  (update ::channels dissoc
                          (:seon.cluster.agent/eid entry)))))
     (async/close! (:seon.cluster.wake/channel entry))
-    (flow/stop (:seon.flow/graph entry))
-    (await-turn-completion! routing entry)
     (async/close! (:seon.cluster.loop/completion entry))
     (async/close! (:seon.cluster.agent/turn-stopped entry)))
   nil)

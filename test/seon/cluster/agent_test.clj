@@ -879,7 +879,19 @@
                server-finished
                ::never-answering-provider-released)
               (agent/disarm! {:seon.cluster.agent/id agent-id
-                              :seon.cluster.agent/routing routing})))
+                              :seon.cluster.agent/routing routing})
+              (is (nil? (agent/armed routing agent-id)))
+              (is (not (contains? (agent/channels routing)
+                                  (:seon.cluster.agent/eid entry))))
+              (is (async.impl/closed?
+                   (:seon.cluster.wake/channel entry)))
+              (is (async.impl/closed?
+                   (:seon.cluster.loop/completion entry)))
+              (is (nil? (agent/disarm!
+                         {:seon.cluster.agent/id agent-id
+                          :seon.cluster.agent/routing routing})))
+              (is (nil? (agent/armed routing agent-id))
+                  "a successful retry removes the route exactly once")))
           (finally
             (.countDown release-provider)
             (.close server)
