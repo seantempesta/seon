@@ -1,9 +1,7 @@
 {:seon.program/identity-attribute
- [:enum :seon.ns/name :seon.fn/sym :seon.schema/key :seon.test/sym
-  :seon.def/id]
+ [:enum :seon.ns/name :seon.fn/sym :seon.schema/key :seon.test/sym]
  :seon.program/source-attribute
- [:enum :seon.ns/source :seon.fn/source :seon.schema/form :seon.test/source
-  :seon.def/source]
+ [:enum :seon.ns/source :seon.fn/source :seon.schema/form :seon.test/source]
  :seon.program/schema-row-properties [:= :seon.program/schema-row-properties]
  :seon.program/owned-attributes
  [:or [:vector :qualified-keyword] :seon.program/schema-row-properties]
@@ -14,8 +12,7 @@
   [:map
    [:seon.schema/key :seon.schema/key]
    [:seon.schema/form :seon.schema/form]]
-  :seon.test/test
-  :seon.def/def]
+  :seon.test/test]
  :seon.program/delete-identities [:vector :seon.program/identity]
  :seon.program/source [:string {:min 1}]
  :seon.program/ns [:tuple [:= :seon.ns/name] :seon.ns/name]

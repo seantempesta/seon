@@ -37,7 +37,8 @@ The separate `:seon.code.def` session-image family and its write path
 are DELETED. The capability survives as agent-scoped **desk facts**
 written through the one admission seam:
 
-- **When:** at RUN SETTLEMENT, the run's session definitions commit as
+- **When:** at TURN SETTLEMENT, in the terminal receipt transaction that
+  already settles the turn, the turn's definitions commit as
   `:seon.def/*` facts scoped to the agent (invisible to the corpus and
   to other agents).
 - **What, per definition (the restore ladder, strongest first):**
@@ -52,14 +53,14 @@ written through the one admission seam:
   3. else **honestly unrestorable** with a reason
      (`:seon.def/unrestorable-reason` — the audit's R9 name).
 - **Atoms restore by SNAPSHOT, STATED** (owner-ruled): the atom's last
-  settled value is snapshotted at run settlement; restore re-creates the
+  settled value is snapshotted at turn settlement; restore re-creates the
   atom bound to it and the REPL prints one honest line ("restored
   `scratch` from its last settled value"). Losing an afternoon's
   experiment state to a JVM bounce is the frustration the desk exists
   to prevent; honesty is preserved by saying it.
-- **Rehydration:** each run's fresh fork = cluster base ctx + this
-  agent's desk facts. Run boundaries, JVM bounces, and stateless resume
-  are ONE path. There is no second restore machinery.
+- **Rehydration:** each turn's fresh fork = the live cluster base ctx + this
+  agent's desk facts. Turn boundaries, run boundaries, JVM bounces, and
+  stateless resume are ONE path. There is no second restore machinery.
 - **Session end is EXPLICIT ONLY** (owner-ruled): the desk lives as
   long as the agent. Clearing = the agent's own act, an operator order,
   or cluster reset/refork. Nothing expires on a timer — "temporary"
@@ -68,10 +69,16 @@ written through the one admission seam:
 ## 3. Freshness is per TURN (owner: "why wait for the run?")
 
 New functions, schemas, and tests are visible in context next turn
-(ruling #16 already derives all context fresh per turn) and CALLABLE
-the moment admission installs them, even mid-run: the per-run fork
-copy-on-writes only its own redefinitions, so foreign installs show
-through. Only the database value one form reads at its instant is
+(ruling #16 already derives all context fresh per turn). Each turn evaluates
+in a fresh fork of the live base; its desk commits in the terminal receipt
+transaction and rehydrates into the next turn's fork. A direct probe against
+SCI pin `2db3358cba913b6fbbe49c7b5b34d7ac72715924` falsified the prior claim
+that an existing fork sees a Var installed into its base later: the base
+resolved `installed-later` to `42`, while the existing fork reported
+`Unable to resolve symbol: installed-later`. Per-turn forking therefore gives
+both foreign-install freshness and the agent's own desk continuity without an
+SCI fork change. Run custody, receipts, and interrupted-and-adapt semantics
+are unchanged. Only the database value one form reads at its instant is
 pinned — snapshot isolation (L9) is preserved, not weakened.
 
 ## 4. The checkout — two time-modes, one mechanism
@@ -139,11 +146,11 @@ exists. The mappings told to agents:
 
 ## 6. Wave order (after the rename pass)
 
-1. **W-A — desk facts**: `:seon.def/*` shapes declared; run-settlement
-   write path through the admission seam; fork rehydration; the
+1. **W-A — desk facts**: `:seon.def/*` shapes declared; turn-settlement
+   write path through the terminal admission seam; per-turn fork rehydration; the
    `:seon.code.def` write path and restore machinery deleted in the
-   same commit. Proof: define fn + data + atom in run 1 → JVM kill →
-   next run sees all three, atom snapshot stated, REPL states anything
+   same commit. Proof: define fn + data + atom in turn 1 → JVM kill →
+   the next turn sees all three, atom snapshot stated, REPL states anything
    lost; explicit clear empties the desk.
 2. **W-B — checkout**: the agent checkout attribute + per-run override
    resolution in the run loop; pinned-basis ctx build cached by commit
