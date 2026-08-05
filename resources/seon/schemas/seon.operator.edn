@@ -1,4 +1,59 @@
 #:seon.operator{:advertisements [:vector :seon.boot/advertisement],
+                 :repository-root :seon.boot/root,
+                 :managed-root :seon.boot/root,
+                 :ephemeral? :boolean,
+                 :control-lock-held? :boolean,
+                 :root-request
+                 [:map
+                  [:seon.operator/repository-root :seon.operator/repository-root]
+                  [:seon.operator/managed-root :seon.operator/managed-root]
+                  [:seon.operator/ephemeral? {:optional true} :seon.operator/ephemeral?]
+                  [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]],
+                 :cleanup-request
+                 [:map
+                 [:seon.operator/repository-root :seon.operator/repository-root]
+                  [:seon.operator/managed-root :seon.operator/managed-root]
+                  [:seon.operator/control-lock-held?
+                   {:optional true}
+                   :seon.operator/control-lock-held?]],
+                 :footprint-request
+                 [:map
+                  [:seon.operator/repository-root :seon.operator/repository-root]
+                  [:seon.operator/managed-root :seon.operator/managed-root]
+                  [:seon.config.maintenance/min-usable-bytes
+                   {:optional true}
+                   :seon.config.maintenance/min-usable-bytes]
+                  [:seon.config.maintenance/min-usable-ratio
+                   {:optional true}
+                   :seon.config.maintenance/min-usable-ratio]],
+                 :log-request
+                 [:map
+                  [:seon.boot/log-dir :seon.boot/log-dir]
+                  [:seon.config.maintenance/log-max-bytes
+                   :seon.config.maintenance/log-max-bytes]
+                  [:seon.config.maintenance/log-retained-files
+                   :seon.config.maintenance/log-retained-files]],
+                 :existence-request
+                 [:map
+                  [:seon.operator/repository-root :seon.operator/repository-root]],
+                 :footprint
+                 [:map
+                  [:seon.operator.footprint/root :string]
+                  [:seon.operator.footprint/bytes [:int {:min 0}]]
+                  [:seon.operator.footprint/usable-bytes [:int {:min 0}]]
+                  [:seon.operator.footprint/total-bytes [:int {:min 0}]]
+                  [:seon.operator.footprint/usable-ratio :double]
+                  [:seon.operator.footprint/observed-at :inst]],
+                 :cleanup-result
+                 [:map
+                  [:seon.operator.cleanup/root :string]
+                  [:seon.operator.cleanup/target :string]
+                  [:seon.operator.cleanup/removed [:vector :string]]
+                  [:seon.operator.cleanup/reclaimed-bytes [:int {:min 0}]]
+                  [:seon.operator.cleanup/remaining [:vector :string]]
+                  [:seon.operator.cleanup/complete? :boolean]],
+                 :existence :map,
+                 :log-result :map,
                  :branches :seon.cluster.registry/roster,
                  :census
                  [:map

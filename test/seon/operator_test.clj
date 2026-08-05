@@ -1,11 +1,13 @@
 (ns seon.operator-test
   "The in-JVM operator surface stays a thin, error-valued delegation."
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.java.io :as io]
             [seon.cluster :as cluster]
             [seon.cluster.registry :as registry]
             [seon.instrument :as instrument]
             [seon.operator :as operator]
-            [seon.operator.runtime :as runtime]))
+            [seon.operator.runtime :as runtime]
+            [seon.test-support :as test-support]))
 
 (defn- caught
   [f]
@@ -14,6 +16,97 @@
     nil
     (catch Throwable error
       error)))
+
+(defn- owned-root
+  []
+  (let [root (str "tmp/operator-test/" (random-uuid))]
+    (.mkdirs (io/file root))
+    (.getCanonicalPath (io/file root))))
+
+(deftest external-existence-survives-the-target-it-describes
+  (let [repository-root (owned-root)
+        managed-root (str (io/file repository-root "experiment"))]
+    (try
+      (operator/claim-root!
+       {:seon.operator/repository-root repository-root
+        :seon.operator/managed-root managed-root
+        :seon.operator/ephemeral? true
+        :seon.boot/cluster-name "dead-target"})
+      (is (false? (.exists (io/file managed-root))))
+      (let [claim (-> (operator/existence
+                       {:seon.operator/repository-root repository-root})
+                      :seon.operator/roots first)]
+        (is (= (.getCanonicalPath (io/file managed-root))
+               (:seon.operator.claim/root claim)))
+        (is (= #{"dead-target"} (:seon.operator.claim/clusters claim)))
+        (is (true? (:seon.operator.claim/ephemeral? claim)))
+        (is (true? (:seon.operator.claim/reap-on-owner-exit? claim)))
+        (is (false? (:seon.operator.claim/live? claim)))
+        (is (= :file
+               (get-in claim
+                       [:seon.operator.claim/store :seon.store/backend])))
+        (is (uuid? (get-in claim
+                           [:seon.operator.claim/store :seon.store/id]))))
+      (finally
+        (test-support/delete-recursively! repository-root)))))
+
+(deftest cleanup-is-complete-truthful-and-never-follows-a-symlink
+  (let [repository-root (owned-root)
+        managed-root (str (io/file repository-root "managed"))
+        cluster-root (io/file managed-root "data" "clusters")
+        sentinel-root (io/file repository-root "sentinel")
+        sentinel (io/file sentinel-root "survives.txt")
+        link (io/file cluster-root "scratch-link")]
+    (try
+      (.mkdirs (io/file cluster-root "default" "logs"))
+      (.mkdirs (io/file cluster-root "store"))
+      (spit (io/file cluster-root "default" "logs" "seon.log") "evidence")
+      (spit (io/file cluster-root "store" "object.ksv") "stored")
+      (.mkdirs sentinel-root)
+      (spit sentinel "alive")
+      (java.nio.file.Files/createSymbolicLink
+       (.toPath link) (.toPath (.getCanonicalFile sentinel-root))
+       (make-array java.nio.file.attribute.FileAttribute 0))
+      (operator/claim-root!
+       {:seon.operator/repository-root repository-root
+        :seon.operator/managed-root managed-root})
+      (let [observed (operator/observe-footprint!
+                      {:seon.operator/repository-root repository-root
+                       :seon.operator/managed-root managed-root
+                       :seon.config.maintenance/min-usable-bytes 1
+                       :seon.config.maintenance/min-usable-ratio 0.0})
+            result (operator/cleanup-root!
+                    {:seon.operator/repository-root repository-root
+                     :seon.operator/managed-root managed-root})]
+        (is (pos? (:seon.operator.footprint/bytes observed)))
+        (is (= (dissoc observed :seon.operator.footprint/low-space?)
+               (-> (operator/existence
+                    {:seon.operator/repository-root repository-root})
+                   :seon.operator/roots first
+                   :seon.operator.claim/footprint)))
+        (is (true? (:seon.operator.cleanup/complete? result)))
+        (is (empty? (:seon.operator.cleanup/remaining result)))
+        (is (false? (.exists cluster-root)))
+        (is (= "alive" (slurp sentinel))))
+      (finally
+        (test-support/delete-recursively! repository-root)))))
+
+(deftest live-log-inode-is-bounded-and-archived
+  (let [root (owned-root)
+        log-dir (io/file root "logs")
+        log-file (io/file log-dir "seon.log")]
+    (try
+      (.mkdirs log-dir)
+      (spit log-file (apply str (repeat 32 "x")))
+      (let [result (operator/rotate-logs!
+                    {:seon.boot/log-dir (.getCanonicalPath log-dir)
+                     :seon.config.maintenance/log-max-bytes 16
+                     :seon.config.maintenance/log-retained-files 1})]
+        (is (true? (:seon.operator.log/rotated? result)))
+        (is (zero? (.length log-file)))
+        (is (= 32 (.length (io/file (str (.getCanonicalPath log-file) ".1"))))))
+      (finally
+        (test-support/delete-recursively! root)))))
 
 (deftest start-refusals-are-flat-and-never-stop-the-running-instance
   (let [stop-calls (atom [])

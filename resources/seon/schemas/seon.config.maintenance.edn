@@ -1,0 +1,4 @@
+#:seon.config.maintenance{:min-usable-bytes [:int {:min 1}],
+                          :min-usable-ratio [:double {:min 0.0, :max 1.0}],
+                          :log-max-bytes [:int {:min 1}],
+                          :log-retained-files [:int {:min 0}]}

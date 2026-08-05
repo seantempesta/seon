@@ -205,6 +205,24 @@
  ; loudly and production to degrade only by explicit configuration.
  :seon.config/on-core-error :panic
 
+ ; THE DISK GOVERNOR OBSERVES AND REPORTS; IT NEVER QUOTAS WORK. The warning
+ ; boundary is crossed when either absolute or proportional usable space is
+ ; low. Provenance: disk-burn-forensics-2026-08-04.md found 144 GiB consumed
+ ; by project-owned trees and established 50 GiB / 10% as the operator warning
+ ; thresholds. Production logs and continues; the development `:panic` policy
+ ; stops the boot after recording the warning so low-space incidents cannot be
+ ; silently normalized. Neither path imposes a runtime quota.
+ ; Unit: usable bytes on the managed root's filesystem.
+ :seon.config.maintenance/min-usable-bytes 53687091200
+ ; Unit: usable / total filesystem bytes.
+ :seon.config.maintenance/min-usable-ratio 0.10
+ ; Unit: bytes retained in the live log inode before rotation. The same
+ ; forensics pass found one unbounded 965 MiB log; 64 MiB preserves extensive
+ ; boot/runtime evidence while bounding one cluster's active file.
+ :seon.config.maintenance/log-max-bytes 67108864
+ ; Unit: prior bounded log files retained beside the live inode.
+ :seon.config.maintenance/log-retained-files 4
+
  ; THE VIEW'S PORT IS EXPLICITLY ABSENT, and absence is the state: with
  ; no dial the port is DERIVED from the cluster name (7700-7999, FNV-1a
  ; over the name — `seon.render.web/derived-port`), so every named

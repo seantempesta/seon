@@ -332,11 +332,16 @@
   every roster branch, so the cost scales with total data and the
   isolation is structural. Idempotent: a second pass over the same
   state sweeps zero (proven, b2-plan §0.7)."
-  {:malli/schema [:=> [:cat :seon.store/store] :seon.cluster.registry/swept]}
-  [store]
-  (locking collect-monitor
-    (let [blob-keys (referenced-blobs store)
-          sweep! konserve.gc/sweep!]
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.store/store] :seon.cluster.registry/swept]
+    [:=> [:cat :seon.store/store :inst] :seon.cluster.registry/swept]]}
+  ([store]
+   (collect! store (java.util.Date. 0)))
+  ([store remove-before]
+   (locking collect-monitor
+     (let [blob-keys (referenced-blobs store)
+           sweep! konserve.gc/sweep!]
       ;; Datahike refers this exact Var. Rebinding it keeps Datahike's one
       ;; safe-point mark/sweep operation intact while extending the mark by
       ;; one fact-derived hop. `collect-monitor` serializes Seon's sole GC
@@ -350,4 +355,5 @@
                                (into reachable blob-keys)
                                cutoff
                                batch-size)))]
-        (count @(d/gc-storage (:seon.store/connection store)))))))
+        (count @(d/gc-storage (:seon.store/connection store)
+                              remove-before)))))))

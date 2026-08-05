@@ -38,9 +38,11 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.flow :as flow]
+            [seon.fs :as seon.fs]
             [seon.fn :as seon.fn]
             [seon.operator.runtime :as operator.runtime
              :refer [root-store-holder running-instances]]
+            [seon.operator.state :as operator.state]
             [seon.oversight :as oversight]
             [seon.problems :as problems]
             [seon.render.data :as render.data]
@@ -498,6 +500,46 @@
   (doseq [path [(:seon.boot/cluster-dir paths)
                 (:seon.boot/log-dir config)]]
     (.mkdirs (io/file path))))
+
+(defn- operator-root
+  [cluster-root]
+  (or (System/getProperty "seon.operator.root")
+      (let [root-file (.getCanonicalFile (io/file cluster-root))
+            parent (.getParentFile root-file)]
+        (if (and (= "clusters" (.getName root-file))
+                 parent (= "data" (.getName parent)))
+          (.getCanonicalPath (.getParentFile parent))
+          (.getCanonicalPath root-file)))))
+
+(defn- warn-low-space!
+  [managed-root effective]
+  (let [footprint (operator.state/footprint managed-root)
+        low? (or (< (:seon.operator.footprint/usable-bytes footprint)
+                    (:seon.config.maintenance/min-usable-bytes effective))
+                 (< (:seon.operator.footprint/usable-ratio footprint)
+                    (:seon.config.maintenance/min-usable-ratio effective)))]
+    (when low?
+      (let [message
+            (format
+             (str "LOW DISK SPACE under %s: %.2f GiB usable (%.1f%%); "
+                  (if (= :panic (:seon.config/on-core-error effective))
+                    "the development core-error policy stops this boot."
+                    "production logs the observation and continues."))
+             managed-root
+             (/ (double (:seon.operator.footprint/usable-bytes footprint))
+                1073741824.0)
+             (* 100.0 (:seon.operator.footprint/usable-ratio footprint)))]
+        (log/warn message)
+        (when (= :panic (:seon.config/on-core-error effective))
+          (throw
+           (ex-info message
+                    {:seon.error/kind :seon.operator/low-disk-space
+                     :seon.operator/footprint footprint
+                     :seon.config.maintenance/min-usable-bytes
+                     (:seon.config.maintenance/min-usable-bytes effective)
+                     :seon.config.maintenance/min-usable-ratio
+                     (:seon.config.maintenance/min-usable-ratio effective)})))))
+    footprint))
 
 (defn- write-advertisement!
   [paths advertisement]
@@ -1958,8 +2000,18 @@
         (config/compile-manifest
          (assoc config-request :seon.boot/cluster-name cluster-name))
         paths (cluster-paths (:seon.boot/root config) cluster-name)
+        repository-root (or (System/getProperty "seon.repository.root")
+                            (System/getProperty "user.dir"))
+        managed-root (operator-root (:seon.boot/root config))
+        claim-here? (not= "true" (System/getProperty "seon.operator.claimed"))
+        _ (when claim-here?
+            (operator.state/claim-root! repository-root managed-root false
+                                        cluster-name))
+        _ (warn-low-space! managed-root (:seon.config/effective compiled-config))
         server-symbol (server-name cluster-name)]
     (create-directories! config paths)
+    (when claim-here?
+      (operator.state/mark-root-created! repository-root managed-root))
     (reserve-cluster! cluster-name)
     (let [server (volatile! nil)
           ;; LAYER 0 — the REPL. Its own failure unwinds completely
@@ -2216,14 +2268,23 @@
   (let [config (:seon.boot/config instance)
         cluster-name (:seon.boot/cluster-name config)
         store-dir (:seon.boot/store-dir config)
+        cluster-dir (:seon.boot/cluster-dir
+                     (cluster-paths (:seon.boot/root config) cluster-name))
         held-store (acquire-root-store! store-dir)]
     (try
       (stop! instance)
-      (registry/reset-cluster!
-       {:seon.store/store held-store
-        :seon.boot/cluster-name cluster-name
-        :seon.source/commit-id
-        (:seon.source/commit-id (current-source! held-store))})
+      (seon.fs/delete-recursively! (:seon.boot/root config) cluster-dir)
+      (let [result
+            (registry/reset-cluster!
+             {:seon.store/store held-store
+              :seon.boot/cluster-name cluster-name
+              :seon.source/commit-id
+              (:seon.source/commit-id (current-source! held-store))})]
+        ;; `Date.` is intentional here: explicit destroy/refork discards every
+        ;; unreachable pre-refork snapshot immediately. Remaining branches and
+        ;; their histories stay rooted by Datahike's mark phase.
+        (registry/collect! held-store (java.util.Date.))
+        result)
       (finally
         (release-root-store! store-dir)))))
 

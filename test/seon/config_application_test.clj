@@ -26,7 +26,8 @@
 
 (def ^:private application-modes
   "Registered config attribute -> when its applied value takes effect."
-  {:seon.config.db/keep-history? :creation-fixed
+  {:seon.config/initialization :creation-fixed
+   :seon.config.db/keep-history? :creation-fixed
    :seon.config.flow.compute/queue-depth :arm-time
    :seon.config.flow.compute/concurrency :arm-time
    :seon.config.flow.io/queue-depth :arm-time
@@ -54,6 +55,10 @@
    :seon.config.error/recurrence-limit :mixed
    :seon.config.error/escalate-to :mixed
    :seon.config/on-core-error :mixed
+   :seon.config.maintenance/min-usable-bytes :live
+   :seon.config.maintenance/min-usable-ratio :live
+   :seon.config.maintenance/log-max-bytes :live
+   :seon.config.maintenance/log-retained-files :live
    :seon.config.message/max-chain :arm-time
    :seon.config.run/max-episode-runs :live
    :seon.config.web/port :arm-time
@@ -117,6 +122,10 @@
    :seon.config.error/recurrence-limit 2
    :seon.config.error/escalate-to "root"
    :seon.config/on-core-error :record
+   :seon.config.maintenance/min-usable-bytes 1048576
+   :seon.config.maintenance/min-usable-ratio 0.01
+   :seon.config.maintenance/log-max-bytes 1024
+   :seon.config.maintenance/log-retained-files 1
    :seon.config.message/max-chain 5
    :seon.config.run/max-episode-runs 4
    :seon.config.web/port 0

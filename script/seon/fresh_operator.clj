@@ -5,10 +5,10 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [seon.dev.clj-kondo :as dev.kondo]
-            [seon.dev.state :as state])
+            [seon.dev.state :as state]
+            [seon.operator.state :as operator.state])
   (:import [java.io PushbackReader RandomAccessFile]
            [java.net InetSocketAddress ServerSocket Socket]
-           [java.nio.file Files LinkOption Path]
            [java.time Instant]
            [java.util.concurrent CompletableFuture ExecutionException
             TimeUnit TimeoutException]
@@ -24,6 +24,7 @@
 (def ^:private log-name "seon.log")
 (def ^:private init-result-prefix "SEON-INIT-RESULT ")
 (def ^:private roster-result-prefix "SEON-ROSTER-RESULT ")
+(def ^:private cleanup-result-prefix "SEON-CLEANUP-RESULT ")
 
 (defn- repository-root
   []
@@ -80,12 +81,12 @@
   (fs/path (cluster-directory root name) "logs" log-name))
 
 (defn- process-record-directory
-  [root]
-  (fs/path (cluster-root root) "processes"))
+  [_root]
+  (operator.state/process-claim-directory (repository-root)))
 
 (defn- process-record-path
-  [root generation]
-  (fs/path (process-record-directory root) (str generation ".edn")))
+  [_root generation]
+  (operator.state/process-claim-path (repository-root) generation))
 
 (defn- process-adoption-path
   [root generation]
@@ -127,12 +128,12 @@
             (if (and (valid-process-record? record)
                      (= canonical-root (:seon.dev.process/root record)))
               (update result :seon.fresh-operator/process-records conj record)
-              (update result :seon.fresh-operator/process-record-errors conj
-                       {:seon.fresh-operator/path (str path)
-                        :seon.fresh-operator/error
-                        (if (valid-process-record? record)
-                          "The recorded child process belongs to another operator root."
-                          "The recorded child process file is invalid.")})))
+              (if (valid-process-record? record)
+                result
+                (update result :seon.fresh-operator/process-record-errors conj
+                        {:seon.fresh-operator/path (str path)
+                         :seon.fresh-operator/error
+                         "The recorded child process file is invalid."}))))
            (catch Throwable error
              (update result :seon.fresh-operator/process-record-errors conj
                      {:seon.fresh-operator/path (str path)
@@ -208,8 +209,8 @@
     (catch Throwable _ nil)))
 
 (defn- with-operator-lock
-  [root transition]
-  (let [directory (fs/path root "data" "operator")
+  [_root transition]
+  (let [directory (operator.state/control-root (repository-root))
         path (fs/path directory "lifecycle.lock")]
     (fs/create-dirs directory)
     (with-open [file (RandomAccessFile. (str path) "rw")
@@ -265,7 +266,9 @@
         child-command
         (into ["clojure"]
               (concat cache-options
-                      [(str "-J-Dseon.operator.root=" root)]
+                      [(str "-J-Dseon.operator.root=" root)
+                       "-J-Dseon.operator.claimed=true"
+                       (str "-J-Dseon.repository.root=" (repository-root))]
                       (when cache-path
                         [(str "-J-Dseon.dependency-cache.path=" cache-path)])
                       jvm-options
@@ -707,6 +710,18 @@
 (defn- reconcile-process-records!
   [root]
   (let [canonical-root (.getCanonicalPath (java.io.File. root))
+        legacy-directory (fs/path (cluster-root canonical-root) "processes")
+        _
+        (when (fs/directory? legacy-directory)
+          (doseq [path (fs/list-dir legacy-directory)
+                  :let [record (try (state/read-edn path)
+                                    (catch Throwable _ nil))]
+                  :when (and (valid-process-record? record)
+                             (= canonical-root
+                                (:seon.dev.process/root record)))]
+            ;; One-way relocation into the external authority. The old file is
+            ;; left until the next explicit reset removes the managed tree.
+            (write-process-record! canonical-root record)))
         existing (read-process-records canonical-root)
         generations
         (into #{}
@@ -1496,7 +1511,22 @@
                        {:seon.boot/root ~(str (cluster-root root))
                         :seon.boot/cluster-name ~name
                         :seon.config/manifest ~manifest}))
+                    _# (require 'seon.operator)
+                    dials#
+                    ((ns-resolve 'seon.config (symbol "effective"))
+                     @(get ~instance :seon.boot/cluster-connection)
+                     ~name)
+                    rotation#
+                    ((ns-resolve 'seon.operator (symbol "rotate-logs!"))
+                     {:seon.boot/log-dir
+                      (get-in ~instance [:seon.boot/config :seon.boot/log-dir])
+                      :seon.config.maintenance/log-max-bytes
+                      (:seon.config.maintenance/log-max-bytes dials#)
+                      :seon.config.maintenance/log-retained-files
+                      (:seon.config.maintenance/log-retained-files dials#)})
                     applied# ~(instrument-form instance name)]
+                (when (:seon.error/kind rotation#)
+                  (throw (ex-info (:seon.error/message rotation#) rotation#)))
                 (println "seon" ~name "ready — instrumented"
                          (:seon.instrument/instrumented applied#) "vars")
                 (flush)
@@ -1556,12 +1586,15 @@
   [root name]
   (let [path (log-path root name)]
     (fs/create-dirs (fs/parent path))
-    (spit (str path) "")
+    (when-not (fs/exists? path)
+      (spit (str path) ""))
     path))
 
 (defn- launch!
   [root name manifest ready-port dependency-cache-path]
-  (let [log (create-log! root name)
+  (let [_ (operator.state/claim-root-under-lock!
+           (repository-root) root false name)
+        log (create-log! root name)
         generation (random-uuid)
         adoption-path (process-adoption-path root generation)
         _ (do (fs/create-dirs (fs/parent adoption-path))
@@ -1608,6 +1641,7 @@
            :seon.dev.process/log log}]
       (try
         (write-process-record! root record)
+        (operator.state/mark-root-created-under-lock! (repository-root) root)
         (spit adoption-path "adopted\n")
         record
         (catch Throwable error
@@ -1912,7 +1946,7 @@
     (println (str "● " name " config applied " result))))
 
 (defn- named-init-form
-  [name force?]
+  [root name force?]
   (let [store (gensym "store")
         source (gensym "source")
         instance (gensym "instance")
@@ -1922,7 +1956,13 @@
         (if force?
           `(if (map? ~instance)
              (seon.cluster/refork! ~instance)
-             (seon.cluster.registry/reset-cluster! ~request))
+             (do
+               (seon.fs/delete-recursively!
+                ~(str (cluster-root root))
+                ~(str (cluster-directory root name)))
+               (let [result# (seon.cluster.registry/reset-cluster! ~request)]
+                 (seon.cluster.registry/collect! ~store (java.util.Date.))
+                 result#)))
           `(seon.cluster.registry/ensure-cluster! ~request))]
     `(fn [~store ~source ~instance]
        (let [~branch (seon.cluster.registry/cluster-branch ~name)
@@ -1964,7 +2004,7 @@
                  (seon.cluster.store/open-store!
                   {:seon.store/dir ~(str (fs/path cluster-root "store"))})]
              (try
-               (~(named-init-form name force?) store# source# nil)
+               (~(named-init-form root name force?) store# source# nil)
                (finally
                  (seon.cluster.store/release-store! store#))))
 
@@ -1976,7 +2016,7 @@
              (when-not store#
                (throw
                 (ex-info "The live JVM has no process-root store." {})))
-             (~(named-init-form name force?)
+             (~(named-init-form root name force?)
               store# source# (get instances# ~name))))]
     (pr-str
      `(do
@@ -2003,7 +2043,8 @@
         ;; when schema resources move or the monolithic resource is removed.
         (require 'seon.cluster :reload)
         (require 'seon.cluster.registry
-                 'seon.cluster.store)
+                 'seon.cluster.store
+                 'seon.fs)
         ~(if source-process?
            `(println
              ~init-result-prefix
@@ -2042,6 +2083,8 @@
   [root arguments]
   (let [{:seon.fresh-operator/keys [name force? changed-paths]}
         (parse-init-arguments arguments)
+        _ (operator.state/claim-root-under-lock!
+           (repository-root) root false name)
         dependency-cache (dev.kondo/ensure-dependency-cache! root)
         _ (when (= :unavailable
                    (:seon.dev.clj-kondo/status dependency-cache))
@@ -2079,6 +2122,7 @@
         source-branch (:seon.source/branch result)
         source-commit (:seon.source/commit-id result)
         digest (:seon.source/digest result)]
+    (operator.state/mark-root-created-under-lock! (repository-root) root)
     (if name
       (println (str "● " name
                     (if force? " reforked " " forked ")
@@ -2168,10 +2212,22 @@
           #(or (:seon.fresh-operator/advertised? %)
                (:seon.fresh-operator/registered? %)
                (:seon.fresh-operator/branch-open? %))
-          rows))]
-    (println (format "%-22s %8s %-9s %7s %-24s %s"
+          rows))
+        _ (doseq [row rows]
+            (operator.state/claim-root-under-lock!
+             (repository-root) root false
+             (:seon.fresh-operator/name row)))
+        _ (when (.exists (java.io.File. root))
+            (operator.state/mark-root-created-under-lock!
+             (repository-root) root))
+        name-width (max 22 (reduce max 0 (map (comp count :seon.fresh-operator/name)
+                                               rows)))
+        row-format (str "%-" name-width "s %8s %-9s %7s %-24s %s")
+        footprint (operator.state/record-footprint-under-lock!
+                   (repository-root) root)]
+    (println (format row-format
                      "CLUSTER" "PID" "STATE" "PREPL" "URL" "DRIFT"))
-    (println (apply str (repeat 112 "-")))
+    (println (apply str (repeat (+ 90 name-width) "-")))
     (doseq [row rows]
       (let [{:seon.fresh-operator/keys
              [name advertisement registered-advertisement
@@ -2180,7 +2236,7 @@
             value (or advertisement registered-advertisement
                       transport-advertisement)]
       (println
-       (format "%-22s %8s %-9s %7s %-24s %s"
+       (format row-format
                name
                (or (get-in row [:seon.fresh-operator/process
                                 :seon.boot/pid])
@@ -2196,12 +2252,23 @@
                  "-")))))
     (println (str alive-count "/" live-state-count " clusters alive"))
     (println
+     (format "root footprint: %.2f GiB; filesystem usable: %.2f GiB (%.1f%%)"
+             (/ (double (:seon.operator.footprint/bytes footprint))
+                1073741824.0)
+             (/ (double (:seon.operator.footprint/usable-bytes footprint))
+                1073741824.0)
+             (* 100.0 (:seon.operator.footprint/usable-ratio footprint))))
+    (println
      (if (:seon.fresh-operator/roster-readable? roster)
        (str "roster readable via "
             (clojure.core/name (:seon.fresh-operator/roster-source roster)))
-       (str "roster unreadable"
+       (str "roster deferred"
             (when-let [reason (:seon.fresh-operator/roster-error roster)]
-              (str ": " reason)))))
+              (str ": "
+                   (if (= :recorded-process
+                          (:seon.fresh-operator/roster-source roster))
+                     "a live JVM owns the store; status is derived from claims and advertisements"
+                     reason))))))
     (doseq [record process-records]
       (println
        (str "recorded JVM pid " (:seon.dev.process/pid record)
@@ -2491,86 +2558,41 @@
         (parse-down-arguments arguments)]
     (down-recorded-processes! root force? true)))
 
-(defn- with-store-flock!
-  [root transition]
-  (let [path (fs/path (cluster-root root) "store.lock")]
-    (fs/create-dirs (fs/parent path))
-    (with-open [file (RandomAccessFile. (str path) "rw")
-                channel (.getChannel file)]
-      (let [lock
-            (try
-              (.tryLock channel)
-              (catch Throwable error
-                (if (= "java.nio.channels.OverlappingFileLockException"
-                       (.getName (class error)))
-                  nil
-                  (throw error))))]
-        (when-not lock
-          (fail! "Refusing reset while the existing store flock is held."
-                 {:seon.fresh-operator/path (str path)}))
-        ;; Closing the channel releases the FileLock. Keep the callback inside
-        ;; this scope so proof and destruction are one indivisible ownership
-        ;; interval rather than a check-then-act race.
-        (transition path)))))
-
-(defn- assert-store-flock-free!
+(defn- cleanup-form
   [root]
-  (with-store-flock! root (fn [_] nil)))
+  (pr-str
+   `(do
+      (require 'seon.operator)
+      (println
+       ~cleanup-result-prefix
+       (pr-str
+        ((ns-resolve 'seon.operator (symbol "cleanup-root!"))
+         {:seon.operator/repository-root ~(str (repository-root))
+          :seon.operator/managed-root ~root
+          :seon.operator/control-lock-held? true}))))))
 
-(defn- delete-path-no-follow!
-  [root target]
-  (let [operator-root
-        (.normalize (.toAbsolutePath (.toPath (java.io.File. root))))
-        target (.normalize (.toAbsolutePath ^Path target))
-        no-follow (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])]
-    (when-not (and (.startsWith ^Path target ^Path operator-root)
-                   (not= target operator-root))
-      (fail! "Refusing broad operator-root deletion."
-             {:seon.fresh-operator/root (str operator-root)
-              :seon.fresh-operator/target (str target)}))
-    (letfn [(under-root? [^Path path]
-              (.startsWith (.normalize (.toAbsolutePath path)) operator-root))
-            (delete-one! [^Path path]
-              (when-not (under-root? path)
-                (fail! "Operator reset reached outside its root."
-                       {:seon.fresh-operator/path (str path)}))
-              (Files/deleteIfExists path))
-            (walk! [^Path path]
-              (when-not (Files/isSymbolicLink path)
-                (when (Files/isDirectory path no-follow)
-                  (with-open [children (Files/newDirectoryStream path)]
-                    (run! walk! (vec children)))))
-              (delete-one! path))]
-      (when (Files/exists target no-follow)
-        (walk! target)))))
-
-(defn- delete-cluster-root-no-follow!
+(defn- cleanup-managed-root!
   [root]
-  (let [operator-root
-        (.normalize (.toAbsolutePath (.toPath (java.io.File. root))))
-        target
-        (.normalize (.toAbsolutePath (.toPath (.toFile (cluster-root root)))))
-        expected (.resolve ^Path operator-root "data/clusters")]
-    (when-not (= target expected)
-      (fail! "Refusing broad operator-root deletion."
-             {:seon.fresh-operator/root (str operator-root)
-              :seon.fresh-operator/target (str target)}))
-    (delete-path-no-follow! root target)))
-
-(defn- destroy-cluster-data-with-flock!
-  [root]
-  (with-store-flock!
-    root
-    (fn [lock-path]
-      (let [directory
-            (.normalize (.toAbsolutePath
-                         (.toPath (.toFile (cluster-root root)))))
-            lock-path
-            (.normalize (.toAbsolutePath (.toPath (.toFile lock-path))))]
-        (with-open [children (Files/newDirectoryStream directory)]
-          (doseq [^Path child (vec children)
-                  :when (not= (.normalize (.toAbsolutePath child)) lock-path)]
-            (delete-path-no-follow! root child)))))))
+  (let [process
+        (start-child-jvm!
+         {:seon.fresh-operator/root root
+          :seon.fresh-operator/arguments ["-e" (cleanup-form root)]})
+        output (slurp (.getInputStream process))
+        exit (.waitFor process)
+        result
+        (some
+         (fn [line]
+           (when (str/starts-with? line cleanup-result-prefix)
+             (edn/read-string (subs line (count cleanup-result-prefix)))))
+         (str/split-lines output))]
+    (when-not (and (zero? exit)
+                   (map? result)
+                   (:seon.operator.cleanup/complete? result))
+      (fail! "The operations owner did not completely clean the managed root."
+             {:seon.fresh-operator/exit exit
+              :seon.fresh-operator/output output
+              :seon.operator/cleanup result}))
+    result))
 
 (defn- reset!
   [root arguments]
@@ -2581,11 +2603,16 @@
     (fail! "Recorded JVMs remain after forced down; reset refused."
            {:seon.fresh-operator/root root}))
   ;; The old store may be impossible to open because its persisted creation
-  ;; config predates the current one. Destruction holds the existing flock,
-  ;; precedes every Datahike operation, and never follows repository links.
-  ;; The lock file remains as the stable inode handed to the new store.
-  (destroy-cluster-data-with-flock! root)
-  (println "● destroyed operator cluster data under the held flock")
+  ;; config predates the current one. The operations owner therefore performs
+  ;; unconditional no-follow deletion without opening Datahike. Exact process
+  ;; reaping above and the external lifecycle lock make the whole transition
+  ;; claim-first and race-free.
+  (let [cleanup (cleanup-managed-root! root)]
+    (println
+     (str "● cleanup complete; reclaimed "
+          (:seon.operator.cleanup/reclaimed-bytes cleanup)
+          " bytes; removed "
+          (str/join ", " (:seon.operator.cleanup/removed cleanup)))))
   (init! root [])
   (init! root ["default"])
   (println "● reset republished current-src and reforked default"))
