@@ -1,0 +1,1 @@
+#:seon.operator.cleanup{:reclaimed-bytes [:int {:min 0}]}

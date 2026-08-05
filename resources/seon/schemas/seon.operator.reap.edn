@@ -24,7 +24,7 @@
                       [:seon.operator.claim/id :seon.operator.claim/id]
                       [:seon.operator.claim/root :seon.operator.claim/root]
                       [:seon.operator.cleanup/reclaimed-bytes
-                       [:int {:min 0}]]]
+                       :seon.operator.cleanup/reclaimed-bytes]]
                      :refusal
                      [:map
                       [:seon.operator.claim/id :seon.operator.claim/id]
@@ -47,6 +47,8 @@
                      [:boolean {:seon.maintenance/attention-when :false}]
                      :result
                      [:map
+                      {:seon.maintenance/result-projection
+                       seon.maintenance/project-reap-result}
                       [:seon.operator.reap/observed-at
                        :seon.operator.reap/observed-at]
                       [:seon.operator.reap/census

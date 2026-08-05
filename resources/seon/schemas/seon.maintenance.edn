@@ -1,0 +1,28 @@
+#:seon.maintenance{:result-projection :qualified-symbol
+                   :attention-when [:enum :truthy :false :non-empty]
+                   :fact-map :map
+                   :entry
+                   [:map
+                    [:seon.schedule.task/id :seon.schedule.task/id]
+                    [:seon.fn/sym :seon.fn/sym]
+                    [:seon.maintenance/receipt-facts
+                     {:optional true}
+                     :seon.maintenance/fact-map]
+                    [:seon.maintenance/result-facts
+                     {:optional true}
+                     :seon.maintenance/fact-map]
+                    [:seon.maintenance/error-facts
+                     {:optional true}
+                     :seon.maintenance/fact-map]]
+                   :entries [:vector :seon.maintenance/entry]
+                   :receipt-facts :seon.maintenance/fact-map
+                   :result-facts :seon.maintenance/fact-map
+                   :error-facts :seon.maintenance/fact-map
+                   :report
+                   [:map
+                    {:seon.render/ai seon.maintenance/render-report-ai
+                     :seon.render/html seon.maintenance/render-report-html}
+                    [:seon.maintenance/entries :seon.maintenance/entries]]
+                   :result-entity-request :seon.maintenance.result/value
+                   :result-entity-response
+                   [:or :seon.maintenance.result/value :seon.error/value]}

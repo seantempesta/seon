@@ -13,6 +13,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.error :as error]
+            [seon.maintenance :as maintenance]
             [seon.operator.runtime :as operator.runtime]
             [seon.schema.edn :as schema.edn])
   (:import [com.cronutils.model Cron CronType]
@@ -436,8 +437,11 @@
 (defn- settle!
   [connection cluster claimed-receipt-id agent-id result-or-failure]
   (let [completed-at (Date.)
-        result (:seon.maintenance.settlement/result result-or-failure)
+        handler-result (:seon.maintenance.settlement/result result-or-failure)
         failure (:seon.maintenance.settlement/failure result-or-failure)
+        result (if failure
+                 handler-result
+                 (maintenance/result-entity handler-result))
         returned-error? (flat-error? result)
         source (cond
                  failure failure

@@ -21,6 +21,8 @@
                                  {:seon.maintenance/attention-when :false}]
                                 :result
                                 [:map
+                                 {:seon.maintenance/result-projection
+                                  seon.maintenance/project-cluster-cleanup-result}
                                  [:seon.operator.cluster-cleanup/managed-root
                                   :seon.operator.cluster-cleanup/managed-root]
                                  [:seon.boot/cluster-name
