@@ -656,7 +656,7 @@
     (:seon.schema/key row)
     (assoc row :seon.schema/shape
            (schema-shape/shape-row
-            (m/schema (read-edn (:seon.schema/form row)) compile-options)
+            (m/schema (:seon.schema/key row) compile-options)
             (or schema-forms (schema/registered-schemas))
             predicate-functions))
 

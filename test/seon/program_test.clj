@@ -1,9 +1,13 @@
 (ns seon.program-test
   "Recurring proof for the one build/runtime declaration contract."
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.test.check :as tc]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
             [malli.core :as m]
             [seon.db :as db]
             [seon.cluster.run :as run]
+            [seon.fn.schema-shape :as schema-shape]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.sci.reader :as reader]
@@ -24,6 +28,22 @@
     nil
     (catch clojure.lang.ExceptionInfo error
       (ex-data error))))
+
+(defn- source-contract
+  [function-symbol spec forms source arglists]
+  (let [projection (schema/build-projection forms
+                                            {(symbol function-symbol) spec})]
+    (program/contract-facts
+     {:seon.program/function-symbol function-symbol
+      :seon.program/spec (pr-str spec)
+      :seon.program/source source
+      :seon.program/arglists (pr-str arglists)
+      :seon.program/compile-options
+      (:seon.schema.projection/compile-options projection)
+      :seon.program/predicate-functions
+      (:seon.schema.projection/predicate-functions projection)
+      :seon.program/schema-keys (set (keys forms))
+      :seon.program/schema-forms forms})))
 
 (defn- parsed-contract
   [function-symbol spec forms]
@@ -49,21 +69,236 @@
                  (pr-str (list* 'defn (symbol function-name)
                                 (map (fn [binding]
                                        (list binding nil)) bindings))))]
-    (program/contract-facts
-     {:seon.program/function-symbol function-symbol
-      :seon.program/spec (pr-str spec)
-      :seon.program/source source
-      :seon.program/arglists (pr-str (apply list bindings))
-      :seon.program/compile-options
-      (:seon.schema.projection/compile-options projection)
-      :seon.program/predicate-functions
-      (:seon.schema.projection/predicate-functions projection)
-      :seon.program/schema-keys (set (keys forms))
-      :seon.program/schema-forms forms})))
+    (source-contract function-symbol spec forms source
+                     (apply list bindings))))
 
 (defn- nested-maps
   [value]
   (filter map? (tree-seq coll? seq value)))
+
+(deftest positional-and-map-entry-contracts-have-distinct-addresses
+  (test-support/with-database
+    (fn [connection]
+      (let [forms {:sample/ambient :int}
+            projection (schema/build-projection forms {})
+            compile-options
+            (:seon.schema.projection/compile-options projection)
+            predicate-functions
+            (:seon.schema.projection/predicate-functions projection)
+            schema-row
+            (program/with-contract-facts
+             {:seon.program/row
+              {:seon.schema/key :sample/ambient
+               :seon.schema/form ":int"
+               :seon.schema.admission/source :core}
+              :seon.program/compile-options compile-options
+              :seon.program/predicate-functions predicate-functions
+              :seon.program/schema-keys #{:sample/ambient}
+              :seon.program/schema-forms forms})
+            positional-spec [:=> [:cat :sample/ambient] :sample/ambient]
+            map-spec
+            [:=> [:cat [:map [:sample/ambient :sample/ambient]]]
+             :sample/ambient]
+            row
+            (fn [function-symbol source arglists spec]
+              (merge {:seon.fn/sym function-symbol
+                      :seon.fn/ns [:seon.ns/name 'sample]
+                      :seon.fn/source source
+                      :seon.fn/arglists (pr-str arglists)
+                      :seon.fn/private? false
+                      :seon.fn/spec (pr-str spec)}
+                     (source-contract function-symbol spec forms source
+                                      arglists)))
+            positional
+            (row "sample/positional" "(defn positional [ambient] ambient)"
+                 '([ambient]) positional-spec)
+            mapped
+            (row "sample/mapped"
+                 "(defn mapped [{:sample/keys [ambient]}] ambient)"
+                 '([{:sample/keys [ambient]}]) map-spec)]
+        (db/transact! connection
+                      [{:seon.ns/name 'sample :seon.ns/source "(ns sample)"}
+                       schema-row positional mapped])
+        (let [positional-address
+              (db/q '[:find ?index ?binding-shape ?value-fingerprint
+                      ?return-fingerprint
+                      :in $ ?function-symbol
+                      :where
+                      [?function :seon.fn/sym ?function-symbol]
+                      [?function :seon.fn/arities ?arity]
+                      [?arity :seon.fn.arity/arguments ?argument]
+                      [?argument :seon.fn.argument/index ?index]
+                      [?argument :seon.fn.argument/binding ?binding]
+                      [?binding :seon.fn.binding/shape ?binding-shape]
+                      [?argument :seon.fn.argument/schema ?value-shape]
+                      [?value-shape :seon.schema.shape/fingerprint
+                       ?value-fingerprint]
+                      [?arity :seon.fn.arity/return-schema ?return-shape]
+                      [?return-shape :seon.schema.shape/fingerprint
+                       ?return-fingerprint]]
+                    @connection "sample/positional")
+              map-address
+              (db/q '[:find ?index ?binding-shape ?key ?value-fingerprint
+                      ?return-fingerprint
+                      :in $ ?function-symbol
+                      :where
+                      [?function :seon.fn/sym ?function-symbol]
+                      [?function :seon.fn/arities ?arity]
+                      [?arity :seon.fn.arity/arguments ?argument]
+                      [?argument :seon.fn.argument/index ?index]
+                      [?argument :seon.fn.argument/binding ?binding]
+                      [?binding :seon.fn.binding/shape ?binding-shape]
+                      [?binding :seon.fn.binding/entries ?binding-entry]
+                      [?binding-entry :seon.schema.map-entry/key-keyword ?key]
+                      [?argument :seon.fn.argument/schema ?map-shape]
+                      [?map-shape :seon.schema.shape/entries ?shape-entry]
+                      [?shape-entry :seon.schema.map-entry/key-keyword ?key]
+                      [?shape-entry :seon.schema.shape.entry/schema ?value-shape]
+                      [?value-shape :seon.schema.shape/fingerprint
+                       ?value-fingerprint]
+                      [?arity :seon.fn.arity/return-schema ?return-shape]
+                      [?return-shape :seon.schema.shape/fingerprint
+                       ?return-fingerprint]]
+                    @connection "sample/mapped")]
+          (is (= 1 (count positional-address)))
+          (is (= 1 (count map-address)))
+          (let [[pos-index pos-binding value-fingerprint pos-return]
+                (first positional-address)
+                [map-index map-binding map-key map-value-fingerprint map-return]
+                (first map-address)]
+            (is (= [0 :symbol] [pos-index pos-binding]))
+            (is (= [0 :map :sample/ambient]
+                   [map-index map-binding map-key]))
+            (is (= value-fingerprint map-value-fingerprint
+                   pos-return map-return))
+            (is (not= [pos-index nil value-fingerprint]
+                      [map-index map-key map-value-fingerprint]))))))))
+
+(deftest regex-rest-tail-is-complete-and-element-is-only-derived-when-proven
+  (let [repeated
+        (source-contract "sample/repeated"
+                         [:=> [:cat :int [:* :string]] :keyword]
+                         {} "(defn repeated [x & xs] [x xs])" '([x & xs]))
+        composed
+        (source-contract
+         "sample/composed"
+         [:=> [:cat [:alt [:cat] [:cat :int]]] :keyword]
+         {} "(defn composed [& xs] xs)" '([& xs]))
+        repeated-rest (second (get-in repeated [:seon.fn/arities 0
+                                                :seon.fn.arity/arguments]))
+        composed-rest (first (get-in composed [:seon.fn/arities 0
+                                               :seon.fn.arity/arguments]))]
+    (is (= "[:* :string]"
+           (get-in repeated-rest
+                   [:seon.fn.argument/rest-tail-schema
+                    :seon.schema.shape/form])))
+    (is (= ":string"
+           (get-in repeated-rest
+                   [:seon.fn.argument/rest-element-schema
+                    :seon.schema.shape/form])))
+    (is (= "[:alt :cat [:cat :int]]"
+           (get-in composed-rest
+                   [:seon.fn.argument/rest-tail-schema
+                    :seon.schema.shape/form])))
+    (is (nil? (:seon.fn.argument/rest-element-schema composed-rest)))))
+
+(deftest source-contract-join-refuses-disagreement-and-records-overrides
+  (let [spec [:=> [:cat :int] :int]
+        request (fn [source arglists]
+                  #(source-contract "sample/join" spec {} source arglists))]
+    (is (= :analyzer-disagreement
+           (:seon.fn.signature/reason
+            (refusal-data
+             (request "(defn join [x] x)" '([analyzer-x]))))))
+    (is (= :unmatched-arity
+           (:seon.fn.signature/reason
+            (refusal-data
+             (request "(defn join [x y] x)" '([x y]))))))
+    (is (= :unsupported-declaration
+           (:seon.fn.signature/reason
+            (refusal-data
+             (request "(fn join [x] x)" '([x]))))))
+    (is (true?
+         (:seon.fn/arglists-override?
+          (source-contract
+           "sample/join" spec {}
+           "(defn ^{:arglists '([public-x])} join [x] x)"
+           '([public-x])))))))
+
+(deftest exact-source-and-malli-arities-join-generatively
+  (let [schema-at (fn [index] (nth [:int :string :keyword :boolean]
+                                    (mod index 4)))
+        result
+        (tc/quick-check
+         80
+         (prop/for-all
+          [fixed-counts (gen/set (gen/choose 0 4)
+                                 {:min-elements 1 :max-elements 4})
+           variadic-min (gen/one-of [(gen/return nil) (gen/choose 0 3)])]
+          (let [fixed (mapv (fn [count]
+                              {:join-key [:fixed count]
+                               :bindings (mapv #(symbol (str "x" %))
+                                               (range count))
+                               :input (into [:cat]
+                                            (map schema-at)
+                                            (range count))})
+                            (sort fixed-counts))
+                variadic
+                (when variadic-min
+                  {:join-key [:variadic variadic-min]
+                   :bindings
+                   (into (mapv #(symbol (str "v" %))
+                               (range variadic-min))
+                         ['& 'xs])
+                   :input
+                   (into [:cat]
+                         (concat (map schema-at (range variadic-min))
+                                 [[:* (schema-at variadic-min)]]))})
+                descriptors (cond-> fixed variadic (conj variadic))
+                source-descriptors (vec (reverse descriptors))
+                arms (mapv (fn [{:keys [input]}] [:=> input :symbol])
+                           descriptors)
+                spec (if (= 1 (count arms)) (first arms)
+                         (into [:function] arms))
+                declarations
+                (mapv (fn [{:keys [bindings]}] (list bindings nil))
+                      source-descriptors)
+                source (pr-str (list* 'defn 'generated declarations))
+                arglists (apply list (map :bindings source-descriptors))
+                facts (source-contract "sample/generated" spec {} source
+                                       arglists)
+                arities (:seon.fn/arities facts)
+                actual-keys
+                (into #{}
+                      (map (fn [arity]
+                             (if (:seon.fn.arity/max arity)
+                               [:fixed (:seon.fn.arity/min arity)]
+                               [:variadic (:seon.fn.arity/min arity)])))
+                      arities)
+                shapes
+                (mapcat (fn [arity]
+                          (cons (:seon.fn.arity/return-schema arity)
+                                (map :seon.fn.argument/schema
+                                     (:seon.fn.arity/arguments arity))))
+                        arities)]
+            (and (= (set (map :join-key descriptors)) actual-keys)
+                 (every?
+                  (fn [arity]
+                    (and (= (:seon.fn.arity/argument-count arity)
+                            (count (:seon.fn.arity/arguments arity)))
+                         (= (range (:seon.fn.arity/argument-count arity))
+                            (map :seon.fn.argument/index
+                                 (:seon.fn.arity/arguments arity)))))
+                  arities)
+                 (every?
+                  (fn [shape]
+                    (= (:seon.schema.shape/fingerprint shape)
+                       (:seon.schema.shape/fingerprint
+                        (schema-shape/shape-row
+                         (m/schema (schema-shape/row-form shape))))))
+                  shapes))))
+         :seed 202608050012)]
+    (test-support/assert-check! result)))
 
 (deftest function-contracts-compile-once-into-complete-query-facts
   (let [forms {:sample/key :keyword
@@ -153,11 +388,34 @@
                     :seon.fn/spec (pr-str new-spec)}
                    (parsed-contract function-symbol new-spec {}))]
         (db/transact! connection [old-row])
-        (let [current (db/pull @connection '[*]
+        (let [current
+              (db/pull @connection
+                       '[* {:seon.fn/arities
+                            [* {:seon.fn.arity/arguments
+                                [* {:seon.fn.argument/binding [:db/id]}
+                                 {:seon.fn.argument/schema [:db/id]}]}
+                             {:seon.fn.arity/return-schema [:db/id]}]}]
                               [:seon.fn/sym function-symbol])
               old-components
               (into #{(get-in current [:seon.fn/ast :db/id])}
-                    (map :db/id)
+                    (mapcat
+                     (fn [arity]
+                       (into [(:db/id arity)]
+                             (mapcat (fn [argument]
+                                       [(:db/id argument)
+                                        (get-in argument
+                                                [:seon.fn.argument/binding
+                                                 :db/id])]))
+                             (:seon.fn.arity/arguments arity))))
+                    (:seon.fn/arities current))
+              old-shapes
+              (into #{}
+                    (mapcat
+                     (fn [arity]
+                       (cons (get-in arity
+                                     [:seon.fn.arity/return-schema :db/id])
+                             (map #(get-in % [:seon.fn.argument/schema :db/id])
+                                  (:seon.fn.arity/arguments arity)))))
                     (:seon.fn/arities current))]
           (db/transact! connection
                       (program/exact-replacement-tx current new-row))
@@ -166,15 +424,31 @@
                         [:seon.fn/spec
                          {:seon.fn/arities
                           [:seon.fn.arity/order :seon.fn.arity/min
-                           :seon.fn.arity/max]}]
+                           :seon.fn.arity/max
+                           {:seon.fn.arity/arguments
+                            [:seon.fn.argument/index
+                             {:seon.fn.argument/schema
+                              [:seon.schema.shape/fingerprint]}]}
+                           {:seon.fn.arity/return-schema
+                            [:seon.schema.shape/fingerprint]}]}]
                         [:seon.fn/sym function-symbol])]
             (is (= (pr-str new-spec) (:seon.fn/spec redefined)))
             (is (= [{:seon.fn.arity/order 0
                      :seon.fn.arity/min 1
-                     :seon.fn.arity/max 1}]
+                     :seon.fn.arity/max 1
+                     :seon.fn.arity/arguments
+                     [{:seon.fn.argument/index 0
+                       :seon.fn.argument/schema
+                       {:seon.schema.shape/fingerprint
+                        (schema-shape/fingerprint :string)}}]
+                     :seon.fn.arity/return-schema
+                     {:seon.schema.shape/fingerprint
+                      (schema-shape/fingerprint :string)}}]
                    (:seon.fn/arities redefined)))
             (is (every? #(empty? (db/datoms @connection :eavt %))
-                        old-components))))))))
+                        old-components))
+            (is (every? #(seq (db/datoms @connection :eavt %)) old-shapes)
+                "shared content-addressed shapes survive arity replacement")))))))
 
 (deftest identical-runtime-redeclaration-builds-no-datoms
   (test-support/with-database

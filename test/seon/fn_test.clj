@@ -320,6 +320,17 @@
                    [?function :seon.fn/arities]
                    [?function :seon.fn/ast]]
                  db)
+            arities
+            (db/q '[:find [?arity ...]
+                    :where [_ :seon.fn/arities ?arity]]
+                  db)
+            complete-arities
+            (db/q '[:find [?arity ...]
+                    :where
+                    [_ :seon.fn/arities ?arity]
+                    [?arity :seon.fn.arity/argument-count]
+                    [?arity :seon.fn.arity/return-schema]]
+                  db)
             assertion-transactions
             (db/q '[:find ?function ?spec-tx ?arities-tx ?ast-tx
                    :where
@@ -327,6 +338,25 @@
                    [?function :seon.fn/arities _ ?arities-tx]
                    [?function :seon.fn/ast _ ?ast-tx]]
                  db)
+            arity-assertion-transactions
+            (db/q '[:find ?function ?spec-tx ?arity-tx ?count-tx ?return-tx
+                    :where
+                    [?function :seon.fn/spec _ ?spec-tx]
+                    [?function :seon.fn/arities ?arity ?arity-tx]
+                    [?arity :seon.fn.arity/argument-count _ ?count-tx]
+                    [?arity :seon.fn.arity/return-schema _ ?return-tx]]
+                  db)
+            argument-assertion-transactions
+            (db/q '[:find ?function ?spec-tx ?argument-tx ?index-tx
+                           ?binding-tx ?schema-tx
+                    :where
+                    [?function :seon.fn/spec _ ?spec-tx]
+                    [?function :seon.fn/arities ?arity]
+                    [?arity :seon.fn.arity/arguments ?argument ?argument-tx]
+                    [?argument :seon.fn.argument/index _ ?index-tx]
+                    [?argument :seon.fn.argument/binding _ ?binding-tx]
+                    [?argument :seon.fn.argument/schema _ ?schema-tx]]
+                  db)
             functions-by-role
             (db/q '[:find ?role ?function-symbol
                    :in $ ?schema-key
@@ -342,12 +372,20 @@
                  db :seon.schema/value)]
         (testing "the complete contracted population is backfilled"
           (is (seq contracted))
-          (is (= (set contracted) (set complete))))
+          (is (= (set contracted) (set complete)))
+          (is (= (set arities) (set complete-arities))))
         (testing "spec and every parsed root assert atomically"
           (is (= (count contracted) (count assertion-transactions)))
           (is (every? (fn [[_ spec-tx arities-tx ast-tx]]
                         (= spec-tx arities-tx ast-tx))
-                      assertion-transactions)))
+                      assertion-transactions))
+          (is (every? (fn [[_ spec-tx arity-tx count-tx return-tx]]
+                        (= spec-tx arity-tx count-tx return-tx))
+                      arity-assertion-transactions))
+          (is (every? (fn [[_ spec-tx argument-tx index-tx binding-tx
+                            schema-tx]]
+                        (= spec-tx argument-tx index-tx binding-tx schema-tx))
+                      argument-assertion-transactions)))
         (testing "one query answers both directions for a given schema"
           (is (seq (filter (comp #{:input} first) functions-by-role)))
           (is (seq (filter (comp #{:output} first) functions-by-role))))))))
@@ -397,8 +435,13 @@
                (db/q '[:find ?function
                       :where
                       [?function :seon.fn/spec]
-                      (or (not [?function :seon.fn/arities])
-                          (not [?function :seon.fn/ast]))]
+                      (or-join [?function]
+                        (not [?function :seon.fn/arities])
+                        (not [?function :seon.fn/ast])
+                        (and [?function :seon.fn/arities ?arity]
+                             (not [?arity :seon.fn.arity/argument-count]))
+                        (and [?function :seon.fn/arities ?arity]
+                             (not [?arity :seon.fn.arity/return-schema])))]
                     @connection))))))))
 
 (deftest publication-refuses-every-error-level-analyzer-finding

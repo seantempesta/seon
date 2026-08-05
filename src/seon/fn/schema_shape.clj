@@ -187,27 +187,31 @@
 
 (defn- child-row
   [shape-fingerprint order child schema-child? shape-row*]
-  (cond-> {:db/id (str "seon.schema.shape.child/" shape-fingerprint "/" order)
+  (let [child-id (str "seon.schema.shape.child/" shape-fingerprint "/" order)]
+    (cond-> {:db/id child-id
+             :seon.schema.shape.child/id child-id
            :seon.schema.shape.child/order (long order)}
-    (and schema-child? (schema-form? child))
-    (assoc :seon.schema.shape.child/schema (shape-row* child))
-    (not (and schema-child? (schema-form? child)))
-    (assoc :seon.schema.shape.child/value-edn (pr-str child))))
+      (and schema-child? (schema-form? child))
+      (assoc :seon.schema.shape.child/schema (shape-row* child))
+      (not (and schema-child? (schema-form? child)))
+      (assoc :seon.schema.shape.child/value-edn (pr-str child)))))
 
 (defn- entry-row
   [shape-fingerprint order entry shape-row*]
   (let [[entry-key a b] entry
-        [properties child] (if (map? a) [a b] [nil a])]
-  (cond->
-   (merge
-    {:db/id (str "seon.schema.shape.entry/" shape-fingerprint "/" order)
+        [properties child] (if (map? a) [a b] [nil a])
+        entry-id (str "seon.schema.shape.entry/" shape-fingerprint "/" order)]
+    (cond->
+     (merge
+      {:db/id entry-id
+       :seon.schema.shape.entry/id entry-id
      :seon.schema.shape.entry/order (long order)
      :seon.schema.shape.entry/optional? (true? (:optional properties))
      :seon.schema.shape.entry/schema (shape-row* child)}
-    (typed-key-facts entry-key))
-    (seq properties)
-    (assoc :seon.schema.shape.entry/properties
-           (pr-str (canonical-form properties))))))
+      (typed-key-facts entry-key))
+      (seq properties)
+      (assoc :seon.schema.shape.entry/properties
+             (pr-str (canonical-form properties))))))
 
 (defn- form-parts
   [form]

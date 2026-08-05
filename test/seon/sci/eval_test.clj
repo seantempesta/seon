@@ -10,6 +10,7 @@
   genuinely unbounded, so a regression does not slow the suite: it
   fails it."
   (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.set :as set]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -20,6 +21,7 @@
             [seon.cluster.agent :as agent]
             [seon.cluster.work :as work]
             [seon.db :as db]
+            [seon.fn :as seon.fn]
             [seon.instrument :as instrument]
             [sci.addons.future :as sci.future]
             [sci.core :as sci]
@@ -448,6 +450,40 @@
     (is (= "user/parsed-at-runtime" (:seon.fn/sym row)))
     (is (= 1 (count (:seon.fn/arities row))))
     (is (map? (:seon.fn/ast row)))))
+
+(deftest static-and-runtime-contracted-definitions-publish-identical-facts
+  (let [root (java.nio.file.Files/createTempDirectory
+              (.toPath (io/file "tmp")) "p12-runtime-parity"
+              (make-array java.nio.file.attribute.FileAttribute 0))
+        source
+        (str "(defn ^{:malli/schema "
+             "[:=> [:cat [:map [:x :int]] [:* :string]] :int]} "
+             "same-facts [{:keys [x]} & xs] x)")
+        source-file (.resolve root "parity.clj")]
+    (try
+      (spit (.toFile source-file) (str "(ns parity)\n" source "\n"))
+      (let [static-row
+            (first
+             (filter #(= "parity/same-facts" (:seon.fn/sym %))
+                     (#'seon.fn/desired-rows
+                      {:seon.fn/roots [(str root)]})))
+            ctx (eval/build-base-ctx)
+            runtime-row
+            (:seon.program/row
+             (eval/evaluate
+              {:seon.sci.eval/ctx ctx
+               :seon.cluster.run.form/ns [:seon.ns/name 'parity]
+               :seon.cluster.run.form/source source
+               :seon.sci.admit/caps caps
+               :seon.sci.eval/time-limit-ms 2000
+               :seon.config/on-core-error :panic}))
+            p12-keys [:seon.fn/arities :seon.fn/ast
+                      :seon.fn/arglists-override?]]
+        (is (= "parity/same-facts" (:seon.fn/sym runtime-row)))
+        (is (= (select-keys static-row p12-keys)
+               (select-keys runtime-row p12-keys))))
+      (finally
+        (test-support/delete-recursively! (str root))))))
 
 (deftest contracted-defn-renders-the-var-it-declared
   (let [def-node

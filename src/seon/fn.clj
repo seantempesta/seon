@@ -7,6 +7,7 @@
             [clojure.walk :as walk]
             [seon.db :as db]
             [seon.fn.analyzer :as analyzer]
+            [seon.fn.schema-shape :as schema-shape]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -1059,17 +1060,23 @@
                                (map (juxt :seon.ns.alias/local
                                           :seon.ns.alias/target-ns))
                                aliases)])))
+              rows)
+        parsed-rows
+        (mapv (fn [row]
+                (program/with-contract-facts
+                 {:seon.program/row row
+                  :seon.program/compile-options compile-options
+                  :seon.program/predicate-functions predicate-functions
+                  :seon.program/schema-keys schema-keys
+                  :seon.program/schema-forms schema-forms
+                  :seon.program/reader-aliases
+                  (get aliases-by-namespace
+                       (second (:seon.fn/ns row)) {})}))
               rows)]
-    (mapv (fn [row]
-            (program/with-contract-facts
-             {:seon.program/row row
-              :seon.program/compile-options compile-options
-              :seon.program/predicate-functions predicate-functions
-              :seon.program/schema-keys schema-keys
-              :seon.program/schema-forms schema-forms
-              :seon.program/reader-aliases
-              (get aliases-by-namespace (second (:seon.fn/ns row)) {})}))
-          rows)))
+    (schema-shape/assert-consistent!
+     (filter :seon.schema.shape/fingerprint
+             (mapcat #(filter map? (tree-seq coll? seq %)) parsed-rows)))
+    parsed-rows))
 
 (defn backfill-contract-facts!
   "Backfill every contracted function missing either parsed component root.
@@ -1091,13 +1098,29 @@
         predicate-functions
         (:seon.schema.projection/predicate-functions projection)
         schema-keys (set (keys (:seon.schema.projection/forms projection)))
+        aliases-by-namespace
+        (into {}
+              (map (fn [[namespace-name namespace-row]]
+                     [namespace-name
+                      (into {}
+                            (map (juxt :seon.ns.alias/local
+                                       :seon.ns.alias/target-ns))
+                            (:seon.ns/aliases namespace-row))]))
+              (db/q '[:find ?namespace-name (pull ?namespace
+                                                  [{:seon.ns/aliases [*]}])
+                      :where
+                      [?namespace :seon.ns/name ?namespace-name]]
+                    db))
         contracted
         (db/q '[:find ?function ?function-symbol ?spec ?source ?arglists
+                       ?namespace-name
                :where
                [?function :seon.fn/sym ?function-symbol]
                [?function :seon.fn/spec ?spec]
                [?function :seon.fn/source ?source]
-               [?function :seon.fn/arglists ?arglists]]
+               [?function :seon.fn/arglists ?arglists]
+               [?function :seon.fn/ns ?namespace]
+               [?namespace :seon.ns/name ?namespace-name]]
              db)
         missing
         (filterv
@@ -1119,7 +1142,7 @@
         (into
          []
          (mapcat
-          (fn [[function function-symbol spec source arglists]]
+          (fn [[function function-symbol spec source arglists namespace-name]]
             (let [current (db/pull db [:seon.fn/arities :seon.fn/ast]
                                   function)
                   parsed
@@ -1132,7 +1155,10 @@
                     :seon.program/predicate-functions predicate-functions
                     :seon.program/schema-keys schema-keys
                     :seon.program/schema-forms
-                    (:seon.schema.projection/forms projection)})]
+                    (:seon.schema.projection/forms projection)
+                    :seon.program/reader-namespace namespace-name
+                    :seon.program/reader-aliases
+                    (get aliases-by-namespace namespace-name {})})]
               (concat
                (keep (fn [attribute]
                        (when (contains? current attribute)
