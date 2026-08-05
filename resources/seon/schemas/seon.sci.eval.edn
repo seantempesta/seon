@@ -31,9 +31,9 @@
                  [:seon.program/row
                   {:optional true}
                   :seon.program/row]
-                 [:seon.sci.eval/session-defs
+                 [:seon.sci.eval/desk-defs
                   {:optional true}
-                  :seon.sci.eval/session-defs]
+                  :seon.sci.eval/desk-defs]
                  [:seon.print/options :seon.print/options]
                  [:seon.sci.admit/capped? :seon.sci.admit/capped?]
                  [:seon.sci.admit/record :seon.sci.admit/record]],
@@ -93,12 +93,13 @@
                  [:seon.boot/cluster-name
                   {:optional true}
                   :seon.boot/cluster-name]],
-                :session-def
+                :desk-def
                 [:map
                  [:seon.def/id :seon.def/id]
                  [:seon.def/ns :seon.def/ns]
                  [:seon.def/name :seon.def/name]
                  [:seon.def/source :seon.def/source]
+                 [:seon.def/atom? {:optional true} :seon.def/atom?]
                  [:seon.sci.eval/value :any]
                  [:seon.sci.eval/referenced-vars
                   :seon.sci.eval/referenced-vars]
@@ -108,14 +109,21 @@
                   :seon.sci.eval/nondeterministic-calls]
                  [:seon.sci.eval/impure-calls
                   :seon.sci.eval/impure-calls]],
-                :session-defs [:vector :seon.sci.eval/session-def],
-                :session-install-request
+                :desk-defs [:vector :seon.sci.eval/desk-def],
+                :desk-fork-request
                 [:map
                  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
                  [:seon.db/db :seon.db/database-value]
+                 [:seon.cluster.agent/id :seon.cluster.agent/id]
                  [:seon.db/connection
                   {:optional true}
                   :seon.db/connection]],
+                :desk-fork-result
+                [:map
+                 [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+                 [:seon.sci.eval/desk-notices
+                  :seon.sci.eval/desk-notices]],
+                :desk-notices [:vector :string],
                 :time-limit-ms [:int {:min 1}],
                 :unproven-called-vars [:set :symbol],
                 :install-mismatch [:= true]
@@ -128,8 +136,8 @@
                 :reader-event-count-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the impossible reader-event count"} [:seon.sci.eval/reader-event-count :seon.sci.eval/reader-event-count] [:seon.error/message :seon.error/message]]
                 :schema-refused :seon.schema/key
                 :schema-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the schema declaration refused during evaluation"} [:seon.sci.eval/schema-refused :seon.sci.eval/schema-refused] [:seon.error/message :seon.error/message]]
-                :session-blob-unavailable :seon.blob/digest
-                :session-blob-unavailable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unavailable session-image blob"} [:seon.sci.eval/session-blob-unavailable :seon.sci.eval/session-blob-unavailable] [:seon.error/message :seon.error/message]]
+                :desk-blob-unavailable :seon.blob/digest
+                :desk-blob-unavailable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unavailable desk blob"} [:seon.sci.eval/desk-blob-unavailable :seon.sci.eval/desk-blob-unavailable] [:seon.error/message :seon.error/message]]
                 :time-limit :seon.eval/fn-entries
                 :time-limit-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the evaluation time limit that was reached"} [:seon.sci.eval/time-limit :seon.sci.eval/time-limit] [:seon.error/message :seon.error/message]]
                 :evaluation-failed [:= true]

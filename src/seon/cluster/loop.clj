@@ -36,6 +36,7 @@
   in a state-machine property, per agent."
   (:require [clojure.core.async :as async]
             [sci.core :as sci]
+            [clojure.string :as str]
             [clojure.core.async.flow :as flow]
             [seon.ai :as ai]
             [seon.blob :as blob]
@@ -51,7 +52,6 @@
             [seon.error :as error]
             [seon.flow :as seon.flow]
             [seon.fn.analyzer :as fn.analyzer]
-            [seon.program :as program]
             [seon.problems :as problems]
             [seon.render :as render]
             [seon.render.value :as render.value]
@@ -248,7 +248,7 @@
   "Terminal receipt request projected from one completed evaluation."
   [{:keys [:seon.cluster.run/id :seon.cluster.run/process
            :seon.cluster.run.form/ordinal :seon.sci.eval/evaluation
-           :seon.problems/form-problem :my.run/value]
+           :seon.problems/form-problem :seon.def/rows :my.run/value]
     settlement-evaluation ::settlement-evaluation}]
   (let [error (or (:seon.cluster.eval/error evaluation)
                   (:seon.cluster.eval/error form-problem))
@@ -285,6 +285,7 @@
       (:seon.program/row evaluation)
       (assoc :seon.program/row
              (:seon.program/row evaluation))
+      (seq rows) (assoc :seon.def/rows rows)
       value (assoc :my.run/value value))))
 
 (defn terminal-tx
@@ -303,7 +304,7 @@
            :seon.cluster.eval/interrupted-at
            :seon.cluster.eval/output :seon.cluster.eval/ns
            :seon.sci.eval/ending-ns
-           :seon.program/row :seon.error/kind
+           :seon.program/row :seon.def/rows :seon.error/kind
            :my.run/value]}
    now]
   (let [receipt (cond-> {:seon.cluster.run/id id
@@ -322,6 +323,7 @@
                   ns (assoc :seon.cluster.eval/ns ns)
                   ending-ns (assoc :seon.sci.eval/ending-ns ending-ns)
                   row (assoc :seon.program/row row)
+                  (seq rows) (assoc :seon.def/rows rows)
                   ;; what the form printed is evidence, and evidence is
                   ;; durable or it is nothing
                   output (assoc :seon.cluster.eval/output output))]
@@ -371,24 +373,9 @@
                        (conj visited function-symbol)))))
           true)))))
 
-(defn- exact-session-row-tx
-  [db row]
-  (let [row (program/canonical-row row)
-        existing (db/pull db '[*]
-                         [:seon.def/id (:seon.def/id row)])
-        changed (when existing (program/changed-attributes existing row))]
-    (concat
-     (when existing
-       (map (fn [attribute]
-              [:db/retract (:db/id existing) attribute])
-            (filter #(contains? existing %) changed)))
-     [(assoc row :db/id
-             (or (:db/id existing)
-                 (str "code.def:" (:seon.def/id row))))])))
-
-(defn- session-image-tx
-  "Exact session-image changes riding beside one terminal receipt."
-  [db evaluation ordinal]
+(defn- desk-rows
+  "Restore-ladder rows admitted by the terminal receipt transaction."
+  [db agent-id evaluation ordinal]
   (let [successful-evaluation?
         (= :ok (get-in evaluation
                        [:seon.sci.admit/record :seon.eval/outcome]))
@@ -397,11 +384,26 @@
                        [:seon.sci.admit/record
                         :seon.eval/host-interop-count]
                        0))
+        row-base
+        (fn [candidate]
+          (-> candidate
+              (dissoc :seon.sci.eval/value
+                      :seon.sci.eval/referenced-vars
+                      :seon.sci.eval/unproven-called-vars
+                      :seon.sci.eval/nondeterministic-calls
+                      :seon.sci.eval/impure-calls)
+              (assoc :seon.def/key
+                     (pr-str [agent-id (:seon.def/id candidate)])
+                     :seon.def/agent
+                     [:seon.cluster.agent/id agent-id]
+                     :seon.def/ordinal ordinal
+                     :seon.schema.admission/source :agent)))
         rows
-        (map
+        (mapv
          (fn [candidate]
            (let [stored? (or (:seon.def/value-edn candidate)
                              (:seon.def/blob candidate))
+                 atom? (:seon.def/atom? candidate)
                  unproven-called-vars
                  (:seon.sci.eval/unproven-called-vars candidate)
                  nondeterministic-calls
@@ -415,38 +417,30 @@
                              unproven-called-vars))
                  deterministic? (empty? nondeterministic-calls)]
              (cond
-               stored?
-               (-> candidate
-                   (dissoc :seon.sci.eval/value
-                           :seon.sci.eval/referenced-vars
-                           :seon.sci.eval/unproven-called-vars
-                           :seon.sci.eval/nondeterministic-calls
-                           :seon.sci.eval/impure-calls
-                           :seon.def/source
-                           :seon.def/unrestorable-reason)
-                   (assoc :seon.def/ordinal ordinal))
+               (and atom? stored?)
+               (-> (row-base candidate)
+                   (dissoc :seon.def/source
+                           :seon.def/unrestorable-reason))
 
-               (and successful-evaluation? pure? deterministic?)
-               (-> candidate
-                   (dissoc :seon.sci.eval/value
-                           :seon.sci.eval/referenced-vars
-                           :seon.sci.eval/unproven-called-vars
-                           :seon.sci.eval/nondeterministic-calls
-                           :seon.sci.eval/impure-calls
-                           :seon.def/unrestorable-reason)
-                   (assoc :seon.def/ordinal ordinal))
+               (and (not atom?) successful-evaluation? pure? deterministic?)
+               (-> (row-base candidate)
+                   (dissoc :seon.def/value-edn :seon.def/blob
+                           :seon.def/size :seon.def/unrestorable-reason))
+
+               (and (not atom?) stored?)
+               (-> (row-base candidate)
+                   (dissoc :seon.def/source
+                           :seon.def/unrestorable-reason))
 
                :else
-               (-> candidate
-                   (dissoc :seon.sci.eval/value
-                           :seon.sci.eval/referenced-vars
-                           :seon.sci.eval/unproven-called-vars
-                           :seon.sci.eval/nondeterministic-calls
-                           :seon.sci.eval/impure-calls
-                           :seon.def/source)
-                   (assoc :seon.def/ordinal ordinal
-                          :seon.def/unrestorable-reason
+               (-> (row-base candidate)
+                   (dissoc :seon.def/source :seon.def/value-edn
+                           :seon.def/blob :seon.def/size)
+                   (assoc :seon.def/unrestorable-reason
                           (cond
+                            (and atom? (not stored?))
+                            "The atom's settled value is not store-faithful."
+
                             (not successful-evaluation?)
                             "Defining evaluation did not complete successfully."
 
@@ -464,19 +458,8 @@
 
                             :else
                             "Defining form reaches a capability leaf."))))))
-         (:seon.sci.eval/session-defs evaluation))
-        contracted-id
-        (get-in evaluation [:seon.program/row :seon.fn/sym])
-        contracted-entry
-        (when contracted-id
-          (db/pull db [:db/id]
-                  [:seon.def/id contracted-id]))]
-    (into
-     (if contracted-entry
-       [[:db/retractEntity (:db/id contracted-entry)]]
-       [])
-     (mapcat #(exact-session-row-tx db %))
-     rows)))
+         (:seon.sci.eval/desk-defs evaluation))]
+    rows))
 
 (defn- result-blob-threshold
   [db]
@@ -484,11 +467,11 @@
          :where [_ :seon.config.eval.result/blob-threshold ?threshold]]
        db))
 
-(defn- store-session-values!
+(defn- store-desk-values!
   [connection evaluation]
   (let [threshold (result-blob-threshold @connection)]
     (update
-     evaluation :seon.sci.eval/session-defs
+     evaluation :seon.sci.eval/desk-defs
      (fn [candidates]
        (mapv
         (fn [candidate]
@@ -505,6 +488,15 @@
                 (assoc :seon.def/value-edn serialized)))
             candidate))
         candidates)))))
+
+(defn- with-desk-notices
+  [evaluation notices]
+  (if (seq notices)
+    (update evaluation :seon.cluster.eval/output
+            (fn [output]
+              (str (str/join "\n" notices)
+                   (when (seq output) (str "\n" output)))))
+    evaluation))
 
 (defn- result-window-page-size
   [db]
@@ -1500,15 +1492,22 @@
         process (:seon.cluster.run/process cluster)
         agent-id (:seon.cluster.agent/id work)
         run-id (:seon.cluster.run/id work)]
-    ;; THE FOLD, in one turn, over the cluster's ONE live ctx. Every agent in
-    ;; this cluster shares the program graph immediately; another cluster
-    ;; owns another ctx. Rebuild from facts is boot and recovery work, never
-    ;; turn work.
+    ;; THE FOLD, in one turn, over a fresh fork of the cluster's live base.
+    ;; Every form in this turn shares the fork; the next turn forks the then
+    ;; current base and rehydrates this agent's desk again.
     ;;
     ;; Boot recovery closes interrupted runs before any agent graph is
     ;; armed, so this branch is only the ordinary live fold over one
     ;; ctx. A cold fold starting at ordinal k > 0 cannot reach it.
-    (let [compiled-evaluate
+    (let [base-ctx (:seon.sci.eval/ctx cluster)
+          {ctx :seon.sci.eval/ctx
+           desk-notices :seon.sci.eval/desk-notices}
+          (sci.eval/fork-for-turn
+           {:seon.sci.eval/ctx base-ctx
+            :seon.db/db @connection
+            :seon.db/connection connection
+            :seon.cluster.agent/id agent-id})
+          compiled-evaluate
           (requiring-resolve (:seon.cluster.loop/evaluate cluster))
           ;; The public walk and every renderer share this evaluation's exact
           ;; cluster context. Bind it on the actual compute worker so nested
@@ -1521,7 +1520,7 @@
               :seon.db/connection connection
               :seon.cluster.agent/id agent-id
               :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
-              :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
+              :seon.sci.eval/ctx ctx
               :seon.sci.eval/time-limit-ms
               (:seon.config.eval/time-limit-ms cluster)
               :seon.config/on-core-error
@@ -1531,8 +1530,7 @@
           ;; is the head of the conversation chain every message this
           ;; turn sends extends, and it cannot change while the run is
           ;; held
-          trigger (message/trigger @connection run-id)
-          ctx (:seon.sci.eval/ctx cluster)]
+          trigger (message/trigger @connection run-id)]
       (loop [ordinal (:seon.cluster.run.form/ordinal work)
              ran 0
              namespace-name
@@ -1567,18 +1565,20 @@
                   evaluation-namespace
                   (second (:seon.cluster.run.form/ns form))
                   evaluation
-                  (submit-evaluation!!
-                   cluster
-                   evaluate
-                   receipt-id
-                   (evaluation-request
-                    {::admitted-form form
-                     ::evaluation-namespace evaluation-namespace
-                     ::cluster cluster
-                     :seon.sci.eval/ctx ctx
-                     :seon.cluster.agent/id agent-id
-                     :seon.cluster.run/id run-id
-                     :seon.cluster.run.form/ordinal ordinal}))
+                  (with-desk-notices
+                    (submit-evaluation!!
+                     cluster
+                     evaluate
+                     receipt-id
+                     (evaluation-request
+                      {::admitted-form form
+                       ::evaluation-namespace evaluation-namespace
+                       ::cluster cluster
+                       :seon.sci.eval/ctx ctx
+                       :seon.cluster.agent/id agent-id
+                       :seon.cluster.run/id run-id
+                       :seon.cluster.run.form/ordinal ordinal}))
+                    (when (zero? ran) desk-notices))
                   problem
                   (problems/form-problem
                    @connection
@@ -1629,36 +1629,41 @@
                   refusals (:seon.error/values-tx delivery)
                   settlement-evaluation
                   (settlement-result cluster evaluation)
+                  desk-evaluation
+                  (store-desk-values! connection evaluation)
+                  desk-rows
+                  (desk-rows @connection agent-id desk-evaluation ordinal)
                   receipt
                   (receipt-request
                    (cond-> {:seon.cluster.run/id run-id
                             :seon.cluster.run/process process
                             :seon.cluster.run.form/ordinal ordinal
                             :seon.sci.eval/evaluation evaluation
+                            :seon.def/rows desk-rows
                             ::settlement-evaluation settlement-evaluation}
                      problem (assoc :seon.problems/form-problem problem)
                      settled (assoc :my.run/value settled)))
-                  session-evaluation
-                  (store-session-values! connection evaluation)
                   outcome
                   (db/transact!
                    connection
                    {:tx-data
                     (into (terminal-tx receipt now)
                           (concat rows
-                                  refusals
-                                  (session-image-tx
-                                   @connection
-                                   session-evaluation
-                                   ordinal)))})
+                                  refusals))})
                   _
                   (if (and (:seon.program/row evaluation)
                            (not (:seon.error/kind outcome)))
-                    (sci.eval/install-row!
-                     {:seon.sci.eval/ctx ctx
-                      :seon.db/db (:db-after outcome)
-                      :seon.program/row
-                      (:seon.program/row evaluation)})
+                    (let [row (:seon.program/row evaluation)
+                          db-after (:db-after outcome)]
+                      (sci.eval/install-row!
+                       {:seon.sci.eval/ctx base-ctx
+                        :seon.db/db db-after
+                        :seon.program/row
+                        (dissoc row :seon.sci.eval/evaluated?)})
+                      (sci.eval/install-row!
+                       {:seon.sci.eval/ctx ctx
+                        :seon.db/db db-after
+                        :seon.program/row row}))
                     nil)
                   ran (inc ran)
                   ;; THE FOLD'S OWN NEXT ORDINAL IS PER-AGENT (F1

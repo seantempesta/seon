@@ -56,9 +56,9 @@
                      [:seon.program/row
                       {:optional true}
                       :seon.program/row]
-                     [:seon.sci.eval/session-defs
+                     [:seon.sci.eval/desk-defs
                       {:optional true}
-                      :seon.sci.eval/session-defs]
+                      :seon.sci.eval/desk-defs]
                      [:seon.print/options
                       {:optional true}
                       :seon.print/options]],
@@ -105,6 +105,9 @@
                      [:seon.program/row
                       {:optional true}
                       :seon.program/row]
+                     [:seon.def/rows
+                      {:optional true}
+                      :seon.def/rows]
                      [:my.run/value {:optional true} :my.run/value]],
                     :turn-report
                     [:map

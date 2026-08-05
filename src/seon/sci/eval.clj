@@ -71,13 +71,12 @@
   its own work; a sink would have made it disappear, and the drive
   showed exactly how expensive disappeared evidence is.
 
-  THE CLUSTER OWNS CTX LIFETIME, and that is not a detail: `sci/fork`
-  copies the env into a NEW atom, so vars created in a fork are
-  invisible to the original (`reference-code/sci/src/sci/core.cljc:318-323`).
-  Forking per FORM would therefore make a `defn` in form 1 invisible to
-  form 2 — which is exactly the State A defect the plan records as
-  `construct 6 is broken three ways`. So a supplied ctx is used AS
-  GIVEN: cluster boot builds and acquires it once, and every agent in
+  THE CLUSTER OWNS THE LIVE BASE CTX. Each turn evaluates in one fresh
+  generation-aware `sci/fork`, rehydrated with only that agent's desk facts.
+  Forms within the turn share the fork; the next turn forks the then-live
+  base again. A supplied ctx is still used AS GIVEN by this form entrance:
+  the run loop owns the turn boundary, while cluster boot builds and acquires
+  the program-only base once. Every agent in
   that cluster evaluates against the same live program graph. A def is
   visible immediately, including when its terminal transaction is
   refused; the refusal is durable session state, not a REPL rollback.
@@ -309,8 +308,7 @@
                      (let [qualified (str (symbol (str namespace-name)
                                                   (str intern-name)))]
                        [[:seon.fn/sym qualified]
-                        [:seon.test/sym qualified]
-                        [:seon.def/id qualified]]))
+                        [:seon.test/sym qualified]]))
                    (sort-by str
                             (remove (get after namespace-name #{})
                                     intern-names)))))
@@ -462,7 +460,7 @@
    (into #{} (filter impure-built-in-calls)
          observed-built-in-calls)})
 
-(defn- changed-session-defs
+(defn- desk-defs
   [ctx namespace-name before source form contracted-function
    observed-built-in-calls]
   (let [after (intern-values ctx)
@@ -472,21 +470,25 @@
            (remove (fn [[qualified value]]
                      (or (= (str qualified) contracted-function)
                          (identical? absent-intern value)
-                         (same-intern-value?
-                          (get before qualified absent-intern) value))))
+                         (and (not (instance? clojure.lang.Atom value))
+                              (same-intern-value?
+                               (get before qualified absent-intern) value)))))
            (map (fn [[qualified value]]
-                  (merge
-                   {:seon.def/id (str qualified)
-                    :seon.def/ns
-                    [:seon.ns/name (symbol (namespace qualified))]
-                    :seon.def/name (symbol (name qualified))
-                    :seon.def/source source
-                    :seon.sci.eval/value value
-                    :seon.sci.eval/referenced-vars
-                    (resolved-form-vars ctx namespace-name form)
-                    :seon.sci.eval/unproven-called-vars
-                    (unproven-called-vars ctx namespace-name form)}
-                   replay-risks))))
+                  (let [atom? (instance? clojure.lang.Atom value)]
+                    (merge
+                     (cond->
+                      {:seon.def/id (str qualified)
+                       :seon.def/ns
+                       [:seon.ns/name (symbol (namespace qualified))]
+                       :seon.def/name (symbol (name qualified))
+                       :seon.def/source source
+                       :seon.sci.eval/value (if atom? @value value)
+                       :seon.sci.eval/referenced-vars
+                       (resolved-form-vars ctx namespace-name form)
+                       :seon.sci.eval/unproven-called-vars
+                       (unproven-called-vars ctx namespace-name form)}
+                       atom? (assoc :seon.def/atom? true))
+                     replay-risks)))))
           after)))
 
 (defn- deleted-schema-key
@@ -1282,30 +1284,41 @@
       (kernel/mark-installed! ctx function-symbol)))
   function-symbol)
 
-(defn install-session-image!
-  "Restore namespace session definitions into one cold cluster ctx.
+(defn- desk-value
+  [connection {value-edn :seon.def/value-edn
+               digest :seon.def/blob}]
+  (let [serialized
+        (or value-edn
+            (when connection (blob/get connection digest))
+            (throw
+             (ex-info "Desk value blob is unavailable during rehydration."
+                      {:seon.error/kind ::desk-blob-unavailable
+                       :seon.blob/digest digest})))]
+    (edn/read-string serialized)))
 
-  Pass 1 creates every namespace and interns every name unbound. Pass 2
-  evaluates only rows whose source presence records the terminal transaction's
-  purity proof, in deterministic ordinal/id order. Unrestorable rows remain
-  unbound; their durable fact is the statement of what is absent."
-  {:malli/schema [:=> [:cat :seon.sci.eval/session-install-request] :map]}
-  [{ctx :seon.sci.eval/ctx
+(defn fork-for-turn
+  "Fork the live base and rehydrate only the selected agent's desk facts."
+  {:malli/schema [:=> [:cat :seon.sci.eval/desk-fork-request]
+                  :seon.sci.eval/desk-fork-result]}
+  [{base-ctx :seon.sci.eval/ctx
     db :seon.db/db
-    connection :seon.db/connection}]
-  (let [entry-ids (db/q '[:find [?entry ...]
-                         :where [?entry :seon.def/id _]]
-                       db)
+    connection :seon.db/connection
+    agent-id :seon.cluster.agent/id}]
+  (let [ctx (sci/fork base-ctx)
+        entry-ids
+        (db/q '[:find [?entry ...]
+                :in $ ?agent
+                :where
+                [?agent-eid :seon.cluster.agent/id ?agent]
+                [?entry :seon.def/agent ?agent-eid]]
+              db agent-id)
         rows
         (->> (db/pull-many db
-                          '[* {:seon.def/ns [:seon.ns/name]}]
-                          entry-ids)
-             (remove
-              (fn [row]
-                (some? (db/pull db [:db/id]
-                               [:seon.fn/sym (:seon.def/id row)]))))
-             (sort-by (juxt :seon.def/ordinal :seon.def/id))
-             vec)]
+                           '[* {:seon.def/ns [:seon.ns/name]}]
+                           entry-ids)
+             (sort-by (juxt :seon.def/ordinal :seon.def/key))
+             vec)
+        notices (transient [])]
     (doseq [{namespace-ref :seon.def/ns
              intern-name :seon.def/name} rows]
       (let [namespace-name (:seon.ns/name namespace-ref)]
@@ -1314,36 +1327,34 @@
         (sci/intern ctx namespace-name intern-name)))
     (doseq [{namespace-ref :seon.def/ns
              intern-name :seon.def/name
-             value-edn :seon.def/value-edn
-             digest :seon.def/blob}
-            (filter #(or (:seon.def/value-edn %)
-                         (:seon.def/blob %))
-                    rows)]
-      (let [serialized
-            (or value-edn
-                (when connection (blob/get connection digest))
-                (throw
-                 (ex-info "Session value blob is unavailable during restore."
-                          {:seon.error/kind ::session-blob-unavailable
-                           :seon.blob/digest digest})))
-            value (edn/read-string serialized)]
-        (sci/intern ctx (:seon.ns/name namespace-ref) intern-name value)))
-    (doseq [{namespace-ref :seon.def/ns
-             source :seon.def/source}
-            (filter :seon.def/source rows)]
-      (let [namespace-name (:seon.ns/name namespace-ref)
-            namespace-object (sci/create-ns namespace-name)
-            event (one-event source namespace-name ctx)]
-        (sci/binding [sci/ns namespace-object]
-          (sci/eval-form ctx (:seon.sci.reader/form event)))))
+             source :seon.def/source
+             atom? :seon.def/atom?
+             reason :seon.def/unrestorable-reason
+             :as row} rows]
+      (let [namespace-name (:seon.ns/name namespace-ref)]
+        (cond
+          atom?
+          (do
+            (sci/intern ctx namespace-name intern-name
+                        (atom (desk-value connection row)))
+            (conj! notices
+                   (str "restored `" intern-name
+                        "` from its last settled value")))
+
+          source
+          (let [event (one-event source namespace-name ctx)]
+            (sci/binding [sci/ns (sci/create-ns namespace-name)]
+              (sci/eval-form ctx (:seon.sci.reader/form event))))
+
+          (or (:seon.def/value-edn row) (:seon.def/blob row))
+          (sci/intern ctx namespace-name intern-name
+                      (desk-value connection row))
+
+          reason
+          (conj! notices
+                 (str "could not restore `" intern-name "`: " reason)))))
     {:seon.sci.eval/ctx ctx
-     :seon.sci.eval/unrestorable
-     (into []
-           (keep (fn [row]
-                   (when-let [reason (:seon.def/unrestorable-reason row)]
-                     {:seon.def/id (:seon.def/id row)
-                      :seon.def/unrestorable-reason reason})))
-           rows)}))
+     :seon.sci.eval/desk-notices (persistent! notices)}))
 
 (defn cluster-ctx
   "Build and cold-acquire one cluster's live SCI program context."
@@ -1368,10 +1379,6 @@
                     ::projection-state
                     (atom {::basis-transaction (long (:max-tx db))
                            :seon.schema/projection projection}))]
-     (install-session-image!
-      (cond-> {:seon.sci.eval/ctx ctx
-               :seon.db/db db}
-        connection (assoc :seon.db/connection connection)))
      ctx)))
 
 (defn- declared-row
@@ -1490,7 +1497,7 @@
     namespace-name :seon.sci.eval/namespace-name
     ending-namespace :seon.sci.eval/ending-namespace
     print-options :seon.print/options
-    session-defs :seon.sci.eval/session-defs
+    desk-definitions :seon.sci.eval/desk-defs
     row :seon.program/row}]
   (cond-> {:seon.sci.admit/value (:seon.sci.admit/value admitted)
            :seon.cluster.eval/result-edn
@@ -1501,7 +1508,7 @@
            :seon.sci.admit/capped? (:seon.sci.admit/capped? admitted)
            :seon.sci.admit/record (:seon.sci.admit/record admitted)}
     row (assoc :seon.program/row row)
-    (seq session-defs) (assoc :seon.sci.eval/session-defs session-defs)
+    (seq desk-definitions) (assoc :seon.sci.eval/desk-defs desk-definitions)
     (seq (str printed))
     (assoc :seon.cluster.eval/output (bounded-output printed caps))))
 
@@ -1511,7 +1518,7 @@
     printed :seon.sci.eval/printed
     namespace-name :seon.sci.eval/namespace-name
     print-options :seon.print/options
-    session-defs :seon.sci.eval/session-defs
+    desk-definitions :seon.sci.eval/desk-defs
     record :seon.sci.admit/record
     value :seon.sci.admit/value
     triage-edn :seon.cluster.eval/triage-edn
@@ -1528,7 +1535,7 @@
            :seon.sci.admit/record record}
     (string? triage-edn)
     (assoc :seon.cluster.eval/triage-edn triage-edn)
-    (seq session-defs) (assoc :seon.sci.eval/session-defs session-defs)
+    (seq desk-definitions) (assoc :seon.sci.eval/desk-defs desk-definitions)
     (contains? request :seon.cluster.eval/interrupted-at)
     (assoc :seon.cluster.eval/interrupted-at interrupted-at)
     (seq (str printed))
@@ -1716,8 +1723,8 @@
               ;; sequence dies at the time limit here rather than in the
               ;; receipt writer
               evaluation-record (record :ok)
-              session-defs
-              (changed-session-defs
+              desk-definitions
+              (desk-defs
                execution-ctx namespace-name before-intern-values source form
                (:seon.fn/sym row) (built-in-calls))
               admitted (admit/admit
@@ -1736,21 +1743,21 @@
             :seon.sci.eval/namespace-name namespace-name
             :seon.sci.eval/ending-namespace @ending-namespace
             :seon.print/options @print-options
-            :seon.sci.eval/session-defs session-defs
+            :seon.sci.eval/desk-defs desk-definitions
             :seon.program/row row}))
         (catch Throwable throwable
           (let [record (record (if (kernel/interrupted? throwable)
                                  :time :error))
-                session-defs
+                desk-definitions
                 (when-let [{failed-ctx :seon.sci.eval/ctx
                             before :seon.sci.eval/before-intern-values
                             failed-form :seon.sci.eval/form}
                            @session-observation]
                   ;; A failed evaluation has no durable program row. Any def
                   ;; it installed before the later throw/cut therefore belongs
-                  ;; to the session image, including a contracted def whose
-                  ;; declaration never reached the terminal transaction.
-                  (changed-session-defs
+                  ;; to the desk, including a contracted def whose declaration
+                  ;; never reached the terminal transaction.
+                  (desk-defs
                    failed-ctx namespace-name before source failed-form nil
                    (built-in-calls)))
                 value (kernel/failure-value
@@ -1770,7 +1777,7 @@
                     :seon.sci.eval/printed printed
                     :seon.sci.eval/namespace-name namespace-name
                     :seon.print/options @print-options
-                    :seon.sci.eval/session-defs session-defs
+                    :seon.sci.eval/desk-defs desk-definitions
                     :seon.sci.admit/record record
                     :seon.sci.admit/value value
                     :seon.cluster.eval/triage-edn
