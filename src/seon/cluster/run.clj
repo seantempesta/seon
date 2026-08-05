@@ -229,7 +229,7 @@
 ;; behavior immediately — the flow-dynamics live-update pattern.
 (declare claim-call release-call close-call plan-call
          open-call receipt-start-call receipt-settle-call
-         receipt-refusal-call recover-call)
+         receipt-refusal-call recover-call clear-desk-call)
 
 (defn- unanswered-background-results
   [db agent-eid]
@@ -615,7 +615,8 @@
           [:seon.sci.eval/ending-ns {:optional true}
            :seon.sci.eval/ending-ns]
           [:seon.program/row {:optional true}
-           :seon.program/row]]]
+           :seon.program/row]
+          [:seon.def/rows {:optional true} :seon.def/rows]]]
     [:vector :some]]}
   [request]
   [[:db.fn/call
@@ -886,6 +887,85 @@
            :else
            (program/exact-replacement-tx existing row)))))))
 
+(defn- desk-owned-attributes
+  "Attributes declared on one desk fact, derived from its entity schema."
+  []
+  (into #{}
+        (keep (fn [entry]
+                (when (and (vector? entry)
+                           (qualified-keyword? (first entry)))
+                  (first entry))))
+        (schema.form/map-entries (schema/schema-definition :seon.def/def))))
+
+(defn- desk-row
+  "Validate one agent-owned desk fact and derive its exact identity."
+  [db request run-agent row]
+  (when-not (schema/valid-candidate-value? :seon.def/def row)
+    (refuse! `receipt-settle-call ::desk-row-not-admitted request))
+  (let [agent (db/pull db [:db/id :seon.cluster.agent/id]
+                       (:seon.def/agent row))
+        namespace-row (db/pull db [:db/id :seon.ns/name]
+                               (:seon.def/ns row))
+        agent-id (:seon.cluster.agent/id agent)
+        expected-id (when-let [namespace-name (:seon.ns/name namespace-row)]
+                      (str (symbol (str namespace-name)
+                                   (str (:seon.def/name row)))))
+        expected-key (pr-str [agent-id (:seon.def/id row)])]
+    (when-not (= (:db/id run-agent) (:db/id agent))
+      (refuse! `receipt-settle-call ::desk-agent-mismatch request))
+    (when-not (:db/id namespace-row)
+      (refuse! `receipt-settle-call ::desk-namespace-missing request))
+    (when-not (= expected-id (:seon.def/id row))
+      (refuse! `receipt-settle-call ::desk-id-mismatch request))
+    (when-not (= expected-key (:seon.def/key row))
+      (refuse! `receipt-settle-call ::desk-key-mismatch request))
+    (when-not (= :agent (:seon.schema.admission/source row))
+      (refuse! `receipt-settle-call ::desk-source-not-agent request))
+    row))
+
+(defn- exact-desk-row-tx
+  "Exactly replace the attributes owned by one admitted desk fact."
+  [db row]
+  (let [existing (db/pull db '[*] [:seon.def/key (:seon.def/key row)])
+        entity-id (:db/id existing)
+        retracts
+        (when entity-id
+          (into []
+                (comp
+                 (remove #{:seon.def/key})
+                 (filter #(contains? existing %))
+                 (map (fn [attribute]
+                        [:db/retract entity-id attribute])))
+                (sort (desk-owned-attributes))))]
+    (conj (vec retracts)
+          (cond-> row entity-id (assoc :db/id entity-id)))))
+
+(defn- desk-rows-tx
+  "Validate and exact-upsert this receipt's agent-scoped desk facts."
+  [db request run-agent rows contracted-id]
+  (let [rows (mapv #(desk-row db request run-agent %) rows)
+        keys (mapv :seon.def/key rows)]
+    (when-not (= (count keys) (count (set keys)))
+      (refuse! `receipt-settle-call ::desk-key-duplicate request))
+    (into []
+          (comp
+           (remove #(= contracted-id (:seon.def/id %)))
+           (mapcat #(exact-desk-row-tx db %)))
+          rows)))
+
+(defn- contracted-desk-retractions
+  "Retract this agent's desk fact superseded by a contracted function."
+  [db agent-eid contracted-id]
+  (when contracted-id
+    (into []
+          (map (fn [desk-eid] [:db.fn/retractEntity desk-eid]))
+          (db/q '[:find [?desk ...]
+                  :in $ ?agent ?id
+                  :where
+                  [?desk :seon.def/agent ?agent]
+                  [?desk :seon.def/id ?id]]
+                db agent-eid contracted-id))))
+
 (def ^:private receipt-terminal-attributes
   [:seon.cluster.eval/result-edn
    :seon.cluster.eval/result-blob
@@ -936,7 +1016,8 @@
           [:seon.sci.eval/ending-ns {:optional true}
            :seon.sci.eval/ending-ns]
           [:seon.program/row {:optional true}
-           :seon.program/row]]]
+           :seon.program/row]
+          [:seon.def/rows {:optional true} :seon.def/rows]]]
     [:vector :some]]}
   [db request]
   (let [{::keys [id]
@@ -958,11 +1039,39 @@
 
       (not (terminal? request))
       (refuse! `receipt-settle-call ::no-terminal-fact request))
-    (into
-     (if-let [row (:seon.program/row request)]
-       (row-tx db request row)
-       [])
-     (receipt-terminal-assertions receipt request))))
+    (let [program-row (:seon.program/row request)
+          contracted-id (:seon.fn/sym program-row)
+          agent-eid (:db/id (::agent run))]
+      (into [] cat
+            [(if program-row (row-tx db request program-row) [])
+             (desk-rows-tx db request (::agent run)
+                           (or (:seon.def/rows request) [])
+                           contracted-id)
+             (contracted-desk-retractions db agent-eid contracted-id)
+             (receipt-terminal-assertions receipt request)]))))
+
+(defn clear-desk-tx
+  "Build transaction data explicitly clearing one agent's desk."
+  {:malli/schema
+   [:=> [:cat :seon.def/clear-request] [:vector :some]]}
+  [request]
+  [[:db.fn/call #'clear-desk-call request]])
+
+(defn clear-desk-call
+  "Retract every desk fact owned by one declared agent."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.def/clear-request]
+    [:vector :some]]}
+  [db request]
+  (let [agent (db/pull db [:db/id] (:seon.def/agent request))]
+    (when-not (:db/id agent)
+      (refuse! `clear-desk-call ::desk-agent-missing request))
+    (into []
+          (map (fn [desk-eid] [:db.fn/retractEntity desk-eid]))
+          (db/q '[:find [?desk ...]
+                  :in $ ?agent
+                  :where [?desk :seon.def/agent ?agent]]
+                db (:db/id agent)))))
 
 (defn receipt-refusal-call
   "Terminalize a running receipt after its terminal transaction refused.

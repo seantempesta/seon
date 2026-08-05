@@ -99,7 +99,26 @@
    :seon.cluster.eval/result-blob
    :seon.cluster.eval/result-size
    :seon.cluster.eval/error
-   :seon.error/kind])
+   :seon.error/kind
+   :seon.schema.admission/source
+   :seon.def/key
+   :seon.def/id
+   :seon.def/agent
+   :seon.def/ns
+   :seon.def/name
+   :seon.def/value-edn
+   :seon.def/blob
+   :seon.def/size
+   :seon.def/source
+   :seon.def/unrestorable-reason
+   :seon.def/atom?
+   :seon.def/ordinal
+   :seon.fn/sym
+   :seon.fn/ns
+   :seon.fn/source
+   :seon.fn/arglists
+   :seon.fn/private?
+   :seon.fn/spec])
 
 (defn- with-model-database [body]
   (let [configuration {:store {:backend :memory :id (random-uuid)}
@@ -438,6 +457,152 @@
                 "and `(run, ordinal)` identity makes re-execution
                  unrepresentable: an ordinal that ever had a receipt
                  refuses forever, across any custody change")))))))
+
+(deftest receipt-settlement-owns-agent-scoped-desk-facts
+  (with-model-database
+    (fn [connection]
+      (let [namespace-name 'my.desk.shared
+            agent-a "desk-agent-a"
+            agent-b "desk-agent-b"
+            run-a "desk-run-a"
+            run-b "desk-run-b"
+            qualified-id "my.desk.shared/scratch"
+            agent-ref (fn [agent-id]
+                        [:seon.cluster.agent/id agent-id])
+            desk-key (fn [agent-id id]
+                       (pr-str [agent-id id]))
+            desk-row
+            (fn [agent-id value]
+              (merge
+               {:seon.def/key (desk-key agent-id qualified-id)
+                :seon.def/id qualified-id
+                :seon.def/agent (agent-ref agent-id)
+                :seon.schema.admission/source :agent
+                :seon.def/ns [:seon.ns/name namespace-name]
+                :seon.def/name 'scratch
+                :seon.def/ordinal 0}
+               value))
+            rows-for
+            (fn [agent-id]
+              (->> (db/q '[:find [?desk ...]
+                           :in $ ?agent-id
+                           :where
+                           [?agent :seon.cluster.agent/id ?agent-id]
+                           [?desk :seon.def/agent ?agent]]
+                         (db/db connection) agent-id)
+                   (mapv #(db/pull (db/db connection) '[*] %))))
+            start!
+            (fn [run-id ordinal]
+              (db/transact!
+               connection
+               (run/receipt-start-tx
+                {::run/id run-id
+                 :seon.cluster.eval/ordinal ordinal
+                 :seon.cluster.eval/at (at ordinal)})))
+            settle!
+            (fn [run-id ordinal request]
+              (transact-or-refusal
+               connection
+               (run/receipt-settle-tx
+                (merge {::run/id run-id
+                        :seon.cluster.eval/ordinal ordinal
+                        :seon.cluster.eval/result-edn "nil"}
+                       request))))]
+        (db/transact!
+         connection
+         [{:seon.ns/name namespace-name
+           :seon.schema.admission/source :agent}
+          {:seon.cluster.agent/id agent-a}
+          {:seon.cluster.agent/id agent-b}])
+        (doseq [[run-id agent-id] [[run-a agent-a] [run-b agent-b]]]
+          (db/transact!
+           connection
+           (run/open-tx {::run/id run-id
+                         ::run/agent (agent-ref agent-id)
+                         ::run/opened-at t0})))
+
+        (testing "the same qualified id is isolated by agent"
+          (start! run-a 0)
+          (start! run-b 0)
+          (is (= ::committed
+                 (settle! run-a 0
+                          {:seon.def/rows
+                           [(desk-row agent-a
+                                      {:seon.def/value-edn "1"})]})))
+          (is (= ::committed
+                 (settle! run-b 0
+                          {:seon.def/rows
+                           [(desk-row agent-b
+                                      {:seon.def/value-edn "2"})]})))
+          (is (= ["1"] (mapv :seon.def/value-edn (rows-for agent-a))))
+          (is (= ["2"] (mapv :seon.def/value-edn (rows-for agent-b)))))
+
+        (testing "replacement is exact, including omitted old attributes"
+          (start! run-a 1)
+          (is (= ::committed
+                 (settle! run-a 1
+                          {:seon.def/rows
+                           [(desk-row
+                             agent-a
+                             {:seon.def/unrestorable-reason
+                              "host value has no faithful representation"})]})))
+          (let [row (first (rows-for agent-a))]
+            (is (nil? (:seon.def/value-edn row)))
+            (is (= "host value has no faithful representation"
+                   (:seon.def/unrestorable-reason row)))))
+
+        (testing "a receipt cannot write another agent's desk"
+          (start! run-a 2)
+          (let [before (rows-for agent-b)
+                refusal
+                (settle! run-a 2
+                         {:seon.def/rows
+                          [(desk-row agent-b
+                                     {:seon.def/value-edn "stolen"})]})]
+            (is (= ::run/desk-agent-mismatch (::run/rule refusal)))
+            (is (= before (rows-for agent-b)))
+            (is (not (run/terminal?
+                      (db/pull
+                       (db/db connection) '[*]
+                       [:seon.cluster.eval/id (pr-str [run-a 2])]))))))
+
+        (testing "a contracted function retracts only its agent's desk fact"
+          (start! run-a 3)
+          (is (= ::committed
+                 (settle!
+                  run-a 3
+                  {:seon.program/row
+                   {:seon.fn/sym qualified-id
+                    :seon.fn/ns [:seon.ns/name namespace-name]
+                    :seon.fn/source
+                    "(defn ^{:malli/schema [:=> [:cat] :int]} scratch [] 1)"
+                    :seon.fn/arglists "([])"
+                    :seon.fn/private? false
+                    :seon.fn/spec "[:=> [:cat] :int]"}})))
+          (is (empty? (rows-for agent-a)))
+          (is (= ["2"] (mapv :seon.def/value-edn (rows-for agent-b)))))
+
+        (testing "clearing is explicit, agent-local, and idempotent"
+          (start! run-a 4)
+          (is (= ::committed
+                 (settle! run-a 4
+                          {:seon.def/rows
+                           [(desk-row agent-a
+                                      {:seon.def/value-edn "kept"})]})))
+          (is (= ::committed
+                 (transact-or-refusal
+                  connection
+                  (run/clear-desk-tx
+                   {:seon.def/agent (agent-ref agent-b)}))))
+          (is (empty? (rows-for agent-b)))
+          (is (= ["kept"]
+                 (mapv :seon.def/value-edn (rows-for agent-a))))
+          (is (= ::committed
+                 (transact-or-refusal
+                  connection
+                  (run/clear-desk-tx
+                   {:seon.def/agent (agent-ref agent-b)}))))
+          (is (empty? (rows-for agent-b))))))))
 
 (deftest receipt-refusal-settlement-is-idempotent-and-never-refuses
   (with-model-database
