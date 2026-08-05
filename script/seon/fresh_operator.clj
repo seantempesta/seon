@@ -1587,13 +1587,18 @@
                 (.write writer# "ready\n")
                 (.flush writer#)))
             (catch Throwable failure#
-              (let [face#
+              (let [failure-data# (clojure.core/ex-data failure#)
+                    face#
                     (clojure.core/pr-str
-                     {:seon.fresh-operator/event :failure
-                      :seon.fresh-operator/message
-                      (or (clojure.core/ex-message failure#) (str failure#))
-                      :seon.fresh-operator/error-kind
-                      (:seon.error/kind (clojure.core/ex-data failure#))})]
+                     (cond->
+                      {:seon.fresh-operator/event :failure
+                       :seon.fresh-operator/message
+                       (or (clojure.core/ex-message failure#) (str failure#))
+                       :seon.fresh-operator/error-kind
+                       (:seon.error/kind failure-data#)}
+                       (= :sweep-in-progress
+                          (:seon.error/kind failure-data#))
+                       (merge failure-data#)))]
                 (println (str "boot failure: " face#))
                 (flush)
                 (.write writer# (str face# "\n"))
@@ -1904,13 +1909,13 @@
 
           :failure
           (fail! (:seon.fresh-operator/message event)
-                 (cond->
+                 (merge
                   {:seon.fresh-operator/name name
                    :seon.boot/pid pid
                    :seon.fresh-operator/phase phase}
-                   (:seon.fresh-operator/error-kind event)
-                   (assoc :seon.error/kind
-                          (:seon.fresh-operator/error-kind event))))
+                  (dissoc event
+                          :seon.fresh-operator/event
+                          :seon.fresh-operator/message)))
 
           :closed
           (fail! "The cluster JVM closed readiness before READY."
