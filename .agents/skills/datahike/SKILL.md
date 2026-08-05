@@ -1,7 +1,5 @@
 ---
 name: datahike
-type: skill
-status: active
 description: "Seon database patterns. Use when writing Datalog queries, transacting data, debugging empty/unexpected results, or working with resources/seon/schemas/, seon.schema.edn, or the Malli-to-Datahike bridge. Use for seon.db/transact! argument maps or raw vectors, seon.db/q, pull, entity, lookup-refs, refs/components/identity, upsert, retract, cardinality-many, :db.fn/call transition functions, CAS fences, as-of/since history, listen!, or any 'where do I put this data / how do I read it back' question."
 ---
 

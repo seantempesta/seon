@@ -1,7 +1,5 @@
 ---
 name: datastar-web-ui
-type: skill
-status: active
 description: "Work on Seon's Datastar web renderer, route table, namespace pages, debug pages, SSE feeds, message submission, block morphs, backpressure, layout, or render cost. Load before changing seon.render.web, seon.render.route, or another seon.render.* web owner, and before proposing a broader canvas or control surface."
 ---
 

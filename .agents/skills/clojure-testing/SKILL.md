@@ -1,7 +1,5 @@
 ---
 name: clojure-testing
-type: skill
-status: active
 description: "Test patterns for Seon. Use when writing or debugging a test, when a test needs a fresh in-memory Datahike connection, when choosing between an example test and a generative property, or when a suite is green for the wrong reason. Covers bin/test and its focused selection, clojure.test shape, the per-test database fixture, seeded test.check state-transition properties, and the honest-generator rules."
 ---
 

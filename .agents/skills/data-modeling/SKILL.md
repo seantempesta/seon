@@ -1,7 +1,5 @@
 ---
 name: data-modeling
-type: skill
-status: active
 description: "Designing a data model in Seon — schema design IS database design, ONE act. Use when modeling a new domain, authoring resources/seon/schemas/*.edn, deciding an attribute's type, choosing identity vs ref vs component-ref vs cardinality-many, picking optional vs required, writing a function contract over the data, or driving generative tests from a schema. Use when you catch yourself reaching for a :type/:kind field, a 'table' of records, a stored nil, or an inline-duplicated constraint. This skill owns DESIGN (what shape to declare and why); the datahike skill owns the resulting query/transact/pull mechanics."
 ---
 

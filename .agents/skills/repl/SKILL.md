@@ -1,7 +1,5 @@
 ---
 name: repl
-type: skill
-status: active
 description: "Distinguish and probe Seon's agent-reply reader, an agent turn in its SCI evaluation context, a cluster io-prepl/MCP eval_clj session, and a raw JVM REPL. Use for reply parsing, prose-vs-code classification, Markdown fences, reader refusals, session-image persistence, source fidelity, namespace attribution, private-Var probes, or reload-before-retest work. Do not load it merely for ordinary Clojure syntax or application code that happens to be evaluated at a REPL."
 ---
 

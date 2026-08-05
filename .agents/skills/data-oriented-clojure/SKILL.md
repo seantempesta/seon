@@ -1,7 +1,5 @@
 ---
 name: data-oriented-clojure
-type: skill
-status: active
 description: "Foundational mindset for writing Clojure the Seon way — data-oriented, immutable, schema-first, EAV, errors-as-values, derive-don't-store. Use this BEFORE writing or reviewing ANY Seon .clj/.cljc OR maintaining a vendored Clojure fork that Seon owns under reference-code/; this does not trigger for unrelated third-party work. Also use it when designing a data model or capability, or whenever you catch an imperative/OO reflex: a mutable accumulator loop, a :type/:kind discriminator, a 'table' of records, bare map keys, a thrown exception at an agent-facing boundary, :pre/:post or hand-rolled validation, stored derived state, threading a db/conn through call sites, a caller pre-read where a transaction function belongs, an unordered collection driving a tied decision, or a parallel namespace to house a fix. Use before guessing library behavior instead of reading reference-code/. For EAV mechanics see datahike; for schema EDN design see data-modeling."
 ---
 
