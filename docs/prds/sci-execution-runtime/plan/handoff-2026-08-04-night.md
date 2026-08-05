@@ -166,7 +166,32 @@ Readings, in confidence order:
    EXTEND the operator's existing atomic records into a claim-first authority
    living outside the managed roots (survives the target's death), not to invent
    a registry file. Two `bin/seon status` output defects were filed alongside.
-7. **The one-time reclaim, owner-approved, still pending**: head-only store GC
+7. **BLOCKED — do NOT run head-only collection until the latch lands.**
+   A live probe (2026-08-05) FALSIFIED its safety: creating a branch from
+   an older commit during the sweep produces a branch that reports
+   success, appears in `:branches`, reads healthy in-process (the node
+   cache masks it), and throws `:node-not-found` after reconnect —
+   silent corruption surfacing at a later boot. Critically, the CUTOFF
+   CREATES THE HOLE: at the default `remove-before` all ancestry stays
+   marked and resurrection is safe; the head-only cutoff needed for the
+   357 GiB is exactly what lets a resurrected branch reach deleted
+   objects. And `bin/seon start <cluster>` forks from a published commit
+   id — it IS the triggering operation. Verdict: CAS on heads is the
+   wrong tool (a head advance is already correct by construction via
+   values-then-pointer ordering plus Datahike's existing `gc_guard`
+   safe point; a branch CREATION has no prior value to compare, so a
+   verify-unchanged passes while the store corrupts). The correct
+   design is a two-sided latch on `gc-guard`'s existing atom (one
+   `swap!` per side, no check/hold window) making branch-set mutation
+   and the sweep mutually exclusive while ordinary commits continue;
+   `remove-before` stays as retention POLICY, never as a safety hedge.
+   A SECOND independent instance: `seon.blob/put!`/`put-binary!` write
+   a blob whose referencing datom is transacted later with no guard (6
+   call sites) while `collect!` computes its blob whitelist up front.
+   Evidence, probes, and the issue:
+   [gc-correctness-cas-opus](../research/gc-correctness-cas-opus-2026-08-05.md),
+   [ranged-store-collection-can-delete-live-segments-via-branch-resurrection.md](../../../seon/issues/ranged-store-collection-can-delete-live-segments-via-branch-resurrection.md).
+   The previously owner-approved one-time reclaim: head-only store GC
    (**357 GiB reclaim, 17 GiB retained**) + delete the frozen `tmp/` evidence.
    Run as ONE quiesced pass after the leak fixes land. Recipe and measurements:
    [disk-burn-forensics](../research/disk-burn-forensics-2026-08-04.md);
