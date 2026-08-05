@@ -18,15 +18,19 @@
                [:seon.db/connection
                 :seon.db/connection]
                [:seon.source/digest :seon.source/digest]],
-              :population-data :map,
+              :populate-request
+              [:map
+               [:seon.fn/manifest
+                {:optional true}
+                :seon.fn.manifest/manifest]],
               :publish-request
               [:map
                [:seon.store/store :seon.store/store]
                [:seon.source/digest :seon.source/digest]
                [:seon.source/populate :seon.source/populate]
-               [:seon.source/population-data
+               [:seon.source/populate-request
                 {:optional true}
-                :seon.source/population-data]],
+                :seon.source/populate-request]],
               :published
               [:map
                [:seon.source/branch :seon.source/branch]

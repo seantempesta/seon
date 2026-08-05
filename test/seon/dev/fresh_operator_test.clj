@@ -91,12 +91,12 @@
 
 (defn- child-process-record
   [root ^Process child]
-  {:seon.dev.process/generation (random-uuid)
-   :seon.dev.process/pid (.pid child)
-   :seon.dev.process/start-instant
-   (str (.toInstant (process-start-date child)))
-   :seon.dev.process/root (.getCanonicalPath (io/file root))
-   :seon.dev.process/log
+  {:seon.operator.process-record/generation (random-uuid)
+   :seon.boot/pid (.pid child)
+   :seon.boot/start-instant
+   (process-start-date child)
+   :seon.operator.process-record/root (.getCanonicalPath (io/file root))
+   :seon.operator.process-record/log
    (str (io/file root "data" "clusters" "logs"
                  (str (.pid child) ".log")))})
 
@@ -285,12 +285,12 @@
                    {:seon.fresh-operator/pid 42})
                  (operator-var# (symbol "record-launched-process!"))
                  (fn [_root# _adoption-server# _silence-ms# _launch-result#]
-                   {:seon.dev.process/generation generation#
-                    :seon.dev.process/pid 42
-                    :seon.dev.process/start-instant
-                    (str (.toInstant start-instant#))
-                    :seon.dev.process/root ~(str root)
-                    :seon.dev.process/log "test.log"})
+                   {:seon.operator.process-record/generation generation#
+                    :seon.boot/pid 42
+                    :seon.boot/start-instant
+                    start-instant#
+                    :seon.operator.process-record/root ~(str root)
+                    :seon.operator.process-record/log "test.log"})
                  (operator-var# (symbol "await-advertisement!"))
                  (fn [_root# _name# _pid# _ready-server# _silence-ms#]
                    advertisement#)
@@ -570,9 +570,10 @@
         child (start-disposable-process!)
         record (child-process-record root child)
         mismatched
-        (update record :seon.dev.process/start-instant
+        (update record :seon.boot/start-instant
                 (fn [value]
-                  (str (.plusMillis (java.time.Instant/parse value) 1))))]
+                  (java.util.Date/from
+                   (.plusMillis (.toInstant ^java.util.Date value) 1))))]
     (try
       (is (= record
              (operator-private-value
@@ -605,11 +606,11 @@
   (let [root (fresh-root)
         foreign-root (fresh-root)
         record
-        {:seon.dev.process/generation (random-uuid)
-         :seon.dev.process/pid 1
-         :seon.dev.process/start-instant "2026-08-01T00:00:00Z"
-         :seon.dev.process/root (.getCanonicalPath foreign-root)
-         :seon.dev.process/log (str (io/file foreign-root "foreign.log"))}]
+        {:seon.operator.process-record/generation (random-uuid)
+         :seon.boot/pid 1
+         :seon.boot/start-instant #inst "2026-08-01T00:00:00Z"
+         :seon.operator.process-record/root (.getCanonicalPath foreign-root)
+         :seon.operator.process-record/log (str (io/file foreign-root "foreign.log"))}]
     (try
       (operator-private-value 'write-process-record! (str root) record)
       (let [read-result
@@ -690,11 +691,11 @@
                  (str generation ".edn"))
         claim-file (process-claim-file generation)
         record
-        {:seon.dev.process/generation generation
-         :seon.dev.process/pid 2147483647
-         :seon.dev.process/start-instant "2026-08-05T00:00:00Z"
-         :seon.dev.process/root (.getCanonicalPath root)
-         :seon.dev.process/log (str (io/file root "dead.log"))}]
+        {:seon.operator.process-record/generation generation
+         :seon.boot/pid 2147483647
+         :seon.boot/start-instant #inst "2026-08-05T00:00:00Z"
+         :seon.operator.process-record/root (.getCanonicalPath root)
+         :seon.operator.process-record/log (str (io/file root "dead.log"))}]
     (try
       (.mkdirs (.getParentFile legacy-file))
       (spit legacy-file (str (pr-str record) "\n"))
@@ -752,11 +753,11 @@
 (deftest bin-root-option-selects-an-isolated-operator-root
   (let [root (fresh-root)
         record
-        {:seon.dev.process/generation (random-uuid)
-         :seon.dev.process/pid 1
-         :seon.dev.process/start-instant "2026-08-01T00:00:00Z"
-         :seon.dev.process/root (.getCanonicalPath root)
-         :seon.dev.process/log (str (io/file root "isolated.log"))}]
+        {:seon.operator.process-record/generation (random-uuid)
+         :seon.boot/pid 1
+         :seon.boot/start-instant #inst "2026-08-01T00:00:00Z"
+         :seon.operator.process-record/root (.getCanonicalPath root)
+         :seon.operator.process-record/log (str (io/file root "isolated.log"))}]
     (try
       (operator.state/claim-root!
        (.getCanonicalPath project-root)
@@ -1249,13 +1250,13 @@
              (:seon.fresh-operator/process-records
               (operator-private-value 'read-process-records (str root))))
             _ (reset! record* record)
-            generation (:seon.dev.process/generation record)
+            generation (:seon.operator.process-record/generation record)
             legacy-file
             (io/file root "data" "clusters" "processes"
                      (str generation ".edn"))
             handle
             (some-> (java.lang.ProcessHandle/of
-                     (long (:seon.dev.process/pid record)))
+                     (long (:seon.boot/pid record)))
                     (.orElse nil))]
         (is (map? record) "the booted JVM published its exact claim")
         (is (some? handle) "the recorded JVM still has a process handle")

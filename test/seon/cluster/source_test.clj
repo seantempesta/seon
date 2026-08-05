@@ -68,11 +68,11 @@
    (source/publish! {:seon.store/store opened
                      :seon.source/digest digest
                      :seon.source/populate populate}))
-  ([opened digest populate population-data]
+  ([opened digest populate populate-request]
    (source/publish! {:seon.store/store opened
                      :seon.source/digest digest
                      :seon.source/populate populate
-                     :seon.source/population-data population-data})))
+                     :seon.source/populate-request populate-request})))
 
 (defn- upsert
   [opened expected-commit digest rows]
@@ -135,7 +135,7 @@
     (fn [opened]
       (let [a (publish opened digest-a
                        'seon.cluster.source-test/populate-from-data!
-                       {:seon.source.test/marker "from-population-data"})
+                       {:seon.source.test/marker "from-populate-request"})
             b (publish opened digest-b)]
         (is (= :current-src (:seon.source/branch a)
                (:seon.source/branch b)))

@@ -1,4 +1,4 @@
-#:my.background{:descriptor
+#:my.background{:receipt
                 [:map
                  [:seon.effect/id :seon.effect/id]
                  [:seon.effect/request-edn :seon.effect/request-edn]

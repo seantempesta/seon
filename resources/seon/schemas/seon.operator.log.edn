@@ -1,0 +1,16 @@
+#:seon.operator.log{:path :string
+                    :bytes-before [:int {:min 0}]
+                    :bytes-after [:int {:min 0}]
+                    :rotated? :boolean
+                    :retained-files [:int {:min 0}]
+                    :result
+                    [:map
+                     [:seon.operator.log/path :seon.operator.log/path]
+                     [:seon.operator.log/bytes-before
+                      :seon.operator.log/bytes-before]
+                     [:seon.operator.log/bytes-after
+                      :seon.operator.log/bytes-after]
+                     [:seon.operator.log/rotated?
+                      :seon.operator.log/rotated?]
+                     [:seon.operator.log/retained-files
+                      :seon.operator.log/retained-files]]}

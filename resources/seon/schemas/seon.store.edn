@@ -1,4 +1,7 @@
 #:seon.store{:branch :keyword,
+             :backend :keyword,
+             :path [:string {:min 1}],
+             :id :uuid,
              :connection-object
              [:fn
               {:error/message

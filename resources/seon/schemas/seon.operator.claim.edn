@@ -1,0 +1,57 @@
+#:seon.operator.claim{:id :uuid
+                      :root [:string {:min 1}]
+                      :repository-root [:string {:min 1}]
+                      :store
+                      [:map
+                       [:seon.store/backend :seon.store/backend]
+                       [:seon.store/path :seon.store/path]
+                       [:seon.store/id :seon.store/id]]
+                      :ephemeral? :boolean
+                      :reap-on-owner-exit? :boolean
+                      :creator :seon.cluster.process/identity
+                      :clusters [:set :seon.cluster/name]
+                      :claimed-at :inst
+                      :created-at :inst
+                      :destroyed-at :inst
+                      :cleanup :seon.operator/cleanup-result
+                      :footprint :seon.operator/footprint
+                      :live? :boolean
+                      :processes [:vector :seon.operator.process-record/record]
+                      :record
+                      [:map
+                       [:seon.operator.claim/id :seon.operator.claim/id]
+                       [:seon.operator.claim/root :seon.operator.claim/root]
+                       [:seon.operator.claim/repository-root
+                        :seon.operator.claim/repository-root]
+                       [:seon.operator.claim/store :seon.operator.claim/store]
+                       [:seon.operator.claim/ephemeral?
+                        :seon.operator.claim/ephemeral?]
+                       [:seon.operator.claim/reap-on-owner-exit?
+                        :seon.operator.claim/reap-on-owner-exit?]
+                       [:seon.operator.claim/creator :seon.operator.claim/creator]
+                       [:seon.operator.claim/clusters :seon.operator.claim/clusters]
+                       [:seon.operator.claim/claimed-at
+                        :seon.operator.claim/claimed-at]
+                       [:seon.operator.claim/created-at
+                        {:optional true}
+                        :seon.operator.claim/created-at]
+                       [:seon.operator.claim/destroyed-at
+                        {:optional true}
+                        :seon.operator.claim/destroyed-at]
+                       [:seon.operator.claim/cleanup
+                        {:optional true}
+                        :seon.operator.claim/cleanup]
+                       [:seon.operator.claim/footprint
+                        {:optional true}
+                        :seon.operator.claim/footprint]
+                       [:seon.operator.claim/live?
+                        {:optional true}
+                        :seon.operator.claim/live?]
+                       [:seon.operator.claim/processes
+                        {:optional true}
+                        :seon.operator.claim/processes]]
+                      :path :string
+                      :read-error
+                      [:map
+                       [:seon.operator.claim/path :seon.operator.claim/path]
+                       [:seon.error/message :seon.error/message]]}

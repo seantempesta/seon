@@ -119,18 +119,14 @@
 (defn- valid-process-record?
   [record]
   (and (map? record)
-       (uuid? (:seon.dev.process/generation record))
-       (pos-int? (:seon.dev.process/pid record))
-       (string? (:seon.dev.process/start-instant record))
-       (try
-         (Instant/parse (:seon.dev.process/start-instant record))
-         true
-         (catch Throwable _ false))
-       (string? (:seon.dev.process/root record))
-       (string? (:seon.dev.process/log record))
-       (or (nil? (:seon.dev.process/cache-path record))
-           (and (string? (:seon.dev.process/cache-path record))
-                (fs/absolute? (:seon.dev.process/cache-path record))))))
+       (uuid? (:seon.operator.process-record/generation record))
+       (pos-int? (:seon.boot/pid record))
+       (inst? (:seon.boot/start-instant record))
+       (string? (:seon.operator.process-record/root record))
+       (string? (:seon.operator.process-record/log record))
+       (or (nil? (:seon.operator.process-record/cache-path record))
+           (and (string? (:seon.operator.process-record/cache-path record))
+                (fs/absolute? (:seon.operator.process-record/cache-path record))))))
 
 (defn- read-process-records
   [root]
@@ -144,7 +140,7 @@
          (try
            (let [record (state/read-edn path)]
             (if (and (valid-process-record? record)
-                     (= canonical-root (:seon.dev.process/root record)))
+                     (= canonical-root (:seon.operator.process-record/root record)))
               (update result :seon.fresh-operator/process-records conj record)
               (if (valid-process-record? record)
                 result
@@ -166,18 +162,18 @@
     (fail! "Refusing to publish an invalid child process record."
            {:seon.fresh-operator/process-record record}))
   (state/write-edn!
-   (process-record-path root (:seon.dev.process/generation record))
+   (process-record-path root (:seon.operator.process-record/generation record))
    record)
-  (when (:seon.dev.process/cache-path record)
+  (when (:seon.operator.process-record/cache-path record)
     (state/write-edn!
      (dependency-cache-reference-path
-      (:seon.dev.process/generation record))
+      (:seon.operator.process-record/generation record))
      record))
   record)
 
 (defn- clear-process-record!
   [root record]
-  (let [generation (:seon.dev.process/generation record)
+  (let [generation (:seon.operator.process-record/generation record)
         deleted? (state/delete-edn! (process-record-path root generation))]
     (state/delete-edn! (dependency-cache-reference-path generation))
     deleted?))
@@ -185,7 +181,7 @@
 (defn- record-process-identity
   [record]
   (select-keys record
-               [:seon.dev.process/pid :seon.dev.process/start-instant]))
+               [:seon.boot/pid :seon.boot/start-instant]))
 
 (defn- record-alive?
   [record]
@@ -193,35 +189,31 @@
 
 (defn- record->boot-process
   [record]
-  {:seon.boot/pid (:seon.dev.process/pid record)
-   :seon.boot/start-instant
-   (java.util.Date/from
-    (Instant/parse (:seon.dev.process/start-instant record)))
+  {:seon.boot/pid (:seon.boot/pid record)
+   :seon.boot/start-instant (:seon.boot/start-instant record)
    :seon.fresh-operator/alive? (record-alive? record)})
 
 (defn- process-record-matches-advertisement?
   [record advertisement]
-  (and (= (:seon.dev.process/pid record)
+  (and (= (:seon.boot/pid record)
           (:seon.boot/pid advertisement))
        (inst? (:seon.boot/start-instant advertisement))
-       (= (.toEpochMilli
-           (Instant/parse (:seon.dev.process/start-instant record)))
-          (.getTime ^java.util.Date
-                    (:seon.boot/start-instant advertisement)))))
+       (= (inst-ms (:seon.boot/start-instant record))
+          (inst-ms (:seon.boot/start-instant advertisement)))))
 
 (defn- matching-process-handle
   [record]
   (try
     (let [optional
           (java.lang.ProcessHandle/of
-           (long (:seon.dev.process/pid record)))]
+           (long (:seon.boot/pid record)))]
       (when (.isPresent optional)
         (let [handle (.get optional)
               start (.startInstant (.info handle))]
           (when (and (.isAlive handle)
                      (.isPresent start)
-                     (= (:seon.dev.process/start-instant record)
-                        (str (.get start))))
+                     (= (inst-ms (:seon.boot/start-instant record))
+                        (.toEpochMilli (.get start))))
             handle))))
     (catch Throwable _ nil)))
 
@@ -703,24 +695,22 @@
     (let [pid
           (get-in observation [:seon.fresh-operator/process :seon.boot/pid])
           start-instant
-          (str (.toInstant
-                ^java.util.Date
-                (get-in observation
-                        [:seon.fresh-operator/process
-                         :seon.boot/start-instant])))
+          (get-in observation
+                  [:seon.fresh-operator/process
+                   :seon.boot/start-instant])
           generation
           (or
            (:seon.fresh-operator/generation observation)
            (java.util.UUID/nameUUIDFromBytes
             (.getBytes (str root "\u0000" pid "\u0000" start-instant)
                        java.nio.charset.StandardCharsets/UTF_8)))]
-      {:seon.dev.process/generation generation
-       :seon.dev.process/pid pid
-       :seon.dev.process/start-instant start-instant
-       :seon.dev.process/root root
-       :seon.dev.process/cache-path
+      {:seon.operator.process-record/generation generation
+       :seon.boot/pid pid
+       :seon.boot/start-instant start-instant
+       :seon.operator.process-record/root root
+       :seon.operator.process-record/cache-path
        (:seon.fresh-operator/cache-path observation)
-       :seon.dev.process/log
+       :seon.operator.process-record/log
        (or (:seon.fresh-operator/log observation)
            (str (fs/path root "data" "clusters" "logs"
                          (str "recovered-" pid ".log"))))})))
@@ -731,14 +721,14 @@
         existing (read-process-records canonical-root)
         generations
         (into #{}
-              (map :seon.dev.process/generation)
+              (map :seon.operator.process-record/generation)
               (:seon.fresh-operator/process-records existing))]
     (doseq [observation (operator-process-observations)
             :when (= canonical-root (:seon.fresh-operator/root observation))
             :let [record (observation->process-record observation)]
             :when (and record
                        (not (contains? generations
-                                       (:seon.dev.process/generation record))))]
+                                       (:seon.operator.process-record/generation record))))]
       (write-process-record! canonical-root record))
     (read-process-records canonical-root)))
 
@@ -922,7 +912,7 @@
          []
          (map
           (fn [record]
-            {:seon.fresh-operator/root (:seon.dev.process/root record)
+            {:seon.fresh-operator/root (:seon.operator.process-record/root record)
              :seon.fresh-operator/process-record record
              :seon.fresh-operator/process (record->boot-process record)}))
          process-records)
@@ -1665,13 +1655,13 @@
              {:seon.boot/pid pid
               :seon.fresh-operator/log log}))
     (let [record
-          {:seon.dev.process/generation generation
-           :seon.dev.process/pid pid
-           :seon.dev.process/start-instant start-instant
-           :seon.dev.process/root (.getCanonicalPath (java.io.File. root))
-           :seon.dev.process/cache-path
+          {:seon.operator.process-record/generation generation
+           :seon.boot/pid pid
+           :seon.boot/start-instant start-instant
+           :seon.operator.process-record/root (.getCanonicalPath (java.io.File. root))
+           :seon.operator.process-record/cache-path
            (.getCanonicalPath (java.io.File. cache-path))
-           :seon.dev.process/log log}]
+           :seon.operator.process-record/log log}]
       (try
         (write-process-record! root record)
         (operator.state/mark-root-created-under-lock! (repository-root) root)
@@ -1762,13 +1752,13 @@
                                           silence-ms)))
             (when (matching-process-handle record)
               (fail! "The recorded cluster JVM survived SIGKILL."
-                     {:seon.dev.process/generation
-                      (:seon.dev.process/generation record)
-                      :seon.dev.process/pid (:seon.dev.process/pid record)}))
+                     {:seon.operator.process-record/generation
+                      (:seon.operator.process-record/generation record)
+                      :seon.boot/pid (:seon.boot/pid record)}))
             :sigkill)
           :sigterm))
       (if (some? (state/process-start-instant
-                  (:seon.dev.process/pid record)))
+                  (:seon.boot/pid record)))
         :pid-reused
         :already-exited))))
 
@@ -1780,11 +1770,11 @@
   ([pid silence-ms]
    (when-let [start-instant (state/process-start-instant pid)]
      (terminate-recorded-process!
-      {:seon.dev.process/generation (random-uuid)
-       :seon.dev.process/pid pid
-       :seon.dev.process/start-instant start-instant
-       :seon.dev.process/root ""
-       :seon.dev.process/log ""}
+      {:seon.operator.process-record/generation (random-uuid)
+       :seon.boot/pid pid
+       :seon.boot/start-instant start-instant
+       :seon.operator.process-record/root ""
+       :seon.operator.process-record/log ""}
       silence-ms))
    nil))
 
@@ -2041,8 +2031,8 @@
                 (clear-process-record! root record))
               (fail!
                "The ready advertisement does not match the launched JVM."
-               {:seon.dev.process/generation
-                (:seon.dev.process/generation record)
+               {:seon.operator.process-record/generation
+                (:seon.operator.process-record/generation record)
                 :seon.fresh-operator/advertisement value}))
             (print-started! root name value)))))))
 
@@ -2406,8 +2396,8 @@
                      reason))))))
     (doseq [record process-records]
       (println
-       (str "recorded JVM pid " (:seon.dev.process/pid record)
-            " generation " (:seon.dev.process/generation record)
+       (str "recorded JVM pid " (:seon.boot/pid record)
+            " generation " (:seon.operator.process-record/generation record)
             " " (if (record-alive? record) "alive" "not alive"))))
     (doseq [error process-record-errors]
       (println
@@ -2605,11 +2595,11 @@
         (.getCanonicalPath (java.io.File. root))
         " records=" (count records)
         " unreadable=" (count record-errors)))
-  (doseq [record (sort-by :seon.dev.process/pid records)]
+  (doseq [record (sort-by :seon.boot/pid records)]
     (println
-     (str "  pid=" (:seon.dev.process/pid record)
-          " start=" (:seon.dev.process/start-instant record)
-          " generation=" (:seon.dev.process/generation record)
+     (str "  pid=" (:seon.boot/pid record)
+          " start=" (:seon.boot/start-instant record)
+          " generation=" (:seon.operator.process-record/generation record)
           " state=" (if (record-alive? record) "alive" "not-alive"))))
   (doseq [error record-errors]
     (println
@@ -2641,7 +2631,7 @@
       (let [failures
             (reduce
              (fn [failures record]
-               (let [pid (:seon.dev.process/pid record)]
+               (let [pid (:seon.boot/pid record)]
                  (try
                    (let [advertisement
                          (when-not force?
@@ -2659,9 +2649,9 @@
                          signal-path (terminate-recorded-process! record)]
                      (when (record-alive? record)
                        (fail! "The exact recorded JVM remained alive after down."
-                              {:seon.dev.process/generation
-                               (:seon.dev.process/generation record)
-                               :seon.dev.process/pid pid}))
+                              {:seon.operator.process-record/generation
+                               (:seon.operator.process-record/generation record)
+                               :seon.boot/pid pid}))
                      (clear-process-record! root record)
                      (println
                       (str "● JVM pid " pid " path="
@@ -2671,9 +2661,9 @@
                      failures)
                    (catch Throwable error
                      (conj failures
-                           {:seon.dev.process/generation
-                            (:seon.dev.process/generation record)
-                            :seon.dev.process/pid pid
+                           {:seon.operator.process-record/generation
+                            (:seon.operator.process-record/generation record)
+                            :seon.boot/pid pid
                             :seon.fresh-operator/error (ex-message error)})))))
              []
              records)]

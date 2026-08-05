@@ -396,7 +396,7 @@
              :seon.fresh-operator/root root
              :seon.fresh-operator/advertisement degraded}]}]
          :seon.fresh-operator/process-records
-         [{:seon.dev.process/pid pid}]
+         [{:seon.boot/pid pid}]
          :seon.fresh-operator/process-record-errors []}
         endpoint
         (with-redefs-fn

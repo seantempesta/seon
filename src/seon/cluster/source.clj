@@ -142,7 +142,7 @@
   [{:keys [:seon.store/store]
     source-digest :seon.source/digest
     populate :seon.source/populate
-    population-data :seon.source/population-data}]
+    populate-request :seon.source/populate-request}]
   (let [populate-fn (resolve-population populate source-digest)
           expected-commit (:seon.source/commit-id (current store))
           scratch (scratch-branch)]
@@ -165,7 +165,7 @@
              "the source scratch schema transaction was refused"
              {:seon.source/digest source-digest})
             (populate-fn
-             (merge population-data
+             (merge populate-request
                     {:seon.db/connection connection
                      :seon.source/digest source-digest}))
             ;; The source seal is the genesis boundary. Population must first

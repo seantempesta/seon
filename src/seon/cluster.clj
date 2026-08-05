@@ -848,7 +848,7 @@
    {:seon.store/store store
     :seon.source/digest source-digest
     :seon.source/populate `populate-source!
-    :seon.source/population-data {:seon.fn/manifest manifest}}))
+    :seon.source/populate-request {:seon.fn/manifest manifest}}))
 
 (defn- current-source!
   "The exact published source commit new clusters fork.

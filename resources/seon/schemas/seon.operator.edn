@@ -52,8 +52,13 @@
                   [:seon.operator.cleanup/reclaimed-bytes [:int {:min 0}]]
                   [:seon.operator.cleanup/remaining [:vector :string]]
                   [:seon.operator.cleanup/complete? :boolean]],
-                 :existence :map,
-                 :log-result :map,
+                 :claim-errors [:vector :seon.operator.claim/read-error],
+                 :roots [:vector :seon.operator.claim/record],
+                 :existence
+                 [:map
+                  [:seon.operator/roots :seon.operator/roots]
+                  [:seon.operator/claim-errors :seon.operator/claim-errors]],
+                 :log-result :seon.operator.log/result,
                  :branches :seon.cluster.registry/roster,
                  :census
                  [:map

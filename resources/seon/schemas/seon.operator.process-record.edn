@@ -1,0 +1,18 @@
+#:seon.operator.process-record{:generation :uuid
+                               :root :string
+                               :log :string
+                               :cache-path [:string {:min 1}]
+                               :record
+                               [:map
+                                [:seon.operator.process-record/generation
+                                 :seon.operator.process-record/generation]
+                                [:seon.boot/pid :seon.boot/pid]
+                                [:seon.boot/start-instant
+                                 :seon.boot/start-instant]
+                                [:seon.operator.process-record/root
+                                 :seon.operator.process-record/root]
+                                [:seon.operator.process-record/log
+                                 :seon.operator.process-record/log]
+                                [:seon.operator.process-record/cache-path
+                                 {:optional true}
+                                 :seon.operator.process-record/cache-path]]}

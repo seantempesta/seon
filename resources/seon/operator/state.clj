@@ -24,23 +24,23 @@
     (let [optional (java.lang.ProcessHandle/of (long pid))]
       (when (.isPresent optional)
         (let [instant (.startInstant (.info (.get optional)))]
-          (when (.isPresent instant) (str (.get instant))))))
+          (when (.isPresent instant) (Date/from (.get instant))))))
     (catch Throwable _ nil)))
 
 (defn process-identity-alive?
   "True when a PID still has the recorded OS start instant."
-  [{:seon.dev.process/keys [pid start-instant]}]
+  [{:seon.boot/keys [pid start-instant]}]
   (and (integer? pid)
-       (string? start-instant)
+       (inst? start-instant)
        (= start-instant (process-start-instant pid))))
 
 (defn current-process-identity
   []
   (let [handle (java.lang.ProcessHandle/current)
         start (.startInstant (.info handle))]
-    {:seon.dev.process/pid (.pid handle)
-     :seon.dev.process/start-instant
-     (when (.isPresent start) (str (.get start)))}))
+    {:seon.boot/pid (.pid handle)
+     :seon.boot/start-instant
+     (when (.isPresent start) (Date/from (.get start)))}))
 
 (defn read-edn
   "Read one EDN state record when it exists."
@@ -182,7 +182,7 @@
 (defn write-process-claim!
   [repository-root record]
   (write-edn! (process-claim-path repository-root
-                                  (:seon.dev.process/generation record))
+                                  (:seon.operator.process-record/generation record))
               record))
 
 (defn delete-process-claim!
@@ -219,7 +219,7 @@
   (let [{roots :records root-errors :errors} (root-claims repository-root)
         {processes :records process-errors :errors}
         (process-claims repository-root)
-        processes-by-root (group-by :seon.dev.process/root processes)]
+        processes-by-root (group-by :seon.operator.process-record/root processes)]
     {:seon.operator/roots
      (mapv
       (fn [claim]

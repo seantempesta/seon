@@ -116,10 +116,10 @@
   (let [start (.startInstant (.info (.toHandle process)))]
     (when-not (.isPresent start)
       (throw (ex-info "The cache probe process has no start instant." {})))
-    {:seon.dev.process/generation (random-uuid)
-     :seon.dev.process/pid (.pid process)
-     :seon.dev.process/start-instant (str (.get start))
-     :seon.dev.process/cache-path cache-path}))
+    {:seon.operator.process-record/generation (random-uuid)
+     :seon.boot/pid (.pid process)
+     :seon.boot/start-instant (java.util.Date/from (.get start))
+     :seon.operator.process-record/cache-path cache-path}))
 
 (defn- directory-state
   [root]
@@ -174,7 +174,7 @@
             (let [record (process-record process first-cache)
                   reference-file
                   (io/file references-root
-                           (str (:seon.dev.process/generation record) ".edn"))]
+                           (str (:seon.operator.process-record/generation record) ".edn"))]
               (state/write-edn! reference-file record)
               (reset! project-digest "project-b")
               (let [second-cache

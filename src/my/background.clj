@@ -41,7 +41,7 @@
   `background`."
   {:malli/schema
    [:=> [:cat :my.background/result]
-    [:or :my.background/descriptor :seon.error/value]]}
+    [:or :my.background/receipt :seon.error/value]]}
   [result-ref]
   (if-not (and (vector? result-ref)
                (= 2 (count result-ref))
@@ -84,7 +84,7 @@
   Use it when the next run should resume after the request settles."
   {:malli/schema
    [:=> [:cat :my.background/result :my.run/note]
-    [:or :my.background/descriptor :my.run/wait :seon.error/value]]}
+    [:or :my.background/receipt :my.run/wait :seon.error/value]]}
   [result-ref note]
   (let [descriptor (poll result-ref)]
     (if (or (:seon.error/kind descriptor)
