@@ -1568,22 +1568,6 @@
   ([record silence-ms]
    (operator.state/terminate-recorded-process! record silence-ms)))
 
-(defn- terminate-observed-process!
-  "Terminate the process generation observed at this call site."
-  ([pid]
-   (terminate-observed-process!
-    pid (operator-silence-backstop-ms {})))
-  ([pid silence-ms]
-   (when-let [start-instant (state/process-start-instant pid)]
-     (terminate-recorded-process!
-      {:seon.operator.process-record/generation (random-uuid)
-       :seon.boot/pid pid
-       :seon.boot/start-instant start-instant
-       :seon.operator.process-record/root ""
-       :seon.operator.process-record/log ""}
-      silence-ms))
-   nil))
-
 (defn- readiness-failure
   [value]
   (try
@@ -1895,15 +1879,11 @@
         request (gensym "request")
         operation
         (if force?
-          `(if (map? ~instance)
-             (seon.cluster/refork! ~instance)
-             (do
-               (seon.fs/delete-recursively!
-                ~(str (cluster-root root))
-                ~(str (cluster-directory root name)))
-               (let [result# (seon.cluster.registry/reset-cluster! ~request)]
-                 (seon.cluster.registry/collect! ~store (java.util.Date.))
-                 result#)))
+          `(seon.operator/refork!
+            (assoc ~request
+                   :seon.operator/repository-root
+                   ~(str (repository-root))
+                   :seon.operator/managed-root ~root))
           `(seon.cluster.registry/ensure-cluster! ~request))]
     `(fn [~store ~source ~instance]
        (let [~branch (seon.cluster.registry/cluster-branch ~name)
@@ -1985,7 +1965,8 @@
         (require 'seon.cluster :reload)
         (require 'seon.cluster.registry
                  'seon.cluster.store
-                 'seon.fs)
+                 'seon.fs
+                 'seon.operator)
         ~(if source-process?
            `(println
              ~init-result-prefix

@@ -1,0 +1,45 @@
+#:seon.operator.collect{:request
+                        [:map
+                         [:seon.operator/repository-root
+                          :seon.operator/repository-root]
+                         [:seon.operator/managed-root
+                          :seon.operator/managed-root]]
+                        :store-id :seon.store/id
+                        :managed-root :seon.operator/managed-root
+                        :branch
+                        [:map
+                         [:seon.store/branch :seon.store/branch]
+                         [:seon.source/commit-id :seon.source/commit-id]]
+                        :branches [:vector :seon.operator.collect/branch]
+                        :objects-before [:int {:min 0}]
+                        :objects-after [:int {:min 0}]
+                        :swept-objects [:int {:min 0}]
+                        :bytes-before [:int {:min 0}]
+                        :bytes-after [:int {:min 0}]
+                        :reclaimed-bytes [:int {:min 0}]
+                        :verification-pass-swept [:int {:min 0}]
+                        :complete? :boolean
+                        :result
+                        [:map
+                         [:seon.operator.collect/store-id
+                          :seon.operator.collect/store-id]
+                         [:seon.operator.collect/managed-root
+                          :seon.operator.collect/managed-root]
+                         [:seon.operator.collect/branches
+                          :seon.operator.collect/branches]
+                         [:seon.operator.collect/objects-before
+                          :seon.operator.collect/objects-before]
+                         [:seon.operator.collect/objects-after
+                          :seon.operator.collect/objects-after]
+                         [:seon.operator.collect/swept-objects
+                          :seon.operator.collect/swept-objects]
+                         [:seon.operator.collect/bytes-before
+                          :seon.operator.collect/bytes-before]
+                         [:seon.operator.collect/bytes-after
+                          :seon.operator.collect/bytes-after]
+                         [:seon.operator.collect/reclaimed-bytes
+                          :seon.operator.collect/reclaimed-bytes]
+                         [:seon.operator.collect/verification-pass-swept
+                          :seon.operator.collect/verification-pass-swept]
+                         [:seon.operator.collect/complete?
+                          :seon.operator.collect/complete?]]}

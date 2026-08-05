@@ -1,0 +1,42 @@
+#:seon.operator.cluster-cleanup{:request
+                                [:map
+                                 [:seon.operator/repository-root
+                                  :seon.operator/repository-root]
+                                 [:seon.operator/managed-root
+                                  :seon.operator/managed-root]
+                                 [:seon.boot/cluster-name
+                                  :seon.boot/cluster-name]
+                                 [:seon.store/store
+                                  {:optional true}
+                                  :seon.store/store]]
+                                :managed-root :seon.operator/managed-root
+                                :live-instance-stopped? :boolean
+                                :branch-retired? :boolean
+                                :removed [:vector :string]
+                                :collection :seon.error/value
+                                :remaining [:vector :string]
+                                :reclaimed-bytes [:int {:min 0}]
+                                :complete?
+                                [:boolean
+                                 {:seon.maintenance/attention-when :false}]
+                                :result
+                                [:map
+                                 [:seon.operator.cluster-cleanup/managed-root
+                                  :seon.operator.cluster-cleanup/managed-root]
+                                 [:seon.boot/cluster-name
+                                  :seon.boot/cluster-name]
+                                 [:seon.store/branch :seon.store/branch]
+                                 [:seon.operator.cluster-cleanup/live-instance-stopped?
+                                  :seon.operator.cluster-cleanup/live-instance-stopped?]
+                                 [:seon.operator.cluster-cleanup/branch-retired?
+                                  :seon.operator.cluster-cleanup/branch-retired?]
+                                 [:seon.operator.cluster-cleanup/removed
+                                  :seon.operator.cluster-cleanup/removed]
+                                 [:seon.operator.cluster-cleanup/collection
+                                  :seon.operator.cluster-cleanup/collection]
+                                 [:seon.operator.cluster-cleanup/remaining
+                                  :seon.operator.cluster-cleanup/remaining]
+                                 [:seon.operator.cluster-cleanup/reclaimed-bytes
+                                  :seon.operator.cluster-cleanup/reclaimed-bytes]
+                                 [:seon.operator.cluster-cleanup/complete?
+                                  :seon.operator.cluster-cleanup/complete?]]}

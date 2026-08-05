@@ -224,6 +224,64 @@
       (finally
         (test-support/delete-recursively! repository-root)))))
 
+(deftest cluster-cleanup-uses-one-stop-retire-delete-and-collect-composition
+  (let [repository-root (owned-root)
+        managed-root (str (io/file repository-root "managed-cluster"))
+        cluster-name "doomed"
+        cluster-root (io/file managed-root "data" "clusters")
+        cluster-dir (io/file cluster-root cluster-name)
+        sentinel-root (io/file repository-root "cluster-sentinel")
+        sentinel (io/file sentinel-root "survives.txt")
+        lock-file (io/file repository-root "operation.lock")
+        calls (atom [])]
+    (try
+      (.mkdirs cluster-dir)
+      (.mkdirs sentinel-root)
+      (spit sentinel "alive")
+      (java.nio.file.Files/createSymbolicLink
+       (.toPath (io/file cluster-dir "outside"))
+       (.toPath (.getCanonicalFile sentinel-root))
+       (make-array java.nio.file.attribute.FileAttribute 0))
+      (operator/claim-root!
+       {:seon.operator/repository-root repository-root
+        :seon.operator/managed-root managed-root
+        :seon.boot/cluster-name cluster-name})
+      (with-open [file (java.io.RandomAccessFile. lock-file "rw")
+                  lock (.lock (.getChannel file))]
+        (let [operation-store {:seon.store/lock lock}
+              instance {:seon.boot/config
+                        {:seon.boot/cluster-name cluster-name}}]
+          (with-redefs [runtime/running-instances (atom {cluster-name instance})
+                        cluster/stop!
+                        (fn [value] (swap! calls conj [:stop value]))
+                        registry/retire-branch!
+                        (fn [request] (swap! calls conj [:retire request]))
+                        registry/collect!
+                        (fn [store _]
+                          (swap! calls conj [:collect store])
+                          3)
+                        registry/roster (fn [_] #{})]
+            (let [result
+                  (operator/cleanup-cluster!
+                   {:seon.operator/repository-root repository-root
+                    :seon.operator/managed-root managed-root
+                    :seon.boot/cluster-name cluster-name
+                    :seon.store/store operation-store})]
+              (is (true?
+                   (:seon.operator.cluster-cleanup/complete? result)))
+              (is (true?
+                   (:seon.operator.cluster-cleanup/live-instance-stopped?
+                    result)))
+              (is (= 3 (get-in result
+                               [:seon.operator.cluster-cleanup/collection
+                                :seon.error/data
+                                :seon.cluster.registry/swept])))
+              (is (= [:stop :retire :collect] (mapv first @calls)))
+              (is (false? (.exists cluster-dir)))
+              (is (= "alive" (slurp sentinel)))))))
+      (finally
+        (test-support/delete-recursively! repository-root)))))
+
 (deftest live-log-inode-is-bounded-and-archived
   (let [root (owned-root)
         log-dir (io/file root "logs")
@@ -354,23 +412,14 @@
                   cluster/stop!
                   (fn [value]
                     (swap! calls conj [:stop value])
-                    nil)
-                  cluster/refork!
-                  (fn [value]
-                    (swap! calls conj [:refork value])
-                    {:seon.store/branch :cluster-second
-                     :seon.cluster/created? true})]
+                    nil)]
       (is (identical? replacement (operator/start! request)))
       (is (nil? (operator/stop! original)))
       (is (identical? replacement (operator/restart! original)))
-      (is (= {:seon.store/branch :cluster-second
-              :seon.cluster/created? true}
-             (operator/refork! original)))
       (is (= [[:start request]
               [:stop original]
               [:stop original]
-              [:start request]
-              [:refork original]]
+              [:start request]]
              @calls)))))
 
 (deftest status-banner-and-census-derive-current-runtime-values

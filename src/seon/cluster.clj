@@ -39,7 +39,6 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.flow :as flow]
-            [seon.fs :as seon.fs]
             [seon.fn :as seon.fn]
             [seon.operator.runtime :as operator.runtime
              :refer [root-store-holder running-instances]]
@@ -2273,38 +2272,25 @@
   nil)
 
 (defn refork!
-  "Destroy one cluster branch and refork the published source commit.
-
-  An extra hold keeps the process-root store and its flock alive while
-  `stop!` releases the addressed instance and its branch connection.
-  The registry's existing `reset-cluster!` remains the sole
-  delete/refork owner. Neither indexing nor source publication enters boot."
+  "Delegate destructive refork composition to the public operator owner."
   {:malli/schema
    [:=> [:cat :seon.boot/instance]
     :seon.cluster.registry/branch-result]}
   [instance]
   (let [config (:seon.boot/config instance)
         cluster-name (:seon.boot/cluster-name config)
-        store-dir (:seon.boot/store-dir config)
-        cluster-dir (:seon.boot/cluster-dir
-                     (cluster-paths (:seon.boot/root config) cluster-name))
-        held-store (acquire-root-store! store-dir)]
-    (try
-      (stop! instance)
-      (seon.fs/delete-recursively! (:seon.boot/root config) cluster-dir)
-      (let [result
-            (registry/reset-cluster!
-             {:seon.store/store held-store
-              :seon.boot/cluster-name cluster-name
-              :seon.source/commit-id
-              (:seon.source/commit-id (current-source! held-store))})]
-        ;; `Date.` is intentional here: explicit destroy/refork discards every
-        ;; unreachable pre-refork snapshot immediately. Remaining branches and
-        ;; their histories stay rooted by Datahike's mark phase.
-        (registry/collect! held-store (java.util.Date.))
-        result)
-      (finally
-        (release-root-store! store-dir)))))
+        cluster-root (.getCanonicalFile (io/file (:seon.boot/root config)))
+        managed-root (some-> cluster-root .getParentFile .getParentFile)
+        operation-store (:seon.store/store instance)
+        published (source/current operation-store)]
+    ((requiring-resolve 'seon.operator/refork!)
+     {:seon.operator/repository-root
+      (or (System/getProperty "seon.repository.root")
+          (System/getProperty "user.dir"))
+      :seon.operator/managed-root (.getCanonicalPath managed-root)
+      :seon.boot/cluster-name cluster-name
+      :seon.source/commit-id (:seon.source/commit-id published)
+      :seon.store/store operation-store})))
 
 (defn read-advertisement
   "Read and validate one cluster's advertisement, or nil.
