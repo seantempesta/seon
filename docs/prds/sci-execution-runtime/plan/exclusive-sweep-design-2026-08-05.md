@@ -1,6 +1,6 @@
 ---
 type: prd
-status: proposed
+status: active
 tags: [prd, storage, datahike, konserve, gc, maintenance]
 ---
 

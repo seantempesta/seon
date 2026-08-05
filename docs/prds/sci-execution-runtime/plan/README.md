@@ -673,6 +673,23 @@ and the GIT FRAMING adopted (conversational, owner-ruled):**
   immutable content-addressed cache design closes the class (probe:
   3,628 dynamic-cache entries cleared, writer still committed from its
   immutable digest directory; `5e5294228`).
+- **THE EXCLUSIVE-SWEEP DESIGN IS SEALED (owner, same day):**
+  [exclusive-sweep-design-2026-08-05.md](exclusive-sweep-design-2026-08-05.md)
+  is ruled with its three core recommendations accepted — Datahike's
+  per-store branch mutex widens into THE one reachability gate
+  (branch!/force-branch!/explicit-parent merge/blob publication/
+  collection all take permits); `bin/seon start` during a sweep gets a
+  loud typed retryable refusal with no partial cluster; the blob guard
+  is the two-sided publication/sweep permit spanning the
+  content-existence check through the root-committing transaction.
+  ALSO RULED: the seventh writer — MCP artifacts — gets a DURABLE
+  NO-HISTORY ARTIFACT FACT before promising retrievability (root
+  maintenance owns explicit retraction; no expiry clock). SEQUENCING:
+  post-rename, the sweep-gate + falsifier lane runs in parallel with
+  desk and ops (disjoint owners); the blob-permit slice lands after
+  desk W-A settles the run-settlement seam; the one-time 357 GiB
+  reclaim runs after both slices plus the dry-run measurement, per the
+  design's runbook.
 - **THE OPERATIONS/MAINTENANCE SPEC IS SEALED (owner, same day):**
   [operations-and-maintenance-spec-2026-08-05.md](operations-and-maintenance-spec-2026-08-05.md)
   is ruled with ALL FIVE of its recommendations accepted — schedule
