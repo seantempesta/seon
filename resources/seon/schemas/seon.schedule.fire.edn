@@ -16,9 +16,28 @@
                      :request
                      [:map
                       [:seon.schedule.task/id :seon.schedule.task/id]
+                      [:seon.schedule.fire/id :seon.schedule.fire/id]
                       [:seon.cluster.agent/id :seon.cluster.agent/id]
                       [:seon.fn/sym :seon.fn/sym]
                       [:seon.schedule.fire/nominal-at
                        :seon.schedule.fire/nominal-at]
                       [:seon.schedule.fire/observed-at
-                       :seon.schedule.fire/observed-at]]}
+                       :seon.schedule.fire/observed-at]
+                      [:seon.boot/cluster-name :seon.boot/cluster-name]
+                      [:seon.operator/repository-root
+                       :seon.operator/repository-root]
+                      [:seon.operator/managed-root
+                       :seon.operator/managed-root]
+                      [:seon.boot/log-dir :seon.boot/log-dir]
+                      [:seon.config.maintenance/min-usable-bytes
+                       {:optional true}
+                       :seon.config.maintenance/min-usable-bytes]
+                      [:seon.config.maintenance/min-usable-ratio
+                       {:optional true}
+                       :seon.config.maintenance/min-usable-ratio]
+                      [:seon.config.maintenance/log-max-bytes
+                       {:optional true}
+                       :seon.config.maintenance/log-max-bytes]
+                      [:seon.config.maintenance/log-retained-files
+                       {:optional true}
+                       :seon.config.maintenance/log-retained-files]]}

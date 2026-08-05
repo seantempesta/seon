@@ -1,90 +1,88 @@
 (ns seon.schedule-test
-  (:require [clojure.core.async :as async]
-            [clojure.core.async.flow :as flow]
-            [clojure.test :refer [deftest is testing]]
-            [datahike.api :as d]
+  (:require [clojure.test :refer [deftest is testing]]
             [malli.core :as m]
             [seon.cluster.agent :as agent]
-            [seon.cluster.wake :as wake]
             [seon.db :as db]
-            [seon.flow :as seon.flow]
             [seon.schedule :as schedule]
-            [seon.schema.datahike :as schema.datahike])
+            [seon.test-support :as test-support])
   (:import [java.time Instant]
-           [java.util Date]
-           [java.util.concurrent CountDownLatch TimeUnit]))
+           [java.util Date]))
 
 (defn- instant
   [text]
   (Date/from (Instant/parse text)))
 
-(def ^:private schedule-attributes
-  [:seon.ns/name
-   :seon.cluster.agent/id
-   :seon.cluster.agent/namespace
-   :seon.fn/sym
-   :seon.schedule/id
-   :seon.schedule/expression
-   :seon.schedule/zone-id
-   :seon.schedule.task/id
-   :seon.schedule.task/owner
-   :seon.schedule.task/function
-   :seon.schedule.task/schedule
-   :seon.schedule.fire/id
-   :seon.schedule.fire/task
-   :seon.schedule.fire/nominal-at
-   :seon.schedule.fire/observed-at
-   :seon.cluster.message/id
-   :seon.cluster.message/to
-   :seon.cluster.message/content
-   :seon.cluster.message/at
-   :seon.cluster.message/ordinal])
+(def ^:private handler-calls (atom []))
 
-(defn- with-schedule-database
-  [body]
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :schema-flexibility :write
-                       :keep-history? true}
-        _ (d/create-database configuration)
-        connection (atom (d/connect configuration))]
-    (try
-      (db/transact! @connection
-                    (schema.datahike/malli->datahike-schema
-                     schedule-attributes))
-      (body configuration connection)
-      (finally
-        (d/release @connection)
-        (d/delete-database configuration)))))
+(defn successful-handler
+  [request]
+  (swap! handler-calls conj request)
+  {:seon.operator.footprint/root (:seon.operator/managed-root request)
+   :seon.operator.footprint/file-bytes 4096
+   :seon.operator.footprint/usable-bytes 8192
+   :seon.operator.footprint/total-bytes 12288
+   :seon.operator.footprint/usable-ratio 0.5
+   :seon.operator.footprint/observed-at
+   (:seon.schedule.fire/observed-at request)
+   :seon.operator/low-space? false})
+
+(defn flat-error-handler
+  [request]
+  (swap! handler-calls conj request)
+  {:seon.error/kind :seon.schedule-test/returned-error
+   :seon.error/message "The scheduled test handler returned an error."})
+
+(defn throwing-handler
+  [request]
+  (swap! handler-calls conj request)
+  (throw (ex-info "The scheduled test handler threw."
+                  {:seon.error/kind :seon.schedule-test/thrown-failure})))
+
+(def ^:private result-caps
+  {:seon.config.eval.result/max-depth 16
+   :seon.config.eval.result/max-collection 100
+   :seon.config.eval.result/max-string 4096
+   :seon.config.eval.result/max-nodes 1000})
+
+(defn- execution-context
+  []
+  {:seon.boot/cluster-name "default"
+   :seon.operator/repository-root "/repo"
+   :seon.operator/managed-root "/repo/operator"
+   :seon.boot/log-dir "/repo/operator/data/clusters/default/logs"
+   :seon.config.maintenance/min-usable-bytes 1
+   :seon.config.maintenance/min-usable-ratio 0.01
+   :seon.config.maintenance/log-max-bytes 1024
+   :seon.config.maintenance/log-retained-files 2
+   :seon.cluster.loop/cluster
+   {:seon.cluster/name "default"
+    :seon.cluster.run/process "schedule-test-process"
+    :seon.sci.admit/caps result-caps
+    :seon.config.error/recurrence-limit 3
+    :seon.config.error/escalate-to "root"}})
 
 (defn- seed-task!
-  [connection agent-id namespace-name task-id expression]
+  [connection task-id handler]
   (db/transact!
    connection
-   [{:seon.ns/name namespace-name}
-    {:seon.cluster.agent/id agent-id
-     :seon.cluster.agent/namespace [:seon.ns/name namespace-name]}
-    {:seon.fn/sym (str namespace-name "/run")}
+   [{:seon.cluster.agent/id "root"}
+    {:seon.fn/sym handler}
     {:seon.schedule/id (str task-id "/schedule")
-     :seon.schedule/expression expression
+     :seon.schedule/expression "* * * * *"
      :seon.schedule/zone-id "UTC"}
     {:seon.schedule.task/id task-id
-     :seon.schedule.task/owner [:seon.cluster.agent/id agent-id]
-     :seon.schedule.task/function
-     [:seon.fn/sym (str namespace-name "/run")]
+     :seon.schedule.task/owner [:seon.cluster.agent/id "root"]
+     :seon.schedule.task/function [:seon.fn/sym handler]
      :seon.schedule.task/schedule
      [:seon.schedule/id (str task-id "/schedule")]}]))
 
-(defn- graph-sink-step
-  ([]
-   {:ins {::episode "One owning-agent mailbox episode."}
-    :workload :io})
-  ([args]
-   args)
-  ([state _transition]
-   state)
-  ([state _input message]
-   (.countDown ^CountDownLatch (::delivered state))
-   [(assoc state ::message message) nil]))
+(defn- count-with
+  [database attribute]
+  (or (db/q '[:find (count ?entity) .
+              :in $ ?attribute
+              :where [?entity ?attribute _]]
+            database attribute)
+      0))
 
 (deftest every-public-schedule-contract-compiles
   (doseq [[function-name function-var] (ns-publics 'seon.schedule)
@@ -108,100 +106,92 @@
                :seon.schedule/zone-id "America/New_York"
                :seon.schedule/reference-at first-at}))))))
 
-(deftest fire-identity-is-idempotent-across-rederivation
-  (with-schedule-database
-    (fn [configuration connection]
-      (seed-task! @connection "owner" 'my.agents.owner "minute-task"
-                  "* * * * *")
+(deftest one-nominal-fire-calls-the-handler-once-without-a-turn
+  (test-support/with-database
+    (fn [connection]
+      (reset! handler-calls [])
+      (seed-task! connection "schedule-test/success"
+                  "seon.schedule-test/successful-handler")
       (let [observed-at (instant "2025-04-05T12:34:45Z")]
-        (is (= 1 (schedule/fire-due! @connection "owner" observed-at)))
-        (d/release @connection)
-        (reset! connection (d/connect configuration))
-        (is (= 0 (schedule/fire-due! @connection "owner" observed-at)))
-        (is (= 1
-               (db/q '[:find (count ?fire) .
-                       :where [?fire :seon.schedule.fire/id _]]
-                     @@connection)))
-        (is (= 1
-               (db/q '[:find (count ?message) .
-                       :where
-                       [?message :seon.cluster.message/to ?owner]
-                       [?owner :seon.cluster.agent/id "owner"]]
-                     @@connection)))))))
+        (is (= 1 (schedule/fire-due! connection "root" observed-at
+                                     (execution-context))))
+        (is (= 0 (schedule/fire-due! connection "root" observed-at
+                                     (execution-context))))
+        (is (= 1 (count @handler-calls)))
+        (is (= 1 (count-with @connection :seon.schedule.fire/id)))
+        (is (= 1 (count-with @connection :seon.maintenance.receipt/id)))
+        (is (= 1 (count-with @connection
+                             :seon.maintenance.receipt/completed-at)))
+        (is (= 1 (count-with @connection :seon.maintenance.receipt/result)))
+        (is (= 0 (count-with @connection :seon.cluster.run/id)))
+        (is (= 0 (count-with @connection :seon.cluster.message/id)))
+        (is (= (dissoc (first @handler-calls)
+                       :seon.schedule.task/id
+                       :seon.schedule.fire/id
+                       :seon.cluster.agent/id
+                       :seon.fn/sym
+                       :seon.schedule.fire/nominal-at
+                       :seon.schedule.fire/observed-at)
+               (dissoc (execution-context) :seon.cluster.loop/cluster)))))))
 
-(deftest scheduled-fire-wakes-only-the-owning-agent-route
-  (with-schedule-database
-    (fn [_configuration connection]
-      (seed-task! @connection "owner" 'my.agents.owner "routed-task"
-                  "* * * * *")
-      (db/transact!
-       @connection
-       [{:seon.ns/name 'my.agents.other}
-        {:seon.cluster.agent/id "other"
-         :seon.cluster.agent/namespace [:seon.ns/name 'my.agents.other]}])
-      (let [owner-eid (db/q '[:find ?agent .
-                              :where
-                              [?agent :seon.cluster.agent/id "owner"]]
-                            @@connection)
-            other-eid (db/q '[:find ?agent .
-                              :where
-                              [?agent :seon.cluster.agent/id "other"]]
-                            @@connection)
-            owner-channel (async/chan (async/sliding-buffer 1))
-            other-channel (async/chan (async/sliding-buffer 1))
-            armer-channel (async/chan (async/sliding-buffer 1))
-            render-channel (async/chan (async/sliding-buffer 1))
-            fault-channel (async/chan (async/sliding-buffer 1))
-            schedule-channel (async/chan (async/sliding-buffer 1))
-            completion (async/chan 1)
-            turn-stopped (async/promise-chan)
-            delivered (CountDownLatch. 1)
-            _ (async/>!! completion ::ready)
-            cluster-handle
-            {:seon.db/connection @connection
-             :seon.cluster.wake/channel owner-channel
-             :seon.schedule/channel schedule-channel
-             :seon.cluster.loop/completion completion
-             :seon.cluster.agent/turn-stopped turn-stopped}
-            blueprint
-            (agent/graph-definition
-             {:seon.cluster.loop/cluster cluster-handle
-              :seon.cluster.agent/id "owner"})
-            owner-graph
-            (flow/create-flow
-             (-> blueprint
-                 (assoc-in [:procs ::sink :proc]
-                           (seon.flow/var-process
-                            #'graph-sink-step :io
-                            {::delivered delivered}))
-                 (assoc :conns
-                        [[[::agent/mailbox ::agent/episode]
-                          [::sink ::episode]]])))]
-        (try
-          (flow/start owner-graph)
-          (wake/route!
-           {:seon.cluster.wake/connection @connection
-            :seon.cluster.wake/channels
-            (constantly {owner-eid owner-channel other-eid other-channel})
-            :seon.cluster.wake/fenced? (constantly false)
-            :seon.cluster.wake/armer-channel armer-channel
-            :seon.cluster.wake/render-channel render-channel
-            :seon.cluster.wake/fault-channel fault-channel
-            :seon.cluster.wake/key ::route})
-          (flow/resume owner-graph)
-          (is (.await delivered 5 TimeUnit/SECONDS)
-              "the ordinary message wake entered the owning agent graph")
-          (is (= 1
-                 (db/q '[:find (count ?fire) .
-                         :where [?fire :seon.schedule.fire/id _]]
-                       @@connection)))
-          (is (nil? (async/poll! other-channel)))
-          (is (nil? (async/poll! fault-channel)))
-          (finally
-            (wake/unlisten! {:seon.cluster.wake/connection @connection
-                             :seon.cluster.wake/key ::route})
-            (flow/stop owner-graph)
-            (doseq [channel [owner-channel other-channel armer-channel
-                             render-channel fault-channel schedule-channel
-                             completion turn-stopped]]
-              (async/close! channel))))))))
+(deftest restart-marks-a-claimed-receipt-interrupted-without-reexecution
+  (test-support/with-database
+    (fn [connection]
+      (reset! handler-calls [])
+      (let [task-id "schedule-test/interrupted"
+            observed-at (instant "2025-04-05T12:34:45Z")
+            nominal-at (instant "2025-04-05T12:34:00Z")
+            fire-id (pr-str [task-id nominal-at])
+            request
+            (merge (dissoc (execution-context) :seon.cluster.loop/cluster)
+                   {:seon.schedule.task/id task-id
+                    :seon.schedule.fire/id fire-id
+                    :seon.cluster.agent/id "root"
+                    :seon.fn/sym "seon.schedule-test/successful-handler"
+                    :seon.schedule.fire/nominal-at nominal-at
+                    :seon.schedule.fire/observed-at observed-at})]
+        (seed-task! connection task-id
+                    "seon.schedule-test/successful-handler")
+        (db/transact! connection
+                      {:tx-data [[:db.fn/call #'schedule/fire-call request]]})
+        (schedule/recover-interrupted! connection "root"
+                                       (instant "2025-04-05T12:35:00Z"))
+        (is (= 0 (schedule/fire-due! connection "root" observed-at
+                                     (execution-context))))
+        (is (empty? @handler-calls))
+        (is (= 1 (count-with @connection
+                             :seon.maintenance.receipt/interrupted-at)))
+        (is (= 0 (count-with @connection
+                             :seon.maintenance.receipt/completed-at)))))))
+
+(deftest returned-and-thrown-handler-errors-use-the-existing-root-wake
+  (doseq [[task-id handler expected-kind]
+          [["schedule-test/returned" "seon.schedule-test/flat-error-handler"
+            :seon.schedule-test/returned-error]
+           ["schedule-test/thrown" "seon.schedule-test/throwing-handler"
+            :seon.schedule-test/thrown-failure]]]
+    (testing handler
+      (test-support/with-database
+        (fn [connection]
+          (reset! handler-calls [])
+          (seed-task! connection task-id handler)
+          (is (= 1 (schedule/fire-due!
+                    connection "root" (instant "2025-04-05T12:34:45Z")
+                    (execution-context))))
+          (is (= 1 (count @handler-calls)))
+          (is (= 1 (count-with @connection :seon.maintenance.receipt/id)))
+          (is (= 1 (count-with @connection :seon.maintenance.receipt/error)))
+          (is (= 1 (count-with @connection :seon.error/id)))
+          (is (= 1 (count-with @connection :seon.cluster.message/id)))
+          (is (= expected-kind
+                 (db/q '[:find ?kind .
+                         :where [_ :seon.error/kind ?kind]]
+                       @connection))))))))
+
+(deftest schedule-remains-the-third-proc-in-the-agent-graph
+  (let [definition
+        (agent/graph-definition
+         {:seon.cluster.loop/cluster {:seon.schedule/channel ::channel}
+          :seon.cluster.agent/id "root"})]
+    (is (= #{::agent/mailbox ::agent/turn ::agent/schedule}
+           (set (keys (:procs definition)))))))

@@ -4,5 +4,26 @@
                           [:map
                            {:seon.db/entity true}
                            [:seon.maintenance.result/id
-                            :seon.maintenance.result/id]],
+                            :seon.maintenance.result/id]
+                           [:seon.operator.footprint/root
+                            {:optional true}
+                            :seon.operator.footprint/root]
+                           [:seon.operator.footprint/file-bytes
+                            {:optional true}
+                            :seon.operator.footprint/file-bytes]
+                           [:seon.operator.footprint/usable-bytes
+                            {:optional true}
+                            :seon.operator.footprint/usable-bytes]
+                           [:seon.operator.footprint/total-bytes
+                            {:optional true}
+                            :seon.operator.footprint/total-bytes]
+                           [:seon.operator.footprint/usable-ratio
+                            {:optional true}
+                            :seon.operator.footprint/usable-ratio]
+                           [:seon.operator.footprint/observed-at
+                            {:optional true}
+                            :seon.operator.footprint/observed-at]
+                           [:seon.operator/low-space?
+                            {:optional true}
+                            :seon.operator/low-space?]],
                           :value :map}

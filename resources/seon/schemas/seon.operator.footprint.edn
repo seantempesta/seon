@@ -1,0 +1,6 @@
+#:seon.operator.footprint{:root :string
+                          :file-bytes [:int {:min 0}]
+                          :usable-bytes [:int {:min 0}]
+                          :total-bytes [:int {:min 0}]
+                          :usable-ratio :double
+                          :observed-at :inst}

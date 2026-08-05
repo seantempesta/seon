@@ -19,4 +19,23 @@
                  [:seon.cluster.agent/id :seon.cluster.agent/id]
                  [:seon.schedule/channel :seon.flow/channel]],
                 :channel :seon.flow/channel,
+                :execution-context
+                [:map
+                 [:seon.boot/cluster-name :seon.boot/cluster-name]
+                 [:seon.operator/repository-root
+                  :seon.operator/repository-root]
+                 [:seon.operator/managed-root :seon.operator/managed-root]
+                 [:seon.boot/log-dir :seon.boot/log-dir]
+                 [:seon.cluster.loop/cluster
+                  :seon.schedule/execution-handle]],
+                :execution-handle
+                [:map
+                 [:seon.cluster/name :seon.cluster/name]
+                 [:seon.cluster.run/process :seon.cluster.run/process]
+                 [:seon.sci.admit/caps :seon.sci.admit/caps]
+                 [:seon.config.error/recurrence-limit
+                  :seon.config.error/recurrence-limit]
+                 [:seon.config.error/escalate-to
+                  {:optional true}
+                  :seon.config.error/escalate-to]],
                 :fire-count [:int {:min 0}]}

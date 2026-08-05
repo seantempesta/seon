@@ -3,12 +3,17 @@
 
   Cron expressions are parsed by cron-utils. Seon owns only the database
   identities and the `java.time` conversion to nominal instants. Every due
-  instant is committed atomically with an ordinary outside-origin message;
-  the message's existing `to` datom is the owning graph's wake."
+  instant claims one durable maintenance receipt. The existing per-agent
+  schedule proc calls the declared Var directly; only an error settlement
+  creates a message, through `seon.error/commit-tx`."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
+            [clojure.java.io :as io]
             [datahike.api :as d]
+            [seon.config :as config]
             [seon.db :as db]
+            [seon.error :as error]
+            [seon.operator.runtime :as operator.runtime]
             [seon.schema.edn :as schema.edn])
   (:import [com.cronutils.model Cron CronType]
            [com.cronutils.model.definition CronDefinitionBuilder]
@@ -152,42 +157,108 @@
        (sort)
        last))
 
+(defn- nominal-fire-id
+  [task-id nominal-at]
+  (pr-str [task-id nominal-at]))
+
+(defn- receipt-identity
+  [claimed-fire-id]
+  (str "maintenance-receipt/" claimed-fire-id))
+
+(defn- request-identity
+  [claimed-fire-id]
+  (str "maintenance-request/" claimed-fire-id))
+
+(defn- result-identity
+  [claimed-receipt-id]
+  (str "maintenance-result/" claimed-receipt-id))
+
+(defn- error-identity
+  [claimed-receipt-id]
+  (str "maintenance-error/" claimed-receipt-id))
+
+(defn- request-entity
+  [request task-eid function-eid fire-tempid request-tempid]
+  (cond-> {:db/id request-tempid
+           :seon.maintenance.request/id
+           (request-identity (:seon.schedule.fire/id request))
+           :seon.maintenance.request/task task-eid
+           :seon.maintenance.request/fire fire-tempid
+           :seon.maintenance.request/handler function-eid
+           :seon.maintenance.request/agent
+           [:seon.cluster.agent/id (:seon.cluster.agent/id request)]
+           :seon.maintenance.request/cluster-name
+           (:seon.boot/cluster-name request)
+           :seon.maintenance.request/repository-root
+           (:seon.operator/repository-root request)
+           :seon.maintenance.request/managed-root
+           (:seon.operator/managed-root request)
+           :seon.maintenance.request/log-dir
+           (:seon.boot/log-dir request)
+           :seon.maintenance.request/nominal-at
+           (:seon.schedule.fire/nominal-at request)
+           :seon.maintenance.request/observed-at
+           (:seon.schedule.fire/observed-at request)}
+    (:seon.config.maintenance/min-usable-bytes request)
+    (assoc :seon.config.maintenance/min-usable-bytes
+           (:seon.config.maintenance/min-usable-bytes request))
+    (:seon.config.maintenance/min-usable-ratio request)
+    (assoc :seon.config.maintenance/min-usable-ratio
+           (:seon.config.maintenance/min-usable-ratio request))
+    (:seon.config.maintenance/log-max-bytes request)
+    (assoc :seon.config.maintenance/log-max-bytes
+           (:seon.config.maintenance/log-max-bytes request))
+    (contains? request :seon.config.maintenance/log-retained-files)
+    (assoc :seon.config.maintenance/log-retained-files
+           (:seon.config.maintenance/log-retained-files request))))
+
 (defn fire-call
-  "Transaction function for one nominal fire and its ordinary message.
+  "Claim one nominal fire and its maintenance receipt atomically.
 
   An existing fire identity returns no transaction data, making retries and
-  restart derivation idempotent at the serial writer. The declaration is also
-  checked here: the task still belongs to the requested agent and its function
-  still lives in that agent's assigned namespace."
+  restart derivation idempotent at the serial writer. The transaction snapshots
+  the task's exact declared function without restricting its namespace."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.schedule.fire/request]
     :seon.store/transaction-data]}
   [database
    {task-id :seon.schedule.task/id
+    requested-fire-id :seon.schedule.fire/id
     agent-id :seon.cluster.agent/id
     function :seon.fn/sym
     nominal-at :seon.schedule.fire/nominal-at
-    observed-at :seon.schedule.fire/observed-at}]
-  (let [fire-id (pr-str [task-id nominal-at])
+    observed-at :seon.schedule.fire/observed-at
+    :as request}]
+  (let [derived-fire-id (nominal-fire-id task-id nominal-at)
+        claimed-receipt-id (receipt-identity derived-fire-id)
         existing (db/q '[:find ?fire .
                          :in $ ?id
                          :where [?fire :seon.schedule.fire/id ?id]]
-                       database fire-id)
+                       database derived-fire-id)
+        existing-receipt
+        (db/q '[:find ?receipt .
+                :in $ ?id
+                :where [?receipt :seon.maintenance.receipt/id ?id]]
+              database claimed-receipt-id)
         declaration
         (first
-         (db/q '[:find ?owner-id ?function-sym ?namespace-name
+         (db/q '[:find ?task ?owner-id ?function ?function-sym
                  :in $ ?task-id
                  :where
                  [?task :seon.schedule.task/id ?task-id]
                  [?task :seon.schedule.task/owner ?owner]
                  [?owner :seon.cluster.agent/id ?owner-id]
-                 [?owner :seon.cluster.agent/namespace ?namespace]
-                 [?namespace :seon.ns/name ?namespace-name]
                  [?task :seon.schedule.task/function ?function]
                  [?function :seon.fn/sym ?function-sym]]
                database task-id))]
     (cond
-      existing []
+      (or existing existing-receipt) []
+
+      (not= requested-fire-id derived-fire-id)
+      (throw (ex-info "The scheduled fire identity is not nominal-derived."
+                      {:seon.error/kind ::invalid-fire-id
+                       :seon.schedule.fire/id requested-fire-id
+                       :seon.schedule.fire/derived-id derived-fire-id}))
 
       (nil? declaration)
       (throw (ex-info "The scheduled task declaration is incomplete."
@@ -195,31 +266,211 @@
                        :seon.schedule.task/id task-id}))
 
       :else
-      (let [[declared-owner declared-function namespace-name] declaration
-            function-namespace (some-> function symbol namespace symbol)]
+      (let [[task-eid declared-owner function-eid declared-function]
+            declaration]
         (when-not (and (= agent-id declared-owner)
-                       (= function declared-function)
-                       (= namespace-name function-namespace))
+                       (= function declared-function))
           (throw
-           (ex-info "The scheduled task owner, namespace, or function changed."
+           (ex-info "The scheduled task owner or function changed."
                     {:seon.error/kind ::invalid-task-owner
                      :seon.schedule.task/id task-id
                      :seon.cluster.agent/id agent-id
                      :seon.fn/sym function})))
-        (let [message-id (str "schedule-fire/" fire-id)
-              fire-tempid (str message-id "/fire")]
+        (let [fire-tempid (str "schedule-fire/" derived-fire-id)
+              request-tempid (str fire-tempid "/request")]
           [{:db/id fire-tempid
-            :seon.schedule.fire/id fire-id
+            :seon.schedule.fire/id derived-fire-id
             :seon.schedule.fire/task [:seon.schedule.task/id task-id]
             :seon.schedule.fire/nominal-at nominal-at
             :seon.schedule.fire/observed-at observed-at}
-           {:seon.cluster.message/id message-id
-            :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
-            :seon.cluster.message/content
-            (str "Scheduled task " task-id " fired. Call (" function " "
-                 (pr-str {:seon.schedule.fire/id fire-id}) ").")
-            :seon.cluster.message/at observed-at
-            :seon.cluster.message/ordinal 0}])))))
+           (request-entity request task-eid function-eid fire-tempid
+                           request-tempid)
+           {:seon.maintenance.receipt/id claimed-receipt-id
+            :seon.maintenance.receipt/fire fire-tempid
+            :seon.maintenance.receipt/task task-eid
+            :seon.maintenance.receipt/handler function-eid
+            :seon.maintenance.receipt/request request-tempid
+            :seon.maintenance.receipt/started-at observed-at}])))))
+
+(defn- terminal-receipt
+  [database claimed-receipt-id]
+  (when-let [receipt-eid
+             (db/q '[:find ?receipt .
+                     :in $ ?id
+                     :where [?receipt :seon.maintenance.receipt/id ?id]]
+                   database claimed-receipt-id)]
+    {:db/id receipt-eid
+     :seon.maintenance.receipt/terminal-attributes
+     (set
+      (db/q '[:find [?attribute ...]
+              :in $ ?receipt [?attribute ...]
+              :where [?receipt ?attribute _]]
+            database receipt-eid
+            [:seon.maintenance.receipt/completed-at
+             :seon.maintenance.receipt/interrupted-at
+             :seon.maintenance.receipt/result
+             :seon.maintenance.receipt/error]))}))
+
+(defn- settle-call
+  "Attach exactly one terminal result or error to a claimed receipt."
+  [database
+   {claimed-receipt-id :seon.maintenance.receipt/id
+    completed-at :seon.maintenance.receipt/completed-at
+    arm :seon.maintenance.settlement/arm
+    result :seon.maintenance.settlement/result
+    error-request :seon.maintenance.settlement/error-request}]
+  (let [receipt (terminal-receipt database claimed-receipt-id)]
+    (cond
+      (nil? receipt)
+      (throw (ex-info "The maintenance receipt does not exist."
+                      {:seon.error/kind ::missing-receipt
+                       :seon.maintenance.receipt/id claimed-receipt-id}))
+
+      (seq (:seon.maintenance.receipt/terminal-attributes receipt))
+      []
+
+      (= :result arm)
+      (let [result-tempid (str "maintenance-result/" claimed-receipt-id)]
+        [(assoc (dissoc result :db/id)
+                :db/id result-tempid
+                :seon.maintenance.result/id
+                (result-identity claimed-receipt-id))
+         {:db/id [:seon.maintenance.receipt/id claimed-receipt-id]
+          :seon.maintenance.receipt/completed-at completed-at
+          :seon.maintenance.receipt/result result-tempid}])
+
+      (= :error arm)
+      (let [error-tx (error/commit-tx database error-request)
+            error-tempid (:db/id (first error-tx))]
+        (conj error-tx
+              {:db/id [:seon.maintenance.receipt/id claimed-receipt-id]
+               :seon.maintenance.receipt/completed-at completed-at
+               :seon.maintenance.receipt/error error-tempid}))
+
+      :else
+      (throw (ex-info "The maintenance terminal arm is invalid."
+                      {:seon.error/kind ::invalid-terminal-arm
+                       :seon.maintenance.settlement/arm arm})))))
+
+(defn- interrupt-call
+  "Mark every unterminated receipt for one agent interrupted."
+  [database agent-id interrupted-at]
+  (->> (db/q '[:find [?receipt ...]
+               :in $ ?agent-id
+               :where
+               [?agent :seon.cluster.agent/id ?agent-id]
+               [?task :seon.schedule.task/owner ?agent]
+               [?receipt :seon.maintenance.receipt/task ?task]
+               (not [?receipt :seon.maintenance.receipt/completed-at _])
+               (not [?receipt :seon.maintenance.receipt/result _])
+               (not [?receipt :seon.maintenance.receipt/error _])
+               (not [?receipt :seon.maintenance.receipt/interrupted-at _])]
+             database agent-id)
+       sort
+       (mapv (fn [receipt-eid]
+               {:db/id receipt-eid
+                :seon.maintenance.receipt/interrupted-at interrupted-at}))))
+
+(defn- transact-result!
+  [connection tx-data refusal-kind refusal-data]
+  (let [result (db/transact! connection {:tx-data tx-data})]
+    (when (:seon.error/kind result)
+      (throw (ex-info "The maintenance receipt transaction was refused."
+                      (assoc refusal-data
+                             :seon.error/kind refusal-kind
+                             :seon.schedule/result result))))
+    result))
+
+(defn- flat-error?
+  [value]
+  (and (map? value)
+       (keyword? (:seon.error/kind value))
+       (string? (:seon.error/message value))))
+
+(def ^:private maintenance-dials
+  [:seon.config.maintenance/min-usable-bytes
+   :seon.config.maintenance/min-usable-ratio
+   :seon.config.maintenance/log-max-bytes
+   :seon.config.maintenance/log-retained-files])
+
+(defn- canonical-path
+  [path]
+  (.getCanonicalPath (io/file path)))
+
+(defn- execution-context
+  [database cluster]
+  (let [cluster-name (:seon.cluster/name cluster)
+        effective (config/effective database cluster-name)
+        instance (get @operator.runtime/running-instances cluster-name)
+        repository-root
+        (canonical-path (or (System/getProperty "seon.repository.root")
+                            (System/getProperty "user.dir")))
+        managed-root
+        (canonical-path (or (System/getProperty "seon.operator.root")
+                            repository-root))
+        log-dir
+        (canonical-path
+         (or (get-in instance [:seon.boot/config :seon.boot/log-dir])
+             (io/file managed-root "data" "clusters" cluster-name "logs")))]
+    (merge (select-keys effective maintenance-dials)
+           {:seon.boot/cluster-name cluster-name
+            :seon.operator/repository-root repository-root
+            :seon.operator/managed-root managed-root
+            :seon.boot/log-dir log-dir})))
+
+(defn- error-request
+  [cluster claimed-receipt-id agent-id source completed-at]
+  (cond-> {:seon.error/source source
+           :seon.error/id (error-identity claimed-receipt-id)
+           :seon.error/at completed-at
+           :seon.error/process (:seon.cluster.run/process cluster)
+           :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+           :seon.config.error/recurrence-limit
+           (:seon.config.error/recurrence-limit cluster)
+           :seon.cluster.agent/id agent-id}
+    (:seon.config.error/escalate-to cluster)
+    (assoc :seon.config.error/escalate-to
+           (:seon.config.error/escalate-to cluster))))
+
+(defn- settle!
+  [connection cluster claimed-receipt-id agent-id result-or-failure]
+  (let [completed-at (Date.)
+        result (:seon.maintenance.settlement/result result-or-failure)
+        failure (:seon.maintenance.settlement/failure result-or-failure)
+        returned-error? (flat-error? result)
+        source (cond
+                 failure failure
+                 returned-error?
+                 (ex-info (:seon.error/message result) result)
+                 :else nil)
+        request
+        (cond-> {:seon.maintenance.receipt/id claimed-receipt-id
+                 :seon.maintenance.receipt/completed-at completed-at}
+          source
+          (assoc :seon.maintenance.settlement/arm :error
+                 :seon.maintenance.settlement/error-request
+                 (error-request cluster claimed-receipt-id agent-id source
+                                completed-at))
+          (nil? source)
+          (assoc :seon.maintenance.settlement/arm :result
+                 :seon.maintenance.settlement/result result))]
+    (transact-result!
+     connection
+     [[:db.fn/call #'settle-call request]]
+     ::settlement-refused
+     {:seon.maintenance.receipt/id claimed-receipt-id})))
+
+(defn- invoke-handler
+  [function request]
+  (try
+    (let [handler (requiring-resolve (symbol function))]
+      (when-not handler
+        (throw (ex-info "The scheduled handler Var does not resolve."
+                        {:seon.error/kind ::unresolved-handler
+                         :seon.fn/sym function})))
+      {:seon.maintenance.settlement/result (handler request)})
+    (catch Throwable failure
+      {:seon.maintenance.settlement/failure failure})))
 
 (defn fire-due!
   "Commit at most the latest due nominal instant for each task of `agent-id`.
@@ -228,10 +479,31 @@
   manufacture an unbounded replay storm. Returns the number of newly committed
   fires."
   {:malli/schema
-   [:=> [:cat :seon.db/connection :seon.cluster.agent/id :inst]
-    :seon.schedule/fire-count]}
-  [connection agent-id observed-at]
-  (reduce
+   [:function
+    [:=> [:cat :seon.db/connection :seon.cluster.agent/id :inst]
+     :seon.schedule/fire-count]
+    [:=> [:cat :seon.db/connection :seon.cluster.agent/id :inst
+          :seon.schedule/execution-context]
+     :seon.schedule/fire-count]]}
+  ([connection agent-id observed-at]
+   (let [cluster-name
+         (or (db/q '[:find ?cluster-name .
+                     :where [_ :seon.cluster/name ?cluster-name]]
+                   @connection)
+             "default")
+         instance (get @operator.runtime/running-instances cluster-name)
+         cluster (:seon.cluster.loop/cluster instance)]
+     (when-not cluster
+       (throw (ex-info "The cluster execution handle is unavailable."
+                       {:seon.error/kind ::missing-execution-handle
+                        :seon.cluster/name cluster-name})))
+     (fire-due! connection agent-id observed-at
+                (assoc (execution-context @connection cluster)
+                       :seon.cluster.loop/cluster cluster))))
+  ([connection agent-id observed-at context]
+   (let [cluster (:seon.cluster.loop/cluster context)
+         common-request (dissoc context :seon.cluster.loop/cluster)]
+    (reduce
    (fn [fire-count task]
      (let [database @connection
            last-fire (latest-fire-at database (:db/id task))
@@ -242,29 +514,46 @@
              :seon.schedule/reference-at observed-at})]
        (if (and nominal
                 (or (nil? last-fire) (.after ^Date nominal ^Date last-fire)))
-         (let [result
-               (db/transact!
+         (let [task-id (:seon.schedule.task/id task)
+               claimed-fire-id (nominal-fire-id task-id nominal)
+               request
+               (merge common-request
+                      {:seon.schedule.task/id task-id
+                       :seon.schedule.fire/id claimed-fire-id
+                       :seon.cluster.agent/id agent-id
+                       :seon.fn/sym (:seon.fn/sym task)
+                       :seon.schedule.fire/nominal-at nominal
+                       :seon.schedule.fire/observed-at observed-at})
+               result
+               (transact-result!
                 connection
-                {:tx-data
-                 [[:db.fn/call #'fire-call
-                   {:seon.schedule.task/id (:seon.schedule.task/id task)
-                    :seon.cluster.agent/id agent-id
-                    :seon.fn/sym (:seon.fn/sym task)
-                    :seon.schedule.fire/nominal-at nominal
-                    :seon.schedule.fire/observed-at observed-at}]]})]
-           (when (:seon.error/kind result)
-             (throw (ex-info "The scheduled fire transaction was refused."
-                             {:seon.error/kind ::fire-refused
-                              :seon.schedule.task/id
-                              (:seon.schedule.task/id task)
-                              :seon.schedule/result result})))
-           (if (some #(= :seon.schedule.fire/id (nth % 1))
-                     (:tx-data result))
-             (inc fire-count)
+                [[:db.fn/call #'fire-call request]]
+                ::fire-refused
+                {:seon.schedule.task/id task-id})
+               claimed?
+               (some #(= :seon.maintenance.receipt/id (nth % 1))
+                     (:tx-data result))]
+           (if claimed?
+             (do
+               (settle! connection cluster (receipt-identity claimed-fire-id)
+                        agent-id
+                        (invoke-handler (:seon.fn/sym task) request))
+               (inc fire-count))
              fire-count))
          fire-count)))
    0
-   (task-rows @connection agent-id)))
+   (task-rows @connection agent-id)))))
+
+(defn recover-interrupted!
+  "Mark claim-only receipts interrupted before deriving scheduled work."
+  {:malli/schema
+   [:=> [:cat :seon.db/connection :seon.cluster.agent/id :inst] :map]}
+  [connection agent-id interrupted-at]
+  (transact-result!
+   connection
+   [[:db.fn/call #'interrupt-call agent-id interrupted-at]]
+   ::recovery-refused
+   {:seon.cluster.agent/id agent-id}))
 
 (defn- earliest-next-at
   [database agent-id reference-at]
@@ -349,6 +638,9 @@
      (case transition
        ::flow/resume
        (do
+         (recover-interrupted! connection
+                               (:seon.cluster.agent/id state)
+                               (Date.))
          (d/listen connection listener-key
                    (fn [report]
                      (when (relevant-report? report)
@@ -373,7 +665,11 @@
                                    :seon.db/connection])
          agent-id (:seon.cluster.agent/id state)
          observed-at (Date.)
-         fires (fire-due! connection agent-id observed-at)
+         cluster (get-in state [:seon.cluster.loop/cluster])
+         fires (fire-due!
+                connection agent-id observed-at
+                (assoc (execution-context @connection cluster)
+                       :seon.cluster.loop/cluster cluster))
          next-at (earliest-next-at @connection agent-id observed-at)]
      [(-> state
           (update ::passes inc)
