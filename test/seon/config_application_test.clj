@@ -59,6 +59,7 @@
    :seon.config.maintenance/min-usable-ratio :live
    :seon.config.maintenance/log-max-bytes :live
    :seon.config.maintenance/log-retained-files :live
+   :seon.config.operator/event-silence-backstop-ms :arm-time
    :seon.config.message/max-chain :arm-time
    :seon.config.run/max-episode-runs :live
    :seon.config.web/port :arm-time
@@ -200,7 +201,7 @@
   (into []
         (mapcat :seon.fn.file/rows)
         (:seon.fn.manifest/artifacts
-         (seon.fn/build-manifest {:seon.fn/roots ["src"]}))))
+         (seon.fn/build-manifest {:seon.fn/roots ["src" "script"]}))))
 
 (deftest every-config-entry-has-an-honest-application-contract
   (let [registered
@@ -212,7 +213,7 @@
     (testing "the program graph, not a hand list, names each dial's consumer"
       (let [rows (source-rows)]
         (is (= #{} (unapplied-families rows registered))
-            (str "a registered config family no indexed src/ function reads "
+            (str "a registered config family no indexed first-party function reads "
                  "is a dead dial: nothing in the running system applies it"))
         (is (= ["seon.fs.jvm/glob"]
                (vec (get (consumers-by-attribute rows registered)
