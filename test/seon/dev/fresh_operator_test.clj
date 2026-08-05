@@ -1510,10 +1510,11 @@
           :seon.boot/instance instance}
          (ex-info
           "A reachability sweep is in progress."
-          {:type :sweep-in-progress
-           :retryable? true
-           :store-id (random-uuid)
-           :maintenance-receipt {:seon.maintenance.receipt/id "sweep-1"}}))]
+          {:seon.error/kind :sweep-in-progress
+           :seon.error/retryable? true
+           :seon.store/id (random-uuid)
+           :datahike.gc-guard/maintenance-receipt
+           {:seon.maintenance.receipt/id "sweep-1"}}))]
     (with-redefs [cluster/start! (fn [_request] (throw failure))
                   cluster/stop! (fn [stopped-instance]
                                   (swap! stopped conj stopped-instance))
@@ -1521,9 +1522,8 @@
                   (fn [_request]
                     (throw (ex-info "a refused start must not instrument" {})))]
       (let [refusal (eval (read-string form))]
-        (is (= :sweep-in-progress (:type refusal)))
         (is (= :sweep-in-progress (:seon.error/kind refusal)))
-        (is (true? (:retryable? refusal)))
+        (is (true? (:seon.error/retryable? refusal)))
         (is (= [instance] @stopped))))))
 
 (deftest ^{:seon.test/long "Loads and instruments schemas in a genuinely fresh operator process."}
