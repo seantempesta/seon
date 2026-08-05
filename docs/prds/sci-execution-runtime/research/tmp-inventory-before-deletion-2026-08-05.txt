@@ -1,0 +1,25 @@
+ 88G	tmp/render-live-proof
+ 38G	tmp/seon-runtime-artifacts
+ 30G	tmp/render-adversarial-root
+ 15G	tmp/reset-proof
+ 12G	tmp/search-live-proof
+ 10G	tmp/seon-jvm-artifacts
+7.2G	tmp/jvm-tuning
+4.0G	tmp/orchestrator
+3.1G	tmp/schema-created-at-saving-2acf0c0b-5592-4867-b18c-e0b35d20a29a
+3.1G	tmp/schema-created-at-saving-01f3dd29-936b-4be9-953a-c0e79ad9686e
+2.0G	tmp/store-census-20260802
+1.9G	tmp/shadow
+1.8G	tmp/perf-fsync
+1.7G	tmp/bootstrap-drives-rerun-20260805T000202Z
+1.5G	tmp/seon-template-stores
+1.0G	tmp/repl-dogfood-0804-root
+891M	tmp/repl-dogfood-edgefaces-0804
+694M	tmp/seon-runtime-slice3-opt-seon.tar
+680M	tmp/load-testing
+638M	tmp/tb-venv
+623M	tmp/schema-allocation-fix
+493M	tmp/mcp-envelope-0804
+454M	tmp/session-curation-replay-2026-08-04
+442M	tmp/mini-swe-venv
+432M	tmp/slice2-venv

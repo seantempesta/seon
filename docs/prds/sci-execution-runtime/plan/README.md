@@ -528,6 +528,82 @@ Evidence base: eight paired sol/Opus research lanes (indexed in the PRD).
   Acquisition by other agents then follows at their next run boundary from
   main.
 
+### Rulings 2026-08-05 (owner, fresh stewardship session) — root causes first, consolidation over patching
+
+Standing direction for this session, owner verbatim: *"I want to address
+all slowness and hard coded waits and all the fragile shit first"* and
+*"find root causes for everything before we do any work. I want to
+consolidate and rename and fix things not just keep patching them.
+Removing old bad code is a priority."* Rulings:
+
+- **P21 process records: THE CLAIMS AUTHORITY SURVIVES.**
+  `data/operator/claims/` (installation-wide, claim-before-create) is
+  the ONE process-record location; the legacy per-root
+  `data/clusters/processes/` directory AND every code path that reads
+  or re-derives from it are deleted in the same commit. No migration —
+  reset wipes (the no-migration ruling applies).
+- **Hardcoded waits: EVENT-DRIVEN WITH A LOUD SILENCE BACKSTOP.** The
+  wrapper's readiness wait drops the flat 30 s total-time clock: boot
+  phase lines on the ready socket are the events; process exit,
+  failure line, and socket EOF are hard events; the only clock left is
+  a per-phase silence backstop — a CONFIG FACT, not a literal — whose
+  firing is itself a bug report. The same treatment applies to the
+  operator's other five constants (audit each: what event is it
+  standing in for?) and to `disarm!`'s inverse defect (an unbounded
+  wait with no event and no backstop).
+- **Boot speed: MEASURE, THEN DECIDE.** One warm-dependency-cache
+  end-to-end boot measurement against the ten-second law; a lane
+  resumes the load-time work only if the cache does not already close
+  the gap.
+- **DELETION SWEEP FULLY AUTHORIZED, all four scopes:** (1) the
+  ~245 GB `tmp/` frozen evidence (numbers referenced by open issues
+  are recorded in those issues before deletion); (2) the CLJS-era
+  roots — `pod-host/`, `src-diffusion/`, `client-runtime/`,
+  `externs/`, `bootstrap/`, old `evals/runs` workspaces; (3)
+  **`src-old/` and `test-old/`** — the quarry leaves the working tree,
+  git history is the archive; (4) legacy operator code paths (the
+  losing record location above, plus retracted mechanisms proven
+  unreferenced by query before deletion).
+
+Session evidence: P19 resolved same day (`9e44815f5`) — the boot was a
+~94 s recursive footprint walk of the whole checkout on the boot path,
+whose result the low-space decision never read; see the state
+document's P19 resolution block. The sweep executed same day: `tmp/`
+purged (245 GB → 1 MB; usable disk 667 → 911 GiB), the CLJS-era
+untracked roots removed, and `src-old/`+`test-old/` deleted
+(`099cdfa99`, 124,580 lines).
+
+**Second ruling batch, same session:**
+
+- **P1 STORAGE RECLAMATION: EXCLUSIVE SWEEP.** Collection takes the
+  branch-creation lock — no fork/`branch!` may start while a sweep
+  runs, and the sweep's whitelist is computed under that exclusivity;
+  `bin/seon start` during a sweep waits or refuses loudly. The
+  branch-resurrection race becomes unrepresentable rather than
+  detected. The SECOND instance stands on its own under any option:
+  blobs written before their referencing datom commits
+  (`seon.blob/put!`/`put-binary!`, 6 call sites) need their own guard.
+  The reconnect falsifier must be strengthened to cover the
+  batch-contains-needed-node case before the one-time 357 GiB reclaim
+  runs. This supersedes the 08-05 preemptible-sweep ruling.
+- **P13 SESSION IMAGE: settled by DESIGN CONVERSATION with the owner
+  first** — what SCI can prove immutable/pure, whether the rows
+  duplicate program facts, what honest restoration looks like. No lane
+  touches the mechanism until that conversation rules.
+- **R8 MAINTENANCE FIRES ARE TURN-FREE; ROOT READS THE RECEIPTS**
+  (owner verbatim): "if there are no errors the root will just have it
+  as part of the initial forms that run to list what maintenance ran
+  without problems (concise for green detailed and also concise for
+  red and any errors trigger wakeup." So: scheduled maintenance
+  executes without a model call and commits ordinary receipts; root's
+  initial forms carry a maintenance-report query — concise when green,
+  concise-but-detailed when red — and an ERROR is what triggers an
+  actual wakeup turn. Root still owns the schedule facts; the model is
+  consulted for judgment, never for mechanical execution.
+- **THE RENAME + RESET + REBUILD PASS runs after the current lanes
+  land**, on a frozen tree, with the boot+query proof bar — before any
+  new feature lanes launch.
+
 ### Rulings 2026-07-27 session 2 (owner, conversational) — the fresh tree IS the project
 
 - **Stop thinking temporary; drop the "nucleus" vocabulary.** The fresh
