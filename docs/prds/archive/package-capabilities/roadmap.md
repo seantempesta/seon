@@ -1,6 +1,6 @@
 ---
 type: prd
-status: active
+status: archived
 tags: [prd, agent, architecture]
 ---
 
@@ -22,7 +22,7 @@ tags: [prd, agent, architecture]
   improve the API and teaching; a final quality pass later is acceptable.
 - **Goal-oriented testing over checklist testing.** The acceptance for each
   capability is a benchmark-shaped goal achieved end-to-end, plus robustness
-  gates. Correctness gates, not style ([[../../seon/architecture/laws]];
+  gates. Correctness gates, not style ([[../../../seon/architecture/laws]];
   scorers gate correctness).
 
 ## Outcome
@@ -48,7 +48,7 @@ pipeline (trustworthy trajectories: real goals, real friction, real fixes).
   gate.
 - The npm **execution-host decision** (pod vs per-cluster disposable Bun
   package host) is an open owner decision from
-  [[../sci-execution-runtime/research/audit-benchmark-pkg-readiness-2026-07-21]].
+  [[../../sci-execution-runtime/research/audit-benchmark-pkg-readiness-2026-07-21]].
   Phase 0 does not depend on it (children isolate). Phase 1 browser/native
   work lands wherever that ruling places it.
 - Each unit begins with a dependency ledger: exact package pin, its source
@@ -100,7 +100,7 @@ Unit template (every capability):
 ## What this PRD does not own
 
 - The `my.pkg/install` mechanism, per-cluster package roots, and the
-  execution-host ruling — [[../sci-execution-runtime/roadmap]] U13.
+  execution-host ruling — [[../../sci-execution-runtime/roadmap]] U13.
 - The deleted pod-era generate-code scheduler/worker-context machinery is
   historical quarry in [[../generate-code/roadmap]]; current sequencing stays
   in the SCI execution-runtime program.
