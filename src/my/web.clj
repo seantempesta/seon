@@ -1,6 +1,5 @@
 (ns my.web
   "Fetch web resources and search the configured provider."
-  (:refer-clojure :exclude [fetch])
   (:require [seon.effect :as effect]
             [seon.schema.edn :as schema.edn]))
 
