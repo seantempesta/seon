@@ -63,4 +63,4 @@
                    :rule :keyword,
                    :transition :keyword,
                    :refused :seon.cluster.run/rule
-                   :refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/refusal-prose :seon.render/html seon.error/render-html :error/message "must identify the run rule that refused its transition"} :seon.error/refusal-value [:map [:seon.cluster.run/refused :seon.cluster.run/refused]]]}
+                   :refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/refusal-prose :seon.render/html seon.error/render-html :gen/schema [:map [:seon.cluster.run/refused :seon.cluster.run/refused] [:seon.error/message :seon.error/message]] :error/message "must identify the run rule that refused its transition"} :seon.error/refusal-value [:map [:seon.cluster.run/refused :seon.cluster.run/refused]]]}

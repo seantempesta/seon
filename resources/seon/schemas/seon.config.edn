@@ -42,7 +42,7 @@
               :path [:string {:min 1}],
               :key :qualified-keyword,
               :refused :seon.config/rule
-              :refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the refused configuration rule"} :seon.error/refusal-value [:map [:seon.config/refused :seon.config/refused]]]
+              :refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :gen/schema [:map [:seon.config/refused :seon.config/refused] [:seon.error/message :seon.error/message]] :error/message "must identify the refused configuration rule"} :seon.error/refusal-value [:map [:seon.config/refused :seon.config/refused]]]
               :manifest-unreadable :seon.config/path
               :manifest-unreadable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the configuration manifest that could not be read"} [:seon.config/manifest-unreadable :seon.config/manifest-unreadable] [:seon.error/message :seon.error/message]]
               :reconcile-refused :seon.config/rule

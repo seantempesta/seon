@@ -20,7 +20,7 @@
                   :seon.error/value],
                  :rule :keyword,
                  :refused :seon.reconcile/rule
-                 :refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the refused reconciliation rule"} :seon.error/refusal-value [:map [:seon.reconcile/refused :seon.reconcile/refused]]]
+                 :refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :gen/schema [:map [:seon.reconcile/refused :seon.reconcile/refused] [:seon.error/message :seon.error/message]] :error/message "must identify the refused reconciliation rule"} :seon.error/refusal-value [:map [:seon.reconcile/refused :seon.reconcile/refused]]]
                  :no-identity [:= true]
                  :no-identity-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a reconciled row with no identity attribute"} [:seon.reconcile/no-identity :seon.reconcile/no-identity] [:seon.error/message :seon.error/message]]
                  :two-identities [:= true]
