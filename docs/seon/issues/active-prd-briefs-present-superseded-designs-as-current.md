@@ -1,7 +1,8 @@
 ---
 type: issue
 status: open
-severity: blocker
+severity-note: downgraded from blocker 2026-08-06 — see Resolution progress
+severity: normal
 tags: [issue, prd, documentation, orchestrator]
 ---
 
@@ -62,3 +63,22 @@ current `plan/` briefs, and the top-level PRD folder lifecycle.
   lifecycle.
 - Historical rename referents remain intact; the cleanup changes authority and
   navigation, not dated evidence.
+
+## Resolution progress — 2026-08-06
+
+Everything except one residual item is fixed and verified:
+
+- Superseded executable briefs carry truthful `status: superseded` frontmatter
+  plus superseding-authority pointers (`f1dce1e00`, spot-verified on
+  `seondb-facade-contract-spec.md` and `stateless-resume-design-2026-08-01.md`).
+- The top-level PRD lifecycle map matches reality after the six-folder archive
+  (`72baef57d`); `package-capabilities` is archived (`962256fb5`).
+- The stale `operational-events` links now point at the archived
+  `operator-integration` location (`2f99cfc41`).
+
+REMAINING (why this stays open, at normal severity): `operational-events` is one
+of the four retained PRDs pending an owner decision — keep with a re-grounded
+current dependency edge (current `seon.operator` source and the sealed
+operations/maintenance spec, not archived implementation history) or archive.
+The link redirect above is honest but interim. Owner decision rides the
+conditional-folders batch from the 2026-08-06 drift audit.
