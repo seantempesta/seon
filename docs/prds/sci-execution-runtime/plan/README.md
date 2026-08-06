@@ -824,6 +824,13 @@ substance so far:
   2026-08-06 audits' approved deletion sweep and doc-drift repairs are
   recorded in the working edge.
 
+**Second batch, same session (owner, via the refresh questions):**
+
+- **ID POLICY CONFIRMED by archaeology** ([result-identity-archaeology-2026-08-06.md](result-identity-archaeology-2026-08-06.md) — path under `../research/`): one identity policy — a durable row's id IS its Datahike entity id; the agent-visible face is `<kind>/<eid>`; pre-commit allocation survives only for scheduled fires (`(task-eid, nominal-at)` replay key) and blobs (SHA-256 content identity); the old CUID allocator and process-local retention authority stay dead; run/message/error pre-commit UUIDs are API shape to delete, not necessity.
+- **OPERATIONAL EVENTS: fact commits IN THE OWNING TRANSITION TRANSACTION** (producer returns pure tx-data; atomic with the transition); **NO event opens an agent turn by default** — events are queryable rendered facts; root reads them in the maintenance report; errors wake via the existing path.
+- **BACKGROUND WORK: one wait primitive** — a background effect participates in `wait` via its durable effect-receipt ref (wait's target schema widens; no distinct disposition survives), and its completed handle is **`result/<receipt-eid>`** — the same reference syntax as eval results, no allocated identity.
+- **Boot regression found and dispatched, same session:** the sweep-gate wave widened the fork-internal `datahike.versioning/branch!` with the permit opts arity (fork `56f1c621`) without widening the public `datahike.api/branch!` wrapper — every permit-carrying fresh boot fails at HEAD; fix assigned (api arity mirroring `force-branch!`).
+
 ### Rulings 2026-07-27 session 2 (owner, conversational) — the fresh tree IS the project
 
 - **Stop thinking temporary; drop the "nucleus" vocabulary.** The fresh
