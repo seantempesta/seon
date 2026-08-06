@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, deletion, flow, testing]
 ---
@@ -61,3 +61,13 @@ those graphs.
   `rg` finds no `planner-proc`, `namespace-owner-proc`,
   `source-enumerator-proc`, `indexer-proc`, `eval-proc`, or `mailbox-proc`.
 - Clojure lint reports no unused import/require at the cut seam.
+
+## Resolution
+
+The audit-finding unit deleted the 238-line production tail, the 707-line
+fake-agent suite, 85 lines of prototype-only schema, and the dependent
+prototype sections of `seon.flow-test`. Current fault fan-out tests now inject
+ordinary Flow error/report values directly, and the Flow Monitor proof uses the
+production work-launcher graph. Focused proof: `bin/test seon.flow-test` ran
+17 tests / 172 assertions with zero failures and zero errors. The path-limited
+implementation commit is identified by hash in the sweep summary.

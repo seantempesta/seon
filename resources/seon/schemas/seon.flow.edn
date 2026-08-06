@@ -1,17 +1,10 @@
-#:seon.flow{:active-evals
-            [:fn
-             {:error/message
-              "must be a process-local atom containing active evaluation state"
-              :gen/gen seon.flow/atom-reference-generator}
-             seon.flow/atom-reference?],
+#:seon.flow{
             :active-work
             [:fn
              {:error/message
               "must be a process-local atom containing active Flow work state"
               :gen/gen seon.flow/atom-reference-generator}
              seon.flow/atom-reference?],
-            :admitted? :boolean,
-            :attempt [:int {:min 0}],
             :buffer-capacity [:int {:min 1}],
             :callback-result
             [:or
@@ -32,13 +25,6 @@
             [:map
              [:seon.flow/parallelism :seon.flow/parallelism]
              [:seon.flow/active-work :seon.flow/active-work]],
-            :changed-namespace :symbol,
-            :changed-namespace-request
-            [:map
-             [:seon.flow/changed-namespace
-              :seon.flow/changed-namespace]
-             [:seon.flow/changed-source :seon.flow/changed-source]],
-            :changed-source :string,
             :channel
             [:fn
              {:error/message "must be a core.async channel"
@@ -52,17 +38,9 @@
             [:=>
              [:cat :seon.flow/core-fault]
              :seon.flow/callback-result],
-            :compile-namespace-fn
-            [:=>
-             [:cat :seon.flow/changed-namespace-request]
-             :seon.store/transaction-operation],
             :completion :seon.flow/channel,
             :compute-timeout-ms [:int {:min 1}],
             :core-fault :map,
-            :deliver!
-            [:=>
-             [:cat :seon.sci.admit/value]
-             :seon.flow/callback-result],
             :error-fanout
             [:map
              [:seon.flow/graph :seon.flow/graph]
@@ -88,25 +66,11 @@
              [:seon.flow/commit-fault! :seon.flow/commit-fault!]
              [:seon.flow/commit-drop! :seon.flow/commit-drop!]
              [:seon.flow/panic! :seon.flow/panic!]],
-            :escalated? :boolean,
-            :escalation-request
-            [:map
-             [:seon.flow/turn-count :seon.flow/turn-count]
-             [:seon.flow/failure-count :seon.flow/failure-count]
-             [:seon.flow/max-turns :seon.flow/max-turns]
-             [:seon.flow/max-failures :seon.flow/max-failures]],
-            :eval-proc-request
-            [:map
-             [:seon.flow/parallelism :seon.flow/parallelism]
-             [:seon.flow/active-evals :seon.flow/active-evals]
-             [:seon.flow/compute-timeout-ms
-              :seon.flow/compute-timeout-ms]],
             :executor
             [:fn
              {:error/message "must be a java.util.concurrent Executor"
               :gen/gen seon.flow/executor-generator}
              seon.flow/executor?],
-            :failure-count [:int {:min 0}],
             :fault-committer-proc-request
             [:map
              [:seon.flow/fault-channel :seon.flow/channel]
@@ -115,13 +79,6 @@
               :seon.flow/read-core-error-mode]
              [:seon.flow/commit-fault! :seon.flow/commit-fault!]
              [:seon.flow/panic! :seon.flow/panic!]],
-            :fix-outcome
-            [:enum
-             :seon.flow/fix-succeeds
-             :seon.flow/fix-fails
-             :seon.flow/fix-breaks-other-namespace
-             :seon.flow/no-response],
-            :fix-step-fn [:=> [:cat :map] :seon.flow/fix-outcome],
             :future
             [:fn
              {:error/message "must be a java.util.concurrent Future"
@@ -132,12 +89,6 @@
              {:error/message "must be a core.async Flow graph"
               :gen/gen seon.flow/graph-generator}
              seon.flow/graph?],
-            :indexer-proc-request
-            [:map
-             [:seon.flow/compile-namespace-fn
-              :seon.flow/compile-namespace-fn]
-             [:seon.flow/compute-timeout-ms
-              :seon.flow/compute-timeout-ms]],
             :join-error-request
             [:map
              [:seon.flow/started
@@ -159,46 +110,13 @@
               :seon.config.flow.io/queue-depth]
              [:seon.config.flow.io/concurrency
               :seon.config.flow.io/concurrency]],
-            :lineage-status
-            [:enum
-             :seon.flow/iterating
-             :seon.flow/escalated
-             :seon.flow/done],
-            :lineage-status-request
-            [:map
-             [:seon.flow/owner-count :seon.flow/owner-count]
-             [:seon.flow/successful-owners
-              :seon.flow/successful-owners]
-             [:seon.flow/escalated? :seon.flow/escalated?]
-             [:seon.flow/admitted? :seon.flow/admitted?]],
-            :mailbox-request
-            [:map [:seon.flow/deliver! :seon.flow/deliver!]],
-            :max-failures [:int {:min 1}],
-            :max-turns [:int {:min 1}],
-            :namespace-owner-proc-request
-            [:map [:seon.flow/fix-step-fn :seon.flow/fix-step-fn]],
-            :owner-count [:int {:min 1}],
-            :owner-ordinal [:int {:min 0}],
             :panic!
             [:=>
              [:cat :seon.flow/core-fault]
              :seon.flow/callback-result],
             :parallelism [:int {:min 1}],
-            :plan-step-fn [:=> [:cat :map] :map],
-            :planner-proc-request
-            [:map [:seon.flow/plan-step-fn :seon.flow/plan-step-fn]],
             :read-core-error-mode
             [:=> [:cat] :seon.config/on-core-error],
-            :read-sources [:=> [:cat] :seon.flow/sources],
-            :seed :int,
-            :seeded-outcome-request
-            [:map
-             [:seon.flow/seed :seon.flow/seed]
-             [:seon.flow/owner-ordinal :seon.flow/owner-ordinal]
-             [:seon.flow/attempt :seon.flow/attempt]],
-            :source-enumerator-proc-request
-            [:map [:seon.flow/read-sources :seon.flow/read-sources]],
-            :sources [:map-of :symbol :string],
             :started
             [:map
              [:report-chan :seon.flow/channel]
@@ -213,8 +131,6 @@
              [:seon.flow/workload [:= :io]]
              [:seon.flow/work-fn :seon.flow/work-fn]
              [:seon.flow/complete! :seon.flow/io-complete!]],
-            :successful-owners [:set :keyword],
-            :turn-count [:int {:min 0}],
             :work-call
             [:or
              [:map [:seon.flow/started! :seon.flow/started!]]

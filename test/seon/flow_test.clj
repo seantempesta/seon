@@ -3,7 +3,6 @@
             [clojure.core.async.impl.protocols :as async.impl]
             [clojure.core.async.flow :as flow]
             [clojure.core.async.flow-monitor :as flow-monitor]
-            [clojure.datafy :as datafy]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
@@ -24,7 +23,7 @@
            [java.nio.file ClosedWatchServiceException StandardWatchEventKinds
             WatchEvent$Kind WatchService]
            [java.util.concurrent CompletableFuture CountDownLatch
-            ExecutorService Future TimeUnit]))
+            Future TimeUnit]))
 
 (def ^:private test-work-launcher (atom nil))
 
@@ -54,13 +53,8 @@
 (def ^:private callback-schema-keys
   [:seon.flow/commit-drop!
    :seon.flow/commit-fault!
-   :seon.flow/compile-namespace-fn
-   :seon.flow/deliver!
-   :seon.flow/fix-step-fn
    :seon.flow/panic!
-   :seon.flow/plan-step-fn
    :seon.flow/read-core-error-mode
-   :seon.flow/read-sources
    :seon.flow/work-fn])
 
 (deftest callback-contracts-construct-functions-that-honor-their-outputs
@@ -120,108 +114,35 @@
   (datahike/unlisten! connection listener-key)
   (async/close! channel))
 
-(defn- testbed-procs
-  [{::keys [parallelism active-evals deliver!]}]
-  {:eval
-   {:proc
-    (sut/eval-proc
-     {::sut/parallelism parallelism
-      ::sut/active-evals active-evals
-      ::sut/compute-timeout-ms 10000})
-    :chan-opts
-    {::sut/submission {:buf-or-n 2}}}
-   :mailbox
-   {:proc (sut/mailbox-proc {::sut/deliver! deliver!})
-    :chan-opts
-    {::sut/mailbox {:buf-or-n (async/sliding-buffer 1)}}}
-   :observer
-   {:proc
-    (sut/capacity-observer-proc
-     {::sut/parallelism parallelism
-      ::sut/active-work active-evals})
-    :chan-opts
-    {::sut/observe {:buf-or-n 2}}}})
-
-(defn- create-testbed-flow
-  [procs compute-executor]
-  (flow/create-flow
-   {:procs procs
-    :conns [[[:eval ::sut/result] [:mailbox ::sut/mailbox]]]
-    :compute-exec compute-executor}))
-
-(defn- stop-executor!
-  [^ExecutorService executor]
-  (.shutdownNow executor)
-  (when-not (.awaitTermination
-             executor test-support/event-backstop-seconds TimeUnit/SECONDS)
-    (throw
-     (ex-info
-      "The bounded Flow compute executor did not terminate."
-      {::event ::executor-termination}))))
-
-(defn- eval-procs
-  [count parallelism active-evals]
-  (into {}
-        (map
-         (fn [ordinal]
-           [(keyword (str "eval-" ordinal))
-            {:proc
-             (sut/eval-proc
-              {::sut/parallelism parallelism
-               ::sut/active-evals active-evals
-               ::sut/compute-timeout-ms 10000})
-             :chan-opts
-             {::sut/submission {:buf-or-n 2}}}]))
-        (range count)))
-
-(defn- channel-data
-  [graph pid input-id]
-  (get-in (datafy/datafy graph) [:chans :ins [pid input-id]]))
-
-(defn- work-message
-  [completed value]
-  {::sut/work-fn
-   (fn [{::sut/keys [interrupt-fn]}]
-     (interrupt-fn)
-     (swap! completed conj value)
-     value)
-   ::sut/wedged? false})
-
-(defn- single-eval-testbed
-  [buffer-size]
-  (let [parallelism 1
-        compute-executor (sut/bounded-platform-executor parallelism)
-        active-evals (atom {})
-        completed (atom [])
-        graph
+(defn- source-testbed
+  []
+  (let [graph
         (flow/create-flow
          {:procs
-          {:eval
+          {:observer
            {:proc
-            (sut/eval-proc
-             {::sut/parallelism parallelism
-              ::sut/active-evals active-evals
-              ::sut/compute-timeout-ms 10000})
-            :chan-opts
-            {::sut/submission {:buf-or-n buffer-size}}}
-           :sink
-           {:proc (sut/mailbox-proc {::sut/deliver! (fn [_])})
-            :chan-opts
-            {::sut/mailbox {:buf-or-n 1}}}}
-          :conns [[[:eval ::sut/result] [:sink ::sut/mailbox]]]
-          :compute-exec compute-executor})]
+            (sut/capacity-observer-proc
+             {::sut/parallelism 1
+              ::sut/active-work (atom {})})}}
+          :conns []})
+        started (flow/start graph)]
+    (flow/resume graph)
     {::graph graph
-     ::compute-executor compute-executor
-     ::parallelism parallelism
-     ::active-evals active-evals
-     ::completed completed}))
+     ::started started}))
 
-(defn- stop-testbed!
-  [{::keys [graph compute-executor]}]
-  (try
-    (flow/stop graph)
-    (catch Throwable _))
-  (stop-executor! compute-executor))
+(defn- stop-source-testbed!
+  [{::keys [graph]}]
+  (flow/stop graph))
+
+(defn- synthetic-core-fault
+  [ordinal]
+  #::flow{:pid :source
+          :status :running
+          :cid ::source
+          :msg ordinal
+          :op ::work
+          :ex (RuntimeException.
+               (str "synthetic core fault " ordinal))})
 
 (defn- with-fault-database
   [body]
@@ -744,232 +665,6 @@
     (finally
       (stop-test-work-launcher!))))
 
-(deftest wedged-steps-degrade-capacity-exactly-and-name-themselves
-  (let [parallelism 4
-        wedge-count 2
-        compute-executor (sut/bounded-platform-executor parallelism)
-        active-evals (atom {})
-        wedge-started (CountDownLatch. wedge-count)
-        release-wedges (CountDownLatch. 1)
-        remaining-work-finished
-        (CountDownLatch. (- parallelism wedge-count))
-        observer
-        {:proc
-         (sut/capacity-observer-proc
-          {::sut/parallelism parallelism
-           ::sut/active-work active-evals})
-         :chan-opts
-         {::sut/observe {:buf-or-n 2}}}
-        procs (assoc (eval-procs parallelism parallelism active-evals)
-                     :observer observer)
-        graph (flow/create-flow
-               {:procs procs
-                :conns []
-                :compute-exec compute-executor})
-        started (flow/start graph)
-        wedged-pids #{:eval-0 :eval-1}]
-    (try
-      (flow/resume graph)
-      (doseq [pid wedged-pids]
-        @(flow/inject
-          graph
-          [pid ::sut/submission]
-          [{::sut/work-fn
-            (fn [{::sut/keys [interrupt-fn]}]
-              (interrupt-fn)
-              (.countDown wedge-started)
-              (when-not (.await
-                         release-wedges
-                         test-support/event-backstop-seconds
-                         TimeUnit/SECONDS)
-                (throw
-                 (ex-info
-                  "The wedge release event did not arrive."
-                  {::event ::wedge-release})))
-              ::released)
-            ::sut/wedged? true}]))
-      (test-support/await-event! wedge-started ::wedges-started)
-
-      (testing "ping and report name every wedge and the exact capacity loss"
-        (let [observer-state
-              (::flow/state (flow/ping-proc graph :observer))]
-          (is (= wedged-pids (::sut/active-procs observer-state)))
-          (is (= wedged-pids (::sut/wedged-procs observer-state)))
-          (is (= (- parallelism wedge-count)
-                 (::sut/available-permits observer-state)))
-          (is (true? (::sut/platform-threads? observer-state))))
-        @(flow/inject graph [:observer ::sut/observe] [::observe])
-        (let [report (test-support/await-event! (:report-chan started) ::capacity-report)]
-          (is (= ::sut/capacity (::sut/event report)))
-          (is (= wedged-pids (::sut/wedged-procs report))))
-        (let [all-pings (flow/ping graph :timeout-ms 100)]
-          (is (empty? (select-keys all-pings wedged-pids))
-              "wedged built-in proc loops cannot answer their own ping")
-          (is (= wedged-pids
-                 (get-in all-pings
-                         [:observer ::flow/state ::sut/wedged-procs]))
-              "the responsive observer names the missing proc replies")))
-
-      (testing "all and only the remaining compute slots still make progress"
-        (doseq [pid [:eval-2 :eval-3]]
-          @(flow/inject
-            graph
-            [pid ::sut/submission]
-            [{::sut/work-fn
-              (fn [{::sut/keys [interrupt-fn]}]
-                (interrupt-fn)
-                (.countDown remaining-work-finished)
-                ::completed)
-              ::sut/wedged? false}]))
-        (test-support/await-event! remaining-work-finished ::remaining-capacity)
-        (dotimes [_ (- parallelism wedge-count)]
-          (test-support/await-event!
-           (:report-chan started)
-           ::normal-work-completed
-           #(contains? #{:eval-2 :eval-3} (::sut/pid %))))
-        (is (= wedge-count (count @active-evals))))
-      (finally
-        (.countDown release-wedges)
-        (dotimes [_ wedge-count]
-          (test-support/await-event!
-           (:report-chan started)
-           ::wedged-work-released
-           #(contains? wedged-pids (::sut/pid %))))
-        (is (empty? @active-evals))
-        (flow/stop graph)
-        (stop-executor! compute-executor)))))
-
-(deftest fixed-buffer-capacity-drains-in-order-without-loss
-  (testing "a full fixed buffer accepts its capacity and loses nothing"
-    (let [{::keys [graph completed] :as testbed}
-          (single-eval-testbed 2)]
-      (try
-        (let [started (flow/start graph)
-              filled
-              (flow/inject
-               graph
-               [:eval ::sut/submission]
-               (mapv #(work-message completed %) (range 2)))
-              _ (.get ^Future filled
-                      test-support/event-backstop-seconds
-                      TimeUnit/SECONDS)
-              injection
-              (flow/inject
-               graph
-               [:eval ::sut/submission]
-               (mapv #(work-message completed %) (range 2 6)))]
-          (is (= 2
-                 (get-in
-                  (channel-data graph :eval ::sut/submission)
-                  [:buffer :count])))
-          (flow/resume graph)
-          (.get ^Future injection
-                test-support/event-backstop-seconds
-                TimeUnit/SECONDS)
-          (dotimes [_ 6]
-            (test-support/await-event!
-             (:report-chan started)
-             ::fixed-buffer-item-completed
-             #(= ::sut/eval-complete (::sut/event %))))
-          (is (= (range 6) @completed))
-          (is (zero?
-               (get-in
-                (channel-data graph :eval ::sut/submission)
-                [:buffer :count]))))
-        (finally
-          (stop-testbed! testbed))))))
-
-(deftest fake-interrupt-ends-a-spin-and-the-proc-survives
-  (testing "an armed interrupt returns a timeout value without losing capacity"
-    (let [{::keys [graph completed active-evals] :as testbed}
-          (single-eval-testbed 2)
-          {:keys [report-chan error-chan]} (flow/start graph)
-          deadline (+ (System/nanoTime) (* 1000000 30))
-          interrupt-fn
-          (fn []
-            (when (<= deadline (System/nanoTime))
-              (throw
-               (ex-info
-                "Synthetic time limit."
-                {::sut/interrupted? true}))))]
-      (try
-        (flow/resume graph)
-        @(flow/inject
-          graph
-          [:eval ::sut/submission]
-          [{::sut/work-fn
-            (fn [{armed ::sut/interrupt-fn}]
-              (loop [entries 0]
-                (armed)
-                (recur (unchecked-inc entries))))
-            ::sut/interrupt-fn interrupt-fn
-            ::sut/wedged? false}])
-        (let [report (test-support/await-event! report-chan ::interrupt-report)
-              result (::sut/result report)]
-          (is (= :timeout (:seon.error/kind result)))
-          (is (= :eval (get-in result
-                               [:seon.error/data ::sut/pid])))
-          (is (nil? (async/poll! error-chan))
-              "an agent error value is not a Flow core fault"))
-        (is (= :running
-               (::flow/status (flow/ping-proc graph :eval))))
-        @(flow/inject
-          graph
-          [:eval ::sut/submission]
-          [(work-message completed ::after-interrupt)])
-        (test-support/await-event!
-         report-chan
-         ::after-interrupt
-         #(= ::after-interrupt (::sut/result %)))
-        (is (= [::after-interrupt] @completed))
-        (is (= 2 (::flow/count (flow/ping-proc graph :eval))))
-        (is (empty? @active-evals))
-        (finally
-          (stop-testbed! testbed))))))
-
-(deftest thrown-step-reports-error-and-keeps-pre-step-state
-  (testing "Flow reports an ordinary Throwable and the proc continues"
-    (let [{::keys [graph completed] :as testbed}
-          (single-eval-testbed 2)
-          {:keys [error-chan report-chan]} (flow/start graph)]
-      (try
-        (flow/resume graph)
-        @(flow/inject
-          graph
-          [:eval ::sut/submission]
-          [{::sut/work-fn
-            (fn [_]
-              (throw (RuntimeException. "synthetic step failure")))
-            ::sut/wedged? false}])
-        (let [error (test-support/await-event! error-chan ::flow-step-error)]
-          (is (= :eval (::flow/pid error)))
-          (is (= :step (::flow/op error)))
-          (is (instance? Throwable (::flow/ex error))))
-        (let [ping (flow/ping-proc graph :eval)]
-          (is (zero? (::flow/count ping)))
-          (is (zero? (get-in ping [::flow/state ::sut/completed]))))
-        @(flow/inject
-          graph
-          [:eval ::sut/submission]
-          [(work-message completed ::after-throw)])
-        (test-support/await-event!
-         report-chan
-         ::after-throw
-         #(= ::after-throw (::sut/result %)))
-        (is (= [::after-throw] @completed))
-        (is (= 1 (::flow/count (flow/ping-proc graph :eval))))
-        (finally
-          (stop-testbed! testbed))))))
-
-(defn- throwing-work-message
-  [ordinal]
-  {::sut/work-fn
-   (fn [_]
-     (throw
-      (RuntimeException.
-       (str "synthetic core fault " ordinal))))
-   ::sut/wedged? false})
-
 (defn- start-test-fanout!
   [connection graph started fault-buffer-capacity monitor-buffer-capacity]
   (sut/start-error-fanout!
@@ -991,9 +686,8 @@
   (testing "one throwing step reaches durable facts and the monitor tap"
     (with-fault-database
       (fn [connection]
-        (let [{::keys [graph completed] :as testbed}
-              (single-eval-testbed 2)
-              started (flow/start graph)
+        (let [{::keys [graph started] :as testbed}
+              (source-testbed)
               fanout (start-test-fanout! connection graph started 4 4)
               monitor-messages (async/chan 8)
               transactions (database-events connection)]
@@ -1007,22 +701,17 @@
                      {:flow (::sut/graph fanout)
                       :port 0})]
                 (try
-                  (flow/resume graph)
-                  @(flow/inject
-                    graph
-                    [:eval ::sut/submission]
-                    [(throwing-work-message 0)])
+                  (async/>!! (:error-chan started)
+                             (synthetic-core-fault 0))
                   (test-support/await-event!
                    monitor-messages
                    ::monitor-core-fault
                    (fn [{:keys [action data]}]
                      (and (= :error action)
-                          (str/includes? data ":pid :eval")
+                          (str/includes? data ":pid :source")
                           (str/includes? data "synthetic core fault 0"))))
-                  @(flow/inject
-                    graph
-                    [:eval ::sut/submission]
-                    [(work-message completed ::fanout-report)])
+                  (async/>!! (:report-chan started)
+                             {::sut/result ::fanout-report})
                   (let [application-copy
                         (test-support/await-event!
                          (::sut/application-report-channel fanout)
@@ -1040,8 +729,7 @@
             (test-support/await-event!
              (::channel transactions)
              ::core-fault-committed
-             #(= #{[:eval
-                    "java.lang.RuntimeException: synthetic core fault 0"]}
+             #(= #{[:source "synthetic core fault 0"]}
                  (set (committed-faults (:db-after %)))))
             (is (= 1
                    (get-in
@@ -1053,7 +741,7 @@
               (stop-database-events! connection transactions)
               (async/close! monitor-messages)
               (sut/stop-error-fanout! fanout)
-              (stop-testbed! testbed))))))))
+              (stop-source-testbed! testbed))))))))
 
 (deftest core-fault-signatures-bound-durable-and-stderr-output
   (let [commit-core-fault!
@@ -1235,8 +923,7 @@
                        @connection)))))))))
 
 (deftest stopping-the-fanout-awaits-an-active-fault-commit
-  (let [{::keys [graph] :as testbed} (single-eval-testbed 1)
-        started (flow/start graph)
+  (let [{::keys [graph started] :as testbed} (source-testbed)
         commit-entered (CountDownLatch. 1)
         finish-commit (CountDownLatch. 1)
         fanout
@@ -1255,10 +942,7 @@
           ::sut/commit-drop! (fn [_])
           ::sut/panic! (fn [_])})]
     (try
-      (flow/resume graph)
-      @(flow/inject graph
-                    [:eval ::sut/submission]
-                    [(throwing-work-message 0)])
+      (async/>!! (:error-chan started) (synthetic-core-fault 0))
       (test-support/await-event! commit-entered ::fault-commit-entered)
       (let [awaiting-completion (CountDownLatch. 1)
             completion (::sut/completion fanout)
@@ -1281,7 +965,7 @@
             "the fault proc publishes completion after the commit returns"))
       (finally
         (.countDown finish-commit)
-        (stop-testbed! testbed)))))
+        (stop-source-testbed! testbed)))))
 
 (defn- async-mixed-platform-threads
   []
@@ -1373,9 +1057,8 @@
     (with-fault-database
       (fn [connection]
         (let [fault-count 6
-              {::keys [graph] :as testbed}
-              (single-eval-testbed fault-count)
-              started (flow/start graph)
+              {::keys [graph started] :as testbed}
+              (source-testbed)
               fanout
               (start-test-fanout!
                connection graph started fault-count fault-count)
@@ -1387,11 +1070,8 @@
                    (::flow/status
                     (flow/ping-proc
                      fault-graph ::sut/fault-committer))))
-            (flow/resume graph)
-            @(flow/inject
-              graph
-              [:eval ::sut/submission]
-              (mapv throwing-work-message (range fault-count)))
+            (doseq [fault (map synthetic-core-fault (range fault-count))]
+              (async/>!! (:error-chan started) fault))
             (dotimes [_ fault-count]
               (test-support/await-event!
                (::sut/monitor-error-channel fanout)
@@ -1404,15 +1084,14 @@
              ::all-core-faults-committed
              #(<= fault-count
                   (count (committed-faults (:db-after %)))))
-            (is (= (set (map #(str "java.lang.RuntimeException: "
-                                   "synthetic core fault " %)
+            (is (= (set (map #(str "synthetic core fault " %)
                              (range fault-count)))
                    (set (map second
                              (committed-faults @connection)))))
             (finally
               (stop-database-events! connection transactions)
               (sut/stop-error-fanout! fanout)
-              (stop-testbed! testbed))))))))
+              (stop-source-testbed! testbed))))))))
 
 (deftest fault-tap-overflow-commits-a-loud-drop-counter
   (testing "faults beyond the bounded tap are counted as durable drops"
@@ -1420,9 +1099,8 @@
       (fn [connection]
         (let [fault-buffer-capacity 2
               fault-count 5
-              {::keys [graph] :as testbed}
-              (single-eval-testbed fault-count)
-              started (flow/start graph)
+              {::keys [graph started] :as testbed}
+              (source-testbed)
               fanout
               (start-test-fanout!
                connection graph started
@@ -1435,11 +1113,8 @@
                    (::flow/status
                     (flow/ping-proc
                      fault-graph ::sut/fault-committer))))
-            (flow/resume graph)
-            @(flow/inject
-              graph
-              [:eval ::sut/submission]
-              (mapv throwing-work-message (range fault-count)))
+            (doseq [fault (map synthetic-core-fault (range fault-count))]
+              (async/>!! (:error-chan started) fault))
             (dotimes [_ fault-count]
               (test-support/await-event!
                (::sut/monitor-error-channel fanout)
@@ -1459,162 +1134,7 @@
             (finally
               (stop-database-events! connection transactions)
               (sut/stop-error-fanout! fanout)
-              (stop-testbed! testbed))))))))
-
-(deftest re-evaluated-step-var-changes-a-running-graph
-  (let [delivered (async/chan 2)
-        step-var (ns-resolve 'seon.flow 'mailbox-step)
-        original-step @step-var
-        graph
-        (flow/create-flow
-         {:procs
-          {:mailbox
-           {:proc
-            (sut/mailbox-proc
-             {::sut/deliver! #(async/put! delivered %)})
-            :chan-opts
-            {::sut/mailbox {:buf-or-n 1}}}}
-          :conns []})]
-    (try
-      (flow/start graph)
-      (flow/resume graph)
-      @(flow/inject graph [:mailbox ::sut/mailbox] [::before-reload])
-      (is (= ::before-reload
-             (test-support/await-event! delivered ::before-reload)))
-
-      (alter-var-root
-       step-var
-       (constantly
-        (fn
-          ([] (original-step))
-          ([args] (original-step args))
-          ([state transition] (original-step state transition))
-          ([state _input message]
-           ((::sut/deliver! state) [::reloaded message])
-           [(update state ::sut/delivered inc) nil]))))
-
-      @(flow/inject graph [:mailbox ::sut/mailbox] [::after-reload])
-      (is (= [::reloaded ::after-reload]
-             (test-support/await-event! delivered ::after-reload))
-          "the already-running graph invokes the Var's new root")
-      (is (= 2 (::flow/count (flow/ping-proc graph :mailbox))))
-      (finally
-        (alter-var-root step-var (constantly original-step))
-        (flow/stop graph)
-        (async/close! delivered)))))
-
-(deftest sliding-mailbox-is-nonblocking-bounded-and-latest-only
-  (testing "a paused sliding buffer of one retains only the latest snapshot"
-    (let [delivered (async/promise-chan)
-          graph
-          (flow/create-flow
-           {:procs
-            {:mailbox
-             {:proc
-              (sut/mailbox-proc
-               {::sut/deliver! #(async/put! delivered %)})
-              :chan-opts
-              {::sut/mailbox
-               {:buf-or-n (async/sliding-buffer 1)}}}}
-            :conns []})]
-      (try
-        (flow/start graph)
-        (let [injection
-              (flow/inject
-               graph
-               [:mailbox ::sut/mailbox]
-               (vec (range 100)))]
-          (.get ^Future injection
-                test-support/event-backstop-seconds
-                TimeUnit/SECONDS)
-          (is (.isDone ^Future injection))
-          (is (= {:type 'SlidingBuffer :count 1 :capacity 1}
-                 (:buffer
-                  (channel-data graph :mailbox ::sut/mailbox))))
-          (flow/resume graph)
-          (is (= 99 (test-support/await-event! delivered ::latest-mail))))
-        (finally
-          (flow/stop graph))))))
-
-(deftest pause-resume-mid-load-preserves-fixed-buffer-order
-  (testing "pause takes effect between transforms without losing input"
-    (let [{::keys [graph completed] :as testbed}
-          (single-eval-testbed 20)
-          mid-step (CountDownLatch. 1)
-          release-mid-step (CountDownLatch. 1)
-          messages
-          (mapv
-           (fn [ordinal]
-             {::sut/work-fn
-              (fn [{::sut/keys [interrupt-fn]}]
-                (interrupt-fn)
-                (when (= ordinal 3)
-                  (.countDown mid-step)
-                  (test-support/await-event! release-mid-step ::release-mid-step))
-                (swap! completed conj ordinal)
-                ordinal)
-              ::sut/wedged? false})
-           (range 20))]
-      (try
-        (let [started (flow/start graph)
-              injection
-              (flow/inject
-               graph
-               [:eval ::sut/submission]
-               messages)]
-          (.get ^Future injection
-                test-support/event-backstop-seconds
-                TimeUnit/SECONDS)
-          (flow/resume graph)
-          (test-support/await-event! mid-step ::load-mid-step)
-          (flow/pause graph)
-          (.countDown release-mid-step)
-          (test-support/await-event!
-           (:report-chan started)
-           ::load-paused-after-current-step
-           #(= 3 (::sut/result %)))
-          (is (= :paused
-                 (::flow/status (flow/ping-proc graph :eval))))
-          (is (nil? (async/poll! (:report-chan started)))
-              "the acknowledged pause publishes no next completion")
-          (flow/resume graph)
-          (test-support/await-event!
-           (:report-chan started)
-           ::load-complete
-           #(= 19 (::sut/result %)))
-          (is (= (range 20) @completed)))
-        (finally
-          (stop-testbed! testbed))))))
-
-(deftest stopping-one-flow-does-not-affect-another
-  (testing "two Flow graph lifecycles in one JVM remain isolated"
-    (let [a (single-eval-testbed 2)
-          b (single-eval-testbed 2)
-          graph-a (::graph a)
-          graph-b (::graph b)]
-      (try
-        (flow/start graph-a)
-        (let [started-b (flow/start graph-b)]
-        (flow/resume graph-a)
-        (flow/resume graph-b)
-        (flow/stop graph-a)
-        (stop-executor! (::compute-executor a))
-        @(flow/inject
-          graph-b
-          [:eval ::sut/submission]
-          [(work-message (::completed b) ::flow-b)])
-        (test-support/await-event!
-         (:report-chan started-b)
-         ::flow-b
-         #(= ::flow-b (::sut/result %)))
-        (is (= [::flow-b] @(::completed b)))
-        (is (= :running
-               (::flow/status (flow/ping-proc graph-b :eval))))
-        (is (thrown? Throwable
-                     (flow/ping graph-a :timeout-ms 20))))
-        (finally
-          (stop-testbed! a)
-          (stop-testbed! b))))))
+              (stop-source-testbed! testbed))))))))
 
 (deftest ^{:seon.test/long
            "Forcibly terminates a child JVM to cover committed-fact survival across process death."}
@@ -1750,20 +1270,12 @@
     [socket @complete-messages]))
 
 (deftest flow-monitor-attaches-and-publishes-the-render-graph
-  (let [parallelism 1
-        compute-executor (sut/bounded-platform-executor parallelism)
-        active-evals (atom {})
-        procs
-        (testbed-procs
-         {::parallelism parallelism
-          ::active-evals active-evals
-          ::deliver! (fn [_])})
-        graph (create-testbed-flow procs compute-executor)
+  (install-test-work-launcher!
+   {::sut/configuration
+    {:seon.config.flow.compute/queue-depth 2
+     :seon.config.flow.compute/concurrency 1}})
+  (let [{::sut/keys [graph started]} @test-work-launcher
         client (HttpClient/newHttpClient)
-        wedge-started (CountDownLatch. 1)
-        release-wedge (CountDownLatch. 1)
-        post-wedge-results (atom [])
-        started (flow/start graph)
         fanout
         (sut/start-error-fanout!
          {::sut/graph graph
@@ -1773,87 +1285,35 @@
           ::sut/read-core-error-mode (constantly :record)
           ::sut/commit-fault! (fn [_])
           ::sut/commit-drop! (fn [_])
-          ::sut/panic! (fn [_])})]
-        (flow/resume graph)
-        @(flow/inject
-          graph
-          [:eval ::sut/submission]
-          [{::sut/work-fn
-            (fn [{::sut/keys [interrupt-fn]}]
-              (interrupt-fn)
-              (.countDown wedge-started)
-              (test-support/await-event! release-wedge ::release-monitor-wedge)
-              ::released)
-            ::sut/wedged? true}])
-        (test-support/await-event! wedge-started ::monitor-wedge-started)
-        (let [filled-injection
-              (flow/inject
-               graph
-               [:eval ::sut/submission]
-               (mapv #(work-message post-wedge-results %) (range 2)))
-              _ (.get ^Future filled-injection
-                      test-support/event-backstop-seconds
-                      TimeUnit/SECONDS)
-              _ (is (= 2
-                       (get-in
-                        (channel-data graph :eval ::sut/submission)
-                        [:buffer :count])))
-              parked-injection
-              (flow/inject
-               graph
-               [:eval ::sut/submission]
-               [(work-message post-wedge-results 2)])
-              monitor-state
-              (flow-monitor/start-server
-               {:flow (::sut/graph fanout)
-                :port 0})]
-          (try
-            (let [port (:port @monitor-state)
-                  request
-                  (-> (HttpRequest/newBuilder)
-                      (.uri (URI/create
-                             (str "http://127.0.0.1:"
-                                  port
-                                  "/index.html")))
-                      .GET
-                      .build)
-                  response
-                  (.send client request
-                         (HttpResponse$BodyHandlers/ofString))
-                  [socket messages]
-                  (monitor-websocket-messages client port)
-                  graph-message (first messages)
-                  rendered-evidence (str/join "\n" messages)]
-              (is (= 200 (.statusCode response)))
-              (is (str/includes? (.body response) "<title>Flow Monitor</title>"))
-              (is (str/includes? graph-message "~:datafy"))
-              (doseq [pid ["~:eval" "~:mailbox" "~:observer"]]
-                (is (str/includes? graph-message pid)
-                    (str "monitor graph data names " pid)))
-              (is (str/includes? rendered-evidence "FixedBuffer"))
-              (is (str/includes? rendered-evidence
-                                 "~:seon.flow/wedged-procs"))
-              (is (str/includes? rendered-evidence "~:eval")
-                  "the monitor ping names the wedged eval via the observer")
-              (is (= #{:eval}
-                     (get-in
-                      (flow/ping-proc graph :observer)
-                      [::flow/state ::sut/wedged-procs])))
-              (.join (.sendClose
-                      ^WebSocket socket
-                      WebSocket/NORMAL_CLOSURE
-                      "test complete")))
-            (finally
-              (flow-monitor/stop-server monitor-state)
-              (.countDown release-wedge)
-              (.get ^Future parked-injection
-                    test-support/event-backstop-seconds
-                    TimeUnit/SECONDS)
-              (test-support/await-event!
-               (::sut/application-report-channel fanout)
-               ::monitor-post-wedge-drain
-               #(= 2 (::sut/result %)))
-              (is (= 3 (count @post-wedge-results)))
-              (sut/stop-error-fanout! fanout)
-              (flow/stop graph)
-              (stop-executor! compute-executor))))))
+          ::sut/panic! (fn [_])})
+        monitor-state
+        (flow-monitor/start-server
+         {:flow (::sut/graph fanout)
+          :port 0})]
+    (try
+      (let [port (:port @monitor-state)
+            request
+            (-> (HttpRequest/newBuilder)
+                (.uri (URI/create
+                       (str "http://127.0.0.1:" port "/index.html")))
+                .GET
+                .build)
+            response
+            (.send client request (HttpResponse$BodyHandlers/ofString))
+            [socket messages] (monitor-websocket-messages client port)
+            graph-message (first messages)]
+        (is (= 200 (.statusCode response)))
+        (is (str/includes? (.body response) "<title>Flow Monitor</title>"))
+        (is (str/includes? graph-message "~:datafy"))
+        (doseq [pid ["~:seon.flow/work-launcher"
+                     "~:seon.flow/capacity-observer"]]
+          (is (str/includes? graph-message pid)
+              (str "monitor graph data names " pid)))
+        (.join (.sendClose
+                ^WebSocket socket
+                WebSocket/NORMAL_CLOSURE
+                "test complete")))
+      (finally
+        (flow-monitor/stop-server monitor-state)
+        (sut/stop-error-fanout! fanout)
+        (stop-test-work-launcher!)))))

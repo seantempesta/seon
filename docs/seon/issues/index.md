@@ -43,7 +43,7 @@ See `README.md` for the convention.
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 | [Install maintenance result attributes on a fresh cluster](fresh-maintenance-result-attributes-are-not-installed.md) | blocker | maintenance schema-install repair |
 
-## Friction (100)
+## Friction (99)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -80,7 +80,6 @@ See `README.md` for the convention.
 | [Say what a predicate schema expected instead of "unknown error"](predicate-schema-violations-humanize-to-unknown-error.md) | friction | agent-diagnostics repair |
 | [Derive the initial-paint census instead of hand-maintaining it](initial-paint-census-is-a-hand-maintained-count.md) | friction | render test repair |
 | [Blob get assumes the file-store callback shape](blob-get-assumes-file-store-callback-shape.md) | friction | blob storage repair wave |
-| [Delete Flow prototype procs beside the live agent graphs](flow-prototype-procs-survive-beside-the-live-agent-graphs.md) | friction | Flow prototype deletion wave |
 | [Derive namespace context without a stored `my.*` roster](cluster-toolkit-stores-a-prefix-derived-projection.md) | friction | context derivation wave |
 | [Split the turn and evaluation kernels at durable boundaries](runtime-turn-and-evaluate-kernels-conflate-boundaries.md) | friction | runtime boundary refactor |
 | [Give config-dial discovery one explicit authority](config-dial-discovery-has-three-authorities.md) | friction | config derivation wave |
