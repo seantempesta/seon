@@ -85,9 +85,7 @@
       (db/transact!
        connection
        [{:seon.cluster.instruction/id :getting-started
-         :seon.cluster.instruction/text "Owner revision."}
-        {:seon.cluster.instruction/id :reply-grammar
-         :seon.cluster.instruction/text "Superseded."}])
+         :seon.cluster.instruction/text "Owner revision."}])
       (db/transact! connection
                   (#'cluster/instruction-row-changes
                    @connection (instruction/seed-rows)))

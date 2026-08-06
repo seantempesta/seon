@@ -10,10 +10,6 @@
   "The cluster-owned instruction identities seeded at initialization."
   [:getting-started])
 
-(def superseded-instruction-ids
-  "The instruction rows replaced by the context walk's getting-started row."
-  [:reply-grammar :messaging :declining :global])
-
 (def getting-started-text
   "The owner-editable starting instruction installed in new source branches."
   (str "This is a live Clojure REPL. Everything above is the output of "

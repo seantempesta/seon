@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, deletion, cluster]
 ---
@@ -9,20 +9,20 @@ tags: [issue, deletion, cluster]
 
 ## Problem
 
-Source population still retracts four instruction identities from the deleted
+Source population still retracted four instruction identities from the deleted
 context system. The rename pass ended with a destructive reset and explicitly
 forbids migration or old spellings; every surviving branch is either freshly
 forked from the current source or sovereign older data. Re-running a
-compatibility cleanup on every population is therefore a superseded mechanism.
+compatibility cleanup on every population was therefore a superseded
+mechanism.
 
 ## Evidence
 
-- `src/seon/cluster/instruction.clj:13-15` hard-codes
-  `:reply-grammar`, `:messaging`, `:declining`, and `:global` solely as
-  `superseded-instruction-ids`.
-- `src/seon/cluster.clj:719-745` queries and retracts those identities before
-  adding current instruction rows.
-- `test/seon/cluster/instruction_test.clj:83-105` deliberately preserves the
+- `src/seon/cluster/instruction.clj` hard-coded `:reply-grammar`, `:messaging`,
+  `:declining`, and `:global` solely as `superseded-instruction-ids`.
+- `src/seon/cluster.clj` queried and retracted those identities before adding
+  current instruction rows.
+- `test/seon/cluster/instruction_test.clj` deliberately preserved the
   migration by installing one obsolete row and asserting its retraction.
 - The reset contract in
   `docs/prds/sci-execution-runtime/plan/rename-pass-2026-08-05.md:8-14`
@@ -39,3 +39,11 @@ Delete the obsolete identity roster, its retraction pass, and the test that
 manufactures old data. Current instruction population remains additive and
 idempotent, and a repository search finds no live reference to the four old
 instruction identities outside historical documents.
+
+## Resolution
+
+Resolved by the audit-finding-3 commit that archives this issue. Population
+now submits only absent current instruction rows, the test proves an existing
+owner revision remains untouched, and exact searches find none of the four old
+instruction identities in maintained source, tests, scripts, binaries,
+resources, or skills.

@@ -718,31 +718,17 @@
 
 (defn- instruction-row-changes
   [db rows]
-  (let [superseded
-        (into
-         []
-         (keep
-          (fn [instruction-id]
-            (when (db/q '[:find ?instruction .
-                         :in $ ?instruction-id
-                         :where
-                         [?instruction :seon.cluster.instruction/id
-                          ?instruction-id]]
-                       db instruction-id)
-              [:db.fn/retractEntity
-               [:seon.cluster.instruction/id instruction-id]])))
-         instruction/superseded-instruction-ids)]
-    (into
-     superseded
-     (remove
-      (fn [{instruction-id :seon.cluster.instruction/id}]
-        (some? (db/q '[:find ?instruction .
-                      :in $ ?instruction-id
-                      :where
-                      [?instruction :seon.cluster.instruction/id
-                       ?instruction-id]]
-                    db instruction-id))))
-     rows)))
+  (into
+   []
+   (remove
+    (fn [{instruction-id :seon.cluster.instruction/id}]
+      (some? (db/q '[:find ?instruction .
+                    :in $ ?instruction-id
+                    :where
+                    [?instruction :seon.cluster.instruction/id
+                     ?instruction-id]]
+                  db instruction-id))))
+   rows))
 
 (defn- accrete-schema-population!
   "Install the current additive schema population on one branch.
