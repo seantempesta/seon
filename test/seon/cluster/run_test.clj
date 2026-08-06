@@ -99,6 +99,7 @@
    :seon.cluster.eval/result-blob
    :seon.cluster.eval/result-size
    :seon.cluster.eval/error
+   :seon.cluster.eval/triage-edn
    :seon.error/kind
    :seon.schema.admission/source
    :seon.def/key
