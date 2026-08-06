@@ -2,13 +2,15 @@
   "Acceptance proofs for the one manifest compiler and config apply."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
             [seon.config :as config]
             [seon.reconcile :as reconcile]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support])
+  (:import [java.util.concurrent TimeUnit]))
 
 (set! *warn-on-reflection* true)
 
@@ -36,6 +38,31 @@
       (finally
         (.delete packaged-file)
         (.delete directory)))))
+
+(deftest config-loads-the-packaged-population-in-a-fresh-jvm
+  (let [command
+        ["clojure" "-M:dev" "-e"
+         (str
+          "(require 'seon.config 'seon.schema) "
+          "(when-not (contains? (seon.schema/registered-schemas) "
+          ":seon.ai.model/provider-id) "
+          "(throw (ex-info \"packaged schema missing\" {}))) "
+          "(seon.config/defaults) "
+          "(println :fresh-config-ready)")]
+        process
+        (.start
+         (doto
+          (ProcessBuilder. ^java.util.List command)
+          (.directory (io/file (System/getProperty "user.dir")))
+          (.redirectErrorStream true)))
+        output (future (slurp (.getInputStream process)))
+        exited? (.waitFor process 30 TimeUnit/SECONDS)]
+    (when-not exited?
+      (.destroyForcibly process))
+    (is exited? "the fresh config JVM exceeded its external-process backstop")
+    (when exited?
+      (is (zero? (.exitValue process)) @output)
+      (is (str/includes? @output ":fresh-config-ready") @output))))
 
 (deftest the-default-document-has-one-canonical-complete-location
   (is (.equals "config/default.edn" config/default-manifest-path))

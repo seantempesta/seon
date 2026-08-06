@@ -5,6 +5,7 @@
                     :retained-files [:int {:min 0}]
                     :result
                     [:map
+                     {:seon.db/attributes true}
                      [:seon.operator.log/path :seon.operator.log/path]
                      [:seon.operator.log/bytes-before
                       :seon.operator.log/bytes-before]

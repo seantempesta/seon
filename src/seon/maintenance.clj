@@ -188,6 +188,29 @@
               (:seon.operator.cluster-cleanup/collection result)
               [:seon.error/kind :seon.error/message]))))
 
+(defn project-collect-result
+  "Project one public collection value into queryable component facts."
+  {:malli/schema
+   [:=> [:cat :seon.operator.collect/result]
+    :seon.maintenance.result/value]}
+  [result]
+  (-> (select-keys
+       result
+       [:seon.operator.collect/store-id
+        :seon.operator.collect/managed-root
+        :seon.operator.collect/objects-before
+        :seon.operator.collect/objects-after
+        :seon.operator.collect/swept-objects
+        :seon.operator.collect/bytes-before
+        :seon.operator.collect/bytes-after
+        :seon.operator.collect/reclaimed-bytes
+        :seon.operator.collect/verification-pass-swept
+        :seon.operator.collect/complete?])
+      (assoc :seon.maintenance.result/collect-branches
+             (mapv #(select-keys % [:seon.store/branch
+                                    :seon.source/commit-id])
+                   (:seon.operator.collect/branches result)))))
+
 (def ^:private receipt-pull
   '[*
     {:seon.maintenance.receipt/result [*]}

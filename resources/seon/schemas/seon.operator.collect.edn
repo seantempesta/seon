@@ -21,6 +21,8 @@
                         :complete? :boolean
                         :result
                         [:map
+                         {:seon.maintenance/result-projection
+                          seon.maintenance/project-collect-result}
                          [:seon.operator.collect/store-id
                           :seon.operator.collect/store-id]
                          [:seon.operator.collect/managed-root

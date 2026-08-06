@@ -114,6 +114,30 @@
                   [?error :seon.error/message ?message]]
                 @connection)))))))
 
+(deftest collection-results-project-branch-maps-to-components
+  (let [store-id (UUID/fromString "00000000-0000-0000-0000-000000000201")
+        commit-id (UUID/fromString "00000000-0000-0000-0000-000000000202")
+        projected
+        (maintenance/result-entity
+         {:seon.operator.collect/store-id store-id
+          :seon.operator.collect/managed-root "/repo/operator"
+          :seon.operator.collect/branches
+          [{:seon.store/branch :cluster-default
+            :seon.source/commit-id commit-id}]
+          :seon.operator.collect/objects-before 8
+          :seon.operator.collect/objects-after 7
+          :seon.operator.collect/swept-objects 1
+          :seon.operator.collect/bytes-before 2048
+          :seon.operator.collect/bytes-after 1024
+          :seon.operator.collect/reclaimed-bytes 1024
+          :seon.operator.collect/verification-pass-swept 0
+          :seon.operator.collect/complete? true})]
+    (is (= [{:seon.store/branch :cluster-default
+             :seon.source/commit-id commit-id}]
+           (:seon.maintenance.result/collect-branches projected)))
+    (is (= 1024 (:seon.operator.collect/reclaimed-bytes projected)))
+    (is (not (contains? projected :seon.operator.collect/branches)))))
+
 (deftest reap-projection-keeps-stop-and-refusal-evidence-queryable
   (let [claim-id (UUID/fromString "33333333-3333-3333-3333-333333333333")
         generation

@@ -17,8 +17,11 @@
             [seon.db :as db]
             [seon.reconcile :as reconcile]
             [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]
             [seon.schema.form :as schema.form])
   (:import [java.nio.charset StandardCharsets]))
+
+(schema.edn/load! {})
 
 (def default-manifest-path
   "The one repository/artifact-relative shipped defaults document."

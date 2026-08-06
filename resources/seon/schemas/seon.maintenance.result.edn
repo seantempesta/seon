@@ -40,6 +40,8 @@
                            :seon.db/ref],
                           :cluster-cleanup-collection
                           [:and {:seon.db/component true} :seon.db/ref],
+                          :collect-branches
+                          [:vector {:seon.db/component true} :seon.db/ref],
                           :root-claim-id :seon.operator.claim/id,
                           :root-claim-path :seon.operator.claim/root,
                           :root-claim-creator-pid :seon.dev.process/pid,
@@ -144,108 +146,80 @@
                            {:seon.db/attributes true}
                            [:seon.error/kind :seon.error/kind]
                            [:seon.error/message :seon.error/message]],
+                          :reap-component
+                          [:map
+                           {:seon.db/attributes true}
+                           [:seon.operator.reap/observed-at
+                            :seon.operator.reap/observed-at]
+                           [:seon.maintenance.result/reap-census
+                            :seon.maintenance.result/reap-census]
+                           [:seon.operator.reap/eligible-root-claims
+                            :seon.operator.reap/eligible-root-claims]
+                           [:seon.maintenance.result/reap-stopped-processes
+                            :seon.maintenance.result/reap-stopped-processes]
+                           [:seon.maintenance.result/reap-roots
+                            :seon.maintenance.result/reap-roots]
+                           [:seon.maintenance.result/reap-refused
+                            :seon.maintenance.result/reap-refused]
+                           [:seon.operator.reap/reclaimed-bytes
+                            :seon.operator.reap/reclaimed-bytes]
+                           [:seon.operator.reap/complete?
+                            :seon.operator.reap/complete?]],
+                          :cluster-cleanup-component
+                          [:map
+                           {:seon.db/attributes true}
+                           [:seon.operator.cluster-cleanup/managed-root
+                            :seon.operator.cluster-cleanup/managed-root]
+                           [:seon.boot/cluster-name
+                            :seon.boot/cluster-name]
+                           [:seon.store/branch :seon.store/branch]
+                           [:seon.operator.cluster-cleanup/live-instance-stopped?
+                            :seon.operator.cluster-cleanup/live-instance-stopped?]
+                           [:seon.operator.cluster-cleanup/branch-retired?
+                            :seon.operator.cluster-cleanup/branch-retired?]
+                           [:seon.operator.cluster-cleanup/removed
+                            :seon.operator.cluster-cleanup/removed]
+                           [:seon.maintenance.result/cluster-cleanup-collection
+                            :seon.maintenance.result/cluster-cleanup-collection]
+                           [:seon.operator.cluster-cleanup/remaining
+                            :seon.operator.cluster-cleanup/remaining]
+                           [:seon.operator.cluster-cleanup/reclaimed-bytes
+                            :seon.operator.cluster-cleanup/reclaimed-bytes]
+                           [:seon.operator.cluster-cleanup/complete?
+                            :seon.operator.cluster-cleanup/complete?]],
+                          :collect-branch
+                          [:map
+                           {:seon.db/attributes true}
+                           [:seon.store/branch :seon.store/branch]
+                           [:seon.source/commit-id :seon.source/commit-id]],
+                          :collect-component
+                          [:map
+                           {:seon.db/attributes true}
+                           [:seon.operator.collect/store-id
+                            :seon.operator.collect/store-id]
+                           [:seon.operator.collect/managed-root
+                            :seon.operator.collect/managed-root]
+                           [:seon.maintenance.result/collect-branches
+                            :seon.maintenance.result/collect-branches]
+                           [:seon.operator.collect/objects-before
+                            :seon.operator.collect/objects-before]
+                           [:seon.operator.collect/objects-after
+                            :seon.operator.collect/objects-after]
+                           [:seon.operator.collect/swept-objects
+                            :seon.operator.collect/swept-objects]
+                           [:seon.operator.collect/bytes-before
+                            :seon.operator.collect/bytes-before]
+                           [:seon.operator.collect/bytes-after
+                            :seon.operator.collect/bytes-after]
+                           [:seon.operator.collect/reclaimed-bytes
+                            :seon.operator.collect/reclaimed-bytes]
+                           [:seon.operator.collect/verification-pass-swept
+                            :seon.operator.collect/verification-pass-swept]
+                           [:seon.operator.collect/complete?
+                            :seon.operator.collect/complete?]],
                           :entity
                           [:map
                            {:seon.db/entity true}
                            [:seon.maintenance.result/id
-                            :seon.maintenance.result/id]
-                           [:seon.operator.footprint/root
-                            {:optional true}
-                            :seon.operator.footprint/root]
-                           [:seon.operator.footprint/file-bytes
-                            {:optional true}
-                            :seon.operator.footprint/file-bytes]
-                           [:seon.operator.footprint/usable-bytes
-                            {:optional true}
-                            :seon.operator.footprint/usable-bytes]
-                           [:seon.operator.footprint/total-bytes
-                            {:optional true}
-                            :seon.operator.footprint/total-bytes]
-                           [:seon.operator.footprint/usable-ratio
-                            {:optional true}
-                            :seon.operator.footprint/usable-ratio]
-                           [:seon.operator.footprint/observed-at
-                            {:optional true}
-                            :seon.operator.footprint/observed-at]
-                           [:seon.operator/low-space?
-                            {:optional true}
-                            :seon.operator/low-space?]
-                           [:seon.operator.process-census/observed-at
-                            {:optional true}
-                            :seon.operator.process-census/observed-at]
-                           [:seon.operator.process-census/complete?
-                            {:optional true}
-                            :seon.operator.process-census/complete?]
-                           [:seon.maintenance.result/process-census-roots
-                            {:optional true}
-                            :seon.maintenance.result/process-census-roots]
-                           [:seon.maintenance.result/process-census-processes
-                            {:optional true}
-                            :seon.maintenance.result/process-census-processes]
-                           [:seon.maintenance.result/process-census-dead
-                            {:optional true}
-                            :seon.maintenance.result/process-census-dead]
-                           [:seon.maintenance.result/process-census-unresponsive
-                            {:optional true}
-                            :seon.maintenance.result/process-census-unresponsive]
-                           [:seon.maintenance.result/process-census-unclaimed
-                            {:optional true}
-                            :seon.maintenance.result/process-census-unclaimed]
-                           [:seon.maintenance.result/process-census-claim-errors
-                            {:optional true}
-                            :seon.maintenance.result/process-census-claim-errors]
-                           [:seon.operator.reap/observed-at
-                            {:optional true}
-                            :seon.operator.reap/observed-at]
-                           [:seon.maintenance.result/reap-census
-                            {:optional true}
-                            :seon.maintenance.result/reap-census]
-                           [:seon.operator.reap/eligible-root-claims
-                            {:optional true}
-                            :seon.operator.reap/eligible-root-claims]
-                           [:seon.maintenance.result/reap-stopped-processes
-                            {:optional true}
-                            :seon.maintenance.result/reap-stopped-processes]
-                           [:seon.maintenance.result/reap-roots
-                            {:optional true}
-                            :seon.maintenance.result/reap-roots]
-                           [:seon.maintenance.result/reap-refused
-                            {:optional true}
-                            :seon.maintenance.result/reap-refused]
-                           [:seon.operator.reap/reclaimed-bytes
-                            {:optional true}
-                            :seon.operator.reap/reclaimed-bytes]
-                           [:seon.operator.reap/complete?
-                            {:optional true}
-                            :seon.operator.reap/complete?]
-                           [:seon.operator.cluster-cleanup/managed-root
-                            {:optional true}
-                            :seon.operator.cluster-cleanup/managed-root]
-                           [:seon.boot/cluster-name
-                            {:optional true}
-                            :seon.boot/cluster-name]
-                           [:seon.store/branch
-                            {:optional true}
-                            :seon.store/branch]
-                           [:seon.operator.cluster-cleanup/live-instance-stopped?
-                            {:optional true}
-                            :seon.operator.cluster-cleanup/live-instance-stopped?]
-                           [:seon.operator.cluster-cleanup/branch-retired?
-                            {:optional true}
-                            :seon.operator.cluster-cleanup/branch-retired?]
-                           [:seon.operator.cluster-cleanup/removed
-                            {:optional true}
-                            :seon.operator.cluster-cleanup/removed]
-                           [:seon.maintenance.result/cluster-cleanup-collection
-                            {:optional true}
-                            :seon.maintenance.result/cluster-cleanup-collection]
-                           [:seon.operator.cluster-cleanup/remaining
-                            {:optional true}
-                            :seon.operator.cluster-cleanup/remaining]
-                           [:seon.operator.cluster-cleanup/reclaimed-bytes
-                            {:optional true}
-                            :seon.operator.cluster-cleanup/reclaimed-bytes]
-                           [:seon.operator.cluster-cleanup/complete?
-                            {:optional true}
-                            :seon.operator.cluster-cleanup/complete?]],
+                            :seon.maintenance.result/id]],
                           :value :map}

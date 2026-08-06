@@ -2,13 +2,14 @@
   "Schema and initialization proofs for turn-free maintenance receipts."
   (:require [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
+            [seon.maintenance :as maintenance]
             [seon.schedule :as schedule]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support])
   (:import [java.time Instant]
-           [java.util Date]))
+           [java.util Date UUID]))
 
 (schema.edn/load! {})
 
@@ -153,6 +154,59 @@
                   [?result :seon.operator.footprint/file-bytes ?bytes]
                   [?result :seon.operator/low-space? ?low-space]]
                 @connection)))))))
+
+(deftest declared-operation-results-install-through-the-production-population
+  (test-support/with-database
+    (fn [connection]
+      (let [store-id (UUID/fromString "00000000-0000-0000-0000-000000000101")
+            commit-id (UUID/fromString "00000000-0000-0000-0000-000000000102")
+            log-result
+            {:seon.operator.log/path "/repo/operator/logs/seon.log"
+             :seon.operator.log/bytes-before 4096
+             :seon.operator.log/bytes-after 1024
+             :seon.operator.log/rotated? true
+             :seon.operator.log/retained-files 4}
+            collect-result
+            {:seon.operator.collect/store-id store-id
+             :seon.operator.collect/managed-root "/repo/operator"
+             :seon.operator.collect/branches
+             [{:seon.store/branch :cluster-default
+               :seon.source/commit-id commit-id}]
+             :seon.operator.collect/objects-before 12
+             :seon.operator.collect/objects-after 10
+             :seon.operator.collect/swept-objects 2
+             :seon.operator.collect/bytes-before 8192
+             :seon.operator.collect/bytes-after 4096
+             :seon.operator.collect/reclaimed-bytes 4096
+             :seon.operator.collect/verification-pass-swept 0
+             :seon.operator.collect/complete? true}]
+        (db/transact!
+         connection
+         [(assoc (maintenance/result-entity log-result)
+                 :seon.maintenance.result/id "maintenance-result/log")
+          (assoc (maintenance/result-entity collect-result)
+                 :seon.maintenance.result/id "maintenance-result/collect")])
+        (is (= "/repo/operator/logs/seon.log"
+               (db/q '[:find ?path .
+                       :where
+                       [?result :seon.maintenance.result/id
+                        "maintenance-result/log"]
+                       [?result :seon.operator.log/path ?path]]
+                     @connection)))
+        (is (= #{[4096 :cluster-default commit-id]}
+               (db/q
+                '[:find ?reclaimed ?branch ?commit
+                  :where
+                  [?result :seon.maintenance.result/id
+                   "maintenance-result/collect"]
+                  [?result :seon.operator.collect/reclaimed-bytes ?reclaimed]
+                  [?result :seon.maintenance.result/collect-branches ?head]
+                  [?head :seon.store/branch ?branch]
+                  [?head :seon.source/commit-id ?commit]]
+                @connection)))
+        (is (not (contains? (:schema @connection)
+                            :seon.operator.collect/branches))
+            "the public vector-of-maps stays a contract, not a stored codec")))))
 
 (deftest root-owned-portfolio-initializes-as-queryable-schedule-facts
   (test-support/with-database
