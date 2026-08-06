@@ -123,30 +123,28 @@
                            {:seon.boot/cluster-name "generate-code-v0"
                             :seon.config/manifest
                             {:seon.config.run/max-episode-runs 100}}))))
-       ;; This composition proves evaluator failure routing, not static
-       ;; analysis. Let the unresolved calls cross the ordinary evaluator
-       ;; boundary instead of replacing them with quoted lint values.
-       (with-redefs [cluster.loop/lint-form
-                     (fn [{source :seon.cluster.loop/source}] source)]
-         (with-render-context-proc
-           {:seon.db/connection connection
-            :seon.cluster/name "generate-code-v0"
-            :seon.flow/work-launcher launcher
-            :seon.cluster.run/process process
-            :seon.sci.eval/ctx (sci.eval/cluster-ctx @connection)
-            :seon.cluster.wake/channel
-            (async/chan (async/sliding-buffer 1))
-            :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
-            :seon.config.eval/time-limit-ms 2000
-            :seon.config/on-core-error :panic
-            :seon.config.error/recurrence-limit 3
-            :seon.config.message/max-chain 4
-            :seon.sci.admit/caps
-            {:seon.config.eval.result/max-depth 6
-             :seon.config.eval.result/max-collection 8
-             :seon.config.eval.result/max-string 4096
-             :seon.config.eval.result/max-nodes 256}}
-           body))
+       ;; Unresolved calls cross the ordinary evaluator boundary; the
+       ;; run loop's second static-admission pass was deleted with the
+       ;; minimal turn, so no lint bypass is needed.
+       (with-render-context-proc
+         {:seon.db/connection connection
+          :seon.cluster/name "generate-code-v0"
+          :seon.flow/work-launcher launcher
+          :seon.cluster.run/process process
+          :seon.sci.eval/ctx (sci.eval/cluster-ctx @connection)
+          :seon.cluster.wake/channel
+          (async/chan (async/sliding-buffer 1))
+          :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
+          :seon.config.eval/time-limit-ms 2000
+          :seon.config/on-core-error :panic
+          :seon.config.error/recurrence-limit 3
+          :seon.config.message/max-chain 4
+          :seon.sci.admit/caps
+          {:seon.config.eval.result/max-depth 6
+           :seon.config.eval.result/max-collection 8
+           :seon.config.eval.result/max-string 4096
+           :seon.config.eval.result/max-nodes 256}}
+         body)
        (finally
          (seon.flow/stop-work-launcher! launcher)))))))
 
