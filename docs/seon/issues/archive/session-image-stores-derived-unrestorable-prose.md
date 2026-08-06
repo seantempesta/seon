@@ -1,6 +1,6 @@
 ---
 type: issue
-status: closed
+status: superseded
 severity: friction
 tags: [issue, sci, database, errors]
 ---

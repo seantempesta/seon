@@ -21,7 +21,7 @@ See `README.md` for the convention.
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Observe and claim every deletable directory](deletable-directories-have-no-claim-or-size-facts.md) | blocker | operator directory-claim governor wave |
-| [Preserve every live bootstrap drive root and raw report](shared-bootstrap-drive-root-disappears-during-live-experiments.md) | blocker | bootstrap drive root-isolation wave |
+| [Prevent ranged collection from deleting resurrected branch data](ranged-store-collection-can-delete-live-segments-via-branch-resurrection.md) | blocker | exclusive sweep implementation wave |
 | [Make bootstrap O4 wait for the causal delegation](bootstrap-o4-stops-before-causal-delegation-settles.md) | blocker | bootstrap delegation-drive repair wave |
 | [Refuse malformed SSE data before it can change agent code](malformed-sse-data-can-change-agent-code.md) | blocker | AI provider-integrity wave |
 | [Bound work submission before Flow injection can block](work-submission-can-block-before-its-time-limit.md) | blocker | Flow bounded-submission wave |
@@ -38,7 +38,7 @@ See `README.md` for the convention.
 | [Refuse the losing concurrent divergent schema declaration](concurrent-divergent-schema-declarations-falsely-both-succeed.md) | blocker | schema collision admission wave |
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 
-## Friction (101)
+## Friction (100)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -82,7 +82,6 @@ See `README.md` for the convention.
 | [Generate fresh Flow contract values](flow-generators-reuse-one-mutable-sample.md) | friction | contract-generator repair |
 | [Give thinking tool continuations one faithful request shape](thinking-tool-continuations-have-no-faithful-request-shape.md) | friction | future model-continuation wave |
 | [Fence the MCP parent watchdog by captured process identity](mcp-parent-watchdog-can-follow-a-reused-pid.md) | friction | MCP process-lifetime repair |
-| [Give the elision marker its count and identity](elided-marker-carries-no-count-or-identity.md) | friction | print-path follow-up |
 | [Make the oversized terminal-refusal settle as one schema-valid error fact](terminal-refusal-error-fact-fails-on-oversized-data.md) | friction | settlement fix wave |
 | [Promote the 34 proven REPL-parity divergences as the print path lands](repl-parity-divergences.md) | friction | print-path implementation wave |
 | [Close the 2026-08-01 unlogged findings (interop policy, agent write surface, rot)](unlogged-findings-2026-08-01.md) | friction | general |
@@ -114,6 +113,9 @@ See `README.md` for the convention.
 | [Make the Context MVP drive prove its semantic exit](context-mvp-drive-can-false-green-after-cross-agent-delivery.md) | friction | context MVP harness wave |
 | [Preserve Inst semantics when a value is also collection-like](admit-inst-overlap-prefers-collection-shape.md) | friction | adversarial-audit fix wave |
 | [Require the general printer bound for every contract headline](instrumentation-headline-unbounded-when-caps-absent.md) | friction | adversarial-audit fix wave |
+| [Keep interpreter-private markers out of the time-limit face](time-limit-face-exposes-interpreter-interrupt-marker.md) | friction | SCI failure-face repair wave |
+| [Keep contract-violation evidence as data](contract-violation-serializes-print-tree-inside-error-data.md) | friction | instrumentation error-data repair wave |
+| [Preserve the throw-site message when an error carries another error](nested-error-data-hides-the-throw-site-message.md) | friction | SCI failure-face repair wave |
 | [Route exact context captures through the blob owner](context-capture-prompts-bypass-the-blob-splitter.md) | friction | eval-scale economics wave |
 | [Update the Datahike skill after every selected fork commit](datahike-skill-pin-drifted-after-cache-cleanup.md) | friction | skill dependency-ledger repair |
 | [Give the shared compute executor per-cluster fairness](root-compute-executor-has-no-per-cluster-fairness.md) | friction | shared-surface scheduling design gate |
@@ -133,14 +135,11 @@ See `README.md` for the convention.
 | [Admit definitions after dynamically hidden namespace movement](dynamic-in-ns-cannot-persist-definition-namespace.md) | friction | per-run fork context wave |
 | [Preserve the interrupted blob staging artifact until it can be observed](interrupted-blob-staging-leaves-no-observable-artifact.md) | friction | blob staging repair wave |
 | [Preserve the Datahike refusal kind in the flat error value](transaction-refusal-drops-datahike-kind.md) | friction | database rejection projection repair |
-| [Keep disarm retryable after its loud backstop fires](disarm-backstop-drops-the-retryable-route.md) | friction | agent stop retry repair |
-| [Return structural edit feedback instead of nil](edit-feedback-returns-nil-for-structural-errors.md) | friction | edit feedback response repair |
 | [Reconcile the error-class catalog with declared schemas and renderers](error-class-catalog-and-renderers-disagree.md) | friction | error class contract repair |
 | [Build the work-launcher graph from complete Flow configuration](work-launcher-graph-build-adds-a-nil-config-value.md) | friction | Flow configuration fixture repair |
 | [Make the generative loop fixture commit the run facts it asserts](generative-loop-fixture-commits-no-run-facts.md) | friction | generative loop fixture repair |
 | [Give `seon.search/index-step` its public contract](search-index-step-has-no-public-contract.md) | friction | search public contract repair |
 | [Resolve schema aliases within one admitted declaration set](schema-alias-population-cannot-resolve-an-earlier-declaration.md) | friction | schema alias admission repair |
-| [Web effect search drops provider credits](web-effect-search-drops-provider-credits.md) | friction | web effect admission repair |
 
 ## Cleanup (15)
 

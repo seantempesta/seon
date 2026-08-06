@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: data-loss
+severity: blocker
 tags: [issue, database, datahike, konserve, gc]
 ---
 
