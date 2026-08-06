@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, deletion, database, operator]
 ---
@@ -57,3 +57,14 @@ otherwise the implementation, schemas, and tests should be deleted together.
   branch opens under its new store identity.
 - If deleted, repository-wide search finds no `seon.cluster.export`,
   `:seon.export/*`, or import/move promise without a live owner.
+
+## Closed 2026-08-06
+
+Exposed in commit `dfc9d5f12`. `bin/seon [--root PATH] export
+DESTINATION-PATH` now dispatches through the root's running JVM to the one
+open flock-held store and calls `seon.cluster.export/export!`; no second copy
+or identity mechanism was added. Cold roots refuse with a message naming
+`bin/seon start`, extra arguments and populated destinations refuse, and the
+focused operator test reopens the exported store and answers a query from its
+cluster branch. A scratch-root live proof likewise reopened all three exported
+branches under the new identity and returned the root agent.
