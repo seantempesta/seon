@@ -45,7 +45,12 @@
                {::sut/parallelism 1
                 ::sut/active-work (atom {})
                 ::sut/queue-depth 1
-                ::sut/compute-executor compute-executor})]
+                ::sut/compute-executor compute-executor
+                ::sut/task-executor compute-executor
+                ::sut/io-parallelism 1
+                ::sut/io-queue-depth 1
+                ::sut/io-submissions (atom {})
+                ::sut/proc-stopped (promise)})]
              [:fault
               ((private-var 'seon.flow 'fault-graph-definition)
                {::sut/fault-channel fault-channel
