@@ -8,6 +8,8 @@
             [clojure.core.async.flow :as flow]
             [clojure.edn :as edn]
             [clojure.string :as str]
+            [clojure.test.check.generators :as gen]
+            [datahike.datom :as datom]
             [seon.db :as db]
             [seon.schema.edn :as schema.edn])
   (:import [java.nio.file Files Paths]
@@ -27,6 +29,37 @@
 (set! *warn-on-reflection* true)
 
 (schema.edn/load! {})
+
+(defn- datahike-datom?
+  [value]
+  (datom/datom? value))
+
+#_{:clj-kondo/ignore [:unused-private-var]}
+(def ^:private datahike-datom-generator
+  (gen/fmap
+   (fn [[entity-id attribute value transaction added?]]
+     (datom/datom entity-id attribute value transaction added?))
+   (gen/tuple (gen/choose 1 1000000)
+              gen/keyword-ns
+              gen/any-printable
+              (gen/choose 1 1000000)
+              gen/boolean)))
+
+(defn- ping-map-fn?
+  [value]
+  (fn? value))
+
+#_{:clj-kondo/ignore [:unused-private-var]}
+(def ^:private ping-map-fn-generator
+  (gen/fmap
+   (fn [[behavior projection-key value]]
+     (case behavior
+       :select (fn [state] (select-keys state [projection-key]))
+       :constant (fn [_state] {projection-key value})
+       :count (fn [state] {projection-key (count state)})))
+   (gen/tuple (gen/elements [:select :constant :count])
+              gen/keyword-ns
+              gen/any-printable)))
 
 (defonce ^:private owners
   (atom {:seon.search/by-id {}
@@ -423,6 +456,61 @@
 
 (defn index-step
   "Flow proc that advances the cluster index from transaction reports."
+  {:malli/schema
+   [:function
+    [:=>
+     [:cat]
+     [:map
+      [:ins [:map [::transactions :string]]]
+      [:outs [:map]]
+      [:workload [:= :io]]
+      [:ping-map-fn
+       [:fn
+        {:error/message "must project the search proc state to a ping map"
+         :gen/gen 'seon.search/ping-map-fn-generator}
+        seon.search/ping-map-fn?]]]]
+    [:=>
+     [:catn
+      [::request
+       [:map
+        [:seon.search/index :seon.search/index-id]
+        [:seon.search/channel :seon.flow/channel]
+        [:seon.search/completion :seon.flow/channel]]]]
+     [:map
+      [::index-id :seon.search/index-id]
+      [::completion :seon.flow/channel]]]
+    [:=>
+     [:catn
+      [::state
+       [:map
+        [::index-id :seon.search/index-id]
+        [::completion :seon.flow/channel]]]
+      [::transition [:enum ::flow/resume ::flow/pause ::flow/stop]]]
+     [:map
+      [::index-id :seon.search/index-id]
+      [::completion :seon.flow/channel]]]
+    [:=>
+     [:catn
+      [::state
+       [:map
+        [::index-id :seon.search/index-id]
+        [::completion :seon.flow/channel]]]
+      [::input [:= ::transactions]]
+      [::report
+       [:map
+        [:db-before :seon.db/database-value]
+        [:db-after :seon.db/database-value]
+        [:tx-data
+         [:vector
+          [:fn
+           {:error/message "must be a raw Datahike transaction datom"
+            :gen/gen 'seon.search/datahike-datom-generator}
+           seon.search/datahike-datom?]]]]]]
+     [:tuple
+      [:map
+       [::index-id :seon.search/index-id]
+       [::completion :seon.flow/channel]]
+      :nil]]]}
   ([] {:ins {::transactions "Datahike transaction reports"}
        :outs {}
        :workload :io
