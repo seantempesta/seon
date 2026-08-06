@@ -9,35 +9,44 @@ tags: [issue, error, schema, render, testing]
 
 ## Problem
 
-The error-class census and the installed declarations disagree in two ways:
-one class exists only in the installed set, and the transaction-refusal class
-uses specialist renderers where the census requires the shared error faces.
+The dated error-class census no longer agrees with the queryable declaration
+registry. It also contradicts itself about the refusal subtotal. Treating the
+dated catalog as an exact name oracle would now delete accreted classes or
+restore a superseded class name.
 
 ## Evidence
 
-The bare 2026-08-05 gate failed
-`seon.error-class-schema-test/catalog-class-schemas-are-complete-and-declared`
-at `test/seon/error_class_schema_test.clj:115,122,124`:
+The W1 registry query on 2026-08-06 found 231 declarations carrying
+`:seon.error/class true`. The catalog records 225, while the hand-maintained
+test oracle it originally supplied contained only 218 identities. The current
+registry includes later accretion such as the `my.web/*` classes,
+`:seon.config/missing-effective-error`, and
+`:seon.search/unavailable-error`.
 
-- actual declarations additionally contain
-  `:seon.config/missing-effective-error`;
-- `:seon.db/transaction-refused-error` declares
-  `seon.db/render-rejection-ai`, not expected `seon.error/render-ai`;
-- the same class declares `seon.db/render-rejection-html`, not expected
-  `seon.error/render-html`.
+The catalog names `:seon.sci.eval/session-blob-unavailable-error`; the declared
+class is now `:seon.sci.eval/desk-blob-unavailable-error`. The catalog also says
+there are eleven refusal classes but enumerates ten, and the registry query
+likewise returns ten.
 
-The focused run at pre-rename commit `401fd300e` printed the same enormous
-unordered set diff and the same two renderer mismatches. The failure is
-pre-existing; the multi-kilobyte set rendering is also poor diagnostic output.
+Commit `9c55c8aef` removed the stale identity list from
+`test/seon/error_class_schema_test.clj`. Its recurring gate now derives every
+class and intentional producer directly from schema properties, so accretion
+does not require another copied census. The catalog remains a dated research
+artifact whose exact-count and refusal-count claims need an explicit
+correction rather than silent reinterpretation. The earlier archived issue
+`docs/seon/issues/archive/error-catalog-undercounted-class-vocabulary.md`
+incorrectly says the 225 correction and query-derived gate fully resolved the
+problem.
 
 ## Owner
 
-The declared error-class registry and the one query-derived census in
-`test/seon/error_class_schema_test.clj`.
+The error-model catalog and its source-derived census method in
+`docs/prds/sci-execution-runtime/research/error-catalog-2026-08-03.md`.
 
 ## Acceptance
 
-The expected and installed class identities agree by query, and every class's
-declared producer follows one explicit rule that accommodates intentional
-specialists. A failure reports sorted missing/extra identities and renderer
-differences, not two complete unordered catalogs.
+The catalog records the temporal boundary for its census, corrects the
+225-versus-218 arithmetic and the ten-versus-eleven refusal claim, and records
+the `session` to `desk` rename plus subsequent accretion without turning the
+dated inventory back into a runtime hand list. The inaccurate archived
+resolution is corrected or superseded.
