@@ -677,11 +677,27 @@
 
 (defn- refusal-terminal-data
   [cluster database now agent-id run-id process ordinal receipt source]
-  (let [recording
-        (error-tx cluster database source now
+  (let [escalate-to (:seon.config.error/escalate-to cluster)
+        recording
+        (error-tx (dissoc cluster :seon.config.error/escalate-to)
+                  database source now
                   (cond-> {:seon.cluster.agent/id agent-id}
                     run-id (assoc :seon.cluster.run/id run-id)))
+        fact (first recording)
         value (error/value (first recording))
+        escalation
+        (when (and escalate-to
+                   (db/q '[:find ?agent .
+                           :in $ ?agent-id
+                           :where [?agent :seon.cluster.agent/id ?agent-id]]
+                         database escalate-to))
+          {:seon.cluster.message/id
+           (str (:seon.error/id fact) "-escalation")
+           :seon.cluster.message/to
+           [:seon.cluster.agent/id escalate-to]
+           :seon.cluster.message/content
+           (str "A run phase failed: " (:seon.error/message fact))
+           :seon.cluster.message/at now})
         receipt-tx
         (when ordinal
           (run/receipt-settle-tx
@@ -706,7 +722,8 @@
                {:seon.cluster.run/id run-id
                 :seon.cluster.run/process process
                 :seon.cluster.run/closed-at now}))
-            recording])}))
+            recording
+            (when escalation [escalation])])}))
 
 (defn settle!
   "The sole terminal writer for one run.

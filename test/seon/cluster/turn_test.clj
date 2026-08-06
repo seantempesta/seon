@@ -2714,6 +2714,105 @@
                 "later work remains claimable without recovery or a restart;
                  the durable fault notice may correctly be older")))))))
 
+(def ^:private run-phases
+  [:claim :fork :prompt :freeze :evaluate :delivery])
+
+(deftest generated-phase-failures-converge-through-one-terminal-exit
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.db/connection cluster)
+            sequence-number (atom 0)
+            cluster (assoc cluster :seon.config.error/escalate-to "root")]
+        (db/transact! connection [(agent-row "root")])
+        (test-support/assert-check!
+         (tc/quick-check
+          24
+          (prop/for-all [failed-phase (gen/elements run-phases)]
+            (let [sample (swap! sequence-number inc)
+                  run-id (str "phase-failure-" sample)
+                  evaluation? (= :evaluate failed-phase)
+                  failure {:seon.error/kind
+                           (keyword "seon.cluster.loop.phase"
+                                    (name failed-phase))
+                           :seon.error/message
+                           (str "injected " (name failed-phase) " failure")
+                           :seon.error/data {:seon.cluster.loop/phase
+                                             failed-phase}}]
+              (db/transact!
+               connection
+               [{:seon.cluster.run/id run-id
+                 :seon.cluster.run/agent
+                 [:seon.cluster.agent/id "agent-a"]
+                 :seon.cluster.run/opened-at now
+                 :seon.cluster.run/process process}
+                {:seon.cluster.agent/id "agent-a"
+                 :seon.cluster.agent/run
+                 [:seon.cluster.run/id run-id]}])
+              (when evaluation?
+                (db/transact!
+                 connection
+                 (run/receipt-start-tx
+                  {:seon.cluster.run/id run-id
+                   :seon.cluster.eval/ordinal 0
+                   :seon.cluster.eval/at now})))
+              (let [settled
+                    (cluster.loop/settle!
+                     (cond-> {:seon.cluster.loop/cluster cluster
+                              :seon.cluster.loop/now now
+                              :seon.cluster.agent/id "agent-a"
+                              :seon.cluster.run/id run-id
+                              :seon.error/value failure}
+                       evaluation?
+                       (assoc :seon.cluster.run.form/ordinal 0)))
+                    error-id
+                    (get-in settled
+                            [:seon.error/value :seon.error/data
+                             :seon.error/id])
+                    escalation-id (str error-id "-escalation")
+                    receipt-count
+                    (or
+                     (db/q '[:find (count ?receipt) .
+                             :in $ ?run-id
+                             :where
+                             [?run :seon.cluster.run/id ?run-id]
+                             [?receipt :seon.cluster.eval/run ?run]]
+                           @connection run-id)
+                     0)]
+                (and
+                 (= 1
+                    (db/q '[:find (count ?closed) .
+                            :in $ ?run-id
+                            :where
+                            [?run :seon.cluster.run/id ?run-id]
+                            [?run :seon.cluster.run/closed-at ?closed]]
+                          @connection run-id))
+                 (= (if evaluation? 1 0) receipt-count)
+                 (= 1
+                    (db/q '[:find (count ?error) .
+                            :in $ ?run-id
+                            :where
+                            [?run :seon.cluster.run/id ?run-id]
+                            [?error :seon.error/run ?run]]
+                          @connection run-id))
+                 (= "root"
+                    (db/q '[:find ?agent-id .
+                            :in $ ?message-id
+                            :where
+                            [?message :seon.cluster.message/id ?message-id]
+                            [?message :seon.cluster.message/to ?agent]
+                            [?agent :seon.cluster.agent/id ?agent-id]]
+                          @connection escalation-id))
+                 (contains?
+                  (into #{} (map :seon.cluster.message/id)
+                        (work/unanswered-triggers @connection "root"))
+                  escalation-id)
+                 (= :open
+                    (:seon.cluster.work/situation
+                     (work/next-agent-work @connection
+                                           (request connection "root"))))))))
+          :seed 2026080601)
+         "Every injected phase failure must settle once, escalate durably, and wake fresh work.")))))
+
 (deftest a-prompt-refusal-is-a-recorded-error-value-never-a-throw
   ;; `seon.cluster.prompt/prompt` refuses by THROWING (`::no-trigger`,
   ;; `::missing-input`). \"Nothing throws into the agent loop\" is law:
