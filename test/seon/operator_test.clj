@@ -83,6 +83,56 @@
       (finally
         (test-support/delete-recursively! repository-root)))))
 
+(deftest root-claim-refuses-a-live-creator-and-supersedes-a-dead-one
+  (let [repository-root (owned-root)
+        managed-root (str (io/file repository-root "superseded"))
+        durable-root (str (io/file repository-root "durable"))
+        owner (.start (ProcessBuilder. ^java.util.List ["/bin/sleep" "60"]))]
+    (try
+      (let [owner-identity
+            {:seon.boot/pid (.pid owner)
+             :seon.boot/start-instant
+             (operator.state/process-start-instant (.pid owner))}]
+        (operator/claim-root!
+         {:seon.operator/repository-root repository-root
+          :seon.operator/managed-root durable-root})
+        (is (false?
+             (:seon.operator.claim/ephemeral?
+              (operator/claim-root!
+               {:seon.operator/repository-root repository-root
+                :seon.operator/managed-root durable-root
+                :seon.operator/ephemeral-owner
+                (operator.state/current-process-identity)})))
+            "a durable lifecycle cannot be relabeled ephemeral")
+        (is (map? (operator/claim-root!
+                   {:seon.operator/repository-root repository-root
+                    :seon.operator/managed-root managed-root
+                    :seon.operator/ephemeral-owner owner-identity})))
+        (is (= :seon.operator/root-creator-mismatch
+               (:seon.error/kind
+                (operator/claim-root!
+                 {:seon.operator/repository-root repository-root
+                  :seon.operator/managed-root managed-root}))))
+        (.destroyForcibly owner)
+        (.waitFor owner)
+        (let [claim (operator/claim-root!
+                     {:seon.operator/repository-root repository-root
+                      :seon.operator/managed-root managed-root})
+              supersession (-> claim
+                               :seon.operator.claim/supersessions
+                               last)]
+          (is (= (operator.state/current-process-identity)
+                 (:seon.operator.claim/creator claim)))
+          (is (false? (:seon.operator.claim/ephemeral? claim)))
+          (is (false? (:seon.operator.claim/reap-on-owner-exit? claim)))
+          (is (= owner-identity
+                 (:seon.operator.claim/creator supersession)))
+          (is (true? (:seon.operator.claim/ephemeral? supersession)))
+          (is (inst? (:seon.operator.claim/superseded-at supersession)))))
+      (finally
+        (when (.isAlive owner) (.destroyForcibly owner))
+        (test-support/delete-recursively! repository-root)))))
+
 (deftest reaper-removes-dead-owner-roots-including-a-vanished-root
   (let [repository-root (owned-root)
         caller-root (str (io/file repository-root "caller"))

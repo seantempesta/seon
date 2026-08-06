@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (17)
+## Blocker (18)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -37,6 +37,7 @@ See `README.md` for the convention.
 | [Let evaluation errors settle their triage receipt](eval-errors-cannot-settle-triage-receipts.md) | blocker | receipt settlement repair |
 | [Refuse the losing concurrent divergent schema declaration](concurrent-divergent-schema-declarations-falsely-both-succeed.md) | blocker | schema collision admission wave |
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
+| [Install maintenance result attributes on a fresh cluster](fresh-maintenance-result-attributes-are-not-installed.md) | blocker | maintenance schema-install repair |
 
 ## Friction (100)
 

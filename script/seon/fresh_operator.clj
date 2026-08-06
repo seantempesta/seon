@@ -35,18 +35,23 @@
       .getParentFile))
 
 (defn- ephemeral-owner
-  []
-  (when-let [pid-value (System/getenv "SEON_OPERATOR_EPHEMERAL_OWNER_PID")]
-    (let [pid (parse-long pid-value)
-          start-instant (and pid (operator.state/process-start-instant pid))]
-      (when-not (and (pos-int? pid) start-instant)
-        (throw
-         (ex-info "The declared ephemeral operator owner is not alive."
-                  {:seon.error/kind
-                   :seon.fresh-operator/ephemeral-owner-not-alive
-                   :seon.boot/pid pid})))
-      {:seon.boot/pid pid
-       :seon.boot/start-instant start-instant})))
+  ([root]
+   (ephemeral-owner root
+                    (System/getenv "SEON_OPERATOR_EPHEMERAL_OWNER_PID")))
+  ([root pid-value]
+   (when (and (not= (.getCanonicalPath (io/file root))
+                    (.getCanonicalPath (repository-root)))
+              pid-value)
+     (let [pid (parse-long pid-value)
+           start-instant (and pid (operator.state/process-start-instant pid))]
+       (when-not (and (pos-int? pid) start-instant)
+         (throw
+          (ex-info "The declared ephemeral operator owner is not alive."
+                   {:seon.error/kind
+                    :seon.fresh-operator/ephemeral-owner-not-alive
+                    :seon.boot/pid pid})))
+       {:seon.boot/pid pid
+        :seon.boot/start-instant start-instant}))))
 
 (def ^:private detach-python
   (str "import socket,subprocess,sys\n"
@@ -1460,7 +1465,7 @@
   [root name manifest ready-port adoption-port silence-ms
    dependency-cache-path]
   (let [_ (operator.state/claim-root-under-lock!
-           (repository-root) root (ephemeral-owner) name)
+           (repository-root) root (ephemeral-owner root) name)
         log (create-log! root name)
         generation (random-uuid)
         process
@@ -2006,7 +2011,7 @@
   (let [{:seon.fresh-operator/keys [name force? changed-paths]}
         (parse-init-arguments arguments)
         _ (operator.state/claim-root-under-lock!
-           (repository-root) root (ephemeral-owner) name)
+           (repository-root) root (ephemeral-owner root) name)
         dependency-cache (dev.kondo/ensure-dependency-cache! root)
         _ (when (= :unavailable
                    (:seon.dev.clj-kondo/status dependency-cache))
@@ -2137,7 +2142,7 @@
           rows))
         _ (doseq [row rows]
             (operator.state/claim-root-under-lock!
-             (repository-root) root (ephemeral-owner)
+             (repository-root) root (ephemeral-owner root)
              (:seon.fresh-operator/name row)))
         _ (when (.exists (java.io.File. root))
             (operator.state/mark-root-created-under-lock!

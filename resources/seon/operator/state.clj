@@ -218,6 +218,7 @@
   [repository-root managed-root ephemeral-owner cluster-name]
   (let [root (canonical-path managed-root)
         path (root-claim-path repository-root root)
+        claimed-at (Date.)
         previous (or (read-edn path) {})
         new-lifecycle? (contains? previous
                                   :seon.operator.claim/destroyed-at)
@@ -237,25 +238,39 @@
                        :seon.operator/ephemeral-owner-not-alive
                        :seon.operator/ephemeral-owner ephemeral-owner})))
         previous-creator (:seon.operator.claim/creator previous)
-        _ (when (and (not new-lifecycle?)
-                     previous-creator
-                     ephemeral-owner
-                     (not= previous-creator ephemeral-owner))
+        creator (or ephemeral-owner (current-process-identity))
+        creator-changed? (and previous-creator
+                              (not= previous-creator creator))
+        previous-creator-alive?
+        (and creator-changed?
+             (process-identity-alive? previous-creator))
+        _ (when (and (not new-lifecycle?) previous-creator-alive?)
             (throw
              (ex-info "The managed root already has a different creator."
                       {:seon.error/kind
                        :seon.operator/root-creator-mismatch
                        :seon.operator.claim/creator previous-creator
-                       :seon.operator/ephemeral-owner ephemeral-owner})))
-        creator (if new-lifecycle?
-                  (or ephemeral-owner (current-process-identity))
-                  (or previous-creator
-                      ephemeral-owner
-                      (current-process-identity)))
-        ephemeral? (if new-lifecycle?
-                     (some? ephemeral-owner)
-                     (or (:seon.operator.claim/ephemeral? previous)
-                         (some? ephemeral-owner)))
+                       :seon.operator.claim/requested-creator creator})))
+        superseding? (and (not new-lifecycle?)
+                          creator-changed?
+                          (not previous-creator-alive?))
+        creator (if (and previous-creator
+                         (not new-lifecycle?)
+                         (not superseding?))
+                  previous-creator
+                  creator)
+        ephemeral? (if (or new-lifecycle?
+                           superseding?
+                           (nil? previous-creator))
+                     (boolean ephemeral-owner)
+                     (boolean (:seon.operator.claim/ephemeral? previous)))
+        supersessions
+        (cond-> (vec (:seon.operator.claim/supersessions previous))
+          superseding?
+          (conj {:seon.operator.claim/creator previous-creator
+                 :seon.operator.claim/ephemeral?
+                 (boolean (:seon.operator.claim/ephemeral? previous))
+                 :seon.operator.claim/superseded-at claimed-at}))
         store-path (str (fs/path root "data" "clusters" "store"))
         clusters (cond-> (set (:seon.operator.claim/clusters previous))
                    cluster-name (conj cluster-name))
@@ -275,8 +290,9 @@
                       :seon.operator.claim/reap-on-owner-exit?
                       (boolean ephemeral?)
                       :seon.operator.claim/creator creator
+                      :seon.operator.claim/supersessions supersessions
                       :seon.operator.claim/clusters clusters
-                      :seon.operator.claim/claimed-at (Date.)})]
+                      :seon.operator.claim/claimed-at claimed-at})]
     (write-edn! path claim)))
 
 (defn claim-root!

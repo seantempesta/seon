@@ -752,6 +752,7 @@
 
 (deftest bin-root-option-selects-an-isolated-operator-root
   (let [root (fresh-root)
+        owner-pid (str (.pid (java.lang.ProcessHandle/current)))
         record
         {:seon.operator.process-record/generation (random-uuid)
          :seon.boot/pid 1
@@ -759,6 +760,14 @@
          :seon.operator.process-record/root (.getCanonicalPath root)
          :seon.operator.process-record/log (str (io/file root "isolated.log"))}]
     (try
+      (is (nil? (operator-private-value
+                 'ephemeral-owner (str project-root) owner-pid))
+          "the shared repository root ignores a lane's ephemeral owner")
+      (is (= (long (parse-long owner-pid))
+             (:seon.boot/pid
+              (operator-private-value
+               'ephemeral-owner (str root) owner-pid)))
+          "an explicit isolated root retains the lane owner identity")
       (operator.state/claim-root!
        (.getCanonicalPath project-root)
        (.getCanonicalPath root)
