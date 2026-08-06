@@ -94,9 +94,6 @@
 (def socket-server-generator
   (gen/fmap (fn [_] @generator-server) (gen/return nil)))
 
-(schema.edn/load! {})
-(schema/activate! (schema/snapshot))
-
 (defn- ref-identity
   [database ref attribute]
   (when (and database (:db/id ref))
@@ -792,40 +789,44 @@
     :nil]}
   [{connection :seon.db/connection
     manifest :seon.fn/manifest}]
-  (report-source-progress! "schema population started")
-  (accrete-schema-population! connection nil)
-  (report-source-progress! "schema population complete")
-  (report-source-progress! "bootstrap rows")
-  (let [rows (bootstrap/population-tx @connection)]
-    (when (seq rows)
-      (require-committed!
-       (db/transact! connection
-                     {:tx-data rows
-                      :tx-meta
-                      {:seon.db/process
-                       [:seon.db.process/id boot-process-identity]}})
-       {:seon.boot/population :seon.bootstrap/rows})))
-  (report-source-progress! "instruction rows")
-  (let [rows (instruction-row-changes
-              @connection
-              (instruction/seed-rows))]
-    (when (seq rows)
-      (require-committed!
-       (db/transact! connection
-                     {:tx-data rows
-                      :tx-meta
-                      {:seon.db/process
-                       [:seon.db.process/id boot-process-identity]}})
-       {:seon.boot/population :seon.cluster.instruction/rows})))
-  (report-source-progress! "program rows started")
-  (seon.fn/index!
-   (cond-> {:seon.db/connection connection
-            :seon.db/process
-            [:seon.db.process/id boot-process-identity]}
-     manifest (assoc :seon.fn/manifest manifest)
-     (nil? manifest) (assoc :seon.fn/roots seon.fn/source-roots))
-   report-source-progress!)
-  (report-source-progress! "program rows complete")
+  (let [forms (schema.edn/packaged-forms)]
+    (schema/call-with-forms
+     forms
+     (fn []
+       (report-source-progress! "schema population started")
+       (accrete-schema-population! connection nil)
+       (report-source-progress! "schema population complete")
+       (report-source-progress! "bootstrap rows")
+       (let [rows (bootstrap/population-tx @connection)]
+         (when (seq rows)
+           (require-committed!
+            (db/transact! connection
+                          {:tx-data rows
+                           :tx-meta
+                           {:seon.db/process
+                            [:seon.db.process/id boot-process-identity]}})
+            {:seon.boot/population :seon.bootstrap/rows})))
+       (report-source-progress! "instruction rows")
+       (let [rows (instruction-row-changes
+                   @connection
+                   (instruction/seed-rows))]
+         (when (seq rows)
+           (require-committed!
+            (db/transact! connection
+                          {:tx-data rows
+                           :tx-meta
+                           {:seon.db/process
+                            [:seon.db.process/id boot-process-identity]}})
+            {:seon.boot/population :seon.cluster.instruction/rows})))
+       (report-source-progress! "program rows started")
+       (seon.fn/index!
+        (cond-> {:seon.db/connection connection
+                 :seon.db/process
+                 [:seon.db.process/id boot-process-identity]}
+          manifest (assoc :seon.fn/manifest manifest)
+          (nil? manifest) (assoc :seon.fn/roots seon.fn/source-roots))
+        report-source-progress!)
+       (report-source-progress! "program rows complete"))))
   nil)
 
 ;;; ---------------------------------------------------------------------------

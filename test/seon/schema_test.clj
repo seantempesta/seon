@@ -16,6 +16,11 @@
     (catch clojure.lang.ExceptionInfo failure
       failure)))
 
+(defn- registration-delta
+  []
+  (schema/begin-registration-delta
+   (schema/build-projection (schema/registered-schemas))))
+
 (deftest canonical-definition-keeps-admitted-predicate-symbols
   (let [definition
         [:=> [:cat :qualified-symbol [:fn 'clojure.core/ifn?]]
@@ -35,17 +40,18 @@
     (is (not (str/includes? (pr-str humanized) "unknown error")))))
 
 (deftest canonical-self-references-refuse-at-registration
-  (let [state (schema/snapshot-state)
-        schema-key :seon.schema-test/self]
-    (try
+  (let [schema-key :seon.schema-test/self]
       (doseq [[label definition]
               [["a direct canonical reference"
                 [:or :string [:vector schema-key]]]
                ["an explicit canonical `:ref`"
                 [:or :string [:vector [:ref schema-key]]]]]]
         (testing label
-          (let [failure
-                (refusal #(schema/register! schema-key definition))
+          (let [delta (registration-delta)
+                failure
+                (refusal
+                 #(schema/call-with-registration-delta
+                   delta (fn [] (schema/register! schema-key definition))))
                 data (ex-data failure)]
             (is (instance? clojure.lang.ExceptionInfo failure)
                 "the admission gate returns a legible refusal")
@@ -58,18 +64,14 @@
             (is (str/includes? (ex-message failure)
                                (pr-str [schema-key schema-key]))
                 "the refusal names the complete cycle")
-            (is (not (schema/registered? schema-key))
-                "a refused declaration never reaches the collector"))))
-      (finally
-        (schema/restore-state! state)))))
+            (is (nil? (schema/registration-delta-form delta schema-key))
+                "a refused declaration never reaches the delta"))))))
 
 (deftest canonical-mutual-recursion-refuses-but-local-recursion-is-supported
   (let [left :seon.schema-test/left
         right :seon.schema-test/right
         local :seon.schema-test/local-recursion
-        local-node :seon.schema-test.local/node
-        state (schema/snapshot-state)]
-    (try
+        local-node :seon.schema-test.local/node]
       (testing "a complete mutually recursive canonical population refuses"
         (let [failure
               (refusal
@@ -84,52 +86,52 @@
           (is (= [left right left]
                  (:seon.schema/cycle-path data)))))
       (testing "Malli's local recursive registry remains a supported shape"
-        (let [definition
+        (let [delta (registration-delta)
+              definition
               [:schema
                {:registry
                 {local-node
                  [:or :string [:vector [:ref local-node]]]}}
                [:ref local-node]]]
-          (is (= local (schema/register! local definition)))
-          (is (schema/valid-candidate-value?
-               local ["root" ["leaf"]]))
-          (is (schema/registered? local))))
-      (finally
-        (schema/restore-state! state)))))
+          (is (= local
+                 (schema/call-with-registration-delta
+                  delta (fn [] (schema/register! local definition)))))
+          (schema/call-with-registration-delta
+           delta
+           (fn []
+             (is (schema/valid-candidate-value?
+                  local ["root" ["leaf"]]))))
+          (is (= definition
+                 (schema/registration-delta-form delta local)))))))
 
 (deftest map-shapes-accrete-additional-top-level-attributes
-  (let [state (schema/snapshot-state)
-        schema-key :seon.schema-test/rendered-entity
-        render-html 'seon.schema-test/render-html]
-    (try
-      (schema/register!
-       schema-key
-       [:map {:seon.render/html render-html}
-        [:seon.schema-test/id :string]
-        [:seon.schema-test/rank {:optional true} :int]])
-      (schema/activate! (schema/build-projection
-                         (schema/registered-schemas)))
-      (let [base {:seon.schema-test/id "one"}
-            additional (assoc base
-                              :seon.render/html
-                              'my.agent/render-html)
-            invalid (assoc additional :seon.schema-test/rank "first")]
-        (testing "shape identity survives accretion"
-          (is (= [schema-key schema-key]
-                 (mapv (fn [value]
-                         (-> (schema/matching-shapes value)
-                             first
-                             :seon.schema/key))
-                       [base additional])))
-          (is (= render-html
-                 (-> (schema/matching-shapes additional)
-                     first
-                     :seon.render/html))
-              "custom Malli render properties survive in the shape row")
-          (is (empty? (schema/matching-shapes invalid))
-              "an invalid declared optional attribute still refuses")))
-      (finally
-        (schema/restore-state! state)))))
+  (let [schema-key :seon.schema-test/rendered-entity
+        render-html 'seon.schema-test/render-html
+        forms (assoc (schema/registered-schemas)
+                     schema-key
+                     [:map {:seon.render/html render-html}
+                      [:seon.schema-test/id :string]
+                      [:seon.schema-test/rank {:optional true} :int]])
+        projection (schema/build-projection forms)
+        base {:seon.schema-test/id "one"}
+        additional (assoc base
+                          :seon.render/html
+                          'my.agent/render-html)
+        invalid (assoc additional :seon.schema-test/rank "first")]
+    (testing "shape identity survives accretion"
+      (is (= [schema-key schema-key]
+             (mapv (fn [value]
+                     (-> (schema/matching-shapes-in projection value)
+                         first
+                         :seon.schema/key))
+                   [base additional])))
+      (is (= render-html
+             (-> (schema/matching-shapes-in projection additional)
+                 first
+                 :seon.render/html))
+          "custom Malli render properties survive in the shape row")
+      (is (empty? (schema/matching-shapes-in projection invalid))
+          "an invalid declared optional attribute still refuses"))))
 
 (deftest canonical-rows-carry-arbitrary-namespaced-properties
   (let [schema-key :seon.schema-test/class

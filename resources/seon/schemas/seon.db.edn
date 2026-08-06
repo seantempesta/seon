@@ -1,4 +1,6 @@
 #:seon.db{:attributes :boolean,
+          :lookup-ref-value [:or :string :uuid :keyword :symbol :int],
+          :ref [:or :int :string [:tuple :keyword :seon.db/lookup-ref-value]],
           :component :boolean,
           :db :seon.db/database-value,
           :read-evidence-sink

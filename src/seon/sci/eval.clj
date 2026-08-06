@@ -626,7 +626,6 @@
 (defn- evaluation-projection
   [{ctx :seon.sci.eval/ctx}]
   (or (context-projection ctx)
-      (schema/current-projection)
       (schema/build-projection (schema/registered-schemas))))
 
 (defn- advance-context-projection!

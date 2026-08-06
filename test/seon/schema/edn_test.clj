@@ -71,22 +71,28 @@
   (let [resource "seon/schema_edn_fixtures/valid.edn"
         resolve-resource io/resource
         calls (atom [])
-        loaded
+        population
         (with-redefs [io/resource
                       (fn [name]
                         (swap! calls conj name)
                         (resolve-resource name))]
-          (schema.edn/load! {:seon.schema.edn/resource resource}))]
+          ((deref #'schema.edn/resource-population) resource))
+        forms (::schema.edn/forms population)
+        loaded {::schema.edn/file (::schema.edn/file population)
+                ::schema.edn/keys (count forms)}]
     (testing "one resource contributes all three keys"
       (is (= #{resource} (set @calls)))
       (is (= 3 (:seon.schema.edn/keys loaded))))
     (testing "a cross-section alias is a candidate like any other"
-      (is (schema/registered? :seon.schema.edn.fixture/label)))
+      (is (contains? forms :seon.schema.edn.fixture/label)))
     (testing "a loaded attribute validates values end to end"
-      (is (schema/valid-candidate-value?
-           :seon.schema.edn.fixture/name "alpha"))
-      (is (not (schema/valid-candidate-value?
-                :seon.schema.edn.fixture/name ""))))))
+      (schema/call-with-forms
+       forms
+       (fn []
+         (is (schema/valid-candidate-value?
+              :seon.schema.edn.fixture/name "alpha"))
+         (is (not (schema/valid-candidate-value?
+                   :seon.schema.edn.fixture/name ""))))))))
 
 (deftest duplicates-across-sections-refuse
   (with-temporary-resources
@@ -302,61 +308,78 @@
                        "load or reload that namespace before schema admission"))))
 
 (deftest register!-flows-through-the-same-gate
-  (let [state (schema/snapshot-state)]
-    (try
+  (let [predicate 'seon.schema.edn-test/fixture-instant?
+        projection
+        (schema/build-projection
+         (schema/registered-schemas)
+         {}
+         {:seon.schema/pure-predicate-symbols #{predicate}})]
       (testing "the agent producer meets the same honesty bar — one gate,
                 two producers"
-        (is (map? (test-support/refusal-data
-                   #(schema/register!
-                     :seon.schema.edn.gate/agent-dishonest
-                     [:fn 'seon.schema.edn-test/fixture-instant?])))))
+        (let [delta (schema/begin-registration-delta projection)]
+          (is (map? (test-support/refusal-data
+                     #(schema/call-with-registration-delta
+                       delta
+                       (fn []
+                         (schema/register!
+                          :seon.schema.edn.gate/agent-dishonest
+                          [:fn 'seon.schema.edn-test/fixture-instant?]))))))))
       (testing "an honest agent registration still lands"
-        (schema/register!
-         :seon.schema.edn.gate/agent-honest
-         [:fn {:gen/schema :inst}
-          'seon.schema.edn-test/fixture-instant?])
-        (is (schema/registered? :seon.schema.edn.gate/agent-honest)))
-      (finally
-        (schema/restore-state! state)))))
+        (let [delta (schema/begin-registration-delta projection)
+              definition [:fn {:gen/schema :inst
+                               :error/message "must be an instant"}
+                          'seon.schema.edn-test/fixture-instant?]]
+          (schema/call-with-registration-delta
+           delta
+           (fn []
+             (schema/register!
+              :seon.schema.edn.gate/agent-honest definition)))
+          (is (= definition
+                 (schema/registration-delta-form
+                  delta :seon.schema.edn.gate/agent-honest)))))))
 
 (deftest one-config-registration-derives-every-structural-contract
   (let [scratch :seon.config.scratch/enabled
-        state (schema/snapshot-state)
+        delta (schema/begin-registration-delta
+               (schema/build-projection (schema/registered-schemas)))
         entries
-        (fn [schema-key]
+        (fn [forms schema-key]
           (into {} (map (juxt first identity))
                 (schema.form/map-entries
-                 (schema/schema-definition schema-key))))]
-    (try
-      (schema/register!
-       scratch
-       [:boolean {:seon.config/default false
-                  :seon.config/per-agent true}])
+                 (get forms schema-key))))]
+    (schema/call-with-registration-delta
+     delta
+     (fn []
+       (schema/register!
+        scratch
+        [:boolean {:seon.config/default false
+                   :seon.config/per-agent true}])))
+    (let [forms @(:seon.schema.delta/candidate-forms delta)]
       (testing "the public registration producer derives every contract"
-        (is (contains? (entries :seon.config/manifest) scratch))
-        (is (contains? (entries :seon.config/effective) scratch))
-        (is (contains? (entries :seon.config/agent-overlay) scratch))
-        (is (contains? (entries :seon.config/entity) scratch))
-        (is (contains? (set (schema/canonical-database-attributes)) scratch))
+        (is (contains? (entries forms :seon.config/manifest) scratch))
+        (is (contains? (entries forms :seon.config/effective) scratch))
+        (is (contains? (entries forms :seon.config/agent-overlay) scratch))
+        (is (contains? (entries forms :seon.config/entity) scratch))
+        (is (contains? (set (schema/canonical-database-attributes forms)) scratch))
         (is (= [scratch
                 {:optional true}
                 [:or scratch [:= :seon.config/absent]]]
-               (get (entries :seon.config/manifest) scratch))
+               (get (entries forms :seon.config/manifest) scratch))
             "manifest derivation retains both optionality and explicit absence")
         (is (= [scratch {:optional true} scratch]
-               (get (entries :seon.config/agent-overlay) scratch))
+               (get (entries forms :seon.config/agent-overlay) scratch))
             "agent absence inherits through one derived optional entry")
-        (is (= false (get (config/default-decisions) scratch))
+        (is (= false
+               (schema/call-with-forms
+                forms #(get (config/default-decisions) scratch)))
             "the same registration is defaults-checkable"))
       (testing "structural config attributes never become manifest entries"
-        (is (not (contains? (entries :seon.config/manifest)
+        (is (not (contains? (entries forms :seon.config/manifest)
                             :seon.config/cluster)))
-        (is (not (contains? (entries :seon.config/manifest)
-                            :seon.config/applied-manifest-digest))))
-      (finally
-        (schema/restore-state! state)))
-    (is (not (schema/registered? scratch))
-        "the scratch registration is removed")))
+        (is (not (contains? (entries forms :seon.config/manifest)
+                            :seon.config/applied-manifest-digest)))))
+    (is (not (contains? (schema/registered-schemas) scratch))
+        "the scratch declaration never mutates packaged facts")))
 
 (deftest per-agent-config-overlay-is-one-derived-optional-surface
   (let [forms (schema/registered-schemas)

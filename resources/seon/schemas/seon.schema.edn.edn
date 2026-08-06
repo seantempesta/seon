@@ -1,4 +1,13 @@
-{:seon.schema.edn/unreadable-file :string
+{:seon.schema.edn/resource [:string {:min 1}]
+ :seon.schema.edn/file [:string {:min 1}]
+ :seon.schema.edn/keys [:int {:min 0}]
+ :seon.schema.edn/load-request
+ [:map [:seon.schema.edn/resource {:optional true} :seon.schema.edn/resource]]
+ :seon.schema.edn/loaded
+ [:map
+  [:seon.schema.edn/file :seon.schema.edn/file]
+  [:seon.schema.edn/keys :seon.schema.edn/keys]]
+ :seon.schema.edn/unreadable-file :string
  :seon.schema.edn/unreadable-file-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unreadable schema resource"} [:seon.schema.edn/unreadable-file :seon.schema.edn/unreadable-file] [:seon.error/message :seon.error/message]]
  :seon.schema.edn/duplicate-attribute :qualified-keyword
  :seon.schema.edn/duplicate-attribute-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the attribute declared by more than one resource"} [:seon.schema.edn/duplicate-attribute :seon.schema.edn/duplicate-attribute] [:seon.error/message :seon.error/message]]

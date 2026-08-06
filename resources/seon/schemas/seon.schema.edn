@@ -1,4 +1,39 @@
 #:seon.schema{:arguments [:vector :any],
+              :registry-key :keyword,
+              :malli-form
+              [:fn
+               {:error/message "must be a parseable, EDN-readable Malli form"
+                :gen/schema [:enum :string :int [:vector :keyword]]}
+               seon.schema/malli-form?],
+              :definition :seon.schema/malli-form,
+              :value :any,
+              :explanation :map,
+              :namespace-name :string,
+              :kvs [:vector :any],
+              :discarded-keys [:set :seon.schema/registry-key],
+              :projection-row
+              [:tuple [:or :keyword :string :symbol] :string :int],
+              :projection-rows
+              [:or
+               [:set :seon.schema/projection-row]
+               [:sequential :seon.schema/projection-row]],
+              :projection-input
+              [:map
+               [:seon.schema/database-value :map]
+               [:seon.schema/schema-rows :seon.schema/projection-rows]
+               [:seon.schema/function-contract-rows
+                :seon.schema/projection-rows]
+               [:seon.schema/function-source-rows
+                {:optional true}
+                :seon.schema/projection-rows]
+               [:seon.schema/artifact-exports
+                {:optional true}
+                [:set :symbol]]
+               [:seon.schema/pure-predicate-symbols
+                {:optional true}
+                [:set :symbol]]],
+              :projection map?,
+              :compiled-validator fn?,
               :key
               [:keyword
                {:seon.db/identity true, :seon.search/index :symbol}],

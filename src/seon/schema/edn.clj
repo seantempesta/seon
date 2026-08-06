@@ -20,32 +20,6 @@
             [seon.schema.form :as schema.form])
   (:import [java.net JarURLConnection]))
 
-;;; ---------------------------------------------------------------------------
-;;; Schemas
-;;; ---------------------------------------------------------------------------
-
-; the one classpath resource; overridable so suites use fixture resources
-(schema/register! ::resource [:string {:min 1}])
-(schema/register! ::file [:string {:min 1}])
-(schema/register! ::keys [:int {:min 0}])
-
-(schema/register!
- ::load-request
- [:map
-  [::resource {:optional true} ::resource]])
-
-(schema/register!
- ::loaded
- [:map
-  [::file ::file]
-  [::keys ::keys]])
-
-(defonce ^:private packaged-base-forms
-  ;; Captured before any consumer namespace can register process-local test or
-  ;; REPL schemas. Packaged publication later merges only schema EDN into this
-  ;; bootstrap population; the ambient registry is never a build input.
-  (schema/registered-schemas))
-
 (def default-resource
   "Classpath directory backed by `resources/seon/schemas/` in a source checkout."
   "seon/schemas")
@@ -53,8 +27,6 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Contracts
 ;;; ---------------------------------------------------------------------------
-
-(defonce ^:private !source-files (atom {}))
 
 (defn- config-dial?
   [identity definition]
@@ -279,8 +251,11 @@
   [loaded]
   (doseq [{file ::file resource ::resource forms ::forms} loaded
           :let [filename (resource-filename resource)
-                file-namespace (subs filename 0 (- (count filename) 4))]]
-    (when-not (filesystem-safe-namespace? file-namespace)
+                file-namespace (subs filename 0 (- (count filename) 4))
+                schema-namespaces (into #{} (map namespace) (keys forms))
+                unqualified? (= #{nil} schema-namespaces)]]
+    (when-not (or unqualified?
+                  (filesystem-safe-namespace? file-namespace))
       (throw
        (ex-info
         (str "Schema resource filename is not a safe verbatim namespace: "
@@ -292,7 +267,8 @@
     (doseq [registry-key (keys forms)
             :let [schema-namespace (when (qualified-keyword? registry-key)
                                      (namespace registry-key))]]
-      (when-not (filesystem-safe-namespace? schema-namespace)
+      (when-not (or unqualified?
+                    (filesystem-safe-namespace? schema-namespace))
         (throw
          (ex-info
           (str "Schema key namespace is not safe as a verbatim filename: "
@@ -302,7 +278,8 @@
            ::file file
            ::namespace schema-namespace
            :seon.error/kind :user-input})))
-      (when-not (= file-namespace schema-namespace)
+      (when-not (or unqualified?
+                    (= file-namespace schema-namespace))
         (throw
          (ex-info
           (str "Schema attribute " registry-key " is declared in " file
@@ -361,26 +338,23 @@
   "Canonical schema forms declared by Seon's bootstrap and schema resources."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (merge packaged-base-forms
-         (::forms (resource-population default-resource))))
+  (::forms (resource-population default-resource)))
 
 (defn load!
-  "Read one schema resource location into candidates.
+  "Read one schema resource location as declaration facts.
   The default is `default-resource`, physically `resources/seon/schemas/`
   in a source checkout. Each resource is one EDN map of registry key → schema
   form. Refuses `::duplicate-attribute` (one key appears twice in or across
   resources), `::unreadable-file` (resource named), and `::not-a-map` (a top
   level is not a map). Contributes
-  candidates exactly as `register!` does; never activates — activation
-  admits the whole population through `admit`. Returns what was
-  loaded."
+  The returned count is diagnostic; publication consumes [[packaged-forms]]
+  directly, so namespace loading mutates no declaration registry."
   {:malli/schema [:=> [:cat ::load-request] ::loaded]}
   [{::keys [resource]}]
   (let [resource (or resource default-resource)
-        {::keys [file forms files-by-key]}
+        {::keys [file forms]}
         (resource-population resource)]
-    (schema/contribute-candidate-forms! forms)
-    (swap! !source-files merge files-by-key)
+    (schema/relink-registry!)
     {::file file
      ::keys (count forms)}))
 
@@ -415,7 +389,8 @@
 
 (defn- refusal!
   [error identity declaration extra]
-  (let [file (get @!source-files identity)
+  (let [file (get (::files-by-key (resource-population default-resource))
+                  identity)
         predicate (::predicate extra)
         predicate-owner (::predicate-owner extra)]
     (throw
