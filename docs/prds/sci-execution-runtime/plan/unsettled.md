@@ -16,6 +16,29 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**WORKING EDGE — 2026-08-06 NEXT SESSION (verification + spelling ruled +
+checkpoint in flight).** Handoff verified first-hand (tree, commits, fork
+gitlink, zero lanes — all match). RULED: the handle face is
+`result/eid-N` (README "Ruling 2026-08-06 (owner, next session)"),
+grounded in
+[result-handle-clojure-idiom-2026-08-06.md](../research/result-handle-clojure-idiom-2026-08-06.md)
+— tagged literal, metadata carrier, and lazy proxy all probe-refuted.
+OWNER DIRECTIVES this session: keep fixing everything (system health
+first); LIVE DRIVE an agent as soon as remotely stable to inventory
+breakage; DATABASE DATA IS DISPOSABLE — reset/wipe freely, never
+migrate. Messaging wave spec ready:
+[messaging-wave-2026-08-06.md](messaging-wave-2026-08-06.md) (M1-M5,
+launches after gate triage). NEW DEFECTS found + filed: `bin/seon init`
+dies at the 30 s silence backstop while a HEALTHY publication runs 70 s
+with zero prepl events
+([init-publication-silent-beyond-backstop.md](../../../seon/issues/init-publication-silent-beyond-backstop.md);
+also flags the 70 s-vs-2.7 s publication-speed question); bin/mcp-server
+was missing `resources/` on its bb classpath since the P21 state.clj
+move — FIXED `e88c2e5d2`. Strays committed `9c6ceb3cb` (incl. the
+mandated fs symlink-sentinel proof, verified green). Bare gate: first
+run RED (runner-exit=1, detail lost to a tail pipe — lesson: never pipe
+the gate), full-capture rerun in flight at `9c6ceb3cb`+docs.
+
 **WORKING EDGE — 2026-08-06 SESSION (cleanup wave + messaging design).**
 Landed and pushed: p12 shape-canonicalization fix (`9adf1ef7f`, green
 complete-init tail); necessity + drift audits (`9858dabfe`,

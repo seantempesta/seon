@@ -832,6 +832,33 @@ substance so far:
 - **OPERATIONAL EVENTS, remaining pair (owner, same session): the log line carries the event's EID QUALIFIED BY ITS COMMIT ID** ("event 15982 @ 6a7480…") — zero new identity, staleness honest after reset/refork; and the coupling is **COMMIT FIRST, THEN APPEND** from the transaction report — the database is the one authority, a crash can only omit the courtesy line, a log line without a fact is unrepresentable. All four operational-events questions are now settled; the folder waits only on its named checkpoints.
 - **Boot regression found and dispatched, same session:** the sweep-gate wave widened the fork-internal `datahike.versioning/branch!` with the permit opts arity (fork `56f1c621`) without widening the public `datahike.api/branch!` wrapper — every permit-carrying fresh boot fails at HEAD; fix assigned (api arity mirroring `force-branch!`).
 
+### Ruling 2026-08-06 (owner, next session) — the handle SPELLING: `result/eid-N`, one symbol family
+
+`result/88` is not readable Clojure (digit-leading name segment; Edamame
+rejects at parse — live-probed). The ruled face is the READABLE SYMBOL
+**`result/eid-88`**: `eid-` tells the agent the number is a Datahike
+entity id it can look up. One family across kinds: `message/eid-91`,
+`error/eid-94`. NO tagged-literal face — probed decisive defect: a data
+reader's return is an evaluation form, so a tag function returning a
+stored list would EXECUTE it; a safe tagged design collapses into the
+same symbol machinery plus quote complications, and no alias face is
+accepted (two canonical spellings = surface drift). Resolution: the one
+parsed reader event detects literal executable handles; preparation on
+the turn's `:io` workload pulls each receipt from the form's pinned
+database value, loads/verifies blobs transparently (~45–60 ms per
+1.3 MB, measured), and transiently interns the STORED RESULT VALUE (the
+receipt's admitted value, never the receipt row) into the fresh turn
+fork — SCI resolves an ordinary Var; quote stays quote; a missing eid
+binds a flat absent-at-basis value. The printed face stays bounded
+(print caps + window); the handle always reaches the full stored value.
+Metadata-carrying values and lazy deref proxies are REJECTED with probe
+evidence (scalars cannot carry metadata; admission strips it; proxies
+are non-transparent and admit as opaque objects). Zero SCI fork
+changes. Grounding:
+[result-handle-clojure-idiom-2026-08-06.md](../research/result-handle-clojure-idiom-2026-08-06.md)
+and the two 08-06 foundation reports. This unblocks the messaging
+implementation wave.
+
 ### Rulings 2026-07-27 session 2 (owner, conversational) — the fresh tree IS the project
 
 - **Stop thinking temporary; drop the "nucleus" vocabulary.** The fresh
