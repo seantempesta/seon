@@ -8,7 +8,7 @@
 
 (def normalization-revision
   "The Malli pin and P12 normalization contract."
-  "malli-80138076960e7820523b4cb932c5b5d1936d4e7f/p12-v1")
+  "malli-80138076960e7820523b4cb932c5b5d1936d4e7f/p12-v2")
 
 (defn- map-properties
   [properties]
@@ -16,6 +16,14 @@
     (false? (:closed properties)) (dissoc :closed)))
 
 (declare canonical-form)
+
+(defn- split-schema-form
+  [form]
+  (let [[schema-type & tail] form
+        properties (when (map? (first tail)) (first tail))]
+    {:seon.schema.shape/type schema-type
+     :seon.schema.shape/properties properties
+     :seon.schema.shape/children (if properties (rest tail) tail)}))
 
 (defn- canonical-map-entry
   [entry]
@@ -31,8 +39,9 @@
   [value]
   (cond
     (and (vector? value) (= :map (first value)))
-    (let [[_ a & more] value
-          [properties entries] (if (map? a) [a more] [nil (cons a more)])]
+    (let [{properties :seon.schema.shape/properties
+           entries :seon.schema.shape/children}
+          (split-schema-form value)]
       (into (cond-> [:map]
               (seq (map-properties properties))
               (conj (canonical-form (map-properties properties))))
@@ -81,8 +90,10 @@
       form)
 
     (vector? form)
-    (let [[schema-type a & more] form
-          [properties children] (if (map? a) [a more] [nil (cons a more)])
+    (let [{schema-type :seon.schema.shape/type
+           properties :seon.schema.shape/properties
+           children :seon.schema.shape/children}
+          (split-schema-form form)
           prefix (cond-> [schema-type] properties (conj properties))]
       (cond
         (= :map schema-type)
@@ -216,10 +227,13 @@
 (defn- form-parts
   [form]
   (if (vector? form)
-    (let [[shape-type a & more] form]
+    (let [{shape-type :seon.schema.shape/type
+           properties :seon.schema.shape/properties
+           children :seon.schema.shape/children}
+          (split-schema-form form)]
       {:seon.schema.shape/type shape-type
-       :seon.schema.shape/properties (when (map? a) a)
-       :seon.schema.shape/children (if (map? a) more (cons a more))
+       :seon.schema.shape/properties properties
+       :seon.schema.shape/children children
        :seon.schema.shape/schema-children?
        (not (contains? #{:enum := :fn :re :> :>= :< :<=} shape-type))})
     {:seon.schema.shape/type

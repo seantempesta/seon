@@ -76,6 +76,49 @@
   [value]
   (filter map? (tree-seq coll? seq value)))
 
+(deftest empty-composite-schema-shapes-remain-canonical-and-queryable
+  (let [forms
+        {:seon.db/connection :map
+         :seon.reconcile/desired [:vector [:map]]
+         :seon.reconcile/process [:string {:min 1}]
+         :seon.reconcile/adopt-identities [:set [:vector :any]]
+         :seon.reconcile/request
+         [:map
+          [:seon.reconcile/desired :seon.reconcile/desired]
+          [:seon.reconcile/process :seon.reconcile/process]
+          [:seon.reconcile/adopt-identities
+           {:optional true}
+           :seon.reconcile/adopt-identities]]}
+        spec
+        [:=> [:cat :seon.db/connection :seon.reconcile/request] :boolean]
+        facts
+        (source-contract
+         "seon.reconcile/reconcile!" spec forms
+         "(defn reconcile! [connection request] nil)"
+         '([connection request]))
+        request-shape
+        (get-in facts [:seon.fn/arities 0 :seon.fn.arity/arguments 1
+                       :seon.fn.argument/schema])
+        desired-entry
+        (some #(when (= :seon.reconcile/desired
+                        (:seon.schema.map-entry/key-keyword %))
+                 %)
+              (:seon.schema.shape/entries request-shape))
+        desired-shape (:seon.schema.shape.entry/schema desired-entry)
+        element-shape
+        (get-in desired-shape [:seon.schema.shape/children 0
+                               :seon.schema.shape.child/schema])]
+    (is (= [:map
+            [:seon.reconcile/desired [:vector [:map]]]
+            [:seon.reconcile/process [:string {:min 1}]]
+            [:seon.reconcile/adopt-identities
+             {:optional true}
+             [:set [:vector :any]]]]
+           (schema-shape/row-form request-shape)))
+    (is (= [:vector [:map]] (schema-shape/row-form desired-shape)))
+    (is (= [:map] (schema-shape/row-form element-shape)))
+    (is (nil? (:seon.schema.shape/entries element-shape)))))
+
 (deftest positional-and-map-entry-contracts-have-distinct-addresses
   (test-support/with-database
     (fn [connection]
