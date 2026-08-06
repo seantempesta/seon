@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, flow, config, testing]
 ---
@@ -39,3 +39,23 @@ by `test/seon/flow_configuration_test.clj`.
 Graph construction either receives every required numeric fact or returns one
 structured configuration refusal naming the missing key. The workload census
 reaches every built proc and never performs arithmetic on nil.
+
+## Resolution — 2026-08-06
+
+Commit `d85936215` repairs the workload-census fixture with the complete
+work-launcher graph request introduced by `79700db1c`: both I/O capacity
+values plus the task executor, I/O submission state, and stop completion.
+
+The missing values were `:seon.config.flow.io/concurrency` and
+`:seon.config.flow.io/queue-depth`. They were already declared under
+`resources/seon/schemas/`, supplied by `config/default.edn`, and acquired by
+the production boot path through `seon.config/effective`; no runtime fallback
+or schema change was needed.
+
+Focused proof:
+
+```text
+bin/test seon.flow-configuration-test seon.flow-test
+Ran 19 tests containing 176 assertions.
+0 failures, 0 errors.
+```
