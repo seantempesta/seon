@@ -6,7 +6,8 @@
   instant claims one durable maintenance receipt. The existing per-agent
   schedule proc calls the declared Var directly; only an error settlement
   creates a message, through `seon.error/commit-tx`."
-  (:require [clojure.core.async :as async]
+  (:require [malli.core :as m]
+            [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
             [clojure.java.io :as io]
             [datahike.api :as d]
@@ -454,12 +455,12 @@
        (keyword? (:seon.error/kind value))
        (string? (:seon.error/message value))))
 
-(def ^:private maintenance-dials
-  [:seon.config.maintenance/min-usable-bytes
-   :seon.config.maintenance/min-usable-ratio
-   :seon.config.maintenance/log-max-bytes
-   :seon.config.maintenance/log-retained-files
-   :seon.config.operator/event-silence-backstop-ms])
+(defn- declared-maintenance-request-values
+  [effective]
+  (select-keys
+   effective
+   (m/explicit-keys
+    (m/deref (m/schema :seon.maintenance.request/value)))))
 
 (defn- canonical-path
   [path]
@@ -480,7 +481,7 @@
         (canonical-path
          (or (get-in instance [:seon.boot/config :seon.boot/log-dir])
              (io/file managed-root "data" "clusters" cluster-name "logs")))]
-    (merge (select-keys effective maintenance-dials)
+    (merge (declared-maintenance-request-values effective)
            {:seon.boot/cluster-name cluster-name
             :seon.operator/repository-root repository-root
             :seon.operator/managed-root managed-root

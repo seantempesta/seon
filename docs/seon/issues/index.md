@@ -40,7 +40,7 @@ See `README.md` for the convention.
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 | [Install maintenance result attributes on a fresh cluster](fresh-maintenance-result-attributes-are-not-installed.md) | blocker | maintenance schema-install repair |
 
-## Friction (96)
+## Friction (95)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -66,7 +66,6 @@ See `README.md` for the convention.
 | [Delete the readerless second Datahike transaction codec](schema-datahike-keeps-a-readerless-second-codec.md) | friction | schema codec deletion wave |
 | [Derive predicate-owner readiness before live source publication](live-publication-has-a-hand-maintained-predicate-owner-reload.md) | friction | publication registration-provenance wave |
 | [Hold one store ownership interval across artifact install and start](artifact-releases-the-fence-between-install-and-start.md) | friction | artifact startup wave |
-| [Derive maintenance execution fields from the declared request](maintenance-execution-duplicates-declared-request-fields.md) | friction | maintenance contract derivation wave |
 | [Make production docstrings describe the surviving runtime](production-docstrings-teach-deleted-semantics.md) | friction | production documentation-honesty wave |
 | [Cut the 11.8 s source load back under the ten-second law](source-load-is-118s-against-the-ten-second-law.md) | friction | load-time incident |
 | [Remove the deleted run lease from the AI retry proof](ai-retry-proof-still-cites-the-deleted-run-lease.md) | friction | AI retry evidence wave |
