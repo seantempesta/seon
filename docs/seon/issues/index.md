@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (26)
+## Blocker (24)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -25,7 +25,6 @@ See `README.md` for the convention.
 | [Make every rendered value id unique within its namespace page](rendered-value-ids-collide-within-one-page.md) | blocker | Datastar value-identity repair |
 | [Pass ordered entity ids to transcript `pull-many`](transcript-about-lookup-passes-a-set-to-pull-many.md) | blocker | live-drive render repair wave |
 | [Supply the live SCI context to the data page renderer](data-page-omits-the-live-sci-context.md) | blocker | visual-QA fix wave |
-| [Load database model schemas before isolated test configuration](isolated-runner-does-not-load-ai-model-schemas.md) | blocker | database model registry/config schema load repair wave |
 | [Observe and claim every deletable directory](deletable-directories-have-no-claim-or-size-facts.md) | blocker | operator directory-claim governor wave |
 | [Prevent ranged collection from deleting resurrected branch data](ranged-store-collection-can-delete-live-segments-via-branch-resurrection.md) | blocker | exclusive sweep implementation wave |
 | [Make bootstrap O4 wait for the causal delegation](bootstrap-o4-stops-before-causal-delegation-settles.md) | blocker | bootstrap delegation-drive repair wave |
@@ -43,7 +42,6 @@ See `README.md` for the convention.
 | [Let evaluation errors settle their triage receipt](eval-errors-cannot-settle-triage-receipts.md) | blocker | receipt settlement repair |
 | [Refuse the losing concurrent divergent schema declaration](concurrent-divergent-schema-declarations-falsely-both-succeed.md) | blocker | schema collision admission wave |
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
-| [Install maintenance result attributes on a fresh cluster](fresh-maintenance-result-attributes-are-not-installed.md) | blocker | maintenance schema-install repair |
 
 ## Friction (98)
 
