@@ -45,6 +45,7 @@
             [seon.operator.state :as operator.state]
             [seon.oversight :as oversight]
             [seon.problems :as problems]
+            [seon.render :as render]
             [seon.render.data :as render.data]
             [seon.print :as print]
             [seon.render.value :as render.value]
@@ -280,13 +281,18 @@
         threshold (:seon.config.eval.result/blob-threshold effective)
         oversized? (> (count content) threshold)
         artifact-backed? oversized?
-        page-size (min (:seon.render.value/max-collection effective)
-                       (:seon.print/length effective))
         print-node (:seon.sci.admit/print-node artifact)
         projected-node (if oversized?
-                         (render.value/print-node-window
-                          print-node page-size threshold
-                          (:seon.print/level effective))
+                         (print/fit
+                          print-node
+                          (cond-> (render/agent-render-profile effective)
+                            connection
+                            (assoc :seon.print/requery-id
+                                   [:seon.blob/digest content-digest])
+
+                            (nil? connection)
+                            (assoc :seon.print/requery-refusal
+                                   "the cluster has no database connection")))
                          print-node)
         staged (when (and artifact-backed? connection)
                  (blob/stage! connection content))

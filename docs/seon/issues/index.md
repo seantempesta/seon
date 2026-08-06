@@ -141,7 +141,7 @@ See `README.md` for the convention.
 | [Give `seon.search/index-step` its public contract](search-index-step-has-no-public-contract.md) | friction | search public contract repair |
 | [Resolve schema aliases within one admitted declaration set](schema-alias-population-cannot-resolve-an-earlier-declaration.md) | friction | schema alias admission repair |
 
-## Cleanup (17)
+## Cleanup (16)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -150,7 +150,6 @@ See `README.md` for the convention.
 | [Delete operator helpers maintained only by private tests](operator-private-helpers-have-only-test-readers.md) | cleanup | operator deletion wave |
 | [Delete five readerless schema rows left by completed cuts](schema-population-retains-five-readerless-rows.md) | cleanup | schema population deletion wave |
 | [Delete or expose the readerless cluster export surface](cluster-export-is-implemented-without-a-runtime-reader.md) | cleanup | store capability deletion wave |
-| [Delete the two render-value compatibility calls](render-value-retains-compatibility-callers.md) | cleanup | render compatibility deletion wave |
 | [Delete the render fixture that outlived its router test](render-fixture-outlived-its-router-test.md) | cleanup | render test deletion wave |
 | [Delete CLJS-era assets and test discovery](cljs-era-assets-and-test-discovery-survived-deletion.md) | cleanup | CLJS residue deletion wave |
 | [Keep the page body from scrolling sideways on a phone](agent-pages-overflow-a-phone-viewport.md) | cleanup | visual-QA fix wave |

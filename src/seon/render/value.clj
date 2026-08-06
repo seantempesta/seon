@@ -2,19 +2,12 @@
   "Unit adapter from admitted print data to the two floor projections."
   (:require [clojure.string :as str]
             [clojure.edn :as edn]
-            [seon.ai.tokens :as tokens]
             [seon.print :as print]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]))
 
 (schema.edn/load! {})
-
-(defn transacted
-  "Compatibility call into the projection selector's transaction shape."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [entity]
-  ((requiring-resolve 'seon.render/transacted) entity))
 
 (defn render-database-identity-ai
   "Readable identity face for an admitted immutable database value."
@@ -325,32 +318,6 @@
                   :seon.cluster.eval/result-edn]}
   [stored]
   (admit/print-node-edn (:seon.sci.admit/print-node stored)))
-
-(defn print-node-window
-  "Compatibility call into the one profile-owned structural fitter."
-  {:malli/schema
-   [:function
-    [:=> [:cat :seon.print/node :int] :seon.print/node]
-    [:=> [:cat :seon.print/node :int :int :int] :seon.print/node]]}
-  ([node size]
-   (print/fit node
-              {:seon.render.profile/id :seon.render.profile/legacy-window
-               :seon.render.profile/token-budget 1048576
-               :seon.render.profile/max-depth 64
-               :seon.render.profile/max-children (max 0 (dec size))
-               :seon.render.profile/composition :multiline
-               :seon.print/requery-refusal
-               "the legacy caller supplied no stable identity"}))
-  ([node size max-size level]
-   (print/fit node
-              {:seon.render.profile/id :seon.render.profile/legacy-window
-               :seon.render.profile/token-budget
-               (max 1 (tokens/estimate (apply str (repeat max-size "x"))))
-               :seon.render.profile/max-depth (max 0 level)
-               :seon.render.profile/max-children (max 0 (dec size))
-               :seon.render.profile/composition :multiline
-               :seon.print/requery-refusal
-               "the legacy caller supplied no stable identity"})))
 
 (defn result-window-edn
   "Store a small tagged data window beside an oversized result blob."
