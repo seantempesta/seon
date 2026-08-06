@@ -31,6 +31,7 @@
   {:seon.db/db database
    :seon.sci.eval/ctx ctx
    :seon.render/namespace owning-namespace
+   :seon.render.call/id [:seon.render-simplification-test/floor]
    :seon.render/value rendered-value
    :seon.sci.admit/caps caps
    :seon.sci.eval/time-limit-ms 2000
@@ -56,6 +57,8 @@
        (doseq [rendered-value [7 [1 2 3] {:open/declared 1 :open/extra 2}]]
          (let [request (render-request database ctx nil rendered-value)
                floor-unit {:seon.render/value rendered-value
+                           :seon.render.call/id
+                           [:seon.render-simplification-test/floor]
                            :seon.sci.admit/caps caps}]
            (is (= (value/render-ai floor-unit) (render-ai request)))
            (is (= (value/render-html floor-unit) (render-html request)))

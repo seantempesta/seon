@@ -15,6 +15,7 @@
 (defn- unit
   [raw]
   {:seon.cluster.agent/id "root"
+   :seon.render.call/id [:seon.render.value-test/floor]
    :seon.render/value raw
    :seon.sci.admit/caps caps})
 
@@ -68,7 +69,8 @@
         (with-redefs [admit/admit (fn [_]
                                    (throw (ex-info "readmitted" {})))]
           (value/prepare
-           {:seon.cluster.eval/result-edn stored
+           {:seon.render.call/id [:seon.render.value-test/stored]
+            :seon.cluster.eval/result-edn stored
             :seon.sci.admit/caps caps}))]
     (is (= "(1 2 3)" (:seon.render.value/text projection)))
     (is (= "(1 2 3)"
@@ -76,6 +78,31 @@
             (:seon.print/hiccup
              (print/emit-both (:seon.render.value/tree projection)
                               (:seon.render.value/options projection))))))))
+
+(deftest anonymous-roots-refuse-instead-of-colliding
+  (let [anonymous {:seon.cluster.agent/id "root"
+                   :seon.render/value {:same/value 1}
+                   :seon.sci.admit/caps caps}
+        results [(value/render-html anonymous)
+                 (value/render-html anonymous)]]
+    (is (= [:seon.render.value/missing-root-identity
+            :seon.render.value/missing-root-identity]
+           (mapv :seon.error/kind results)))
+    (is (every? #(= "A rendered value root requires a caller-supplied block id."
+                    (:seon.error/message %))
+                results))
+    (is (not-any? vector? results)
+        "no anonymous Hiccup root can carry a colliding invented id")))
+
+(deftest caller-supplied-block-ids-are-stable-and-distinct
+  (let [raw {:same/value 1}
+        left (assoc (unit raw) :seon.render.call/id [:test/block-a])
+        right (assoc (unit raw) :seon.render.call/id [:test/block-b])
+        left-id (value/node-id left [])
+        right-id (value/node-id right [])]
+    (is (string? left-id))
+    (is (not= left-id right-id))
+    (is (= left-id (value/node-id left [])))))
 
 (deftest value-artifact-stores-only-the-print-node-source
   (let [admitted (admit/admit

@@ -81,6 +81,7 @@
                               :seon.sci.eval/ctx
                               :seon.cluster.agent/id
                               :seon.cluster.run/id
+                              :seon.render.call/id
                               :seon.sci.admit/caps
                               :seon.sci.eval/time-limit-ms
                               :seon.config/on-core-error

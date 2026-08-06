@@ -27,18 +27,25 @@
 (defn node-id
   "Stable element id for one root selector and `get-in` path."
   {:malli/schema [:=> [:cat :seon.render/unit :seon.render.data/path]
-                  :string]}
+                  [:or :string :seon.error/value]]}
   [unit path]
   (let [root-address
-        (or (:seon.render.value/root unit)
+        (or (:seon.render.call/id unit)
+            (:seon.render.value/root unit)
             (when-some [eid (:db/id unit)] [:db/id eid])
             (when-some [block-name (:seon.render.block/name unit)]
-              [:seon.render.block/name block-name])
-            :seon.render.value/anonymous)
-        address [(:seon.cluster.agent/id unit) root-address path]
-        digest (schema/sha-256
-                [(.getBytes ^String (pr-str address) "UTF-8")])]
-    (str "seon-value-" (subs digest 0 24))))
+              [:seon.render.block/name block-name]))]
+    (if-not root-address
+      {:seon.error/kind ::missing-root-identity
+       :seon.error/message
+       "A rendered value root requires a caller-supplied block id."
+       :seon.error/data
+       {:seon.cluster.agent/id (:seon.cluster.agent/id unit)
+        :seon.render.data/path path}}
+      (let [address [(:seon.cluster.agent/id unit) root-address path]
+            digest (schema/sha-256
+                    [(.getBytes ^String (pr-str address) "UTF-8")])]
+        (str "seon-value-" (subs digest 0 24))))))
 
 (defn- encoded
   [value]
@@ -208,9 +215,9 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.render/unit]
-     [:or :nil :seon.render.value/projection]]
+     [:or :nil :seon.render.value/projection :seon.error/value]]
     [:=> [:cat :seon.render/unit :seon.render/output]
-     [:or :nil :seon.render.value/projection]]]}
+     [:or :nil :seon.render.value/projection :seon.error/value]]]}
   ([unit]
    (prepare unit :seon.render/ai))
   ([unit output]
@@ -253,19 +260,22 @@
                           (:seon.render.value/more? display)
                           (pos? (:seon.render.value/offset display))))
           path (vec (get-in unit [:seon.render.data/cursor
-                                  :seon.render.data/path] []))]
-      {:seon.render.value/tree tree
-       :seon.render.value/options options
-       :seon.render.value/truncated? truncated?
-       :seon.render.value/text (:seon.print/text emitted)
-       :seon.render.value/html
-       [:div {:id (node-id unit path) :class "seon-data-panel"}
-        (breadcrumbs unit path)
-        (pager unit path display)
-        (:seon.print/hiccup emitted)
-        (when truncated?
-          [:p {:class "seon-data-capped"}
-           "elided — this value is larger than the configured window"]) ]}))))
+                                  :seon.render.data/path] []))
+          id (node-id unit path)]
+      (if (:seon.error/kind id)
+        id
+        {:seon.render.value/tree tree
+         :seon.render.value/options options
+         :seon.render.value/truncated? truncated?
+         :seon.render.value/text (:seon.print/text emitted)
+         :seon.render.value/html
+         [:div {:id id :class "seon-data-panel"}
+          (breadcrumbs unit path)
+          (pager unit path display)
+          (:seon.print/hiccup emitted)
+          (when truncated?
+            [:p {:class "seon-data-capped"}
+             "elided — this value is larger than the configured window"]) ]})))))
 
 (defn render-ai-data
   "Return the text sink result from one already prepared projection."
@@ -339,9 +349,11 @@
 (defn- render-prepared
   [unit output]
   (if-let [projection (prepare unit output)]
-    (if (= output :seon.render/html)
-      (render-html-data projection)
-      (render-ai-data projection))
+    (if (:seon.error/kind projection)
+      projection
+      (if (= output :seon.render/html)
+        (render-html-data projection)
+        (render-ai-data projection)))
     (if (= output :seon.render/html)
       [:div {:class "seon-error-card"}
        [:span {:class "seon-error-card-message"}
@@ -352,12 +364,14 @@
 
 (defn render-ai
   "Render any floor unit through the admitted text sink."
-  {:malli/schema [:=> [:cat :seon.render/unit] :string]}
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:or :string :seon.error/value]]}
   [unit]
   (render-prepared unit :seon.render/ai))
 
 (defn render-html
   "Render any floor unit through the admitted hiccup sink."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:or :seon.render/hiccup :seon.error/value]]}
   [unit]
   (render-prepared unit :seon.render/html))

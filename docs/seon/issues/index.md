@@ -16,13 +16,12 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (23)
+## Blocker (22)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Scope schema projections to their cluster database values](process-global-schema-state-crosses-cluster-bases.md) | blocker | per-cluster schema acquisition wave |
 | [Commit every dropped core-fault observation](dropped-core-fault-count-is-not-durable.md) | blocker | fault-committer durability wave |
-| [Make every rendered value id unique within its namespace page](rendered-value-ids-collide-within-one-page.md) | blocker | Datastar value-identity repair |
 | [Pass ordered entity ids to transcript `pull-many`](transcript-about-lookup-passes-a-set-to-pull-many.md) | blocker | live-drive render repair wave |
 | [Supply the live SCI context to the data page renderer](data-page-omits-the-live-sci-context.md) | blocker | visual-QA fix wave |
 | [Observe and claim every deletable directory](deletable-directories-have-no-claim-or-size-facts.md) | blocker | operator directory-claim governor wave |
