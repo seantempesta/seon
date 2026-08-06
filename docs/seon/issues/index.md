@@ -16,11 +16,12 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (22)
+## Blocker (23)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Scope schema projections to their cluster database values](process-global-schema-state-crosses-cluster-bases.md) | blocker | per-cluster schema acquisition wave |
+| [Read the opening `AsOfDB` basis through Datahike's database interface](context-capture-cannot-read-opening-as-of-basis.md) | blocker | opening-database capture repair |
 | [Commit every dropped core-fault observation](dropped-core-fault-count-is-not-durable.md) | blocker | fault-committer durability wave |
 | [Pass ordered entity ids to transcript `pull-many`](transcript-about-lookup-passes-a-set-to-pull-many.md) | blocker | live-drive render repair wave |
 | [Supply the live SCI context to the data page renderer](data-page-omits-the-live-sci-context.md) | blocker | visual-QA fix wave |
