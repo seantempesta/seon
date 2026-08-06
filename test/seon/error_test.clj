@@ -39,10 +39,24 @@
             [seon.error :as error]
             [seon.render.walk :as walk]
             [seon.sci.eval :as sci.eval]
-            [seon.schema]
+            [seon.schema :as schema]
             [seon.sci.admit :as admit]
             [seon.test-support :as test-support]
             [seon.db :as db]))
+
+(deftest error-class-recognition-uses-the-active-registry
+  (let [projection (schema/build-projection (schema/registered-schemas))]
+    (with-redefs [schema/current-projection (constantly projection)]
+      (is (true? (error/error? {:my.fs/not-found "tmp/absent"
+                                :seon.error/message "File not found."})))
+      (is (false? (error/error? {:seon.error/message "Only a message."})))
+      (is (false? (error/error? :not-a-map))))))
+
+(deftest error-class-recognition-has-a-registry-free-leaf-fallback
+  (with-redefs [schema/current-projection (constantly nil)]
+    (is (true? (error/error? {:seon.error/message "Reader refusal."})))
+    (is (false? (error/error? {})))
+    (is (false? (error/error? "Reader refusal.")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Fixtures — the three families, plus the hostile values

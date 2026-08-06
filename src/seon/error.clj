@@ -892,6 +892,19 @@
                              (class-properties forms schema-key)))))
            vec))))
 
+(defn error?
+  "True when `value` matches at least one declared error-class schema.
+
+  Registry-free leaves use the structural fallback: a map containing
+  `:seon.error/message`. Once a projection is active, its declared classes are
+  the complete authority and a message alone is not an error class."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (if (schema/current-projection)
+    (boolean (seq (matched-error-classes value)))
+    (and (map? value)
+         (contains? value :seon.error/message))))
+
 (defn- error-marker
   [value]
   (or
