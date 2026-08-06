@@ -1,10 +1,12 @@
 ---
 type: prd
-status: active
+status: superseded
 tags: [prd, context, render, agent]
 ---
 
 # The REPL-session context — the design to build next (2026-08-01)
+
+> Superseded by [the desk PRD](agent-desk-and-checkout-prd-2026-08-05.md) and the canonical namespace-page contract in [UI architecture](../../../seon/architecture/ui.md); the shared-session design below is dated archaeology.
 
 The owner's synthesis after seeing the raw walk dump fail a live agent:
 the context, the transcript, and the debug interface are ONE thing —

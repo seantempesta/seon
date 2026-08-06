@@ -1,10 +1,12 @@
 ---
 type: prd
-status: draft
+status: complete
 tags: [prd, runtime, platform, sci, database, program-graph]
 ---
 
 # Ambient injection r2 — RULED (owner, 2026-08-05)
+
+> Design complete under the 2026-08-05 ruling batch in [the active plan](README.md); implementation is owned by [the P17 slice plan](p17-ambient-slices-2026-08-05.md).
 
 Graduated from draft the same day: seam = the SCI-fork hook primitive;
 arity model = derived all-or-nothing shorter call shapes with

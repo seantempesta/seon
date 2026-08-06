@@ -1,10 +1,12 @@
 ---
 type: prd
-status: active
+status: superseded
 tags: [prd, database, render]
 ---
 
 # seon.db read facade — contract spec (for owner review)
+
+> Superseded by ruling #41's one read/write `seon.db` namespace in [the active plan](README.md); this file is dated archaeology.
 
 Authored by the orchestrator from the full-surface quarry
 (`../research/seondb-facade-quarry-2026-07-29.md`, rulings 22a/24).
