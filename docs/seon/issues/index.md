@@ -16,10 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (18)
+## Blocker (19)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Make init publication emit progress events past the silence backstop](init-publication-silent-beyond-backstop.md) | blocker | gate-fix-operator lane (running) |
 | [Observe and claim every deletable directory](deletable-directories-have-no-claim-or-size-facts.md) | blocker | operator directory-claim governor wave |
 | [Prevent ranged collection from deleting resurrected branch data](ranged-store-collection-can-delete-live-segments-via-branch-resurrection.md) | blocker | exclusive sweep implementation wave |
 | [Make bootstrap O4 wait for the causal delegation](bootstrap-o4-stops-before-causal-delegation-settles.md) | blocker | bootstrap delegation-drive repair wave |
