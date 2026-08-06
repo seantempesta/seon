@@ -595,3 +595,61 @@ loses rarely-executed dynamically-defined classes. When correct code
 fails in a long-lived process, suspect the process before the code —
 and prefer on-disk, content-addressed caches so eviction is
 recoverable rather than fatal.
+
+**Distinguish slow from wedged with a dump before designing anything.**
+A boot "failure" that blocked the whole program for a day (P19,
+2026-08-05) was a 94-second directory walk being reported as a hang by
+a 30-second timeout; one virtual-thread-aware `jcmd` dump named the
+exact frame in minutes. The timeout was REPORTING the problem, not
+causing it. Corollary found in the same frame: the expensive
+computation fed a decision that read none of its output — when
+something is slow, first ask what its result is actually FOR.
+
+**The instrument can be the defect.** The two worst scores in the
+bootstrap experiment were broken graders, not broken systems: O4
+graded delegation against a run that correct behavior CLOSES (working
+delegation scored 0/10), and O5 asserted a refusal a ruling had
+deleted. When a measurement contradicts a prior live proof, verify the
+measurement before redesigning the subject.
+
+**A rename sweep must not rewrite prose that DESCRIBES the rename.**
+Blind textual replacement turned "X is deleted in favour of Y" into
+"Y is deleted in favour of Y" across three planning documents.
+Sentences about a rename keep the old spelling as their historical
+referent; graduation searches prove cleanliness over code-bearing
+surfaces (src, resources, test, scripts, skills, architecture docs),
+never over ruling records, ledgers, or research.
+
+**No-migration pays dividends you did not plan.** The program's
+scariest open problem — 357 GiB of store needing a data-loss-prone
+reclaim — simply evaporated because the rename pass's format/reset had
+already destroyed the old store. Reset-and-rebuild is not only safer
+than migration; it dissolves whole problem classes that migration
+would have had to solve.
+
+**Use vocabulary the model already owns; teach only the differences.**
+Datahike's branching maps almost exactly onto git, so the agent-facing
+story became git's own words — working tree, checkout, ff-only,
+rebase — and the entire mental model costs two sentences of teaching
+plus an explicit list of what is absent (no index, no remotes, no
+merge). Inventing teachable nouns where a strong prior exists is paying
+to create confusion; the O1-inversion datum (teaching hurting a
+competent model) points the same direction.
+
+**"Attributes, not enums" applies to functions themselves.** One
+conversation chain (2026-08-05): no bare `:type` keys in error values →
+`private?` is an attribute, never an execution wall (a schema may
+reference a private predicate; ruling #20 restored to full letter) →
+public functions are simply the namespace's API, rendered as the
+foreign-walk card. The presence of attributes and refs makes a thing
+what it is; every wall someone builds from a boolean is the enum
+mistake recurring.
+
+**A composition of lock-taking owners needs under-lock arms, and the
+regression must run the COMPOSED verb.** `refork!` acquired the
+lifecycle lock and called `cleanup-cluster!`, which re-acquired the
+same non-reentrant file lock: a live deadlock the sealed spec had
+warned about in prose but no test exercised, because every test ran
+the parts and none ran the composition. Public entry points acquire
+once; internal compositions call `-under-lock!` arms; and the
+regression forces the real composed operation on a real store.
