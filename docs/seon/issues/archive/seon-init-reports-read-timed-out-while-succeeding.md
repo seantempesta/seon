@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, operator, render]
 ---
@@ -41,3 +41,11 @@ operation to completion.
 
 A slow-but-successful `bin/seon init` prints the success result; a genuine
 failure prints the flat error; no success path ever prints `✗`.
+
+## Superseded by
+
+The later blocker investigation isolated the silence-backstop cause and
+closed it with recurring and live proof in
+[`bin/seon init` dies at the silence backstop because publication emits no events](init-publication-silent-beyond-backstop.md).
+The separate failure-face problem remains tracked by
+[A failed `bin/seon init` dumps the entire prepl event history instead of the cause](../init-failure-dumps-entire-prepl-event-history.md).

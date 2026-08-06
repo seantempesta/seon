@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, operator, process, database]
 ---
@@ -45,3 +45,35 @@ file separately if it is a genuine velocity regression.
 - `bin/seon init` completes green against a live anchor JVM whose
   publication takes longer than the backstop, with visible progress lines.
 - A genuinely silent (wedged) publication still trips the backstop.
+
+## Resolution
+
+Resolved by `b465b4613` and `ddb648dc2`. The first commit forwards prepl
+`:out` events and publishes the complete source phases. The second extends
+that same callback through `seon.fn/index!`: contract derivation reports six
+total-derived milestones, and each ordered program transaction phase is
+divided into at most six vector batches on the unpublished scratch branch.
+The branch head remains guarded and invisible until every phase and the final
+source seal commit complete. The 30 000 ms backstop is unchanged.
+
+Live proof on 2026-08-06 used the already-running default JVM, PID 47346; it
+was not stopped or reset. `bin/seon init` completed green in 81.93 s and
+printed bounded milestones through 5 657 contract rows, 5 379 declaration
+rows, 16 981 keyword datoms, and 2 533 call rows before:
+
+```text
+● current-src: program rows complete
+● current-src: branch publication complete
+● :current-src commit 6a74b888-3103-5e0d-8e50-9b92138c94af digest 9284b9873e6ca6062522bd827b336467d099967dafff9645808b3237fb5b2288
+```
+
+The recurring genuinely-silent falsifier remains green with the unchanged
+backstop. The non-long fresh-operator selection passed 22 tests / 99
+assertions, including the PID-reuse fence and both progress/silence backstop
+tests; `seon.fn-test` passed 18 tests / 121 assertions.
+
+The 81.93 s complete publication is not the recorded 2.7 s
+reset→republish→refork result. Current evidence demonstrates a real slow
+complete-publication path, while the older record does not contain comparable
+per-phase timing. Performance attribution and repair are deliberately split
+into [Complete source publication takes ~70 s against the ten-second law](../complete-publication-takes-seventy-seconds.md).
