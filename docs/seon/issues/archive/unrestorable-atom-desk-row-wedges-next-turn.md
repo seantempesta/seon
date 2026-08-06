@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, sci, agent, live-drive]
 ---
@@ -52,9 +52,9 @@ The source order is visible at `src/seon/sci/eval.clj:1329-1359`: the `atom?`
 arm invokes `desk-value` before the later `reason` arm can emit its notice.
 
 This cause refines, without replacing, the independent symptoms recorded in
-[Keep newly loaded system Vars out of the agent desk](docs/seon/issues/agent-desk-captures-newly-loaded-system-vars.md)
+[Keep newly loaded system Vars out of the agent desk](agent-desk-captures-newly-loaded-system-vars.md)
 and
-[Settle or refuse a frozen plan's first form](docs/seon/issues/run-freezes-before-first-receipt-after-plan-freeze.md).
+[Settle or refuse a frozen plan's first form](../run-freezes-before-first-receipt-after-plan-freeze.md).
 
 ## Owner
 
@@ -71,3 +71,23 @@ row.
   receipt; no core-fault fact is committed.
 - The live-drive reproduction closes its run rather than retaining custody
   indefinitely.
+
+## Resolution
+
+Resolved by `11ddaba1a`. `fork-for-turn` now handles an explicit
+`:seon.def/unrestorable-reason` before atom restoration, never calls
+`seon.blob/get` without both a connection and digest, and contains malformed
+source/value rows as one honest `could not restore …` REPL notice. Rows with no
+restorable representation are not pre-interned into the fork.
+
+`preexisting-bad-desk-rows-do-not-block-the-next-turn` commits the two
+unrestorable runtime atom shapes and one malformed atom shape before building
+a fresh cluster context. The fork returns three deterministic notices, its
+first form evaluates to `3`, and the real receipt settlement commits the exact
+evaluation result at ordinal zero. The cross-JVM desk proof also passed after
+its writer adopted the production per-turn fork boundary.
+
+The complete desk gate passed 6 tests / 24 assertions; the adjacent evaluator
+gate passed 52 tests / 245 assertions. Per the lane's explicit safety scope,
+the already-live `default` cluster and its wedged run were not mutated or
+re-driven.

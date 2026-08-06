@@ -16,17 +16,15 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (27)
+## Blocker (25)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [Skip unrestorable atom desk rows before blob rehydration](unrestorable-atom-desk-row-wedges-next-turn.md) | blocker | agent desk rehydration repair |
 | [Make every rendered value id unique within its namespace page](rendered-value-ids-collide-within-one-page.md) | blocker | Datastar value-identity repair |
 | [Settle or refuse a frozen plan's first form](run-freezes-before-first-receipt-after-plan-freeze.md) | blocker | live-drive run-loop repair wave |
 | [Keep an unclaimed message out of an unrelated run's prompt](unclaimed-message-enters-an-unrelated-run-prompt.md) | blocker | messaging context-causality wave |
 | [Pass ordered entity ids to transcript `pull-many`](transcript-about-lookup-passes-a-set-to-pull-many.md) | blocker | live-drive render repair wave |
 | [Supply the live SCI context to the data page renderer](data-page-omits-the-live-sci-context.md) | blocker | visual-QA fix wave |
-| [Keep newly loaded system Vars out of the agent desk](agent-desk-captures-newly-loaded-system-vars.md) | blocker | desk attribution repair wave |
 | [Load database model schemas before isolated test configuration](isolated-runner-does-not-load-ai-model-schemas.md) | blocker | database model registry/config schema load repair wave |
 | [Observe and claim every deletable directory](deletable-directories-have-no-claim-or-size-facts.md) | blocker | operator directory-claim governor wave |
 | [Prevent ranged collection from deleting resurrected branch data](ranged-store-collection-can-delete-live-segments-via-branch-resurrection.md) | blocker | exclusive sweep implementation wave |

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, sci, agent, durability, honesty, live-drive]
 ---
@@ -46,3 +46,24 @@ that distinguish an authored intern from a namespace-load side effect.
   the desk exactly once.
 - A fresh-turn regression queries every persisted desk row and proves its
   defining form and agent attribution.
+
+## Resolution
+
+Resolved by `11ddaba1a`. Desk settlement now selects only SCI Vars carrying
+the current turn fork's `:sci/generation`, the provenance SCI stamps on
+interpreted `def`, `intern`, and inherited-root writes. System host Vars copied
+while a namespace loads carry no turn generation and therefore cannot become
+agent desk candidates.
+
+`only-turn-authored-definitions-settle-into-the-agent-desk` installs the live
+`seon.operator.runtime` namespace during an evaluation, settles the real
+terminal receipt, and observes zero desk rows. Its next form defines
+`own-value`; the committed row contains that exact source and
+`:seon.schema.admission/source :agent` exactly once. The complete desk gate
+passed 6 tests / 24 assertions, and the adjacent evaluator gate passed 52
+tests / 245 assertions.
+
+The prior prompt output was both dishonest and ugly: it presented runtime
+custody atoms as agent work and then rendered false unrestorable notices. The
+generation-derived attribution removes those rows rather than cosmetically
+changing their rendering.
