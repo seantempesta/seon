@@ -1879,7 +1879,7 @@
         request (gensym "request")
         operation
         (if force?
-          `(seon.operator/refork!
+          `((ns-resolve 'seon.operator (symbol "refork-under-lock!"))
             (assoc ~request
                    :seon.operator/repository-root
                    ~(str (repository-root))

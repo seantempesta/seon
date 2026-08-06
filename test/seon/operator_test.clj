@@ -233,11 +233,16 @@
         cluster-dir (io/file cluster-root cluster-name)
         sentinel-root (io/file repository-root "cluster-sentinel")
         sentinel (io/file sentinel-root "survives.txt")
+        foreign-claim
+        (io/file repository-root "data" "operator" "claims" "roots"
+                 "unrelated-invalid.edn")
         calls (atom [])]
     (try
       (.mkdirs cluster-dir)
       (.mkdirs sentinel-root)
       (spit sentinel "alive")
+      (.mkdirs (.getParentFile foreign-claim))
+      (spit foreign-claim "{:unrelated true}\n")
       (java.nio.file.Files/createSymbolicLink
        (.toPath (io/file cluster-dir "outside"))
        (.toPath (.getCanonicalFile sentinel-root))

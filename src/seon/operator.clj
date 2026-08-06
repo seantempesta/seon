@@ -443,91 +443,82 @@
 
 (declare collect-under-lock!)
 
+(defn- cleanup-cluster-under-lock!
+  [{repository-root :seon.operator/repository-root
+    managed-root :seon.operator/managed-root
+    cluster-name :seon.boot/cluster-name
+    supplied-store :seon.store/store}]
+  (let [managed-root (state/canonical-path managed-root)
+        claim (state/root-claim repository-root managed-root)]
+    (when-not (and claim
+                   (contains? (:seon.operator.claim/clusters claim)
+                              cluster-name))
+      (throw
+       (ex-info "The cluster has no exact external root claim."
+                {:seon.error/kind
+                 :seon.operator/cluster-cleanup-incomplete
+                 :seon.operator.claim/root managed-root
+                 :seon.boot/cluster-name cluster-name})))
+    (let [cluster-root (.getCanonicalPath
+                        (io/file managed-root "data" "clusters"))
+          paths (cluster/cluster-paths cluster-root cluster-name)
+          cluster-dir (:seon.boot/cluster-dir paths)
+          before (state/footprint cluster-dir)
+          instance (get @runtime/running-instances cluster-name)
+          stopped? (map? instance)
+          _ (when stopped? (cluster/stop! instance))
+          [operation-store release?]
+          (acquire-operation-store! managed-root supplied-store)]
+      (try
+        (let [branch (registry/cluster-branch cluster-name)
+              _ (registry/retire-branch!
+                 {:seon.store/store operation-store
+                  :seon.store/branch branch})
+              present? (.exists (io/file cluster-dir))
+              _ (when present?
+                  (fs/delete-recursively! cluster-root cluster-dir))
+              collection (collect-under-lock! managed-root operation-store)
+              remaining (cond-> []
+                          (.exists (io/file cluster-dir))
+                          (conj cluster-dir)
+                          (contains? (registry/roster operation-store)
+                                     branch)
+                          (conj (str branch)))
+              complete? (empty? remaining)
+              result
+              {:seon.operator.cluster-cleanup/managed-root managed-root
+               :seon.boot/cluster-name cluster-name
+               :seon.store/branch branch
+               :seon.operator.cluster-cleanup/live-instance-stopped?
+               stopped?
+               :seon.operator.cluster-cleanup/branch-retired? true
+               :seon.operator.cluster-cleanup/removed
+               (if present? [cluster-dir] [])
+               :seon.operator.cluster-cleanup/collection collection
+               :seon.operator.cluster-cleanup/remaining remaining
+               :seon.operator.cluster-cleanup/reclaimed-bytes
+               (:seon.operator.footprint/file-bytes before)
+               :seon.operator.cluster-cleanup/complete? complete?}]
+          (when-not complete?
+            (throw
+             (ex-info "Cluster cleanup left claimed state."
+                      {:seon.error/kind
+                       :seon.operator/cluster-cleanup-incomplete
+                       :seon.operator.cluster-cleanup/result result})))
+          result)
+        (finally
+          (when release? (store/release-store! operation-store)))))))
+
 (defn cleanup-cluster!
   "Stop, retire, delete, and collect one exactly claimed cluster."
   {:malli/schema
    [:=> [:cat :seon.operator.cluster-cleanup/request]
     [:or :seon.operator.cluster-cleanup/result :seon.error/value]]}
-  [{repository-root :seon.operator/repository-root
-    managed-root :seon.operator/managed-root
-    cluster-name :seon.boot/cluster-name
-    supplied-store :seon.store/store}]
+  [{repository-root :seon.operator/repository-root :as request}]
   (attempt
-   (fn []
-     (state/with-control-lock!
-      repository-root
-      (fn []
-        (let [{claims :records errors :errors}
-              (state/root-claims repository-root)
-              managed-root (state/canonical-path managed-root)
-              claim (some #(when (= managed-root
-                                    (:seon.operator.claim/root %)) %)
-                          claims)]
-          (when (seq errors)
-            (throw
-             (ex-info "Cluster cleanup cannot read every root claim."
-                      {:seon.error/kind
-                       :seon.operator/cluster-cleanup-incomplete
-                       :seon.operator.claim/errors errors})))
-          (when-not (and claim
-                         (contains? (:seon.operator.claim/clusters claim)
-                                    cluster-name))
-            (throw
-             (ex-info "The cluster has no exact external root claim."
-                      {:seon.error/kind
-                       :seon.operator/cluster-cleanup-incomplete
-                       :seon.operator.claim/root managed-root
-                       :seon.boot/cluster-name cluster-name})))
-          (let [cluster-root (.getCanonicalPath
-                              (io/file managed-root "data" "clusters"))
-                paths (cluster/cluster-paths cluster-root cluster-name)
-                cluster-dir (:seon.boot/cluster-dir paths)
-                before (state/footprint cluster-dir)
-                instance (get @runtime/running-instances cluster-name)
-                stopped? (map? instance)
-                _ (when stopped? (cluster/stop! instance))
-                [operation-store release?]
-                (acquire-operation-store! managed-root supplied-store)]
-            (try
-              (let [branch (registry/cluster-branch cluster-name)
-                    _ (registry/retire-branch!
-                       {:seon.store/store operation-store
-                        :seon.store/branch branch})
-                    present? (.exists (io/file cluster-dir))
-                    _ (when present?
-                        (fs/delete-recursively! cluster-root cluster-dir))
-                    collection (collect-under-lock! managed-root operation-store)
-                    remaining (cond-> []
-                                (.exists (io/file cluster-dir))
-                                (conj cluster-dir)
-                                (contains? (registry/roster operation-store)
-                                           branch)
-                                (conj (str branch)))
-                    complete? (empty? remaining)
-                    result
-                    {:seon.operator.cluster-cleanup/managed-root managed-root
-                     :seon.boot/cluster-name cluster-name
-                     :seon.store/branch branch
-                     :seon.operator.cluster-cleanup/live-instance-stopped?
-                     stopped?
-                     :seon.operator.cluster-cleanup/branch-retired? true
-                     :seon.operator.cluster-cleanup/removed
-                     (if present? [cluster-dir] [])
-                     :seon.operator.cluster-cleanup/collection
-                     collection
-                     :seon.operator.cluster-cleanup/remaining remaining
-                     :seon.operator.cluster-cleanup/reclaimed-bytes
-                     (:seon.operator.footprint/file-bytes before)
-                     :seon.operator.cluster-cleanup/complete? complete?}]
-                (when-not complete?
-                  (throw
-                   (ex-info "Cluster cleanup left claimed state."
-                            {:seon.error/kind
-                             :seon.operator/cluster-cleanup-incomplete
-                             :seon.operator.cluster-cleanup/result result})))
-                result)
-              (finally
-                (when release? (store/release-store! operation-store)))))))))))
+   #(state/with-control-lock!
+     repository-root
+     (fn [] (cleanup-cluster-under-lock! request)))))
 
 (defn- operation-konserve
   [operation-store]
@@ -772,25 +763,29 @@
            (finally
              (when release? (store/release-store! operation-store)))))))))
 
+(defn- refork-under-lock!
+  [{managed-root :seon.operator/managed-root
+    source-commit :seon.source/commit-id
+    :as request}]
+  (let [[operation-store release?]
+        (acquire-operation-store! managed-root (:seon.store/store request))]
+    (try
+      (cleanup-cluster-under-lock!
+       (assoc request :seon.store/store operation-store))
+      (registry/ensure-cluster!
+       {:seon.store/store operation-store
+        :seon.boot/cluster-name (:seon.boot/cluster-name request)
+        :seon.source/commit-id source-commit})
+      (finally
+        (when release? (store/release-store! operation-store))))))
+
 (defn refork!
   "Compose the one cluster cleanup with an exact source refork."
   {:malli/schema
    [:=> [:cat :seon.operator/refork-request]
     [:or :seon.cluster.registry/branch-result :seon.error/value]]}
-  [{managed-root :seon.operator/managed-root
-    source-commit :seon.source/commit-id
-    :as request}]
-  (let [cleanup (cleanup-cluster! request)]
-    (if (error-value? cleanup)
-      cleanup
-      (attempt
-       #(let [[operation-store release?]
-              (acquire-operation-store! managed-root
-                                        (:seon.store/store request))]
-          (try
-            (registry/ensure-cluster!
-             {:seon.store/store operation-store
-              :seon.boot/cluster-name (:seon.boot/cluster-name request)
-              :seon.source/commit-id source-commit})
-            (finally
-              (when release? (store/release-store! operation-store)))))))))
+  [{repository-root :seon.operator/repository-root :as request}]
+  (attempt
+   #(state/with-control-lock!
+     repository-root
+     (fn [] (refork-under-lock! request)))))

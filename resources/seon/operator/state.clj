@@ -331,6 +331,20 @@
                       [:seon.operator.claim/creator
                        :seon.boot/start-instant]))))
 
+(defn root-claim
+  "Read one exact external root claim, or nil when it is absent."
+  [repository-root managed-root]
+  (let [path (root-claim-path repository-root managed-root)
+        claim (read-edn path)]
+    (cond
+      (nil? claim) nil
+      (root-claim? claim) claim
+      :else
+      (throw
+       (ex-info "The exact external root claim is invalid."
+                {:seon.error/kind :seon.operator/unreadable-claim
+                 :seon.operator.claim/path (str path)})))))
+
 (defn- read-claim-records
   [directory valid?]
   (if-not (fs/directory? directory)

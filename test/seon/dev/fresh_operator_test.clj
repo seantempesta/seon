@@ -1142,7 +1142,25 @@
                 "bare init does not invent a default cluster"))
           (finally
             (store/release-store! opened))))
+      (let [started (run-operator root "start" name)
+            advertisement
+            (when (zero? (::exit started))
+              (edn/read-string
+               (slurp (io/file root "data" "clusters" name "prepl.edn"))))]
+        (is (::completed? started) (::output started))
+        (is (= 0 (::exit started)) (::output started))
+        (is (= "true"
+               (prepl-eval
+                advertisement
+                (pr-str
+                 `(some?
+                   (:seon.boot/ready-ms
+                    (get @seon.operator.runtime/running-instances ~name))))))
+            (::output started)))
       (finally
+        (try
+          (run-operator root "down" "--force")
+          (catch Throwable _))
         (delete-recursively! root)))))
 
 (deftest ^{:seon.test/long "Runs live initialization and reload through a fresh operator JVM."}
