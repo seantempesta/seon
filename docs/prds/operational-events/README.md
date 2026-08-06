@@ -135,7 +135,16 @@ The 2026-08-06 redesign changes this folder in four precise ways:
 - no `result/<eid>` alias for event identity unless the owner explicitly rules
   that result handles generalize beyond evaluation receipts.
 
-## Open design questions (2026-08-06)
+## Open design questions (2026-08-06) — ALL FOUR SETTLED same day
+
+Owner rulings (recorded in the active plan's "Rulings 2026-08-06" second
+batch): (1) the event fact commits IN THE OWNING TRANSITION TRANSACTION;
+(2) the log line carries the event's EID qualified by its COMMIT ID —
+no declared second identity; (3) coupling is COMMIT FIRST, THEN APPEND
+from the transaction report — the fact is authoritative and a missing
+line is the only possible divergence; (4) NO event opens a turn by
+default. The original question text is retained below as the record of
+the options considered.
 
 1. **Where does the durable event commit happen?**
    **A — compose pure event transaction data into each owning transition
