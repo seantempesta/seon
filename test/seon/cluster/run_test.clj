@@ -381,6 +381,8 @@
                 settle {::run/id "receipts"
                         :seon.cluster.eval/ordinal 0
                         :seon.cluster.eval/result-edn "42"
+                        :seon.cluster.eval/triage-edn
+                        "{:clojure.error/cause \"triage evidence\"}"
                         :seon.cluster.eval/result-blob
                         (apply str (repeat 64 "a"))
                         :seon.cluster.eval/result-size 100}]
@@ -413,6 +415,8 @@
               (is (= "42" (:seon.cluster.eval/result-edn receipt))
                   "the first terminal outcome is preserved")
               (is (= 100 (:seon.cluster.eval/result-size receipt)))
+              (is (= "{:clojure.error/cause \"triage evidence\"}"
+                     (:seon.cluster.eval/triage-edn receipt)))
               (is (= (apply str (repeat 64 "a"))
                      (:seon.cluster.eval/result-blob receipt)))
               (is (nil? (:seon.cluster.eval/error receipt))
