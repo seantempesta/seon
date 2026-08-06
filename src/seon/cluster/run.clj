@@ -252,7 +252,7 @@
 ;; behavior immediately — the flow-dynamics live-update pattern.
 (declare claim-call release-call close-call plan-call
          open-call receipt-start-call receipt-settle-call
-         receipt-refusal-call recover-call clear-desk-call)
+         recover-call clear-desk-call)
 
 (defn- unanswered-background-results
   [db agent-eid]
@@ -629,6 +629,8 @@
            :seon.cluster.eval/result-size]
           [:seon.cluster.eval/error {:optional true}
            :seon.cluster.eval/error]
+          [:seon.cluster.eval/triage-edn {:optional true}
+           :seon.cluster.eval/triage-edn]
           [:seon.cluster.eval/interrupted-at {:optional true}
            :seon.cluster.eval/interrupted-at]
           [:seon.error/kind {:optional true} :seon.error/kind]
@@ -646,37 +648,6 @@
     #'receipt-settle-call
     (if (and (:seon.cluster.eval/result-edn request)
              (not (contains? request :seon.cluster.eval/result-size)))
-      (assoc request :seon.cluster.eval/result-size
-             (long (count (:seon.cluster.eval/result-edn request))))
-      request)]])
-
-(defn receipt-refusal-tx
-  "Transaction data terminalizing a receipt after its settlement refused.
-  The caller supplies a bounded, registered-schema-valid flat error;
-  there is no program row or disposition that can repeat the original
-  refusal. This transition also closes the receipt's run, so the event
-  derives no follow-up close pass. `terminal-refused!` checks the
-  transaction's returned outcome rather than treating construction as
-  proof that it committed."
-  {:malli/schema
-   [:=> [:cat
-         [:map
-          [::id ::id]
-          [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
-          [::closed-at ::closed-at]
-          [:seon.cluster.eval/result-edn
-           :seon.cluster.eval/result-edn]
-          [:seon.cluster.eval/result-blob {:optional true}
-           :seon.cluster.eval/result-blob]
-          [:seon.cluster.eval/result-size {:optional true}
-           :seon.cluster.eval/result-size]
-          [:seon.cluster.eval/error :seon.cluster.eval/error]
-          [:seon.error/kind :seon.error/kind]]]
-    [:vector :some]]}
-  [request]
-  [[:db.fn/call
-    #'receipt-refusal-call
-    (if (not (contains? request :seon.cluster.eval/result-size))
       (assoc request :seon.cluster.eval/result-size
              (long (count (:seon.cluster.eval/result-edn request))))
       request)]])
@@ -991,6 +962,7 @@
    :seon.cluster.eval/result-blob
    :seon.cluster.eval/result-size
    :seon.cluster.eval/error
+   :seon.cluster.eval/triage-edn
    :seon.cluster.eval/interrupted-at
    :seon.error/kind
    :seon.cluster.eval/output
@@ -1092,53 +1064,6 @@
                   :in $ ?agent
                   :where [?desk :seon.def/agent ?agent]]
                 db (:db/id agent)))))
-
-(defn receipt-refusal-call
-  "Terminalize a running receipt after its terminal transaction refused.
-  Never refuses on database STATE: a missing or already-terminal receipt
-  contributes no transaction data, so the durable error recorder sharing
-  this transaction still commits. The caller's bounded request already
-  satisfies the registered attribute schemas. A running receipt gets the
-  same terminal assertions as ordinary settlement and its run closes in
-  this same transaction. Presence prevents overwrite, and closing here
-  leaves no derived `:close` work whose wake could be mistaken for a
-  retry."
-  {:malli/schema
-   [:=> [:cat :seon.db/database-value
-         [:map
-          [::id ::id]
-          [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
-          [::closed-at ::closed-at]
-          [:seon.cluster.eval/result-edn
-           :seon.cluster.eval/result-edn]
-          [:seon.cluster.eval/result-blob {:optional true}
-           :seon.cluster.eval/result-blob]
-          [:seon.cluster.eval/result-size {:optional true}
-           :seon.cluster.eval/result-size]
-          [:seon.cluster.eval/error :seon.cluster.eval/error]
-          [:seon.error/kind :seon.error/kind]]]
-    [:vector :some]]}
-  [db {::keys [id]
-       :seon.cluster.eval/keys [ordinal]
-       :as request}]
-  (let [receipt (current-receipt db id ordinal)
-        run-eid (get-in receipt [:seon.cluster.eval/run :db/id])
-        run (when run-eid (db/pull db '[*] run-eid))
-        agent-eid (get-in run [::agent :db/id])
-        pointer-eid (get-in (when agent-eid
-                              (db/pull db [:seon.cluster.agent/run] agent-eid))
-                            [:seon.cluster.agent/run :db/id])]
-    (if (or (nil? receipt) (terminal? receipt))
-      []
-      (into
-       (receipt-terminal-assertions receipt request)
-       (concat
-        (when (and run (open? run))
-          (cond-> [[:db/add run-eid ::closed-at (::closed-at request)]]
-            (::process run)
-            (conj [:db/retract run-eid ::process (::process run)])))
-        (when (= run-eid pointer-eid)
-          [[:db/retract agent-eid :seon.cluster.agent/run run-eid]]))))))
 
 (defn recover-tx
   "Transaction data recovering one run from dead-process facts."
