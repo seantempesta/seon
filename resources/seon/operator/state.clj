@@ -58,6 +58,15 @@
                  (process-start-instant (.pid handle)))
           handle)))))
 
+(defn- recorded-process-absence
+  [record]
+  (let [optional (java.lang.ProcessHandle/of
+                  (long (:seon.boot/pid record)))]
+    (if (and (.isPresent optional)
+             (.isAlive ^java.lang.ProcessHandle (.get optional)))
+      :pid-reused
+      :already-exited)))
+
 (defn terminate-recorded-process!
   "Terminate only the exact recorded process identity, rechecking before KILL."
   [record silence-ms]
@@ -84,7 +93,7 @@
                        :seon.boot/pid (:seon.boot/pid record)})))
           :sigkill)
         :sigterm))
-    :already-exited))
+    (recorded-process-absence record)))
 
 (defn- graceful-stop!
   [advertisement silence-ms]

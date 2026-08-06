@@ -71,6 +71,14 @@
 ;;; the genuinely opaque platform objects; everything else is ordinary
 ;;; data.
 
+(def ^:dynamic ^:private *source-progress!*
+  (constantly nil))
+
+(defn- report-source-progress!
+  [phase]
+  (*source-progress!* phase)
+  nil)
+
 (defn socket-server?
   "True for the java.net.ServerSocket an io-prepl listens on."
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
@@ -784,7 +792,10 @@
     :nil]}
   [{connection :seon.db/connection
     manifest :seon.fn/manifest}]
+  (report-source-progress! "schema population started")
   (accrete-schema-population! connection nil)
+  (report-source-progress! "schema population complete")
+  (report-source-progress! "bootstrap rows")
   (let [rows (bootstrap/population-tx @connection)]
     (when (seq rows)
       (require-committed!
@@ -794,6 +805,7 @@
                       {:seon.db/process
                        [:seon.db.process/id boot-process-identity]}})
        {:seon.boot/population :seon.bootstrap/rows})))
+  (report-source-progress! "instruction rows")
   (let [rows (instruction-row-changes
               @connection
               (instruction/seed-rows))]
@@ -805,12 +817,14 @@
                       {:seon.db/process
                        [:seon.db.process/id boot-process-identity]}})
        {:seon.boot/population :seon.cluster.instruction/rows})))
+  (report-source-progress! "program rows started")
   (seon.fn/index!
    (cond-> {:seon.db/connection connection
             :seon.db/process
             [:seon.db.process/id boot-process-identity]}
      manifest (assoc :seon.fn/manifest manifest)
      (nil? manifest) (assoc :seon.fn/roots seon.fn/source-roots)))
+  (report-source-progress! "program rows complete")
   nil)
 
 ;;; ---------------------------------------------------------------------------
@@ -991,13 +1005,19 @@
 
 (defn- stable-manifest
   []
+  (report-source-progress! "source snapshot")
   (let [snapshot-before (current-source-snapshot)
         cached @source-analysis-cache
         cached? (= snapshot-before (:seon.source/snapshot cached))
+        _ (report-source-progress!
+           (str "analysis started: "
+                (count (:seon.source/file-digests snapshot-before))
+                " source inputs"))
         manifest (if cached?
                    (:seon.fn/manifest cached)
                    (seon.fn/build-manifest
                     {:seon.fn/roots seon.fn/source-roots}))
+        _ (report-source-progress! "analysis complete")
         snapshot-after (current-source-snapshot)]
     (when-not (= snapshot-before snapshot-after)
       (refused! "Source changed while current-src was being analyzed; retry."
@@ -1017,7 +1037,9 @@
   (let [{source-digest :seon.source/digest
          snapshot :seon.source/snapshot
          manifest :seon.fn/manifest} (stable-manifest)
-        published (publish-current-source! store source-digest manifest)]
+        _ (report-source-progress! "branch publication started")
+        published (publish-current-source! store source-digest manifest)
+        _ (report-source-progress! "branch publication complete")]
     (write-source-artifact! root (source-artifact published manifest snapshot))
     published))
 
@@ -1112,11 +1134,15 @@
   ([root]
    (refresh-source! root []))
   ([root changed-paths]
+   (report-source-progress! "request accepted")
    (locking source-refresh-monitor
+     (report-source-progress! "bootstrap configuration")
      (let [config (resolve-bootstrap {:seon.boot/root root})
            store-dir (:seon.boot/store-dir config)
+           _ (report-source-progress! "store acquisition")
            held-store (acquire-root-store! store-dir)]
        (try
+         (report-source-progress! "source build")
          (if (seq changed-paths)
            (incremental-source-refresh! root held-store changed-paths)
            (full-source-refresh! root held-store))

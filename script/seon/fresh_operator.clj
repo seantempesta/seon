@@ -2001,35 +2001,61 @@
         ;; Reload the schema loader before any namespace whose top-level forms
         ;; call `load!`, then reload predicate registration owners before
         ;; admission runs during publication.
+        (println "● current-src: reload schema declarations")
+        (flush)
         (require 'seon.schema.edn :reload)
+        (println "● current-src: reload source analyzer")
+        (flush)
         (require 'seon.fn.analyzer :reload)
         ;; `seon.fn` canonicalizes analyzed rows through `seon.program`.
         ;; Reload that owner first so newly recorded program attributes such
         ;; as call edges cannot be dropped by a stale long-lived Var.
+        (println "● current-src: reload program rows")
+        (flush)
         (require 'seon.program :reload)
+        (println "● current-src: reload source index")
+        (flush)
         (require 'seon.fn :reload)
         ;; A live JVM may already have an older `seon.db` loaded, so
         ;; `requiring-resolve` cannot replay its new load-time registrations
         ;; during schema admission.
+        (println "● current-src: reload database functions")
+        (flush)
         (require 'seon.db :reload)
+        (println "● current-src: reload publication owners")
+        (flush)
         (require 'seon.cluster.source :reload)
         ;; Reload the publication owner too: its source-root value changes
         ;; when schema resources move or the monolithic resource is removed.
+        (println "● current-src: reload cluster publication owner")
+        (flush)
         (require 'seon.cluster :reload)
+        (println "● current-src: reload remaining publication owners")
+        (flush)
         (require 'seon.cluster.registry
                  'seon.cluster.store
                  'seon.fs
                  'seon.operator)
-        ~(if source-process?
-           `(println
-             ~init-result-prefix
-             (pr-str
-              (try
-                {:seon.fresh-operator/value ~operation}
-                (catch Throwable failure#
-                  {:seon.fresh-operator/message (ex-message failure#)
-                   :seon.fresh-operator/data (ex-data failure#)}))))
-           operation)))))
+        (println "● current-src: publication started")
+        (flush)
+        (let [progress-var#
+              (ns-resolve 'seon.cluster (symbol "*source-progress!*"))
+              progress!#
+              (fn [phase#]
+                (println (str "● current-src: " phase#))
+                (flush))]
+          (with-bindings
+            {progress-var# progress!#}
+            ~(if source-process?
+               `(println
+                 ~init-result-prefix
+                 (pr-str
+                  (try
+                    {:seon.fresh-operator/value ~operation}
+                    (catch Throwable failure#
+                      {:seon.fresh-operator/message (ex-message failure#)
+                       :seon.fresh-operator/data (ex-data failure#)}))))
+               operation)))))))
 
 (defn- source-process-value!
   [root form]
@@ -2081,7 +2107,12 @@
            (terminal-value
             (prepl-eval!
              (:seon.fresh-operator/transport-advertisement anchor)
-             (init-form root name force? changed-paths false))))
+             (init-form root name force? changed-paths false)
+             (operator-silence-backstop-ms {})
+             (fn [event]
+               (when (= :out (:tag event))
+                 (print (:val event))
+                 (flush))))))
 
           (seq changed-paths)
           (fail! "Incremental source publication requires a running operator JVM."

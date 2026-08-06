@@ -444,6 +444,87 @@
      :seon.dev.fresh-operator-test/outcome
      (edn/read-string (last (str/split-lines output)))}))
 
+(defn- prepl-response-simulation
+  [mode]
+  (let [code
+        (pr-str
+         `(do
+            (require 'clojure.edn 'clojure.java.io 'seon.fresh-operator)
+            (let [server#
+                  (java.net.ServerSocket.
+                   0 1 (java.net.InetAddress/getLoopbackAddress))
+                  served#
+                  (future
+                    (with-open
+                     [socket# (.accept server#)
+                      reader# (clojure.java.io/reader socket#)
+                      writer# (clojure.java.io/writer socket#)]
+                      (.readLine ^java.io.BufferedReader reader#)
+                      (if (= ~mode :progress)
+                        (do
+                          (doseq [value# ["analysis\n"
+                                          "schema population\n"
+                                          "branch publication\n"]]
+                            (Thread/sleep 120)
+                            (.write writer#
+                                    (str (pr-str {:tag :out :val value#})
+                                         "\n"))
+                            (.flush writer#))
+                          (.write writer#
+                                  (str (pr-str {:tag :ret :val "{:ok true}"})
+                                       "\n"))
+                          (.flush writer#))
+                        (Thread/sleep 600))))
+                  observed# (atom [])
+                  started# (System/nanoTime)
+                  outcome#
+                  (try
+                    {:seon.dev.fresh-operator-test/value
+                     ((var-get
+                       (ns-resolve 'seon.fresh-operator
+                                   (symbol "prepl-eval!")))
+                      {:seon.boot/prepl-host "127.0.0.1"
+                       :seon.boot/prepl-port (.getLocalPort server#)}
+                      "(+ 1 2)"
+                      250
+                      (fn [event#] (swap! observed# conj event#)))}
+                    (catch Throwable failure#
+                      {:seon.dev.fresh-operator-test/message
+                       (ex-message failure#)
+                       :seon.dev.fresh-operator-test/data
+                       (ex-data failure#)}))
+                  elapsed-ms#
+                  (long (/ (- (System/nanoTime) started#) 1000000))]
+              (.close server#)
+              (deref served# 1000 nil)
+              (prn
+               (assoc outcome#
+                      :seon.dev.fresh-operator-test/observed @observed#
+                      :seon.dev.fresh-operator-test/elapsed-ms
+                      elapsed-ms#)))))
+        process
+        (.start
+         (doto
+          (ProcessBuilder.
+           ^java.util.List
+           ["bb"
+            "--config" (str (io/file project-root "bb.edn"))
+            "--deps-root" (str project-root)
+            "--classpath" operator-classpath
+            "-e" code])
+          (.directory project-root)
+          (.redirectErrorStream true)))
+        completed? (.waitFor process 10 TimeUnit/SECONDS)
+        _ (when-not completed? (.destroyForcibly process))
+        output (str/trim (slurp (.getInputStream process)))]
+    (when-not (and completed? (zero? (.exitValue process)))
+      (throw
+       (ex-info "The prepl response simulation failed."
+                {:seon.dev.fresh-operator-test/output output})))
+    {:seon.dev.fresh-operator-test/output output
+     :seon.dev.fresh-operator-test/outcome
+     (edn/read-string (last (str/split-lines output)))}))
+
 (defn- process-output
   [^Process process]
   (future
@@ -1005,6 +1086,37 @@
                   "namespaces was silent for 250 ms"))))
       (finally
         (delete-recursively! root)))))
+
+(deftest prepl-response-progress-resets-the-silence-backstop
+  (let [{:seon.dev.fresh-operator-test/keys [outcome]}
+        (prepl-response-simulation :progress)]
+    (is (nil? (:seon.dev.fresh-operator-test/message outcome))
+        (pr-str outcome))
+    (is (<= 320 (:seon.dev.fresh-operator-test/elapsed-ms outcome))
+        "the response outlived one silence interval")
+    (is (= [:out :out :out :ret]
+           (mapv :tag
+                 (:seon.dev.fresh-operator-test/value outcome))))
+    (is (= ["analysis\n" "schema population\n" "branch publication\n"]
+           (into []
+                 (comp (filter #(= :out (:tag %))) (map :val))
+                 (:seon.dev.fresh-operator-test/observed outcome)))
+        "every publication progress event remains observable")))
+
+(deftest prepl-response-silence-still-trips-the-backstop
+  (let [{:seon.dev.fresh-operator-test/keys [output outcome]}
+        (prepl-response-simulation :silent)]
+    (is (= :seon.fresh-operator/prepl-response-silent
+           (get-in outcome
+                   [:seon.dev.fresh-operator-test/data
+                    :seon.error/kind])))
+    (is (= 250
+           (get-in outcome
+                   [:seon.dev.fresh-operator-test/data
+                    :seon.fresh-operator/silence-backstop-ms])))
+    (is (str/includes?
+         output
+         "operator event silence backstop fired: prepl response was silent"))))
 
 (deftest every-child-jvm-command-uses-the-shared-launch-owner
   (let [source (slurp (io/file project-root "script" "seon"
