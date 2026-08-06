@@ -162,7 +162,9 @@
          rendered :seon.cluster.prompt/rendered-context
          live :seon.cluster.run/live-processes} request
         db (:seon.db/db rendered)
-        basis-t (long (:max-tx db))
+        ; the database interface, not a map key: an as-of/history value
+        ; carries no top-level :max-tx entry
+        basis-t (long (:t (db/database-value-identity db)))
         capture-id (str run-id "-context-" basis-t)]
     [(cond-> {:seon.context.capture/id capture-id
               :seon.context.capture/run [:seon.cluster.run/id run-id]
