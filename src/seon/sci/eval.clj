@@ -346,11 +346,7 @@
   (boolean (store-faithful-edn value)))
 
 (defn- intern-values
-  "Dereferenced SCI intern roots keyed by qualified name.
-
-  This intentionally snapshots values, not env maps or Var identities: SCI
-  redefinition mutates the existing Var root and assocs the identical Var back
-  into the env. Values are not traversed here."
+  "Dereferenced SCI intern roots keyed by qualified name."
   [ctx]
   (let [namespace-state (sci/namespace-state ctx)]
     (into {}
@@ -367,6 +363,34 @@
                        absent-intern)])))
               intern-names))
            (sci/namespace-interns ctx)))))
+
+(defn- turn-intern-values
+  "Dereferenced roots owned by this SCI fork's generation.
+
+  `def`, `intern`, and inherited-root writes stamp SCI's current fork
+  generation (`reference-code/sci/src/sci/impl/evaluator.cljc:25-49` and
+  `sci/impl/utils.cljc:359-379`). Host Vars copied into the context by system
+  namespace installation carry no such stamp. This is the definition-event
+  provenance for the desk: namespace membership never decides authorship.
+
+  Values rather than Var identities are retained because redefinition may
+  mutate an already generation-owned Var root. Values are not traversed."
+  [ctx]
+  (let [namespace-state (sci/namespace-state ctx)
+        values (intern-values ctx)
+        turn-generation (:sci/generation @(:env ctx))]
+    (if-not turn-generation
+      {}
+      (into {}
+            (filter
+             (fn [[qualified _value]]
+               (= turn-generation
+                  (:sci/generation
+                   (meta
+                    (get-in namespace-state
+                            [(symbol (namespace qualified))
+                             (symbol (name qualified))]))))))
+            values))))
 
 (defn- same-intern-value?
   [left right]
@@ -472,7 +496,7 @@
 
 (defn- desk-defs
   [ctx namespace-name before source form observed-built-in-calls]
-  (let [after (intern-values ctx)
+  (let [after (turn-intern-values ctx)
         replay-risks (built-in-replay-risks observed-built-in-calls)]
     (into []
           (comp
@@ -1296,13 +1320,26 @@
   [connection {value-edn :seon.def/value-edn
                digest :seon.def/blob}]
   (let [serialized
-        (or value-edn
-            (when connection (blob/get connection digest))
-            (throw
-             (ex-info "Desk value blob is unavailable during rehydration."
-                      {:seon.error/kind ::desk-blob-unavailable
-                       :seon.blob/digest digest})))]
+        (cond
+          (some? value-edn) value-edn
+          (and connection digest) (blob/get connection digest)
+          :else
+          (throw
+           (ex-info "Desk row has no available stored value."
+                    {:seon.error/kind ::desk-blob-unavailable
+                     :seon.blob/digest digest})))]
     (edn/read-string serialized)))
+
+(defn- desk-restore-notice
+  [intern-name reason]
+  (str "could not restore `" intern-name "`: " reason))
+
+(defn- restorable-desk-row?
+  [{:seon.def/keys [atom? blob source unrestorable-reason value-edn]}]
+  (and (nil? unrestorable-reason)
+       (if atom?
+         (or (some? value-edn) (some? blob))
+         (or (some? source) (some? value-edn) (some? blob)))))
 
 (defn fork-for-turn
   "Fork the live base and rehydrate only the selected agent's desk facts."
@@ -1328,7 +1365,9 @@
              vec)
         notices (transient [])]
     (doseq [{namespace-ref :seon.def/ns
-             intern-name :seon.def/name} rows]
+             intern-name :seon.def/name
+             :as row} rows
+            :when (restorable-desk-row? row)]
       (let [namespace-name (:seon.ns/name namespace-ref)]
         (when-not (sci/find-ns ctx namespace-name)
           (sci/add-namespace! ctx namespace-name {}))
@@ -1341,26 +1380,41 @@
              :as row} rows]
       (let [namespace-name (:seon.ns/name namespace-ref)]
         (cond
+          reason
+          (conj! notices (desk-restore-notice intern-name reason))
+
+          (not (restorable-desk-row? row))
+          (conj! notices
+                 (desk-restore-notice
+                  intern-name "desk row has no defining form or stored value"))
+
           atom?
-          (do
+          (try
             (sci/intern ctx namespace-name intern-name
                         (atom (desk-value connection row)))
             (conj! notices
                    (str "restored `" intern-name
-                        "` from its last settled value")))
+                        "` from its last settled value"))
+            (catch Throwable failure
+              (conj! notices
+                     (desk-restore-notice intern-name (.getMessage failure)))))
 
           source
-          (let [event (one-event source namespace-name ctx)]
-            (sci/binding [sci/ns (sci/create-ns namespace-name)]
-              (sci/eval-form ctx (:seon.sci.reader/form event))))
+          (try
+            (let [event (one-event source namespace-name ctx)]
+              (sci/binding [sci/ns (sci/create-ns namespace-name)]
+                (sci/eval-form ctx (:seon.sci.reader/form event))))
+            (catch Throwable failure
+              (conj! notices
+                     (desk-restore-notice intern-name (.getMessage failure)))))
 
           (or (:seon.def/value-edn row) (:seon.def/blob row))
-          (sci/intern ctx namespace-name intern-name
-                      (desk-value connection row))
-
-          reason
-          (conj! notices
-                 (str "could not restore `" intern-name "`: " reason)))))
+          (try
+            (sci/intern ctx namespace-name intern-name
+                        (desk-value connection row))
+            (catch Throwable failure
+              (conj! notices
+                     (desk-restore-notice intern-name (.getMessage failure))))))))
     {:seon.sci.eval/ctx ctx
      :seon.sci.eval/desk-notices (persistent! notices)}))
 
@@ -1651,7 +1705,7 @@
             execution-ctx (if namespace-unmap?
                             (sci/fork evaluation-ctx)
                             evaluation-ctx)
-            before-intern-values (intern-values execution-ctx)
+            before-intern-values (turn-intern-values execution-ctx)
             _ (when-not namespace-unmap?
                 (vreset! session-observation
                          {:seon.sci.eval/ctx execution-ctx

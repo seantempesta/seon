@@ -77,7 +77,7 @@
        {:seon.cluster.run/id run-id
         :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
         :seon.cluster.run/opened-at (java.util.Date.)})})
-    (let [ctx (eval/cluster-ctx @connection connection)
+    (let [ctx (sci/fork (eval/cluster-ctx @connection connection))
           sources ["(def helper (fn [x] (inc x)))"
                    "(def data {:answer 42})"
                    "(def scratch (atom 1))"
