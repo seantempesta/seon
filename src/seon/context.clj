@@ -42,6 +42,7 @@
   — capture with no attempt row, evidence the call may never have
   fired; kill after — today's attempt-row story. Nothing re-executes."
   (:require [seon.ai.tokens :as tokens]
+            [seon.db :as db]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
@@ -50,6 +51,55 @@
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})
+
+;;; ---------------------------------------------------------------------------
+;;; Message custody in one run's rendered context
+;;; ---------------------------------------------------------------------------
+
+(defn message-custody
+  "Classify one message relative to the run whose prompt is being rendered.
+
+  The run's recorded trigger is its current instruction. An inbound message
+  to the same agent with no run pointing at it is pending work, even when it
+  arrived later and therefore interleaves honestly in the transcript. All
+  other messages are history. This is derived from refs on the supplied
+  database value; no prompt-local flag or message status is stored."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value
+         [:maybe :seon.cluster.run/id]
+         :seon.cluster.agent/id
+         :int]
+    :keyword]}
+  [database run-id agent-id message-eid]
+  (if-not run-id
+    ::history
+    (let [current-trigger?
+          (some?
+           (db/q '[:find ?run .
+                   :in $ ?run-id ?message
+                   :where
+                   [?run :seon.cluster.run/id ?run-id]
+                   [?run :seon.cluster.run/trigger ?message]]
+                 database run-id message-eid))
+          inbound?
+          (some?
+           (db/q '[:find ?message .
+                   :in $ ?agent-id ?message
+                   :where
+                   [?agent :seon.cluster.agent/id ?agent-id]
+                   [?message :seon.cluster.message/to ?agent]]
+                 database agent-id message-eid))
+          claimed?
+          (some?
+           (db/q '[:find ?run .
+                   :in $ ?message
+                   :where
+                   [?run :seon.cluster.run/trigger ?message]]
+                 database message-eid))]
+      (cond
+        current-trigger? ::current-trigger
+        (and inbound? (not claimed?)) ::pending
+        :else ::history))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The pre-provider capture

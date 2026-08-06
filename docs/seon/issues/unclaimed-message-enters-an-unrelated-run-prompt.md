@@ -37,6 +37,32 @@ call and owns the resulting plan.
 `seon.cluster.prompt` and the run-opening context selection that turns one
 recorded trigger into the exact prompt for that run.
 
+## Cause
+
+The walk bound the current run id while acquiring prompt context, but dropped
+that identity before invoking the schema-declared agent transcript renderer.
+The transcript therefore preserved the correct arrival order while rendering
+the recorded trigger and every newer unclaimed inbound message with the same
+unqualified sentence shape. The run ref remained correct in the database; the
+AI projection erased its custody meaning.
+
+## Resolution
+
+The walk now carries the current run id through renderer-call evidence.
+`seon.context/message-custody` derives each inbound message's relationship to
+that run exclusively from database refs:
+
+- the run's recorded trigger renders as the current run instruction;
+- an inbound message with no run trigger ref renders as pending, explicitly
+  not this run's instruction; and
+- claimed or non-inbound messages remain ordinary history.
+
+The transcript still sorts every entry by its durable arrival facts, so a
+mid-turn message interleaves honestly without acquiring the wrong custody.
+The event-controlled regression opens a run on message A, commits message B
+between open and call, and asserts both the arrival-visible pending sentence
+and the unchanged trigger ref.
+
 ## Acceptance
 
 - A run's prompt clearly identifies and answers its recorded trigger.

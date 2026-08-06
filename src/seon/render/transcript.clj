@@ -12,6 +12,7 @@
             [seon.ai.tokens :as tokens]
             [seon.blob :as blob]
             [seon.bootstrap :as bootstrap]
+            [seon.context :as context]
             [seon.print :as print]
             [seon.render :as render]
             [seon.render.agent :as agent]
@@ -320,7 +321,7 @@
     {}))
 
 (defn- message-entry
-  [identities orders message]
+  [database run-id agent-id identities orders message]
   (let [about-eid (get-in message [:seon.cluster.message/about :db/id])]
     (merge
      {::kind :message
@@ -335,6 +336,8 @@
       ::about (second (get identities about-eid))
       ::about-ref? (some? about-eid)
       ::reason (:my.message/reason message)}
+     {::custody
+      (context/message-custody database run-id agent-id (:db/id message))}
      (get orders (:db/id message)))))
 
 (defn capped-result?
@@ -413,7 +416,7 @@
              (::id entry)])))
 
 (defn- history
-  [db agent-id limit]
+  [db run-id agent-id limit]
   (let [ids (candidate-entity-ids db agent-id limit)
         messages (pulled-many db message-selector (:message ids))
         receipts (pulled-many db receipt-selector (:eval ids))
@@ -421,7 +424,8 @@
         identities (about-identities db messages)
         message-orders (message-order-facts db (:message ids))
         sources (form-sources db (:eval ids))]
-    (->> (concat (map (partial message-entry identities message-orders)
+    (->> (concat (map (partial message-entry db run-id agent-id
+                               identities message-orders)
                       messages)
                  (map input-entry inputs)
                  (map (partial receipt-entry sources) receipts))
@@ -483,7 +487,12 @@
                 (and (::about-ref? entry) (nil? (::about entry)))
                 (assoc :seon.transcript/unresolved-about? true)
                 (::reason entry) (assoc :my.message/reason (::reason entry)))]
-    (str sentence
+    (str (case (::custody entry)
+           :seon.context/current-trigger "Current run instruction:\n"
+           :seon.context/pending
+           "Pending message — awaiting its own run; not this run's instruction:\n"
+           "")
+         sentence
          (when (seq extra) (str "\n" (floor-text unit extra))))))
 
 (defn- bounded-result
@@ -675,7 +684,8 @@
         candidate-limit (int (min Integer/MAX_VALUE
                                   (max recent-entry-count requested)))
         entries (if (and db agent-id)
-                  (history db agent-id candidate-limit)
+                  (history db (:seon.cluster.run/id unit)
+                           agent-id candidate-limit)
                   [])
         pinned (into []
                      (comp (filter ::pinned?)

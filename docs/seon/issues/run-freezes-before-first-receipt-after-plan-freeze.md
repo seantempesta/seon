@@ -58,6 +58,29 @@ release custody rather than silently retaining the run.
 The root agent's `seon.cluster.loop` Flow proc and its post-attempt
 plan-freeze-to-first-evaluation transition.
 
+## Resolution
+
+Every operation before an evaluation result now carries its form ordinal into
+the run-loop boundary. If turn-fork construction, evaluator resolution,
+trigger derivation, form admission, or evaluation submission faults, the loop
+commits one atomic backstop transaction that:
+
+- starts the ordinal's receipt when it does not yet exist;
+- terminalizes that receipt with the bounded normalized error;
+- closes the run, retracting process custody and the agent's run pointer; and
+- records the durable error fact with agent and run attribution.
+
+The backstop uses the existing receipt-refusal transaction function, whose
+presence fence prevents overwriting a terminal receipt. If the backstop itself
+is refused, the existing terminal-settlement fault path closes the agent's
+process-local mailbox and raises the named core fault instead of reporting
+success.
+
+The class regression freezes a real plan, forces `fork-for-turn` to throw at
+ordinal zero, and asserts a terminal receipt zero, durable error, closed run,
+absent custody and agent pointer, plus later unanswered work remaining
+claimable without recovery or restart.
+
 ## Acceptance
 
 - A successful provider attempt that freezes a nonempty plan publishes the

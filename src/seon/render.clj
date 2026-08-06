@@ -80,6 +80,7 @@
                              [:seon.db/db
                               :seon.sci.eval/ctx
                               :seon.cluster.agent/id
+                              :seon.cluster.run/id
                               :seon.sci.admit/caps
                               :seon.sci.eval/time-limit-ms
                               :seon.config/on-core-error
@@ -616,6 +617,8 @@
                    ((requiring-resolve 'seon.render.walk/neighborhood)
                     {:seon.db/db db
                      :seon.sci.eval/ctx (:seon.sci.eval/ctx *walk-context*)
+                     :seon.cluster.run/id
+                     (:seon.cluster.run/id *walk-context*)
                      :seon.render/retained-calls
                      (:seon.render/retained-calls *walk-context*)
                      :seon.render/captured-calls

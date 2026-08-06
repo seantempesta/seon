@@ -841,6 +841,71 @@
          true))
      kind)))
 
+(defn- settle-pre-evaluation-fault!
+  "Create or terminalize this ordinal's receipt, close its run, and record
+  one pre-evaluation core fault in a single transaction.
+
+  Receipt presence is read from the same database basis used to construct the
+  transaction. Before receipt zero exists (turn-fork construction), the
+  transaction starts it first. Once receipt start has committed, the same
+  transaction function terminalizes that running receipt. Either way, an
+  accepted plan cannot retain custody without a terminal fact. A refusal of
+  this settlement is itself a core settlement fault and stops the agent
+  mailbox."
+  [cluster failure now agent-id run-id ordinal]
+  (let [connection (:seon.db/connection cluster)
+        database @connection
+        existing
+        (db/pull database '[*]
+                 [:seon.cluster.eval/id (pr-str [run-id ordinal])])
+        recording
+        (error-tx cluster database failure now
+                  {:seon.cluster.agent/id agent-id
+                   :seon.cluster.run/id run-id})
+        fact (first recording)
+        value (error/value fact)
+        result-edn (pr-str value)
+        receipt
+        {:seon.cluster.run/id run-id
+         :seon.cluster.eval/ordinal ordinal
+         :seon.cluster.run/closed-at now
+         :seon.cluster.eval/result-edn result-edn
+         :seon.cluster.eval/result-size (long (count result-edn))
+         :seon.cluster.eval/error (:seon.error/message value)
+         :seon.error/kind (:seon.error/kind value)}
+        tx-data
+        (into [] cat
+              [(when-not (:db/id existing)
+                 (run/receipt-start-tx
+                  {:seon.cluster.run/id run-id
+                   :seon.cluster.eval/ordinal ordinal
+                   :seon.cluster.eval/at now}))
+               (run/receipt-refusal-tx receipt)
+               recording])
+        outcome (db/transact! connection {:tx-data tx-data})]
+    (when (:seon.error/kind outcome)
+      (terminal-settlement-fault!
+       cluster
+       "Pre-evaluation fault settlement was refused."
+       {::pre-evaluation-failure value
+        ::settlement-outcome outcome
+        :seon.cluster.run/id run-id
+        :seon.cluster.run.form/ordinal ordinal}))
+    value))
+
+(defn- pre-evaluation-call
+  "Run one operation before an evaluation result exists, retaining the form
+  ordinal as data if it faults."
+  [ordinal operation]
+  (try
+    (operation)
+    (catch Throwable failure
+      (throw
+       (ex-info "A pre-evaluation operation failed."
+                {::pre-evaluation-fault true
+                 :seon.cluster.run.form/ordinal ordinal}
+                failure)))))
+
 (defn- attempt-id
   "One model attempt's identity: derived, so nothing allocates a uuid.
   `<run-id>-attempt-<ordinal>` — the same (run, ordinal) idiom receipts
@@ -1499,7 +1564,7 @@
               ;; delivery machinery does the rest
               :else (fail! failure))))))))
 
-(defn- resume-turn
+(defn- resume-turn*
   "Reduce one held run over its remaining admitted forms."
   [{cluster ::cluster work ::work now ::now report ::report}]
   (let [connection (:seon.db/connection cluster)
@@ -1516,13 +1581,17 @@
     (let [base-ctx (:seon.sci.eval/ctx cluster)
           {ctx :seon.sci.eval/ctx
            desk-notices :seon.sci.eval/desk-notices}
-          (sci.eval/fork-for-turn
-           {:seon.sci.eval/ctx base-ctx
-            :seon.db/db @connection
-            :seon.db/connection connection
-            :seon.cluster.agent/id agent-id})
+          (pre-evaluation-call
+           (:seon.cluster.run.form/ordinal work)
+           #(sci.eval/fork-for-turn
+             {:seon.sci.eval/ctx base-ctx
+              :seon.db/db @connection
+              :seon.db/connection connection
+              :seon.cluster.agent/id agent-id}))
           compiled-evaluate
-          (requiring-resolve (:seon.cluster.loop/evaluate cluster))
+          (pre-evaluation-call
+           (:seon.cluster.run.form/ordinal work)
+           #(requiring-resolve (:seon.cluster.loop/evaluate cluster)))
           ;; The public walk and every renderer share this evaluation's exact
           ;; cluster context. Bind it on the actual compute worker so nested
           ;; agent calls use the same database value, live SCI ctx, time limit,
@@ -1544,7 +1613,10 @@
           ;; is the head of the conversation chain every message this
           ;; turn sends extends, and it cannot change while the run is
           ;; held
-          trigger (message/trigger @connection run-id)]
+          trigger
+          (pre-evaluation-call
+           (:seon.cluster.run.form/ordinal work)
+           #(message/trigger @connection run-id))]
       (loop [ordinal (:seon.cluster.run.form/ordinal work)
              ran 0
              namespace-name
@@ -1568,33 +1640,37 @@
             (report :error ran)
             (let [db-before-evaluation @connection
                   form
-                  (admitted-form
-                   {:seon.db/db db-before-evaluation
-                    :seon.cluster.run/id run-id
-                    :seon.cluster.run.form/ordinal ordinal
-                    :seon.sci.eval/ctx ctx
-                    ::current-namespace namespace-name
-                    ::fallback-namespace
-                    (sci.eval/agent-namespace db-before-evaluation agent-id)})
+                  (pre-evaluation-call
+                   ordinal
+                   #(admitted-form
+                     {:seon.db/db db-before-evaluation
+                      :seon.cluster.run/id run-id
+                      :seon.cluster.run.form/ordinal ordinal
+                      :seon.sci.eval/ctx ctx
+                      ::current-namespace namespace-name
+                      ::fallback-namespace
+                      (sci.eval/agent-namespace db-before-evaluation agent-id)}))
                   evaluation-namespace
                   (second (:seon.cluster.run.form/ns form))
                   evaluation
-                  (submit-evaluation!!
-                   cluster
-                   evaluate
-                   receipt-id
-                   (evaluation-request
-                    (cond->
-                     {::admitted-form form
-                      ::evaluation-namespace evaluation-namespace
-                      ::cluster cluster
-                      :seon.sci.eval/ctx ctx
-                      :seon.cluster.agent/id agent-id
-                      :seon.cluster.run/id run-id
-                      :seon.cluster.run.form/ordinal ordinal}
-                      (and (zero? ran) (seq desk-notices))
-                      (assoc :seon.sci.eval/output-prefix
-                             (str/join "\n" desk-notices)))))
+                  (pre-evaluation-call
+                   ordinal
+                   #(submit-evaluation!!
+                     cluster
+                     evaluate
+                     receipt-id
+                     (evaluation-request
+                      (cond->
+                       {::admitted-form form
+                        ::evaluation-namespace evaluation-namespace
+                        ::cluster cluster
+                        :seon.sci.eval/ctx ctx
+                        :seon.cluster.agent/id agent-id
+                        :seon.cluster.run/id run-id
+                        :seon.cluster.run.form/ordinal ordinal}
+                        (and (zero? ran) (seq desk-notices))
+                        (assoc :seon.sci.eval/output-prefix
+                               (str/join "\n" desk-notices))))))
                   problem
                   (problems/form-problem
                    @connection
@@ -1729,6 +1805,24 @@
                        (or (:seon.sci.eval/ending-ns evaluation)
                            evaluation-namespace))
                 :else (report :released ran)))))))))
+
+(defn- resume-turn
+  "Reduce a held plan, settling any fault before evaluation as a terminal
+  receipt plus run close rather than allowing it to escape with custody."
+  [{work ::work now ::now report ::report :as request}]
+  (try
+    (resume-turn* request)
+    (catch Throwable failure
+      (if (::pre-evaluation-fault (ex-data failure))
+        (let [cluster (::cluster request)
+              ordinal (:seon.cluster.run.form/ordinal (ex-data failure))]
+          (settle-pre-evaluation-fault!
+           cluster (or (ex-cause failure) failure) now
+           (:seon.cluster.agent/id work)
+           (:seon.cluster.run/id work)
+           ordinal)
+          (report :error 0))
+        (throw failure)))))
 
 (defn- close-turn
   "Claim when needed and close one fully settled run."

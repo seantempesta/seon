@@ -2800,6 +2800,78 @@
 ;;; Nothing throws into the agent loop — the prompt refusal seam
 ;;; ---------------------------------------------------------------------------
 
+(deftest a-pre-evaluation-fault-terminalizes-receipt-zero-and-releases-custody
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.db/connection cluster)]
+        (let [open-work (work/next-agent-work @connection
+                                              (request connection))]
+          (cluster.loop/turn {:seon.cluster.loop/cluster cluster
+                              :seon.cluster.work/next open-work}
+                             now))
+        (with-redefs [ai/complete
+                      (recording-completer
+                       (atom [])
+                       [{:seon.ai/text "(identity 1)"}])]
+          (let [call-work (work/next-agent-work @connection
+                                                (request connection))]
+            (is (= :call (:seon.cluster.work/situation call-work)))
+            (cluster.loop/turn {:seon.cluster.loop/cluster cluster
+                                :seon.cluster.work/next call-work}
+                               now)))
+        (let [resume-work (work/next-agent-work @connection
+                                                (request connection))
+              run-id (:seon.cluster.run/id resume-work)
+              report
+              (with-redefs [sci.eval/fork-for-turn
+                            (fn [_]
+                              (throw (ex-info "desk rehydration failed"
+                                              {:fault :rehydration})))]
+                (cluster.loop/turn
+                 {:seon.cluster.loop/cluster cluster
+                  :seon.cluster.work/next resume-work}
+                 now))
+              receipt
+              (db/pull @connection '[*]
+                       [:seon.cluster.eval/id (pr-str [run-id 0])])
+              run-row
+              (db/pull @connection
+                       [:seon.cluster.run/closed-at
+                        :seon.cluster.run/process]
+                       [:seon.cluster.run/id run-id])]
+          (is (= :resume (:seon.cluster.work/situation resume-work)))
+          (is (= :error (:seon.cluster.loop/outcome report)))
+          (is (= 0 (:seon.cluster.eval/ordinal receipt)))
+          (is (string? (:seon.cluster.eval/result-edn receipt))
+              "an accepted plan always forms receipt zero")
+          (is (= "desk rehydration failed"
+                 (:seon.cluster.eval/error receipt)))
+          (is (some? (:seon.cluster.run/closed-at run-row)))
+          (is (nil? (:seon.cluster.run/process run-row)))
+          (is (nil? (db/q '[:find ?run .
+                            :in $ ?agent-id
+                            :where
+                            [?agent :seon.cluster.agent/id ?agent-id]
+                            [?agent :seon.cluster.agent/run ?run]]
+                          @connection "agent-a"))
+              "the agent pointer and process custody are released together")
+          (db/transact!
+           connection
+           [{:seon.cluster.message/id "after-pre-eval-fault"
+             :seon.cluster.message/to
+             [:seon.cluster.agent/id "agent-a"]
+             :seon.cluster.message/content "continue after the fault"
+             :seon.cluster.message/at (Date. 1700000001000)}])
+          (let [later-work (work/next-agent-work @connection
+                                                 (request connection))]
+            (is (= :open (:seon.cluster.work/situation later-work)))
+            (is (contains?
+                 (into #{} (map :seon.cluster.message/id)
+                       (work/unanswered-triggers @connection "agent-a"))
+                 "after-pre-eval-fault")
+                "later work remains claimable without recovery or a restart;
+                 the durable fault notice may correctly be older")))))))
+
 (deftest a-prompt-refusal-is-a-recorded-error-value-never-a-throw
   ;; `seon.cluster.prompt/prompt` refuses by THROWING (`::no-trigger`,
   ;; `::missing-input`). \"Nothing throws into the agent loop\" is law:
@@ -2882,10 +2954,18 @@
           (is (str/includes? prompt-text "count the widgets")
               "the provider request carries the trigger the run OPENED
                on — the run's own recorded cause")
-          ;; One walk honestly includes both connected messages. The cause
-          ;; invariant is a database fact, not a special prompt block.
+          (is (str/includes? prompt-text "Current run instruction:")
+              "the recorded trigger is presented as this run's work")
+          ;; One walk honestly includes both connected messages. Custody is
+          ;; derived from the trigger refs instead of flattening both into
+          ;; equally actionable prose.
           (is (str/includes? prompt-text "ignore everything else")
               "the fresh walk also includes the later connected message")
+          (is (str/includes?
+               prompt-text
+               "Pending message — awaiting its own run; not this run's instruction:")
+              "the unclaimed trigger remains visible at its arrival position
+               without becoming this run's instruction")
           (let [run-id (db/q '[:find ?run-id .
                               :where
                               [?run :seon.cluster.run/id ?run-id]]
