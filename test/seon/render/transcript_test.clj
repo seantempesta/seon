@@ -508,6 +508,51 @@
         (is (str/includes? ai ":seon.cluster.eval/result-edn \"{\""))
         (assert-no-session-narration ai)))))
 
+(deftest about-identity-resolution-pulls-one-deterministic-ordered-id-vector
+  (support/with-database
+    (fn [connection]
+      (db/transact!
+       connection
+       [{:seon.cluster.agent/id agent-id}
+        {:seon.problems/id "about-first"}
+        {:seon.problems/id "about-second"}
+        {:seon.cluster.message/id "about-message-first"
+         :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+         :seon.cluster.message/about [:seon.problems/id "about-first"]
+         :seon.cluster.message/content "Inspect the first problem."
+         :seon.cluster.message/at (at 0)}
+        {:seon.cluster.message/id "about-message-second"
+         :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+         :seon.cluster.message/about [:seon.problems/id "about-second"]
+         :seon.cluster.message/content "Inspect the second problem."
+         :seon.cluster.message/at (at 1000)}])
+      (let [database @connection
+            basis-before (:max-tx database)
+            pull-many db/pull-many
+            calls (atom [])]
+        (with-redefs [db/pull-many
+                      (fn [db-value selector entity-ids]
+                        (swap! calls conj [selector entity-ids])
+                        (pull-many db-value selector entity-ids))]
+          (dotimes [_ 2]
+            (let [rendered (transcript/render-ai (unit database 100000))]
+              (is (str/includes? rendered "about-first"))
+              (is (str/includes? rendered "about-second")))))
+        (let [about-id-vectors
+              (into []
+                    (keep (fn [[selector entity-ids]]
+                            (when (some #{:seon.problems/id} selector)
+                              entity-ids)))
+                    @calls)]
+          (is (= 2 (count about-id-vectors))
+              "each render resolves all about refs in one pull-many call")
+          (is (every? vector? about-id-vectors)
+              "pull-many receives its declared ordered collection")
+          (is (apply = about-id-vectors)
+              "the same transcript produces the same entity-id order"))
+        (is (= basis-before (:max-tx @connection))
+            "rendering twice commits no fault or other transaction")))))
+
 (deftest receipt-content-enters-the-shared-capped-floor
   (support/with-database
     (fn [connection]

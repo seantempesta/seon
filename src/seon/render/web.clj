@@ -497,7 +497,49 @@
       (and reverse? (seq reverse-groups))
       (assoc :seon.render.debug/reverse-refs reverse-groups))))
 
-(declare ai-walk)
+(defn- latest-captured-prompt
+  [db agent-id]
+  (ffirst
+   (db/q {:query
+          '[:find ?prompt ?basis-t ?capture-id
+            :in $ ?agent-id
+            :where
+            [?agent :seon.cluster.agent/id ?agent-id]
+            [?run :seon.cluster.run/agent ?agent]
+            [?capture :seon.context.capture/run ?run]
+            [?capture :seon.context.capture/prompt ?prompt]
+            [?capture :seon.context.capture/basis-t ?basis-t]
+            [?capture :seon.context.capture/id ?capture-id]]
+          :args [db agent-id]
+          :order-by '[?basis-t :desc ?capture-id :desc]
+          :limit 1})))
+
+(defn- debug-prompt
+  [db agent-id]
+  (or (latest-captured-prompt db agent-id)
+      "No recorded context capture exists for this agent."))
+
+(defn- debug-ai-html
+  [agent-id prompt]
+  (let [element-id (str "debug-ai-" agent-id)]
+    (hiccup/->string
+     [:section {:id element-id
+                :class "seon-debug-body seon-debug-body-ai"}
+      [:pre prompt]])))
+
+(defn- debug-html-id
+  [agent-id]
+  (str "debug-html-" agent-id))
+
+(defn- debug-html
+  [agent-id page]
+  (hiccup/->string
+   (into [:section {:id (debug-html-id agent-id)
+                    :class "seon-debug-body seon-debug-body-html"}]
+         (if (seq page)
+           (map hiccup/raw page)
+           [[:p {:class "seon-render-pending"}
+             "Loading the current HTML projection…"]]))))
 
 (defn- debug-page-result
   [db connection agent-id root-agent-id caps handle]
@@ -514,13 +556,11 @@
                  :seon.db/connection connection
                  :seon.cluster.run/live-processes #{}})
         page (dissoc (:seon.render.web/page result) stream-strip-id)
-        ai-id (str "debug-ai-" agent-id)]
+        ai-id (str "debug-ai-" agent-id)
+        html-id (debug-html-id agent-id)]
     (assoc result :seon.render.web/page
-           (assoc page ai-id
-                  (hiccup/->string
-                   [:section {:id ai-id
-                              :class "seon-debug-body seon-debug-body-ai"}
-                    [:pre (ai-walk db caps agent-id handle)]])))))
+           {ai-id (debug-ai-html agent-id (debug-prompt db agent-id))
+            html-id (debug-html agent-id (vals page))})))
 
 (defn join-package
   "Return the render proc's settled package unchanged.
@@ -1259,19 +1299,6 @@
       connection
       (assoc :seon.db/connection connection)))
 
-(defn- ai-walk
-  [db caps agent-id render-context]
-  (render/call-with-walk-context
-   {:seon.db/db db
-    :seon.cluster.agent/id agent-id
-    :seon.sci.admit/caps caps
-    :seon.sci.eval/ctx (:seon.sci.eval/ctx render-context)
-    :seon.sci.eval/time-limit-ms
-    (:seon.config.eval/time-limit-ms render-context)
-    :seon.config/on-core-error
-    (:seon.config/on-core-error render-context)}
-   #(render/walk namespace-walk-options)))
-
 (defn- page-response
   {:seon.fn/external-sink :html-response
    :seon.fn/projection-boundary :none}
@@ -1300,13 +1327,9 @@
                    (route/path ::route/feed {:id agent-id})})}))
 
 (defn- debug-response
-  [service
+  [{connection :seon.store/connection-object}
    agent-id]
-  (let [page (:seon.render.package/keyframe
-              (settle-package! service [::debug-tab agent-id]))
-        ai-id (str "debug-ai-" agent-id)
-        ai (get page ai-id)
-        html (vals (dissoc page ai-id))]
+  (let [prompt (debug-prompt @connection agent-id)]
     {:status 200
      :headers {"content-type" "text/html; charset=utf-8"}
      :body
@@ -1319,13 +1342,10 @@
          [:div {:class "seon-debug-grid"}
           [:section {:class "seon-debug-pane seon-debug-pane-ai"}
            [:h2 {:class "seon-debug-caption"} ":seon.render/ai"]
-           (hiccup/raw ai)]
+           (hiccup/raw (debug-ai-html agent-id prompt))]
           [:section {:class "seon-debug-pane seon-debug-pane-html"}
            [:h2 {:class "seon-debug-caption"} ":seon.render/html"]
-           (into [:div {:id (str "debug-html-" agent-id)
-                        :class "seon-debug-body seon-debug-body-html"}]
-                 (map hiccup/raw)
-                 html)]]]]
+           (hiccup/raw (debug-html agent-id nil))]]]]
        :seon.render.web/feed-url
        (route/path ::route/feed
                    {:id agent-id}
@@ -1390,7 +1410,8 @@
 (defn- data-response
   [{connection :seon.store/connection-object
     :keys [:seon.cluster.agent/id]
-    caps :seon.sci.admit/caps}
+    caps :seon.sci.admit/caps
+    :as service}
    request]
   (let [db @connection
         query (query-params request)
@@ -1445,6 +1466,11 @@
               :seon.render.value/options options
               :seon.render.data/cursor cursor
               :seon.sci.admit/caps caps
+              :seon.sci.eval/ctx (:seon.sci.eval/ctx service)
+              :seon.sci.eval/time-limit-ms
+              (:seon.config.eval/time-limit-ms service)
+              :seon.config/on-core-error
+              (:seon.config/on-core-error service)
               :seon.render/value opened-value}]
     {:status 200
      :headers {"content-type" "text/html; charset=utf-8"}

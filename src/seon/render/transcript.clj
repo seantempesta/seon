@@ -258,7 +258,8 @@
 (defn- about-identities
   [db messages]
   (let [about-eids
-        (into #{} (keep #(get-in % [:seon.cluster.message/about :db/id]))
+        (into [] (comp (keep #(get-in % [:seon.cluster.message/about :db/id]))
+                       (distinct))
               messages)
         attributes (identity-attributes db)
         selector (into [:db/id] attributes)

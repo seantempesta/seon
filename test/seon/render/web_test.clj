@@ -45,6 +45,7 @@
             [seon.render.web :as web]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
+            [seon.sci.kernel :as sci.kernel]
             [seon.test-support :as support])
   (:import [java.net BindException URI URLEncoder]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
@@ -141,6 +142,11 @@
                           {:seon.store/connection-object connection
                            :seon.cluster.agent/id agent-id
                            :seon.sci.admit/caps caps
+                           :seon.sci.eval/ctx ctx
+                           :seon.config.eval/time-limit-ms
+                           (:seon.config.eval/time-limit-ms
+                            (config/defaults))
+                           :seon.config/on-core-error :record
                            :seon.cluster.run/process process
                            :seon.render.web/pages-mult pages-mult
                            :seon.render.web/registration registration
@@ -155,7 +161,8 @@
                  :stream-channel stream-channel
                  :fault-channel fault-channel
                  :latest-packages latest-packages
-                 :registration registration})
+                 :registration registration
+                 :ctx ctx})
           (finally
             (when @server (web/stop! @server))
             (wake/unlisten! {:seon.cluster.wake/connection connection
@@ -358,27 +365,46 @@
         (is (str/includes? other "Agent agent-b is idle.")
             "the alias selects a different root for the same HTML walk")))))
 
-(deftest debug-is-one-public-ai-walk-beside-the-html-walk
+(deftest debug-responds-from-the-exact-capture-before-deriving-the-live-walk
   (with-server
-    (fn [_connection server _context]
+    (fn [connection server context]
       (let [calls (atom 0)
-            exact-ai "left<&\nright"]
-        (with-redefs [render/walk
-                      (fn [_options]
-                        (swap! calls inc)
-                        exact-ai)]
-          (let [response (fetch server "/agent/root/debug")
-                body (.body response)]
-            (is (= 200 (.statusCode response)))
-            (is (= 1 @calls)
-                "the left pane invokes the public walk exactly once")
-            (is (str/includes? body "id=\"debug-ai-root\""))
-            (is (str/includes? body "left&lt;&amp;\nright")
-                "HTML escaping preserves the exact AI bytes as pre text")
-            (is (str/includes? body "id=\"debug-html-root\""))
-            (is (str/includes? body "class=\"seon-debug-grid\""))
-            (is (str/includes? body "Agent root is idle.")
-                "the right pane is the HTML projection of the walk")))))))
+            exact-ai (str "left<&\n"
+                          (apply str (repeat 150000 "x"))
+                          "\nright")
+            run-id "debug-exact-capture"]
+        (db/transact!
+         connection
+         [{:seon.cluster.run/id run-id
+           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+           :seon.cluster.run/opened-at (java.util.Date.)}])
+        (db/transact!
+         connection
+         [{:seon.context.capture/id "debug-exact-capture-context"
+           :seon.context.capture/run [:seon.cluster.run/id run-id]
+           :seon.context.capture/basis-t 42
+           :seon.context.capture/prompt exact-ai}])
+        (let [before (settle-render! context)]
+          (with-redefs [render/walk
+                        (fn [_options]
+                          (swap! calls inc)
+                          (throw
+                           (ex-info "the request thread derived a walk" {})))]
+            (let [response (fetch server "/agent/root/debug")
+                  body (.body response)]
+              (is (= 200 (.statusCode response)))
+              (is (zero? @calls)
+                  "the response does not derive either live projection")
+              (is (= before (derivations context))
+                  "the response does not wait on a debug render-proc pass")
+              (is (str/includes? body "id=\"debug-ai-root\""))
+              (is (str/includes? body "left&lt;&amp;\n"))
+              (is (str/includes? body "\nright"))
+              (is (str/includes? body "id=\"debug-html-root\""))
+              (is (str/includes? body "class=\"seon-debug-grid\""))
+              (is (str/includes? body
+                                 "Loading the current HTML projection")
+                  "the pending pane states what has not derived yet"))))))))
 
 (deftest static-resources-come-off-the-classpath
   (with-server
@@ -970,11 +996,23 @@
   ;; A drilled position is a LINK, so the proof is that following one
   ;; lands somewhere different from the root.
   (with-server
-    (fn [_connection server _context]
-      (let [root (.body (fetch server "/data"))]
-        (is (str/includes? root "seon-data-panel"))
-        (is (str/includes? root "showing 1")
-            "a window, and it says so"))
+    (fn [_connection server context]
+      (let [seen-contexts (atom [])
+            context-projection sci.kernel/context-projection]
+        (with-redefs [sci.kernel/context-projection
+                      (fn [ctx]
+                        (swap! seen-contexts conj ctx)
+                        (context-projection ctx))]
+          (let [response (fetch server "/data")
+                root (.body response)]
+            (is (= 200 (.statusCode response)))
+            (is (str/includes? root "seon-data-panel"))
+            (is (str/includes? root "showing 1")
+                "a window, and it says so")))
+        (is (seq @seen-contexts)
+            "recursive producer selection consults the SCI context")
+        (is (every? #(identical? (:ctx context) %) @seen-contexts)
+            "the route supplies the cluster's one live SCI context"))
       (testing "a stale or mangled cursor shows the root rather than failing"
         (let [response (fetch server "/data?path=%7Bbroken&offset=nope")]
           (is (= 200 (.statusCode response)))
