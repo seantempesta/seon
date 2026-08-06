@@ -40,7 +40,7 @@ See `README.md` for the convention.
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 | [Install maintenance result attributes on a fresh cluster](fresh-maintenance-result-attributes-are-not-installed.md) | blocker | maintenance schema-install repair |
 
-## Friction (98)
+## Friction (97)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -138,7 +138,6 @@ See `README.md` for the convention.
 | [Preserve the interrupted blob staging artifact until it can be observed](interrupted-blob-staging-leaves-no-observable-artifact.md) | friction | blob staging repair wave |
 | [Reconcile the error-class catalog with declared schemas and renderers](error-class-catalog-and-renderers-disagree.md) | friction | error class contract repair |
 | [Make the generative loop fixture commit the run facts it asserts](generative-loop-fixture-commits-no-run-facts.md) | friction | generative loop fixture repair |
-| [Resolve schema aliases within one admitted declaration set](schema-alias-population-cannot-resolve-an-earlier-declaration.md) | friction | schema alias admission repair |
 
 ## Cleanup (12)
 
