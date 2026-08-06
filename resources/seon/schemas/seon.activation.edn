@@ -54,7 +54,7 @@
                      :seon.db/lookup-ref-value]]
                    [:map
                     [:seon.activation/executable-symbol
-                     :qualified-symbol]]],
+                     :seon.fn/sym]]],
                   :missing [:vector :seon.activation/missing-fact],
                   :result
                   [:map

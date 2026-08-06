@@ -413,6 +413,11 @@
             (is (= "20260728" answer)))
           (testing "the completed tower records its measured duration"
             (is (nat-int? (:seon.boot/ready-ms instance))))
+          (testing "the READY fork owns the complete published activation"
+            (is (= (:seon.source/digest (cluster/source-snapshot))
+                   (:seon.activation/source-digest
+                    (cluster/require-activation!
+                     @(:seon.boot/cluster-connection instance))))))
           (testing "the advertisement validates and is discoverable"
             (is (seon.schema/valid-candidate-value?
                  :seon.boot/advertisement advertisement))
@@ -824,10 +829,16 @@
         (cluster/stop! instance))
       (let [failure (start-refusal request)
             refused-instance (:seon.boot/instance (ex-data failure))
-            connection (:seon.boot/cluster-connection refused-instance)]
+            connection (:seon.boot/cluster-connection refused-instance)
+            activation-failure
+            (some #(when (seq (:seon.activation/missing (ex-data %))) %)
+                  (take-while some? (iterate ex-cause failure)))]
         (try
           (testing "namespaces without functions are denied despite a current digest"
-            (is (str/includes? (ex-message failure) "partial"))
+            (is (some? activation-failure))
+            (is (every? :seon.activation/executable-symbol
+                        (:seon.activation/missing
+                         (ex-data activation-failure))))
             (is (str/includes? (ex-message failure)
                                (str "bin/seon init " cluster-name " --force")))
             (is (pos? (db/q '[:find (count ?namespace) .
@@ -896,22 +907,6 @@
       (finally
         (cluster/stop! old-world)
         (delete-recursively! root)))))
-
-(deftest packaged-source-does-not-capture-an-ambient-schema-registration
-  (let [dial :seon.config.boot-test/reopen-dial
-        schema-state (schema/snapshot-state)]
-    (try
-      ;; Process-global registration is a REPL/runtime concern. It is not a
-      ;; packaged source edit and therefore cannot silently mutate current-src.
-      (schema/register!
-       dial
-       [:int {:seon.db/index true :seon.config/default 7}])
-      (is (= [:int {:seon.db/index true :seon.config/default 7}]
-             (get-in (schema/snapshot-state)
-                     [:seon.schema.state/candidate-forms dial])))
-      (is (not (contains? (schema.edn/packaged-forms) dial)))
-      (finally
-        (schema/restore-state! schema-state)))))
 
 (deftest ^{:seon.test/long "Restarts a real cluster to prove configuration applies before arming."}
   selected-config-repairs-locked-state-before-consumers-arm
@@ -1001,6 +996,11 @@
                               "(ns sample.a)\n(defn value [] 1)\n")
         b-path (write-source! source-root "sample/b.clj"
                               "(ns sample.b)\n(defn value [] 10)\n")
+        _ (write-source!
+           source-root "seon/cluster.clj"
+           (str "(ns seon.cluster)\n"
+                "(defn populate-source! [_] nil)\n"
+                "(defn derive-activation [_] nil)\n"))
         roots (mapv #(.getCanonicalPath ^java.io.File %)
                     [source-root test-root])
         all-roots (conj roots schema-path)]

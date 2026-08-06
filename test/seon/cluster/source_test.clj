@@ -26,6 +26,7 @@
 
 (defonce ^:private blocked-entered (atom nil))
 (defonce ^:private blocked-release (atom nil))
+(def ^:dynamic *activation-missing* [])
 
 (defn populate!
   [{:keys [:seon.db/connection :seon.source/digest]}]
@@ -60,7 +61,7 @@
     :seon.activation/executable-symbols #{}
     :seon.activation/lookup-refs []}
    :seon.activation/lookup-rows []
-   :seon.activation/missing []})
+   :seon.activation/missing *activation-missing*})
 
 (defn- with-store
   [body]
@@ -148,6 +149,31 @@
           (refusal #(source/digest
                      {:seon.source/roots
                       [(str "tmp/source-test/absent-" (random-uuid))]}))))))
+
+(deftest publication-refuses-each-missing-activation-prerequisite-before-fork
+  (doseq [[prerequisite missing]
+          [[:schema {:seon.activation/schema-key :missing/schema}]
+           [:attribute
+            {:seon.activation/required-attribute :missing/attribute}]
+           [:default {:seon.activation/config-dial :missing/default}]
+           [:lookup-ref
+            {:seon.activation/lookup-attribute :missing/identity
+             :seon.activation/lookup-value "absent"}]
+           [:program-symbol
+            {:seon.activation/executable-symbol "missing/function"}]]]
+    (testing (name prerequisite)
+      (with-store
+        (fn [opened]
+          (let [data
+                (binding [*activation-missing* [missing]]
+                  (refusal #(publish opened digest-a)))]
+            (is (= :seon.cluster.source/activation-incomplete
+                   (:seon.cluster.source/rule data)))
+            (is (= #{:db} (set (registry/roster opened)))
+                "no current-src or cluster branch exists after preflight")
+            (is (empty? (scratch-branches opened)))
+            (is (= [missing] (:seon.activation/missing data))
+                "the refusal names the missing fact")))))))
 
 (deftest publication-advances-one-branch-and-retires-scratch
   (with-store
