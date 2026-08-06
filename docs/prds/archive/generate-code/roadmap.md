@@ -1,6 +1,6 @@
 ---
 type: prd
-status: superseded
+status: archived
 tags: [prd, agent, cljs, database, flow]
 ---
 
@@ -67,7 +67,7 @@ namespace step for one root; and three roots reached the `:blocked` terminal
 whose compact addressed result envelope (status, progress, steps, error) the
 caller received as an ordinary message. Two latent defects found and fixed
 live: the parse-forms closed-options regression that failed every `:batch`
-turn ([[../../seon/issues/archive/parse-forms-closed-options-broke-batch-turns]],
+turn ([[../../../seon/issues/archive/parse-forms-closed-options-broke-batch-turns]],
 `793a8ea6`) and cause-query result-node budgets that datahike charges per
 candidate rule row rather than per projected value (`dee42356`, `882fbe1c`,
 plus the eval-evidence container fix).

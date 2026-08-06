@@ -1,6 +1,6 @@
 ---
 type: orchestrator
-status: superseded
+status: archived
 tags: [orchestrator, prd, agent, flow]
 ---
 
