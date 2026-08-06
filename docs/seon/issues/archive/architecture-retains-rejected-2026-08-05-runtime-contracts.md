@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, architecture, documentation, sci, maintenance]
 ---
@@ -62,3 +62,13 @@ accurate statements elsewhere in the same architecture corpus.
   maintenance identities.
 - `my.branch` appears as an explicitly ruled target without implying it is
   already implemented.
+
+## Resolution
+
+Resolved by `d4259aa1e`. The architecture now states unrestricted function
+callability with privacy as curation, public functions as the namespace API,
+fresh per-turn forks rehydrated from the selected agent's desk, shipped
+turn-free maintenance, the split schema population, `[TARGET] my.branch`, and
+the current render-producer vocabulary. All twelve changed Markdown files
+passed `seon.dev.markdown/validate-file` and `git diff --check` before the
+path-limited commit.

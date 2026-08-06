@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, testing, documentation]
 ---
@@ -35,3 +35,12 @@ The `.agents/skills/clojure-testing` instruction package and the current
 The skill describes only current test commands and carries verified current
 file:line evidence. Independent skill verification finds no deleted alias,
 deleted source root, or line beyond the end of its cited file.
+
+## Resolution
+
+Resolved by `6f2576a18`. The skill now names only the current `bin/test` fast,
+full, and explicit-namespace surfaces, with current citations to `AGENTS.md`,
+`bin/test`, and `src/seon/test/runner.clj`. Its package passed the skill
+creator's `quick_validate.py` and `git diff --check` before the path-limited
+commit. The required independent verification pass remains the next review
+boundary and is not claimed here.

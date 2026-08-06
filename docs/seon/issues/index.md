@@ -16,14 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (22)
+## Blocker (19)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [Re-ground mandatory skills after the desk and schema-directory waves](mandatory-skills-regressed-to-deleted-runtime-semantics.md) | blocker | documentation drift repair wave |
-| [Align architecture with the 2026-08-05 runtime contracts](architecture-retains-rejected-2026-08-05-runtime-contracts.md) | blocker | documentation drift repair wave |
 | [Give executable PRD briefs truthful lifecycle status](active-prd-briefs-present-superseded-designs-as-current.md) | blocker | PRD lifecycle and archive wave |
-| [Replace the transfer prompt's deleted August 2 current-state handoff](transfer-prompt-orients-agents-to-the-deleted-august-2-system.md) | blocker | documentation drift repair wave |
 | [Observe and claim every deletable directory](deletable-directories-have-no-claim-or-size-facts.md) | blocker | operator directory-claim governor wave |
 | [Prevent ranged collection from deleting resurrected branch data](ranged-store-collection-can-delete-live-segments-via-branch-resurrection.md) | blocker | exclusive sweep implementation wave |
 | [Make bootstrap O4 wait for the causal delegation](bootstrap-o4-stops-before-causal-delegation-settles.md) | blocker | bootstrap delegation-drive repair wave |
@@ -43,7 +40,7 @@ See `README.md` for the convention.
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 | [Install maintenance result attributes on a fresh cluster](fresh-maintenance-result-attributes-are-not-installed.md) | blocker | maintenance schema-install repair |
 
-## Friction (98)
+## Friction (96)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -70,7 +67,6 @@ See `README.md` for the convention.
 | [Derive predicate-owner readiness before live source publication](live-publication-has-a-hand-maintained-predicate-owner-reload.md) | friction | publication registration-provenance wave |
 | [Hold one store ownership interval across artifact install and start](artifact-releases-the-fence-between-install-and-start.md) | friction | artifact startup wave |
 | [Derive maintenance execution fields from the declared request](maintenance-execution-duplicates-declared-request-fields.md) | friction | maintenance contract derivation wave |
-| [Remove deleted aliases from the Clojure-testing skill](clojure-testing-skill-again-teaches-deleted-aliases.md) | friction | skill dependency-ledger repair |
 | [Make production docstrings describe the surviving runtime](production-docstrings-teach-deleted-semantics.md) | friction | production documentation-honesty wave |
 | [Cut the 11.8 s source load back under the ten-second law](source-load-is-118s-against-the-ten-second-law.md) | friction | load-time incident |
 | [Remove the deleted run lease from the AI retry proof](ai-retry-proof-still-cites-the-deleted-run-lease.md) | friction | AI retry evidence wave |
@@ -122,7 +118,6 @@ See `README.md` for the convention.
 | [Keep contract-violation evidence as data](contract-violation-serializes-print-tree-inside-error-data.md) | friction | instrumentation error-data repair wave |
 | [Preserve the throw-site message when an error carries another error](nested-error-data-hides-the-throw-site-message.md) | friction | SCI failure-face repair wave |
 | [Route exact context captures through the blob owner](context-capture-prompts-bypass-the-blob-splitter.md) | friction | eval-scale economics wave |
-| [Update the Datahike skill after every selected fork commit](datahike-skill-pin-drifted-after-cache-cleanup.md) | friction | skill dependency-ledger repair |
 | [Give the shared compute executor per-cluster fairness](root-compute-executor-has-no-per-cluster-fairness.md) | friction | shared-surface scheduling design gate |
 | [Extract Malli map entries by shape, not position](schema-map-extraction-still-depends-on-position-two.md) | friction | schema-form extraction repair |
 | [Stop encoding namespace-render results as source comments](namespace-renderer-encodes-results-as-comments.md) | friction | strict REPL display wave |
@@ -146,7 +141,7 @@ See `README.md` for the convention.
 | [Give `seon.search/index-step` its public contract](search-index-step-has-no-public-contract.md) | friction | search public contract repair |
 | [Resolve schema aliases within one admitted declaration set](schema-alias-population-cannot-resolve-an-earlier-declaration.md) | friction | schema alias admission repair |
 
-## Cleanup (18)
+## Cleanup (17)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -155,7 +150,6 @@ See `README.md` for the convention.
 | [Delete operator helpers maintained only by private tests](operator-private-helpers-have-only-test-readers.md) | cleanup | operator deletion wave |
 | [Delete five readerless schema rows left by completed cuts](schema-population-retains-five-readerless-rows.md) | cleanup | schema population deletion wave |
 | [Delete or expose the readerless cluster export surface](cluster-export-is-implemented-without-a-runtime-reader.md) | cleanup | store capability deletion wave |
-| [Delete the reset-only instruction migration](instruction-population-retains-reset-only-migration.md) | cleanup | source population deletion wave |
 | [Delete the two render-value compatibility calls](render-value-retains-compatibility-callers.md) | cleanup | render compatibility deletion wave |
 | [Delete the render fixture that outlived its router test](render-fixture-outlived-its-router-test.md) | cleanup | render test deletion wave |
 | [Delete CLJS-era assets and test discovery](cljs-era-assets-and-test-discovery-survived-deletion.md) | cleanup | CLJS residue deletion wave |

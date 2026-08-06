@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, documentation, agent]
 ---
@@ -54,3 +54,12 @@ handoff asserts the opposite of several 2026-08-05 landings.
   split schema population, `seon.db`, and `seon.effect` accurately.
 - Historical lessons remain clearly historical and retain legitimate old-name
   referents.
+
+## Resolution
+
+Resolved by `4648721e3`. The named current-state handoff now describes the
+post-rename runtime, landed agent desk, completed four-lane wave, pending green
+bare gate, and next grader wave. The two stale quarry statements in
+`docs/conventions.md` now use Git history. Both changed Markdown files passed
+`seon.dev.markdown/validate-file` and `git diff --check` before the path-limited
+commit; stable orientation and historical lessons were left intact.

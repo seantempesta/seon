@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, skills, datahike, dependency]
 ---
@@ -38,3 +38,14 @@ The Datahike skill and fork-maintenance reference owner.
   the root Datahike gitlink, so “current” cannot drift independently again.
 - Independently verify every touched skill claim against the selected fork and
   Seon acceptance tests.
+
+## Resolution
+
+Resolved by `6f2576a18` against the newer selected gitlink
+`56f1c62105b7087f0cac13162f9fd54b1690986e`. The skill now requires checking
+both the root gitlink and the submodule checkout before every fork edit and
+directs maintainers to the current fork-maintenance checklist instead of
+treating a historical repair commit as current provenance. The skill package
+passed the skill creator's `quick_validate.py` and `git diff --check` before
+the path-limited commit. The required independent verification pass remains
+the next review boundary and is not claimed here.

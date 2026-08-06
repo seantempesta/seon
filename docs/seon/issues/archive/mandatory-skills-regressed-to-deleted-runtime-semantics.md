@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, skills, documentation, sci, schema]
 ---
@@ -69,3 +69,13 @@ references.
 - Dependency pins and all cited first-party paths match the checked-out tree.
 - An independent skill verification pass reads every changed skill and linked
   reference in full and validates the complete skill corpus.
+
+## Resolution
+
+Resolved by `6f2576a18`. The nine affected skill packages now cite the current
+program-only base, per-turn fork, agent desk, split schema population, Git
+history quarry, and selected dependency sources. All nine packages passed the
+skill creator's `quick_validate.py`, the canonical skill symlinks still resolve
+to `.agents/skills/`, and the changed files passed `git diff --check` before the
+path-limited commit. The required independent verification pass remains the
+next review boundary and is not claimed here.
