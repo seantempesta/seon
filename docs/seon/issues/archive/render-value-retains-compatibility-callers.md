@@ -38,7 +38,9 @@ search finds no `legacy-window` or compatibility call in `seon.render.value`.
 
 ## Resolution
 
-Resolved by the audit-finding-4 commit that archives this issue. Error values
+Resolved by audit-finding-4 commit `0a8dfa63a`. Error values
 call `seon.render/transacted` directly, oversized MCP results fit through the
 declared agent render profile with their blob requery identity, and exact
-searches find no compatibility function or legacy profile.
+searches find no compatibility function or legacy profile. Proof: the error,
+render-value, and MCP owner suites ran 50 tests / 177 assertions with zero
+failures and errors.

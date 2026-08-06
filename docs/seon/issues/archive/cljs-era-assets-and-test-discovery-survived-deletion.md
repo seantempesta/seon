@@ -38,8 +38,9 @@ portable `.cljc` test discovery and the declared Datastar and CSS assets.
 
 ## Resolution
 
-Resolved across deletion-sweep units 1, 4, and 8. Commit `68af32ebc` removed
-the unconsumed browser assets, unit 4 removed CLJS test/lint discovery, and the
-audit-finding-8 commit archiving this issue removes the unresolved legacy-role
-test. `datastar.js`, `input.css`, and `output.css` remain consumed, and exact
-search finds no live Scittle, Shadow CLJS, or CLJS-runner path.
+Resolved by deletion-sweep commits `68af32ebc`, `6de64fdb2`, and `b41728539`.
+They removed the unconsumed browser assets, CLJS test/lint discovery, and the
+unresolved legacy-role test respectively. `datastar.js`, `input.css`, and
+`output.css` remain consumed, exact search finds no live Scittle, Shadow CLJS,
+or CLJS-runner path, and the focused changed-test owner suite ran 3 tests / 6
+assertions with zero failures and errors.

@@ -42,8 +42,9 @@ instruction identities outside historical documents.
 
 ## Resolution
 
-Resolved by the audit-finding-3 commit that archives this issue. Population
+Resolved by audit-finding-3 commit `a79699eab`. Population
 now submits only absent current instruction rows, the test proves an existing
 owner revision remains untouched, and exact searches find none of the four old
 instruction identities in maintained source, tests, scripts, binaries,
-resources, or skills.
+resources, or skills. Proof: `seon.cluster.instruction-test` ran 4 tests / 16
+assertions with zero failures and errors.

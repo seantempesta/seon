@@ -36,7 +36,8 @@ semantics.
 
 ## Resolution
 
-Resolved by the audit-finding-5 commit that archives this issue. Execution now
+Resolved by audit-finding-5 commit `b007c12f1`. Execution now
 selects the intersection of effective config and Malli's explicit keys for
 `:seon.maintenance.request/value`; the five-key hand roster no longer exists.
-Focused schedule and maintenance contract suites are the behavioral proof.
+Proof: the focused schedule and maintenance contract suites ran 13 tests / 69
+assertions with zero failures and errors.

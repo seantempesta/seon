@@ -35,7 +35,9 @@ level process-cleanup proofs, and leave no test-only private operator surface.
 
 ## Resolution
 
-Resolved by the audit-finding-8 commit that archives this issue. The three
+Resolved by audit-finding-8 commit `b41728539`. The three
 readerless production helpers, two test-only process launchers, and three
 unresolved tests are gone. Exact searches find none of their symbols, while
-the current command-level process cleanup proofs remain intact.
+the current command-level process cleanup proofs remain intact. Proof: the two
+non-boot owner tests ran 5 assertions with zero failures and errors; boot-bound
+proof remains assigned to the quiet-tree checkpoint.

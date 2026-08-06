@@ -41,9 +41,10 @@ from files or environment variables.
 
 ## Resolution
 
-Resolved by the audit-finding-9 commit that archives this issue. The hook no
+Resolved by audit-finding-9 commit `92661b9f6`. The hook no
 longer reads pod logs, environment configuration, or a file manifest to infer
 core faults, and the Markdown checker no longer compares skills with the
 deleted CLJS floor. Exact-name searches over first-party source and skills find
-no surviving reader for either closure; focused hook and Markdown tests are
-the behavioral proof.
+no surviving reader for either closure. Proof: the focused Markdown and edit
+feedback suites ran 34 tests / 394 assertions with zero failures and errors;
+the selector-derived instrumentation suite ran 15 / 68 with zero reds.

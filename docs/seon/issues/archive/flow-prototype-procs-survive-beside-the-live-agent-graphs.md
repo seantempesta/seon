@@ -70,4 +70,4 @@ prototype sections of `seon.flow-test`. Current fault fan-out tests now inject
 ordinary Flow error/report values directly, and the Flow Monitor proof uses the
 production work-launcher graph. Focused proof: `bin/test seon.flow-test` ran
 17 tests / 172 assertions with zero failures and zero errors. The path-limited
-implementation commit is identified by hash in the sweep summary.
+implementation commit is `56aaee5e3`.

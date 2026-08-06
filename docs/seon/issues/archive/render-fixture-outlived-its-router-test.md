@@ -34,6 +34,7 @@ Delete `test/seon/render_fixture.clj`; exact first-party search finds no
 
 ## Resolution
 
-Resolved by the audit-finding-6 commit that archives this issue. The orphan
+Resolved by audit-finding-6 commit `459ee2cf2`. The orphan
 fixture is deleted, exact search finds no surviving namespace reference, and
-the focused render suites remain green.
+the focused render suite ran 10 tests / 47 assertions with zero failures and
+errors.
