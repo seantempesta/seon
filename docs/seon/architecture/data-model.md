@@ -102,10 +102,15 @@ entity. The architecture's durable natural keys are:
 | schema | `:seon.schema/key` |
 | test | `:seon.test/sym` |
 | agent desk definition | `:seon.def/key` |
+| schedule | `:seon.schedule/id` |
+| scheduled task | `:seon.schedule.task/id` |
+| nominal fire | `:seon.schedule.fire/id` |
+| maintenance receipt | `:seon.maintenance.receipt/id` |
+| maintenance result | `:seon.maintenance.result/id` |
 
 The test-observation families add `:seon.test.run/id`,
 `:seon.test.result/id`, and `:seon.test.failure/id`. No durable identity exists
-for a turn, route, schedule, browser session, interaction, restore record, or
+for a turn, route, browser session, interaction, restore record, or
 any compatibility agent/eval family.
 
 ### Plain and component refs
@@ -168,8 +173,9 @@ Absence of `:seon.cluster.agent/run` means idle. Namespace reassignment is an
 ordinary cardinality-one transaction. There are no parent, termination,
 default-turn-limit, home-requires, or agent-status attributes.
 
-**[TARGET — ruled 2026-08-04]** Task, schedule, and fire identities attach
-declared scheduled work to its owning agent. Root's maintenance tasks use the
+Task, schedule, and fire identities attach declared scheduled work to its
+owning agent. Each fire owns one maintenance receipt whose terminal attributes
+record its result, error, or interruption. Root's maintenance tasks use the
 same families; they are not a second scheduler or operator-only registry.
 
 AI configuration follows ruling #34 without a second override schema. Every AI

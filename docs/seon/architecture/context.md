@@ -437,7 +437,7 @@ Routes, context membership, instruction imports, and skills are not a config
 manifest. Routes are the canonical Reitit table; context is the visible walk;
 instructions are ordinary cluster or agent refs. Configuration contains only
 registered decision attributes from the config section of
-`resources/seon/schema.edn`.
+the family declarations under `resources/seon/schemas/`.
 
 **Instructions are ordinary cluster facts.** The cluster entity's
 `:seon.cluster/instructions` ref set reaches named

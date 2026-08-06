@@ -75,10 +75,10 @@ same held-run fence. A terminal receipt cannot be overwritten or reopened.
 
 ## One graph per agent
 
-An agent's graph contains the run-loop proc and the wake proc. The process-local
-routing map connects the agent entity id to its mailbox; it is disposable live
-channel state, not a database registry. The blueprint differs only by agent id
-and cluster handle.
+An agent's graph contains the mailbox proc, turn proc, and schedule proc. The
+process-local routing map connects the agent entity id to its mailbox; it is
+disposable live channel state, not a database registry. The blueprint differs
+only by agent id and cluster handle.
 
 One pass:
 
@@ -232,20 +232,18 @@ There is no durable parent tree, interaction entity, browser session, hop
 counter, or delivery acknowledgement in the runtime model. Subagents are
 ordinary agents connected by messages and namespace ownership.
 
-**[TARGET — ruled 2026-08-04]** Scheduling is also per agent. Declared task,
-schedule, and fire identities feed a schedule proc in the owning agent's graph;
-a due fire commits an ordinary message to that agent. There is no central
-ticker. Root owns the maintenance portfolio—database and blob reclamation,
-footprint inspection, dead-root cleanup, log retention, and related repair—as
-ordinary root tasks; the operator invokes the same owners for explicit manual
-maintenance.
+Scheduling is per agent. Declared task, schedule, and fire identities feed the
+schedule proc in the owning agent's graph. A due fire atomically claims its fire
+and maintenance receipt, invokes the task's declared Var directly without a
+model turn, and settles the receipt. Only an error settlement creates a message.
+There is no central ticker.
 
-The manual owners are live in `seon.operator`: root claiming and existence
-queries, footprint observation, live-inode log rotation, and unconditional
-no-follow cleanup. `bin/seon` invokes those functions; scheduled root tasks call
-the same functions once their per-agent schedule procs land. Explicit reset is
-authorization to remove the complete managed `data/clusters` tree and succeeds
-only when its returned cleanup result reports no residual paths.
+Root owns the maintenance portfolio—database and blob reclamation, footprint
+inspection, dead-root cleanup, log retention, process census, and related
+repair—as ordinary root tasks. Scheduled work and explicit operator work invoke
+the same owners. Explicit reset is authorization to remove the complete managed
+`data/clusters` tree and succeeds only when its returned cleanup result reports
+no residual paths.
 
 ## Crash recovery
 
@@ -293,7 +291,7 @@ platform worker.
 - `src/seon/cluster/{agent,wake,work,loop}.clj*` owns per-agent graph lifecycle,
   wake routing, work derivation, and the fold.
 - `src/seon/sci/eval.clj` owns interruption, live context acquisition, and
-  session restore.
+  per-turn fork and desk rehydration.
 - `src/seon/render/{agent,transcript}.clj` owns the current queries and renders
   over agents, messages, runs, forms, and receipts.
 
@@ -301,5 +299,5 @@ platform worker.
 
 - [[architecture]] — process topology, Flow scheduling, and the effect seam.
 - [[data-model]] — the admitted attribute census.
-- [[context]] — the REPL-session context and context-capture contract.
+- [[context]] — agent context, desk continuity, and the context-capture contract.
 - [[observability]] — forensic use of captures, attempts, receipts, and errors.

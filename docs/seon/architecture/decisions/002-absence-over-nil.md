@@ -39,6 +39,6 @@ Model "no value" as **key absence**, never as nil. For persisted schemas: `{:opt
 
 - `src/seon/schema/datahike.clj` validates logical values and derives
   Datahike attribute storage.
-- `resources/seon/schema.edn` declares optional persisted attributes by omitting
+- The family declarations under `resources/seon/schemas/` declare optional persisted attributes by omitting
   absent values.
 - [[data-model]] owns the current EAV and schema target.

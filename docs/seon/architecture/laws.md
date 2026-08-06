@@ -91,8 +91,9 @@ sample sizes, and acceptance evidence belong in PRD research and roadmaps.
   belong on channels with loss-encoding buffers; the database gets the
   settled fact. (`flow-mechanics-2026-07-28.md`.)
 - **Build once, fork everywhere.** Expensive values are derived once and
-  forked by consumers — never rebuilt, never shared mutably: the sci base
-  `ctx` forks once per run; a database value at a basis is a free fork
+  forked by consumers — never rebuilt, never shared mutably: the SCI base
+  `ctx` forks once per turn and rehydrates the selected agent's desk; a
+  database value at a basis is a free fork
   (`as-of`/`since` are temporal forks); every cluster branch forks from the
   same immutable bootstrap ancestor containing indexed code and initialization
   pages; and a proc restart derives from facts at `init` state 0. Structural

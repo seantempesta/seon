@@ -18,7 +18,7 @@ population and ruling 2026-08-01 #33, which makes function contracts parsed,
 queryable program facts.
 
 [[data-model]] describes the current target. Shipped declarations enter
-through `resources/seon/schema.edn` and `src/seon/schema/edn.clj`; runtime
+through `resources/seon/schemas/` and `src/seon/schema/edn.clj`; runtime
 registrations enter through the admitted `src/seon/program.cljc` and
 `src/seon/sci/eval.clj` path.
 

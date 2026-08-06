@@ -46,12 +46,12 @@ protected implementation or invent a second tool protocol.
   renders each ordered arity's resolved input and output schema keys and forms
   from the program graph. Schema forms use the ordinary bounded print floor;
   the standard `:seon.error/value` arm renders as its bare key.
-- Every public function is agent-callable by definition. Function menus and
-  program export derive the public, non-private function surface directly;
-  complete schemas determine which functions can render compact contracts.
-  Persisted `:refer` edges select exactly their named public schema-complete
-  functions, while `:as` edges select the public schema-complete namespace
-  surface.
+- Every indexed function is agent-callable. `:seon.fn/private?` is an
+  attribute, never an execution wall; public functions are the namespace's API.
+  A namespace's owner sees its private functions with the full source, foreign
+  namespace cards default to the public schema-complete API, and an explicit
+  inspection may include private functions. Persisted `:refer` and `:as` edges
+  shape namespace bindings and rendering, never callability.
 
 ## Two layers
 
@@ -73,6 +73,7 @@ a context-economy decision; it never gates execution.
 | Namespace | Owner and purpose |
 |---|---|
 | `my.blob` | SHA-256-addressed large-content storage and bounded reads |
+| `my.branch` | **[TARGET]** branch checkout, log, diff, status, and fork over cluster database branches |
 | `my.canvas` | **[TARGET]** generalized focal-canvas and interaction API |
 | `my.data` | small data transformation and presentation composition |
 | `my.fs` | guarded filesystem reads and writes over approved paths |
@@ -160,7 +161,7 @@ Datahike `:db.fn/cas` is reserved for facts two processes race to win exactly
 once: plan freeze from absent to digest, and run claim from no process to the
 process record (CAS-on-absence). `seon.schema` owns
 registered shapes and the
-Malli-to-Datahike bridge. `seon.eval`, `seon.ns`, and the program graph own code
+Malli-to-Datahike bridge. `seon.sci.eval`, `seon.ns`, and the program graph own code
 lookup and evaluation. `my.kb`, `my.ns`, and `my.plan` compose those contracts;
 they do not bypass them.
 
@@ -281,6 +282,14 @@ without bodies. Both selection operations preserve every other block dial and
 return errors for unknown or stale program rows. No operation copies the
 program graph into a second registry or renderer.
 
+### [TARGET] `my.branch`
+
+`my.branch` exposes checkout, log, diff, status, and fork over the cluster's
+Datahike branches using Git's familiar vocabulary. It is fast-forward-only,
+with no index and no remotes. Git repositories on disk remain ordinary CLI
+work through `my.shell`; `my.branch` never pretends a database branch is a Git
+repository.
+
 ### [TARGET] `my.canvas` and generalized `my.ui` controls
 
 `my.canvas` selects the focal shared value and generalized `my.ui` controls
@@ -307,9 +316,12 @@ A normal cluster has no bases. A lifecycle-managed branch writes its private
 overlay while reading the source archive, and every read verifies that the bytes
 still hash to their name.
 
-The target does not claim zstd compression, garbage collection, remote
-placement, or promotion materialization. Those policies belong to the database
-and blob lifecycle PRDs. See [[data-model]] and [[observability]].
+Database and blob collection is one control-lock-protected
+`seon.operator/collect!` operation. A dry run reports the mark set without
+deleting; collection sweeps, repeats the sweep to zero, and verifies retained
+branch heads and blob bytes before reporting completion. The target does not
+claim zstd compression, remote placement, or promotion materialization. See
+[[data-model]] and [[observability]].
 
 ## Errors and bounds
 

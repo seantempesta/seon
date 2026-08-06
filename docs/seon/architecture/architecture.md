@@ -24,8 +24,9 @@ aggregation, and recovery all fall out of that one choice:
 units share *data*, not memory, so they run in parallel, can't corrupt each other,
 and restart cleanly from the DB (which is itself reversible). The run cursor is data; the
 prompt is a render of data; the UI is a reactive projection of data. The context
-unit is the **block** (`:seon.render.block/block`); the prompt, an agent’s **view**,
-and the **root agent's** view (`/`) are each a derivation of the same blocks.
+unit is the **block** (`:seon.render.block/block`); the prompt, an agent's
+**namespace page**, and the **root agent's** namespace page (`/`) are each a
+derivation of the same blocks.
 
 Seon is one supervised JVM process root hosting isolated named clusters. The
 process root opens one physical Datahike store at `data/clusters/store` under a
@@ -90,7 +91,7 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    process ownership. Dynamic context makes relevant shared capabilities
    discoverable when their schemas and data fit the work at hand.
 3. **The agent authors its own environment.** A `defn` returning
-   `:seon.render/ai` and/or `:seon.render/hiccup` supplies one or both render
+   `:seon.render/ai` and/or `:seon.render/html` supplies one or both render
    twins —
    writing a function IS authoring context, tools, and UI at once. Both keys =
    twins: agent and human look at ONE derived value; shared situational
@@ -191,18 +192,15 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
   object or persisted entity.
 - **layout** — a first-party HTML renderer that arranges an already resolved
   render tree; it never redirects renderer resolution or changes membership.
-- **canvas** — the focal, agent-controlled surface in an agent view: the
+- **canvas** — the focal, agent-controlled surface in a namespace page: the
   agent↔human communication area.
-- **view** — an agent's page, route `/agent/{id}`: the canvas plus a
-  recency-ordered rail of the agent's other html surfaces.
 - **root agent** — ONE `:seon.cluster.agent/id "root"` that is BOTH the `/`
-  system-view
-  owner (UI) AND the system orchestrator (lifecycle) — the same elevated grant,
+  root namespace-page owner (UI) AND the system orchestrator (lifecycle),
   never two entities. Its all-agents overview uses a dedicated system layout
   over the SAME blocks, render units, route resolution, and live-morph machinery
-  as ordinary agent pages. It holds the elevated system-level lifecycle
-  functions (`start!`, terminate, cross-agent) in its
-  discoverable context; those functions enforce their own caller rules. Its
+  as ordinary namespace pages. Its context renders the lifecycle functions
+  (`start!`, terminate, cross-agent) prominently, but every indexed function is
+  callable by every agent and private is only a curation attribute. Its
   actions use the specific POST routes in `seon.render.route/routes`. Root is
   the base case because its ordinary agent identity is reserved; no parent
   attribute or second lifecycle identity exists. See [[agent-runtime]].
@@ -624,7 +622,7 @@ channel, and the derived-walk block model. See [[ui]].
 ### Toolkit — [[toolkit]]
 
 The agent-facing tool surface is flat `my.*` namespaces:
-`my.blob`, `my.canvas`, `my.data`, `my.fs`, `my.kb`, `my.ns`, `my.plan`,
+`my.blob`, **[TARGET]** `my.branch`, `my.canvas`, `my.data`, `my.fs`, `my.kb`, `my.ns`, `my.plan`,
 `my.shell`, `my.skills`, `my.ui`, and `my.web`. Every effectful entry calls the
 one guarded `seon.effect/request!` function with the request identity.
 Protected policy and platform leaves remain under `seon.*`. Exact function
