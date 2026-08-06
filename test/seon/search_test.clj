@@ -1,8 +1,12 @@
 (ns seon.search-test
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [malli.core :as m]
+            [malli.generator :as mg]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.schema :as schema]
             [seon.search :as search]
             [seon.sci.eval :as eval]
             [seon.test-support :as test-support]))
@@ -23,6 +27,29 @@
   [connection request]
   (binding [db/*conn* connection]
     (search/search request)))
+
+(deftest index-step-contract-has-durable-generative-host-predicates
+  (let [definition
+        (schema/canonical-definition
+         (:malli/schema (meta #'search/index-step))
+         {})
+        definition-values (set (tree-seq coll? seq definition))]
+    (is (= definition (edn/read-string (pr-str definition))))
+    (doseq [[predicate-symbol generator-symbol]
+            [['seon.search/ping-map-fn?
+              'seon.search/ping-map-fn-generator]
+             ['seon.search/datahike-datom?
+              'seon.search/datahike-datom-generator]]]
+      (is (schema/core-predicate-registered? predicate-symbol))
+      (is (contains? definition-values predicate-symbol))
+      (let [compiled
+            (m/schema
+             (schema/bind-predicates
+              [:fn {:gen/gen generator-symbol} predicate-symbol]
+              {predicate-symbol @(requiring-resolve predicate-symbol)}))
+            generated (mg/sample compiled {:seed 2026080604 :size 20})]
+        (is (seq generated))
+        (is (every? #(m/validate compiled %) generated))))))
 
 (deftest tokenization-follows-natural-name-separators
   (is (= ["invoice" "line" "item" "count"]

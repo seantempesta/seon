@@ -11,6 +11,7 @@
             [clojure.test.check.generators :as gen]
             [datahike.datom :as datom]
             [seon.db :as db]
+            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn])
   (:import [java.nio.file Files Paths]
            [java.util HashMap]
@@ -27,8 +28,6 @@
            [org.apache.lucene.store Directory FSDirectory]))
 
 (set! *warn-on-reflection* true)
-
-(schema.edn/load! {})
 
 (defn- datahike-datom?
   [value]
@@ -60,6 +59,13 @@
    (gen/tuple (gen/elements [:select :constant :count])
               gen/keyword-ns
               gen/any-printable)))
+
+(schema/register-core-predicate! 'seon.search/datahike-datom?
+                                 datahike-datom?)
+(schema/register-core-predicate! 'seon.search/ping-map-fn?
+                                 ping-map-fn?)
+
+(schema.edn/load! {})
 
 (defonce ^:private owners
   (atom {:seon.search/by-id {}
