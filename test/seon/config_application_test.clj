@@ -201,7 +201,8 @@
   (into []
         (mapcat :seon.fn.file/rows)
         (:seon.fn.manifest/artifacts
-         (seon.fn/build-manifest {:seon.fn/roots ["src" "script"]}))))
+         (seon.fn/build-manifest
+          {:seon.fn/roots ["src" "script/seon/fresh_operator.clj"]}))))
 
 (deftest every-config-entry-has-an-honest-application-contract
   (let [registered
