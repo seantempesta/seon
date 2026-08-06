@@ -1,6 +1,6 @@
 ---
 type: prd
-status: active
+status: archived
 tags: [prd, runtime, operator, boot]
 ---
 
@@ -11,8 +11,8 @@ tags: [prd, runtime, operator, boot]
 The owner ruled (2026-08-03, conversational): **take the ergonomics, not the
 machinery.** No Integrant, no clj-reload — both evaluated at source and
 rejected on measured grounds
-([operator-integration-integrant-2026-08-03.md](../sci-execution-runtime/research/operator-integration-integrant-2026-08-03.md);
-[clj-reload-evaluation-2026-08-03.md](../sci-execution-runtime/research/clj-reload-evaluation-2026-08-03.md)).
+([operator-integration-integrant-2026-08-03.md](../../sci-execution-runtime/research/operator-integration-integrant-2026-08-03.md);
+[clj-reload-evaluation-2026-08-03.md](../../sci-execution-runtime/research/clj-reload-evaluation-2026-08-03.md)).
 This ruling supersedes the 2026-07-26 conditional-adoption note for Integrant:
 its acceptance condition (deleting ~360 lines of host/writer/web scaffolding)
 was met without Integrant, so the condition can never fire again.
@@ -24,13 +24,13 @@ What ships instead:
    that already perform each operation, callable from the REPL, MCP, and
    (where policy permits) agents. This is the reloaded-workflow developer
    experience implemented on Seon's own mechanisms
-   ([reloaded-ergonomics-sweep-2026-08-03.md](../sci-execution-runtime/research/reloaded-ergonomics-sweep-2026-08-03.md) §4).
+   ([reloaded-ergonomics-sweep-2026-08-03.md](../../sci-execution-runtime/research/reloaded-ergonomics-sweep-2026-08-03.md) §4).
 2. **`bin/seon` becomes a thin foreign-process client.** It keeps only the
    irreducible outside layer — spawn/identify/log/kill a JVM that cannot do
    those things for itself, and whole-root destruction exactly when the
    database cannot be opened — and calls `seon.operator` for everything else
    instead of manufacturing Clojure control forms
-   ([operator-integration-2026-08-03.md](../sci-execution-runtime/research/operator-integration-2026-08-03.md)).
+   ([operator-integration-2026-08-03.md](../../sci-execution-runtime/research/operator-integration-2026-08-03.md)).
 3. **Stale-var detection as a query.** The one genuine weakness of
    var-indirect hot reload (a deleted `defn`'s Var lingering in the image)
    becomes a derived `seon.problems` finding over program-graph facts —
@@ -42,9 +42,9 @@ Read before implementing; every claim below carries its source:
 
 | Authority | What it settles |
 |---|---|
-| [operator-integration-2026-08-03.md](../sci-execution-runtime/research/operator-integration-2026-08-03.md) | The Option 1 target, the irreducible outside layer, the flock-stays-in-JVM custody answer, the migration rule and acceptance evidence. |
-| [reloaded-ergonomics-sweep-2026-08-03.md](../sci-execution-runtime/research/reloaded-ergonomics-sweep-2026-08-03.md) | Verb-by-verb mapping of integrant-repl onto existing Seon functions; the component-pattern catalog; the deliberate divergences to keep; the nREPL deferral. |
-| [clj-reload-evaluation-2026-08-03.md](../sci-execution-runtime/research/clj-reload-evaluation-2026-08-03.md) | Why no namespace-reload engine can run against the live runtime (273 host Vars in the shared SCI ctx; 138-of-162-namespace blast radius), and the stale-var-query replacement. |
+| [operator-integration-2026-08-03.md](../../sci-execution-runtime/research/operator-integration-2026-08-03.md) | The Option 1 target, the irreducible outside layer, the flock-stays-in-JVM custody answer, the migration rule and acceptance evidence. |
+| [reloaded-ergonomics-sweep-2026-08-03.md](../../sci-execution-runtime/research/reloaded-ergonomics-sweep-2026-08-03.md) | Verb-by-verb mapping of integrant-repl onto existing Seon functions; the component-pattern catalog; the deliberate divergences to keep; the nREPL deferral. |
+| [clj-reload-evaluation-2026-08-03.md](../../sci-execution-runtime/research/clj-reload-evaluation-2026-08-03.md) | Why no namespace-reload engine can run against the live runtime (273 host Vars in the shared SCI ctx; 138-of-162-namespace blast radius), and the stale-var-query replacement. |
 | `src/seon/cluster.clj` (tower/stop/refork/readiness sections) | The functions every verb delegates to. The sweep's Q1 table names exact lines at its read; re-derive at implementation time. |
 | `script/seon/fresh_operator.clj` | The Babashka operator being demoted to client; its reconciliation/fallback branches are the deletion inventory. |
 | `resources/seon/operator/runtime.clj` | The process-root holder (running instances, store/flock custody, executors) — deliberately outside source roots and outside this PRD's edits. |
@@ -73,7 +73,7 @@ changed macro or def-time-captured value does not propagate through var
 indirection alone — dependents must re-evaluate. clj-reload solves this
 with a text-parsed graph and `remove-ns`; `remove-ns` severs Var identity
 and is refuted for this runtime
-([clj-reload-evaluation-2026-08-03.md](../sci-execution-runtime/research/clj-reload-evaluation-2026-08-03.md)).
+([clj-reload-evaluation-2026-08-03.md](../../sci-execution-runtime/research/clj-reload-evaluation-2026-08-03.md)).
 The native design: `(reload! changed-namespaces)` derives the first-party
 downstream closure from the program graph's namespace dependency facts,
 topologically orders it, and `require :reload`s each namespace in order —
