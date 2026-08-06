@@ -1262,23 +1262,39 @@
                 row (db/pull database '[*] [:seon.schema/key schema-key])
                 receipts
                 (into {}
-                      (map (fn [[ordinal result error-kind]]
-                             [ordinal {:result (semantic-result result)
-                                       :error-kind error-kind}]))
-                      (db/q '[:find ?ordinal ?result ?error-kind
+                      (map (fn [receipt]
+                             (let [printed
+                                   (edn/read-string
+                                    (:seon.cluster.eval/result-edn receipt))]
+                               [(:seon.cluster.eval/ordinal receipt)
+                                {:result
+                                 (if (:seon.print/face printed)
+                                   (#'admit/semantic-value printed)
+                                   printed)
+                                 :error-kind (:seon.error/kind receipt)}])))
+                      (db/q '[:find [(pull ?receipt
+                                          [:seon.cluster.eval/ordinal
+                                           :seon.cluster.eval/result-edn
+                                           :seon.error/kind]) ...]
                               :where
-                              [?receipt :seon.cluster.eval/ordinal ?ordinal]
-                              [?receipt :seon.cluster.eval/result-edn ?result]
-                              [(get-else $ ?receipt :seon.error/kind nil)
-                               ?error-kind]]
-                            database))]
+                              [?receipt :seon.cluster.eval/result-edn _]]
+                            database))
+                refusal (get-in receipts [3 :result])
+                refusal-fact
+                (db/pull database
+                         [:seon.error/data-edn]
+                         [:seon.error/id
+                          (get-in refusal [:seon.error/data :seon.error/id])])
+                refused-source
+                (semantic-result (:seon.error/data-edn refusal-fact))]
             (is (= ":string" (:seon.schema/form row)))
             (is (= schema-key (get-in receipts [1 :result])))
             (is (= schema-key (get-in receipts [2 :result]))
                 "identical registration is an ordinary idempotent success")
-            (is (= :seon.db/rejected (get-in receipts [3 :error-kind])))
+            (is (= :seon.cluster.run/refused
+                   (get-in receipts [3 :error-kind])))
             (is (= ::run/schema-key-immutable
-                   (get-in receipts [3 :result ::run/refused])))
+                   (::run/rule refused-source)))
             (is (nil? (get receipts 4))
                 "the divergent declaration closes the run before later forms")))))))
 
