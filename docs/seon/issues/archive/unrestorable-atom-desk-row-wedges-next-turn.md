@@ -54,7 +54,7 @@ arm invokes `desk-value` before the later `reason` arm can emit its notice.
 This cause refines, without replacing, the independent symptoms recorded in
 [Keep newly loaded system Vars out of the agent desk](agent-desk-captures-newly-loaded-system-vars.md)
 and
-[Settle or refuse a frozen plan's first form](../run-freezes-before-first-receipt-after-plan-freeze.md).
+[Settle or refuse a frozen plan's first form](run-freezes-before-first-receipt-after-plan-freeze.md).
 
 ## Owner
 

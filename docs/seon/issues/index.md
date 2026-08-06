@@ -23,8 +23,6 @@ See `README.md` for the convention.
 | [Scope schema projections to their cluster database values](process-global-schema-state-crosses-cluster-bases.md) | blocker | per-cluster schema acquisition wave |
 | [Commit every dropped core-fault observation](dropped-core-fault-count-is-not-durable.md) | blocker | fault-committer durability wave |
 | [Make every rendered value id unique within its namespace page](rendered-value-ids-collide-within-one-page.md) | blocker | Datastar value-identity repair |
-| [Settle or refuse a frozen plan's first form](run-freezes-before-first-receipt-after-plan-freeze.md) | blocker | live-drive run-loop repair wave |
-| [Keep an unclaimed message out of an unrelated run's prompt](unclaimed-message-enters-an-unrelated-run-prompt.md) | blocker | messaging context-causality wave |
 | [Pass ordered entity ids to transcript `pull-many`](transcript-about-lookup-passes-a-set-to-pull-many.md) | blocker | live-drive render repair wave |
 | [Supply the live SCI context to the data page renderer](data-page-omits-the-live-sci-context.md) | blocker | visual-QA fix wave |
 | [Load database model schemas before isolated test configuration](isolated-runner-does-not-load-ai-model-schemas.md) | blocker | database model registry/config schema load repair wave |

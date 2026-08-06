@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, context, messaging, runtime, honesty, live-drive]
 ---
@@ -62,6 +62,16 @@ mid-turn message interleaves honestly without acquiring the wrong custody.
 The event-controlled regression opens a run on message A, commits message B
 between open and call, and asserts both the arrival-visible pending sentence
 and the unchanged trigger ref.
+
+## Acceptance evidence
+
+The isolated live drive observed two exact durable captures containing
+`CUSTODY-LIVE-0806`. In unrelated run
+`85f76e51-3e98-40b2-b5e4-9e3f60bafae7`, the message was accompanied by the
+pending/not-this-run label. In its own causal run
+`44afc3e7-aeb5-43d4-909f-678b066d9529`, it was accompanied by the current-run
+instruction label and no pending label. The latter run completed through
+receipt zero to the requested tagged result.
 
 ## Acceptance
 

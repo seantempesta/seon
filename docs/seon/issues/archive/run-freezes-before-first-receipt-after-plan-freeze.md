@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, flow, agent, live-drive]
 ---
@@ -80,6 +80,21 @@ The class regression freezes a real plan, forces `fork-for-turn` to throw at
 ordinal zero, and asserts a terminal receipt zero, durable error, closed run,
 absent custody and agent pointer, plus later unanswered work remaining
 claimable without recovery or restart.
+
+## Acceptance evidence
+
+Commit `634e3038d` passed `seon.cluster.loop-test` (24 tests, 107 assertions),
+`seon.cluster.turn-test` (48 tests, 288 assertions), and
+`seon.render.transcript-test` (12 tests, 135 assertions).
+
+The isolated `custody-fix` cluster, reforked from published commit
+`6a74d4b0-491d-5c3c-9a87-3a1031a644e9`, accepted
+`inbound-536870999-0` over the public HTTP route. Its causal run
+`44afc3e7-aeb5-43d4-909f-678b066d9529` acquired plan digest
+`a8184c404861dec61f548346c230c59ad7adb5e7e1075c4e8766c835a95e9928`,
+formed four terminal receipts, including ordinal zero with a 1,801-byte
+result and no error, closed, retracted process custody, and left no agent run
+pointer. The tagged completion was present on the root namespace page.
 
 ## Acceptance
 
