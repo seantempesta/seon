@@ -26,6 +26,8 @@
   (support/with-database
     (fn [connection]
       (support/seed-cluster! connection "prompt-walk")
+      (config/apply! {:seon.db/connection connection
+                      :seon.boot/cluster-name "prompt-walk"})
       (db/transact! connection
                   (agent/creation-tx
                    {:seon.cluster.agent/id "walker"
@@ -247,3 +249,40 @@
                  #(prompt/prompt @connection
                                  (request connection
                                           (async/chan)))))))))))
+
+(deftest prompt-budget-compacts-then-refuses-at-distance-zero
+  (planted
+   (fn [connection context-channel]
+     (db/transact! connection
+                   [{:seon.cluster.agent/id "walker"
+                     :seon.config.ai/prompt-token-budget 3}])
+     (let [distances (atom [])
+           acquire (fn [_ render-request]
+                     (let [distance (:seon.render/distance render-request)]
+                       (swap! distances conj distance)
+                       {:seon.cluster.prompt/text
+                        (if (= 1 distance) "fits in twelve" (apply str (repeat 40 "x")))
+                        :seon.db/db (:seon.db/db render-request)}))]
+       (with-redefs [render/acquire-context! acquire]
+         (let [compacted (prompt/prompt @connection
+                                        (request connection context-channel))]
+           (is (= [2 1] @distances))
+           (is (= "fits in twelve" (:seon.cluster.prompt/text compacted)))
+           (is (<= (-> compacted :seon.context/contributions first
+                       :seon.context.contribution/tokens)
+                   3))))
+       (reset! distances [])
+       (with-redefs [render/acquire-context!
+                     (fn [_ render-request]
+                       (swap! distances conj (:seon.render/distance render-request))
+                       {:seon.cluster.prompt/text (apply str (repeat 40 "x"))
+                        :seon.db/db (:seon.db/db render-request)})]
+         (let [refusal (prompt/prompt @connection
+                                      (request connection context-channel))]
+           (is (= [2 1 0] @distances))
+           (is (= :seon.cluster.prompt/budget-exceeded
+                  (:seon.error/kind refusal)))
+           (is (= 0 (get-in refusal [:seon.error/data
+                                     :seon.render/distance])))
+           (is (= 3 (get-in refusal [:seon.error/data
+                                     :seon.config.ai/prompt-token-budget])))))))))

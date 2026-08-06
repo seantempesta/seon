@@ -78,11 +78,13 @@
     (is (= {:seon.ai/endpoint (:seon.config.ai/endpoint @dials)
             :seon.ai/model (:seon.config.ai/model @dials)
             :seon.ai/max-tokens (:seon.config.ai/max-tokens @dials)
+            :seon.ai/prompt-token-budget
+            (:seon.config.ai/prompt-token-budget @dials)
             :seon.ai/api-key-variable (:seon.config.ai/api-key-variable @dials)
             :seon.ai/thinking :disabled
             :seon.ai/timeout-ms (:seon.config.ai/timeout-ms @dials)}
            (:seon.ai/primary targets))
-        "the primary IS the four dials, and nothing reshapes them")
+        "the primary retains every effective AI dial without reshaping it")
     (is (not (contains? targets :seon.ai/backup))
         "ABSENT, never nil — a nil backup would read as `configured, and
          broken` at every downstream site that asks whether one exists")
@@ -183,6 +185,8 @@
     (is (= {:seon.ai/endpoint "https://example.invalid/v1/messages"
             :seon.ai/model "claude-probe"
             :seon.ai/max-tokens (:seon.config.ai/max-tokens @dials)
+            :seon.ai/prompt-token-budget
+            (:seon.config.ai/prompt-token-budget @dials)
             :seon.ai/api-key-variable "OTHER_PROVIDER_KEY"
             :seon.ai/thinking :disabled
             :seon.ai/timeout-ms 30000}

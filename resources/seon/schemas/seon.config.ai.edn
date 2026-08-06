@@ -22,6 +22,8 @@
                    :seon.ai/wire
                    [["max_tokens" clojure.core/identity]]}
                   :seon.ai/max-tokens],
+                 :prompt-token-budget
+                 [:int {:min 1, :seon.config/per-agent true}],
                  :model
                  [:string {:min 1, :seon.config/per-agent true}],
                  :no-auth

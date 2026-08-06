@@ -7,8 +7,10 @@
   public `seon.render/walk` function returns the exact stable-prefix text and
   the final REPL-state line carries volatile basis and time after the provider
   cache boundary."
-  (:require [seon.ai.tokens :as tokens]
+  (:require [seon.ai :as ai]
+            [seon.ai.tokens :as tokens]
             [seon.cluster.message :as message]
+            [seon.config :as config]
             [seon.context :as context]
             [seon.db :as db]
             [seon.render :as render]
@@ -26,6 +28,36 @@
 ;;; ---------------------------------------------------------------------------
 
 (def ^:private default-depth 2)
+
+(defn- agent-cluster-name
+  [database agent-id]
+  (db/q '[:find ?cluster-name .
+          :in $ ?agent-id
+          :where
+          [?agent :seon.cluster.agent/id ?agent-id]
+          [?agent :seon.cluster.agent/cluster ?cluster]
+          [?cluster :seon.cluster/name ?cluster-name]]
+        database agent-id))
+
+(defn- prompt-token-budget
+  [database agent-id]
+  (let [cluster-name (agent-cluster-name database agent-id)]
+    (cond
+      (:seon.error/kind cluster-name)
+      cluster-name
+
+      (nil? cluster-name)
+      {:seon.error/kind ::missing-cluster
+       :seon.error/message
+       "The prompt's agent is not connected to a cluster."
+       :seon.error/data {:seon.cluster.agent/id agent-id}}
+
+      :else
+      (let [effective (config/effective database cluster-name)]
+        (if (:seon.config/missing-effective effective)
+          (assoc effective :seon.error/kind ::missing-config)
+          (:seon.config.ai/prompt-token-budget
+           (ai/settings effective (ai/agent-overlay database agent-id))))))))
 
 (defn- refuse!
   [rule message]
@@ -63,6 +95,36 @@
    :seon.context.contribution/hash (context/contribution-hash text)
    :seon.context.contribution/tokens (tokens/estimate text)})
 
+(defn- acquire-within-budget
+  [database request budget]
+  (loop [distance (long (get request :seon.render/distance default-depth))]
+    (let [acquired (render/acquire-context!
+                    (:seon.render/context-channel request)
+                    (assoc request
+                           :seon.db/db database
+                           :seon.render/distance distance))
+          text (:seon.cluster.prompt/text acquired)
+          estimated (tokens/estimate text)]
+      (cond
+        (<= estimated budget)
+        {:seon.cluster.prompt/text text
+         :seon.context/contributions [(walk-contribution text)]
+         :seon.db/db (:seon.db/db acquired)}
+
+        (pos? distance)
+        (recur (dec distance))
+
+        :else
+        {:seon.error/kind ::budget-exceeded
+         :seon.error/message
+         (str "The prompt still needs " estimated
+              " estimated tokens at render distance 0, exceeding its "
+              budget "-token provider budget.")
+         :seon.error/data
+         {:seon.config.ai/prompt-token-budget budget
+          :seon.context.contribution/tokens estimated
+          :seon.render/distance distance}}))))
+
 (defn prompt
   "Acquire one retained walk for the agent holding the request's run.
 
@@ -71,24 +133,18 @@
   metadata for the exact one-walk text, not block membership."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.prompt/request]
-                  :seon.cluster.prompt/rendered-context]}
-  [db request]
+                  :seon.cluster.prompt/result]}
+  [database request]
   (validate-request! request)
   (let [run-id (:seon.cluster.run/id request)
-        run (db/pull db [:seon.cluster.run/background-results]
+        run (db/pull database [:seon.cluster.run/background-results]
                      [:seon.cluster.run/id run-id])
-        _ (or (message/trigger db run-id)
+        _ (or (message/trigger database run-id)
               (seq (:seon.cluster.run/background-results run))
               (refuse! ::no-trigger
                        "Prompt request's held run has no trigger or background result."))
-        acquired (render/acquire-context!
-                  (:seon.render/context-channel request)
-                  (assoc request
-                         :seon.db/db db
-                         :seon.render/distance
-                         (long (get request :seon.render/distance
-                                    default-depth))))
-        text (:seon.cluster.prompt/text acquired)]
-    {:seon.cluster.prompt/text text
-     :seon.context/contributions [(walk-contribution text)]
-     :seon.db/db (:seon.db/db acquired)}))
+        budget (prompt-token-budget database
+                                    (:seon.cluster.agent/id request))]
+    (if (:seon.error/kind budget)
+      budget
+      (acquire-within-budget database request budget))))

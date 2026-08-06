@@ -5,6 +5,10 @@
                        [:seon.context/contributions
                         :seon.context/contributions]
                        [:seon.db/db :seon.db/database-value]],
+                      :result
+                      [:or
+                       :seon.cluster.prompt/rendered-context
+                       :seon.error/value],
                       :request
                       [:map
                        [:seon.cluster.run/id :seon.cluster.run/id]

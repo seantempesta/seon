@@ -296,6 +296,13 @@
  ; at 4,096, so the live default must carry ample reasoning + reply headroom.
  :seon.config.ai/max-tokens 65536
 
+ ; Unit: estimated input tokens (`seon.ai.tokens/estimate`). Provenance:
+ ; the 2026-08-06 live drive observed unbounded 34k/44k-token prompts;
+ ; 32,768 is the first power-of-two boundary below both observations, so
+ ; either a lower-distance walk fits or prompt derivation refuses before
+ ; opening an unbounded provider request.
+ :seon.config.ai/prompt-token-budget 32768
+
  ; Explicitly disabled by owner ruling #34: ordinary per-turn agents optimize
  ; for reasonably smart, fast, and cheap work; planners opt into thinking with
  ; an agent-entity override. The flash-quality-interrogation-2026-08-01 bench
