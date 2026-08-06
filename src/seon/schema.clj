@@ -598,6 +598,13 @@
   (binding [*packaged-forms* forms]
     (f)))
 
+(defn call-with-projection
+  "Call `f` with one immutable database-derived projection for this operation."
+  {:malli/schema [:=> [:cat :map [:fn clojure.core/ifn?]] :any]}
+  [projection f]
+  (binding [*projection* projection]
+    (f)))
+
 (defn- active-projection []
   *projection*)
 
@@ -2266,7 +2273,8 @@
   "A map of all registered domain schemas (Malli's built-ins excluded)."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (candidate-forms))
+  (or (:seon.schema.projection/forms (active-projection))
+      (candidate-forms)))
 
 (defn canonical-schema-rows
   "Build the complete canonical schema-row population."
@@ -2438,10 +2446,17 @@
   (or (current-projection)
       (let [forms (candidate-forms)
             cached @!shape-generation]
-        (if (identical? forms
-                        (:seon.schema.shape/candidate-forms cached))
+        ;; Packaged forms are immutable values read from resources, so two
+        ;; accesses may return equal maps without sharing object identity.
+        (if (= forms (:seon.schema.shape/candidate-forms cached))
           (:seon.schema.shape/projection cached)
-          (build-projection forms)))))
+          (let [projection (build-projection forms)]
+            (reset! !shape-generation
+                    {:seon.schema.shape/projection projection
+                     :seon.schema.shape/candidate-forms forms
+                     :seon.schema.shape/validators {}
+                     :seon.schema.shape/explainers {}})
+            projection)))))
 
 (defonce ^:private !identity-only-generation
   (atom {:seon.schema.identity-only/projection nil

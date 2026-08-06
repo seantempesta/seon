@@ -1046,8 +1046,11 @@
   Receipts and eval results are outside all derivations by construction."
   {:malli/schema [:=> [:cat :seon.sci.eval/acquire-request] :map]}
   [{ctx :seon.sci.eval/ctx db :seon.db/db}]
-  (let [projection (schema/projection-from-database db)
-        ctx (assoc ctx :seon.schema/projection projection)
+  (let [projection (schema/projection-from-database db)]
+    (schema/call-with-projection
+     projection
+     (fn []
+      (let [ctx (assoc ctx :seon.schema/projection projection)
         source-for-transaction
         (memoize (fn [source-tx]
                    (admission-source db source-tx)))
@@ -1258,7 +1261,7 @@
                   :seon.test/ns [:seon.ns/name namespace-name]})
                (sort-by first (get test-rows-by-ns namespace-name)))))
        functions-installed
-       namespace-order))))
+       namespace-order)))))))
 
 (defn- install-function-from-database!
   "Install one selected function from the acquired database snapshot."

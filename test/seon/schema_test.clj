@@ -39,6 +39,36 @@
                        "must be an immutable Datahike database value"))
     (is (not (str/includes? (pr-str humanized) "unknown error")))))
 
+(deftest equal-packaged-populations-reuse-the-shape-projection
+  (let [forms (assoc (schema/registered-schemas)
+                     :seon.schema-test/cache-sentinel :string)
+        equal-copy (into {} forms)
+        builds (atom 0)
+        original-build schema/build-projection
+        project! (fn [population]
+                   (schema/call-with-forms
+                    population
+                    #(schema/identity-only-projection ::not-an-identity)))]
+    (is (not (identical? forms equal-copy))
+        "the probe supplies equal declaration values with distinct identities")
+    (with-redefs [schema/build-projection
+                  (fn [& arguments]
+                    (swap! builds inc)
+                    (apply original-build arguments))]
+      (project! forms)
+      (project! equal-copy))
+    ;; `build-projection`'s one-argument entry delegates to its three-argument
+    ;; entry, so the redefined Var observes two calls for one complete build.
+    (is (= 2 @builds)
+        "resource reads do not start a second complete projection build")))
+
+(deftest acquired-projection-owns-schema-introspection
+  (let [forms {:seon.schema-test/acquired :string}
+        projection {:seon.schema.projection/forms forms}]
+    (is (= forms
+           (schema/call-with-projection
+            projection schema/registered-schemas)))))
+
 (deftest canonical-self-references-refuse-at-registration
   (let [schema-key :seon.schema-test/self]
       (doseq [[label definition]
