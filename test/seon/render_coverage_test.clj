@@ -170,11 +170,21 @@
            (is (not (str/includes? (hiccup/->string html) ":db/id")))))
        (let [config-ai (config/render-ai (assoc config-value
                                                  :seon.db/db database))
+             model-value
+             (pulled database
+                     [:seon.ai.model/id (:seon.config.ai/model config-value)])
+             model-ai (render/render-ai
+                       (render-request database ctx model-value))
              plan-ai (bootstrap/render-ai (assoc plan-value
                                                    :seon.db/db database))]
          (is (not (str/includes? config-ai "DEEPSEEK_API_KEY")))
          (is (not (str/includes? config-ai
                                  "https://api.deepseek.com")))
+         (is (not (str/includes? config-ai "Available models"))
+             "the recurring config face does not inline the model roster")
+         (is (str/includes? model-ai
+                            (str "Model " (:seon.config.ai/model config-value)))
+             "the configured model remains reachable through its own face")
          (is (str/includes? plan-ai "tokens"))
          (is (not (str/includes? plan-ai
                                  ":seon.cluster.run.form/source")))

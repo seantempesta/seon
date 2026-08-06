@@ -14,7 +14,6 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.set :as set]
-            [seon.ai :as ai]
             [seon.db :as db]
             [seon.reconcile :as reconcile]
             [seon.schema :as schema]
@@ -60,9 +59,7 @@
      "evaluation " (:seon.config.eval/time-limit-ms unit) " ms; Flow "
      (:seon.config.flow.compute/concurrency unit) " compute / "
      (:seon.config.flow.io/concurrency unit) " I/O; core faults "
-     (name (:seon.config/on-core-error unit)) "."
-     (when-let [database (:seon.db/db unit)]
-       (str "\n\n" (ai/registry-ai database))))))
+     (name (:seon.config/on-core-error unit)) ".")))
 
 (defn render-html
   "`:seon.render/html` — one readable effective-configuration card."
@@ -70,27 +67,24 @@
                   [:maybe :seon.render/hiccup]]}
   [unit]
   (when-let [cluster (:seon.config/cluster unit)]
-    (cond->
-      [:article {:class "seon-family-entry seon-config-entry"}
-       [:h3 (str "Configuration " cluster)]
-       [:dl
-        [:div [:dt "Manifest digest"]
-         [:dd [:code (:seon.config/applied-manifest-digest unit)]]]
-        [:div [:dt "Model"] [:dd (:seon.config.ai/model unit)]]
-        [:div [:dt "Thinking"]
-         [:dd (name (:seon.config.ai/thinking unit))]]
-        [:div [:dt "Maximum output"]
-         [:dd (str (:seon.config.ai/max-tokens unit) " tokens")]]
-        [:div [:dt "Evaluation limit"]
-         [:dd (str (:seon.config.eval/time-limit-ms unit) " ms")]]
-        [:div [:dt "Flow concurrency"]
-         [:dd (str (:seon.config.flow.compute/concurrency unit)
-                   " compute / "
-                   (:seon.config.flow.io/concurrency unit) " I/O")]]
-        [:div [:dt "Core faults"]
-         [:dd (name (:seon.config/on-core-error unit))]]]]
-      (:seon.db/db unit)
-      (conj (ai/registry-html (:seon.db/db unit))))))
+    [:article {:class "seon-family-entry seon-config-entry"}
+     [:h3 (str "Configuration " cluster)]
+     [:dl
+      [:div [:dt "Manifest digest"]
+       [:dd [:code (:seon.config/applied-manifest-digest unit)]]]
+      [:div [:dt "Model"] [:dd (:seon.config.ai/model unit)]]
+      [:div [:dt "Thinking"]
+       [:dd (name (:seon.config.ai/thinking unit))]]
+      [:div [:dt "Maximum output"]
+       [:dd (str (:seon.config.ai/max-tokens unit) " tokens")]]
+      [:div [:dt "Evaluation limit"]
+       [:dd (str (:seon.config.eval/time-limit-ms unit) " ms")]]
+      [:div [:dt "Flow concurrency"]
+       [:dd (str (:seon.config.flow.compute/concurrency unit)
+                 " compute / "
+                 (:seon.config.flow.io/concurrency unit) " I/O")]]
+      [:div [:dt "Core faults"]
+       [:dd (name (:seon.config/on-core-error unit))]]]]))
 
 (def ^:private available-processors
   :seon.config/available-processors)
