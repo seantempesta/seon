@@ -16,10 +16,12 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (25)
+## Blocker (27)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Skip unrestorable atom desk rows before blob rehydration](unrestorable-atom-desk-row-wedges-next-turn.md) | blocker | agent desk rehydration repair |
+| [Make every rendered value id unique within its namespace page](rendered-value-ids-collide-within-one-page.md) | blocker | Datastar value-identity repair |
 | [Settle or refuse a frozen plan's first form](run-freezes-before-first-receipt-after-plan-freeze.md) | blocker | live-drive run-loop repair wave |
 | [Keep an unclaimed message out of an unrelated run's prompt](unclaimed-message-enters-an-unrelated-run-prompt.md) | blocker | messaging context-causality wave |
 | [Keep committed error facts valid in the problems projection](problems-projection-breaks-health-and-root-render.md) | blocker | live-drive observability repair wave |
@@ -46,10 +48,11 @@ See `README.md` for the convention.
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 | [Install maintenance result attributes on a fresh cluster](fresh-maintenance-result-attributes-are-not-installed.md) | blocker | maintenance schema-install repair |
 
-## Friction (99)
+## Friction (100)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Give system-generated messages arrival ordinals](system-generated-messages-omit-arrival-ordinals.md) | friction | message transaction-data repair |
 | [Attribute and fix the ~70 s complete publication](complete-publication-takes-seventy-seconds.md) | friction | publication velocity incident |
 | [Lead a failed init with its cause, not the event history](init-failure-dumps-entire-prepl-event-history.md) | friction | operator status-face hygiene |
 | [Quiet the unreadable-external-claim flood in `bin/seon status`](status-floods-unreadable-external-claim-warnings.md) | friction | operator status-face hygiene (follow-up to gate-fix-operator) |
