@@ -216,10 +216,9 @@
     :outs {}
     :workload :io
     :ping-map-fn (fn [state]
-                   (select-keys state [::passes ::turns
-                                       :seon.cluster.run/id]))})
+                   (select-keys state [:seon.cluster.run/id]))})
   ([args]
-   (assoc args ::passes 0 ::turns 0))
+   args)
   ([state transition]
    (when (= ::flow/stop transition)
      (async/offer!
@@ -248,9 +247,7 @@
                ;; ONE database value for the derivation
                next (work/next-agent-work @connection request)]
            (if (nil? next)
-             [(-> state
-                  (update ::passes inc)
-                  (dissoc :seon.cluster.run/id))
+             [(dissoc state :seon.cluster.run/id)
               nil]
              (let [report (cluster.loop/turn
                            {:seon.cluster.loop/cluster cluster
@@ -262,10 +259,7 @@
                (when (work/more-agent-work? @connection request)
                  (async/offer! (:seon.cluster.wake/channel cluster) ::wake))
                [(let [run-id (held-run-id @connection agent-id process)]
-                  (cond-> (-> state
-                              (update ::passes inc)
-                              (update ::turns inc)
-                              (dissoc :seon.cluster.run/id))
+                  (cond-> (dissoc state :seon.cluster.run/id)
                     run-id (assoc :seon.cluster.run/id run-id)))
                 ;; flow's own report channel: observation, never a dependency
                 {::flow/report [report]}])))
@@ -623,15 +617,14 @@
     :outs {}
     :workload :io
     :ping-map-fn (fn [state]
-                   (assoc (select-keys state [::passes])
+                   (assoc {}
                           ::armed-count
                           (count (::armed @(:seon.cluster.agent/routing
                                             state)))))})
   ([args]
    (assoc args
           ::flow/in-ports {::arm (:seon.cluster.wake/channel
-                                  (:seon.cluster.loop/cluster args))}
-          ::passes 0))
+                                  (:seon.cluster.loop/cluster args))}))
   ([state transition]
    (when (= ::flow/stop transition)
      (async/put! (:seon.cluster.loop/completion
@@ -660,4 +653,4 @@
          (arm! {:seon.cluster.loop/cluster handle
                 :seon.cluster.agent/id agent-id
                 :seon.cluster.agent/routing routing}))
-       [(update state ::passes inc) nil]))))
+       [state nil]))))

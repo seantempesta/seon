@@ -201,8 +201,7 @@
 
 (defn- turn-ping
   [entry]
-  (:clojure.core.async.flow/state
-   (flow/ping-proc (:seon.flow/graph entry) ::agent/turn)))
+  (flow/ping-proc (:seon.flow/graph entry) ::agent/turn))
 
 (defn- mailbox-ping
   [entry]
@@ -718,7 +717,7 @@
               (testing "armed and idle: the arm prime's pass ran and
               spent nothing — the window is bounded by ping counts,
               never a sleep standing for proof"
-                (is (await-until #(pos? (::agent/passes
+                (is (await-until #(pos? (::flow/count
                                          (turn-ping entry)))))
                 (is (zero? (count @ledger)))
                 (is (empty? (db/q '[:find ?run :where
@@ -737,13 +736,11 @@
                 (is (= {"m-2026072812" 1} (answers-by-trigger @connection))))
               (testing "idle again with ping counts flat: a probe wake
               runs a pass that does no work and calls nothing"
-                (let [turns (::agent/turns (turn-ping entry))
-                      passes (::agent/passes (turn-ping entry))]
+                (let [passes (::flow/count (turn-ping entry))]
                   (async/offer! (:seon.cluster.wake/channel entry)
                                 ::probe)
-                  (is (await-until #(> (::agent/passes (turn-ping entry))
+                  (is (await-until #(> (::flow/count (turn-ping entry))
                                        passes)))
-                  (is (= turns (::agent/turns (turn-ping entry))))
                   (is (= 1 (count @ledger)))))))
           (finally
             (disarm-all! routing)))))))
@@ -1002,7 +999,7 @@
                 _ (flow/resume control)]
             (try
               ;; let both graphs finish any prime pass under v1 first
-              (is (await-until #(pos? (::agent/passes (turn-ping entry)))))
+              (is (await-until #(pos? (::flow/count (turn-ping entry)))))
               (alter-var-root #'agent/turn-step (constantly
                                                  (wrap original)))
               (testing "the armed graph's next pass observably runs v2,
@@ -1014,14 +1011,12 @@
               (testing "the fn-value control proc still runs v1"
                 (let [before @v2-ran
                       control-passes
-                      (::agent/passes
-                       (:clojure.core.async.flow/state
-                        (flow/ping-proc control ::agent/turn)))]
+                      (::flow/count
+                       (flow/ping-proc control ::agent/turn))]
                   (async/offer! control-channel ::wake)
                   (is (await-until
-                       #(> (::agent/passes
-                            (:clojure.core.async.flow/state
-                             (flow/ping-proc control ::agent/turn)))
+                       #(> (::flow/count
+                            (flow/ping-proc control ::agent/turn))
                            control-passes))
                       "the control proc ran a pass")
                   (is (= before @v2-ran)
@@ -1268,11 +1263,13 @@
               ;; the arm prime plus an explicit rewake both pass over
               ;; the held run without touching it
               (async/offer! (:seon.cluster.wake/channel entry) ::wake)
-              (is (await-until #(>= (::agent/passes (turn-ping entry)) 1)))
+              (is (await-until #(>= (::flow/count (turn-ping entry)) 1)))
               (is (zero? (count @ledger))
                   "zero duplicate provider dispatches across the
                    interleaving")
-              (is (zero? (::agent/turns (turn-ping entry))))
+              (is (empty? (db/q '[:find ?receipt
+                                  :where [?receipt :seon.cluster.eval/id _]]
+                                @connection)))
               (is (= other (db/q '[:find ?p . :where
                                   [?run :seon.cluster.run/id "run-held"]
                                   [?run :seon.cluster.run/process ?p]]
