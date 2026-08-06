@@ -30,7 +30,7 @@ The intended mechanism half-exists and is the one to strengthen:
 
 ## Problems
 
-Evidence: [[../archive/runtime-reliability/research/cleanup-audit-config-startup-2026-07-20]].
+Evidence: [[../runtime-reliability/research/cleanup-audit-config-startup-2026-07-20]].
 
 1. **Runtime env gates bypass the mechanism**: `SEON_WEB`, `SEON_SHELL`,
    `SEON_RENDER_STRICT`, `SEON_BRAND_*` are read from process env at runtime
@@ -212,4 +212,4 @@ Validated by executable probe —
   deletions (`db/install-configuration-context!`,
   `internal/enter-tx-context!` — after which `seon.db` contains no
   `enterWith`, also sidestepping the Bun `enterWith` segfault recorded at
-  [[../../seon/issues/bun-enterwith-toplevel-segfault]]).
+  [[../../../seon/issues/bun-enterwith-toplevel-segfault]]).

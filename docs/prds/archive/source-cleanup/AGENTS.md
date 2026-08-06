@@ -1,6 +1,6 @@
 ---
 type: reference
-status: superseded
+status: archived
 tags: [prd, architecture]
 ---
 

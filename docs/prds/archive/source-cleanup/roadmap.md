@@ -1,6 +1,6 @@
 ---
 type: prd
-status: superseded
+status: archived
 tags: [prd, architecture, database, agent, web]
 ---
 
@@ -39,12 +39,12 @@ rather than creating another value transport.
 
 Evidence base (all dated 2026-07-20, committed):
 
-- [[../archive/database-authority-mesh/research/cleanup-audit-jvm-residue-2026-07-20]]
-- [[../archive/database-authority-mesh/research/cleanup-audit-duplicate-interfaces-2026-07-20]]
-- [[../archive/database-authority-mesh/research/cleanup-audit-logging-errors-2026-07-20]]
-- [[../archive/database-authority-mesh/research/cleanup-audit-vocabulary-2026-07-20]]
-- [[../archive/runtime-reliability/research/cleanup-audit-config-startup-2026-07-20]]
-- [[../archive/database-authority-mesh/research/pod-term-retirement-plan-2026-07-20]]
+- [[../database-authority-mesh/research/cleanup-audit-jvm-residue-2026-07-20]]
+- [[../database-authority-mesh/research/cleanup-audit-duplicate-interfaces-2026-07-20]]
+- [[../database-authority-mesh/research/cleanup-audit-logging-errors-2026-07-20]]
+- [[../database-authority-mesh/research/cleanup-audit-vocabulary-2026-07-20]]
+- [[../runtime-reliability/research/cleanup-audit-config-startup-2026-07-20]]
+- [[../database-authority-mesh/research/pod-term-retirement-plan-2026-07-20]]
 - [[research/fresh-source-cleanup-gaps-2026-07-20]]
 
 ## Live bug ledger
@@ -193,8 +193,8 @@ route, drill, and child-transport consumers remain ordered after this plain-data
 contract.
 
 Before transport, close
-[[../../seon/issues/projected-map-keys-are-not-drill-paths]] and
-[[../../seon/issues/value-drill-has-no-total-work-bounds]]: drill paths must
+[[../../../seon/issues/projected-map-keys-are-not-drill-paths]] and
+[[../../../seon/issues/value-drill-has-no-total-work-bounds]]: drill paths must
 retain original keys, and separate configured maxima must bound path segments,
 encoded path bytes, and total realized page work in both parent and child.
 The projection repair is grounded by
@@ -297,7 +297,7 @@ The dependency-ready transport boundary is grounded by
 existing serving tiers; it does not parse HTTP. Bun samples through its
 existing child-local result slot. JVM-hosted evals currently retain no
 addressable live value after invocation, so
-[[../../seon/issues/retain-live-eval-values-in-the-owning-jvm-host]]
+[[../../../seon/issues/retain-live-eval-values-in-the-owning-jvm-host]]
 (`cb64b7a1`) records the blocker and ruling: add one bounded process-local
 managed-eval-id slot inside the existing JVM host session lifecycle and sample
 there. No raw value crosses to the parent, no persisted result is reparsed, and
@@ -336,7 +336,7 @@ Second,
 projection nor a safe ambient fallback. Moving a convenient config subset
 would leave browser truth dependent on namespace load order; globally
 activating only database forms would delete JVM-private host schemas. The open
-blocker [[../../seon/issues/archive/jvm-value-drill-lacks-committed-schema-projection]]
+blocker [[../../../seon/issues/archive/jvm-value-drill-lacks-committed-schema-projection]]
 (`8a9283d7`) owned that ordered prerequisite. It is closed by `414b8137`: one
 portable rows-to-projection transform rejects malformed, duplicate, unresolved,
 and overflow populations; projection-explicit schema APIs share recursively
@@ -438,7 +438,7 @@ before the issue archives. The ruled plan UI migration now owns the released
 paths, but its shortest proof exposed a prerequisite in generic property
 dispatch: `matching-shapes-in` recursively validates a hostile value before a
 bounded renderer receives control. Issue
-[[../../seon/issues/archive/custom-property-dispatch-validates-hostile-values-before-bounded-rendering]]
+[[../../../seon/issues/archive/custom-property-dispatch-validates-hostile-values-before-bounded-rendering]]
 (`6c7343a8`) records the Malli call path and work-bound acceptance. The one
 generic dispatch boundary now admits only sampler-proven complete values and
 reuses the bounded projection for incomplete fallback (`9887ab64` +
@@ -510,7 +510,7 @@ turn; its complete identity SSE emitted both history and usage omission with
 no error, proving timestamp selection and non-critical hostile telemetry. The
 branch closed and default remained unchanged. The separate branch-qualified
 MCP pending defect is durable in
-[[../../seon/issues/branch-qualified-eval-cljs-database-read-stays-pending]].
+[[../../../seon/issues/branch-qualified-eval-cljs-database-read-stays-pending]].
 
 The **earliest unsettled contract** returns to the remaining Stage 1.5 frozen
 live sampler/retirement/route/UI matrix. Its **integrated proof** must combine
@@ -678,7 +678,7 @@ pure-render, single execution, byte-identity safe):
 
 ### Stage 2 — pod-term retirement (atomic rename)
 
-Execute [[../archive/database-authority-mesh/research/pod-term-retirement-plan-2026-07-20]]
+Execute [[../database-authority-mesh/research/pod-term-retirement-plan-2026-07-20]]
 steps 1-4 as one orchestrator-owned unit during a lane freeze: code
 identities (`client`/`cluster` mapping, `pod.js` -> `client.js`,
 `pod-events.log` -> `client-events.log`, `:seon.dev.process/pod` ->
@@ -1076,7 +1076,7 @@ diagnostics for malformed/unknown shapes. Delete `src/seon/ui/components.cljc`
 `seon.db`; extract the two namespace predicates `seon/dev/docstring.clj:193`
 duplicates into the owning `.cljc`; rename test-only "tile"/"verbs" fixture
 strings; resolve
-[[../../seon/issues/deprecated-skill-render-functions-indexed]] by removing
+[[../../../seon/issues/deprecated-skill-render-functions-indexed]] by removing
 false deprecation claims from canonical live render functions and deleting any
 actually retired function after caller migration; delete
 `dev/storage-shootout.js`, remove the `reference-code/integrant`

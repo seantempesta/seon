@@ -11,7 +11,7 @@ tags: [prd, architecture, naming]
 - **"pod" is retired**: running unit → **cluster**; the supervised CLJS
   process → **client** (confirmed; matches `:client` build +
   `seon.client/-main`). Execution plan and complete 3257-site inventory:
-  [[../archive/database-authority-mesh/research/pod-term-retirement-plan-2026-07-20]].
+  [[../database-authority-mesh/research/pod-term-retirement-plan-2026-07-20]].
   This is stage 2 of the cleanup roadmap — one atomic rename under a lane
   freeze.
 - Doc scope: current branch PRDs + `docs/seon/` only; dated research and
@@ -19,7 +19,7 @@ tags: [prd, architecture, naming]
 
 ## Remaining problems
 
-Evidence: [[../archive/database-authority-mesh/research/cleanup-audit-vocabulary-2026-07-20]].
+Evidence: [[../database-authority-mesh/research/cleanup-audit-vocabulary-2026-07-20]].
 
 1. "tile" survives only in tests (~30 fixture names/prose across six test
    files). Safe mechanical rename.

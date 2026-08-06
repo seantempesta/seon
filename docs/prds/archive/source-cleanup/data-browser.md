@@ -133,8 +133,8 @@ rendering, web routes, database access, or execution-child transport.
    [[research/activated-schema-projection-boundary-2026-07-20]].
 2. Implement the single-sample plain-data Unit 1B projection from
    [[research/schema-aware-value-projection-boundary-2026-07-20]].
-3. Close [[../../seon/issues/projected-map-keys-are-not-drill-paths]] and
-   [[../../seon/issues/value-drill-has-no-total-work-bounds]] by preserving
+3. Close [[../../../seon/issues/projected-map-keys-are-not-drill-paths]] and
+   [[../../../seon/issues/value-drill-has-no-total-work-bounds]] by preserving
    original drill keys and enforcing configured path-segment, encoded-byte,
    and total-realization budgets in every producer.
 4. Add the closed correlated execution-child frames specified by
