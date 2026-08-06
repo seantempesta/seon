@@ -12,10 +12,12 @@ with its [working edge](/docs/prds/sci-execution-runtime/plan/unsettled.md).
 The [issue index](/docs/seon/issues/index.md) is the ranked queue.
 
 - `sci-execution-runtime/` contains the active program and its current runbook.
-- `package-capabilities/` is a bounded successor PRD; its roadmap does not
-  replace the program ordering.
-- `source-cleanup/` and `generate-code/` are superseded historical quarry.
-- `archive/` contains archived historical quarry.
+- `error-model/` is the active successor currently named by the working edge.
+- `accretion-testing/`, `background-work/`, `operational-events/`, and
+  `in-server-tests/` remain non-archived pending an explicit current dependency
+  edge, as recorded by the 2026-08-06 drift audit.
+- `archive/` contains archived historical quarry, including the retained
+  `_example-feature/` template.
 
 ## Authority lifecycle
 

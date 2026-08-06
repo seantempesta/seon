@@ -39,6 +39,11 @@ session-image, shared-context, or pod/Bun designs.
   map. In particular, `docs/prds/package-capabilities/roadmap.md:37-55` still
   sequences work through deleted Bun execution children and an open pod-host
   decision.
+- After the approved archive move, `docs/prds/operational-events/README.md:12,51`
+  still links the old `../operator-integration/README.md` location. That active
+  PRD was protected from edits during the archive-only lane; its dependency
+  should be re-grounded in current `seon.operator` source and rulings rather
+  than redirected to archived implementation history.
 
 ## Owner
 
