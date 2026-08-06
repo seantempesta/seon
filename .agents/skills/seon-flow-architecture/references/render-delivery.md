@@ -1,14 +1,13 @@
 # Render delivery
 
 Read this when changing render blocks, SSE delivery, buffering, socket
-backpressure, or the proposed package/keyframe protocol.
+backpressure, or the package/keyframe protocol.
 
 ## Contents
 
 - [Current implementation](#current-implementation)
 - [Blocks and stable identity](#blocks-and-stable-identity)
-- [Current snapshots and per-tab deltas](#current-snapshots-and-per-tab-deltas)
-- [TARGET: revisioned packages and keyframes](#target-revisioned-packages-and-keyframes)
+- [Revisioned packages and keyframes](#revisioned-packages-and-keyframes)
 - [Per-edge buffer law](#per-edge-buffer-law)
 - [The http-kit write-state interface](#the-http-kit-write-state-interface)
 - [Measured frame budgets](#measured-frame-budgets)
@@ -23,18 +22,18 @@ One cluster render proc consumes:
 - streamed partial values; and
 - page-demand signals.
 
-It emits a complete page snapshot map
-`{agent-id {surface-id serialized-html}}`, suppresses unchanged surfaces, and
-mults snapshots to connected tabs
-(`src/seon/render/web.clj:497-671,692-804`).
+It retains serialized fragments, emits one revisioned package per changed
+page, and mults the latest package map to connected tabs. Every package carries
+both delta bytes and a complete keyframe
+(`src/seon/render/web.clj:553-600,631-735`).
 
 The built surface also includes canonical namespace pages, root/agent aliases,
 and namespace/agent debug variants in the one route table
 (`src/seon/render/route.clj:5-34`). HTML pages and AI context share the same
 walk membership and ordering, and debug renders both projections from one
 database value (`src/seon/render/web.clj:300-350,1041-1102`;
-`src/seon/render/walk.clj:693-876`). The package/keyframe protocol below and a
-generalized canvas/control surface remain **[TARGET]**
+`src/seon/render/walk.clj:693-876`). A generalized canvas/control surface
+remains **[TARGET]**
 (`src/seon/render/route.clj:5-27`;
 `src/seon/render/web.clj:132-169,1027-1037`).
 
@@ -58,46 +57,31 @@ Use “block” for the render unit, “surface” for a context render, and “
 only for CSS grouping. Do not revive widget/component/panel as competing
 runtime nouns.
 
-## Current snapshots and per-tab deltas
+## Revisioned packages and keyframes
 
 The live delivery sequence is:
 
-1. Render one complete page snapshot when database or stream state changes.
-2. Publish that snapshot through a `mult`.
-3. Give each tab a `(sliding-buffer 1)` tap.
-4. On connection, render and send a full initial paint.
-5. For subsequent snapshots, compare against that tab's prior snapshot and
-   send changed surfaces.
+1. Render registered pages when database, stream, or join state changes.
+2. Retain stable fragment bytes and construct a revisioned package containing
+   the changed-block delta and a complete keyframe.
+3. Publish the newest package map through a `mult`.
+4. Give each tab a `(sliding-buffer 1)` tap.
+5. On connection, reuse a current retained keyframe or request one proc pass.
+6. Send the smaller delta for a contiguous revision; send the keyframe for a
+   gap. Each tab retains only its delivered revision.
 
-Read `src/seon/render/web.clj:300-350,443-467,497-804`.
+Read `src/seon/render/web.clj:553-600,631-735,930-1026`.
 
-The per-tab prior snapshot means delta selection is currently repeated for
-each connection. Serialization of each surface happens in `page-of` before the
-mult, so the expensive render/serialize work is shared.
-
-Do not claim current revisions, gap detection, or reconnect keyframes. Those
-are target protocol properties.
-
-## TARGET: revisioned packages and keyframes
-
-The ruled target uses three delivery nouns:
+The current protocol uses three delivery nouns:
 
 - **package** — one revisioned delivery value per render change;
 - **delta** — only changed block fragments; and
 - **keyframe** — every current block, serialized once.
 
-The intended producer serializes shared bytes once, then mults the immutable
-package to every tab. A revision gap selects the latest keyframe. A new page
-load can use that keyframe without re-rendering.
-
-This design and its falsification are in
-`docs/prds/sci-execution-runtime/research/render-pipeline-design-2026-07-29.md`.
-It is **[TARGET]**. Before implementation, settle revision identity, bounded
-keyframe retention, the gap rule, and how the current initial paint path
-acquires the latest package.
-
-Do not bolt packages beside snapshots. Convert the existing render owner in
-place and delete the superseded per-tab delta mechanism in the same slice.
+The render proc serializes shared bytes once, then mults the immutable package
+map to every tab. A revision gap selects the latest keyframe, and a new page
+load reuses the current fact-derived keyframe when its basis is current
+(`src/seon/render/web.clj:553-600,930-1026`).
 
 ## Per-edge buffer law
 
@@ -115,7 +99,7 @@ Choose each buffer from its loss semantics:
 The research table and measured conditions are at
 `docs/prds/sci-execution-runtime/research/render-pipeline-design-2026-07-29.md`.
 Current concrete taps and inputs are visible at
-`src/seon/cluster.clj:1119-1148` and `src/seon/render/web.clj:551-671,692-804`.
+`src/seon/cluster.clj:1648-1818` and `src/seon/render/web.clj:930-1026`.
 
 Never use a channel for state recovery. If dropping the value makes reconnect
 or restart incorrect, commit the required identity/receipt/final value as a
@@ -169,7 +153,7 @@ socket backlog for the actual page.
 ## Change checklist
 
 1. Identify the stable block IDs and bytes.
-2. Mark current snapshot behavior separately from target package behavior.
+2. Preserve one revisioned package carrying both delta and repair keyframe.
 3. Serialize common data before the `mult`.
 4. Give each tab a latest-wins buffer.
 5. Park `:io` writers on actual drain state.

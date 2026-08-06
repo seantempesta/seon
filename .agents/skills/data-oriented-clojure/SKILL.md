@@ -16,10 +16,10 @@ what shape to declare and why → `data-modeling`; test patterns →
 `clojure-testing`.** The grounding is the vendored source under
 `reference-code/` and the live code in `src/`.
 
-**Where you are (owner rulings, 2026-07-27):** fresh `src/` and `test/` are the
-system, `bin/test` is the gate, and **the CLJS build is OFF — CLJ and the JVM
-only**. `src-old/` is the quarry: read it for idiom, never extend it, and never
-add a `.cljs`.
+**Where you are:** fresh `src/` and `test/` are the system, `bin/test` is the
+gate, and **the CLJS build is OFF — CLJ and the JVM only**. The old source trees
+were deleted; quarry them through `git show` and `git log`, never through an
+in-tree checkout (`AGENTS.md:247-254`).
 
 ## The one habit that causes the most wrong code
 
@@ -207,7 +207,7 @@ on current state, make the decision INSIDE the transaction — a
 refuses an ineligible request by throwing (aborting the whole transaction
 atomically), and returns plain tx-data otherwise. No observed-* request fields,
 no caller pre-reads, no window between deciding and acting. `:db.fn/cas` is the
-same idea for a single value. `src/seon/cluster/run.cljc` is the worked
+same idea for a single value. `src/seon/cluster/run.clj:562-730` is the worked
 example.
 
 ### Prefer `reduce`/`map`/`into` over mutable accumulator loops
@@ -287,10 +287,10 @@ only what function code actually calls:
 {:seon.expense/amount :int}
 ```
 
-`seon.schema.edn/load!` reads that one classpath resource. Section comments are
+`seon.schema.edn/load!` reads the directory-backed classpath population. Section comments are
 editorial only: duplicate keys refuse, every reference must resolve, and
 predicate schemas require registered predicates plus honest generators
-(`src/seon/schema/edn.clj:143-225,234-324`).
+(`src/seon/schema/edn.clj:1-15,49-51,143-225,234-324`).
 
 ### Write a real test ns — `clojure.test/deftest`, not inline `assert`
 

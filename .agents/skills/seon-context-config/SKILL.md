@@ -1,6 +1,6 @@
 ---
 name: seon-context-config
-description: "Change or diagnose Seon's fresh database-backed cluster configuration. Load this when editing config/default.edn, adding a config dial to resources/seon/schema.edn, applying a sparse cluster overlay, tracing a runtime config read, or deciding whether a change is live versus arm-time. Also load it when old instructions mention config/system.edn, SEON_CONFIG, context-block manifests, routes, or skill corpus so you do not restore the deleted pod model."
+description: "Change or diagnose Seon's fresh database-backed cluster configuration. Load this when editing config/default.edn, adding a config dial under resources/seon/schemas/, applying a sparse cluster overlay, tracing a runtime config read, or deciding whether a change is live versus arm-time. Also load it when old instructions mention config/system.edn, SEON_CONFIG, context-block manifests, routes, or skill corpus so you do not restore the deleted pod model."
 ---
 
 # Seon cluster configuration
@@ -10,21 +10,23 @@ It is not the deleted pod's Aero-style `config/system.edn` manifest.
 
 Read these current owners:
 
-- the config section of `resources/seon/schema.edn` — registered config attributes;
+- config-family files under `resources/seon/schemas/` — registered config attributes;
 - `config/default.edn` — one shipped decision for every dial;
-- `src/seon/config.cljc` — read, validate, compile, reconcile, and query;
+- `src/seon/config.clj` — read, validate, compile, reconcile, and query;
 - `src/seon/cluster.clj` — boot ordering and consumers; and
 - `script/seon/fresh_operator.clj` — operator apply/start commands.
 
-Treat `config/system.edn`, `SEON_CONFIG`, and `src-old/seon/config.cljs` as
-historical quarry only.
+Treat `config/system.edn` and `SEON_CONFIG` as historical referents only. The
+old source trees are available through `git show` and `git log`, not an in-tree
+checkout (`AGENTS.md:247-254`).
 
 ## Author a dial
 
 Configuration design and database schema design are one act:
 
 1. Declare the namespaced attribute and value schema in the config section of
-   `resources/seon/schema.edn`.
+   the owning config-family file under `resources/seon/schemas/`; the loader
+   merges that directory as one population (`src/seon/schema/edn.clj:1-15,49-51`).
 2. Add its explicit shipped decision to `config/default.edn`.
 3. Read the value from `seon.config/effective` at the owning runtime boundary.
 4. Prove whether the consumer reads live database values or captures the value
@@ -52,7 +54,7 @@ invitation for runtime code to read ambient environment variables.
 
 Use `:seon.config/absent` to retract an optional defaulted attribute. The
 compiler refuses it for a required attribute and never stores the marker or
-nil (`src/seon/config.cljc:31-37,183-229`).
+nil (`src/seon/config.clj:36-42,182-198,317-365`).
 
 ## Apply and inspect
 
@@ -76,9 +78,9 @@ separate deployment (`bin/seon:4-18`;
 `script/seon/fresh_operator.clj:44-76,604-619,1690-1722`).
 
 `seon.config/apply!` exact-reconciles the desired row
-(`src/seon/config.cljc:237-252`). Runtime code reads the effective ordinary
+(`src/seon/config.clj:460-472`). Runtime code reads the effective ordinary
 map from a database value with `seon.config/effective`
-(`src/seon/config.cljc:254-275`).
+(`src/seon/config.clj:474-500`).
 
 Verify the resulting datoms and consumer behavior. File contents are desired
 input; the database row is runtime truth.
@@ -88,7 +90,7 @@ input; the database row is runtime truth.
 Applying a row does not magically rebuild a proc, executor, web server, or
 other process-local structure.
 
-`test/seon/config_application_test.clj:17-150` owns the recurring census
+`test/seon/config_application_test.clj:1-13,27-109,206-222` owns the recurring census
 mechanism: it compares the exact default-manifest key set with an application
 ledger and fails on any missing or extra consumer row. Treat that equality
 check as the gate; never copy its momentary count into this skill. Read the
@@ -96,22 +98,14 @@ source boundary too; the acquisition matrix is:
 
 | acquisition | dials | source and update truth |
 |---|---|---|
-| boot-time process structure | flow queue depth/concurrency; web port | the work launcher and web server capture them while the cluster starts; applying facts does not rebuild either (`src/seon/cluster.clj:940-971,1357-1370`) |
-| operator start/add instrumentation | core-error mode and result caps | the operator reads one running cluster's effective row when it applies process-global host-Var instrumentation; `config apply` itself only reconciles the database row (`script/seon/fresh_operator.clj:1335-1415,1690-1722`) |
-| graph-arm-time loop handle | result caps, eval time limit, message-chain limit; one copy of recurrence/escalation and core-error mode | `loop-handle` reads one effective map and carries these values into agent graphs (`src/seon/cluster.clj:1043-1077,1118-1125`) |
-| per-episode pass | maximum runs per episode | the work derivation queries the current database value, so the next pass sees the change (`src/seon/cluster/work.cljc:424-441`) |
-| per-turn | every registered AI setting plus the agent overlay | the `:call` branch resolves both from one immutable database value once per turn; a config apply or override changes the next turn, never the attempts already derived for this turn (`src/seon/cluster/loop.cljc:975-989`) |
-| per-terminal evaluation | session-value blob threshold | `store-session-values!` reads the threshold from the current database immediately before terminal transaction data is committed; the next terminal evaluation sees an applied change (`src/seon/cluster/loop.cljc:432-458,1411-1424`) |
-| per-render pass/request | render coalescing; data-drill collection page size | the render proc queries coalescing before each pass; `/data` reads page size from the request's database value (`src/seon/render/web.clj:473-480,636-662,1126-1145`) |
-| explicit walk fallback | result caps | an agent walk normally receives the arm-time caps in its ambient context; only a call lacking those caps re-reads the current cluster config (`src/seon/render.clj:169-211`) |
-| program row installation | core-error mode and result caps | installing a contracted interpreted function reads the committed row's database value before wrapping it, both on cold acquisition and after a successful terminal transaction (`src/seon/sci/eval.clj:762-786,789-895`) |
-| per-fault | recurrence/escalation facts and the fan-out's core-error decision | fault commit reads recurrence/escalation from the fault's database value, while the fan-out callback reads `on-core-error` again for each fault (`src/seon/cluster.clj:1000-1034,1151-1164`) |
-
-`:seon.config/on-core-error` is deliberately split: the loop handle carries
-the arm-time value into eval requests (`src/seon/cluster.clj:1051-1067`;
-`src/seon/cluster/loop.cljc:1287-1302`), while flow-fault fan-out re-reads it
-per fault (`src/seon/cluster.clj:1151-1160`). Never give that dial one blanket
-“live” label.
+| boot/arm-time structure | flow queue depth/concurrency; web port | the work launcher and web server capture effective facts during cluster start; applying a row does not rebuild them (`src/seon/cluster.clj:1989-2005`) |
+| graph-arm-time loop handle | result caps, eval time limit, message-chain limit, recurrence/escalation, core-error mode | `loop-handle` reads one effective map and carries these values into agent graphs (`src/seon/cluster.clj:1607-1646`) |
+| per-episode pass | maximum runs per episode | the work derivation queries the current database value, so the next pass sees the change (`src/seon/cluster/work.clj:441-458`) |
+| per-turn | every registered AI setting plus the agent overlay | provider settings derive from one immutable database value per turn; a config apply or override changes the next turn (`src/seon/cluster/loop.clj:920-934,1243-1259`) |
+| per-terminal evaluation | desk-value blob threshold | `store-desk-values!` reads the threshold immediately before desk rows join the terminal receipt transaction (`src/seon/cluster/loop.clj:464-498,1643-1658`) |
+| per-render pass | render coalescing | the render proc queries coalescing before each pass (`src/seon/render/web.clj:606-613,861-873`) |
+| per-render request fallback | agent render profile | a request uses its supplied profile or derives the agent profile from current effective config (`src/seon/render.clj:37-74`) |
+| program-row installation | schema projection and result caps | successful acquisition and installation advance the live context from the committed database value (`src/seon/sci/eval.clj:762-788`) |
 
 Applying AI settings is next-turn live, including per-agent overrides. The
 real-provider proof changed the same running worker's next request without a

@@ -46,7 +46,8 @@ If you write "for each kind" or a `:kind` enum, stop and reframe.
 
 Namespace every attr `:seon.<ns>/<name>` where the namespace is a real code
 namespace that owns the data. In EDN, write the full qualified keyword.
-`seon.schema.edn/load!` reads the classpath resource `seon/schema.edn`;
+`seon.schema.edn/load!` reads the classpath directory `seon/schemas`, backed by
+`resources/seon/schemas/` (`src/seon/schema/edn.clj:1-15,49-51`);
 `seon.schema.datahike/malli->datahike-attr` derives the
 Datahike facet. The design choice is which Malli shape expresses the intent:
 
@@ -240,7 +241,7 @@ every loaded public var carrying `:malli/schema` in development, with no
 namespace allow list. Tests and generators still prove the contract rather
 than relying only on runtime checks.
 
-### Program rows, base context, run fork, and session image
+### Program rows, base context, turn fork, and agent desk
 
 Keep the four boundaries distinct. Read the one checked current/target source,
 [`program-state.md`](../data-oriented-clojure/references/program-state.md),
@@ -258,7 +259,7 @@ removal also refuse atomically while any directly or transitively affected
 Datahike attribute—including entity-child attributes—carries current data.
 After current data and contract dependencies are retracted, the operation may
 commit (`src/seon/schema.cljc:1907-1935`;
-`src/seon/cluster/run.cljc:562-730`;
+`src/seon/cluster/run.clj:562-730`;
 `test/seon/schema_usage_guard_test.clj:80-397`).
 
 Ordinary history retains the old datoms and historical global schema row, so a
@@ -369,7 +370,7 @@ worked pair: identity attributes, refs, and transition contracts.
 | `src/seon/schema/form.cljc` | shared form inspection the bridge and gates use |
 | `src/seon/fn.clj` | selective durable corpus admission |
 | `src/seon/instrument.clj` | computed public-contracted-var instrumentation |
-| `src/seon/cluster/run.cljc` | a live domain model end to end |
+| `src/seon/cluster/run.clj` | a live domain model end to end |
 | `docs/conventions.md` | Malli patterns, request/response, the `:any` boundary |
 | `reference-code/malli/src/malli/{core,generator}.cljc` | schema syntax + generator derivation |
 

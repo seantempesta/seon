@@ -1,6 +1,6 @@
 ---
 name: clojurescript
-description: "Mine the deleted Seon CLJS pod as historical quarry. Load this only when intentionally reading src-old .cljs, reconstructing a deleted pod behavior, or deciding what lesson—not implementation—to carry into the JVM. Do not load it for current runtime, eval, UI, async, or agent work: fresh Seon is CLJ-only and the pod/self-host engine is deleted."
+description: "Mine the deleted Seon CLJS pod through Git history (AGENTS.md:247-254). Load this only when intentionally reconstructing a deleted pod behavior or deciding what lesson—not implementation—to carry into the JVM. Do not load it for current runtime, eval, UI, async, or agent work: fresh Seon is CLJ-only and the pod/self-host engine is deleted."
 ---
 
 # Historical CLJS pod quarry
@@ -10,8 +10,9 @@ The CLJS build is off and the pod is deleted. Current Seon is CLJ/JVM only
 evaluation belongs to `src/seon/sci/eval.clj`; current web rendering belongs to
 `src/seon/render/web.clj`.
 
-Use this skill only to understand a behavior in `src-old/` before designing a
-fresh replacement. Never:
+Use this skill only to understand a deleted behavior through `git show` or
+`git log` before designing a fresh replacement. The old source trees are not
+present in the working tree (`AGENTS.md:247-254`). Never:
 
 - add `.cljs` to fresh `src/`;
 - restore shadow-cljs, Bun, `cljs.js`, bootstrap compile state, or the pod;
@@ -45,20 +46,14 @@ These sources explain why a top-level old `(await ...)` failed while an await
 inside an old `^:async` function could compile. Preserve that only as forensic
 understanding.
 
-## Old Seon owners
+## Old Seon evidence
 
 Read these only as quarry:
 
-| old owner | historical behavior worth identifying |
-|---|---|
-| `docs/prds/archive/agent-fsm/research/cljs-async-await-2026-06-28.md` | deleted self-host compilation, Promise auto-await, and compile-state evidence |
-| `src-old/seon/agent/AGENTS.md` | surviving historical agent/pod contract notes |
-| `src-old/seon/web/` | Node/CLJS web server and Datastar feed |
-
-The detailed historical investigation remains at
-`docs/prds/archive/agent-fsm/research/cljs-async-await-2026-06-28.md`. Check
-every old line citation against `src-old/` because the quarry can still move
-during deletion.
+The retained research record is
+`docs/prds/archive/agent-fsm/research/cljs-async-await-2026-06-28.md`. Use Git
+history when the question requires deleted source, for example
+`git log --all -- path/to/deleted/file` followed by `git show REV:path`.
 
 ## How to carry a lesson forward
 
@@ -74,7 +69,7 @@ time limit and one interrupt function (`src/seon/sci/eval.clj`;
 `reference-code/sci/doc/interrupt.md`).
 
 If a current task mentions “the pod,” first prove that it is deliberately
-mining `src-old/`. Otherwise load the skill for the fresh owner instead:
+mining Git history. Otherwise load the skill for the fresh owner instead:
 
 - `seon-flow-architecture` for runtime machinery;
 - `datastar-web-ui` for the JVM web renderer;

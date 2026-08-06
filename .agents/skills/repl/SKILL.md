@@ -1,6 +1,6 @@
 ---
 name: repl
-description: "Distinguish and probe Seon's agent-reply reader, an agent turn in its SCI evaluation context, a cluster io-prepl/MCP eval_clj session, and a raw JVM REPL. Use for reply parsing, prose-vs-code classification, Markdown fences, reader refusals, session-image persistence, source fidelity, namespace attribution, private-Var probes, or reload-before-retest work. Do not load it merely for ordinary Clojure syntax or application code that happens to be evaluated at a REPL."
+description: "Distinguish and probe Seon's agent-reply reader, an agent turn in its fresh SCI fork and rehydrated desk, a cluster io-prepl/MCP eval_clj session, and a raw JVM REPL. Use for reply parsing, prose-vs-code classification, Markdown fences, reader refusals, desk persistence, source fidelity, namespace attribution, private-Var probes, or reload-before-retest work. Do not load it merely for ordinary Clojure syntax or application code that happens to be evaluated at a REPL."
 ---
 
 # REPL — distinguish the four surfaces
@@ -9,16 +9,15 @@ Four surfaces share Clojure syntax but not an execution contract:
 
 - **The Seon agent-form reader** splits a model's text reply into ordered plan
   source strings. This is what this skill is mostly about. Fresh Seon uses
-  `seon.cluster.reply/sources` over `seon.sci.reader/read`; the retired
-  `src-old/seon/repl/parse.cljc` repair system is not on this path
+  `seon.cluster.reply/sources` over `seon.sci.reader/read`; deleted reader
+  implementations are Git-history quarry and are not on this path
   (`src/seon/cluster/reply.clj:1-48,310-355`).
 - **An agent turn in SCI** executes frozen sources through
-  `seon.sci.eval/evaluate`. **[CURRENT]** it receives the cluster's supplied
-  context; **[TARGET — ruled, unbuilt]** each run receives a fresh
-  generation-aware fork of the acquired base. Durable cross-run sharing remains
-  program publication and session-image acquisition
-  (`src/seon/cluster.clj:1880-1885`; `src/seon/sci/eval.clj:1334-1361`;
-  `reference-code/sci/src/sci/core.cljc:331-337`).
+  `seon.sci.eval/evaluate`. Each turn gets a fresh generation-aware fork of the
+  cluster's program-only base, then rehydrates only the selected agent's desk.
+  Every form in that turn shares the fork; the next turn forks the then-current
+  base again (`src/seon/sci/eval.clj:1309-1392`;
+  `src/seon/cluster/loop.clj:1493-1514`).
 - **Cluster `io-prepl` / MCP `eval_clj`** sends a form to the live cluster
   JVM's `clojure.core.server/io-prepl`. It reads, evaluates, and returns a
   structured envelope; a bare value evaluates normally, and the agent-reply
@@ -50,14 +49,14 @@ server exists.
 ### Prove the agent session boundary
 
 Use an actual agent turn when the claim concerns the SCI evaluation context,
-terminal receipt, contracted program publication, or session-image facts. A
+terminal receipt, contracted program publication, or desk facts. A
 direct `io-prepl` form proves only host-JVM evaluation; it never passes through
 the agent reply reader or the turn's terminal transaction
 (`reference-code/clojure/src/clj/clojure/core/server.clj:228-296`;
-`src/seon/cluster/loop.clj:1279-1306,1460-1654`).
+`src/seon/cluster/loop.clj:1493-1670`).
 
-For the full current/target split between program rows, base context, per-run
-fork, and durable session image, read
+For the full split between program rows, base context, per-turn fork, and
+agent-scoped desk, read
 [`program-state.md`](../data-oriented-clojure/references/program-state.md).
 
 An evaluation's namespace precedence is explicit form namespace → committed

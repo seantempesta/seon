@@ -17,10 +17,11 @@ limits, or the proposed agent-owned render proc.
 ## Current blueprint
 
 Each agent owns one independent core.async.flow graph. The graph definition is
-data built by `src/seon/cluster/agent.clj:240-264`; it currently has exactly:
+data built by `src/seon/cluster/agent.clj:286-318`; it currently has exactly:
 
 - `::mailbox`, workload `:io`;
-- `::turn`, workload `:io`; and
+- `::turn`, workload `:io`;
+- `::schedule`, workload `:io`; and
 - one `(sliding-buffer 1)` connection from mailbox output to turn input.
 
 There is no central loop, dispatcher, active-set, or scheduler entity in fresh
@@ -85,14 +86,14 @@ Read the routing map and armer's `agents`/`armed` set derivation at
 ## Episode caps and retry semantics
 
 The maximum consecutive runs per episode is a database-backed config dial.
-Its schema and default live in the config section of `resources/seon/schema.edn` and
-`config/default.edn:81-95`. The work loop reads and enforces it in
-`src/seon/cluster/work.cljc:424-441,484-517`.
+Its schema and default live in `resources/seon/schemas/seon.config.run.edn:1-2`
+and `config/default.edn:175-189`. The work loop reads and enforces it in
+`src/seon/cluster/work.clj:400-458,491-546`.
 
 The cap is runaway protection, not a retry scheduler. Nothing re-fires a
 failed turn after recovery. Recovery marks dangling receipts interrupted and
 the agent adapts from durable context
-(`src/seon/cluster/run.cljc:866-930`; `src/seon/cluster.clj:1322-1328`).
+(`src/seon/cluster/run.clj:866-930`; `src/seon/cluster.clj:1322-1328`).
 
 Do not add:
 
@@ -122,17 +123,16 @@ Read the exact host, JDK, heap method, warm-up, and samples in
 `docs/prds/sci-execution-runtime/research/flow-mechanics-2026-07-28.md`.
 The lifecycle timing ends when the stop API returns; it is not an exit-join
 measurement.
-The current two-proc blueprint therefore suggests roughly two parked virtual
-threads and 17 KB of proc baseline per agent, but that multiplication is an
-inference from the per-proc measurement, not a separately measured production
-heap total.
+The current three-proc blueprint has three parked virtual threads per agent.
+The measured per-proc baseline is not a separately measured production-agent
+heap total (`src/seon/cluster/agent.clj:286-318`).
 
 ## TARGET: the renders proc
 
-The intended third proc, `::renders`, would own the agent's derived AI and HTML
+The intended fourth proc, `::renders`, would own the agent's derived AI and HTML
 views in one memoized proc state. It is **not built**: current
-`graph-definition` has only mailbox and turn
-(`src/seon/cluster/agent.clj:240-264`).
+`graph-definition` has mailbox, turn, and schedule
+(`src/seon/cluster/agent.clj:286-318`).
 
 The July 29 falsifier compared 100 parked agents in an in-memory database on
 JDK 26 with `-Xmx512m -XX:+UseG1GC`; it discarded two warm-ups, forced three

@@ -54,7 +54,7 @@ Do not flatten four distinct executor roles into “the executor”:
 | core.async default/root-held `:io` | core.async memoized virtual-per-task when available, cached-platform fallback | every current production graph's `:io` proc loop, including work launcher, cluster, agent, and fault graphs | `reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj:82-105`; `src/seon/cluster.clj:158-182,1079-1096`; `src/seon/cluster/agent.clj:337-390`; `src/seon/flow.clj:381-423,626-666` |
 | process-root `:compute` | Seon fixed platform pool, size `availableProcessors` | work-launcher graph `:compute` transforms | `src/seon/cluster.clj:158-182`; `src/seon/flow.clj:381-423` |
 | core.async default `:compute` | core.async memoized cached platform pool | any graph with a `:compute` proc and no `:compute-exec` override | `reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj:91-105`; `reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:145-148` |
-| work task executor | Seon virtual-thread-per-task | submitted SCI evaluation tasks | `src/seon/flow.clj:135-137,199-229,401-430`; `src/seon/cluster/loop.cljc:509-525` |
+| work task executor | Seon virtual-thread-per-task | submitted SCI evaluation tasks | `src/seon/flow.clj:135-137,199-229,401-430`; `src/seon/cluster/loop.clj:559-590` |
 
 Core.async constructs and memoizes the default executors at
 `reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj:71-105`;
@@ -93,8 +93,8 @@ still consume application-level admission and retain their live state.
 ## The bounded submission owner
 
 `seon.flow/submit!!` is the one public submission operation
-(`src/seon/flow.clj:469-497`). The production turn path uses it at
-`src/seon/cluster/loop.cljc:509-525`; do not evaluate inline on the turn proc.
+(`src/seon/flow.clj:652-683`). The production turn path uses it at
+`src/seon/cluster/loop.clj:559-590`; do not evaluate inline on the turn proc.
 
 The launcher owns:
 
@@ -141,12 +141,14 @@ turn those host measurements into universal constants.
 
 ## What a capability boundary changes
 
-There is no current effect/capability door in fresh `src/`. The fresh SCI host
-bindings are pure `my.run` and `my.message` surfaces, and workload reachability
-over `:seon.fn/calls` is not implemented. Treat both as target work.
+`seon.effect/request!` is the one system-side owner for capability requests. It
+records the request identity before invoking a protected JVM handler, bounds
+terminal data, commits settlement once, and recovery never dispatches an open
+receipt again (`src/seon/effect.clj:1-19,554-566`). Workload reachability over
+`:seon.fn/calls` remains unimplemented.
 
-When a genuine capability boundary lands, it creates the first honest place to
-separate CPU admission from blocking transport:
+The shipped request owner is the honest place to separate CPU admission from
+blocking transport:
 
 1. Enter interpreted computation under bounded CPU admission.
 2. At the capability request, publish an addressable request and release CPU
@@ -154,8 +156,9 @@ separate CPU admission from blocking transport:
 3. Run blocking transport as `:io`.
 4. Reacquire CPU admission before resuming interpreted computation.
 
-This is the target examined by the CPU-segment probe, not current behavior.
-Do not fake it by annotating an entire mixed chain `:io`, adding another
+The four-stage placement sequence remains **[TARGET]**; the request owner alone
+does not implement CPU-permit release and reacquisition. Do not fake it by
+annotating an entire mixed chain `:io`, adding another
 executor, or inspecting function names. Placement is intended to derive from
 program-graph call edges and leaf workload facts; that reachability owner is
 still **[TARGET]**.

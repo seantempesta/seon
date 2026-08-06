@@ -17,10 +17,8 @@ over the real database.
 
 **The CLJS build is OFF.** The one current correctness gate is `bin/test`; it
 discovers only `*_test.clj` and `*_test.cljc` beneath fresh `test/`
-(`bin/test:1-22,84-99`). The retained `:cljs` alias is explicitly dead, and
-the old `:writer`/`:writer-test` aliases are quarry-only
-(`deps.edn:101-110,162-184`). Do not look for, restore, or invent a CLJS or
-writer test command to satisfy an old instruction.
+(`AGENTS.md:247-254`; `bin/test:1-11,118-142`). Do not restore or invent a CLJS
+or writer test command to satisfy an old instruction.
 
 ## Running
 

@@ -36,11 +36,12 @@ Read `references/fork-maintenance.md` before editing the fork. It maps:
 - the fork's own Kaocha focus command plus Seon's separate
   `seon.datahike-fork-test` acceptance gate.
 
-The root gitlink currently selects
-`c15272730e74fb3f8bba91f6361c268492a99ba7`. Verify both the gitlink and the
-submodule checkout before every fork edit; the dependency ledger and source
-map are in `references/fork-maintenance.md`. Never treat a historical repair
-commit as current provenance.
+The root gitlink and checkout currently select
+`56f1c62105b7087f0cac13162f9fd54b1690986e`. Verify both before every fork edit;
+the selected identity comes from `git ls-files -s reference-code/datahike` and
+`git -C reference-code/datahike rev-parse HEAD`. The dependency ledger and
+source map are in `references/fork-maintenance.md`. Never treat a historical
+repair commit as current provenance.
 
 ## The runtime: co-located, synchronous, one connection per branch
 
@@ -83,10 +84,8 @@ on the database path.
   code calls it for `q`, `pull`, `pull-many`, `entity`, `datoms`, `db`,
   `history`, `as-of`, `since`, and `transact!`. Only `seon.db` itself and the
   store/registry custody owners for open, release, and branch lifecycle may
-  require `datahike.api` directly. The pre-ruling 34-namespace call-site sweep
-  is still in flight; do not copy those old direct calls
-  (`docs/seon/issues/seon-db-is-not-the-one-database-namespace.md:77-125`;
-  `src/seon/db.clj:1-14,159-170,198-248,262-443,501-517`).
+  require `datahike.api` directly
+  (`src/seon/db.clj:1-14,159-170,198-248,262-443,501-517`).
 
 A database is a **value, not a place**. The "race" you think you have ("the database moved
 between deciding and acting") is almost always re-reading the connection three
@@ -226,11 +225,12 @@ derives every Datahike facet — `:db/valueType`, `:db/cardinality`, `:db/unique
 `:db/isComponent`, `:db/index`, `:db/noHistory`. Never write `:db.type/*`
 yourself.
 
-`schema.edn/load!` reads `seon/schema.edn` with one classpath resource lookup,
-refuses duplicate keys and an unreadable resource, and contributes
+`schema.edn/load!` reads the `seon/schemas` classpath directory, merges its EDN
+resources, refuses duplicate keys and unreadable resources, and contributes
 candidates without activation. Activation admits the whole population:
 references must resolve and every predicate must be registered and carry an
-honest generator. Production cluster population then installs the derived
+honest generator (`src/seon/schema/edn.clj:1-15,49-51,143-225,234-324`).
+Production cluster population then installs the derived
 Datahike declarations and canonical schema rows.
 
 **Population is not installation.** Loading/activation teaches the registry;
@@ -253,7 +253,7 @@ A config attribute is declared once under `resources/seon/schemas/`.
 declarations. Never hand-maintain those composite maps or a second dial roster. `config/default.edn` is the
 complete shipped decision document; it is data, not another schema list.
 
-### Program rows, base context, run fork, and session image are distinct
+### Program rows, base context, turn fork, and agent desk are distinct
 
 Keep the four states separate; the checked current/target source is
 [`program-state.md`](../data-oriented-clojure/references/program-state.md).
@@ -630,8 +630,8 @@ listener is the sanctioned alternative to polling or a tuned timeout
 | `src/seon/fn.clj` | static first-party rows plus global schema EDN rows; `current-src` publication only |
 | `src/seon/sci/eval.clj` | selective runtime publication of contracted functions, schemas, tests |
 | `src/seon/cluster/loop.clj` | terminal receipt plus exact `:seon.def` reconciliation |
-| program families under `resources/seon/schemas/` | program rows and durable session-image schemas |
-| `test/seon/sci/session_image_test.clj` | cold session-image restoration acceptance |
+| `resources/seon/schemas/seon.def.edn` | agent-scoped desk facts and restore-ladder shapes (`:1-45`) |
+| `test/seon/sci/desk_test.clj` | cross-JVM desk rehydration and explicit-clear acceptance (`:184-225`) |
 | `reference-code/datahike/src/datahike/api/impl.cljc` | accepted transact argument shapes |
 | `reference-code/datahike/` | the fork's source — read it, don't guess semantics |
 

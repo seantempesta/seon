@@ -20,7 +20,7 @@ alternative was rejected.
 The authoritative ruling index is
 `docs/prds/sci-execution-runtime/plan/README.md`. Follow its numbered rulings
 and current ladder rather than copying old implementation shapes from
-`src-old/`.
+the Git-history quarry (`AGENTS.md:247-254`).
 
 This reference explains the reasons that recur in flow work. Check the ledger
 for exact wording and later supersessions before treating any summary as the
@@ -42,7 +42,7 @@ Plan ruling: the 2026-07-28 agents-are-flows ruling at
 
 Current proof:
 
-- two-proc blueprint at `src/seon/cluster/agent.clj:240-264`;
+- three-proc blueprint at `src/seon/cluster/agent.clj:286-318`;
 - derive-all armer at `src/seon/cluster/agent.clj:435-484`; and
 - measured parked-proc cost in
   `docs/prds/sci-execution-runtime/research/flow-mechanics-2026-07-28.md`.
@@ -74,7 +74,7 @@ Recovery does not replay an interrupted effect, plan suffix, or turn.
 Reopening the database marks dangling receipts interrupted, rebuilds graphs,
 and lets the agent adapt from durable facts.
 
-Read `src/seon/cluster/run.cljc:866-930` and the boot recovery position at
+Read `src/seon/cluster/run.clj:866-930` and the boot recovery position at
 `src/seon/cluster.clj:1322-1328`. The database records what settled; absence or
 an interrupted receipt is evidence for the next agent decision, not authority
 for an automatic retry.
@@ -95,7 +95,7 @@ The transport law divides values by recovery need:
   backpressure, or observation may drop.
 
 Current examples are the sliding agent wake at
-`src/seon/cluster/agent.clj:240-264`, render/stream inputs at
+`src/seon/cluster/agent.clj:286-318`, render/stream inputs at
 `src/seon/cluster.clj:1119-1148`, and counted-dropping fault observation at
 `src/seon/flow.clj:633-701`.
 
@@ -134,8 +134,8 @@ Current examples:
 
 - armer derives missing graph custody from agents minus armed agents;
 - turn passes derive work after a payload-free wake; and
-- the renderer derives page snapshots from the current database value and
-  suppresses equal bytes (`src/seon/render/web.clj:300-350,443-549`).
+- the renderer derives revisioned packages from the current database value and
+  suppresses equal bytes (`src/seon/render/web.clj:553-600,631-735`).
 
 Plan ruling 19 derives reactivity from render input and display-fact presence:
 `docs/prds/sci-execution-runtime/plan/README.md:961-981`.
@@ -179,11 +179,11 @@ The generalized agent-authored canvas/control API and guarded `/call` route
 remain **[TARGET]**: the live route table has neither, and current interaction
 is the fixed inbound-message route plus a page-local checkbox
 (`src/seon/render/route.clj:5-27`;
-`src/seon/render/web.clj:1027-1037,1104-1110`). Revisioned packages/keyframes
-and agent-owned `::renders` also remain **[TARGET]**; current delivery uses
-complete snapshots with per-tab comparison and the agent graph still contains
-only mailbox and turn (`src/seon/render/web.clj:497-804`;
-`src/seon/cluster/agent.clj:240-264`).
+`src/seon/render/web.clj:1027-1037,1104-1110`). Agent-owned `::renders` remains
+**[TARGET]**; current delivery already uses revisioned packages with delta and
+keyframe bytes, while the agent graph contains mailbox, turn, and schedule
+(`src/seon/render/web.clj:553-600,930-1026`;
+`src/seon/cluster/agent.clj:286-318`).
 
 These built and target boundaries apply the simpler facts/channels/derived-
 render model without restoring the deleted CLJS mechanisms

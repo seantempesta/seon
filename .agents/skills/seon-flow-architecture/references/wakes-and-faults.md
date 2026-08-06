@@ -17,7 +17,7 @@ or changing fault capture and `:record`/`:panic` behavior.
 ## One listener router
 
 Fresh Seon installs one Datahike `listen!` router per cluster. `route!` lives at
-`src/seon/cluster/wake.cljc:163-228` and receives transaction reports.
+`src/seon/cluster/wake.clj:163-228` and receives transaction reports.
 
 The router currently:
 
@@ -35,7 +35,7 @@ Messages and identities are already database facts.
 ## The two hard listener rules
 
 The owning source documents two measured rules at
-`src/seon/cluster/wake.cljc:6-63`.
+`src/seon/cluster/wake.clj:6-63`.
 
 ### Never throw
 
@@ -86,42 +86,12 @@ Current routing is intentionally incomplete:
 | cluster renderer | every transaction report |
 
 Verify the actual datom extraction and offers at
-`src/seon/cluster/wake.cljc:163-228`.
+`src/seon/cluster/wake.clj:163-228`.
 
 Do not describe the current renderer as attribute-selective. It receives every
 report, then its own equality checks suppress unchanged output
 (`src/seon/render/web.clj:497-549`). Attribute/query interest derivation is
 target work needed by agent-owned renders.
-
-## Historical E/A/V machinery worth reusing
-
-The deleted pod writer contains a source-grounded design for selective
-interest. Treat it as quarry, not live code:
-`src-old/seon/db/writer.clj:2756-3205`.
-
-Its useful design is:
-
-1. Normalize each interest into attribute dependencies and optional E/A/V
-   patterns (`src-old/seon/db/writer.clj:2756-2847`).
-2. Derive query attributes from Datahike's dependency plan rather than a
-   handwritten attribute list (`src-old/seon/db/writer.clj:2848-2981`).
-3. Match entity/attribute/value pattern positions against transaction datoms
-   (`src-old/seon/db/writer.clj:2982-3002`).
-4. Index candidate interests by affected attribute
-   (`src-old/seon/db/writer.clj:3174-3189`).
-5. Apply the complete pattern before delivery
-   (`src-old/seon/db/writer.clj:3191-3205`).
-
-Reuse the construction lessons, not the namespace, atoms, or old writer
-boundary. Fresh Seon owns one cluster listener in `seon.cluster.wake`; any
-replacement strengthens that one router.
-
-The design obligation is conservative completeness:
-
-- never omit a consumer whose query could change;
-- accept extra candidates only when downstream equality suppression is cheap;
-- derive attributes from maintained query/dependency data; and
-- keep pattern matching pure and testable outside the listener.
 
 ## Fault fan-out
 
@@ -152,7 +122,7 @@ system defects.
 The cluster reads one `:seon.config/on-core-error` decision and passes it to
 the fan-out at `src/seon/cluster.clj:1151-1190`.
 
-Current modes are declared at `resources/seon/schema.edn:595`:
+Current modes are declared at `resources/seon/schemas/seon.config.edn:39-40`:
 
 - `:record`: commit the fault and keep the graph operating where possible;
 - `:panic`: call the supplied panic handler.

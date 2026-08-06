@@ -42,13 +42,13 @@ Read absence from the bottom upward:
 | advertisement, no `:seon.store/store` | REPL stands; process-root store acquisition failed |
 | store, no `:seon.boot/cluster-connection` | ancestor, branch creation, or branch open failed |
 | connection, no `:seon.boot/config-result` | coherent-program validation, schema accretion, recovery, or config application failed; use the exception cause to select among them |
-| config result, no `:seon.sci.eval/ctx` | cluster/root-agent fact convergence, cold program acquisition, or durable session-image restoration failed |
+| config result, no `:seon.sci.eval/ctx` | cluster/root-agent fact convergence, cold program acquisition, or base-context construction failed |
 | SCI ctx, no routing/served value | work-launcher install, agent arm, or web serve failed |
 | `:seon.boot/ready-ms` | the complete tower returned |
 
 This table follows the actual publish points and order at
-`src/seon/cluster.clj:1289-1386,1388-1485`; context construction and
-session-image restoration are at `src/seon/sci/eval.clj:1142-1228`. Do not
+`src/seon/cluster.clj:1289-1386,1388-1485`; the program-only base context is
+built at `src/seon/sci/eval.clj:1369-1392`. Do not
 infer a higher layer from a pid or open socket alone.
 
 ## 2. Inspect the advertisement before touching lifecycle
