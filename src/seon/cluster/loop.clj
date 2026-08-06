@@ -35,9 +35,7 @@
   transaction wrote. The sealed suite drives the rows as kill positions
   in a state-machine property, per agent."
   (:require [clojure.core.async :as async]
-            [sci.core :as sci]
             [clojure.string :as str]
-            [clojure.core.async.flow :as flow]
             [seon.ai :as ai]
             [seon.blob :as blob]
             [seon.context :as context]
@@ -45,13 +43,11 @@
             [seon.cluster.prompt :as prompt]
             [seon.cluster.reply :as reply]
             [seon.cluster.run :as run]
-            [seon.cluster.wake :as wake]
             [seon.cluster.work :as work]
             [seon.config :as config]
             [seon.db :as db]
             [seon.error :as error]
             [seon.flow :as seon.flow]
-            [seon.fn.analyzer :as fn.analyzer]
             [seon.problems :as problems]
             [seon.render :as render]
             [seon.render.value :as render.value]
@@ -68,98 +64,6 @@
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})
-
-(defn lint-form
-  "Replace one error-bearing source form with a flat lint refusal.
-
-  The namespace row and program functions come from the current database
-  value so an earlier REPL form's committed resolver changes govern this
-  form."
-  {:malli/schema
-   [:=>
-    [:cat
-     [:map
-      [:seon.ns/name :seon.ns/name]
-      [::namespace-row {:optional true} :map]
-      [::available-functions {:optional true} [:vector :map]]
-      [::source :seon.cluster.reply/form]]]
-    :seon.cluster.reply/form]}
-  [{namespace-name :seon.ns/name
-    namespace-row ::namespace-row
-    available-functions ::available-functions
-    source ::source}]
-  (let [namespace-row
-        (some-> namespace-row
-                (update :seon.ns/requires
-                        (fn [required-namespaces]
-                          (into #{}
-                                (map :seon.ns/name)
-                                required-namespaces))))
-        analyzed
-        (first
-         (fn.analyzer/analyze-forms
-          (cond->
-           {::fn.analyzer/namespace-name namespace-name
-            ::fn.analyzer/available-functions available-functions
-            ::fn.analyzer/sources
-            [(:seon.cluster.run.form/source source)]}
-            namespace-row
-            (assoc ::fn.analyzer/namespace-row namespace-row))))
-        findings (::fn.analyzer/findings analyzed)
-        errors (filterv #(= :error (::fn.analyzer/level %)) findings)]
-    (if (seq errors)
-      (assoc source
-             :seon.cluster.run.form/source
-             (pr-str
-              (list
-               'quote
-               {:seon.error/kind ::lint-rejected
-                :seon.error/message
-                (str "Static analysis rejected this source form with "
-                     (count errors) " error finding(s).")
-                :seon.error/data
-                {:seon.cluster.run.form/source
-                 (:seon.cluster.run.form/source source)
-                 ::fn.analyzer/findings findings}})))
-      source)))
-
-(defn- available-functions
-  [db ctx]
-  (let [namespace-state (sci/namespace-state ctx)]
-    (->> (concat
-          (map (fn [[sym private? arglists]]
-                 (cond-> {:seon.fn/sym sym
-                          :seon.fn/private? private?}
-                   (seq arglists)
-                   (assoc :seon.fn/arglists arglists)))
-               (db/q '[:find ?sym ?private ?arglists
-                      :where
-                      [?function :seon.fn/sym ?sym]
-                      [(get-else $ ?function :seon.fn/private? false)
-                       ?private]
-                      [(get-else $ ?function :seon.fn/arglists "")
-                       ?arglists]]
-                    db))
-          (mapcat
-           (fn [[namespace-name intern-names]]
-             (map (fn [intern-name]
-                    (let [intern-meta
-                          (meta (get-in namespace-state
-                                        [namespace-name intern-name]))]
-                      (cond->
-                       {:seon.fn/sym
-                        (str (symbol (str namespace-name) (str intern-name)))
-                        :seon.fn/private? (boolean (:private intern-meta))}
-                        (seq (:arglists intern-meta))
-                        (assoc :seon.fn/arglists
-                               (pr-str (:arglists intern-meta))))))
-                  intern-names))
-           (sci/namespace-interns ctx)))
-         (reduce (fn [by-symbol row]
-                   (assoc by-symbol (:seon.fn/sym row) row)) {})
-         vals
-         (sort-by :seon.fn/sym)
-         vec)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The pure turn
@@ -1143,39 +1047,18 @@
          db run-id)))
 
 (defn- admitted-form
-  "One run form after namespace-sensitive static admission."
+  "One durable run form projected into its evaluation namespace."
   [{db :seon.db/db
     run-id :seon.cluster.run/id
     ordinal :seon.cluster.run.form/ordinal
-    ctx :seon.sci.eval/ctx
     current-namespace ::current-namespace
     fallback-namespace ::fallback-namespace}]
   (let [form (form-data db run-id ordinal)
         evaluation-namespace
         (or current-namespace
             (second (:seon.cluster.run.form/ns form))
-            fallback-namespace)
-        namespace-row
-        (db/pull db
-                '[* {:seon.ns/requires [:seon.ns/name]}
-                    {:seon.ns/aliases [*]}
-                    {:seon.ns/imports [*]}
-                    {:seon.ns/refers [*]}]
-                [:seon.ns/name evaluation-namespace])
-        admitted-source
-        (lint-form
-         (cond->
-          {:seon.ns/name evaluation-namespace
-           ::available-functions (available-functions db ctx)
-           ::source
-           {:seon.cluster.run.form/source
-            (:seon.cluster.run.form/source form)
-            :seon.ns/name evaluation-namespace}}
-           namespace-row (assoc ::namespace-row namespace-row)))]
-    (assoc form
-           :seon.cluster.run.form/source
-           (:seon.cluster.run.form/source admitted-source)
-           :seon.cluster.run.form/ns
+            fallback-namespace)]
+    (assoc form :seon.cluster.run.form/ns
            [:seon.ns/name evaluation-namespace])))
 
 (defn- evaluation-request

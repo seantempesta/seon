@@ -61,11 +61,6 @@
   [request]
   (let [source (:seon.cluster.run.form/source request)]
     (cond
-      (str/includes? source ":seon.cluster.loop/lint-rejected")
-      (let [value (second (read-string source))]
-        {:seon.cluster.eval/result-edn (pr-str value)
-         :seon.sci.admit/value value})
-
       (re-find #"my\.run/complete" source)
       (let [value (my.run/complete "done")]
         {:seon.cluster.eval/result-edn (pr-str value)
@@ -261,17 +256,6 @@
   (and (every? #(empty? (work/unanswered-triggers db %)) agent-ids)
        (empty? (open-runs db))))
 
-(defn- scripted-completer
-  "Record each provider request and return the corresponding reply."
-  [ledger calls replies]
-  (fn [request]
-    (let [call-count (count (swap! ledger conj request))]
-      (async/put! calls request)
-      {:seon.ai/text
-       (nth replies
-            (dec call-count)
-            "(my.run/complete \"unexpected extra provider call\")")})))
-
 (defn- database-events
   [connection]
   (let [events (async/chan 64)
@@ -285,35 +269,6 @@
   (d/unlisten connection
               (:seon.cluster.agent-test/listener-key event-source))
   (async/close! (:seon.cluster.agent-test/events event-source)))
-
-(defn- await-quiescence!
-  [event-source agent-ids receipt-count]
-  (test-support/await-event!
-   (:seon.cluster.agent-test/events event-source)
-   ::quiescent
-   #(let [db (:db-after %)]
-      (and (quiescent? db agent-ids)
-           (= receipt-count
-              (or (db/q '[:find (count ?receipt) .
-                         :where
-                         [?receipt :seon.cluster.eval/id _]]
-                       db)
-                  0))))))
-
-(defn- lint-refusal-results
-  [db]
-  (->> (db/q '[:find [?serialized ...]
-              :where
-              [_ :seon.cluster.eval/result-edn ?serialized]]
-            db)
-       (keep (fn [serialized]
-               (try
-                 (let [value (read-string serialized)]
-                   (when (= :seon.cluster.loop/lint-rejected
-                            (:seon.error/kind value))
-                     value))
-                 (catch Exception _ nil))))
-       vec))
 
 (deftest prompt-request-without-context-channel-is-a-flat-refusal
   (with-connection
@@ -413,157 +368,6 @@
           (finally
             (stop-database-events! connection events)
             (disarm-all! routing)))))))
-
-;;; ---------------------------------------------------------------------------
-;;; Ruling #22 — lint refusals continue the episode without a message
-;;; ---------------------------------------------------------------------------
-
-(deftest lint-refusals-continue-the-episode-until-the-cap
-  (let [refused-source
-        "(my.message/send \"nobody\" \"body\" \"about\" \"extra\")"
-        completed-source "(my.run/complete \"corrected\")"]
-    (testing "an all-refused turn opens the next turn with its finding"
-      (with-connection
-        (fn [connection ctx]
-          (let [routing (armory)
-                ledger (atom [])
-                calls (async/chan 4)
-                events (database-events connection)]
-            (db/transact! connection
-                        [(agent-row "all-refused")
-                         (config-row "r22-all-refused"
-                                     {:seon.config.run/max-episode-runs 3})])
-            (try
-              (with-redefs [ai/complete
-                            (scripted-completer
-                             ledger calls
-                             [refused-source completed-source])]
-                (let [entry (arm-one! connection ctx routing "all-refused")]
-                  (outside-trigger! connection "all-refused"
-                                    "r22-all-message" "do the work")
-                  (async/offer! (:seon.cluster.wake/channel entry) ::wake)
-                  (test-support/await-event! calls ::first-provider-call)
-                  (test-support/await-event! calls
-                                             ::refusal-continuation-call)
-                  (await-quiescence! events ["all-refused"] 2)
-                  (is (= 2 (count @ledger))
-                      "the refusal itself derives exactly one next turn")
-                  (let [refusals (lint-refusal-results @connection)
-                        second-prompt (:seon.ai/prompt (second @ledger))]
-                    (is (= 1 (count refusals))
-                        "production linting committed one flat refusal")
-                    (is (and (string? second-prompt)
-                             (str/includes? second-prompt "expects 2 or 3"))
-                        "the next turn sees the exact arity finding")
-                    (is (= 1 (or (db/q '[:find (count ?message) .
-                                         :where
-                                         [?message :seon.cluster.message/id _]]
-                                       @connection)
-                                 0))
-                        "no self-message or second external message continued it")
-                    (is (= 2 (count (db/q '[:find [?run ...]
-                                           :where
-                                           [?run :seon.cluster.run/id _]]
-                                         @connection)))
-                        "the corrective turn opened exactly one new run")
-                    (is (nil? (work/next-agent-work
-                               @connection
-                               {:seon.cluster.agent/id "all-refused"
-                                :seon.cluster.run/process process
-                                :seon.cluster.work/now (Date.)}))
-                        "the clean correction prevents the old refusal resurfacing"))))
-              (finally
-                (stop-database-events! connection events)
-                (async/close! calls)
-                (disarm-all! routing)))))))
-
-    (testing "one successful form does not hide a refusal"
-      (with-connection
-        (fn [connection ctx]
-          (let [routing (armory)
-                ledger (atom [])
-                calls (async/chan 4)
-                events (database-events connection)]
-            (db/transact! connection
-                        [(agent-row "mixed-refusal")
-                         (config-row "r22-mixed-refusal"
-                                     {:seon.config.run/max-episode-runs 3})])
-            (try
-              (with-redefs [ai/complete
-                            (scripted-completer
-                             ledger calls
-                             [(str "(+ 1 1)\n" refused-source)
-                              completed-source])]
-                (let [entry (arm-one! connection ctx routing "mixed-refusal")]
-                  (outside-trigger! connection "mixed-refusal"
-                                    "r22-mixed-message" "do both forms")
-                  (async/offer! (:seon.cluster.wake/channel entry) ::wake)
-                  (test-support/await-event! calls ::first-provider-call)
-                  (test-support/await-event! calls
-                                             ::mixed-refusal-continuation-call)
-                  (await-quiescence! events ["mixed-refusal"] 3)
-                  (is (= 2 (count @ledger))
-                      "a mixed turn derives exactly one next turn")
-                  (let [refusals (lint-refusal-results @connection)
-                        second-prompt (:seon.ai/prompt (second @ledger))]
-                    (is (= 1 (count refusals)))
-                    (is (and (string? second-prompt)
-                             (str/includes? second-prompt "expects 2 or 3"))
-                        "the mixed turn's refusal finding reaches context")
-                    (is (= 3 (or (db/q '[:find (count ?receipt) .
-                                         :where
-                                         [?receipt :seon.cluster.eval/id _]]
-                                       @connection)
-                                 0))
-                        "both first-turn forms and the corrected form settled")
-                    (is (nil? (work/next-agent-work
-                               @connection
-                               {:seon.cluster.agent/id "mixed-refusal"
-                                :seon.cluster.run/process process
-                                :seon.cluster.work/now (Date.)}))
-                        "the successful correction retires the mixed refusal"))))
-              (finally
-                (stop-database-events! connection events)
-                (async/close! calls)
-                (disarm-all! routing)))))))
-
-    (testing "the existing episode cap remains the only bound"
-      (with-connection
-        (fn [connection ctx]
-          (let [routing (armory)
-                ledger (atom [])
-                calls (async/chan 4)
-                events (database-events connection)
-                request {:seon.cluster.agent/id "capped-refusal"
-                         :seon.cluster.run/process process
-                         :seon.cluster.work/now (Date.)}]
-            (db/transact! connection
-                        [(agent-row "capped-refusal")
-                         (config-row "r22-capped-refusal"
-                                     {:seon.config.run/max-episode-runs 1})])
-            (try
-              (with-redefs [ai/complete
-                            (scripted-completer
-                             ledger calls
-                             [refused-source completed-source])]
-                (let [entry (arm-one! connection ctx routing "capped-refusal")]
-                  (outside-trigger! connection "capped-refusal"
-                                    "r22-capped-message" "do the work")
-                  (async/offer! (:seon.cluster.wake/channel entry) ::wake)
-                  (test-support/await-event! calls ::capped-provider-call)
-                  (await-quiescence! events ["capped-refusal"] 1)
-                  (is (seq (lint-refusal-results @connection))
-                      "the first turn closed with its refusal")
-                  (is (nil? (work/next-agent-work @connection request))
-                      "a refusal at the cap derives no continuation")
-                  (is (nil? (async/poll! calls))
-                      "the capped refusal published no second call event")
-                  (is (= 1 (count @ledger))
-                      "the capped refusal made no second provider call")))
-              (finally
-                (stop-database-events! connection events)
-                (async/close! calls)
-                (disarm-all! routing)))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; 1. n-agent-parallel-turns-property — seed 2026072811

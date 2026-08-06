@@ -31,7 +31,6 @@
             [seon.cluster.wake :as wake]
             [seon.cluster.work :as work]
             [seon.flow :as seon.flow]
-            [seon.fn.analyzer :as fn.analyzer]
             [seon.problems :as problems]
             [seon.render.web :as web]
             [seon.schema :as schema]
@@ -208,51 +207,29 @@
                 @connection))
             "the durable attempt and display gauges settle together")))))
 
-(deftest admitted-form-preserves-current-namespace-and-lints-one-source
+(deftest admitted-form-preserves-current-namespace-and-source
   (let [db {:immutable :database-value}
-        ctx {:live :context}
         form {:seon.cluster.run.form/source "(+ 1 2)"
               :seon.cluster.run.form/ns [:seon.ns/name 'parse.namespace]}
-        namespace-row {:seon.ns/name 'current.namespace
-                       :seon.ns/requires [{:seon.ns/name 'clojure.set}]}
-        available [{:seon.fn/sym 'clojure.core/+}]
         calls (atom [])]
     (with-redefs-fn
       {(ns-resolve 'seon.cluster.loop 'form-data)
        (fn [actual-db run-id ordinal]
          (swap! calls conj [:form actual-db run-id ordinal])
-         form)
-       #'db/pull
-       (fn [actual-db pattern lookup-ref]
-         (swap! calls conj [:pull actual-db pattern lookup-ref])
-         namespace-row)
-       (ns-resolve 'seon.cluster.loop 'available-functions)
-       (fn [actual-db actual-ctx]
-         (swap! calls conj [:available actual-db actual-ctx])
-         available)
-       #'cluster.loop/lint-form
-       (fn [request]
-         (swap! calls conj [:lint request])
-         (assoc (::cluster.loop/source request)
-                :seon.cluster.run.form/source "(inc 2)"))}
+         form)}
       (fn []
-        (is (= {:seon.cluster.run.form/source "(inc 2)"
+        (is (= {:seon.cluster.run.form/source "(+ 1 2)"
                 :seon.cluster.run.form/ns
                 [:seon.ns/name 'current.namespace]}
                ((private-loop-fn 'admitted-form)
                 {:seon.db/db db
                  :seon.cluster.run/id "run-1"
                  :seon.cluster.run.form/ordinal 3
-                 :seon.sci.eval/ctx ctx
                  :seon.cluster.loop/current-namespace 'current.namespace
                  :seon.cluster.loop/fallback-namespace 'fallback.namespace})))
-        (is (= [:form db "run-1" 3] (first @calls)))
-        (is (= [:seon.ns/name 'current.namespace]
-               (last (nth @calls 1)))
-            "the per-form namespace pull uses the current evaluation namespace")
-        (is (= [:available db ctx] (nth @calls 2)))
-        (is (= 'current.namespace
-               (get-in (last @calls) [1 :seon.ns/name])))))))
+        (is (= [[:form db "run-1" 3]] @calls))
+        (is (= "(+ 1 2)" (:seon.cluster.run.form/source form))
+            "the evaluator receives the durable source without a second admission pass")))))
 
 (deftest evaluation-request-projects-the-admitted-form-and-cluster-controls
   (let [ctx {:live :context}
@@ -497,16 +474,12 @@
                 admitted-form (private-loop-fn 'admitted-form)
                 resumed-namespace (fold-namespace @connection run-id 1)
                 form
-                (with-redefs [cluster.loop/lint-form
-                              (fn [{source :seon.cluster.loop/source}]
-                                source)]
-                  (admitted-form
-                   {:seon.db/db @connection
-                    :seon.cluster.run/id run-id
-                    :seon.cluster.run.form/ordinal 1
-                    :seon.sci.eval/ctx ctx
-                    :seon.cluster.loop/current-namespace resumed-namespace
-                    :seon.cluster.loop/fallback-namespace starting-ns}))
+                (admitted-form
+                 {:seon.db/db @connection
+                  :seon.cluster.run/id run-id
+                  :seon.cluster.run.form/ordinal 1
+                  :seon.cluster.loop/current-namespace resumed-namespace
+                  :seon.cluster.loop/fallback-namespace starting-ns})
                 evaluation
                 (sci.eval/evaluate
                  {:seon.cluster.run.form/source
@@ -882,98 +855,6 @@
                        (:seon.config.ai/model
                         (edn/read-string
                          (:seon.ai.attempt/settings-edn last-row))))))))))))))
-
-(defn- lint-plan
-  [sources]
-  (mapv
-   (fn [source]
-     (cluster.loop/lint-form
-      {:seon.ns/name 'my.agents.lint-test
-       :seon.cluster.loop/namespace-row
-       {:seon.ns/name 'my.agents.lint-test}
-       :seon.cluster.loop/source
-       {:seon.cluster.run.form/source source
-        :seon.ns/name 'my.agents.lint-test}}))
-   sources))
-
-(deftest lint-rejection-is-per-form-data-at-execution
-  (let [originals (mapv #(str "(+ " % " " % ")") (range 10))
-        originals (assoc originals 4 "(missing 4)")
-        admitted (lint-plan originals)
-        admitted-sources (mapv :seon.cluster.run.form/source admitted)
-        rejected-value (second (read-string (nth admitted-sources 4)))]
-    (testing "nine independent forms retain their exact bytes and execute"
-      (is (= (vec (concat (subvec originals 0 4)
-                          (subvec originals 5)))
-             (vec (concat (subvec admitted-sources 0 4)
-                          (subvec admitted-sources 5)))))
-      (is (= [0 2 4 6 10 12 14 16 18]
-             (mapv (comp eval read-string)
-                   (concat (subvec admitted-sources 0 4)
-                           (subvec admitted-sources 5))))))
-    (testing "the rejected ordinal is a literal flat error, not executable source"
-      (is (= ::cluster.loop/lint-rejected (:seon.error/kind rejected-value)))
-      (is (= "(missing 4)"
-             (get-in rejected-value
-                     [:seon.error/data :seon.cluster.run.form/source])))
-      (is (= :unresolved-symbol
-             (get-in rejected-value
-                     [:seon.error/data ::fn.analyzer/findings 0
-                      ::fn.analyzer/type])))
-      (let [evaluation
-            (sci.eval/evaluate
-             {:seon.cluster.run.form/source (nth admitted-sources 4)
-              :seon.sci.admit/caps
-              (config/result-caps (config/defaults))
-              :seon.sci.eval/time-limit-ms 2000
-              :seon.config/on-core-error :panic})]
-        (is (= rejected-value (:seon.sci.admit/value evaluation)))
-        (is (string? (:seon.cluster.eval/result-edn evaluation))))))
-  (testing "warnings never reject"
-    (let [warning-source "(let [unused 1] 2)"]
-      (is (= warning-source
-             (:seon.cluster.run.form/source
-              (first (lint-plan [warning-source])))))))
-  (testing "a dependent form is separately rejected when kondo flags it"
-    (let [admitted (lint-plan ["(defn broken [] (missing))"
-                               "(broken 1)"])]
-      (is (every?
-           #(= ::cluster.loop/lint-rejected
-               (:seon.error/kind
-                (second
-                 (read-string (:seon.cluster.run.form/source %)))))
-           admitted)))))
-
-(deftest linting-a-new-agent-namespace-uses-the-database-program-graph
-  (let [source "(my.run/complete \"done\")"
-        admitted
-        (cluster.loop/lint-form
-         {:seon.ns/name 'my.agents.new-agent
-          :seon.cluster.loop/available-functions
-          [{:seon.fn/sym "my.run/complete" :seon.fn/private? false}]
-          :seon.cluster.loop/source
-          {:seon.cluster.run.form/source source
-           :seon.ns/name 'my.agents.new-agent}})]
-    (is (= source (:seon.cluster.run.form/source admitted))
-        "an absent namespace row is valid for a newly created agent")))
-
-(deftest linting-projects-required-namespace-refs-to-analyzer-symbols
-  (let [source "(authored.target/increment 41)"
-        admitted
-        (cluster.loop/lint-form
-         {:seon.ns/name 'authored.consumer
-          :seon.cluster.loop/namespace-row
-          {:seon.ns/name 'authored.consumer
-           :seon.ns/requires #{{:seon.ns/name 'authored.target}}}
-          :seon.cluster.loop/available-functions
-          [{:seon.fn/sym "authored.target/increment"
-            :seon.fn/private? false
-            :seon.fn/arglists "([x])"}]
-          :seon.cluster.loop/source
-          {:seon.cluster.run.form/source source
-           :seon.ns/name 'authored.consumer}})]
-    (is (= source (:seon.cluster.run.form/source admitted))
-        "a nested ref pull supplies the required namespace name to lint")))
 
 (deftest the-committed-set-is-computed-and-covers-what-the-loop-writes
   (let [committed (cluster.loop/committed-attributes)]
