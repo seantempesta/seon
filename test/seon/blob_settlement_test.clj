@@ -5,7 +5,7 @@
             [datahike.api :as d]
             [seon.db :as db]
             [seon.blob :as blob]
-            [seon.cluster.loop :as loop]
+            [seon.cluster.run :as run]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.config :as config]
@@ -33,18 +33,20 @@
                         :seon.render.value/max-collection 3}])
           (let [caps (config/result-caps (config/defaults))
                 full (pr-str (vec (range 20000)))
-                large (#'loop/settlement-result
-                       {:seon.db/connection connection
-                        :seon.sci.admit/caps caps}
-                       {:seon.cluster.eval/result-edn full})
-                small (#'loop/settlement-result
-                       {:seon.db/connection connection
-                        :seon.sci.admit/caps caps}
-                       {:seon.cluster.eval/result-edn "42"})
+                large-projection
+                (run/settlement-projection
+                 {:seon.db/connection connection
+                  :seon.sci.admit/caps caps}
+                 {:seon.cluster.eval/result-edn full})
+                large (nth large-projection 0)
+                small (first
+                       (run/settlement-projection
+                        {:seon.db/connection connection
+                         :seon.sci.admit/caps caps}
+                        {:seon.cluster.eval/result-edn "42"}))
                 large
                 (blob/with-publication!
-                 connection (:seon.blob/staged-writes large)
-                 #(dissoc large :seon.blob/staged-writes))]
+                 connection (nth large-projection 2) #(identity large))]
             (is (= (count full) (:seon.cluster.eval/result-size large)))
             (is (< (count (:seon.cluster.eval/result-edn large)) (count full)))
             (is (= [0 1 :seon.print/elided]

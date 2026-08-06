@@ -50,13 +50,11 @@
             [seon.flow :as seon.flow]
             [seon.problems :as problems]
             [seon.render :as render]
-            [seon.render.value :as render.value]
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.schema.form :as schema.form])
-  (:import [java.nio.charset StandardCharsets]
-           [java.util Date]))
+  (:import [java.util Date]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -307,97 +305,6 @@
          (:seon.sci.eval/desk-defs evaluation))]
     rows))
 
-(defn- result-blob-threshold
-  [db]
-  (db/q '[:find ?threshold .
-         :where [_ :seon.config.eval.result/blob-threshold ?threshold]]
-       db))
-
-(defn- store-desk-values!
-  [connection evaluation]
-  (let [threshold (result-blob-threshold @connection)]
-    (let [result
-          (reduce
-           (fn [acc candidate]
-             (if-let [serialized
-                      (sci.eval/store-faithful-edn
-                       (:seon.sci.eval/value candidate))]
-               (let [size (long (count serialized))
-                     staged (when (and threshold (> size threshold))
-                              (blob/stage! connection serialized))]
-                 (cond->
-                  (update acc :seon.sci.eval/desk-defs
-                          conj
-                          (cond-> (assoc candidate :seon.def/size size)
-                            staged
-                            (assoc :seon.def/blob
-                                   (:seon.blob/digest staged))
-
-                            (or (nil? threshold) (<= size threshold))
-                            (assoc :seon.def/value-edn serialized)))
-                   staged
-                   (update :seon.blob/staged-writes conj staged)))
-               (update acc :seon.sci.eval/desk-defs conj candidate)))
-           {:seon.sci.eval/desk-defs []
-            :seon.blob/staged-writes []}
-           (:seon.sci.eval/desk-defs evaluation))]
-      (merge evaluation result))))
-
-(defn- result-window-page-size
-  [db]
-  (db/q '[:find ?size .
-         :where [_ :seon.render.value/max-collection ?size]]
-       db))
-
-(def ^:private result-blob-fixed-growth-bytes
-  ;; DERIVED 2026-08-03 from two production-format, one-commit file-store
-  ;; cells after subtracting the measured payload terms. With result-edn
-  ;; noHistory, inline payload recurs in EAVT + AEVT across the immutable
-  ;; commit and mutable head (4R). Blob placement stores the window on those
-  ;; same four paths plus the original once as binary (4W + R); digest, size,
-  ;; and blob framing contribute the remaining 743 bytes. Both calibration
-  ;; cells derive 743 exactly: R=258/W=72 grew 5,822 vs 6,079 bytes, and
-  ;; R=358/W=72 grew 6,220 vs 6,177. The stored-shape comparison is therefore
-  ;; blob < inline exactly when 743 + 4W + R < 4R.
-  743)
-
-(defn- utf8-size
-  [value]
-  (alength (.getBytes ^String value StandardCharsets/UTF_8)))
-
-(defn- result-blob-smaller?
-  [result-edn window-edn]
-  (< (+ result-blob-fixed-growth-bytes
-        (* 4 (utf8-size window-edn))
-        (utf8-size result-edn))
-     (* 4 (utf8-size result-edn))))
-
-(defn- settlement-result
-  [cluster evaluation]
-  (if-let [result-edn (:seon.cluster.eval/result-edn evaluation)]
-    (let [connection (:seon.db/connection cluster)
-          result-size (long (count result-edn))
-          db @connection
-          threshold (result-blob-threshold db)
-          window-edn
-          (when (and threshold (> result-size threshold))
-            (render.value/result-window-edn
-             {:seon.sci.admit/caps (:seon.sci.admit/caps cluster)
-              :seon.render.value/options
-              {:seon.render.value/max-collection
-               (result-window-page-size db)}}
-             result-edn))]
-      (if (and window-edn (result-blob-smaller? result-edn window-edn))
-        (let [staged (blob/stage! connection result-edn)]
-          (assoc evaluation
-                 :seon.cluster.eval/result-edn window-edn
-                 :seon.cluster.eval/result-blob
-                 (:seon.blob/digest staged)
-                 :seon.cluster.eval/result-size result-size
-                 :seon.blob/staged-writes [staged]))
-        (assoc evaluation :seon.cluster.eval/result-size result-size)))
-    evaluation))
-
 ;;; ---------------------------------------------------------------------------
 ;;; The proc
 ;;; ---------------------------------------------------------------------------
@@ -582,14 +489,8 @@
                   ::now now}
            problem (assoc :seon.problems/form-problem problem)
            trigger (assoc :seon.cluster.message/trigger trigger)))
-        settlement-evaluation (settlement-result cluster evaluation)
-        settlement-stages (:seon.blob/staged-writes settlement-evaluation)
-        settlement-evaluation
-        (dissoc settlement-evaluation :seon.blob/staged-writes)
-        desk-evaluation
-        (store-desk-values! (:seon.db/connection cluster) evaluation)
-        desk-stages (:seon.blob/staged-writes desk-evaluation)
-        desk-evaluation (dissoc desk-evaluation :seon.blob/staged-writes)
+        [settlement-evaluation desk-evaluation settlement-stages]
+        (run/settlement-projection cluster evaluation)
         rows (desk-rows database agent-id desk-evaluation ordinal)
         receipt
         (evaluation-receipt
@@ -621,7 +522,7 @@
     {::settled settled
      ::evaluation evaluation
      ::receipt receipt
-     :seon.blob/staged-writes (into (vec settlement-stages) desk-stages)
+     :seon.blob/staged-writes settlement-stages
      :seon.db/tx-data tx-data}))
 
 (defn- refusal-terminal-data
@@ -859,7 +760,10 @@
         db @connection
         reasoning-size (when (seq reasoning-content)
                          (long (count reasoning-content)))
-        threshold (result-blob-threshold db)
+        threshold (db/q '[:find ?threshold .
+                          :where
+                          [_ :seon.config.eval.result/blob-threshold ?threshold]]
+                        db)
         reasoning-stage (when (and reasoning-size threshold
                                    (> reasoning-size threshold))
                           (blob/stage! connection reasoning-content))

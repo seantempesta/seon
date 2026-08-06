@@ -326,25 +326,6 @@
 
 (def ^:private absent-intern (Object.))
 
-(defn store-faithful-edn
-  "Serialized value exactly when EDN preserves value, class, and metadata."
-  {:malli/schema [:=> [:cat :any] [:maybe :string]]}
-  [value]
-  (try
-    (let [serialized (binding [*print-meta* true] (pr-str value))
-          restored (edn/read-string serialized)]
-      (when (and (= value restored)
-                 (= (class value) (class restored))
-                 (= (meta value) (meta restored)))
-        serialized))
-    (catch Throwable _ nil)))
-
-(defn store-faithful?
-  "True exactly when the real EDN round trip preserves all fidelity axes."
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [value]
-  (boolean (store-faithful-edn value)))
-
 (defn- intern-values
   "Dereferenced SCI intern roots keyed by qualified name."
   [ctx]

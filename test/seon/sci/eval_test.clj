@@ -20,6 +20,7 @@
             [seon.config :as config]
             [seon.cluster.agent :as agent]
             [seon.cluster.work :as work]
+            [seon.blob :as blob]
             [seon.db :as db]
             [seon.fn :as seon.fn]
             [seon.instrument :as instrument]
@@ -169,15 +170,15 @@
         ordered (sorted-set-by > 1 2 3)
         function-map {:f (fn [] 1)}
         lazy-value (map inc [1 2])]
-    (is (eval/store-faithful? tagged))
-    (is (= tagged (edn/read-string (eval/store-faithful-edn tagged))))
-    (is (not (eval/store-faithful? ordered))
+    (is (blob/store-faithful? tagged))
+    (is (= tagged (edn/read-string (blob/store-faithful-edn tagged))))
+    (is (not (blob/store-faithful? ordered))
         "a comparator-losing set is = but its restored class differs")
-    (is (not (eval/store-faithful? function-map))
+    (is (not (blob/store-faithful? function-map))
         "a function nested in otherwise ordinary data refuses the value tier")
-    (is (not (eval/store-faithful? lazy-value))
+    (is (not (blob/store-faithful? lazy-value))
         "a lazy sequence must not silently become a list")
-    (is (not (eval/store-faithful? (fn [] 1)))
+    (is (not (blob/store-faithful? (fn [] 1)))
         "an opaque closure has no faithful stored representation")))
 
 (deftest agent-print-vars-are-captured-before-sci-bindings-unwind

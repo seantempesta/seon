@@ -56,13 +56,16 @@
   (:require [clojure.edn :as edn]
             [clojure.main :as main]
             [clojure.string :as str]
+            [seon.blob :as blob]
             [seon.db :as db]
             [seon.effect :as effect]
             [seon.program :as program]
+            [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
-            [seon.schema.form :as schema.form]))
+            [seon.schema.form :as schema.form])
+  (:import [java.nio.charset StandardCharsets]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The agent pointer — owned HERE. Port manifest: old `:seon.agent/*`
@@ -72,6 +75,96 @@
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})
+
+(defn- result-blob-threshold
+  [db]
+  (db/q '[:find ?threshold .
+          :where [_ :seon.config.eval.result/blob-threshold ?threshold]]
+        db))
+
+(defn- store-desk-values!
+  [connection evaluation]
+  (let [threshold (result-blob-threshold @connection)]
+    (reduce
+     (fn [projection candidate]
+       (if-let [serialized
+                (blob/store-faithful-edn
+                 (:seon.sci.eval/value candidate))]
+         (let [size (long (count serialized))
+               staged (when (and threshold (> size threshold))
+                        (blob/stage! connection serialized))]
+           (cond->
+            (update projection :seon.sci.eval/desk-defs
+                    conj
+                    (cond-> (assoc candidate :seon.def/size size)
+                      staged
+                      (assoc :seon.def/blob (:seon.blob/digest staged))
+
+                      (or (nil? threshold) (<= size threshold))
+                      (assoc :seon.def/value-edn serialized)))
+             staged (update :seon.blob/staged-writes conj staged)))
+         (update projection :seon.sci.eval/desk-defs conj candidate)))
+     {:seon.sci.eval/desk-defs []
+      :seon.blob/staged-writes []}
+     (:seon.sci.eval/desk-defs evaluation))))
+
+(defn- result-window-page-size
+  [db]
+  (db/q '[:find ?size .
+          :where [_ :seon.render.value/max-collection ?size]]
+        db))
+
+(def ^:private result-blob-fixed-growth-bytes 743)
+
+(defn- utf8-size
+  [value]
+  (alength (.getBytes ^String value StandardCharsets/UTF_8)))
+
+(defn- result-blob-smaller?
+  [result-edn window-edn]
+  (< (+ result-blob-fixed-growth-bytes
+        (* 4 (utf8-size window-edn))
+        (utf8-size result-edn))
+     (* 4 (utf8-size result-edn))))
+
+(defn- settlement-result
+  [cluster evaluation]
+  (if-let [result-edn (:seon.cluster.eval/result-edn evaluation)]
+    (let [connection (:seon.db/connection cluster)
+          result-size (long (count result-edn))
+          database @connection
+          threshold (result-blob-threshold database)
+          window-edn
+          (when (and threshold (> result-size threshold))
+            (render.value/result-window-edn
+             {:seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+              :seon.render.value/options
+              {:seon.render.value/max-collection
+               (result-window-page-size database)}}
+             result-edn))]
+      (if (and window-edn (result-blob-smaller? result-edn window-edn))
+        (let [staged (blob/stage! connection result-edn)]
+          (assoc evaluation
+                 :seon.cluster.eval/result-edn window-edn
+                 :seon.cluster.eval/result-blob (:seon.blob/digest staged)
+                 :seon.cluster.eval/result-size result-size
+                 :seon.blob/staged-writes [staged]))
+        (assoc evaluation :seon.cluster.eval/result-size result-size)))
+    evaluation))
+
+(defn settlement-projection
+  "Project one evaluation into receipt, desk, and staged-blob settlement data."
+  {:malli/schema
+   [:=> [:cat :seon.cluster.loop/cluster :seon.cluster.loop/evaluation]
+    [:tuple :map :map [:vector :seon.blob/staged-write]]]}
+  [cluster evaluation]
+  (let [receipt (settlement-result cluster evaluation)
+        desk (store-desk-values! (:seon.db/connection cluster) evaluation)]
+    [(dissoc receipt :seon.blob/staged-writes)
+     (merge evaluation
+            (dissoc desk :seon.blob/staged-writes))
+     (into (vec (:seon.blob/staged-writes receipt))
+           (:seon.blob/staged-writes desk))]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure derivations

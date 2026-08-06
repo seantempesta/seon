@@ -38,7 +38,10 @@
 
 (defn- settle!
   [connection ordinal evaluated]
-  (let [stored ((deref #'loop/store-desk-values!) connection evaluated)
+  (let [stored (second
+                (run/settlement-projection
+                 {:seon.db/connection connection}
+                 evaluated))
         rows (#'loop/desk-rows @connection agent-id stored ordinal)]
     (db/transact!
      connection

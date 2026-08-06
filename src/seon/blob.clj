@@ -1,7 +1,8 @@
 (ns seon.blob
   "Content-addressed result blobs in Seon's already-open Konserve store."
   (:refer-clojure :exclude [get])
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.test.check.generators :as gen]
             [datahike.gc-guard :as gc-guard]
             [konserve.core :as k]
@@ -37,6 +38,25 @@
 (def octet-array-generator gen/bytes)
 
 (schema.edn/load! {})
+
+(defn store-faithful-edn
+  "Serialize a value exactly when EDN preserves value, class, and metadata."
+  {:malli/schema [:=> [:cat :any] [:maybe :string]]}
+  [value]
+  (try
+    (let [serialized (binding [*print-meta* true] (pr-str value))
+          restored (edn/read-string serialized)]
+      (when (and (= value restored)
+                 (= (class value) (class restored))
+                 (= (meta value) (meta restored)))
+        serialized))
+    (catch Throwable _ nil)))
+
+(defn store-faithful?
+  "True exactly when the real EDN round trip preserves all fidelity axes."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [value]
+  (boolean (store-faithful-edn value)))
 
 (defn- binary-threshold
   [connection]

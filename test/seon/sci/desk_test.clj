@@ -75,7 +75,10 @@
 
 (defn- settle!
   [connection agent-id run-id ordinal evaluated]
-  (let [stored ((deref #'loop/store-desk-values!) connection evaluated)
+  (let [stored (second
+                (run/settlement-projection
+                 {:seon.db/connection connection}
+                 evaluated))
         rows (#'loop/desk-rows @connection agent-id stored ordinal)]
     (db/transact!
      connection
@@ -308,7 +311,11 @@
                             :seon.def/name 'scratch
                             :seon.def/atom? true
                             :seon.sci.eval/value 9))
-           store-values (deref #'loop/store-desk-values!)
+           store-values (fn [connection evaluation]
+                          (second
+                           (run/settlement-projection
+                            {:seon.db/connection connection}
+                            evaluation)))
            stored-ordinary (store-values connection ordinary)
            stored-atom (store-values connection atom-evaluation)
            ordinary-row (first (#'loop/desk-rows @connection "agent"

@@ -2,7 +2,7 @@
   "The measured storage decision behind the shipped blob threshold."
   (:require [clojure.test :refer [deftest is testing]]
             [seon.blob :as blob]
-            [seon.cluster.loop :as loop]
+            [seon.cluster.run :as run]
             [seon.config :as config]
             [seon.db :as db]
             [seon.sci.admit :as admit]
@@ -23,13 +23,14 @@
 (defn- settlement
   [connection result-edn]
   (let [staged
-        (#'loop/settlement-result
+        (run/settlement-projection
          {:seon.db/connection connection
           :seon.sci.admit/caps caps}
-         {:seon.cluster.eval/result-edn result-edn})]
+         {:seon.cluster.eval/result-edn result-edn})
+        receipt (nth staged 0)
+        stages (nth staged 2)]
     (blob/with-publication!
-     connection (:seon.blob/staged-writes staged)
-     #(dissoc staged :seon.blob/staged-writes))))
+     connection stages #(identity receipt))))
 
 (deftest default-keeps-the-measured-small-result-class-off-the-blob-path
   (support/with-database
@@ -61,7 +62,7 @@
         (testing "an equal-sized window makes blob plus envelope larger"
           (is (< 4096 (count window-heavy)))
           (is (false?
-               (#'loop/result-blob-smaller? window-heavy window-heavy)))
+               (#'run/result-blob-smaller? window-heavy window-heavy)))
           (is (= {:seon.cluster.eval/result-edn window-heavy
                   :seon.cluster.eval/result-size (count window-heavy)}
                  retained)))
