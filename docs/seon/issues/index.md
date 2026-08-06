@@ -16,10 +16,14 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (18)
+## Blocker (22)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Re-ground mandatory skills after the desk and schema-directory waves](mandatory-skills-regressed-to-deleted-runtime-semantics.md) | blocker | documentation drift repair wave |
+| [Align architecture with the 2026-08-05 runtime contracts](architecture-retains-rejected-2026-08-05-runtime-contracts.md) | blocker | documentation drift repair wave |
+| [Give executable PRD briefs truthful lifecycle status](active-prd-briefs-present-superseded-designs-as-current.md) | blocker | PRD lifecycle and archive wave |
+| [Replace the transfer prompt's deleted August 2 current-state handoff](transfer-prompt-orients-agents-to-the-deleted-august-2-system.md) | blocker | documentation drift repair wave |
 | [Observe and claim every deletable directory](deletable-directories-have-no-claim-or-size-facts.md) | blocker | operator directory-claim governor wave |
 | [Prevent ranged collection from deleting resurrected branch data](ranged-store-collection-can-delete-live-segments-via-branch-resurrection.md) | blocker | exclusive sweep implementation wave |
 | [Make bootstrap O4 wait for the causal delegation](bootstrap-o4-stops-before-causal-delegation-settles.md) | blocker | bootstrap delegation-drive repair wave |
