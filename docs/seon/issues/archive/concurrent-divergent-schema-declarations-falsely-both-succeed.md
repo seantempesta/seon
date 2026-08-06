@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, schema, sci, concurrency, durability]
 ---
@@ -38,3 +38,18 @@ The isolated registration delta plus terminal program-row admission boundary.
   facts.
 - A deterministic two-run regression covers both identical and divergent
   declarations.
+
+## Resolution
+
+Commit `c55879b73` moved schema-key immutability into the serial terminal
+admission transaction. An existing identical declaration contributes no
+transaction data; an existing different form refuses with
+`:seon.cluster.run/schema-key-immutable`, so a losing run cannot receive a
+success-shaped receipt.
+
+## Acceptance evidence
+
+`runtime-schema-keys-are-immutable-at-terminal-admission` executes identical
+re-registration followed by a divergent form through the production run loop.
+It observes one durable `:string` row, two ordinary successes, one flat
+attributable refusal, and no later receipt after the run closes.

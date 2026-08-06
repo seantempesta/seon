@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, sci, runtime, errors, durability]
 ---
@@ -44,3 +44,18 @@ The one receipt settlement contract and transaction function.
 - The run reaches its defined error disposition without a host exception.
 - A concurrent run remains independent and contains no foreign error facts.
 - The regression executes through the production run loop.
+
+## Resolution
+
+Commit `506e2350a` added `:seon.cluster.eval/triage-edn` to the one surviving
+receipt-settlement request contract and terminal attribute projection. The
+loop carries triage evidence through `settle!`; there is no second error
+settlement transaction.
+
+## Acceptance evidence
+
+`receipt-transitions-preserve-one-terminal-outcome` commits bounded triage
+evidence through `receipt-settle-tx`, reads it from the terminal receipt, and
+proves later settlement attempts cannot overwrite it. The production-loop
+runaway-evaluation regression continues to settle its interrupted receipt and
+move the fold forward.

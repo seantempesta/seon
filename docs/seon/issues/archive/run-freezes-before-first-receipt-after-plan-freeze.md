@@ -60,32 +60,26 @@ plan-freeze-to-first-evaluation transition.
 
 ## Resolution
 
-Every operation before an evaluation result now carries its form ordinal into
-the run-loop boundary. If turn-fork construction, evaluator resolution,
-trigger derivation, form admission, or evaluation submission faults, the loop
-commits one atomic backstop transaction that:
+Commit `dc4d3a7e5` replaced the backstop relay with the one `settle!` exit. A
+failure before evaluation began has no ordinal, so its single terminal
+transaction closes the run, retracts process custody and the agent pointer,
+and records one durable error while creating zero receipts. Only the evaluate
+step contributes an ordinal and therefore a receipt.
 
-- starts the ordinal's receipt when it does not yet exist;
-- terminalizes that receipt with the bounded normalized error;
-- closes the run, retracting process custody and the agent's run pointer; and
-- records the durable error fact with agent and run attribution.
-
-The backstop uses the existing receipt-refusal transaction function, whose
-presence fence prevents overwriting a terminal receipt. If the backstop itself
-is refused, the existing terminal-settlement fault path closes the agent's
-process-local mailbox and raises the named core fault instead of reporting
-success.
-
-The class regression freezes a real plan, forces `fork-for-turn` to throw at
-ordinal zero, and asserts a terminal receipt zero, durable error, closed run,
-absent custody and agent pointer, plus later unanswered work remaining
-claimable without recovery or restart.
+The class regression forces `fork-for-turn` to fail, then asserts zero
+receipts, one durable error, one close fact, absent custody and agent pointer,
+plus later unanswered work remaining claimable without recovery or restart.
+The seeded phase-failure property in commit `e86d0e6f3` extends that proof over
+claim, fork, prompt, freeze, evaluate, and delivery: every sample reaches one
+terminal exit, evaluation alone contributes a receipt, and the escalation
+message itself derives fresh work on the next wake.
 
 ## Acceptance evidence
 
-Commit `634e3038d` passed `seon.cluster.loop-test` (24 tests, 107 assertions),
-`seon.cluster.turn-test` (48 tests, 288 assertions), and
-`seon.render.transcript-test` (12 tests, 135 assertions).
+The replacement regressions are
+`a-pre-evaluation-fault-closes-with-zero-receipts` and
+`generated-phase-failures-converge-through-one-terminal-exit` in
+`seon.cluster.turn-test`.
 
 The isolated `custody-fix` cluster, reforked from published commit
 `6a74d4b0-491d-5c3c-9a87-3a1031a644e9`, accepted
