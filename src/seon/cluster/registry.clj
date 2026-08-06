@@ -68,7 +68,8 @@
             [datahike.store :as datahike.store]
             [konserve.core :as k]
             [seon.cluster.store :as store]
-            [seon.schema.edn :as schema.edn]))
+            [seon.schema.edn :as schema.edn])
+  (:import [java.nio.file Files LinkOption Path Paths]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -347,8 +348,140 @@
         (mapcat #(branch-blobs store %))
         branches))
 
+(defn- branch-heads
+  [store branches]
+  (mapv
+   (fn [branch]
+     (let [commit-id (branch-commit-id {:seon.store/store store
+                                        :seon.store/branch branch})]
+       (when-not commit-id
+         (throw
+          (ex-info "A roster branch has no readable head commit ID."
+                   {:seon.error/kind
+                    :seon.cluster.registry/branch-head-absent
+                    :seon.store/branch branch})))
+       {:seon.store/branch branch
+        :seon.source/commit-id commit-id}))
+   (sort-by str branches)))
+
+(defn- elapsed-ms
+  [started-ns]
+  (quot (- (System/nanoTime) started-ns) 1000000))
+
+(defn- physical-filestore-inventory
+  [store candidate-store-keys]
+  (let [base (Paths/get (:seon.store/dir store) (make-array String 0))
+        no-follow (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])
+        candidates (set candidate-store-keys)
+        inventory
+        (with-open [entries (Files/newDirectoryStream base)]
+          (reduce
+           (fn [{:keys [candidate-names] :as result} ^Path path]
+             (let [store-key (str (.getFileName path))]
+               (if (and (.endsWith store-key ".ksv")
+                        (Files/isRegularFile path no-follow))
+                 (let [candidate? (contains? candidates store-key)]
+                   (cond-> (-> result
+                               (update :files inc)
+                               (update :bytes + (Files/size path)))
+                     candidate?
+                     (update :candidate-files inc)
+
+                     candidate?
+                     (update :candidate-bytes + (Files/size path))
+
+                     candidate?
+                     (assoc :candidate-names
+                            (conj candidate-names store-key))))
+                 result)))
+           {:files 0
+            :bytes 0
+            :candidate-files 0
+            :candidate-bytes 0
+            :candidate-names #{}}
+           (iterator-seq (.iterator entries))))
+        missing (remove (:candidate-names inventory) candidates)]
+    (when (seq missing)
+      (throw
+       (ex-info "A dry-run candidate has no physical FileStore file."
+                {:seon.error/kind
+                 :seon.cluster.registry/candidate-file-absent
+                 :seon.cluster.registry/missing-candidate-files
+                 (vec missing)})))
+    {:seon.cluster.registry/retained-files
+     (- (:files inventory) (:candidate-files inventory))
+     :seon.cluster.registry/file-bytes (:bytes inventory)
+     :seon.cluster.registry/candidate-files
+     (:candidate-files inventory)
+     :seon.cluster.registry/candidate-bytes
+     (:candidate-bytes inventory)}))
+
+(defn- dry-run-complete?
+  [failure token]
+  (loop [current failure]
+    (cond
+      (nil? current) false
+      (identical? token
+                  (:seon.cluster.registry/dry-run-token
+                   (ex-data current))) true
+      :else (recur (ex-cause current)))))
+
+(defn- dry-run!
+  [store remove-before options]
+  (let [started-ns (System/nanoTime)
+        token (Object.)
+        heads (atom [])
+        inventory (atom nil)
+        result
+        (try
+          @(d/gc-storage
+            (:seon.store/connection-object store)
+            remove-before
+            (-> options
+                (assoc
+                 :datahike.gc/batch-size Long/MAX_VALUE
+                 :datahike.gc/reachable-extension
+                 (fn [{:datahike.gc/keys [branches]}]
+                   (reset! heads (branch-heads store branches))
+                   (referenced-blobs store branches)))
+                (assoc-in
+                 [:datahike.gc/sweep-opts :konserve.gc/batch-issued]
+                 (fn [candidate-store-keys]
+                   (reset! inventory
+                           (assoc
+                            (physical-filestore-inventory
+                             store candidate-store-keys)
+                            :seon.cluster.registry/mark-duration-ms
+                            (elapsed-ms started-ns)))
+                   (throw
+                    (ex-info "Dry-run candidate enumeration is complete."
+                             {:seon.error/kind
+                              :seon.cluster.registry/dry-run-complete
+                              :seon.cluster.registry/dry-run-token token}))))))
+          (catch Throwable failure
+            failure))]
+    (cond
+      (and (instance? Throwable result)
+           (dry-run-complete? result token))
+      (assoc @inventory :seon.cluster.registry/branches @heads)
+
+      (instance? Throwable result)
+      (throw result)
+
+      (empty? result)
+      (merge
+       (physical-filestore-inventory store [])
+       {:seon.cluster.registry/branches @heads
+        :seon.cluster.registry/mark-duration-ms (elapsed-ms started-ns)})
+
+      :else
+      (throw
+       (ex-info "Dry-run collection returned without its delete barrier."
+                {:seon.error/kind
+                 :seon.cluster.registry/dry-run-barrier-absent})))))
+
 (defn collect!
-  "Collect this store's unreachable objects; returns how many were swept.
+  "Collect or inventory this store's unreachable objects.
   One owner per store — the process, never a cluster (§0.6 condition
   3) — and it runs where the writers are, which is this JVM
   (`gc.cljc:105-115`). Whole-store by nature: the mark is a union over
@@ -360,17 +493,19 @@
     [:=> [:cat :seon.store/store] :seon.cluster.registry/swept]
     [:=> [:cat :seon.store/store :inst] :seon.cluster.registry/swept]
     [:=> [:cat :seon.store/store :inst [:map]]
-     :seon.cluster.registry/swept]]}
+     [:or :seon.cluster.registry/swept :map]]]}
   ([store]
    (collect! store (java.util.Date. 0)))
   ([store remove-before]
    (collect! store remove-before {}))
   ([store remove-before options]
-   (count
-    @(d/gc-storage
-      (:seon.store/connection-object store)
-      remove-before
-      (assoc options
-             :datahike.gc/reachable-extension
-             (fn [{:datahike.gc/keys [branches]}]
-               (referenced-blobs store branches)))))))
+   (if (true? (:seon.operator.collect/dry-run? options))
+     (dry-run! store remove-before options)
+     (count
+      @(d/gc-storage
+        (:seon.store/connection-object store)
+        remove-before
+        (assoc options
+               :datahike.gc/reachable-extension
+               (fn [{:datahike.gc/keys [branches]}]
+                 (referenced-blobs store branches))))))))

@@ -640,6 +640,46 @@
      :seon.operator.collect/result result}
     failure)))
 
+(def ^:private projected-delete-ms-per-file
+  ;; The sealed runbook's middle projection: one existence check, delete, and
+  ;; FileStore sync per candidate at an illustrative five milliseconds.
+  5)
+
+(defn- dry-run-under-lock!
+  [managed-root operation-store]
+  (let [inventory
+        (registry/collect!
+         operation-store
+         (java.util.Date.)
+         {:seon.operator.collect/dry-run? true})
+        retained (:seon.cluster.registry/retained-files inventory)
+        candidates (:seon.cluster.registry/candidate-files inventory)
+        files (+ retained candidates)
+        file-bytes (:seon.cluster.registry/file-bytes inventory)
+        mark-duration (:seon.cluster.registry/mark-duration-ms inventory)]
+    {:seon.operator.collect/store-id
+     (get-in @(:seon.store/connection-object operation-store)
+             [:config :store :id])
+     :seon.operator.collect/managed-root managed-root
+     :seon.operator.collect/branches
+     (:seon.cluster.registry/branches inventory)
+     :seon.operator.collect/objects-before files
+     :seon.operator.collect/objects-after files
+     :seon.operator.collect/swept-objects 0
+     :seon.operator.collect/bytes-before file-bytes
+     :seon.operator.collect/bytes-after file-bytes
+     :seon.operator.collect/reclaimed-bytes 0
+     :seon.operator.collect/verification-pass-swept 0
+     :seon.operator.collect/complete? true
+     :seon.operator.collect/dry-run? true
+     :seon.operator.collect/retained-files retained
+     :seon.operator.collect/candidate-files candidates
+     :seon.operator.collect/candidate-bytes
+     (:seon.cluster.registry/candidate-bytes inventory)
+     :seon.operator.collect/mark-duration-ms mark-duration
+     :seon.operator.collect/projected-duration-ms
+     (+ mark-duration (* projected-delete-ms-per-file candidates))}))
+
 (defn- collect-under-lock!
   [managed-root operation-store]
   (let [store-id
@@ -711,12 +751,13 @@
           (incomplete-collection! base-result failure))))))
 
 (defn collect!
-  "Collect one managed store and verify every recorded root."
+  "Collect or dry-run one managed store."
   {:malli/schema
    [:=> [:cat :seon.operator.collect/request]
     [:or :seon.operator.collect/result :seon.error/value]]}
   [{repository-root :seon.operator/repository-root
-    managed-root :seon.operator/managed-root}]
+    managed-root :seon.operator/managed-root
+    dry-run? :seon.operator.collect/dry-run?}]
   (attempt
    #(state/with-control-lock!
      repository-root
@@ -725,7 +766,9 @@
              [operation-store release?]
              (acquire-operation-store! managed-root nil)]
          (try
-           (collect-under-lock! managed-root operation-store)
+           (if (true? dry-run?)
+             (dry-run-under-lock! managed-root operation-store)
+             (collect-under-lock! managed-root operation-store))
            (finally
              (when release? (store/release-store! operation-store)))))))))
 

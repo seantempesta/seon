@@ -542,6 +542,55 @@
       (finally
         (test-support/delete-recursively! repository-root)))))
 
+(deftest collection-dry-run-returns-the-bounded-physical-inventory
+  (let [repository-root (owned-root)
+        managed-root (.getCanonicalPath
+                      (io/file repository-root "managed"))
+        commit-id (random-uuid)
+        calls (atom [])]
+    (try
+      (with-redefs
+       [registry/collect!
+        (fn [_ remove-before options]
+          (swap! calls conj [remove-before options])
+          {:seon.cluster.registry/branches
+           [{:seon.store/branch :db
+             :seon.source/commit-id commit-id}]
+           :seon.cluster.registry/retained-files 2
+           :seon.cluster.registry/candidate-files 3
+           :seon.cluster.registry/file-bytes 700
+           :seon.cluster.registry/candidate-bytes 400
+           :seon.cluster.registry/mark-duration-ms 17})]
+        (let [result
+              (operator/collect!
+               {:seon.operator/repository-root repository-root
+                :seon.operator/managed-root managed-root
+                :seon.operator.collect/dry-run? true})]
+          (is (true? (:seon.operator.collect/dry-run? result)))
+          (is (= [{:seon.store/branch :db
+                   :seon.source/commit-id commit-id}]
+                 (:seon.operator.collect/branches result)))
+          (is (= 2 (:seon.operator.collect/retained-files result)))
+          (is (= 3 (:seon.operator.collect/candidate-files result)))
+          (is (= 400 (:seon.operator.collect/candidate-bytes result)))
+          (is (= 17 (:seon.operator.collect/mark-duration-ms result)))
+          (is (= 32
+                 (:seon.operator.collect/projected-duration-ms result)))
+          (is (= 5 (:seon.operator.collect/objects-before result)))
+          (is (= (:seon.operator.collect/objects-before result)
+                 (:seon.operator.collect/objects-after result)))
+          (is (= (:seon.operator.collect/bytes-before result)
+                 (:seon.operator.collect/bytes-after result)))
+          (is (zero? (:seon.operator.collect/swept-objects result)))
+          (is (zero? (:seon.operator.collect/reclaimed-bytes result)))
+          (is (true? (:seon.operator.collect/complete? result)))
+          (is (= 1 (count @calls)))
+          (is (instance? java.util.Date (ffirst @calls)))
+          (is (true?
+               (:seon.operator.collect/dry-run? (second (first @calls)))))))
+      (finally
+        (test-support/delete-recursively! repository-root)))))
+
 (deftest collection-refuses-a-nonzero-verification-pass-with-partial-evidence
   (let [repository-root (owned-root)
         managed-root (.getCanonicalPath

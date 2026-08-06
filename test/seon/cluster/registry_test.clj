@@ -22,6 +22,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
+            [konserve.core :as k]
             [seon.db :as db]
             [seon.blob :as blob]
             [seon.cluster.registry :as registry]
@@ -322,6 +323,52 @@
   (reduce + 0 (map #(.length ^java.io.File %)
                    (filter #(.isFile ^java.io.File %)
                            (file-seq (io/file dir))))))
+
+(deftest dry-run-enumerates-candidates-without-deleting
+  (with-source-store
+    (fn [opened]
+      (registry/ensure-cluster! (cluster-request opened "dry-run-doomed"))
+      (let [doomed (registry/cluster-branch "dry-run-doomed")
+            connection (store/open-branch! opened doomed)]
+        (try
+          (doseq [batch (partition-all 100 (range 500))]
+            (db/transact!
+             connection
+             {:tx-data
+              (mapv (fn [n]
+                      {:seon.registry.test/marker
+                       (str "dry-run-" n " "
+                            (apply str (repeat 200 \x)))})
+                    batch)}))
+          (finally
+            (d/release connection)))
+        (registry/retire-branch! {:seon.store/store opened
+                                  :seon.store/branch doomed})
+        (let [konserve (:store @(:seon.store/connection-object opened))
+              keys-before (into #{} (map :key)
+                                (k/keys konserve {:sync? true}))
+              bytes-before (store-bytes (:seon.store/dir opened))
+              result (registry/collect!
+                      opened
+                      (java.util.Date.)
+                      {:seon.operator.collect/dry-run? true})
+              keys-after (into #{} (map :key)
+                               (k/keys konserve {:sync? true}))]
+          (is (= keys-before keys-after))
+          (is (= bytes-before (store-bytes (:seon.store/dir opened))))
+          (is (pos? (:seon.cluster.registry/candidate-files result)))
+          (is (pos? (:seon.cluster.registry/candidate-bytes result)))
+          (is (= (count keys-before)
+                 (+ (:seon.cluster.registry/retained-files result)
+                    (:seon.cluster.registry/candidate-files result))))
+          (is (= (sort-by str (registry/roster opened))
+                 (mapv :seon.store/branch
+                       (:seon.cluster.registry/branches result))))
+          (is (every? uuid?
+                      (map :seon.source/commit-id
+                           (:seon.cluster.registry/branches result))))
+          (is (not (neg?
+                    (:seon.cluster.registry/mark-duration-ms result)))))))))
 
 (deftest retiring-one-cluster-reclaims-only-its-own-tail
   (with-source-store
