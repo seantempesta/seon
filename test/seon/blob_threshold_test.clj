@@ -22,10 +22,14 @@
 
 (defn- settlement
   [connection result-edn]
-  (#'loop/settlement-result
-   {:seon.db/connection connection
-    :seon.sci.admit/caps caps}
-   {:seon.cluster.eval/result-edn result-edn}))
+  (let [staged
+        (#'loop/settlement-result
+         {:seon.db/connection connection
+          :seon.sci.admit/caps caps}
+         {:seon.cluster.eval/result-edn result-edn})]
+    (blob/with-publication!
+     connection (:seon.blob/staged-writes staged)
+     #(dissoc staged :seon.blob/staged-writes))))
 
 (deftest default-keeps-the-measured-small-result-class-off-the-blob-path
   (support/with-database
