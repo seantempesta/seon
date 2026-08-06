@@ -42,3 +42,12 @@ the obsolete operator test without restoring any CLJS owner. The JVM `.clj`
 and portable `.cljc` test discovery remains green, the current page serves its
 declared Datastar and CSS assets, and exact searches find no live Scittle,
 Shadow CLJS, or CLJS-runner path.
+
+## Progress
+
+- 2026-08-06 deletion sweep unit 1 removed the eight audited browser assets
+  plus the readerless `jetbrains-mono-500.woff2` file after exact-name searches
+  across `src/`, `test/`, `script/`, `bin/`, `resources/`, and
+  `.agents/skills/`. `datastar.js`, `input.css`, and `output.css` retain exact
+  consumers. The issue remains open for the CLJS discovery/lint and obsolete
+  operator-test cuts in later ordered units.
