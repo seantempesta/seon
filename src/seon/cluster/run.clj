@@ -855,14 +855,14 @@
       (let [current-projection
             (when (#{:seon.fn/sym :seon.schema/key} identity)
               (schema/projection-from-database db))
-            schema-replacement?
+            schema-redefinition?
             (and (= identity :seon.schema/key)
                  existing
                  (not= (:seon.schema/form existing)
                        (:seon.schema/form row)))
-            _ (when schema-replacement?
-                (assert-schema-data-unused!
-                 db current-projection #{identity-value}))
+            _ (when schema-redefinition?
+                (refuse! `receipt-settle-call
+                         ::schema-key-immutable request))
             candidate-projection
             (case identity
               :seon.schema/key
@@ -880,23 +880,20 @@
               nil)
             schema-declarations
             (if (= identity :seon.schema/key)
-              (if schema-replacement?
-                (schema-attribute-change-tx
-                 db current-projection candidate-projection)
-                (let [current-attributes
-                      (schema.datahike/database-attributes-in
-                       current-projection)
-                      candidate-attributes
-                      (schema.datahike/database-attributes-in
-                       candidate-projection)
-                      required
-                      (into []
-                            (comp
-                             (remove (set current-attributes))
-                             (remove #(contains? (:schema db) %)))
-                            (sort candidate-attributes))]
-                  (schema.datahike/malli->datahike-schema-in
-                   candidate-projection required)))
+              (let [current-attributes
+                    (schema.datahike/database-attributes-in
+                     current-projection)
+                    candidate-attributes
+                    (schema.datahike/database-attributes-in
+                     candidate-projection)
+                    required
+                    (into []
+                          (comp
+                           (remove (set current-attributes))
+                           (remove #(contains? (:schema db) %)))
+                          (sort candidate-attributes))]
+                (schema.datahike/malli->datahike-schema-in
+                 candidate-projection required))
               [])]
         (into
          schema-declarations

@@ -1240,6 +1240,48 @@
                           @connection persistent-key))
                   "the committed attribute accepts a fact immediately"))))))))
 
+(deftest runtime-schema-keys-are-immutable-at-terminal-admission
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            connection (:seon.db/connection cluster)
+            schema-key :shared.runtime/immutable]
+        (with-redefs
+          [ai/complete
+           (fn [_]
+             {:seon.ai/text
+              (str
+               "(require '[seon.schema :as schema])\n"
+               "(schema/register! :shared.runtime/immutable :string)\n"
+               "(schema/register! :shared.runtime/immutable :string)\n"
+               "(schema/register! :shared.runtime/immutable :int)\n"
+               "(my.run/complete \"unreachable\")")})]
+          (drive! cluster 10)
+          (let [database @connection
+                row (db/pull database '[*] [:seon.schema/key schema-key])
+                receipts
+                (into {}
+                      (map (fn [[ordinal result error-kind]]
+                             [ordinal {:result (semantic-result result)
+                                       :error-kind error-kind}]))
+                      (db/q '[:find ?ordinal ?result ?error-kind
+                              :where
+                              [?receipt :seon.cluster.eval/ordinal ?ordinal]
+                              [?receipt :seon.cluster.eval/result-edn ?result]
+                              [(get-else $ ?receipt :seon.error/kind nil)
+                               ?error-kind]]
+                            database))]
+            (is (= ":string" (:seon.schema/form row)))
+            (is (= schema-key (get-in receipts [1 :result])))
+            (is (= schema-key (get-in receipts [2 :result]))
+                "identical registration is an ordinary idempotent success")
+            (is (= :seon.db/rejected (get-in receipts [3 :error-kind])))
+            (is (= ::run/schema-key-immutable
+                   (get-in receipts [3 :result ::run/refused])))
+            (is (nil? (get receipts 4))
+                "the divergent declaration closes the run before later forms")))))))
+
 (deftest runtime-schema-unregister-removes-one-unused-global-schema
   (with-cluster
     (fn [cluster]
