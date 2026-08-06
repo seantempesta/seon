@@ -9,7 +9,7 @@ tags: [prd, runtime, observability, operator]
 ## Decision
 
 Owner-designed 2026-08-03 night, executing the successor slice the
-[operator-integration PRD](../operator-integration/README.md) named. ONE
+[operator-integration PRD](../archive/operator-integration/README.md) named. ONE
 event mechanism with three honestly different destinations:
 
 1. **Significant events become durable facts.** Lifecycle transitions,
@@ -48,7 +48,7 @@ this PRD adds no fourth destination.
 | `:db/noHistory` semantics | `reference-code/datahike` — verify the flag's exact index behavior at the pin BEFORE relying on it; record file:line in the implementation | Gauges must prove history returns nothing for the attribute |
 | Render producers rule | AGENTS.md reactive-context section | The event feed/page declares `:seon.render/ai` + `:seon.render/html` producers as named functions |
 | Error-model wave | [error-model PRD](../error-model/README.md) | Event shapes reuse the attribute-presence idiom; no `:event/type` discriminator — the event's namespaced attribute set IS its identity |
-| Operator verbs | [operator-integration PRD](../operator-integration/README.md) | Verbs emit events through the one emitter; no verb grows its own logging |
+| Operator verbs | [operator-integration PRD](../archive/operator-integration/README.md) | Verbs emit events through the one emitter; no verb grows its own logging |
 
 ## Shape sketch
 
