@@ -16,6 +16,29 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**LIVE DRIVE VERDICT + REPAIR WAVE — 2026-08-06 evening.** The
+owner-directed live drive
+([live-drive-2026-08-06.md](../research/live-drive-2026-08-06.md),
+`bc937a7ae`) proved the fresh system CANNOT COMPLETE ITS FIRST REAL
+TURN: fresh-cluster maintenance cannot settle (missing
+`:seon.operator.log/path`) → its failed trigger occupies root → root's
+run opens on the stale trigger while the human message LEAKS into its
+prompt → DeepSeek answers the human inside the wrong custody → the
+accepted plan FREEZES before receipt zero → root blocked, message never
+claimed. Also: problems projection contract violation kills health +
+root render; transcript pull-many set-arg fault loops into context 14×;
+/data deterministic 500; debug page no first byte in 5 s; system atoms
+committed as root's desk; 44k-token prompt opening with a broken
+renderer line. Six new blockers + one friction filed by the drive.
+FIVE REPAIR LANES RUNNING (all file-disjoint): drive-fix-run-custody
+(freeze + message-leak, loop/work/context), drive-fix-maintenance
+(fresh schema install, the chain's root), drive-fix-problems
+(projection totality), drive-fix-web (transcript pull-many, /data ctx,
+debug first byte), drive-fix-desk (system-Var attribution).
+drive-observer still watching the frozen run; its report lands
+separately. NEXT after repairs: rerun the drive arc (the untested
+phases are explicitly not-covered), then the messaging wave.
+
 **GREEN BARE GATE ACHIEVED — 2026-08-06 (the wave exit).** `bin/test`
 bare: 1007 tests / 8162 assertions / 0 failures / 0 errors at
 `0e894e533` (log `tmp/bare-gate-2026-08-06d.log`). The gate-fix wave
