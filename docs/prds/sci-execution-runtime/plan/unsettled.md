@@ -16,6 +16,26 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**GREEN BARE GATE ACHIEVED — 2026-08-06 (the wave exit).** `bin/test`
+bare: 1007 tests / 8162 assertions / 0 failures / 0 errors at
+`0e894e533` (log `tmp/bare-gate-2026-08-06d.log`). The gate-fix wave
+that closed it: eight file-disjoint lanes fixed all 12 reds at cause
+(blob publish-order fixture, Datahike rejection data preserved in flat
+errors, refused defs stay desk candidates, pid-reuse fence, flow census
+fixture, render census + concise config faces, schema alias
+dependency-first admission, bootstrap/search/config-analysis) plus TWO
+integration repairs at the top level (search predicate registration
+`b8d843549` after the inline-private-fn contract broke publication;
+desired-rows test arity `0e894e533`). `bin/seon init` is GREEN
+end-to-end with phase + intra-phase progress events (`b465b4613` +
+`ddb648dc2`, blocker archived); the ~70-82 s publication cost and the
+isolated-runner model-schema refusal are filed as follow-ups. Six
+ugly-output issues filed from lane reports this session. NEXT: reset
+--force → fresh baseline → LIVE DRIVE + observer (owner-directed
+breakage inventory), then the messaging wave
+([messaging-wave-2026-08-06.md](messaging-wave-2026-08-06.md), spelling
+ruled) and error-model W2-W5 (gate now green).
+
 **WORKING EDGE — 2026-08-06 NEXT SESSION (verification + spelling ruled +
 checkpoint in flight).** Handoff verified first-hand (tree, commits, fork
 gitlink, zero lanes — all match). RULED: the handle face is
