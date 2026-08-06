@@ -51,7 +51,6 @@
             [seon.problems :as problems]
             [seon.render :as render]
             [seon.render.value :as render.value]
-            [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -554,12 +553,25 @@
     run-id :seon.cluster.run/id
     ordinal :seon.cluster.run.form/ordinal
     now ::now
+    problem :seon.problems/form-problem
     trigger :seon.cluster.message/trigger}]
-  (let [delivery
+  (let [receipt-eid
+        (when problem
+          (db/q '[:find ?receipt .
+                  :in $ ?run-id ?ordinal
+                  :where
+                  [?run :seon.cluster.run/id ?run-id]
+                  [?receipt :seon.cluster.eval/run ?run]
+                  [?receipt :seon.cluster.eval/ordinal ?ordinal]]
+                db run-id ordinal))
+        delivery
         (when asked
           (message/delivery
            db
-           (cond-> {:my.message/value asked
+           (cond-> {:my.message/value
+                    (if problem
+                      (dissoc asked :my.message/about)
+                      asked)
                     :seon.cluster.agent/id agent-id
                     :seon.cluster.run/id run-id
                     :seon.cluster.run.form/ordinal ordinal
@@ -567,7 +579,9 @@
                     :seon.config.message/max-chain
                     (:seon.config.message/max-chain cluster)}
              trigger (assoc :seon.cluster.message/trigger trigger))))]
-    {:seon.cluster.message/rows (:seon.cluster.message/rows delivery)
+    {:seon.cluster.message/rows
+     (cond->> (:seon.cluster.message/rows delivery)
+       problem (mapv #(assoc % :seon.cluster.message/about receipt-eid)))
      :seon.error/values-tx
      (into []
            (mapcat
@@ -577,238 +591,175 @@
                          :seon.cluster.run/id run-id})))
            (:seon.error/values delivery))}))
 
-(defn- refused!
-  "Record one refused transaction as a durable error, and say it refused.
-  Returns true when `outcome` was a refusal, so a call site reads
-  `(if (refused! …) :error :released)` and the recording is not a
-  second branch to keep in sync.
-
-  THIS IS THE HOLE D3 NAMED. `db/transact!` preserves a transition's
-  own rule verbatim — the exact CAS fence, the exact schema violation —
-  and four of these five branches threw it away one line later, reducing
-  it to the keyword `:error` in a turn report that goes to an out
-  documented \"for observation only\". The `:call` branch had already
-  learned the lesson the expensive way (the live drive sat
-  claimed-with-no-plan for two minutes because a model error evaporated);
-  this is that fix applied to the other four, now that the error owner
-  those values belong to exists.
-
-  Attribution is passed in, never derived here: an `:open` that REFUSED
-  has no run to point at, and a lookup ref to a run that does not exist
-  would fail the very transaction that records the failure.
-
-  The recording's own outcome is deliberately ignored. This is the
-  recursion fence for a refusal that owns no running receipt: if the
-  database refuses the error fact too, the answer is not to record
-  THAT — `db/transact!` never throws, the loop keeps its pass, and
-  the visible symptom stays the original refusal rather than an
-  infinite regress of them. A refused terminal receipt uses
-  `terminal-refused!` below instead, because recording alone cannot
-  settle work derivation."
-  [cluster outcome now attribution]
-  (boolean
-   (when-let [kind (:seon.error/kind outcome)]
-     (let [connection (:seon.db/connection cluster)
-           db @connection]
-       (db/transact!
-        connection
-        (error-tx cluster db outcome now attribution)))
-     kind)))
-
-(defn- terminal-settlement-fault!
-  "Stop this agent's passes and raise one named core settlement fault."
-  [cluster message data]
-  ;; This agent may not take another pass over the still-running receipt
-  ;; before boot recovery marks it interrupted. Closing its process-local
-  ;; mailbox loses no work — wakes are re-derivable from database facts
-  ;; and arm! creates a fresh channel after reboot — while leaving Flow's
-  ;; independent error channel alive to carry this fault.
-  (async/close! (:seon.cluster.wake/channel cluster))
-  (throw
-   (ex-info
-    message
-    (merge
-     {::terminal-refusal-settlement-failed true
-      :seon.error/kind ::terminal-refusal-settlement-refused}
-     data))))
-
-(defn- terminal-refused!
-  "Settle and record a refused terminal transaction, and say it refused.
-
-  The original transaction remains commit-first: its program row,
-  disposition, receipt, and context installation all stay absent when
-  the database refuses any one of them. Before the second transaction
-  exists, the refusal passes through the one bounded admission codec and
-  the resulting error fact plus flat value must satisfy their registered
-  shapes. This second transaction carries the SAME presence-fenced receipt
-  settlement, the agent-scoped desk rows already admitted for the first
-  attempt, the run close, and a pre-admitted normalized durable error record.
-  It omits the refused program row and disposition: refusal blocks the shared
-  commit, never the originating agent's desk.
-
-  The receipt terminal fact, run close, and error fact commit together.
-  Success is checked rather than assumed. If construction is invalid or
-  the commit still refuses, a named Throwable escapes as a core fault
-  into Flow's error channel; this function never returns silent success.
-  The receipt remains running in its held run, which boot recovery marks
-  interrupted without re-executing it."
-  [cluster outcome now attribution receipt]
-  (boolean
-   (when-let [kind (:seon.error/kind outcome)]
-     (let [connection (:seon.db/connection cluster)
-           db @connection
-           admitted
-           (admit/admit
-            {:seon.sci.admit/value outcome
-             :seon.sci.admit/interrupt-fn (constantly nil)
-             :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
-             ;; Error-path admission is total. R41 applies if the
-             ;; resulting settlement is invalid or refuses below.
-             :seon.config/on-core-error :record})
-           source
-           (select-keys
-            (:seon.sci.admit/value admitted)
-            [:seon.error/kind
-             :seon.error/message
-             :seon.error/data
-             :seon.cluster.run/rule
-             :seon.cluster.run/transition])
-           ;; The receipt is the run provenance for this eval result.
-           ;; Keeping a second run ref on the recorder fact would store
-           ;; the same connection twice; agent attribution is the one
-           ;; connection the next prompt needs to reach the fact.
-           recording
-           (try
-             (error-tx cluster db source now
-                       (dissoc attribution :seon.cluster.run/id))
-             ;; Instrumentation guards `error/normalize`'s declared
-             ;; output. If malformed source makes construction violate
-             ;; that contract, translate the guardrail into this seam's
-             ;; named core fault rather than letting instrumentation
-             ;; replace the incident it was observing.
-             (catch Throwable _
-               (terminal-settlement-fault!
-                cluster
-                "Terminal refusal settlement could not be constructed."
-                {::admitted-outcome
-                 (:seon.sci.admit/value admitted)})))
-           fact (first recording)
-           failure (error/value fact)
-           failure-edn (pr-str failure)
-           valid?
-           (and
-            (schema/valid-candidate-value?
-             :seon.error/fact
-             (dissoc fact :db/id))
-            (schema/valid-candidate-value?
-             :seon.error/value
-             failure))
-           terminal
-           (when valid?
-             (let [settlement
-                   (cond->
-                    {:seon.cluster.run/id (:seon.cluster.run/id receipt)
-                     :seon.cluster.eval/ordinal
-                     (:seon.cluster.run.form/ordinal receipt)
-                     :seon.cluster.eval/result-edn failure-edn
-                     :seon.cluster.eval/result-size (long (count failure-edn))
-                     :seon.cluster.eval/error (:seon.error/message failure)
-                     :seon.error/kind (:seon.error/kind failure)}
-                     (seq (:seon.def/rows receipt))
-                     (assoc :seon.def/rows (:seon.def/rows receipt)))]
-               (into
-                (run/receipt-settle-tx settlement)
-                (run/close-tx
-                 {:seon.cluster.run/id (:seon.cluster.run/id receipt)
-                  :seon.cluster.run/process
-                  (:seon.cluster.run/process receipt)
-                  :seon.cluster.run/closed-at now}))))]
-       (when-not valid?
-         (terminal-settlement-fault!
-          cluster
-          "Terminal refusal settlement could not be constructed."
-          {::admitted-outcome
-           (:seon.sci.admit/value admitted)}))
-       (let [settlement
-             (db/transact! connection (into terminal recording))]
-         (when (:seon.error/kind settlement)
-           ;; The fault committer may itself write an explanation
-           ;; message. Fence that message from re-entering this exact
-           ;; dangling receipt before recovery; its durable row remains
-           ;; available to the fresh mailbox after reboot.
-           (terminal-settlement-fault!
-            cluster
-            "Terminal refusal settlement was refused."
-            {::admitted-outcome
-             (:seon.sci.admit/value admitted)
-             ::settlement settlement}))
-         true))
-     kind)))
-
-(defn- settle-pre-evaluation-fault!
-  "Create or terminalize this ordinal's receipt, close its run, and record
-  one pre-evaluation core fault in a single transaction.
-
-  Receipt presence is read from the same database basis used to construct the
-  transaction. Before receipt zero exists (turn-fork construction), the
-  transaction starts it first. Once receipt start has committed, the same
-  transaction function terminalizes that running receipt. Either way, an
-  accepted plan cannot retain custody without a terminal fact. A refusal of
-  this settlement is itself a core settlement fault and stops the agent
-  mailbox."
-  [cluster failure now agent-id run-id ordinal]
-  (let [connection (:seon.db/connection cluster)
-        database @connection
-        existing
-        (db/pull database '[*]
-                 [:seon.cluster.eval/id (pr-str [run-id ordinal])])
-        recording
-        (error-tx cluster database failure now
-                  {:seon.cluster.agent/id agent-id
-                   :seon.cluster.run/id run-id})
-        fact (first recording)
-        value (error/value fact)
-        result-edn (pr-str value)
-        receipt
-        {:seon.cluster.run/id run-id
-         :seon.cluster.eval/ordinal ordinal
-         :seon.cluster.run/closed-at now
-         :seon.cluster.eval/result-edn result-edn
-         :seon.cluster.eval/result-size (long (count result-edn))
-         :seon.cluster.eval/error (:seon.error/message value)
-         :seon.error/kind (:seon.error/kind value)}
-        tx-data
-        (into [] cat
-              [(when-not (:db/id existing)
-                 (run/receipt-start-tx
-                  {:seon.cluster.run/id run-id
-                   :seon.cluster.eval/ordinal ordinal
-                   :seon.cluster.eval/at now}))
-               (run/receipt-refusal-tx receipt)
-               recording])
-        outcome (db/transact! connection {:tx-data tx-data})]
-    (when (:seon.error/kind outcome)
-      (terminal-settlement-fault!
-       cluster
-       "Pre-evaluation fault settlement was refused."
-       {::pre-evaluation-failure value
-        ::settlement-outcome outcome
-        :seon.cluster.run/id run-id
-        :seon.cluster.run.form/ordinal ordinal}))
-    value))
-
-(defn- pre-evaluation-call
-  "Run one operation before an evaluation result exists, retaining the form
-  ordinal as data if it faults."
-  [ordinal operation]
+(defn- phase
+  "Return one phase's value, translating a host failure to flat data."
+  [operation]
   (try
     (operation)
     (catch Throwable failure
-      (throw
-       (ex-info "A pre-evaluation operation failed."
-                {::pre-evaluation-fault true
-                 :seon.cluster.run.form/ordinal ordinal}
-                failure)))))
+      (merge {:seon.error/kind ::phase-failed
+              :seon.error/message
+              (or (ex-message failure) (.getName (class failure)))}
+             (error/refusal failure)))))
+
+(defn- evaluation-terminal-data
+  [{cluster ::cluster
+    now ::now
+    agent-id :seon.cluster.agent/id
+    run-id :seon.cluster.run/id
+    process :seon.cluster.run/process
+    ordinal :seon.cluster.run.form/ordinal
+    evaluation :seon.sci.eval/evaluation
+    problem :seon.problems/form-problem
+    trigger :seon.cluster.message/trigger}]
+  (let [database @(get cluster :seon.db/connection)
+        settled (disposition (:seon.sci.admit/value evaluation))
+        evaluation-failure
+        (or (when (:seon.error/kind (:seon.sci.admit/value evaluation))
+              (:seon.sci.admit/value evaluation))
+            (when (:seon.error/kind problem) problem)
+            (when-let [message (:seon.cluster.eval/error evaluation)]
+              {:seon.error/kind ::evaluation-failed
+               :seon.error/message message}))
+        asked (asked-value
+               (cond-> {:seon.db/db database
+                        :seon.sci.eval/evaluation evaluation
+                        ::settled settled
+                        :seon.cluster.agent/id agent-id}
+                 problem (assoc :seon.problems/form-problem problem)
+                 trigger (assoc :seon.cluster.message/trigger trigger)))
+        delivery
+        (delivery-rows
+         (cond-> {:seon.db/db database
+                  ::cluster cluster
+                  ::asked asked
+                  :seon.cluster.agent/id agent-id
+                  :seon.cluster.run/id run-id
+                  :seon.cluster.run.form/ordinal ordinal
+                  ::now now}
+           problem (assoc :seon.problems/form-problem problem)
+           trigger (assoc :seon.cluster.message/trigger trigger)))
+        settlement-evaluation (settlement-result cluster evaluation)
+        settlement-stages (:seon.blob/staged-writes settlement-evaluation)
+        settlement-evaluation
+        (dissoc settlement-evaluation :seon.blob/staged-writes)
+        desk-evaluation
+        (store-desk-values! (:seon.db/connection cluster) evaluation)
+        desk-stages (:seon.blob/staged-writes desk-evaluation)
+        desk-evaluation (dissoc desk-evaluation :seon.blob/staged-writes)
+        rows (desk-rows database agent-id desk-evaluation ordinal)
+        receipt
+        (receipt-request
+         (cond-> {:seon.cluster.run/id run-id
+                  :seon.cluster.run/process process
+                  :seon.cluster.run.form/ordinal ordinal
+                  :seon.sci.eval/evaluation evaluation
+                  :seon.def/rows rows
+                  ::settlement-evaluation settlement-evaluation}
+           problem (assoc :seon.problems/form-problem problem)
+           settled (assoc :my.run/value settled)))
+        recording
+        (when evaluation-failure
+          (error-tx cluster database evaluation-failure now
+                    {:seon.cluster.agent/id agent-id
+                     :seon.cluster.run/id run-id}))
+        tx-data
+        (into (terminal-tx receipt now)
+              (concat
+               (:seon.cluster.message/rows delivery)
+               (:seon.error/values-tx delivery)
+               recording))]
+    {::settled settled
+     ::evaluation evaluation
+     ::receipt receipt
+     :seon.blob/staged-writes (into (vec settlement-stages) desk-stages)
+     :seon.db/tx-data tx-data}))
+
+(defn- refusal-terminal-data
+  [cluster database now agent-id run-id process ordinal receipt source]
+  (let [recording
+        (error-tx cluster database source now
+                  (cond-> {:seon.cluster.agent/id agent-id}
+                    run-id (assoc :seon.cluster.run/id run-id)))
+        value (error/value (first recording))
+        receipt-tx
+        (when ordinal
+          (run/receipt-settle-tx
+           (cond->
+            {:seon.cluster.run/id run-id
+             :seon.cluster.eval/ordinal ordinal
+             :seon.cluster.eval/result-edn (pr-str value)
+             :seon.cluster.eval/result-size (long (count (pr-str value)))
+             :seon.cluster.eval/error (:seon.error/message value)
+             :seon.error/kind (:seon.error/kind value)}
+             (seq (:seon.def/rows receipt))
+             (assoc :seon.def/rows (:seon.def/rows receipt)))))]
+    {:seon.error/value value
+     :seon.db/tx-data
+     (into [] cat
+           [receipt-tx
+            (when (and run-id (not ordinal))
+              [[:db/add [:seon.cluster.run/id run-id]
+                :seon.cluster.run/error (:seon.error/message value)]])
+            (when run-id
+              (run/close-tx
+               {:seon.cluster.run/id run-id
+                :seon.cluster.run/process process
+                :seon.cluster.run/closed-at now}))
+            recording])}))
+
+(defn settle!
+  "The sole terminal writer for one run.
+
+  Evaluation settlement commits its receipt, disposition, deliveries, desk
+  rows, durable error fact, and close together. A phase failure before
+  evaluation has no ordinal and therefore commits zero receipts. A refused
+  terminal transaction takes one bounded refusal branch; success is the
+  returned transaction report, never a value constructed before commit."
+  [{cluster ::cluster
+    now ::now
+    agent-id :seon.cluster.agent/id
+    run-id :seon.cluster.run/id
+    ordinal :seon.cluster.run.form/ordinal
+    evaluation :seon.sci.eval/evaluation
+    failure :seon.error/value
+    :as request}]
+  (let [connection (:seon.db/connection cluster)
+        process (:seon.cluster.run/process cluster)
+        prepared
+        (if evaluation
+          (phase #(evaluation-terminal-data
+                   (assoc request :seon.cluster.run/process process)))
+          failure)
+        prepared
+        (if (:seon.error/kind prepared)
+          (refusal-terminal-data cluster @connection now agent-id run-id
+                                 process ordinal nil prepared)
+          prepared)
+        commit
+        (fn [transaction]
+          (if-let [stages (:seon.blob/staged-writes transaction)]
+            (blob/with-publication!
+             connection stages
+             #(db/transact! connection {:tx-data (:seon.db/tx-data transaction)}))
+            (db/transact! connection {:tx-data (:seon.db/tx-data transaction)})))
+        outcome (commit prepared)]
+    (if-not (:seon.error/kind outcome)
+      (assoc prepared ::outcome outcome)
+      (let [refusal
+            (refusal-terminal-data
+             cluster @connection now agent-id run-id process ordinal
+             (::receipt prepared) outcome)
+            refused (commit refusal)]
+        (when (:seon.error/kind refused)
+          (throw
+           (ex-info "Terminal refusal settlement was refused."
+                    {:seon.error/kind ::terminal-refusal-settlement-refused
+                     ::settlement refused
+                     ::refused-outcome outcome})))
+        (assoc refusal
+               ::outcome refused
+               ::refused-outcome outcome)))))
 
 (defn- attempt-id
   "One model attempt's identity: derived, so nothing allocates a uuid.
@@ -1162,13 +1113,16 @@
                                          :seon.cluster.run/live-processes
                                          #{process}
                                          :seon.cluster.run/now now}))})]
-      ;; a REFUSED open has no run to attribute to — the run is what
-      ;; failed to exist
-      (report (if (refused! cluster outcome now
-                            {:seon.cluster.agent/id agent-id})
-                :error
-                :released)
-              0))))
+      (if (:seon.error/kind outcome)
+        (do
+          ;; The open transaction formed no run, so settlement records the
+          ;; error and escalation with no run attribution or close.
+          (settle! {::cluster cluster
+                    ::now now
+                    :seon.cluster.agent/id agent-id
+                    :seon.error/value outcome})
+          (report :error 0))
+        (report :released 0)))))
 
 (defn- call-turn
   "Call the provider and freeze the returned plan."
@@ -1230,42 +1184,14 @@
                                  {:seon.cluster.agent/id agent-id
                                   :seon.cluster.run/id run-id
                                   :seon.ai/partial snapshot})))
-          fail! (fn fail!
-                  ([failure]
-                   (fail! failure false))
-                  ([failure record-refusal?]
-                   ;; ONE transaction: the run closes and WHY it closed
-                   ;; lands with it. A pre-provider refusal also commits its
-                   ;; error fact here, so the existing episode derivation can
-                   ;; distinguish it structurally from a failed model attempt.
-                   ;; This terminal FACT is also the stream terminal: its
-                   ;; render wake replaces any transient partial.
-                   (let [db @connection
-                         recording
-                         (when record-refusal?
-                           (error-tx
-                            cluster db failure now
-                            {:seon.cluster.agent/id agent-id
-                             :seon.cluster.run/id run-id}))
-                         outcome
-                         (db/transact!
-                          connection
-                          (into (vec recording)
-                                (cons
-                                 [:db/add [:seon.cluster.run/id run-id]
-                                  :seon.cluster.run/error
-                                  (:seon.error/message failure)]
-                                 (run/close-tx
-                                  {:seon.cluster.run/id run-id
-                                   :seon.cluster.run/process process
-                                   :seon.cluster.run/closed-at now}))))]
-                     (when (and record-refusal?
-                                (:seon.error/kind outcome))
-                       (terminal-settlement-fault!
-                        cluster
-                        "Pre-provider refusal settlement was refused."
-                        {::settlement outcome}))
-                     (report :error 0))))
+          fail!
+          (fn [failure]
+            (settle! {::cluster cluster
+                      ::now now
+                      :seon.cluster.agent/id agent-id
+                      :seon.cluster.run/id run-id
+                      :seon.error/value failure})
+            (report :error 0))
           freeze!
           (fn [completion]
             ;; Freeze the reply's exact ordered source. Static admission is
@@ -1288,12 +1214,9 @@
                                  (digest sources)
                                  :seon.cluster.run/sources
                                  sources}))]
-                  (report (if (refused! cluster outcome now
-                                        {:seon.cluster.agent/id agent-id
-                                         :seon.cluster.run/id run-id})
-                            :error
-                            :released)
-                          0)))))
+                  (if (:seon.error/kind outcome)
+                    (fail! outcome)
+                    (report :released 0))))))
           ;; THE PROMPT REQUEST NAMES THE HELD RUN — `prompt` derives
           ;; the trigger from the run's own creating transaction
           ;; (`message/trigger`), never a re-asked queue: the recorded
@@ -1303,28 +1226,21 @@
           ;; and this one call site turns that refusal into the flat
           ;; error value the loop already records — the same shape a
           ;; refused transaction takes through `db/transact!`.
-          rendered (try
-                     (prompt/prompt (run/opening-db @connection run-id)
-                                    {:seon.cluster.run/id run-id
-                                     :seon.cluster.agent/id agent-id
-                                     :seon.sci.admit/caps
-                                     (:seon.sci.admit/caps cluster)
-                                     :seon.sci.eval/ctx
-                                     (:seon.sci.eval/ctx cluster)
-                                     :seon.sci.eval/time-limit-ms
-                                     (:seon.config.eval/time-limit-ms cluster)
-                                     :seon.config/on-core-error
-                                     (:seon.config/on-core-error cluster)
-                                     :seon.render/context-channel
-                                     (:seon.render/context-channel cluster)})
-                     (catch Exception failure
-                       ;; the kind fallback keeps this total: an
-                       ;; exception carrying no flat error data still
-                       ;; ends the turn as a recorded value rather
-                       ;; than falling through to a nil-prompt call
-                       (merge {:seon.error/kind ::prompt-failed
-                               :seon.error/message (ex-message failure)}
-                              (error/refusal failure))))
+          rendered
+          (phase
+           #(prompt/prompt (run/opening-db @connection run-id)
+                           {:seon.cluster.run/id run-id
+                            :seon.cluster.agent/id agent-id
+                            :seon.sci.admit/caps
+                            (:seon.sci.admit/caps cluster)
+                            :seon.sci.eval/ctx
+                            (:seon.sci.eval/ctx cluster)
+                            :seon.sci.eval/time-limit-ms
+                            (:seon.config.eval/time-limit-ms cluster)
+                            :seon.config/on-core-error
+                            (:seon.config/on-core-error cluster)
+                            :seon.render/context-channel
+                            (:seon.render/context-channel cluster)}))
           ;; CAPTURE BEFORE THE PROVIDER (ruling 4, 2026-07-28): the
           ;; exact prompt text, the rendered basis and the ordered
           ;; contribution records commit in ONE turn-owned transaction
@@ -1354,7 +1270,7 @@
         ;; The next pass derives correction from those facts below the ONE
         ;; episode cap; at the cap it derives no work. No provider call occurs
         ;; without durable prompt evidence.
-        (fail! captured true)
+        (fail! captured)
         (loop [target primary
                ordinal (attempts @connection run-id)
                ;; ABSENT on the primary and on every backoff retry;
@@ -1447,265 +1363,200 @@
               ;; delivery machinery does the rest
               :else (fail! failure))))))))
 
-(defn- resume-turn*
-  "Reduce one held run over its remaining admitted forms."
+(defn- resume-turn
+  "Reduce one held run through value-returning phases and the sole settle! exit."
   [{cluster ::cluster work ::work now ::now report ::report}]
   (let [connection (:seon.db/connection cluster)
         process (:seon.cluster.run/process cluster)
         agent-id (:seon.cluster.agent/id work)
-        run-id (:seon.cluster.run/id work)]
-    ;; THE FOLD, in one turn, over a fresh fork of the cluster's live base.
-    ;; Every form in this turn shares the fork; the next turn forks the then
-    ;; current base and rehydrates this agent's desk again.
-    ;;
-    ;; Boot recovery closes interrupted runs before any agent graph is
-    ;; armed, so this branch is only the ordinary live fold over one
-    ;; ctx. A cold fold starting at ordinal k > 0 cannot reach it.
-    (let [base-ctx (:seon.sci.eval/ctx cluster)
-          {ctx :seon.sci.eval/ctx
-           desk-notices :seon.sci.eval/desk-notices}
-          (pre-evaluation-call
-           (:seon.cluster.run.form/ordinal work)
-           #(sci.eval/fork-for-turn
-             {:seon.sci.eval/ctx base-ctx
-              :seon.db/db @connection
-              :seon.db/connection connection
-              :seon.cluster.agent/id agent-id}))
-          compiled-evaluate
-          (pre-evaluation-call
-           (:seon.cluster.run.form/ordinal work)
-           #(requiring-resolve (:seon.cluster.loop/evaluate cluster)))
-          ;; The public walk and every renderer share this evaluation's exact
-          ;; cluster context. Bind it on the actual compute worker so nested
-          ;; agent calls use the same database value, live SCI ctx, time limit,
-          ;; and core-error disposition as the form that called them.
-          evaluate
-          (fn [request]
-            (render/call-with-walk-context
-             {:seon.db/db @connection
-              :seon.db/connection connection
-              :seon.cluster.agent/id agent-id
-              :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
-              :seon.sci.eval/ctx ctx
-              :seon.sci.eval/time-limit-ms
-              (:seon.config.eval/time-limit-ms cluster)
-              :seon.config/on-core-error
-              (:seon.config/on-core-error cluster)}
-             #(compiled-evaluate request)))
-          ;; the message this run is answering, read ONCE per turn: it
-          ;; is the head of the conversation chain every message this
-          ;; turn sends extends, and it cannot change while the run is
-          ;; held
-          trigger
-          (pre-evaluation-call
-           (:seon.cluster.run.form/ordinal work)
-           #(message/trigger @connection run-id))]
-      (loop [ordinal (:seon.cluster.run.form/ordinal work)
-             ran 0
-             namespace-name
-             (fold-namespace @connection run-id
-                             (:seon.cluster.run.form/ordinal work))]
-        (let [receipt-id (pr-str [run-id ordinal])
-              problem-id (work/problem-id run-id ordinal)
-              started
-              (db/transact!
-               connection
-               (conj
-                (run/receipt-start-tx
-                 {:seon.cluster.run/id run-id
-                  :seon.cluster.eval/ordinal ordinal
-                  :seon.cluster.eval/at now})
-                [:db/add [:seon.cluster.eval/id receipt-id]
-                 :seon.problems/id problem-id]))]
-          (if (refused! cluster started now
-                        {:seon.cluster.agent/id agent-id
-                         :seon.cluster.run/id run-id})
-            (report :error ran)
-            (let [db-before-evaluation @connection
-                  form
-                  (pre-evaluation-call
-                   ordinal
-                   #(admitted-form
-                     {:seon.db/db db-before-evaluation
+        run-id (:seon.cluster.run/id work)
+        base-ctx (:seon.sci.eval/ctx cluster)
+        forked
+        (phase
+         #(sci.eval/fork-for-turn
+           {:seon.sci.eval/ctx base-ctx
+            :seon.db/db @connection
+            :seon.db/connection connection
+            :seon.cluster.agent/id agent-id}))]
+    (if (:seon.error/kind forked)
+      (do
+        (settle! {::cluster cluster
+                  ::now now
+                  :seon.cluster.agent/id agent-id
+                  :seon.cluster.run/id run-id
+                  :seon.error/value forked})
+        (report :error 0))
+      (let [{ctx :seon.sci.eval/ctx
+             desk-notices :seon.sci.eval/desk-notices} forked
+            compiled-evaluate
+            (phase #(requiring-resolve (:seon.cluster.loop/evaluate cluster)))
+            trigger (phase #(message/trigger @connection run-id))]
+        (cond
+          (:seon.error/kind compiled-evaluate)
+          (do
+            (settle! {::cluster cluster
+                      ::now now
+                      :seon.cluster.agent/id agent-id
                       :seon.cluster.run/id run-id
-                      :seon.cluster.run.form/ordinal ordinal
-                      :seon.sci.eval/ctx ctx
-                      ::current-namespace namespace-name
-                      ::fallback-namespace
-                      (sci.eval/agent-namespace db-before-evaluation agent-id)}))
-                  evaluation-namespace
-                  (second (:seon.cluster.run.form/ns form))
-                  evaluation
-                  (pre-evaluation-call
-                   ordinal
-                   #(submit-evaluation!!
-                     cluster
-                     evaluate
-                     receipt-id
-                     (evaluation-request
-                      (cond->
-                       {::admitted-form form
-                        ::evaluation-namespace evaluation-namespace
-                        ::cluster cluster
-                        :seon.sci.eval/ctx ctx
-                        :seon.cluster.agent/id agent-id
+                      :seon.error/value compiled-evaluate})
+            (report :error 0))
+
+          (:seon.error/kind trigger)
+          (do
+            (settle! {::cluster cluster
+                      ::now now
+                      :seon.cluster.agent/id agent-id
+                      :seon.cluster.run/id run-id
+                      :seon.error/value trigger})
+            (report :error 0))
+
+          :else
+          (let [evaluate
+                (fn [request]
+                  (render/call-with-walk-context
+                   {:seon.db/db @connection
+                    :seon.db/connection connection
+                    :seon.cluster.agent/id agent-id
+                    :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+                    :seon.sci.eval/ctx ctx
+                    :seon.sci.eval/time-limit-ms
+                    (:seon.config.eval/time-limit-ms cluster)
+                    :seon.config/on-core-error
+                    (:seon.config/on-core-error cluster)}
+                   #(compiled-evaluate request)))]
+            (loop [ordinal (:seon.cluster.run.form/ordinal work)
+                   ran 0
+                   namespace-name
+                   (fold-namespace @connection run-id
+                                   (:seon.cluster.run.form/ordinal work))]
+              (let [database @connection
+                    form
+                    (phase
+                     #(admitted-form
+                       {:seon.db/db database
                         :seon.cluster.run/id run-id
-                        :seon.cluster.run.form/ordinal ordinal}
-                        (and (zero? ran) (seq desk-notices))
-                        (assoc :seon.sci.eval/output-prefix
-                               (str/join "\n" desk-notices))))))
-                  problem
-                  (problems/form-problem
-                   @connection
-                   {:seon.cluster.run/id run-id
-                    :seon.cluster.run.form/ordinal ordinal
-                    :seon.sci.eval/evaluation evaluation})
-                  settled (disposition (:seon.sci.admit/value evaluation))
-                  ;; THE SECOND AGENT-FACING VALUE, resolved against
-                  ;; the same database value this receipt is about.
-                  ;; Rows and refusal facts BOTH ride the terminal
-                  ;; transaction: a message that exists without the
-                  ;; receipt explaining where it came from is the torn
-                  ;; window this loop has closed everywhere else.
-                  ;; WHAT THIS FORM ASKS TO SEND — explicitly, or by
-                  ;; completing a run somebody else asked for. The
-                  ;; second is derived from the trigger rather than
-                  ;; remembered by the agent: bob computed the right
-                  ;; answer on the first live drive and called
-                  ;; `complete`, which addressed nobody, and alice
-                  ;; waited forever for a number that already existed.
-                  ;; The reply is an ordinary `my.message` value, so
-                  ;; it goes through the same bound, the same
-                  ;; recipient check and the same derived id.
-                  db-after-evaluation @connection
-                  asked
-                  (asked-value
-                   (cond-> {:seon.db/db db-after-evaluation
-                            :seon.sci.eval/evaluation evaluation
-                            ::settled settled
-                            :seon.cluster.agent/id agent-id}
-                     problem (assoc :seon.problems/form-problem problem)
-                     trigger (assoc :seon.cluster.message/trigger trigger)))
-                  ;; an undeliverable message is a durable fact, never
-                  ;; a drop — and `error/commit-tx` composes with
-                  ;; itself now that its tempid derives from the
-                  ;; error's own id rather than being a constant
-                  delivery
-                  (delivery-rows
-                   (cond-> {:seon.db/db db-after-evaluation
-                            ::cluster cluster
-                            ::asked asked
-                            :seon.cluster.agent/id agent-id
-                            :seon.cluster.run/id run-id
-                            :seon.cluster.run.form/ordinal ordinal
-                            ::now now}
-                     trigger (assoc :seon.cluster.message/trigger trigger)))
-                  rows (:seon.cluster.message/rows delivery)
-                  refusals (:seon.error/values-tx delivery)
-                  settlement-evaluation
-                  (settlement-result cluster evaluation)
-                  settlement-stages
-                  (:seon.blob/staged-writes settlement-evaluation)
-                  settlement-evaluation
-                  (dissoc settlement-evaluation :seon.blob/staged-writes)
-                  desk-evaluation
-                  (store-desk-values! connection evaluation)
-                  desk-stages
-                  (:seon.blob/staged-writes desk-evaluation)
-                  desk-evaluation
-                  (dissoc desk-evaluation :seon.blob/staged-writes)
-                  desk-rows
-                  (desk-rows @connection agent-id desk-evaluation ordinal)
-                  receipt
-                  (receipt-request
-                   (cond-> {:seon.cluster.run/id run-id
-                            :seon.cluster.run/process process
-                            :seon.cluster.run.form/ordinal ordinal
-                            :seon.sci.eval/evaluation evaluation
-                            :seon.def/rows desk-rows
-                            ::settlement-evaluation settlement-evaluation}
-                     problem (assoc :seon.problems/form-problem problem)
-                     settled (assoc :my.run/value settled)))
-                  terminal
-                  (blob/with-publication!
-                   connection (into (vec settlement-stages) desk-stages)
-                   (fn []
-                     (let [outcome
-                           (db/transact!
-                            connection
-                            {:tx-data
-                             (into (terminal-tx receipt now)
-                                   (concat rows
-                                           refusals))})]
-                       {::outcome outcome
-                        ::terminal-refused?
-                        (terminal-refused!
-                         cluster outcome now
-                         {:seon.cluster.agent/id agent-id
-                          :seon.cluster.run/id run-id}
-                         receipt)})))
-                  outcome (::outcome terminal)
-                  terminal-refused? (::terminal-refused? terminal)
-                  _
-                  (if (and (:seon.program/row evaluation)
-                           (not (:seon.error/kind outcome)))
-                    (let [row (:seon.program/row evaluation)
-                          db-after (:db-after outcome)]
-                      (sci.eval/install-row!
-                       {:seon.sci.eval/ctx base-ctx
-                        :seon.db/db db-after
-                        :seon.program/row
-                        (dissoc row :seon.sci.eval/evaluated?)})
-                      (sci.eval/install-row!
-                       {:seon.sci.eval/ctx ctx
-                        :seon.db/db db-after
-                        :seon.program/row row}))
-                    nil)
-                  ran (inc ran)
-                  ;; THE FOLD'S OWN NEXT ORDINAL IS PER-AGENT (F1
-                  ;; §5.2): asking the GLOBAL derivation here was the
-                  ;; conservation audit's verified defect — wrong the
-                  ;; moment two agents run, because another agent's
-                  ;; earlier work would answer this run's question.
-                  next-ordinal
-                  (when-not (or settled (:seon.error/kind outcome))
-                    (:seon.cluster.run.form/ordinal
-                     (work/next-agent-work
-                      @connection
-                      {:seon.cluster.agent/id agent-id
-                       :seon.cluster.run/process process
-                       :seon.cluster.work/now now})))]
-              (cond
-                terminal-refused?
-                (report :error ran)
-
-                ;; both dispositions CLOSE the run in the terminal
-                ;; transaction now, so a settled fold always reports
-                ;; the run closed
-                settled (report :closed ran)
-                next-ordinal
-                (recur next-ordinal ran
-                       (or (:seon.sci.eval/ending-ns evaluation)
-                           evaluation-namespace))
-                :else (report :released ran)))))))))
-
-(defn- resume-turn
-  "Reduce a held plan, settling any fault before evaluation as a terminal
-  receipt plus run close rather than allowing it to escape with custody."
-  [{work ::work now ::now report ::report :as request}]
-  (try
-    (resume-turn* request)
-    (catch Throwable failure
-      (if (::pre-evaluation-fault (ex-data failure))
-        (let [cluster (::cluster request)
-              ordinal (:seon.cluster.run.form/ordinal (ex-data failure))]
-          (settle-pre-evaluation-fault!
-           cluster (or (ex-cause failure) failure) now
-           (:seon.cluster.agent/id work)
-           (:seon.cluster.run/id work)
-           ordinal)
-          (report :error 0))
-        (throw failure)))))
+                        :seon.cluster.run.form/ordinal ordinal
+                        ::current-namespace namespace-name
+                        ::fallback-namespace
+                        (sci.eval/agent-namespace database agent-id)}))]
+                (if (:seon.error/kind form)
+                  (do
+                    (settle! {::cluster cluster
+                              ::now now
+                              :seon.cluster.agent/id agent-id
+                              :seon.cluster.run/id run-id
+                              :seon.error/value form})
+                    (report :error ran))
+                  (let [evaluation-namespace
+                        (second (:seon.cluster.run.form/ns form))
+                        receipt-id (pr-str [run-id ordinal])
+                        started
+                        (db/transact!
+                         connection
+                         (run/receipt-start-tx
+                          {:seon.cluster.run/id run-id
+                           :seon.cluster.eval/ordinal ordinal
+                           :seon.cluster.eval/at now}))]
+                    (if (:seon.error/kind started)
+                      (do
+                        (settle! {::cluster cluster
+                                  ::now now
+                                  :seon.cluster.agent/id agent-id
+                                  :seon.cluster.run/id run-id
+                                  :seon.error/value started})
+                        (report :error ran))
+                      (let [evaluation
+                            (phase
+                             #(submit-evaluation!!
+                               cluster
+                               evaluate
+                               receipt-id
+                               (evaluation-request
+                                (cond->
+                                 {::admitted-form form
+                                  ::evaluation-namespace evaluation-namespace
+                                  ::cluster cluster
+                                  :seon.sci.eval/ctx ctx
+                                  :seon.cluster.agent/id agent-id
+                                  :seon.cluster.run/id run-id
+                                  :seon.cluster.run.form/ordinal ordinal}
+                                  (and (zero? ran) (seq desk-notices))
+                                  (assoc :seon.sci.eval/output-prefix
+                                         (str/join "\n" desk-notices))))))]
+                        (if (:seon.error/kind evaluation)
+                          (do
+                            (settle! {::cluster cluster
+                                      ::now now
+                                      :seon.cluster.agent/id agent-id
+                                      :seon.cluster.run/id run-id
+                                      :seon.cluster.run.form/ordinal ordinal
+                                      :seon.error/value evaluation})
+                            (report :error (inc ran)))
+                          (let [problem
+                                (phase
+                                 #(problems/form-problem
+                                   @connection
+                                   {:seon.cluster.run/id run-id
+                                    :seon.cluster.run.form/ordinal ordinal
+                                    :seon.sci.eval/evaluation evaluation}))
+                                terminal
+                                (if (= ::phase-failed
+                                       (:seon.error/kind problem))
+                                  (settle! {::cluster cluster
+                                            ::now now
+                                            :seon.cluster.agent/id agent-id
+                                            :seon.cluster.run/id run-id
+                                            :seon.cluster.run.form/ordinal ordinal
+                                            :seon.error/value problem})
+                                  (settle!
+                                   (cond->
+                                    {::cluster cluster
+                                     ::now now
+                                     :seon.cluster.agent/id agent-id
+                                     :seon.cluster.run/id run-id
+                                     :seon.cluster.run.form/ordinal ordinal
+                                     :seon.sci.eval/evaluation evaluation}
+                                     problem
+                                     (assoc :seon.problems/form-problem problem)
+                                     trigger
+                                     (assoc :seon.cluster.message/trigger
+                                            trigger))))
+                                outcome (::outcome terminal)
+                                refused? (some? (::refused-outcome terminal))
+                                failure (::failure terminal)
+                                settled (::settled terminal)
+                                _
+                                (when (and (:seon.program/row evaluation)
+                                           (not refused?))
+                                  (let [row (:seon.program/row evaluation)
+                                        db-after (:db-after outcome)]
+                                    (sci.eval/install-row!
+                                     {:seon.sci.eval/ctx base-ctx
+                                      :seon.db/db db-after
+                                      :seon.program/row
+                                      (dissoc row :seon.sci.eval/evaluated?)})
+                                    (sci.eval/install-row!
+                                     {:seon.sci.eval/ctx ctx
+                                      :seon.db/db db-after
+                                      :seon.program/row row})))
+                                ran (inc ran)
+                                next-ordinal
+                                (when-not (or settled failure refused?)
+                                  (:seon.cluster.run.form/ordinal
+                                   (work/next-agent-work
+                                    @connection
+                                    {:seon.cluster.agent/id agent-id
+                                     :seon.cluster.run/process process
+                                     :seon.cluster.work/now now})))]
+                            (cond
+                              refused? (report :error ran)
+                              failure (report :error ran)
+                              settled (report :closed ran)
+                              next-ordinal
+                              (recur next-ordinal ran
+                                     (or (:seon.sci.eval/ending-ns evaluation)
+                                         evaluation-namespace))
+                              :else (report :released ran))))))))))))))))
 
 (defn- close-turn
   "Claim when needed and close one fully settled run."
@@ -1749,12 +1600,16 @@
                      (run/close-tx {:seon.cluster.run/id run-id
                                     :seon.cluster.run/process process
                                     :seon.cluster.run/closed-at now})))]
-      (report (if (refused! cluster outcome now
-                            {:seon.cluster.agent/id agent-id
-                             :seon.cluster.run/id run-id})
-                :error
-                :closed)
-              0))))
+      (if (:seon.error/kind outcome)
+        (do
+          ;; A refused claim means another process owns this run. Record the
+          ;; refusal without mutating that process's terminal state.
+          (settle! {::cluster cluster
+                    ::now now
+                    :seon.cluster.agent/id agent-id
+                    :seon.error/value outcome})
+          (report :error 0))
+        (report :closed 0)))))
 
 (defn turn
   "Run one turn to its next durable boundary; returns the turn report.
