@@ -1553,7 +1553,7 @@
                      :seon.error/at (java.util.Date.)
                      :seon.error/process process
                      :seon.sci.admit/caps caps
-                     :seon.error/basis-t (:max-tx db)
+                     :seon.error/basis-t (db/basis-t db)
                      :seon.config.error/recurrence-limit
                      (:seon.config.error/recurrence-limit dials)}
               (:seon.config.error/escalate-to dials)

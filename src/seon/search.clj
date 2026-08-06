@@ -237,7 +237,7 @@
       (doseq [eid (declared-entity-ids database roster)
               doc (entity-documents database roster eid)]
         (.addDocument writer ^Iterable doc))
-      (set-basis! owner (:max-tx database))
+      (set-basis! owner (db/basis-t database))
       (finally
         (.unlock ^ReentrantLock (:lock owner)))))
   owner)
@@ -265,7 +265,7 @@
           before-roster (search-roster before)
           after-roster (search-roster after)
           relevant-attributes (roster-attributes after-roster)]
-      (if (or (not= @(:basis owner) (long (:max-tx before)))
+      (if (or (not= @(:basis owner) (db/basis-t before))
               (not= before-roster after-roster))
         (rebuild! owner after)
         (do
@@ -283,7 +283,7 @@
                   (.deleteDocuments writer terms))
                 (doseq [doc (entity-documents after after-roster eid)]
                   (.addDocument writer ^Iterable doc)))
-              (set-basis! owner (:max-tx after)))
+              (set-basis! owner (db/basis-t after)))
             (finally
               (.unlock ^ReentrantLock (:lock owner))))))))
   nil)
@@ -334,7 +334,7 @@
                    (assoc-in [:seon.search/by-id index-id] owner)
                    (assoc-in [:seon.search/by-connection connection] index-id))))
       (try
-        (when (not= disk-basis (long (:max-tx database)))
+        (when (not= disk-basis (db/basis-t database))
           (rebuild! owner database))
         index-id
         (catch Throwable failure

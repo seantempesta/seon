@@ -583,7 +583,7 @@
                  [:seon.cluster.agent/id agent-id])
         basis-instant
         (:db/txInstant
-         (db/pull database [:db/txInstant] (long (:max-tx database))))
+         (db/pull database [:db/txInstant] (db/basis-t database)))
         pending
         (->> (db/q
               '[:find ?id ?owner ?opened

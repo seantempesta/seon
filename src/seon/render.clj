@@ -469,7 +469,7 @@
                        [?message :seon.cluster.message/id ?message-id]]
                      database message-id))
         at (:db/txInstant
-            (db/pull database [:db/txInstant] (:max-tx database)))
+            (db/pull database [:db/txInstant] (db/basis-t database)))
         message
         (str "A renderer in " namespace-name " failed. "
              (:seon.error/message failure)
@@ -544,7 +544,7 @@
 
 (defn- repl-state
   [db agent-id]
-  (let [basis (long (:max-tx db))
+  (let [basis (db/basis-t db)
         namespace-name
         (db/q '[:find ?name .
                :in $ ?agent-id

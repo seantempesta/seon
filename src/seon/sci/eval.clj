@@ -652,7 +652,7 @@
   "Advance a live context's projection at the database's basis transaction."
   [ctx db projection]
   (when-let [state (::projection-state ctx)]
-    (let [basis-transaction (long (:max-tx db))]
+    (let [basis-transaction (db/basis-t db)]
       (swap! state
              (fn [current]
                (if (<= (long (or (::basis-transaction current)
@@ -1439,7 +1439,7 @@
          ctx (assoc ctx
                     :seon.schema/projection projection
                     ::projection-state
-                    (atom {::basis-transaction (long (:max-tx db))
+                    (atom {::basis-transaction (db/basis-t db)
                            :seon.schema/projection projection}))]
      ctx)))
 

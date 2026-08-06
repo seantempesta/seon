@@ -253,7 +253,7 @@
 (defn- inbound-message-id
   "One outside message's identity, derived at the serial writer basis."
   [db index]
-  (str "inbound-" (:max-tx db) "-" index))
+  (str "inbound-" (db/basis-t db) "-" index))
 
 (defn inbound-tx
   "Derive one outside message row or a flat refusal value.

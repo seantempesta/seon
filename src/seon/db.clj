@@ -57,7 +57,7 @@
      (let [database @(fresh-connection)]
        (case variant
          :current database
-         :as-of (d/as-of database (:max-tx database))
+         :as-of (d/as-of database (dbi/-max-tx database))
          :since (d/since database 0)
          :history (d/history database))))
    (gen/elements [:current :as-of :since :history])))
@@ -144,6 +144,21 @@
       {:db-name (:branch configuration)
        :t (dbi/-max-tx database)
        :datahike/commit-id (d/commit-id database)})))
+
+(defn basis-t
+  "The database value's basis transaction, through Datahike's interface.
+
+  Takes any database value shape — current, as-of, since, or history — and
+  returns its basis transaction as a long, or the error value unchanged. Use
+  this instead of reading :max-tx as a map key: an as-of/history value
+  carries no top-level :max-tx entry."
+  {:malli/schema
+   [:=> [:cat [:or :seon.db/database-value :seon.error/value]]
+    [:or :int :seon.error/value]]}
+  [database]
+  (if (error-value? database)
+    database
+    (long (dbi/-max-tx database))))
 
 (defn- foreign-connection-error
   [connection]

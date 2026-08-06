@@ -623,7 +623,7 @@
   (let [package (get @latest-packages registration-key)]
     (when (and package
                (not (:seon.render.package/streaming? package))
-               (= (long (:max-tx @connection))
+               (= (db/basis-t @connection)
                   (:seon.render.package/basis-transaction package)))
       (join-package package))))
 
@@ -744,7 +744,7 @@
                  (next-package
                   (get latest registration-key)
                   (:seon.render.web/page result)
-                  (long (:max-tx db))
+                  (db/basis-t db)
                   (boolean (and (not debug?) (get streams agent-id))))]
              {:packages (assoc latest registration-key package)
               :changed? (or changed? package-changed?)}))
