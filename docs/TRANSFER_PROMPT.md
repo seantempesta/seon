@@ -33,14 +33,15 @@ learned enough to build it properly.
 That single fact should reorganize how you work here:
 
 > **Almost everything you are asked to build has been built before, and the
-> previous version is still readable.**
+> previous version is still readable through Git history.**
 
-`src-old/` is not dead weight; it is a quarry with gold in it. Git history is a
-record of every bug each mechanism learned to survive — each fix commit is a
-failure class someone already paid for. `docs/prds/*/research/` holds dated
-investigations with `file:line` evidence and measured numbers, dozens of them.
-`reference-code/` vendors ~90 dependencies as submodules so their semantics can
-be *read* rather than remembered.
+The old source trees are absent from the checkout; `git show` and `git log` are
+the quarry. Git history records every bug each mechanism learned to survive —
+each fix commit is a failure class someone already paid for.
+`docs/prds/*/research/` holds dated investigations with `file:line` evidence
+and measured numbers, dozens of them. `reference-code/` vendors ~90
+dependencies as submodules so their semantics can be *read* rather than
+remembered.
 
 So the prime directive is not "write good code." It is:
 
@@ -135,8 +136,8 @@ pass. A stale skill is a high-priority defect, not documentation debt.
 **Archaeology → design → falsify → review → test-forward implementation → live
 proof → independent audit.**
 
-- **Archaeology.** Read `src-old`, git history, the research corpus, and the
-  vendored dependency. Produce a keep / avoid / reconceive table. If you are
+- **Archaeology.** Read deleted source through Git history, the research corpus,
+  and the vendored dependency. Produce a keep / avoid / reconceive table. If you are
   coordinating, this is what research lanes are for, and launching them *first*
   is the whole game.
 - **Falsify before you commit to a design.** Attack it: an adversarial reviewer,
@@ -161,7 +162,8 @@ proof → independent audit.**
 ## Your instant feedback loop
 
 ```bash
-bin/test                      # the gate; bare = full suite, or pass namespaces
+bin/test                      # fast non-long tier, or pass namespaces
+bin/test --full               # complete checkpoint suite
 clojure -M:dev                # plain source-classpath REPL for load-only probes
 bin/seon status               # every live cluster
 bin/seon start <your-name>    # your own cluster; a fork is ~17ms
@@ -198,126 +200,35 @@ sovereign and cheap. Never write to, reset, or bounce someone else's.
 - **Long-running work dies sometimes** (upstream API errors, machine load).
   Commit in small coherent slices so churn costs minutes, not hours.
 
-## Start here, 2026-08-02: where the program actually is
+## Start here: the current working edge
 
-Read `plan/unsettled.md` from the TOP — its addenda run newest-first
-and **ADDENDUM 15 is the session-close handoff** (tree state, owed
-verifications, the queue). Then `plan/README.md` rulings **#24-#40**;
-the 2026-08-01/02 ones are the current charter. Then
-`issues/index.md`.
+Read [plan/unsettled.md](prds/sci-execution-runtime/plan/unsettled.md) from
+the top. Its newest WORKING EDGE owns current state. Then read all three
+2026-08-05 ruling batches in
+[plan/README.md](prds/sci-execution-runtime/plan/README.md), followed by
+[issues/index.md](seon/issues/index.md).
 
-**Run `bin/test` before anything else.** The full gate has not run
-since the schema consolidation and the `turn`/`evaluate` refactor
-landed. Last known green: 823 tests / 4,062 assertions / 0 failures.
+The rename + reset + rebuild pass is complete. `src-old/` and `test-old/`
+are gone from the checkout; Git history is the quarry. The schema population
+is split under `resources/seon/schemas/`. `seon.db` is the one database
+namespace for reads and writes, and `seon.effect` is the one system-side
+capability-request owner.
 
-### What is BUILT now (this list changed enormously on 2026-08-01/02)
+The four-lane implementation wave is complete:
 
-The substrate the earlier "state of the design" called designed-but-
-unbuilt is largely built and live-proven:
+- operations and maintenance execute turn-free and record queryable receipts;
+- desk W-A landed: each turn uses a fresh fork of the program-only cluster
+  base and rehydrates only the selected agent's `:seon.def/*` desk;
+- the exclusive-sweep gate, blob permit, durable MCP artifact fact, and
+  `collect!` dry-run landed; and
+- P12 graduated with complete typed argument-address facts, making P17
+  dependency-ready.
 
-- **One live SCI context per cluster**, built at cluster start and kept
-  hot — the per-turn rebuild is gone (~350 ms off every turn). Agents
-  in a cluster share one program; clusters share nothing (ruling #27
-  closed, including the 17-var sci-fork residue).
-- **Stateless resume**: a session restores value-first from
-  `:seon.def` facts, re-evaluating only *provably pure* forms;
-  effectful and nondeterministic ones never re-run (rulings #28/#32).
-- **The print path**: one closed grammar, one dispatch, text and hiccup
-  from one stored fact (#26). 34 REPL-parity divergences tracked; 10
-  promoted.
-- **Parsed function contracts as facts** (#33): "which functions accept
-  X / produce X" is one Datalog query, derived with Malli's own parser.
-- **Agent contract enforcement**: an agent calling another agent's
-  contracted function with bad input gets the same flat error a host
-  var produces — live-proven.
-- **AI settings** (#34): every dial overridable per agent by the same
-  attribute idents on the agent entity, resolved per turn.
-  Default model `deepseek-v4-flash`, **thinking off**, max-tokens
-  65536, timeout 180 s — all calibration-cited. Planners opt into
-  thinking; Seon is **tool-less** — forms are how agents act (#39).
-- **Model reasoning** persisted and streamed to the HTML projection
-  only, never into agent context (#35).
-- **The bootstrap is data**: `resources/seon/bootstrap.edn` populates
-  per-cluster plan facts; editing one form is a transaction, digests
-  key graded drives, prior agents stay frozen.
-- **Evals**: Seon registers as an Inspect model provider — **proved on
-  198 real gpqa samples**, upstream untouched (#36/#37). Goal grading
-  is our own `clojure.test` + test.check against the ending commit's
-  fork; judges advise, tests gate.
-- **One schema resource** (`resources/seon/schema.edn`, ruling #14
-  finally executed) — the per-family files and the globbing machinery
-  are gone.
-- **The operator**: `bin/seon --root PATH` isolation, `down` prints its
-  census before acting, `reset --force` works from any wreckage, one
-  `start-child-jvm!` owns every child launch.
-- **A standalone jar** (`build.clj`) that boots a cluster from nothing
-  but the jar, shipping pre-analyzed initialization rows.
-
-### The open work, and the trap in each
-
-- **The bootstrap's content is the live experiment.** The gpqa run is
-  the sharpest datum yet: **196 of 198 episodes tried to WORK a
-  multiple-choice question instead of answering it**. The episode
-  teaches objective-work; raw-QA tasks want an answer. Trap: this is
-  not a bug to fix in code — it is the empirical question the whole
-  apparatus exists to answer. Edit `resources/seon/bootstrap.edn` (or
-  transact a plan edit), run drives, compare by digest.
-- **Store economics at eval scale** (blocker). READ THE ANATOMY BEFORE
-  QUOTING ANY NUMBER HERE:
-  `research/store-amplification-anatomy-2026-08-02.md`. TWO EARLIER
-  FIGURES ARE NOW DISPROVEN and both were quoted in rulings and issue
-  notes before anyone modelled them:
-  - **"~86x inline payload amplification" is a MISREADING.** Payload
-    growth is LINEAR in payload size and QUADRATIC in sequential commit
-    count while roots stay shallow: the coefficient came from 40
-    retained growing snapshots, `4 × (N(N+1)/2 + N)`. The model is
-    validated, not asserted — a held-out 16 KiB prediction of
-    56,648,465 B against 56,618,147 B measured, 0.05% error.
-  - **"~42 MB per eval sample" is WRONG by ~4x**; it summed
-    overlapping shared-store intervals. The reconstruction is
-    9.793 MB/sample (1.939 GB selected for the 198-sample run).
-  What the run actually holds: history is 47.25% of it, the commit
-  record averages 969 B per transaction, and **blob content is exactly
-  0 B** — the blob tier is not being exercised at eval scale at all.
-  The blob threshold was RE-JUSTIFIED at 4,096 on fresh evidence
-  (production replay 1,277,558 B versus 1,572,238 B at 65,536, an 18.7%
-  saving); the 0-byte finding was explained — the archived run predated
-  the change. The older "~1.5 MB per transaction regardless of payload"
-  claim is also false.
-  **ATTRIBUTION IS NOT A COUNTERFACTUAL**, and this bit us the same day
-  we measured it. The per-attribute census attributed 187,360,394 B to
-  `:seon.schema/created-at` and projected ~8.3 MB per sample from
-  deleting it. Actually deleting it saved **9,661,654 B** — a
-  nineteenth of the attributed figure — because bytes attributed to an
-  attribute are not the bytes its removal frees when the underlying
-  persistent-set nodes are shared. A census tells you where bytes ARE;
-  only a measured before/after tells you what a change SAVES. Never
-  quote an attribution as a saving. Four figures in this one area have
-  now been disproven, the last by our own fresh measurement: measure
-  before repeating, model before tuning, and prove the counterfactual
-  before promising the win.
-- **The agent write surface** — the hole is ergonomics and gating, not
-  capability. Agents CAN transact any declared attribute (ruling #20
-  makes `store/transact!` callable; `:schema-flexibility :write`
-  refuses undeclared ones; refusals return as values). Ambient custody
-  is FIXED (`643719904`): each evaluation binds the agent's cluster
-  connection, so ambient `seon.db` reads and writes work through the
-  door. What remains: the seon.db wave (ruling #41 — all Datahike core
-  functions in `seon.db`, dual positional/argument-map interfaces,
-  everything first-party migrated) and ruling #30's persistence gate —
-  the designed control over what an agent may COMMIT — which has no
-  design yet. Commission the gate design.
-- **The effect door** (`seon.effect`) does not exist. That is why
-  replay-safety is trivially true today, and it gates ~26% of the
-  benchmark catalog.
-- **My own probe tools are too narrow** — `eval_clj` cannot reach a
-  `--root` JVM, a degraded boot (the REPL starts first precisely so
-  those stay debuggable), a chosen namespace, or the agent's own view
-  through the door. Filed; fix it early, it pays for itself.
-- **Load time**: 11.8 s -> 2.14 s via a dev dependency class cache
-  (first-party stays uncached, hot reload intact). The jar still pays
-  ~12 s; the same mechanism could serve it, with core.async's AOT/IOC
-  behavior the one thing to decide.
+The wave exit is still a green bare `bin/test` on a quiet tree. Finish the
+held verifications and remaining attributed red classes before claiming that
+exit. The grader wave is next; its results feed the bootstrap design session
+with the owner. The later ordered queue remains P17, desk W-B/W-C, the
+error-model wave, and curation W3.
 
 ## The mentality
 

@@ -11,7 +11,7 @@ convention here disagrees with the running code, the running code wins and this
 doc is a bug — flag it.
 
 Fresh `src/` and `test/` are the system; `bin/test` is the gate. Seon is CLJ on
-the JVM. The deleted CLJS/pod system under `src-old/` and `test-old/` is quarry,
+the JVM. The deleted CLJS/pod system is quarry through `git show` and `git log`,
 not a source of current APIs or ownership.
 
 ## Why These Conventions Matter
@@ -618,9 +618,8 @@ src/seon/
     └── datahike.cljc          ; seon.schema.datahike (the Datahike bridge)
 ```
 
-`test/` mirrors `src/`. Deleted implementations remain only as quarry under
-`src-old/` and `test-old/`; never port their namespace layout into the fresh
-tree.
+`test/` mirrors `src/`. Deleted implementations remain only in Git history;
+never port their namespace layout into the fresh tree.
 
 ---
 
