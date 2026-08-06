@@ -159,7 +159,7 @@
                  (:seon.error/kind form-problem))]
     (cond-> {:seon.cluster.run/id id
              :seon.cluster.run/process process
-             :seon.cluster.run.form/ordinal ordinal}
+             :seon.cluster.eval/ordinal ordinal}
       (:seon.cluster.eval/result-edn settlement-evaluation)
       (assoc :seon.cluster.eval/result-edn
              (:seon.cluster.eval/result-edn settlement-evaluation))
