@@ -230,8 +230,30 @@
   ([check]
    (assert-check! check "Generative check failed."))
   ([check message]
-   (test/is (true? (:result check))
-            (str message " " (pr-str check)))))
+   (letfn [(without-duplicate-error [result]
+             (let [error (get-in result
+                                 [:result-data
+                                  :clojure.test.check.properties/error])
+                   result-data
+                   (when-let [data (:result-data result)]
+                     (if (identical? (:result result) error)
+                       (not-empty
+                        (dissoc data
+                                :clojure.test.check.properties/error))
+                       data))]
+               (cond-> (if result-data
+                         (assoc result :result-data result-data)
+                         (dissoc result :result-data))
+                 (and (map? (:shrunk result))
+                      (instance? Throwable (:result result)))
+                 (assoc :result false)
+
+                 (map? (:shrunk result))
+                 (update :shrunk without-duplicate-error))))]
+     (let [passed? (true? (:result check))]
+       (test/is passed?
+              (str message " "
+                   (pr-str (without-duplicate-error check))))))))
 
 (defn- run-database-body
   [connection extra-schema body]

@@ -276,19 +276,44 @@
          :seon.error/kind :core-bug})))
     decoded))
 
+(defn- reference-registry
+  [canonical-keys fallback]
+  (let [defaults (mr/fast-registry (m/default-schemas))
+        references
+        (into {}
+              (comp
+               (filter qualified-keyword?)
+               (map (fn [schema-key]
+                      [schema-key [:ref schema-key]])))
+              canonical-keys)
+        all-schemas
+        (delay
+          (merge (mr/-schemas defaults)
+                 (mr/-schemas fallback)
+                 references))]
+    (reify
+      mr/Registry
+      (-schema [_ type]
+        (or (mr/-schema defaults type)
+            (get references type)
+            (mr/-schema fallback type)))
+      (-schemas [_]
+        @all-schemas))))
+
 (defn- canonical-reference-graph
   "Direct canonical references without eagerly expanding canonical forms."
   [forms predicate-functions]
   (let [canonical-keys (set (keys forms))
-        reference-registry
-        (mr/composite-registry
-         (m/default-schemas)
+        bootstrap-forms
+        (into {}
+              (remove (comp qualified-keyword? key))
+              forms)
+        registry-for-references
+        (reference-registry
+         canonical-keys
          (mr/fast-registry
-          (into {}
-                (map (fn [schema-key]
-                       [schema-key [:ref schema-key]]))
-                canonical-keys)))
-        options {:registry reference-registry}]
+          (bound-forms bootstrap-forms predicate-functions)))
+        options {:registry registry-for-references}]
     (into
      (sorted-map)
      (map
@@ -308,26 +333,12 @@
      forms)))
 
 (defn- direct-reference-keys-in
-  [definition predicate-functions canonical-keys]
-  (let [defaults (mr/fast-registry (m/default-schemas))
-        all-references
-        (delay
-          (into (mr/-schemas defaults)
-                (map (fn [schema-key]
-                       [schema-key [:ref schema-key]]))
-                canonical-keys))
-        reference-registry
-        (reify
-          mr/Registry
-          (-schema [_ type]
-            (or (mr/-schema defaults type)
-                (when (contains? canonical-keys type)
-                  [:ref type])))
-          (-schemas [_]
-            @all-references))]
+  [definition predicate-functions canonical-keys fallback]
+  (let [registry-for-references
+        (reference-registry canonical-keys fallback)]
     (direct-references*
      (m/schema (bind-predicates definition predicate-functions)
-               {:registry reference-registry})
+               {:registry registry-for-references})
      canonical-keys)))
 
 (declare canonical-data-string)
@@ -1970,7 +1981,7 @@
               schema-key)
         direct-dependencies
         (direct-reference-keys-in
-         definition predicate-functions canonical-keys)
+         definition predicate-functions canonical-keys registry)
         old-dependencies
         (get (:seon.schema.projection/schema-dependencies projection)
              schema-key #{})

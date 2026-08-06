@@ -467,6 +467,52 @@
                  ::predicate-owner (some-> predicate namespace symbol)
                  ::path path}))))
 
+(defn- unresolved-candidate-reference
+  [error projection forms]
+  (let [data (ex-data error)
+        reference (get-in data [:data :schema])]
+    (when (and (= :malli.core/invalid-schema (:type data))
+               (contains? forms reference)
+               (not= (get (:seon.schema.projection/forms projection)
+                          reference ::absent)
+                     (get forms reference ::absent)))
+      reference)))
+
+(defn- admit-changed-identities
+  [projection forms identities admission]
+  (letfn [(admit-one [candidate schema-key resolving]
+            (let [definition (get forms schema-key)]
+              (if (= definition
+                     (get (:seon.schema.projection/forms candidate)
+                          schema-key ::absent))
+                candidate
+                (try
+                  (schema/projection-with-schema
+                   candidate schema-key definition admission)
+                  (catch Exception error
+                    (if-let [reference
+                             (unresolved-candidate-reference
+                              error candidate forms)]
+                      (if (contains? resolving reference)
+                        (do
+                          ;; The complete candidate set owns the exact cycle
+                          ;; refusal. This call cannot return for a cycle.
+                          (schema/assert-complete-contract!
+                           {:seon.schema/identity schema-key
+                            :seon.schema/definition definition
+                            :seon.schema/forms forms
+                            :seon.schema/admission admission})
+                          (throw error))
+                        (let [with-reference
+                              (admit-one candidate reference
+                                         (conj resolving reference))]
+                          (admit-one with-reference schema-key resolving)))
+                      (throw error)))))))]
+    (reduce (fn [candidate schema-key]
+              (admit-one candidate schema-key #{schema-key}))
+            projection
+            identities)))
+
 (defn admit
   "THE one admission gate over a complete candidate population.
   The population is one map of registry key → schema form. Called by activation over the loader's
@@ -506,13 +552,9 @@
         ;; the same incremental projection choke point without recompiling
         ;; unrelated registry forms.
         (if-let [projection (schema/current-projection)]
-          (reduce
-           (fn [candidate changed-identity]
-             (schema/projection-with-schema
-              candidate changed-identity (get forms changed-identity)
-              (or admission {:seon.schema.admission/source :agent})))
-           projection
-           changed-identities)
+          (admit-changed-identities
+           projection forms changed-identities
+           (or admission {:seon.schema.admission/source :agent}))
           ;; Bootstrap has no database-derived projection yet. Its small
           ;; declaration population retains the complete-population gate.
           (schema/assert-complete-contract!
