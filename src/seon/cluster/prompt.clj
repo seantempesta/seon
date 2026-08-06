@@ -29,19 +29,16 @@
 
 (def ^:private default-depth 2)
 
-(defn- agent-cluster-name
-  [database agent-id]
+(defn- config-cluster-name
+  [database]
   (db/q '[:find ?cluster-name .
-          :in $ ?agent-id
           :where
-          [?agent :seon.cluster.agent/id ?agent-id]
-          [?agent :seon.cluster.agent/cluster ?cluster]
-          [?cluster :seon.cluster/name ?cluster-name]]
-        database agent-id))
+          [_ :seon.config/cluster ?cluster-name]]
+        database))
 
 (defn- prompt-token-budget
   [database agent-id]
-  (let [cluster-name (agent-cluster-name database agent-id)]
+  (let [cluster-name (config-cluster-name database)]
     (cond
       (:seon.error/kind cluster-name)
       cluster-name
@@ -49,7 +46,7 @@
       (nil? cluster-name)
       {:seon.error/kind ::missing-cluster
        :seon.error/message
-       "The prompt's agent is not connected to a cluster."
+       "The prompt's database has no effective cluster configuration."
        :seon.error/data {:seon.cluster.agent/id agent-id}}
 
       :else
