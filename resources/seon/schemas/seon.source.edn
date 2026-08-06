@@ -6,12 +6,16 @@
               [:map
                [:seon.source/branch :seon.source/branch]
                [:seon.source/commit-id :seon.source/commit-id]],
-              :digest [:re #:seon.db{:index true} "^[0-9a-f]{64}$"],
+              :digest
+              [:re #:seon.db{:identity true} "^[0-9a-f]{64}$"],
               :digest-request
               [:map [:seon.source/roots :seon.source/roots]],
               :expected-commit-id :uuid,
               :file-digests [:map-of :string :seon.source/digest],
               :populate :qualified-symbol,
+              :activation :qualified-symbol,
+              :activation-closure
+              [:and {:seon.db/component true} :seon.db/ref],
               :path [:string {:min 1}],
               :population
               [:map
@@ -28,6 +32,7 @@
                [:seon.store/store :seon.store/store]
                [:seon.source/digest :seon.source/digest]
                [:seon.source/populate :seon.source/populate]
+               [:seon.source/activation :seon.source/activation]
                [:seon.source/populate-request
                 {:optional true}
                 :seon.source/populate-request]],
@@ -49,4 +54,5 @@
                 :seon.source/expected-commit-id]
                [:seon.source/digest :seon.source/digest]
                [:seon.program/rows :seon.program/rows]
+               [:seon.source/activation :seon.source/activation]
                [:seon.db/process {:optional true} :seon.db/ref]]}

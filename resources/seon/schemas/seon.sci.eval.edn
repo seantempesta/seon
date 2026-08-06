@@ -1,13 +1,21 @@
 #:seon.sci.eval{:acquire-request
                 [:map
                  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
-                 [:seon.db/db :seon.db/database-value]],
+                 [:seon.db/db :seon.db/database-value]
+                 [:seon.schema/projection
+                  {:optional true}
+                  :seon.schema/projection]],
                 :args [:vector :any],
                 :ctx
                 [:fn
                  {:error/message "must be an SCI evaluation context"
                   :gen/gen seon.sci.eval/ctx-generator}
                  seon.sci.eval/ctx?],
+                :projection-state
+                [:fn
+                 {:error/message "must be a cluster-owned projection state"
+                  :gen/gen seon.sci.eval/projection-state-generator}
+                 seon.sci.eval/projection-state?],
                 :ending-ns :symbol,
                 :evaluation
                 [:map

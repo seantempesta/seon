@@ -19,6 +19,7 @@
             [clojure.core.async.impl.protocols :as async.protocols]
             [clojure.core.async.flow :as flow.core]
             [clojure.core.server]
+            [clojure.set :as set]
             [seon.blob :as blob]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.instruction :as instruction]
@@ -57,6 +58,7 @@
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
+            [seon.schema.form :as schema.form]
             [seon.search :as search])
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file CopyOption Files StandardCopyOption]))
@@ -741,6 +743,311 @@
                   db instruction-id))))
    rows))
 
+(defn- activation-requirements
+  [database]
+  (let [projection (schema/projection-from-database database)
+        forms (:seon.schema.projection/forms projection)
+        shapes (into []
+                     (filter :seon.schema/entity?)
+                     (:seon.schema.projection/catalog projection))
+        schema-keys (into #{} (map :seon.schema/key) shapes)
+        required-attributes
+        (into #{} (mapcat :seon.schema/required-attrs) shapes)
+        config-dials
+        (into #{}
+              (map first)
+              (schema.form/map-entries
+               (get forms :seon.config/manifest)))
+        config-defaults
+        (into #{}
+              (filter
+               (fn [dial]
+                 (let [properties
+                       (schema.form/attr-form-properties (get forms dial))]
+                   (or (contains? properties :seon.config/default)
+                       (true? (:seon.config/optional properties))))))
+              config-dials)
+        executable-symbols
+        (into #{}
+              (db/q '[:find [?symbol ...]
+                      :where
+                      [?function :seon.fn/sym ?symbol]]
+                    database))]
+    {:seon.activation/projection projection
+     :seon.activation/schema-keys schema-keys
+     :seon.activation/required-attributes required-attributes
+     :seon.activation/config-defaults config-defaults
+     :seon.activation/config-required
+     (set/difference config-dials config-defaults)
+     :seon.activation/executable-symbols executable-symbols}))
+
+(defn- lookup-refs-in
+  [database value]
+  (letfn [(lookup-ref? [candidate]
+            (and (vector? candidate)
+                 (= 2 (count candidate))
+                 (qualified-keyword? (first candidate))
+                 (:db/unique (get (:schema database) (first candidate)))))
+          (walk [candidate]
+            (cond
+              (lookup-ref? candidate) [candidate]
+              (map? candidate) (mapcat walk (vals candidate))
+              (coll? candidate) (mapcat walk candidate)
+              :else []))]
+    (->> (walk value) distinct (sort-by pr-str) vec)))
+
+(defn- activation-lookup-row
+  [source-digest [attribute value]]
+  {:seon.activation.lookup/id
+   (schema/sha-256
+    [(.getBytes (pr-str [source-digest attribute value])
+                StandardCharsets/UTF_8)])
+   :seon.activation.lookup/attribute attribute
+   :seon.activation.lookup/value value})
+
+(defn- transact-initialization!
+  [connection rows]
+  (loop [pending (vec rows)]
+    (when (seq pending)
+      (let [database @connection
+            ready?
+            (fn [row]
+              (every?
+               (fn [[attribute value]]
+                 (:db/id (db/pull database [:db/id] [attribute value])))
+               (lookup-refs-in database row)))
+            ready (into [] (filter ready?) pending)
+            waiting (into [] (remove ready?) pending)]
+        (when (empty? ready)
+          (refused!
+           "Initialization lookup refs do not resolve."
+           {:seon.activation/missing
+            (into []
+                  (comp
+                   (mapcat #(lookup-refs-in database %))
+                   distinct
+                   (map (fn [[attribute value]]
+                          {:seon.activation/lookup-attribute attribute
+                           :seon.activation/lookup-value value})))
+                  waiting)}))
+        (require-committed!
+         (db/transact! connection
+                       {:tx-data ready
+                        :tx-meta
+                        {:seon.db/process
+                         [:seon.db.process/id boot-process-identity]}})
+         {:seon.boot/population :seon.config/initialization})
+        (recur waiting))))
+  nil)
+
+(defn activation-missing
+  "Missing facts for one stored or candidate activation closure at `database`."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value
+         :seon.activation/closure
+         :seon.activation/lookup-rows]
+    :seon.activation/missing]}
+  [database closure lookup-rows]
+  (let [{expected-schemas :seon.activation/schema-keys
+         expected-attributes :seon.activation/required-attributes
+         expected-defaults :seon.activation/config-defaults
+         expected-required :seon.activation/config-required
+         expected-symbols :seon.activation/executable-symbols}
+        (activation-requirements database)
+        stored-schemas (set (:seon.activation/schema-keys closure))
+        stored-attributes (set (:seon.activation/required-attributes closure))
+        stored-defaults (set (:seon.activation/config-defaults closure))
+        stored-required (set (:seon.activation/config-required closure))
+        stored-symbols (set (:seon.activation/executable-symbols closure))
+        database-schemas
+        (into #{}
+              (db/q '[:find [?key ...]
+                      :where [?schema :seon.schema/key ?key]]
+                    database))
+        installed-attributes (set (keys (:schema database)))
+        database-symbols expected-symbols
+        missing-schemas
+        (set/union (set/difference expected-schemas stored-schemas)
+                   (set/difference stored-schemas database-schemas))
+        missing-attributes
+        (set/union (set/difference expected-attributes stored-attributes)
+                   (set/difference stored-attributes installed-attributes))
+        expected-dials (set/union expected-defaults expected-required)
+        stored-dials (set/union stored-defaults stored-required)
+        missing-dials
+        (set/union (set/difference expected-dials stored-dials)
+                   (set/intersection stored-defaults stored-required))
+        missing-symbols
+        (set/union (set/difference expected-symbols stored-symbols)
+                   (set/difference stored-symbols database-symbols))
+        missing-lookups
+        (into []
+              (keep
+               (fn [{attribute :seon.activation.lookup/attribute
+                     value :seon.activation.lookup/value}]
+                 (let [resolved (db/pull database [:db/id] [attribute value])]
+                   (when-not (:db/id resolved)
+                     {:seon.activation/lookup-attribute attribute
+                      :seon.activation/lookup-value value}))))
+              lookup-rows)]
+    (into []
+          cat
+          [(map (fn [schema-key]
+                  {:seon.activation/schema-key schema-key})
+                (sort missing-schemas))
+           (map (fn [attribute]
+                  {:seon.activation/required-attribute attribute})
+                (sort missing-attributes))
+           (map (fn [dial]
+                  {:seon.activation/config-dial dial})
+                (sort missing-dials))
+           (sort-by pr-str missing-lookups)
+           (map (fn [symbol]
+                  {:seon.activation/executable-symbol symbol})
+                (sort missing-symbols))])))
+
+(defn derive-activation
+  "Derive and preflight the complete activation closure on one source scratch."
+  {:malli/schema [:=> [:cat :seon.activation/request]
+                  :seon.activation/result]}
+  [{connection :seon.db/connection
+    source-digest :seon.source/digest
+    requested-symbols :seon.activation/requested-symbols}]
+  (let [database @connection
+        requirements (activation-requirements database)
+        initialization
+        (schema/call-with-forms
+         (:seon.schema.projection/forms
+          (:seon.activation/projection requirements))
+         config/default-population)
+        lookup-rows
+        (mapv (partial activation-lookup-row source-digest)
+              (lookup-refs-in database initialization))
+        closure
+        {:seon.activation/source-digest source-digest
+         :seon.activation/schema-keys
+         (:seon.activation/schema-keys requirements)
+         :seon.activation/required-attributes
+         (:seon.activation/required-attributes requirements)
+         :seon.activation/config-defaults
+         (:seon.activation/config-defaults requirements)
+         :seon.activation/config-required
+         (:seon.activation/config-required requirements)
+         :seon.activation/executable-symbols
+         (:seon.activation/executable-symbols requirements)
+         :seon.activation/lookup-refs
+         (mapv (fn [{id :seon.activation.lookup/id}]
+                 [:seon.activation.lookup/id id])
+               lookup-rows)}
+        requested-missing
+        (mapv (fn [symbol]
+                {:seon.activation/executable-symbol symbol})
+              (sort
+               (set/difference
+                (into #{} (map str) requested-symbols)
+                (:seon.activation/executable-symbols requirements))))]
+    {:seon.activation/closure closure
+     :seon.activation/lookup-rows lookup-rows
+     :seon.activation/missing
+     (into (activation-missing database closure lookup-rows)
+           requested-missing)}))
+
+(defn- stored-activation
+  [database]
+  (when-let [source
+             (db/q '[:find ?source .
+                     :where
+                     [?source :seon.source/digest _]
+                     [?source :seon.source/activation-closure ?closure]]
+                   database)]
+    (let [source-row
+          (db/pull database
+                   [{:seon.source/activation-closure
+                     [:seon.activation/source-digest
+                      :seon.activation/schema-keys
+                      :seon.activation/required-attributes
+                      :seon.activation/config-defaults
+                      :seon.activation/config-required
+                      :seon.activation/executable-symbols
+                      {:seon.activation/lookup-refs
+                       [:seon.activation.lookup/id
+                        :seon.activation.lookup/attribute
+                        :seon.activation.lookup/value]}]}]
+                   source)
+          closure (:seon.source/activation-closure source-row)
+          lookup-rows (vec (:seon.activation/lookup-refs closure))]
+      {:seon.activation/closure
+       (update closure :seon.activation/lookup-refs
+               (fn [rows]
+                 (mapv (fn [{id :seon.activation.lookup/id}]
+                         [:seon.activation.lookup/id id])
+                       rows)))
+       :seon.activation/lookup-rows lookup-rows})))
+
+(defn- closure-fact-missing
+  [database closure lookup-rows]
+  (let [schema-keys (set (:seon.activation/schema-keys closure))
+        required-attributes
+        (set (:seon.activation/required-attributes closure))
+        config-defaults (set (:seon.activation/config-defaults closure))
+        config-required (set (:seon.activation/config-required closure))
+        executable-symbols
+        (set (:seon.activation/executable-symbols closure))
+        database-schemas
+        (into #{}
+              (db/q '[:find [?key ...]
+                      :where [?schema :seon.schema/key ?key]]
+                    database))
+        installed-attributes (set (keys (:schema database)))
+        database-symbols
+        (into #{}
+              (db/q '[:find [?symbol ...]
+                      :where [?function :seon.fn/sym ?symbol]]
+                    database))]
+    (into []
+          cat
+          [(map (fn [schema-key]
+                  {:seon.activation/schema-key schema-key})
+                (sort (set/difference schema-keys database-schemas)))
+           (map (fn [attribute]
+                  {:seon.activation/required-attribute attribute})
+                (sort
+                 (set/difference required-attributes installed-attributes)))
+           (map (fn [dial]
+                  {:seon.activation/config-dial dial})
+                (sort (set/intersection config-defaults config-required)))
+           (keep
+            (fn [{attribute :seon.activation.lookup/attribute
+                  value :seon.activation.lookup/value}]
+              (when-not (:db/id (db/pull database [:db/id] [attribute value]))
+                {:seon.activation/lookup-attribute attribute
+                 :seon.activation/lookup-value value}))
+            (sort-by pr-str lookup-rows))
+           (map (fn [executable-symbol]
+                  {:seon.activation/executable-symbol executable-symbol})
+                (sort
+                 (set/difference executable-symbols database-symbols)))])))
+
+(defn require-activation!
+  "Return the stored closure or refuse with every missing activation fact."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  :seon.activation/closure]}
+  [database]
+  (let [{closure :seon.activation/closure
+         lookup-rows :seon.activation/lookup-rows}
+        (or (stored-activation database)
+            {:seon.activation/closure nil
+             :seon.activation/lookup-rows []})
+        missing
+        (if closure
+          (closure-fact-missing database closure lookup-rows)
+          [{:seon.activation/schema-key :seon.activation/closure}])]
+    (when (seq missing)
+      (refused!
+       (str "The source activation closure is incomplete: " (pr-str missing))
+       {:seon.activation/missing missing}))
+    closure))
+
 (defn- accrete-schema-population!
   "Install the current additive schema population on one branch.
 
@@ -751,26 +1058,30 @@
   names refork or export/import as the resolutions. A converged reopen issues
   no transaction."
   [connection cluster-name]
-  (let [forms (schema.edn/packaged-forms)
-        declarations (declaration-changes @connection forms cluster-name)]
-    (when (seq declarations)
-      (require-committed!
-       (db/transact! connection {:tx-data declarations})
-       {:seon.boot/population :seon.schema/declarations}))
-    (let [process-rows (missing-process-rows @connection)]
-      (when (seq process-rows)
-        (require-committed!
-         (db/transact! connection {:tx-data process-rows})
-         {:seon.boot/population :seon.db/processes})))
-    (let [schema-rows (schema-row-changes @connection forms)]
-      (when (seq schema-rows)
-        (require-committed!
-         (db/transact! connection
-                       {:tx-data schema-rows
-                        :tx-meta
-                        {:seon.db/process
-                         [:seon.db.process/id boot-process-identity]}})
-         {:seon.boot/population :seon.schema/rows}))))
+  (let [forms (schema.edn/packaged-forms)]
+    (schema/call-with-forms
+     forms
+     (fn []
+       (let [declarations
+             (declaration-changes @connection forms cluster-name)]
+         (when (seq declarations)
+           (require-committed!
+            (db/transact! connection {:tx-data declarations})
+            {:seon.boot/population :seon.schema/declarations})))
+       (let [process-rows (missing-process-rows @connection)]
+         (when (seq process-rows)
+           (require-committed!
+            (db/transact! connection {:tx-data process-rows})
+            {:seon.boot/population :seon.db/processes})))
+       (let [schema-rows (schema-row-changes @connection forms)]
+         (when (seq schema-rows)
+           (require-committed!
+            (db/transact! connection
+                          {:tx-data schema-rows
+                           :tx-meta
+                           {:seon.db/process
+                            [:seon.db.process/id boot-process-identity]}})
+            {:seon.boot/population :seon.schema/rows}))))))
   nil)
 
 (defn populate-source!
@@ -806,6 +1117,10 @@
                            {:seon.db/process
                             [:seon.db.process/id boot-process-identity]}})
             {:seon.boot/population :seon.bootstrap/rows})))
+       (report-source-progress! "initialization rows")
+       (let [rows (config/default-population)]
+         (when (seq rows)
+           (transact-initialization! connection rows)))
        (report-source-progress! "instruction rows")
        (let [rows (instruction-row-changes
                    @connection
@@ -841,7 +1156,8 @@
 (def source-roots
   "The complete file roots whose content identifies `current-src`."
   (into seon.fn/source-roots
-        ["resources/seon/bootstrap.edn"]))
+        ["resources/seon/bootstrap.edn"
+         "config/default.edn"]))
 
 (defonce ^:private source-refresh-monitor
   ;; One JVM may receive overlapping editor events. Serialize analysis,
@@ -885,6 +1201,7 @@
    {:seon.store/store store
     :seon.source/digest source-digest
     :seon.source/populate `populate-source!
+    :seon.source/activation `derive-activation
     :seon.source/populate-request {:seon.fn/manifest manifest}}))
 
 (defn- current-source!
@@ -896,6 +1213,14 @@
       (refused!
        "No `current-src` branch is published; run `bin/seon init` first."
        {:seon.source/branch source/current-branch})))
+
+(defn- require-current-source-activation!
+  [store]
+  (let [connection (store/open-branch! store source/current-branch)]
+    (try
+      (require-activation! @connection)
+      (finally
+        (d/release connection)))))
 
 (defn- count-installed
   [db attribute]
@@ -1116,6 +1441,7 @@
                   :seon.source/expected-commit-id expected-commit
                   :seon.source/digest digest-after
                   :seon.program/rows rows
+                  :seon.source/activation `derive-activation
                   :seon.db/process
                   [:seon.db.process/id boot-process-identity]})]
             (write-source-artifact! root
@@ -1920,6 +2246,57 @@
     (async/close! (:seon.render.web/pages-channel view)))
   nil)
 
+(defn- stand-cluster-runtime!
+  [instance publish! compiled-config connection cluster-name config
+   projection-state]
+  (schema/call-with-projection-state
+   projection-state
+   (fn []
+     (let [recovery (recover-runs!
+                     connection
+                     (process-identity (:seon.boot/advertisement instance)))
+           instance (publish! (merge instance recovery))
+           instance (publish!
+                     (assoc instance
+                            :seon.boot/config-result
+                            (config/apply-compiled! connection compiled-config)))
+           process (process-identity (:seon.boot/advertisement instance))
+           _ (ensure-cluster-entity! connection cluster-name process)
+           _ (seed-root-agent! connection cluster-name process)
+           search-path (:seon.search/path
+                        (cluster-paths (:seon.boot/root config) cluster-name))
+           instance (publish!
+                     (assoc instance :seon.search/index
+                            (search/open! connection search-path)))
+           instance (publish!
+                     (assoc instance :seon.sci.eval/ctx
+                            (sci.eval/cluster-ctx
+                             @connection connection projection-state)))
+           work-launcher
+           (flow/start-work-launcher!
+            {::flow/configuration
+             (select-keys (config/effective @connection cluster-name)
+                          flow/flow-workload-attributes)})
+           instance (publish!
+                     (assoc instance :seon.flow/work-launcher work-launcher))
+           instance (publish!
+                     (merge instance
+                            (arm-agents! instance connection cluster-name)))
+           dials (config/effective @connection cluster-name)
+           served (serve! connection cluster-name dials
+                          (:seon.render.web/view instance))
+           advertisement (assoc (:seon.boot/advertisement instance)
+                                :seon.render.web/url
+                                (:seon.render.web/url served)
+                                :seon.render.web/port
+                                (:seon.render.web/port served))]
+       (write-advertisement!
+        (cluster-paths (:seon.boot/root config) cluster-name)
+        advertisement)
+       (publish! (assoc instance
+                        :seon.render.web/served served
+                        :seon.boot/advertisement advertisement))))))
+
 (defn- stack-tower!
   "Stack store → source commit → fork → connection → config onto `instance`.
   Each layer is assoc'd as it stands, and the whole value is republished
@@ -1935,6 +2312,10 @@
         instance (publish! (assoc instance :seon.store/store store))
         store-id (get-in @(:seon.store/connection-object store)
                          [:config :store :id])
+        cluster-branch (registry/cluster-branch cluster-name)
+        existing-cluster? (contains? (registry/roster store) cluster-branch)
+        published-source (when-not existing-cluster? (current-source! store))
+        _ (when published-source (require-current-source-activation! store))
         start-permit (gc-guard/try-reachability-permit! store-id :roster)
         _ (when-let [kind (:seon.error/kind start-permit)]
             (throw
@@ -1943,102 +2324,56 @@
                 "A reachability sweep is in progress; retry start later."
                 "Reachability publication is currently unavailable; retry start later.")
               start-permit)))
-        cluster-branch (registry/cluster-branch cluster-name)
         forked
         (try
-          (if (contains? (registry/roster store) cluster-branch)
+          (if existing-cluster?
             {:seon.store/branch cluster-branch
              :seon.cluster/created? false}
             (registry/ensure-cluster!
              {:seon.store/store store
               :seon.boot/cluster-name cluster-name
               :seon.source/commit-id
-              (:seon.source/commit-id (current-source! store))
+              (:seon.source/commit-id published-source)
               :datahike.gc-guard/reachability-permit start-permit}))
           (finally
             (gc-guard/release-reachability-permit! start-permit)))
-        connection (store/open-branch! store (:seon.store/branch forked))
+        provisional-connection
+        (store/open-branch! store (:seon.store/branch forked))
         instance (publish!
-                  (assoc instance :seon.boot/cluster-connection connection))
+                  (assoc instance
+                         :seon.boot/cluster-connection provisional-connection))
+        ;; Activation is a property of this cluster's own immutable database
+        ;; value. A newly forked branch was preflighted before creation; an
+        ;; older sovereign branch is checked here without consulting files or
+        ;; another cluster's projection.
+        _ (require-activation! @provisional-connection)
         ;; Boot never reads or indexes the file tree. This gate precedes schema
         ;; accretion, recovery, config, and arming:
         ;; an incoherent program graph gets no runtime semantics. A complete
         ;; older corpus remains a legitimate sovereign world.
-        _ (require-coherent-program! connection cluster-name)
+        _ (require-coherent-program! provisional-connection cluster-name)
         ;; A branch may predate this process's additive schema population.
         ;; Install it before recovery or config can transact a newly added
         ;; attribute. This is the same population that creates `current-src`;
         ;; converged reopens issue zero transactions.
-        _ (accrete-schema-population! connection cluster-name)
-        ;; BEFORE anything resumes: a previous process's wreckage is
-        ;; settled here, so the first pass of any loop derives work from
-        ;; facts that already tell the truth about who holds what
-        recovery (recover-runs!
-                  connection
-                  (process-identity (:seon.boot/advertisement instance)))
-        instance (publish! (merge instance recovery))
+        _ (accrete-schema-population! provisional-connection cluster-name)
+        projection (schema/projection-from-database @provisional-connection)
+        projection-state
+        (sci.eval/projection-state @provisional-connection projection)
+        ;; Datahike's writer is a core.async state machine created with the
+        ;; connection. Create the durable cluster connection while its one
+        ;; advanceable projection state is bound, so in-writer transaction
+        ;; functions decode against the same cluster basis as their caller.
+        _ (store/release-branch! provisional-connection)
+        connection
+        (schema/call-with-projection-state
+         projection-state
+         #(store/open-branch! store (:seon.store/branch forked)))
         instance (publish!
-                  (assoc instance
-                         :seon.boot/config-result
-                         (config/apply-compiled! connection compiled-config)))
-        process (process-identity (:seon.boot/advertisement instance))
-        _ (ensure-cluster-entity! connection cluster-name process)
-        ;; AFTER the dials are facts, because the root agent is who the
-        ;; escalation dial names, and BEFORE the loop is armed, because
-        ;; an armed loop may need to address it on its first pass
-        _ (seed-root-agent! connection cluster-name process)
-        search-path (:seon.search/path
-                     (cluster-paths (:seon.boot/root config) cluster-name))
-        instance (publish!
-                  (assoc instance :seon.search/index
-                         (search/open! connection search-path)))
-        ;; The cluster's one live SCI program graph is derived from facts once
-        ;; after schema accretion and before any agent graph can run. It has no
-        ;; close operation; dropping the instance drops the derived context.
-        instance (publish!
-                  (assoc instance :seon.sci.eval/ctx
-                         (sci.eval/cluster-ctx @connection connection)))
-        ;; INSTRUMENTATION IS NOT WIRED HERE, and the reason is
-        ;; evidence rather than taste. Wiring `seon.instrument/apply!`
-        ;; into boot was tried: every test that boots a cluster then
-        ;; instruments the whole JVM, so a suite's outcome depends on
-        ;; whether an earlier suite happened to boot one — and a
-        ;; CLUSTER-scoped dial silently mutating PROCESS-global var
-        ;; roots is the wrong seam besides. The fresh operator turns it on
-        ;; where a human is watching. See `seon.instrument`.
-        work-launcher
-        (flow/start-work-launcher!
-         {::flow/configuration
-          (select-keys (config/effective @connection cluster-name)
-                       flow/flow-workload-attributes)})
-        instance (publish!
-                  (assoc instance :seon.flow/work-launcher work-launcher))
-        instance (publish!
-                  (merge instance
-                         (arm-agents! instance connection cluster-name)))
-          ;; LAST, and after the loop, because the view renders what the
-          ;; loop produces and must never be able to cost it
-          ;; a database VALUE, not the connection: `effective` reads
-          ;; the dials at a basis like every other derivation
-          dials (config/effective @connection cluster-name)
-          served (serve! connection cluster-name dials
-                         (:seon.render.web/view instance))
-          ;; THE ADVERTISEMENT GAINS THE URL, so discovery never parses a
-          ;; log. The operator reads advertisements as its only truth,
-          ;; and a URL scraped from stdout would be a second source that
-          ;; drifts. Staleness semantics are unchanged: pid and
-          ;; start-instant still say whether this process is real.
-          advertisement (assoc (:seon.boot/advertisement instance)
-                               :seon.render.web/url
-                               (:seon.render.web/url served)
-                               :seon.render.web/port
-                               (:seon.render.web/port served))]
-      (write-advertisement!
-       (cluster-paths (:seon.boot/root config) cluster-name)
-       advertisement)
-    (publish! (assoc instance
-                     :seon.render.web/served served
-                     :seon.boot/advertisement advertisement))))
+                  (assoc instance :seon.boot/cluster-connection connection))]
+    (stand-cluster-runtime!
+     instance publish! compiled-config connection cluster-name config
+     projection-state)))
 
 (defn start!
   "Start one cluster instance in this JVM, REPL FIRST, then the tower.

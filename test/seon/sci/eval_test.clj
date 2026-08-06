@@ -504,37 +504,42 @@
            (symbol (:seon.print/name defn-node))))))
 
 (deftest schema-and-contract-declarations-have-bounded-allocation
-  ;; Warm the guarded evaluator so this measures declaration work rather than
-  ;; first-use namespace and instrumentation initialization.
-  (run "(+ 1 1)")
-  (let [schema-evaluation
-        (run
-         (str "(seon.schema/register! "
-              ":seon.sci.eval-test.allocation/score "
-              "[:int {:min 0 :max 100}])")
-         5000)
-        function-evaluation
-        (run
-         (str "(defn ^{:malli/schema [:=> [:cat :string] :string]} "
-              "allocation-contract [x] x)")
-         5000)
-        allocation-limit (* 64 1024 1024)]
-    (is (= :seon.sci.eval-test.allocation/score
-           (:seon.sci.admit/value schema-evaluation)))
-    (is (= :ok
-           (get-in schema-evaluation
-                   [:seon.sci.admit/record :seon.eval/outcome])))
-    (is (= :ok
-           (get-in function-evaluation
-                   [:seon.sci.admit/record :seon.eval/outcome])))
-    (is (< (get-in schema-evaluation
-                   [:seon.sci.admit/record :seon.eval/allocated-bytes])
-           allocation-limit)
-        "one schema declaration stays below 64 MiB at production registry size")
-    (is (< (get-in function-evaluation
-                   [:seon.sci.admit/record :seon.eval/allocated-bytes])
-           allocation-limit)
-        "one contracted defn stays below 64 MiB at production registry size")))
+  (test-support/with-database
+    (fn [connection]
+      (let [ctx (eval/cluster-ctx @connection connection)]
+        ;; Warm the guarded evaluator so this measures declaration work on one
+        ;; cluster-owned projection rather than context acquisition.
+        (run-in ctx "(+ 1 1)" 2000)
+        (let [schema-evaluation
+              (run-in
+               ctx
+               (str "(seon.schema/register! "
+                    ":seon.sci.eval-test.allocation/score "
+                    "[:int {:min 0 :max 100}])")
+               5000)
+              function-evaluation
+              (run-in
+               ctx
+               (str "(defn ^{:malli/schema [:=> [:cat :string] :string]} "
+                    "allocation-contract [x] x)")
+               5000)
+              allocation-limit (* 64 1024 1024)]
+          (is (= :seon.sci.eval-test.allocation/score
+                 (:seon.sci.admit/value schema-evaluation)))
+          (is (= :ok
+                 (get-in schema-evaluation
+                         [:seon.sci.admit/record :seon.eval/outcome])))
+          (is (= :ok
+                 (get-in function-evaluation
+                         [:seon.sci.admit/record :seon.eval/outcome])))
+          (is (< (get-in schema-evaluation
+                         [:seon.sci.admit/record :seon.eval/allocated-bytes])
+                 allocation-limit)
+              "one schema declaration stays below 64 MiB at registry size")
+          (is (< (get-in function-evaluation
+                         [:seon.sci.admit/record :seon.eval/allocated-bytes])
+                 allocation-limit)
+              "one contracted defn stays below 64 MiB at registry size"))))))
 
 (deftest evaluate-invokes-eval-form-exactly-once-on-every-path
   (let [ctx (eval/build-base-ctx)
@@ -777,10 +782,13 @@
     (fn [connection]
       (let [ctx (eval/build-base-ctx)
             _ (eval/acquire! {:seon.sci.eval/ctx ctx
-                              :seon.db/db @connection})]
+                              :seon.db/db @connection})
+            projection (seon.schema/projection-from-database @connection)]
         (try
-          (instrument/apply! {:seon.config/on-core-error :panic
-                              :seon.sci.admit/caps caps})
+          (seon.schema/call-with-projection
+           projection
+           #(instrument/apply! {:seon.config/on-core-error :panic
+                                :seon.sci.admit/caps caps}))
           (let [evaluation (run-in ctx "(my.message/send)" 2000)
                 failure (:seon.sci.admit/value evaluation)]
             (is (= "Wrong number of args (0) passed to: my.message/send"
@@ -1049,9 +1057,12 @@
             (into {}
                   (map (fn [instrumented-var]
                          [instrumented-var @instrumented-var]))
-                  (instrument/instrumented))]
+                  (instrument/instrumented))
+            projection (seon.schema/projection-from-database @connection)]
         (try
-          (instrument/apply! {:seon.config/on-core-error :panic})
+          (seon.schema/call-with-projection
+           projection
+           #(instrument/apply! {:seon.config/on-core-error :panic}))
           (is (map? (eval/acquire!
                      {:seon.sci.eval/ctx (eval/build-base-ctx)
                       :seon.db/db @connection})))

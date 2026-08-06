@@ -1,0 +1,13 @@
+#:seon.activation.lookup{:id
+                         [:string {:min 1, :seon.db/identity true}],
+                         :attribute :qualified-keyword,
+                         :value :seon.db/lookup-ref-value,
+                         :lookup
+                         [:map
+                          {:seon.db/entity true}
+                          [:seon.activation.lookup/id
+                           :seon.activation.lookup/id]
+                          [:seon.activation.lookup/attribute
+                           :seon.activation.lookup/attribute]
+                          [:seon.activation.lookup/value
+                           :seon.activation.lookup/value]]}

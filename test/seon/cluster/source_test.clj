@@ -49,6 +49,19 @@
   (.await ^CountDownLatch @blocked-release)
   nil)
 
+(defn activation
+  [{source-digest :seon.source/digest}]
+  {:seon.activation/closure
+   {:seon.activation/source-digest source-digest
+    :seon.activation/schema-keys #{:seon.source/digest}
+    :seon.activation/required-attributes #{:seon.source/digest}
+    :seon.activation/config-defaults #{}
+    :seon.activation/config-required #{}
+    :seon.activation/executable-symbols #{}
+    :seon.activation/lookup-refs []}
+   :seon.activation/lookup-rows []
+   :seon.activation/missing []})
+
 (defn- with-store
   [body]
   (let [root (str "tmp/source-test/" (random-uuid))
@@ -67,11 +80,15 @@
   ([opened digest populate]
    (source/publish! {:seon.store/store opened
                      :seon.source/digest digest
-                     :seon.source/populate populate}))
+                     :seon.source/populate populate
+                     :seon.source/activation
+                     'seon.cluster.source-test/activation}))
   ([opened digest populate populate-request]
    (source/publish! {:seon.store/store opened
                      :seon.source/digest digest
                      :seon.source/populate populate
+                     :seon.source/activation
+                     'seon.cluster.source-test/activation
                      :seon.source/populate-request populate-request})))
 
 (defn- upsert
@@ -79,7 +96,9 @@
   (source/upsert! {:seon.store/store opened
                    :seon.source/expected-commit-id expected-commit
                    :seon.source/digest digest
-                   :seon.program/rows rows}))
+                   :seon.program/rows rows
+                   :seon.source/activation
+                   'seon.cluster.source-test/activation}))
 
 (defn- markers
   [connection]
@@ -195,7 +214,7 @@
         (is (= #{:db} (set (registry/roster opened))))
         (is (empty? (scratch-branches opened)))))))
 
-(deftest incremental-upsert-is-one-transaction-on-the-expected-commit
+(deftest incremental-upsert-seals-one-activation-on-the-expected-commit
   (with-store
     (fn [opened]
       (let [a (publish opened digest-a)
@@ -208,11 +227,12 @@
             current-db (d/branch-as-db (:seon.store/connection-object opened)
                                        source/current-branch)]
         (is (= digest-b (:seon.source/digest b)))
-        (is (true? (get-in current-db
-                           [:schema :seon.source/digest :db/index]))
-            "the source seal is a physical indexed database attribute")
-        (is (= (inc max-a) (:max-tx current-db))
-            "rows and digest replacement commit in one transaction")
+        (is (= :db.unique/identity
+               (get-in current-db
+                       [:schema :seon.source/digest :db/unique]))
+            "the source seal has one physical identity")
+        (is (= (+ 2 max-a) (:max-tx current-db))
+            "private row application is followed by one activation seal")
         (is (= #{digest-b}
                (set (db/q '[:find [?digest ...]
                            :where [_ :seon.source/digest ?digest]]

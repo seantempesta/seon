@@ -26,7 +26,19 @@
   :current-src)
 
 (def ^:private source-attributes
-  [:seon.source/digest :seon.source/built-at])
+  [:seon.source/digest
+   :seon.source/built-at
+   :seon.source/activation-closure
+   :seon.activation/source-digest
+   :seon.activation/schema-keys
+   :seon.activation/required-attributes
+   :seon.activation/config-defaults
+   :seon.activation/config-required
+   :seon.activation/executable-symbols
+   :seon.activation/lookup-refs
+   :seon.activation.lookup/id
+   :seon.activation.lookup/attribute
+   :seon.activation.lookup/value])
 
 (defn- refuse!
   [rule message data]
@@ -128,6 +140,65 @@
                {:seon.source/populate populate
                 :seon.source/digest source-digest})))
 
+(defn- resolve-activation
+  [activation source-digest]
+  (or (try
+        (requiring-resolve activation)
+        (catch Throwable _ nil))
+      (refuse! ::activation-unresolvable
+               (str "the activation derivation " activation " does not resolve")
+               {:seon.source/activation activation
+                :seon.source/digest source-digest})))
+
+(defn- activation-seal-tx
+  [connection source-digest requested-symbols activation-fn]
+  (let [{closure :seon.activation/closure
+         lookup-rows :seon.activation/lookup-rows
+         missing :seon.activation/missing}
+        (activation-fn
+         {:seon.db/connection connection
+          :seon.source/digest source-digest
+          :seon.activation/requested-symbols requested-symbols})
+        requirement-count
+        (+ (count (:seon.activation/schema-keys closure))
+           (count (:seon.activation/required-attributes closure))
+           (count (:seon.activation/config-defaults closure))
+           (count (:seon.activation/config-required closure))
+           (count (:seon.activation/executable-symbols closure))
+           (count (:seon.activation/lookup-refs closure)))
+        activation-tempid (str "activation:" source-digest)
+        lookup-tempids
+        (into {}
+              (map (fn [{id :seon.activation.lookup/id}]
+                     [id (str "activation-lookup:" id)]))
+              lookup-rows)
+        closure
+        (assoc closure
+               :db/id activation-tempid
+               :seon.activation/lookup-refs
+               (mapv (fn [[_ id]] (get lookup-tempids id))
+                     (:seon.activation/lookup-refs closure)))
+        lookup-rows
+        (mapv (fn [{id :seon.activation.lookup/id :as row}]
+                (assoc row :db/id (get lookup-tempids id)))
+              lookup-rows)]
+    (when (seq missing)
+      (refuse! ::activation-incomplete
+               (str "the source activation closure is missing facts: "
+                    (pr-str missing))
+               {:seon.source/digest source-digest
+                :seon.activation/missing missing}))
+    (when-not (pos? requirement-count)
+      (refuse! ::activation-empty
+               "the source activation closure is empty"
+               {:seon.source/digest source-digest}))
+    (into
+     [{:seon.source/digest source-digest
+       :seon.source/built-at (java.util.Date.)
+       :seon.source/activation-closure activation-tempid}
+      closure]
+     lookup-rows)))
+
 (defn- retire-scratch!
   [store scratch]
   (try
@@ -142,8 +213,10 @@
   [{:keys [:seon.store/store]
     source-digest :seon.source/digest
     populate :seon.source/populate
+    activation :seon.source/activation
     populate-request :seon.source/populate-request}]
   (let [populate-fn (resolve-population populate source-digest)
+          activation-fn (resolve-activation activation source-digest)
           expected-commit (:seon.source/commit-id (current store))
           scratch (scratch-branch)]
       (registry/branch! {:seon.store/store store
@@ -174,8 +247,9 @@
             (require-committed!
              (db/transact!
               connection
-              {:tx-data [{:seon.source/digest source-digest
-                          :seon.source/built-at (java.util.Date.)}]})
+              {:tx-data
+               (activation-seal-tx
+                connection source-digest #{populate activation} activation-fn)})
              ::source-seal-refused
              "the source seal transaction was refused"
              {:seon.source/digest source-digest})
@@ -240,8 +314,10 @@
                   :seon.source/published]}
   [{:keys [:seon.store/store :seon.program/rows :seon.db/process]
     expected-commit :seon.source/expected-commit-id
-    source-digest :seon.source/digest}]
-  (let [scratch (scratch-branch)]
+    source-digest :seon.source/digest
+    activation :seon.source/activation}]
+  (let [activation-fn (resolve-activation activation source-digest)
+        scratch (scratch-branch)]
     (registry/branch! {:seon.store/store store
                        :seon.cluster.registry/from expected-commit
                        :seon.store/branch scratch})
@@ -258,22 +334,28 @@
                        "incremental publication requires one source digest entity"
                        {:seon.source/expected-commit-id expected-commit
                         ::digest-entity-count (count digest-entities)}))
-            (let [digest-entity (first digest-entities)
-                  old-digest (:seon.source/digest
-                              (db/entity @connection digest-entity))]
+            (let [digest-entity (first digest-entities)]
+              (require-committed!
+               (db/transact!
+                connection
+                (cond->
+                 {:tx-data rows}
+                  process (assoc :tx-meta {:seon.db/process process})))
+               ::incremental-source-refused
+               "the incremental source transaction was refused"
+               {:seon.source/digest source-digest
+                :seon.source/expected-commit-id expected-commit})
               (require-committed!
                (db/transact!
                 connection
                 (cond->
                  {:tx-data
-                  (into [[:db/retract digest-entity
-                          :seon.source/digest old-digest]
-                         [:db/add digest-entity
-                          :seon.source/digest source-digest]]
-                        rows)}
+                  (into [[:db/retractEntity digest-entity]]
+                        (activation-seal-tx
+                         connection source-digest #{activation} activation-fn))}
                   process (assoc :tx-meta {:seon.db/process process})))
-               ::incremental-source-refused
-               "the incremental source transaction was refused"
+               ::incremental-activation-refused
+               "the incremental source activation transaction was refused"
                {:seon.source/digest source-digest
                 :seon.source/expected-commit-id expected-commit}))
             (d/force-branch! @connection current-branch #{expected-commit}

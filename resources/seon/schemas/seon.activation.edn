@@ -1,0 +1,69 @@
+#:seon.activation{:source-digest
+                  [:and {:seon.db/identity true} :seon.source/digest],
+                  :schema-keys [:set :seon.schema/key],
+                  :schema-key :seon.schema/key,
+                  :required-attributes [:set :qualified-keyword],
+                  :required-attribute :qualified-keyword,
+                  :config-defaults [:set :qualified-keyword],
+                  :config-required [:set :qualified-keyword],
+                  :config-dial :qualified-keyword,
+                  :executable-symbols [:set :seon.fn/sym],
+                  :executable-symbol :seon.fn/sym,
+                  :lookup-attribute :qualified-keyword,
+                  :lookup-value :seon.db/lookup-ref-value,
+                  :lookup-rows [:vector :seon.activation.lookup/lookup],
+                  :requested-symbols [:set :qualified-symbol],
+                  :request
+                  [:map
+                   [:seon.db/connection :seon.db/connection]
+                   [:seon.source/digest :seon.source/digest]
+                   [:seon.activation/requested-symbols
+                    :seon.activation/requested-symbols]],
+                  :lookup-refs
+                  [:vector {:seon.db/component true} :seon.db/ref],
+                  :closure
+                  [:map
+                   {:seon.db/entity true}
+                   [:seon.activation/source-digest
+                    :seon.activation/source-digest]
+                   [:seon.activation/schema-keys
+                    :seon.activation/schema-keys]
+                   [:seon.activation/required-attributes
+                    :seon.activation/required-attributes]
+                   [:seon.activation/config-defaults
+                    :seon.activation/config-defaults]
+                   [:seon.activation/config-required
+                    :seon.activation/config-required]
+                   [:seon.activation/executable-symbols
+                    :seon.activation/executable-symbols]
+                   [:seon.activation/lookup-refs
+                    :seon.activation/lookup-refs]],
+                  :missing-fact
+                  [:or
+                   [:map
+                    [:seon.activation/schema-key :seon.schema/key]]
+                   [:map
+                    [:seon.activation/required-attribute
+                     :qualified-keyword]]
+                   [:map
+                    [:seon.activation/config-dial :qualified-keyword]]
+                   [:map
+                    [:seon.activation/lookup-attribute
+                     :qualified-keyword]
+                    [:seon.activation/lookup-value
+                     :seon.db/lookup-ref-value]]
+                   [:map
+                    [:seon.activation/executable-symbol
+                     :qualified-symbol]]],
+                  :missing [:vector :seon.activation/missing-fact],
+                  :result
+                  [:map
+                   [:seon.activation/closure :seon.activation/closure]
+                   [:seon.activation/lookup-rows
+                    :seon.activation/lookup-rows]
+                   [:seon.activation/missing :seon.activation/missing]],
+                  :stored
+                  [:map
+                   [:seon.activation/closure :seon.activation/closure]
+                   [:seon.activation/lookup-rows
+                    :seon.activation/lookup-rows]]}

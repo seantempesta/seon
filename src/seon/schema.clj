@@ -535,6 +535,7 @@
 
 (def ^:dynamic ^:private *candidate-forms-overlay* nil)
 (def ^:dynamic ^:private *projection* nil)
+(def ^:dynamic ^:private *projection-state* nil)
 (def ^:dynamic ^:private *packaged-forms* nil)
 (def ^:dynamic ^:private *registration-admission-source* :core)
 
@@ -589,7 +590,13 @@
 (defn- candidate-forms []
   (if *candidate-forms-overlay*
     @*candidate-forms-overlay*
-    (or *packaged-forms* (packaged-forms))))
+    (or *packaged-forms*
+        (some-> *projection-state*
+                deref
+                :seon.schema/projection
+                :seon.schema.projection/forms)
+        (:seon.schema.projection/forms *projection*)
+        (packaged-forms))))
 
 (defn call-with-forms
   "Call `f` with one immutable declaration population for this operation."
@@ -603,6 +610,14 @@
   {:malli/schema [:=> [:cat :map [:fn clojure.core/ifn?]] :any]}
   [projection f]
   (binding [*projection* projection]
+    (f)))
+
+(defn call-with-projection-state
+  "Call `f` with one cluster-owned, advanceable schema projection state."
+  {:malli/schema [:=> [:cat [:fn clojure.core/deref] [:fn clojure.core/ifn?]]
+                  :any]}
+  [projection-state f]
+  (binding [*projection-state* projection-state]
     (f)))
 
 (defn- active-projection []

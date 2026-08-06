@@ -139,6 +139,18 @@
 
 (schema/register-core-predicate! 'seon.sci.eval/ctx? ctx?)
 
+(defn projection-state?
+  "True for the atom advancing one cluster's schema projection by basis."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (instance? clojure.lang.IAtom value))
+
+(schema/register-core-predicate! 'seon.sci.eval/projection-state?
+                                 projection-state?)
+
+(def projection-state-generator
+  (gen/fmap atom (gen/return {})))
+
 (defonce ^:private generator-ctx
   (delay (sci/init {})))
 
@@ -147,6 +159,15 @@
   (gen/fmap (fn [_] @generator-ctx) (gen/return nil)))
 
 (schema.edn/load! {})
+
+(defn projection-state
+  "Create the schema projection state owned by one cluster context and writer."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.schema/projection]
+    :seon.sci.eval/projection-state]}
+  [db projection]
+  (atom {::basis-transaction (db/basis-t db)
+         :seon.schema/projection projection}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The base context
@@ -1016,12 +1037,15 @@
 (defn- install-program-doc!
   "Install one acquired program-doc projection without retaining the db."
   [ctx db projection]
-  (let [doc-var (program-doc-var ctx (program-documentation db projection))]
-    ;; Preserve qualified `clojure.repl/doc` and expose the same macro bare
-    ;; through every namespace's ordinary clojure.core refer.
-    (sci/add-namespace! ctx 'clojure.repl {'doc doc-var})
-    (sci/add-namespace! ctx 'clojure.core {'doc doc-var})
-    ctx))
+  (schema/call-with-projection
+   projection
+   (fn []
+     (let [doc-var (program-doc-var ctx (program-documentation db projection))]
+       ;; Preserve qualified `clojure.repl/doc` and expose the same macro bare
+       ;; through every namespace's ordinary clojure.core refer.
+       (sci/add-namespace! ctx 'clojure.repl {'doc doc-var})
+       (sci/add-namespace! ctx 'clojure.core {'doc doc-var})
+       ctx))))
 
 (defn- install-declared-classes!
   "Install every non-masked class named by acquired namespace facts."
@@ -1045,8 +1069,11 @@
   namespaces, contracted functions, and tests use the same interpreted path.
   Receipts and eval results are outside all derivations by construction."
   {:malli/schema [:=> [:cat :seon.sci.eval/acquire-request] :map]}
-  [{ctx :seon.sci.eval/ctx db :seon.db/db}]
-  (let [projection (schema/projection-from-database db)]
+  [{ctx :seon.sci.eval/ctx
+    db :seon.db/db
+    supplied-projection :seon.schema/projection}]
+  (let [projection (or supplied-projection
+                       (schema/projection-from-database db))]
     (schema/call-with-projection
      projection
      (fn []
@@ -1407,23 +1434,32 @@
    [:function
     [:=> [:cat :seon.db/database-value] :seon.sci.eval/ctx]
     [:=> [:cat :seon.db/database-value :seon.db/connection]
+     :seon.sci.eval/ctx]
+    [:=> [:cat :seon.db/database-value :seon.db/connection
+          :seon.sci.eval/projection-state]
      :seon.sci.eval/ctx]]}
   ([db]
    (cluster-ctx db nil))
   ([db connection]
+   (cluster-ctx db connection nil))
+  ([db connection supplied-projection-state]
    (let [ctx (assoc (build-base-ctx)
                     ::custody
                     {:seon.db/connection connection}
                     ::kernel/install-function!
                     install-function-from-database!)
+         supplied-projection
+         (:seon.schema/projection (some-> supplied-projection-state deref))
          acquired (acquire! {:seon.sci.eval/ctx ctx
-                             :seon.db/db db})
+                             :seon.db/db db
+                             :seon.schema/projection supplied-projection})
          projection (:seon.schema/projection acquired)
+         projection-state (or supplied-projection-state
+                              (projection-state db projection))
          ctx (assoc ctx
                     :seon.schema/projection projection
                     ::projection-state
-                    (atom {::basis-transaction (db/basis-t db)
-                           :seon.schema/projection projection}))]
+                    projection-state)]
      ctx)))
 
 (defn- declared-row
@@ -1665,19 +1701,27 @@
         namespace-object (sci/create-ns namespace-name)
         ending-namespace (volatile! namespace-name)
         print-options (volatile! {})
-        session-observation (volatile! nil)]
-    (binding [db/*conn* connection
-              effect/*request-context*
-              (when (and run-id (some? form-ordinal) cluster-name)
-                {:seon.db/connection connection
-                 :seon.cluster.run/id run-id
-                 :seon.cluster.run.form/ordinal form-ordinal
-                 :seon.cluster.agent/id agent-id
-                 :seon.flow/work-launcher work-launcher
-                 :seon.boot/cluster-name cluster-name
-                 :seon.sci.admit/caps caps
-                 :seon.config/on-core-error on-core-error
-                 :seon.effect/counter (atom -1)})]
+        session-observation (volatile! nil)
+        projection-state
+        (or (::projection-state evaluation-ctx)
+            (atom {:seon.schema/projection
+                   (evaluation-projection
+                    {:seon.sci.eval/ctx evaluation-ctx})}))]
+    (schema/call-with-projection-state
+     projection-state
+     (fn []
+       (binding [db/*conn* connection
+                 effect/*request-context*
+                 (when (and run-id (some? form-ordinal) cluster-name)
+                   {:seon.db/connection connection
+                    :seon.cluster.run/id run-id
+                    :seon.cluster.run.form/ordinal form-ordinal
+                    :seon.cluster.agent/id agent-id
+                    :seon.flow/work-launcher work-launcher
+                    :seon.boot/cluster-name cluster-name
+                    :seon.sci.admit/caps caps
+                    :seon.config/on-core-error on-core-error
+                    :seon.effect/counter (atom -1)})]
       (try
         (let [_ (vreset! arm-state (kernel/arm evaluation-ctx time-limit-ms))
             before-reader-context
@@ -1843,4 +1887,4 @@
              (assoc :seon.cluster.eval/interrupted-at
                     (java.util.Date.))))))
         (finally
-          (stop!))))))
+          (stop!))))))))
