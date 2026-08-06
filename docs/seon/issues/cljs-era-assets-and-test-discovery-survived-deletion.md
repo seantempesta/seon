@@ -51,3 +51,7 @@ Shadow CLJS, or CLJS-runner path.
   `.agents/skills/`. `datastar.js`, `input.css`, and `output.css` retain exact
   consumers. The issue remains open for the CLJS discovery/lint and obsolete
   operator-test cuts in later ordered units.
+- 2026-08-06 deletion sweep unit 4 removed the readerless CLJS test-file
+  selector and the sibling-`.cljs` lint pass. JVM `.clj` and portable `.cljc`
+  test discovery remain in place. The issue remains open only for the obsolete
+  private-operator test cut in unit 8.

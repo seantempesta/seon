@@ -9,15 +9,6 @@
        (or (str/ends-with? (.getName file) "_test.clj")
            (str/ends-with? (.getName file) "_test.cljc"))))
 
-(defn- cljs-test-file? [^File file]
-  (and (.isFile file)
-       (or (str/ends-with? (.getName file) "_test.cljs")
-           (str/ends-with? (.getName file) "_test.cljc"))))
-
-(defn- retained-test-file? [^File file]
-  (or (clojure-test-file? file)
-      (cljs-test-file? file)))
-
 (defn- files-below [root relative]
   (let [directory (io/file root relative)]
     (if (.isDirectory directory)
@@ -93,7 +84,7 @@
   (let [directory (io/file root "test")]
     (if (.isDirectory directory)
       (->> (file-seq directory)
-           (filter retained-test-file?)
+           (filter clojure-test-file?)
            (sort-by #(.getCanonicalPath ^File %))
            vec)
       [])))
@@ -115,15 +106,6 @@
            (sort-by #(.getCanonicalPath ^File %))
            vec)
       [])))
-
-(defn cljs-test-files
-  "Return files selected by the CLJS runner's `-test$` namespace scan."
-  [root]
-  (->> (test-files root)
-       (filter cljs-test-file?)
-       (filter #(str/ends-with? (str (namespace-symbol % #{:cljs}))
-                                "-test"))
-       vec))
 
 (defn operator-test-namespaces
   "Return the operator runner's current test namespaces."
