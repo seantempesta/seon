@@ -823,7 +823,8 @@
             :seon.db/process
             [:seon.db.process/id boot-process-identity]}
      manifest (assoc :seon.fn/manifest manifest)
-     (nil? manifest) (assoc :seon.fn/roots seon.fn/source-roots)))
+     (nil? manifest) (assoc :seon.fn/roots seon.fn/source-roots))
+   report-source-progress!)
   (report-source-progress! "program rows complete")
   nil)
 

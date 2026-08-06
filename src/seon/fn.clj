@@ -21,6 +21,18 @@
   "The Clojure source roots admitted to the program graph."
   ["src" "test"])
 
+(defn- report-index-progress!
+  [progress! line]
+  (when progress!
+    (progress! line))
+  nil)
+
+(def ^:private progress-line-budget 6)
+
+(defn- progress-stride
+  [total line-budget]
+  (max 1 (quot (+ total (dec line-budget)) line-budget)))
+
 (defn- require-committed!
   [result phase]
   (when (:seon.error/kind result)
@@ -1030,7 +1042,7 @@
          ::missing-population identity-attr})))))
 
 (defn- add-contract-facts
-  [rows]
+  [rows progress!]
   (let [schema-forms
         (into (sorted-map)
               (keep (fn [{schema-key :seon.schema/key
@@ -1045,7 +1057,13 @@
                       (when spec
                         [(symbol function-symbol) (edn/read-string spec)])))
               rows)
+        _ (report-index-progress!
+           progress!
+           (str "contract projection started: "
+                (count schema-forms) " schemas, "
+                (count function-contracts) " functions"))
         projection (schema/build-projection schema-forms function-contracts)
+        _ (report-index-progress! progress! "contract projection complete")
         compile-options (:seon.schema.projection/compile-options projection)
         predicate-functions
         (:seon.schema.projection/predicate-functions projection)
@@ -1061,17 +1079,28 @@
                                           :seon.ns.alias/target-ns))
                                aliases)])))
               rows)
+        total (count rows)
+        stride (progress-stride total progress-line-budget)
         parsed-rows
-        (mapv (fn [row]
-                (program/with-contract-facts
-                 {:seon.program/row row
-                  :seon.program/compile-options compile-options
-                  :seon.program/predicate-functions predicate-functions
-                  :seon.program/schema-keys schema-keys
-                  :seon.program/schema-forms schema-forms
-                  :seon.program/reader-aliases
-                  (get aliases-by-namespace
-                       (second (:seon.fn/ns row)) {})}))
+        (mapv (fn [index row]
+                (let [parsed
+                      (program/with-contract-facts
+                       {:seon.program/row row
+                        :seon.program/compile-options compile-options
+                        :seon.program/predicate-functions predicate-functions
+                        :seon.program/schema-keys schema-keys
+                        :seon.program/schema-forms schema-forms
+                        :seon.program/reader-aliases
+                        (get aliases-by-namespace
+                             (second (:seon.fn/ns row)) {})})
+                      completed (inc index)]
+                  (when (or (= completed total)
+                            (zero? (mod completed stride)))
+                    (report-index-progress!
+                     progress!
+                     (str "contract rows: " completed "/" total)))
+                  parsed))
+              (range)
               rows)]
     (schema-shape/assert-consistent!
      (filter :seon.schema.shape/fingerprint
@@ -1176,7 +1205,7 @@
      :seon.reconcile/operations (count missing)}))
 
 (defn- desired-rows
-  [request]
+  [request progress!]
   (let [source-rows (rows request)
         canonical-schemas
         (schema/canonical-schema-rows (schema.edn/packaged-forms))
@@ -1211,26 +1240,39 @@
     (add-contract-facts
      (mapv #(assoc % :seon.schema.admission/source :core)
            (into (into (vec source-only) external-namespace-rows)
-                 canonical-schemas)))))
+                 canonical-schemas))
+     progress!)))
 
 (defn index!
-  "Populate one fresh source scratch branch from static analysis."
-  {:malli/schema [:=> [:cat :seon.fn/index-request] :seon.reconcile/result]}
-  [{connection :seon.db/connection process :seon.db/process :as request}]
-  (let [rows (desired-rows request)
-        _ (assert-one-row-per-identity! rows)
-        _ (assert-populated! rows)
-        existing (some (fn [identity-attribute]
-                         (db/q '[:find ?entity .
-                                :in $ ?attribute
-                                :where [?entity ?attribute]]
-                              @connection identity-attribute))
-                       [:seon.ns/name :seon.fn/sym :seon.test/sym])]
-    (when existing
-      (throw (ex-info "Program indexing requires a fresh source scratch branch."
-                      {:seon.error/kind ::index-refused
-                       ::existing-program-entity existing})))
-    (let [namespaces (filterv :seon.ns/name rows)
+  "Populate one fresh source scratch branch from static analysis.
+
+  The optional callback receives bounded progress lines while contract rows
+  are derived and committed. Supplying it also divides each ordered phase
+  into at most `progress-line-budget` vector transactions; the scratch branch
+  remains unpublished until every phase and the source seal commit."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.fn/index-request] :seon.reconcile/result]
+    [:=> [:cat :seon.fn/index-request [:fn clojure.core/ifn?]]
+     :seon.reconcile/result]]}
+  ([request]
+   (index! request nil))
+  ([{connection :seon.db/connection process :seon.db/process :as request}
+    progress!]
+   (let [rows (desired-rows request progress!)
+         _ (assert-one-row-per-identity! rows)
+         _ (assert-populated! rows)
+         existing (some (fn [identity-attribute]
+                          (db/q '[:find ?entity .
+                                 :in $ ?attribute
+                                 :where [?entity ?attribute]]
+                                @connection identity-attribute))
+                        [:seon.ns/name :seon.fn/sym :seon.test/sym])]
+     (when existing
+       (throw (ex-info "Program indexing requires a fresh source scratch branch."
+                       {:seon.error/kind ::index-refused
+                        ::existing-program-entity existing})))
+     (let [namespaces (filterv :seon.ns/name rows)
           namespace-bases
           (mapv #(dissoc % :seon.ns/requires) namespaces)
           namespace-relations
@@ -1266,21 +1308,35 @@
                 declarations)
           commit-phase! (fn [phase tx-data]
                           (when (seq tx-data)
-                            (require-committed!
-                             (db/transact!
-                              connection
-                              (cond-> {:tx-data tx-data}
-                                process (assoc :tx-meta
-                                               {:seon.db/process process})))
-                             phase)))]
-      ;; Datahike processes tx-data in order. Every identity therefore exists
-      ;; before a requires lookup ref resolves it, including the shared
-      ;; name-only rows for external namespaces.
-      (commit-phase! :seon.fn/namespaces
-                     (into namespace-bases namespace-relations))
-      (commit-phase! :seon.fn/declarations declaration-bases)
-      (commit-phase! :seon.test/subject subject-rows)
-      (commit-phase! :seon.fn/keywords keyword-rows)
-      (commit-phase! :seon.fn/calls call-rows)
-      {:seon.reconcile/converged? false
-       :seon.reconcile/operations (count rows)})))
+                            (let [total (count tx-data)
+                                  stride (progress-stride
+                                          total progress-line-budget)
+                                  completed (volatile! 0)]
+                              (doseq [batch (if progress!
+                                             (partition-all stride tx-data)
+                                             [tx-data])]
+                                (require-committed!
+                                 (db/transact!
+                                  connection
+                                  (cond-> {:tx-data (vec batch)}
+                                    process
+                                    (assoc :tx-meta
+                                           {:seon.db/process process})))
+                                 phase)
+                                (when progress!
+                                  (report-index-progress!
+                                   progress!
+                                   (str (name phase) ": "
+                                        (vswap! completed + (count batch))
+                                        "/" total)))))))]
+       ;; Datahike processes tx-data in order. Every identity therefore exists
+       ;; before a requires lookup ref resolves it, including the shared
+       ;; name-only rows for external namespaces.
+       (commit-phase! :seon.fn/namespaces
+                      (into namespace-bases namespace-relations))
+       (commit-phase! :seon.fn/declarations declaration-bases)
+       (commit-phase! :seon.test/subject subject-rows)
+       (commit-phase! :seon.fn/keywords keyword-rows)
+       (commit-phase! :seon.fn/calls call-rows)
+       {:seon.reconcile/converged? false
+        :seon.reconcile/operations (count rows)}))))
