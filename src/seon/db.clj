@@ -125,19 +125,25 @@
 (defn connection-identity
   "Plain-data identity of a live Datahike connection."
   {:malli/schema
-   [:=> [:cat :seon.db/connection] :seon.db/connection-identity]}
+   [:=> [:cat [:or :seon.db/connection :seon.error/value]]
+    [:or :seon.db/connection-identity :seon.error/value]]}
   [connection]
-  {:datahike/connection-id (connection-id connection)})
+  (if (error-value? connection)
+    connection
+    {:datahike/connection-id (connection-id connection)}))
 
 (defn database-value-identity
   "Plain-data identity of an immutable Datahike database value."
   {:malli/schema
-   [:=> [:cat :seon.db/database-value] :seon.db/database-value-identity]}
+   [:=> [:cat [:or :seon.db/database-value :seon.error/value]]
+    [:or :seon.db/database-value-identity :seon.error/value]]}
   [database]
-  (let [configuration (dbi/-config database)]
-    {:db-name (:branch configuration)
-     :t (dbi/-max-tx database)
-     :datahike/commit-id (d/commit-id database)}))
+  (if (error-value? database)
+    database
+    (let [configuration (dbi/-config database)]
+      {:db-name (:branch configuration)
+       :t (dbi/-max-tx database)
+       :datahike/commit-id (d/commit-id database)})))
 
 (defn- foreign-connection-error
   [connection]
@@ -296,22 +302,24 @@
 
 (defn read-evidence-current?
   "True when `database` still satisfies every retained dependency revision."
-  {:malli/schema [:=> [:cat :seon.db/database-value
+  {:malli/schema [:=> [:cat [:or :seon.db/database-value :seon.error/value]
                        [:vector :seon.db/read-evidence]]
-                  :boolean]}
+                  [:or :boolean :seon.error/value]]}
   [database retained]
-  (every?
-   (fn [{source-position :seon.db/source-argument-position
-         plan :datahike.read/dependency-plan
-         revision :datahike.read/revision
-         :as evidence}]
-     (or (= revision (dependency-revision database plan source-position))
-         (when-let [request (:seon.db/read-request evidence)]
-           (try
-             (= (:seon.db/read-result evidence)
-                (stable-read-result (replay-read database request)))
-             (catch Throwable _ false)))))
-   retained))
+  (if (error-value? database)
+    database
+    (every?
+     (fn [{source-position :seon.db/source-argument-position
+           plan :datahike.read/dependency-plan
+           revision :datahike.read/revision
+           :as evidence}]
+       (or (= revision (dependency-revision database plan source-position))
+           (when-let [request (:seon.db/read-request evidence)]
+             (try
+               (= (:seon.db/read-result evidence)
+                  (stable-read-result (replay-read database request)))
+               (catch Throwable _ false)))))
+     retained)))
 
 (defn- decode-attribute-value
   [attribute value]
@@ -527,22 +535,38 @@
    [:function
     [:=> [:cat]
      [:or :seon.db/database-value :seon.error/value]]
-    [:=> [:cat :seon.db/connection]
+    [:=> [:cat [:or :seon.db/connection :seon.error/value]]
      [:or :seon.db/database-value :seon.error/value]]]}
   ([]
    (current-database-value))
   ([connection]
-   (resolve-database-value connection)))
+   (if (error-value? connection)
+     connection
+     (resolve-database-value connection))))
+
+(defn- source-argument-error
+  [source-bindings arguments]
+  (some (fn [source]
+          (let [position (:datahike.query.source/argument-position source)]
+            (when (< position (count arguments))
+              (let [argument (nth arguments position)]
+                (when (error-value? argument)
+                  argument)))))
+        source-bindings))
 
 (defn- aligned-query-arguments
   [explicit-database query-form arguments]
   (let [arguments (vec arguments)
         input-count (d/query-input-count query-form)
         source-bindings (d/query-source-bindings query-form)
+        upstream-error (source-argument-error source-bindings arguments)
         default-sources
         (filterv #(= '$ (:datahike.query.source/symbol %))
                  source-bindings)]
     (cond
+      upstream-error
+      upstream-error
+
       (= input-count (count arguments))
       arguments
 
@@ -568,12 +592,15 @@
      [::query-or-database
       [:or
        :seon.db/database-value
+       :seon.error/value
        :seon.db/query
        :seon.db/query-args]]
      [::arguments [:* :seon.schema/value]]]
     [:or :seon.schema/value :seon.error/value]]}
   [query-or-database & arguments]
-  (let [explicit-database? (db.utils/db? query-or-database)
+  (if (error-value? query-or-database)
+    query-or-database
+    (let [explicit-database? (db.utils/db? query-or-database)
         query-input
         (if explicit-database?
           (first arguments)
@@ -609,10 +636,10 @@
            "The query arguments do not align with its declared inputs."
            {::query-form (:query normalized)
             ::argument-count (count (:args normalized))})))
-      (catch Throwable cause
-        (when explicit-database?
-          (append-database-evidence! query-or-database :all))
-        (dependency-error ::q cause)))))
+        (catch Throwable cause
+          (when explicit-database?
+            (append-database-evidence! query-or-database :all))
+          (dependency-error ::q cause))))))
 
 (defn- pull-call
   [database arguments operation operation-key result-key]
@@ -636,11 +663,12 @@
     [:=> [:cat :seon.db/pull-options]
      [:or :nil :map :seon.error/value]]
     [:=> [:cat
-          [:or :seon.db/database-value :seon.db/pull-selector]
+          [:or :seon.db/database-value :seon.error/value
+           :seon.db/pull-selector]
           [:or :seon.db/pull-options :seon.db/entity-id]]
      [:or :nil :map :seon.error/value]]
     [:=>
-     [:cat :seon.db/database-value
+     [:cat [:or :seon.db/database-value :seon.error/value]
       :seon.db/pull-selector
       :seon.db/entity-id]
      [:or :nil :map :seon.error/value]]]}
@@ -651,7 +679,8 @@
               :pull
               :datahike.pull/result))
   ([database-or-selector options-or-eid]
-   (if (db.utils/db? database-or-selector)
+   (if (or (db.utils/db? database-or-selector)
+           (error-value? database-or-selector))
      (pull-call database-or-selector
                 [options-or-eid]
                 d/pull-with-evidence
@@ -677,12 +706,13 @@
      [:or [:vector [:or :nil :map]] :seon.error/value]]
     [:=>
      [:cat
-      [:or :seon.db/database-value :seon.db/pull-selector]
+      [:or :seon.db/database-value :seon.error/value
+       :seon.db/pull-selector]
       [:or :seon.db/pull-many-options
        [:sequential :seon.db/entity-id]]]
      [:or [:vector [:or :nil :map]] :seon.error/value]]
     [:=>
-     [:cat :seon.db/database-value
+     [:cat [:or :seon.db/database-value :seon.error/value]
       :seon.db/pull-selector
       [:sequential :seon.db/entity-id]]
      [:or [:vector [:or :nil :map]] :seon.error/value]]]}
@@ -693,7 +723,8 @@
               :pull-many
               :datahike.pull-many/result))
   ([database-or-selector options-or-eids]
-   (if (db.utils/db? database-or-selector)
+   (if (or (db.utils/db? database-or-selector)
+           (error-value? database-or-selector))
      (pull-call database-or-selector
                 [options-or-eids]
                 d/pull-many-with-evidence
@@ -727,7 +758,8 @@
    [:function
     [:=> [:cat :seon.db/entity-id]
      [:or :nil :map :seon.error/value]]
-    [:=> [:cat :seon.db/database-value :seon.db/entity-id]
+    [:=> [:cat [:or :seon.db/database-value :seon.error/value]
+          :seon.db/entity-id]
      [:or :nil :map :seon.error/value]]]}
   ([entity-id]
    (entity-call (current-database-value) entity-id))
@@ -768,11 +800,13 @@
   {:malli/schema
    [:=>
     [:cat
-     [:or :seon.db/database-value :seon.db/index-lookup :keyword]
+     [:or :seon.db/database-value :seon.error/value
+      :seon.db/index-lookup :keyword]
      [:* :seon.schema/value]]
     [:or :seon.db/datoms :seon.error/value]]}
   [database-or-index & arguments]
-  (if (db.utils/db? database-or-index)
+  (if (or (db.utils/db? database-or-index)
+          (error-value? database-or-index))
     (datoms-call database-or-index arguments)
     (datoms-call (current-database-value)
                  (cons database-or-index arguments))))
@@ -818,7 +852,7 @@
    [:function
     [:=> [:cat]
      [:or :nil :uuid :seon.error/value]]
-    [:=> [:cat :seon.db/database-value]
+    [:=> [:cat [:or :seon.db/database-value :seon.error/value]]
      [:or :nil :uuid :seon.error/value]]]}
   ([]
    (database-identity d/commit-id ::commit-id (current-database-value)))
@@ -831,7 +865,7 @@
    [:function
     [:=> [:cat]
      [:or :nil :map :seon.error/value]]
-    [:=> [:cat :seon.db/database-value]
+    [:=> [:cat [:or :seon.db/database-value :seon.error/value]]
      [:or :nil :map :seon.error/value]]]}
   ([]
    (database-identity d/committed-value-identity
@@ -848,7 +882,7 @@
    [:function
     [:=> [:cat]
      [:or :seon.db/database-value :seon.error/value]]
-    [:=> [:cat :seon.db/database-value]
+    [:=> [:cat [:or :seon.db/database-value :seon.error/value]]
      [:or :seon.db/database-value :seon.error/value]]]}
   ([]
    (database-view d/history (current-database-value) []))
@@ -861,7 +895,8 @@
    [:function
     [:=> [:cat :seon.db/time-point]
      [:or :seon.db/database-value :seon.error/value]]
-    [:=> [:cat :seon.db/database-value :seon.db/time-point]
+    [:=> [:cat [:or :seon.db/database-value :seon.error/value]
+          :seon.db/time-point]
      [:or :seon.db/database-value :seon.error/value]]]}
   ([time-point]
    (database-view d/as-of (current-database-value) [time-point]))
@@ -874,7 +909,8 @@
    [:function
     [:=> [:cat :seon.db/time-point]
      [:or :seon.db/database-value :seon.error/value]]
-    [:=> [:cat :seon.db/database-value :seon.db/time-point]
+    [:=> [:cat [:or :seon.db/database-value :seon.error/value]
+          :seon.db/time-point]
      [:or :seon.db/database-value :seon.error/value]]]}
   ([time-point]
    (database-view d/since (current-database-value) [time-point]))

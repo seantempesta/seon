@@ -239,6 +239,40 @@
     (is (= 'seon.db/*conn*
            (get-in result [:seon.error/data :seon.db/binding])))))
 
+(deftest every-public-read-preserves-an-upstream-database-error
+  (let [upstream {:seon.error/kind :seon.db-test/upstream
+                  :seon.error/message "The earlier database read failed."
+                  :seon.error/data {:seon.db-test/stage :opening-basis}}
+        reads
+        [[:connection-identity #(apply db/connection-identity [upstream])]
+         [:database-value-identity #(db/database-value-identity upstream)]
+         [:read-evidence-current? #(db/read-evidence-current? upstream [])]
+         [:db #(db/db upstream)]
+         [:q-database-first #(db/q upstream exam-query)]
+         [:q-source-argument #(db/q exam-query upstream)]
+         [:q-request-source
+          #(db/q {:query exam-query :args [upstream]})]
+         [:pull-options #(db/pull upstream {:selector schema-pattern
+                                            :eid schema-ref})]
+         [:pull-positional #(db/pull upstream schema-pattern schema-ref)]
+         [:pull-many-options
+          #(db/pull-many upstream {:selector schema-pattern
+                                   :eids [schema-ref]})]
+         [:pull-many-positional
+          #(db/pull-many upstream schema-pattern [schema-ref])]
+         [:entity #(db/entity upstream schema-ref)]
+         [:datoms #(db/datoms upstream :avet)]
+         [:commit-id #(db/commit-id upstream)]
+         [:committed-value-identity
+          #(db/committed-value-identity upstream)]
+         [:history #(db/history upstream)]
+         [:as-of #(db/as-of upstream 0)]
+         [:since #(db/since upstream 0)]]]
+    (doseq [[operation read-call] reads]
+      (testing (clojure.core/name operation)
+        (is (identical? upstream (read-call))
+            "the exact upstream error value returns before dependency work")))))
+
 (deftest query-and-pull-append-evidence-only-when-captured
   (test-support/with-database
    (fn [connection]
