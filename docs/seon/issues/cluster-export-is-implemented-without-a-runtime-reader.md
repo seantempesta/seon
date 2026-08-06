@@ -26,15 +26,16 @@ supply the live store handle their contracts require.
   `reidentify!` only in `src/seon/cluster/export.clj` and
   `test/seon/cluster/export_test.clj`; no production namespace requires
   `seon.cluster.export`.
-- The EXPORT section of `resources/seon/schema.edn` exists only to contract
-  `:seon.export/request` and its paths for that namespace.
-- `docs/prds/sci-execution-runtime/plan/unsettled.md:1432-1441` records
-  `seon.cluster.export` as a B2 implementation unit, while the current
+- `resources/seon/schemas/seon.cluster.export.edn` and
+  `resources/seon/schemas/seon.export.edn` exist only to contract this
+  namespace's requests and results.
+- `docs/prds/sci-execution-runtime/plan/unsettled.md:2525-2536` records
+  `seon.cluster.export` only in historical B2 sequencing, while the current
   `bin/seon` command roster has no export/import command and current
-  architecture/reference pages expose no callable boundary.
-- `src/seon/cluster/export.clj:1-61` claims three surviving jobs and a complete
-  crash walk, but `:264-302` can only be reached by a direct host call with an
-  open `:seon.store/store` value.
+  architecture pages expose no callable boundary.
+- `src/seon/cluster/export.clj:241-298` implements copied-store mutation and
+  export, but can only be reached by a direct host call with an open
+  `:seon.store/store` value.
 - The namespace also owns one of the unsafe recursive-delete copies tracked by
   [[fresh-recursive-deletion-reintroduces-symlink-traversal]], increasing the
   cost and risk of preserving an unattached mechanism.

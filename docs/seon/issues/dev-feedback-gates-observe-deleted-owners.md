@@ -16,15 +16,16 @@ corpus.
 
 ## Evidence
 
-- `bin/seon-hook:833-867` claims core faults land in `logs/pod.log`, rereads
+- `bin/seon-hook:998-1020` claims core faults land in `logs/pod.log`, rereads
   `SEON_CONFIG`/`config/default.edn`, and recognizes retired
   `:gate/:crash/:log` values.
-- `bin/seon-hook:867-902` runs only when the obsolete log exists and catches
-  internal failures as `nil`; `:967` still invokes it after Clojure edits.
+- `bin/seon-hook:1022-1065` runs only when the obsolete log exists and catches
+  internal failures as `nil`; `:1138-1141` still invokes it after Clojure
+  edits.
 - `script/seon/dev/markdown.clj:598-611` names deleted
   `src/seon/agent/ctx.cljs` as the live system-text floor.
 - `script/seon/dev/markdown.clj:629-648` converts the missing file into an empty
-  n-gram set; `:705-713` keeps the rule enabled.
+  n-gram set; `:705-713,739` keeps the rule enabled.
 - The owning hook/Markdown tests mention neither stale mechanism.
 
 ## Owner

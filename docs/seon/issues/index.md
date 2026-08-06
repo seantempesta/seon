@@ -70,6 +70,8 @@ See `README.md` for the convention.
 | [Derive predicate-owner readiness before live source publication](live-publication-has-a-hand-maintained-predicate-owner-reload.md) | friction | publication registration-provenance wave |
 | [Hold one store ownership interval across artifact install and start](artifact-releases-the-fence-between-install-and-start.md) | friction | artifact startup wave |
 | [Delete dev feedback gates that observe deleted owners](dev-feedback-gates-observe-deleted-owners.md) | friction | dev feedback deletion wave |
+| [Derive maintenance execution fields from the declared request](maintenance-execution-duplicates-declared-request-fields.md) | friction | maintenance contract derivation wave |
+| [Remove deleted aliases from the Clojure-testing skill](clojure-testing-skill-again-teaches-deleted-aliases.md) | friction | skill dependency-ledger repair |
 | [Make production docstrings describe the surviving runtime](production-docstrings-teach-deleted-semantics.md) | friction | production documentation-honesty wave |
 | [Cut the 11.8 s source load back under the ten-second law](source-load-is-118s-against-the-ten-second-law.md) | friction | load-time incident |
 | [Remove the deleted run lease from the AI retry proof](ai-retry-proof-still-cites-the-deleted-run-lease.md) | friction | AI retry evidence wave |
@@ -146,7 +148,7 @@ See `README.md` for the convention.
 | [Give `seon.search/index-step` its public contract](search-index-step-has-no-public-contract.md) | friction | search public contract repair |
 | [Resolve schema aliases within one admitted declaration set](schema-alias-population-cannot-resolve-an-earlier-declaration.md) | friction | schema alias admission repair |
 
-## Cleanup (15)
+## Cleanup (18)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -155,6 +157,10 @@ See `README.md` for the convention.
 | [Delete operator helpers maintained only by private tests](operator-private-helpers-have-only-test-readers.md) | cleanup | operator deletion wave |
 | [Delete five readerless schema rows left by completed cuts](schema-population-retains-five-readerless-rows.md) | cleanup | schema population deletion wave |
 | [Delete or expose the readerless cluster export surface](cluster-export-is-implemented-without-a-runtime-reader.md) | cleanup | store capability deletion wave |
+| [Delete the reset-only instruction migration](instruction-population-retains-reset-only-migration.md) | cleanup | source population deletion wave |
+| [Delete the two render-value compatibility calls](render-value-retains-compatibility-callers.md) | cleanup | render compatibility deletion wave |
+| [Delete the render fixture that outlived its router test](render-fixture-outlived-its-router-test.md) | cleanup | render test deletion wave |
+| [Delete CLJS-era assets and test discovery](cljs-era-assets-and-test-discovery-survived-deletion.md) | cleanup | CLJS residue deletion wave |
 | [Keep the page body from scrolling sideways on a phone](agent-pages-overflow-a-phone-viewport.md) | cleanup | visual-QA fix wave |
 | [Fix the context wave's three small honesty defects](context-wave-leaves-three-small-honesty-defects.md) | cleanup | context wave fix lane |
 | [Give Flow configuration dials one registration owner](flow-config-dials-have-two-registration-owners.md) | cleanup | Core |

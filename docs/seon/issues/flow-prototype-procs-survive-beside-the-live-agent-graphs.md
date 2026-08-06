@@ -18,11 +18,11 @@ green beside that owner.
 
 This is the old-model shape surviving as fresh code. It enlarges the indexed
 program graph and lets runtime work accidentally cite a test mechanism that
-does not carry current run, session-image, capability, or fault semantics.
+does not carry current run, desk, capability, or fault semantics.
 
 ## Evidence
 
-- `src/seon/flow.clj:723-970` explicitly describes the retained functions as
+- `src/seon/flow.clj:947-1184` explicitly describes the retained functions as
   "fake", "prototype", "fixture", or "simulates": `seeded-outcome`,
   `lineage-status`, `escalate-lineage?`, `planner-proc`,
   `namespace-owner-proc`, `source-enumerator-proc`, `indexer-proc`,
@@ -30,20 +30,18 @@ does not carry current run, session-image, capability, or fault semantics.
 - `test/seon/flow/loop_test.clj:1-15` calls itself the standing fake-agent
   generate-code loop and declares a raw prototype Datahike schema. It is the
   only reader of the lineage/planner/owner functions.
-- `test/seon/flow_test.clj:91-210,489-599,921-981` is the only reader of the
+- `test/seon/flow_test.clj:127-208,1473-1530` is the only other reader of the
   simulated eval/mailbox procs. `source-enumerator-proc` and `indexer-proc`
   have no reader outside their own definitions.
-- The FLOW section of `resources/seon/schema.edn` retains callback, outcome, lineage,
+- `resources/seon/schemas/seon.flow.edn:1-220` retains outcome, lineage,
   planner, namespace-owner, source-enumerator, indexer, eval, and mailbox
   schemas solely for this prototype closure.
 - The live half must remain: `seon.flow`'s work launcher, capacity observer,
   fault committer, and error fan-out are called by current cluster/agent
   graphs. The cut boundary is the prototype tail and its exact test/schema
   readers, not the namespace wholesale.
-- Mechanical residue marks the seam: `src/seon/flow.clj:18-21` imports unused
-  `TimeUnit`; `src/seon/cluster/loop.cljc:35-53` requires unused
-  `clojure.core.async.flow` and `seon.cluster.wake` aliases after the central
-  loop deletion.
+- The fake-agent suite alone is 707 lines, and the source tail is 238 lines
+  before its schema and extra test-only readers are counted.
 
 ## Owner
 
