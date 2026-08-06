@@ -1441,9 +1441,10 @@
 
           :else
           (schema/canonical-database-attributes))
+        effective (config/effective db (current-cluster-name db))
         options
         (select-keys
-         (config/effective db (current-cluster-name db))
+         effective
          [:seon.render.value/max-collection])
         cursor (data/parse-cursor (get query "path") (get query "offset"))
         found (data/at root-value cursor)
@@ -1455,23 +1456,26 @@
                                (cond-> {}
                                  value? (assoc :value value-digest)
                                  entity? (assoc :entity (get query "entity"))))
-        unit {:seon.cluster.agent/id id
-              :seon.render.value/root
-              (cond
-                value? [:seon.blob/digest value-digest]
-                entity?
-                (or entity [:seon.render.data/entity (get query "entity")])
-                :else :seon.render.data/schema)
-              :seon.render.value/route-base route-base
-              :seon.render.value/options options
-              :seon.render.data/cursor cursor
-              :seon.sci.admit/caps caps
-              :seon.sci.eval/ctx (:seon.sci.eval/ctx service)
-              :seon.sci.eval/time-limit-ms
-              (:seon.config.eval/time-limit-ms service)
-              :seon.config/on-core-error
-              (:seon.config/on-core-error service)
-              :seon.render/value opened-value}]
+        unit (cond->
+              {:seon.render.value/root
+               (cond
+                 value? [:seon.blob/digest value-digest]
+                 entity?
+                 (or entity [:seon.render.data/entity (get query "entity")])
+                 :else :seon.render.data/schema)
+               :seon.render.value/route-base route-base
+               :seon.render.value/options options
+               :seon.render.data/cursor cursor
+               :seon.sci.admit/caps caps
+               :seon.sci.eval/ctx (:seon.sci.eval/ctx service)
+               :seon.sci.eval/time-limit-ms
+               (:seon.config.eval/time-limit-ms service)
+               :seon.config/on-core-error
+               (:seon.config/on-core-error service)
+               :seon.render/value opened-value}
+               (not (:seon.config/missing-effective effective))
+               (assoc :seon.render/profile
+                      (render/agent-render-profile effective)))]
     {:status 200
      :headers {"content-type" "text/html; charset=utf-8"}
      :body (shell {:seon.cluster.agent/id id

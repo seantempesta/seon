@@ -1030,9 +1030,8 @@
             default-body (.body (fetch server "/data"))]
         (is (= 200 (.statusCode response)))
         (is (str/includes? body "seon-data-panel"))
-        (is (and (str/includes? body ":seon.cluster.agent/id")
-                 (str/includes? body "&quot;alice&quot;"))
-            "the drill root is the pulled entity, not the schema vector")
+        (is (str/includes? body "Agent alice is idle.")
+            "the pulled entity uses its declared HTML producer")
         (is (str/includes? default-body ":seon.ai.attempt/at")
             "without entity the schema vector remains the drill root")
         (is (str/includes? body
