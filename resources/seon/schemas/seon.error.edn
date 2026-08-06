@@ -154,7 +154,7 @@
              :unclassified [:= true],
              :unclassified-error
              [:map {:seon.error/class true
-                    :seon.render/ai seon.error/render-ai
+                    :seon.render/ai seon.error/unclassified-prose
                     :seon.render/html seon.error/render-html
                     :error/message "must mark a failure that no registered error class recognized"}
               [:seon.error/unclassified :seon.error/unclassified]

@@ -60,9 +60,9 @@
   [:my.edit/source-window-complete? :my.edit/source-window-complete?]
   [:my.edit/replacements {:optional true} :my.edit/replacements]],
  :my.edit/no-match :my.edit/path
- :my.edit/no-match-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path with no matching edit target"} [:my.edit/no-match :my.edit/no-match] [:seon.error/message :seon.error/message]]
+ :my.edit/no-match-error [:map {:seon.error/class true :seon.render/ai seon.error/edit-prose :seon.render/html seon.error/render-html :error/message "must identify the path with no matching edit target"} [:my.edit/no-match :my.edit/no-match] [:seon.error/message :seon.error/message]]
  :my.edit/ambiguous-match :my.edit/path
- :my.edit/ambiguous-match-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path with ambiguous edit targets"} [:my.edit/ambiguous-match :my.edit/ambiguous-match] [:seon.error/message :seon.error/message]]
+ :my.edit/ambiguous-match-error [:map {:seon.error/class true :seon.render/ai seon.error/edit-prose :seon.render/html seon.error/render-html :error/message "must identify the path with ambiguous edit targets"} [:my.edit/ambiguous-match :my.edit/ambiguous-match] [:seon.error/message :seon.error/message]]
  :my.edit/parse-refused [:= true]
  :my.edit/parse-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark edited source refused by the Clojure reader"} [:my.edit/parse-refused :my.edit/parse-refused] [:seon.error/message :seon.error/message]]
  :my.edit/lossless-check-failed [:= true]

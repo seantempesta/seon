@@ -63,7 +63,7 @@
                      :seon.db/tx-data]],
                    :units [:vector :seon.render.walk/unit],
                    :elided [:= true]
-                   :elided-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a bounded render walk that elided additional content"} [:seon.render.walk/elided :seon.render.walk/elided] [:seon.error/message :seon.error/message]]
+                   :elided-error [:map {:seon.error/class true :seon.render/ai seon.error/elision-prose :seon.render/html seon.error/elision-html :error/message "must mark a bounded render walk that elided additional content"} [:seon.render.walk/elided :seon.render.walk/elided] [:seon.error/message :seon.error/message]]
                    :no-such-entity [:= true]
                    :no-such-entity-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a render walk whose requested entity does not exist"} [:seon.render.walk/no-such-entity :seon.render.walk/no-such-entity] [:seon.error/message :seon.error/message]]
                    :connections-failed [:= true]

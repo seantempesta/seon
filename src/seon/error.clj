@@ -147,6 +147,7 @@
             [seon.render.route :as render.route]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
+            [seon.schema.form :as schema.form]
             [seon.sci.admit :as admit]))
 
 ;;; ---------------------------------------------------------------------------
@@ -407,8 +408,7 @@
 (defn refusal-prose
   "`:seon.render/ai` — a refused transition and its atomic outcome."
   {:malli/schema
-   [:=> [:cat [:or :seon.error/value :seon.error/notice]]
-    [:string {:min 1}]]}
+   [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
   [error-value]
   (let [fact (or (:seon.error/fact error-value) error-value)
         source (if (:seon.error/data-edn fact)
@@ -431,8 +431,7 @@
 (defn instrumentation-prose
   "`:seon.render/ai` — detailed steering for a validation failure."
   {:malli/schema
-   [:=> [:cat [:or :seon.error/value :seon.error/notice]]
-    [:string {:min 1}]]}
+   [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
   [error-value]
   (let [fact (or (:seon.error/fact error-value) error-value)
         {instrument-fn :seon.instrument/fn
@@ -548,8 +547,7 @@
   The notice arm remains through slice 1 so existing committed facts and the
   failover context retain their current face until their emission sweep."
   {:malli/schema
-   [:=> [:cat [:or :seon.error/value :seon.error/notice]]
-    [:string {:min 1}]]}
+   [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
   [error-value]
   (if (:seon.error/fact error-value)
     (notice-ai-prose error-value)
@@ -879,29 +877,66 @@
                 unit)]
     (render/transacted value)))
 
-(defn- error-evidence
+(defn- class-properties
+  [forms schema-key]
+  (some-> (get forms schema-key)
+          schema.form/namespaced-properties))
+
+(defn- matched-error-classes
   [value]
+  (when-let [projection (schema/current-projection)]
+    (let [forms (:seon.schema.projection/forms projection)]
+      (->> (schema/matching-shapes-in projection value)
+           (filter (fn [{schema-key :seon.schema/key}]
+                     (true? (:seon.error/class
+                             (class-properties forms schema-key)))))
+           vec))))
+
+(defn- error-marker
+  [value]
+  (or
+   (when-let [class-row (first (matched-error-classes value))]
+     (let [marker-attributes
+           (disj (:seon.schema/required-attrs class-row)
+                 :seon.error/message)]
+       (first
+        (sort-by (comp str key)
+                 (select-keys value marker-attributes)))))
+   (when-let [kind (:seon.error/kind value)]
+     [:seon.error/kind kind])))
+
+(defn- error-evidence
+  [value marker]
   (->> value
        (remove (fn [[attribute _]]
                  (or (= :seon.error/message attribute)
+                     (= (some-> marker key) attribute)
+                     (= :seon.error/id attribute)
                      (contains? render-context-attributes attribute))))
        (sort-by (comp str key))))
 
+(defn- evidence-text
+  [evidence]
+  (when (seq evidence)
+    (str "Evidence: "
+         (str/join ", "
+                   (map (fn [[attribute evidence-value]]
+                          (str attribute "=" (pr-str evidence-value)))
+                        evidence))
+         ".")))
+
 (defn- default-ai-prose
   [value]
-  (let [evidence (error-evidence value)]
+  (let [marker (error-marker value)
+        evidence (error-evidence value marker)]
     (str/join
      "\n"
      (remove
       nil?
       [(:seon.error/message value)
-       (when (seq evidence)
-         (str "Evidence: "
-              (str/join ", "
-                        (map (fn [[attribute evidence-value]]
-                               (str attribute "=" (pr-str evidence-value)))
-                             evidence))
-              "."))
+       (when marker
+         (str "Failed: " (key marker) "=" (pr-str (val marker)) "."))
+       (evidence-text evidence)
        "Re-read the current facts before retrying or changing state."]))))
 
 (defn- evidence-path
@@ -922,7 +957,7 @@
   `d/pull` wraps refs as `{:db/id N}` and adds `:db/id`, neither of
   which the fact schema admits — `seon.render/transacted` is the
   one place that unwrapping is written."
-  {:malli/schema [:=> [:cat :seon.error/value] [:string {:min 1}]]}
+  {:malli/schema [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)]
     (if (and (:seon.error/kind value) (:seon.error/id value))
@@ -937,14 +972,20 @@
 
 (defn render-html
   "`:seon.render/html` — one readable error card for debug surfaces."
-  {:malli/schema [:=> [:cat :seon.error/value] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat :seon.schema/value] :seon.render/hiccup]}
   [unit]
   (let [value (rendered-error-value unit)
-        evidence (error-evidence value)]
+        marker (error-marker value)
+        evidence (error-evidence value marker)]
     (into
      [:article {:class "seon-family-entry seon-error-entry"}
       [:h3 {:class "seon-error-message"} (:seon.error/message value)]]
      (concat
+      (when marker
+        [[:dl {:class "seon-error-marker"}
+          [:div {:class "seon-error-marker-row"}
+           [:dt (str (key marker))]
+           [:dd (pr-str (val marker))]]]])
       (when (seq evidence)
         [(into [:dl {:class "seon-error-evidence"}]
                (map (fn [[attribute evidence-value]]
@@ -955,3 +996,113 @@
       (when-let [id (:seon.error/id value)]
         [[:p {:class "seon-error-link"}
           [:a {:href (evidence-path id)} "Inspect durable evidence"]]])))))
+
+(defn time-limit-prose
+  "`:seon.render/ai` — evaluation time-limit evidence without guessing cause."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
+  [unit]
+  (let [value (rendered-error-value unit)
+        entries (:seon.eval/fn-entries value)]
+    (str/join
+     " "
+     (remove nil?
+             [(:seon.error/message value)
+              (when (some? entries)
+                (str "Recorded function-body entries: " entries "."))
+              "Many entries indicate a spin; few indicate time spent inside a host call. Inspect the called function before retrying."]))))
+
+(defn edit-prose
+  "`:seon.render/ai` — selection evidence for an edit that did not apply."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
+  [unit]
+  (let [value (rendered-error-value unit)
+        marker (error-marker value)
+        evidence (error-evidence value marker)]
+    (str/join
+     "\n"
+     (remove nil?
+             [(:seon.error/message value)
+              (when marker
+                (str "Selection: " (key marker) "=" (pr-str (val marker)) "."))
+              (evidence-text evidence)
+              "Re-read the exact source and narrow the edit selection before applying it again."]))))
+
+(defn elision-prose
+  "`:seon.render/ai` — a neutral account of bounded render-walk elision."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
+  [unit]
+  (let [value (rendered-error-value unit)
+        marker (error-marker value)
+        evidence (error-evidence value marker)]
+    (str/join
+     " "
+     (remove nil?
+             ["Additional render-walk content was elided by the active render profile."
+              (evidence-text evidence)
+              "Request the next offset when more detail is needed."]))))
+
+(defn elision-html
+  "`:seon.render/html` — a neutral elision notice, never an error card."
+  {:malli/schema [:=> [:cat :seon.schema/value] :seon.render/hiccup]}
+  [unit]
+  (let [value (rendered-error-value unit)
+        marker (error-marker value)
+        evidence (error-evidence value marker)]
+    (into
+     [:aside {:class "seon-family-entry seon-render-elision"}
+      [:p "Additional render-walk content was elided by the active render profile."]]
+     (when (seq evidence)
+       [(into [:dl {:class "seon-render-elision-evidence"}]
+              (map (fn [[attribute evidence-value]]
+                     [:div
+                      [:dt (str attribute)]
+                      [:dd (pr-str evidence-value)]]))
+              evidence)]))))
+
+(defn unclassified-prose
+  "`:seon.render/ai` — an honest failure projection with no class match."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
+  [unit]
+  (let [value (rendered-error-value unit)
+        marker (error-marker value)
+        evidence (error-evidence value marker)]
+    (str/join
+     "\n"
+     (remove nil?
+             [(:seon.error/message value)
+              "No registered error class recognized the original failure."
+              (evidence-text evidence)
+              "Inspect the admitted projection and declare the missing class before retrying."]))))
+
+(defn mcp-prose
+  "`:seon.render/ai` — retrieval evidence for a failed MCP value lookup."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
+  [unit]
+  (let [value (rendered-error-value unit)
+        marker (error-marker value)
+        evidence (error-evidence value marker)]
+    (str/join
+     "\n"
+     (remove nil?
+             [(:seon.error/message value)
+              (when marker
+                (str "Lookup: " (key marker) "=" (pr-str (val marker)) "."))
+              (evidence-text evidence)
+              "Re-read the current cluster status or value identity before requesting the data again."]))))
+
+(defn index-refusal-prose
+  "`:seon.render/ai` — the precise evidence that stopped program indexing."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
+  [unit]
+  (let [value (rendered-error-value unit)
+        marker (error-marker value)
+        evidence (error-evidence value marker)]
+    (str/join
+     "\n"
+     (remove nil?
+             [(:seon.error/message value)
+              (when marker
+                (str "Indexing stopped at " (key marker) "="
+                     (pr-str (val marker)) "."))
+              (evidence-text evidence)
+              "Repair the named source or declaration evidence, then rerun initialization."]))))
