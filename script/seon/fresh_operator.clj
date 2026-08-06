@@ -1864,6 +1864,65 @@
                              (config-apply-form name manifest)))]
     (println (str "● " name " config applied " result))))
 
+(defn- export-destination
+  [arguments]
+  (when-not (= 1 (count arguments))
+    (fail! "Use `export DESTINATION-PATH`."
+           {:seon.fresh-operator/arguments arguments}))
+  (let [destination (.getCanonicalFile (io/file (first arguments)))]
+    (when (.exists destination)
+      (let [children (when (.isDirectory destination)
+                       (.listFiles destination))]
+        (when (or (not (.isDirectory destination))
+                  (nil? children)
+                  (pos? (alength children)))
+          (fail! "The export destination must not exist or must be an empty directory."
+                 {:seon.fresh-operator/path (.getPath destination)}))))
+    (.getPath destination)))
+
+(defn- export-form
+  [destination]
+  (pr-str
+   `(do
+      (require 'seon.cluster.export)
+      (let [instances# @@(ns-resolve 'seon.cluster
+                                     (symbol "running-instances"))
+            store# (some :seon.store/store (vals instances#))]
+        (when-not store#
+          (throw
+           (ex-info "The live JVM has no process-root store." {})))
+        (try
+          {:seon.fresh-operator/value
+           ((ns-resolve 'seon.cluster.export (symbol "export!"))
+            {:seon.store/store store#
+             :seon.export/parent-dir ~destination})}
+          (catch Throwable failure#
+            {:seon.fresh-operator/message (ex-message failure#)
+             :seon.fresh-operator/data (ex-data failure#)}))))))
+
+(defn- export!
+  [root arguments]
+  (let [destination (export-destination arguments)
+        truth
+        (reconciled-truth!
+         root {:seon.fresh-operator/read-offline-roster? false})
+        anchor
+        (or (select-anchor truth)
+            (fail!
+             (str "Export requires a running JVM holding this root's store; "
+                  "run `bin/seon start` first.")
+             {:seon.fresh-operator/root root}))
+        outcome
+        (edn/read-string
+         (terminal-value
+          (prepl-eval!
+           (:seon.fresh-operator/transport-advertisement anchor)
+           (export-form destination))))]
+    (if-let [message (:seon.fresh-operator/message outcome)]
+      (fail! message (:seon.fresh-operator/data outcome))
+      (println (str "● exported root store → "
+                    (:seon.fresh-operator/value outcome))))))
+
 (defn- named-init-form
   [root name force?]
   (let [store (gensym "store")
@@ -2596,6 +2655,8 @@
     "                 start one cluster; absent cluster means default\n"
     "  config apply [CLUSTER] PATH\n"
     "                 reconcile one live cluster; absent cluster means default\n"
+    "  export DESTINATION-PATH\n"
+    "                 copy this root's live store to DESTINATION-PATH/store\n"
     "  init\n"
     "                 publish and print the current-src branch + commit ID\n"
     "  init --changed PATH...\n"
@@ -2626,6 +2687,7 @@
           (case command
             "start" (start! root command-arguments)
             "config" (config! root command-arguments)
+            "export" (export! root command-arguments)
             "init" (init! root command-arguments)
             "status" (status! root command-arguments)
             "open" (open! root command-arguments)
@@ -2638,7 +2700,7 @@
                    {:seon.fresh-operator/command command
                     :seon.fresh-operator/usage? true})))]
     (try
-      (if (contains? #{"start" "config" "init" "status"
+      (if (contains? #{"start" "config" "export" "init" "status"
                        "stop" "down" "reset"}
                      command)
         (with-operator-lock root run-command)
