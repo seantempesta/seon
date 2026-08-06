@@ -106,6 +106,7 @@
            direct (render/call-with-walk-context
                    {:seon.db/db @connection
                     :seon.cluster.agent/id "walker"
+                    :seon.cluster.run/id "walk-run"
                     :seon.sci.admit/caps caps
                     :seon.sci.eval/ctx (:seon.sci.eval/ctx render-request)
                     :seon.sci.eval/time-limit-ms 2000
