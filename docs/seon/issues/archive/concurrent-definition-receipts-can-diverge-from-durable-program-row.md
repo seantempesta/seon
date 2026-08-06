@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, sci, runtime, concurrency, durability]
 ---
@@ -40,3 +40,22 @@ The per-run candidate-context and durable-placement transaction boundary.
 - Immediately after settlement and after context rebuild, the live Var source
   equals the one durable `:seon.fn/source` row.
 - Repeated collisions retain whole Var roots with no torn value.
+
+## Resolution
+
+Commit `f2e1dd476` makes terminal admission compare a function declaration
+with the run's immutable opening database value inside Datahike's serial
+writer. If another run changed the durable row after this run opened, a
+different proposed row refuses with
+`:seon.cluster.run/program-row-changed-after-open`. Identical declaration is
+an assertion-free success, and a declaration previously written by the same
+run remains deliberately revisable.
+
+## Acceptance evidence
+
+`receipt-settlement-owns-agent-scoped-desk-facts` opens two runs before either
+publishes the shared function, admits the first source, refuses the second
+run's divergent source, observes the first durable row unchanged, then admits
+the second run's identical declaration as a no-op. Runtime installation is
+separately gated on the successful settlement transaction report by
+`runtime-declarations-install-only-from-a-successful-terminal-db-after`.
