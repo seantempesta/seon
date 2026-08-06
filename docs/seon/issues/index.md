@@ -16,10 +16,16 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (19)
+## Blocker (25)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Settle or refuse a frozen plan's first form](run-freezes-before-first-receipt-after-plan-freeze.md) | blocker | live-drive run-loop repair wave |
+| [Keep an unclaimed message out of an unrelated run's prompt](unclaimed-message-enters-an-unrelated-run-prompt.md) | blocker | messaging context-causality wave |
+| [Keep committed error facts valid in the problems projection](problems-projection-breaks-health-and-root-render.md) | blocker | live-drive observability repair wave |
+| [Pass ordered entity ids to transcript `pull-many`](transcript-about-lookup-passes-a-set-to-pull-many.md) | blocker | live-drive render repair wave |
+| [Supply the live SCI context to the data page renderer](data-page-omits-the-live-sci-context.md) | blocker | visual-QA fix wave |
+| [Keep newly loaded system Vars out of the agent desk](agent-desk-captures-newly-loaded-system-vars.md) | blocker | desk attribution repair wave |
 | [Load database model schemas before isolated test configuration](isolated-runner-does-not-load-ai-model-schemas.md) | blocker | database model registry/config schema load repair wave |
 | [Observe and claim every deletable directory](deletable-directories-have-no-claim-or-size-facts.md) | blocker | operator directory-claim governor wave |
 | [Prevent ranged collection from deleting resurrected branch data](ranged-store-collection-can-delete-live-segments-via-branch-resurrection.md) | blocker | exclusive sweep implementation wave |
@@ -40,7 +46,7 @@ See `README.md` for the convention.
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 | [Install maintenance result attributes on a fresh cluster](fresh-maintenance-result-attributes-are-not-installed.md) | blocker | maintenance schema-install repair |
 
-## Friction (98)
+## Friction (99)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -94,6 +100,7 @@ See `README.md` for the convention.
 | [Give offline roster discovery a current read-only helper](give-offline-roster-discovery-a-current-read-only-helper.md) | friction | operator artifact follow-up |
 | [Separate declared search metadata from the process index ID](search-index-property-collides-with-process-index-id.md) | friction | cluster search wiring wave |
 | [Make the debug left pane the exact bytes the agent received](debug-left-pane-is-not-the-exact-prompt.md) | friction | visual-QA fix wave |
+| [Return the namespace debug page without blocking the response](debug-page-blocks-before-first-byte.md) | friction | visual-QA fix wave |
 | [Bind first-party namespaces so value-position reads deref](host-bound-first-party-vars-break-in-value-position.md) | friction | SCI eval-context owner design gate |
 | [Create the store with the write-amplification options it already has](file-store-commits-pay-five-times-the-fsyncs-they-need.md) | friction | store/perf fix lane |
 | [Give render token budgets one config owner instead of private dials](render-token-budgets-are-private-dials-no-producer-supplies.md) | friction | context wave fix lane |
