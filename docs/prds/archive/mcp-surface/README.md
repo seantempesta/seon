@@ -1,6 +1,6 @@
 ---
 type: prd
-status: active
+status: archived
 tags: [prd, mcp, repl, flow, runtime]
 ---
 
