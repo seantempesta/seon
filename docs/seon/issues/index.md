@@ -40,10 +40,11 @@ See `README.md` for the convention.
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 | [Install maintenance result attributes on a fresh cluster](fresh-maintenance-result-attributes-are-not-installed.md) | blocker | maintenance schema-install repair |
 
-## Friction (95)
+## Friction (96)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Quiet the unreadable-external-claim flood in `bin/seon status`](status-floods-unreadable-external-claim-warnings.md) | friction | operator status-face hygiene (follow-up to gate-fix-operator) |
 | [Render live-proof roots have no declared lifecycle owner](render-live-proof-roots-have-no-lifecycle-owner.md) | friction | operator directory-claim governor wave |
 | [Render adversarial roots outlive their fault experiment](render-adversarial-roots-outlive-their-experiment.md) | friction | operator directory-claim governor wave |
 | [Include non-installed operator and MCP leaves in the sink proof](output-sink-query-excludes-operator-and-mcp-scripts.md) | friction | universal output floor graduation wave |
