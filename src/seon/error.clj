@@ -1015,7 +1015,8 @@
   {:malli/schema [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
-        entries (:seon.eval/fn-entries value)]
+        entries (or (:seon.eval/fn-entries value)
+                    (:seon.sci.eval/time-limit value))]
     (str/join
      " "
      (remove nil?

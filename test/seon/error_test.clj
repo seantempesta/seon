@@ -436,21 +436,26 @@
       (is (not (str/blank? prose))))))
 
 (deftest the-default-renderers-accept-an-attribute-shaped-error
-  (let [value {:my.fs/not-found "/tmp/missing.edn"
-               :my.fs/path "/tmp/missing.edn"
-               :seon.error/message "No file exists at that path."}
-        ai (error/render-ai value)
-        html (error/render-html value)]
-    (testing "the AI face carries the human line, class subject, and evidence"
-      (is (str/includes? ai "No file exists at that path."))
-      (is (str/includes? ai ":my.fs/not-found=\"/tmp/missing.edn\""))
-      (is (str/includes? ai ":my.fs/path=\"/tmp/missing.edn\""))
-      (is (str/includes? ai "Re-read the current facts")))
-    (testing "the HTML face is a readable card rather than the value floor"
-      (is (= :article (first html)))
-      (is (seon.schema/valid-candidate-value? :seon.render/hiccup html))
-      (is (= "No file exists at that path." (get-in html [2 2])))
-      (is (str/includes? (pr-str html) ":my.fs/not-found")))))
+  (let [projection (schema/build-projection (schema/registered-schemas))]
+    (with-redefs [schema/current-projection (constantly projection)]
+      (let [value {:my.fs/not-found "/tmp/missing.edn"
+                   :my.fs/path "/tmp/missing.edn"
+                   :seon.error/message "No file exists at that path."}
+            ai (error/render-ai value)
+            html (error/render-html value)]
+        (testing "the AI face separates failure subject from sibling evidence"
+          (is (str/includes? ai "No file exists at that path."))
+          (is (str/includes? ai "Failed: :my.fs/not-found=\"/tmp/missing.edn\""))
+          (is (str/includes? ai "Evidence: :my.fs/path=\"/tmp/missing.edn\""))
+          (is (str/includes? ai "Re-read the current facts")))
+        (testing "the HTML face has distinct marker and evidence rows"
+          (is (= :article (first html)))
+          (is (schema/valid-candidate-value? :seon.render/hiccup html))
+          (is (= "No file exists at that path." (get-in html [2 2])))
+          (is (= "seon-error-marker" (get-in html [3 1 :class])))
+          (is (= ":my.fs/not-found" (get-in html [3 2 2 1])))
+          (is (= "seon-error-evidence" (get-in html [4 1 :class])))
+          (is (str/includes? (pr-str html) ":my.fs/path")))))))
 
 (deftest the-default-html-face-links-committed-evidence
   (let [html (error/render-html
@@ -491,7 +496,49 @@
       (is (str/includes? prose "request transmitted: false"))
       (is (str/includes? prose "response started: false"))
       (is (str/includes? prose "output observed: false"))
-      (is (str/includes? prose "configured failover may be safe")))))
+      (is (str/includes? prose "configured failover may be safe"))))
+  (testing "time-limit prose explains the diagnostic without treating it as a limit"
+    (let [prose (error/time-limit-prose
+                 {:seon.sci.eval/time-limit 271000000
+                  :seon.error/message "Evaluation reached its time limit."})]
+      (is (str/includes? prose "Recorded function-body entries: 271000000"))
+      (is (str/includes? prose "indicate a spin"))))
+  (testing "edit prose asks for a narrower source selection"
+    (let [prose (error/edit-prose
+                 {:my.edit/ambiguous-match "src/seon/error.clj"
+                  :seon.error/message "More than one form matched."})]
+      (is (str/includes? prose "src/seon/error.clj"))
+      (is (str/includes? prose "narrow the edit selection"))))
+  (testing "render-walk elision stays neutral in both projections"
+    (let [value {:seon.render.walk/elided true
+                 :seon.error/message "The bounded walk omitted content."}
+          prose (error/elision-prose value)
+          html (error/elision-html value)]
+      (is (str/includes? prose "content was elided"))
+      (is (not (str/includes? prose "error")))
+      (is (= :aside (first html)))
+      (is (= "seon-family-entry seon-render-elision"
+             (get-in html [1 :class])))))
+  (testing "unclassified prose says that the declaration is missing"
+    (let [prose (error/unclassified-prose
+                 {:seon.error/unclassified true
+                  :seon.error/source {:unexpected/value 7}
+                  :seon.error/message "Nothing recognized the source."})]
+      (is (str/includes? prose "No registered error class recognized"))
+      (is (str/includes? prose "declare the missing class"))))
+  (testing "MCP lookup prose keeps the requested value identity"
+    (let [digest (apply str (repeat 64 "a"))
+          prose (error/mcp-prose
+                 {:seon.dev.mcp/value-not-found digest
+                  :seon.error/message "The value was absent."})]
+      (is (str/includes? prose digest))
+      (is (str/includes? prose "current cluster status"))))
+  (testing "index refusal prose names the stopped phase"
+    (let [prose (error/index-refusal-prose
+                 {:seon.fn/index-transaction-refused :schema
+                  :seon.error/message "Schema indexing was refused."})]
+      (is (str/includes? prose ":schema"))
+      (is (str/includes? prose "rerun initialization")))))
 
 (deftest the-log-line-is-one-line-and-derived
   (let [fact (fact)
