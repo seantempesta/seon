@@ -487,6 +487,16 @@
                 :seon.def/name 'scratch
                 :seon.def/ordinal 0}
                value))
+            function-row
+            (fn [result]
+              {:seon.fn/sym qualified-id
+               :seon.fn/ns [:seon.ns/name namespace-name]
+               :seon.fn/source
+               (str "(defn ^{:malli/schema [:=> [:cat] :int]} "
+                    "scratch [] " result ")")
+               :seon.fn/arglists "([])"
+               :seon.fn/private? false
+               :seon.fn/spec "[:=> [:cat] :int]"})
             rows-for
             (fn [agent-id]
               (->> (db/q '[:find [?desk ...]
@@ -577,15 +587,24 @@
                  (settle!
                   run-a 3
                   {:seon.program/row
-                   {:seon.fn/sym qualified-id
-                    :seon.fn/ns [:seon.ns/name namespace-name]
-                    :seon.fn/source
-                    "(defn ^{:malli/schema [:=> [:cat] :int]} scratch [] 1)"
-                    :seon.fn/arglists "([])"
-                    :seon.fn/private? false
-                    :seon.fn/spec "[:=> [:cat] :int]"}})))
+                   (function-row 1)})))
           (is (empty? (rows-for agent-a)))
           (is (= ["2"] (mapv :seon.def/value-edn (rows-for agent-b)))))
+
+        (testing "a divergent definition from an older opening basis refuses"
+          (start! run-b 1)
+          (is (= ::run/program-row-changed-after-open
+                 (::run/rule
+                  (settle! run-b 1
+                           {:seon.program/row (function-row 2)}))))
+          (is (= (:seon.fn/source (function-row 1))
+                 (:seon.fn/source
+                  (db/pull @connection '[*]
+                           [:seon.fn/sym qualified-id]))))
+          (is (= ::committed
+                 (settle! run-b 1
+                          {:seon.program/row (function-row 1)}))
+              "an identical declaration is an assertion-free success"))
 
         (testing "clearing is explicit, agent-local, and idempotent"
           (start! run-a 4)

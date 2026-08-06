@@ -775,6 +775,21 @@
   (when-some [canonical (program/canonical-row value)]
     (declared-map db (dissoc canonical :seon.fn/arities :seon.fn/ast))))
 
+(defn- definition-written-by-run?
+  "True when the current function source and one receipt of `run-id` were
+  asserted by the same terminal transaction."
+  [db function-symbol run-id]
+  (boolean
+   (db/q '[:find ?receipt .
+           :in $ ?function-symbol ?run-id
+           :where
+           [?function :seon.fn/sym ?function-symbol]
+           [?function :seon.fn/source _ ?tx]
+           [?receipt :seon.cluster.eval/result-edn _ ?tx]
+           [?receipt :seon.cluster.eval/run ?run]
+           [?run :seon.cluster.run/id ?run-id]]
+         (db/history db) function-symbol run-id)))
+
 (defn- row-tx
   "Validate and exact-upsert one reader-produced durable declaration."
   [db request row]
@@ -819,7 +834,11 @@
           [identity identity-value] (program/row-identity row)
           namespace-ref (or (:seon.fn/ns row)
                             (:seon.test/ns row))
-          existing (when identity (db/pull db '[*] [identity identity-value]))]
+          existing (when identity (db/pull db '[*] [identity identity-value]))
+          opening-database (opening-db db (::id request))
+          opening-existing
+          (when (and identity (not (:seon.error/kind opening-database)))
+            (db/pull opening-database '[*] [identity identity-value]))]
       (when (and namespace-ref
                  (not (:db/id (db/pull db [:db/id] namespace-ref))))
         (refuse! `receipt-settle-call ::program-namespace-missing request))
@@ -834,6 +853,18 @@
             _ (when schema-redefinition?
                 (refuse! `receipt-settle-call
                          ::schema-key-immutable request))
+            concurrent-definition?
+            (and (= identity :seon.fn/sym)
+                 existing
+                 (not= (declared-content db opening-existing)
+                       (declared-content db existing))
+                 (not= (declared-content db existing)
+                       (declared-content db row))
+                 (not (definition-written-by-run?
+                       db identity-value (::id request))))
+            _ (when concurrent-definition?
+                (refuse! `receipt-settle-call
+                         ::program-row-changed-after-open request))
             candidate-projection
             (case identity
               :seon.schema/key
