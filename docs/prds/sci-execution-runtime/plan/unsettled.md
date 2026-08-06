@@ -16,6 +16,26 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**WORKING EDGE FINAL — 2026-08-05 SESSION CLOSE.** The platform is
+WHOLE and LIVE: `default` serves at 7994 (pid 47346) reforked from
+digest `603ea178…` carrying every landing of the day. The last two
+platform defects closed at cause: the `refork!`→`cleanup-cluster!`
+control-lock deadlock (`65e86cc6a`, under-lock arms + real-store
+refork regression) and dead-creator claim blocking (`3dd7a492f`:
+exact-identity supersession, live-mismatch still refuses, durable
+roots can never be relabeled ephemeral). The three owner-requested
+research drafts are committed for joint design sessions:
+human-accounts (+ the recipient-as-tx-user provenance defect it
+found), bootstrap-groundwork (13 forms annotated; awaits grader-wave
+data), curation-editor (revisions reuse per-form ordinal+source
+entities; fail-closed destructive gate; supervised first real
+curation). REMAINING QUEUE unchanged: held verifications on the live
+tree, five red classes → GREEN BARE GATE (wave exit), grader wave →
+bootstrap design session with the owner, human-accounts design
+session, initial-forms contract (orchestrator-owed, shape ruled:
+per-form ordinal+source entities, most-specific-wins), P17 slices,
+desk W-B/W-C, error-model wave, curation W3.
+
 **WORKING EDGE UPDATE — 2026-08-05 LATE (implementation wave nearly
 closed; supersedes the next-actions list in the block below).**
 
