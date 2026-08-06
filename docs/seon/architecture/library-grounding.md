@@ -17,13 +17,14 @@ These are the maintained source revisions verified for this map:
 
 | Dependency | Revision |
 |---|---|
-| Datahike | `256b714d97a0e8f952b01a47c693eff2976ccee7` |
-| Konserve | `737697d9205e5e8f0bc08a666e4c97dad55e9dbe` |
-| SCI | `a27e2c0e079476196477b533e76a2a6a8095017d` |
+| Datahike | `56f1c62105b7087f0cac13162f9fd54b1690986e` |
+| Konserve | `07377c27c8288b7484f0aa7b82e8158b415985be` |
+| SCI | `2db3358cba913b6fbbe49c7b5b34d7ac72715924` |
 | core.async | `dc35f3e0d7bc2eef502e77982f48641f025c8051` |
 | Malli | `80138076960e7820523b4cb932c5b5d1936d4e7f` |
 | clj-kondo | `57252e07975710aa579b24f0d1b2b1e04195caa2` |
 | Reitit | `106fc4c7a09290c8e2df2d4ef9570ea1322ab2ab` |
+| Datastar browser | `bb9ed6fbe78cf5690f5ad23a5faf86407a44982f` |
 | Datastar Clojure | `1cef624e9e59a2ea79ffe2f65df2e7b06f8198d2` |
 
 ## Current seams
@@ -38,7 +39,7 @@ These are the maintained source revisions verified for this map:
 | Host and interpreted function contracts | `src/seon/instrument.clj`; `src/seon/sci/eval.clj`; `src/seon/program.cljc` | `reference-code/malli/src/malli/instrument.clj`; `reference-code/malli/src/malli/core.cljc`; `reference-code/malli/src/malli/registry.cljc` | Host public Vars with `:malli/schema` are instrumented under the core-error dial; committed interpreted functions are wrapped from their `:seon.fn/spec` at program row installation |
 | Flow graphs, procs, and workloads | `src/seon/flow.clj`; `src/seon/cluster/agent.clj`; `src/seon/cluster/loop.clj`; `src/seon/render/web.clj` | `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj`; `reference-code/core.async/src/main/clojure/clojure/core/async/flow/spi.clj`; `reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj`; `reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj` | Seon builds real Flow graphs from Var-backed procs and pins each proc to `:io` or `:compute`; channels carry losable process-local work while durable state remains database facts |
 | Content-addressed result blobs | `src/seon/blob.clj`; `src/seon/cluster/loop.clj`; `src/seon/cluster/store.clj`; the blob and eval family declarations under `resources/seon/schemas/` | `reference-code/konserve/src/konserve/core.cljc`; `reference-code/konserve/src/konserve/store.cljc` | Threshold-eligible result content moves to the already-open Konserve store only when its bounded-window receipt plus binary payload is smaller than the full inline receipt; the SHA-256 digest is verified when read |
-| Routes, Ring handlers, and Datastar SSE | `src/seon/render/route.clj`; `src/seon/render/web.clj` | `reference-code/reitit/modules/reitit-core/src/reitit/core.cljc`; `reference-code/reitit/modules/reitit-ring/src/reitit/ring.cljc`; `reference-code/datastar-clojure/libraries/sdk/src/main/starfederation/datastar/clojure/api.clj`; `reference-code/datastar-clojure/libraries/sdk-http-kit/src/main/starfederation/datastar/clojure/adapter/http_kit.clj` | One route table owns matching and reverse routing; the web renderer uses Datastar's element patch and HTTP-kit SSE lifecycle rather than owning a second streaming protocol |
+| Routes, Ring handlers, and Datastar SSE | `src/seon/render/route.clj`; `src/seon/render/web.clj`; `resources/public/js/datastar.js` | `reference-code/reitit/modules/reitit-core/src/reitit/core.cljc`; `reference-code/reitit/modules/reitit-ring/src/reitit/ring.cljc`; `reference-code/datastar/bundles/datastar.js`; `reference-code/datastar-clojure/libraries/sdk/src/main/starfederation/datastar/clojure/api.clj`; `reference-code/datastar-clojure/libraries/sdk-http-kit/src/main/starfederation/datastar/clojure/adapter/http_kit.clj` | One route table owns matching and reverse routing; the page loads the byte-identical pinned Datastar browser bundle, and the web renderer uses Datastar's element patch and HTTP-kit SSE lifecycle rather than owning a second streaming protocol |
 | Changed-test selection and the fresh gate | `script/seon/dev/changed_test.clj`; `src/seon/test/runner.clj`; `bin/test` | `reference-code/clj-kondo/src/clj_kondo/core.clj`; `reference-code/clj-kondo/src/clj_kondo/impl/analyzer.clj` | clj-kondo host analysis may conservatively narrow affected CLJ and CLJC tests; `bin/test` remains the one fresh-system correctness gate |
 
 ## Reading rules
