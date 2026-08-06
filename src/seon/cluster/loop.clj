@@ -1421,7 +1421,7 @@
           ;; error value the loop already records — the same shape a
           ;; refused transaction takes through `db/transact!`.
           rendered (try
-                     (prompt/prompt @connection
+                     (prompt/prompt (run/opening-db @connection run-id)
                                     {:seon.cluster.run/id run-id
                                      :seon.cluster.agent/id agent-id
                                      :seon.sci.admit/caps

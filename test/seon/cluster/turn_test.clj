@@ -2914,65 +2914,68 @@
 ;;; The prompt's cause is the run's recorded trigger
 ;;; ---------------------------------------------------------------------------
 
-(deftest the-call-prompts-with-the-trigger-the-run-opened-on
-  ;; simplification-catalog-2026-07-28 group 3's confirmed defect: the
-  ;; :call pass re-asked `unanswered-triggers` for the prompt's cause,
-  ;; but the recorded run ref ANSWERS its trigger, so the re-ask
-  ;; selected whatever message arrived NEXT (and only prompted the
-  ;; right content when none had, because nil matched anything). The
-  ;; trigger the run OPENED on is the trigger: recorded on the run and
-  ;; read back by `message/trigger`.
+(deftest a-run-prompts-from-its-opening-database-value
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             requests (atom [])]
-        ;; pass 1: the loop opens a run on m-1 ("count the widgets")
         (let [work (work/next-agent-work @connection (request connection))]
           (is (= :open (:seon.cluster.work/situation work)))
           (cluster.loop/turn {:seon.cluster.loop/cluster cluster
                               :seon.cluster.work/next work}
                              (Date.)))
-        ;; message B arrives BETWEEN open and the :call pass
         (db/transact! connection
-                    [{:seon.cluster.message/id "m-2"
-                      :seon.cluster.message/to
-                      [:seon.cluster.agent/id "agent-a"]
-                      :seon.cluster.message/content "ignore everything else"
-                      :seon.cluster.message/at (Date.)}])
-        ;; pass 2: the ONE paid call must carry m-1's content, not m-2's
+                      [{:seon.cluster.message/id "m-2"
+                        :seon.cluster.message/to
+                        [:seon.cluster.agent/id "agent-a"]
+                        :seon.cluster.message/content "message B"
+                        :seon.cluster.message/at (Date.)}])
         (with-redefs [ai/complete
                       (recording-completer
                        requests
-                       [{:seon.ai/text "(my.run/complete \"counted\")"}])]
-          (let [work (work/next-agent-work @connection (request connection))]
-            (is (= :call (:seon.cluster.work/situation work)))
+                       [{:seon.ai/text "(my.run/complete \"A settled\")"}
+                        {:seon.ai/text "(my.run/complete \"B settled\")"}])]
+          (let [call-a (work/next-agent-work @connection
+                                             (request connection))]
+            (is (= :call (:seon.cluster.work/situation call-a)))
             (cluster.loop/turn {:seon.cluster.loop/cluster cluster
-                                :seon.cluster.work/next work}
-                               (Date.))))
-        (is (= 1 (count @requests)))
-        (let [prompt-text (:seon.ai/prompt (first @requests))]
-          (is (str/includes? prompt-text "count the widgets")
-              "the provider request carries the trigger the run OPENED
-               on — the run's own recorded cause")
-          (is (str/includes? prompt-text "Current run instruction:")
-              "the recorded trigger is presented as this run's work")
-          ;; One walk honestly includes both connected messages. Custody is
-          ;; derived from the trigger refs instead of flattening both into
-          ;; equally actionable prose.
-          (is (str/includes? prompt-text "ignore everything else")
-              "the fresh walk also includes the later connected message")
-          (is (str/includes?
-               prompt-text
-               "Pending message — awaiting its own run; not this run's instruction:")
-              "the unclaimed trigger remains visible at its arrival position
-               without becoming this run's instruction")
-          (let [run-id (db/q '[:find ?run-id .
-                              :where
-                              [?run :seon.cluster.run/id ?run-id]]
-                            @connection)]
-            (is (= "m-1" (message/trigger @connection run-id))
-                "a message arriving between open and :call cannot displace
-                 the run's recorded trigger")))))))
+                                :seon.cluster.work/next call-a}
+                               (Date.)))
+          (let [prompt-a (:seon.ai/prompt (first @requests))]
+            (is (str/includes? prompt-a "count the widgets"))
+            (is (str/includes? prompt-a "Current run instruction:"))
+            (is (not (str/includes? prompt-a "message B"))
+                "a message committed after run A opened is absent by
+                 construction from A's opening database value"))
+          (binding [*evaluation*
+                    {:seon.cluster.eval/result-edn
+                     (pr-str (my.run/complete "A settled"))
+                     :seon.sci.admit/value (my.run/complete "A settled")}]
+            (let [resume-a (work/next-agent-work @connection
+                                                 (request connection))]
+              (is (= :resume (:seon.cluster.work/situation resume-a)))
+              (cluster.loop/turn {:seon.cluster.loop/cluster cluster
+                                  :seon.cluster.work/next resume-a}
+                                 (Date.))))
+          (let [open-b (work/next-agent-work @connection
+                                             (request connection))]
+            (is (= :open (:seon.cluster.work/situation open-b)))
+            (is (= "m-2" (:seon.cluster.message/id open-b))
+                "the next derived work is the run triggered by B")
+            (cluster.loop/turn {:seon.cluster.loop/cluster cluster
+                                :seon.cluster.work/next open-b}
+                               (Date.)))
+          (let [call-b (work/next-agent-work @connection
+                                             (request connection))]
+            (is (= :call (:seon.cluster.work/situation call-b)))
+            (cluster.loop/turn {:seon.cluster.loop/cluster cluster
+                                :seon.cluster.work/next call-b}
+                               (Date.)))
+          (is (= 2 (count @requests)))
+          (let [prompt-b (:seon.ai/prompt (second @requests))]
+            (is (str/includes? prompt-b "message B")
+                "B is visible in the opening database value of its own run")
+            (is (str/includes? prompt-b "Current run instruction:"))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The F2 sealed suite — streaming rides channels, the database keeps facts

@@ -146,6 +146,29 @@
       (filter #(>= (:seon.cluster.run.form/ordinal %) ordinal)
               forms))}))
 
+(defn opening-db
+  "The database value this run opened on.
+
+  The opening transaction is derived from the `opened-at` datom rather than
+  stored as another run attribute. Datahike `as-of` includes that transaction,
+  so the trigger that opened the run is visible and every later transaction is
+  absent by construction."
+  {:malli/schema [:=> [:cat :seon.db/database-value ::id]
+                  [:or :seon.db/database-value :seon.error/value]]}
+  [database id]
+  (let [opening-tx
+        (db/q '[:find ?tx .
+                :in $ ?id
+                :where
+                [?run :seon.cluster.run/id ?id]
+                [?run :seon.cluster.run/opened-at _ ?tx]]
+              database id)]
+    (if opening-tx
+      (db/as-of database opening-tx)
+      {:seon.error/kind ::missing-opening-datom
+       :seon.error/message "The run has no opening datom."
+       :seon.error/data {::id id}})))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Transitions — pure functions OF THE MID-TRANSACTION DATABASE VALUE,
 ;;; each invoked as [:db.fn/call f request] on the one serial writer.

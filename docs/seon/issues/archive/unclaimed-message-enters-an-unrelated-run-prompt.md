@@ -39,39 +39,42 @@ recorded trigger into the exact prompt for that run.
 
 ## Cause
 
-The walk bound the current run id while acquiring prompt context, but dropped
-that identity before invoking the schema-declared agent transcript renderer.
-The transcript therefore preserved the correct arrival order while rendering
-the recorded trigger and every newer unclaimed inbound message with the same
-unqualified sentence shape. The run ref remained correct in the database; the
-AI projection erased its custody meaning.
+`call-turn` passed a fresh `@connection` database value to `prompt/prompt`
+after the run had already opened. The walk therefore included facts committed
+after the opening transaction, including a newer message awaiting its own run.
+The stored trigger remained correct; the prompt violated the run's opening
+database value.
 
 ## Resolution
 
-The walk now carries the current run id through renderer-call evidence.
-`seon.context/message-custody` derives each inbound message's relationship to
-that run exclusively from database refs:
+The ruled R3 mechanism is `seon.cluster.run/opening-db`. It derives the run's
+opening transaction from the `:seon.cluster.run/opened-at` datom and returns
+Datahike's `as-of` database value at that transaction. The one prompt call site
+uses that value. A message committed after the run opened is absent by
+construction, with no post-opening visibility filter.
+
+For messages already present in the opening database value,
+`seon.context/message-custody` still derives each inbound message's
+relationship to that run exclusively from database refs:
 
 - the run's recorded trigger renders as the current run instruction;
 - an inbound message with no run trigger ref renders as pending, explicitly
   not this run's instruction; and
 - claimed or non-inbound messages remain ordinary history.
 
-The transcript still sorts every entry by its durable arrival facts, so a
-mid-turn message interleaves honestly without acquiring the wrong custody.
-The event-controlled regression opens a run on message A, commits message B
-between open and call, and asserts both the arrival-visible pending sentence
-and the unchanged trigger ref.
+The transcript retains durable arrival order. A message already present at
+opening but not claimed by its own run renders at that arrival position as
+pending; a message arriving after opening belongs only to later work.
 
 ## Acceptance evidence
 
-The isolated live drive observed two exact durable captures containing
-`CUSTODY-LIVE-0806`. In unrelated run
-`85f76e51-3e98-40b2-b5e4-9e3f60bafae7`, the message was accompanied by the
-pending/not-this-run label. In its own causal run
-`44afc3e7-aeb5-43d4-909f-678b066d9529`, it was accompanied by the current-run
-instruction label and no pending label. The latter run completed through
-receipt zero to the requested tagged result.
+The event-controlled class regression opens run A, commits message B after
+that opening, and asserts B is absent from A's paid-call prompt. After A
+settles, it asserts `next-agent-work` derives `:open` for B and B's own
+paid-call prompt contains B as the current run instruction. A direct fresh
+database probe observed opening ids `["A"]` while the current database held
+`["B" "A"]`. The existing pre-evaluation settlement regression remains
+unchanged.
 
 ## Acceptance
 
