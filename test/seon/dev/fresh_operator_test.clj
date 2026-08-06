@@ -47,41 +47,6 @@
           "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))\n"
           "signal.pause()\n")])))
 
-(defn- start-sigterm-resistant-process!
-  []
-  (let [process
-        (.start
-         (doto
-          (ProcessBuilder.
-           ^java.util.List
-           ["/usr/bin/python3" "-c"
-            (str "import signal\n"
-                 "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
-                 "print('ready',flush=True)\n"
-                 "signal.pause()\n")])
-          (.redirectErrorStream true)))]
-    (when-not (= "ready"
-                 (.readLine ^java.io.BufferedReader
-                            (io/reader (.getInputStream process))))
-      (throw (ex-info "The SIGTERM-resistant child did not become ready."
-                      {})))
-    process))
-
-(defn- start-disposable-process-tree!
-  []
-  (.start
-   (doto
-    (ProcessBuilder.
-     ^java.util.List
-     ["/usr/bin/python3" "-c"
-      (str "import signal,subprocess,sys\n"
-           "child=subprocess.Popen([sys.executable,'-c',"
-           "'import signal; signal.pause()'])\n"
-           "print(child.pid,flush=True)\n"
-           "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))\n"
-           "signal.pause()\n")])
-    (.redirectErrorStream true))))
-
 (defn- process-start-date
   [^Process process]
   (let [optional (.startInstant (.info (.toHandle process)))]
@@ -524,22 +489,6 @@
                  (deref output-future 10000
                         "The terminated output reader did not finish.")})))))
 
-(deftest legacy-operator-jvm-roles-remain-visible-to-orphan-detection
-  (doseq [arguments
-          [["clojure.main" "-m" "seon.web.server" "{}"]
-           ["clojure.main" "-m" "seon.host" "{}"]
-           ["-jar" "/checkout/target/seon-database-server-standalone.jar"]
-           ["clojure.main" "-m" "shadow.cljs.devtools.cli" "watch"
-            "client"]]]
-    (is (true?
-         (operator-private-value 'legacy-operator-arguments? arguments))))
-  (doseq [arguments
-          [["clojure.main" "-e" "(clojure.test/run-tests)"]
-           ["clojure.main" "-m" "shadow.cljs.devtools.cli" "compile"
-            "client"]]]
-    (is (false?
-         (operator-private-value 'legacy-operator-arguments? arguments)))))
-
 (deftest init-changed-paths-are-an-explicit-source-publication-mode
   (is (= {:seon.fresh-operator/changed-paths
           ["src/seon/fn.clj" "test/seon/fn_test.clj"]
@@ -624,52 +573,11 @@
               (operator-private-value
                'read-process-records (str foreign-root))))
           "the installation authority exposes the claim only to its root")
-      (is (= []
-             (operator-private-value
-              'require-readable-process-records! (str root))))
       (finally
         (operator-private-value
          'clear-process-record! (str foreign-root) record)
         (delete-recursively! root)
         (delete-recursively! foreign-root)))))
-
-(deftest failed-launch-cleanup-signals-only-the-recorded-generation
-  (let [parent (start-disposable-process-tree!)
-        child-pid (parse-long (.readLine (io/reader (.getInputStream parent))))]
-    (try
-      (is (some? child-pid))
-      (is (nil?
-           (operator-private-value 'terminate-observed-process! (.pid parent))))
-      (is (true? (.waitFor parent 10 TimeUnit/SECONDS)))
-      (is (true?
-           (some-> (java.lang.ProcessHandle/of child-pid)
-                   (.orElse nil)
-                   .isAlive))
-          "an unrecorded descendant was never authorized for signaling")
-      (finally
-        (when (.isAlive parent)
-          (terminate-process-tree! parent))
-        (when-let [^java.lang.ProcessHandle child
-                   (some-> (java.lang.ProcessHandle/of child-pid)
-                           (.orElse nil))]
-          (when (.isAlive child)
-            (.destroyForcibly child)
-            (.get (.onExit child) 10 TimeUnit/SECONDS)))))))
-
-(deftest ^{:seon.test/long "Spawns a TERM-resistant child and awaits the process cleanup backstop."}
-  failed-launch-cleanup-escalates-after-bounded-term-grace
-  (let [process (start-sigterm-resistant-process!)]
-    (try
-      (is (nil?
-           (operator-private-value
-            'terminate-observed-process! (.pid process) 250)))
-      (is (true? (.waitFor process 10 TimeUnit/SECONDS)))
-      (is (not (.isAlive process))
-          "the SIGTERM-resistant generation was forcibly reaped")
-      (finally
-        (when (.isAlive process)
-          (.destroyForcibly process)
-          (.waitFor process 10 TimeUnit/SECONDS))))))
 
 (defn- run-operator
   [root & arguments]

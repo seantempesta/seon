@@ -12,7 +12,6 @@
             SocketTimeoutException]
            [java.nio.channels FileChannel]
            [java.nio.file OpenOption StandardOpenOption]
-           [java.time Instant]
            [java.util.concurrent CompletableFuture ExecutionException
             LinkedBlockingQueue TimeUnit TimeoutException]
            [java.util.function Function Supplier]))
@@ -128,10 +127,6 @@
   [root name]
   (fs/path (cluster-directory root name) "logs" log-name))
 
-(defn- process-record-directory
-  [_root]
-  (operator.state/process-claim-directory (repository-root)))
-
 (defn- process-record-path
   [_root generation]
   (operator.state/process-claim-path (repository-root) generation))
@@ -198,12 +193,6 @@
 (defn- record-alive?
   [record]
   (state/process-identity-alive? (record-process-identity record)))
-
-(defn- record->boot-process
-  [record]
-  {:seon.boot/pid (:seon.boot/pid record)
-   :seon.boot/start-instant (:seon.boot/start-instant record)
-   :seon.fresh-operator/alive? (record-alive? record)})
 
 (defn- process-record-matches-advertisement?
   [record advertisement]
@@ -2366,15 +2355,6 @@
     (println
      (str "↻ repaired " (:seon.fresh-operator/name observation)
           ": removed stale advertisement"))))
-
-(defn- require-readable-process-records!
-  [root]
-  (let [result (reconcile-process-records! root)
-        errors (:seon.fresh-operator/process-record-errors result)]
-    (when (seq errors)
-      (fail! "Refusing destructive action with unreadable process records."
-             {:seon.fresh-operator/process-record-errors errors}))
-    (:seon.fresh-operator/process-records result)))
 
 (defn- print-process-record-census!
   [root records record-errors]
