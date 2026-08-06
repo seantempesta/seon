@@ -134,7 +134,6 @@ See `README.md` for the convention.
 | [Select the latest closed run without comparing run ids](latest-closed-run-orders-by-id-string.md) | friction | work ordering follow-up |
 | [Admit definitions after dynamically hidden namespace movement](dynamic-in-ns-cannot-persist-definition-namespace.md) | friction | per-run fork context wave |
 | [Preserve the interrupted blob staging artifact until it can be observed](interrupted-blob-staging-leaves-no-observable-artifact.md) | friction | blob staging repair wave |
-| [Preserve the Datahike refusal kind in the flat error value](transaction-refusal-drops-datahike-kind.md) | friction | database rejection projection repair |
 | [Reconcile the error-class catalog with declared schemas and renderers](error-class-catalog-and-renderers-disagree.md) | friction | error class contract repair |
 | [Make the generative loop fixture commit the run facts it asserts](generative-loop-fixture-commits-no-run-facts.md) | friction | generative loop fixture repair |
 | [Give `seon.search/index-step` its public contract](search-index-step-has-no-public-contract.md) | friction | search public contract repair |

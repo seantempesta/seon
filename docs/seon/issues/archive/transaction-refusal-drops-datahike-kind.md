@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, database, agent, testing]
 ---
@@ -40,3 +40,15 @@ The `seon.db/transact!` rejection classifier and flat error projection.
 The unique constraint remains enforced and its structured Datahike kind and
 attribute survive in the returned flat error data. The regression asserts the
 value without relying on duplicated writer log lines.
+
+## Resolution
+
+Resolved by `00a5f4400`. `seon.db/rejected-value` now merges Datahike's
+deepest non-empty `ex-data` with the derived unique-conflict facts instead of
+replacing the dependency map. The focused database and namespace-assignment
+gate passed 24 tests and 125 assertions with zero failures and zero errors.
+
+The changed-test selector completed its fresh-operator group, then encountered
+an unrelated in-flight schema-group failure at snapshot `910679222` and was
+stopped before its source-churn fallback could run the full suite. That foreign
+boundary does not alter the focused proof for this issue.
