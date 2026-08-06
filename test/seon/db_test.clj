@@ -200,6 +200,28 @@
                    :order-by '?id
                    :limit 2}))))))
 
+(deftest positional-query-acceptance-remains-datahikes-contract
+  (test-support/with-database
+   (fn [connection]
+     (let [database @connection
+           forms
+           [['[:find [?id ...]
+               :where [?entity :seon.cluster.agent/id ?id]]
+             [database]]
+            ['[:find ?result .
+               :where
+               [?receipt :seon.cluster.eval/ordinal 1]
+               [?receipt :seon.cluster.eval/result-edn ?result]]
+             [database]]
+            ['[:find ?entity .
+               :in $ ?id
+               :where [?entity :seon.cluster.agent/id ?id]]
+             [database "missing-agent"]]]]
+       (doseq [[query arguments] forms]
+         (is (= (apply d/q query arguments)
+                (apply db/q query arguments))
+             "Seon passes every Datahike-accepted positional shape through"))))))
+
 (deftest database-identities-support-explicit-and-current-custody
   (test-support/with-database
    (fn [connection]

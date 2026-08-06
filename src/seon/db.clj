@@ -582,7 +582,10 @@
             (into (conj (subvec arguments 0 position) database)
                   (subvec arguments position)))))
 
-      :else nil)))
+      ;; Datahike owns every other positional shape. Passing the normalized
+      ;; arguments through is deliberately weaker than the dependency's own
+      ;; acceptance; `q-with-evidence` alone decides whether they are valid.
+      :else arguments)))
 
 (defn q
   "Run a Datalog query over explicit inputs or the current database value."
@@ -618,24 +621,14 @@
              (when explicit-database? query-or-database)
              (:query normalized)
              (:args normalized))]
-        (cond
-          (error-value? aligned)
-          aligned
-
+        (if (error-value? aligned)
           aligned
           (let [request (assoc normalized :args aligned)
                 response (d/q-with-evidence request)
                 result (decode-query-result
                         request (:datahike.query/result response))]
             (append-query-evidence! request response result)
-            result)
-
-          :else
-          (error-value
-           ::invalid-read
-           "The query arguments do not align with its declared inputs."
-           {::query-form (:query normalized)
-            ::argument-count (count (:args normalized))})))
+            result)))
         (catch Throwable cause
           (when explicit-database?
             (append-database-evidence! query-or-database :all))
