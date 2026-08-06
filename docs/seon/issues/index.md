@@ -16,10 +16,12 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (25)
+## Blocker (26)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Scope schema projections to their cluster database values](process-global-schema-state-crosses-cluster-bases.md) | blocker | per-cluster schema acquisition wave |
+| [Commit every dropped core-fault observation](dropped-core-fault-count-is-not-durable.md) | blocker | fault-committer durability wave |
 | [Make every rendered value id unique within its namespace page](rendered-value-ids-collide-within-one-page.md) | blocker | Datastar value-identity repair |
 | [Settle or refuse a frozen plan's first form](run-freezes-before-first-receipt-after-plan-freeze.md) | blocker | live-drive run-loop repair wave |
 | [Keep an unclaimed message out of an unrelated run's prompt](unclaimed-message-enters-an-unrelated-run-prompt.md) | blocker | messaging context-causality wave |
@@ -45,10 +47,11 @@ See `README.md` for the convention.
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 | [Install maintenance result attributes on a fresh cluster](fresh-maintenance-result-attributes-are-not-installed.md) | blocker | maintenance schema-install repair |
 
-## Friction (100)
+## Friction (98)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Replace load-time schema registration sentinels with acquired declarations](load-time-schema-sentinels-bypass-basis-acquisition.md) | friction | schema acquisition cleanup wave |
 | [Give system-generated messages arrival ordinals](system-generated-messages-omit-arrival-ordinals.md) | friction | message transaction-data repair |
 | [Attribute and fix the ~70 s complete publication](complete-publication-takes-seventy-seconds.md) | friction | publication velocity incident |
 | [Lead a failed init with its cause, not the event history](init-failure-dumps-entire-prepl-event-history.md) | friction | operator status-face hygiene |
@@ -147,10 +150,12 @@ See `README.md` for the convention.
 | [Reconcile the error-class catalog with declared schemas and renderers](error-class-catalog-and-renderers-disagree.md) | friction | error class contract repair |
 | [Make the generative loop fixture commit the run facts it asserts](generative-loop-fixture-commits-no-run-facts.md) | friction | generative loop fixture repair |
 
-## Cleanup (12)
+## Cleanup (14)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Carry schema source provenance as immutable admission data](schema-source-provenance-accumulates-in-a-global-atom.md) | cleanup | schema admission cleanup wave |
+| [Replace derivable local mutable accumulators](local-mutable-accumulators-are-derivable.md) | cleanup | data-oriented Clojure cleanup wave |
 | [Make fresh CLJC namespaces portable or name them CLJ](fresh-cljc-files-are-jvm-only.md) | cleanup | fresh portability cleanup wave |
 | [Select duplicate-identity refusal evidence deterministically](duplicate-identity-refusal-evidence-is-unordered.md) | cleanup | reconcile evidence cleanup wave |
 | [Delete five readerless schema rows left by completed cuts](schema-population-retains-five-readerless-rows.md) | cleanup | schema population deletion wave |
