@@ -16,6 +16,55 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**WORKING EDGE UPDATE — 2026-08-05 LATE (implementation wave nearly
+closed; supersedes the next-actions list in the block below).**
+
+LANDED SINCE THE BLOCK BELOW (all pushed): the FOUR-LANE WAVE IS
+COMPLETE — ops/maintenance (turn-free fires live-proven; portfolio
+seeds at ROOT CREATION after the ordering fix `152b466ee`; five tasks
+queryable on a fresh READY root), desk W-A (`7ee782871` etc.: per-TURN
+forks, `:seon.def/*` desk settlement, snapshot-stated atoms, kill -9
+drill green 196/731/0, old session-image machinery deleted), sweep
+slices 1+2 (gate + falsifiers + two-sided blob permit + MCP artifact
+fact + `collect!` with dry-run `6eae8b0b7`; konserve 89/1,602 green),
+P12 GRADUATED (714 arities / zero incomplete; fresh-cluster
+acquisition proven — P17 is dependency-ready). Red fixes landed:
+gen.loop fixture (`71cb669d5`, 1 var awaiting quiet-tree proof),
+search index-ID + problems projection (`6a0050aa3`, `70957604e`; D19/
+D20 await a READY proof), web credits CLOSED (`de4c03a06`),
+edit-feedback hook fixed at the mixed-dependency cause (`5c9e96f2d`)
+and the ISSUES INDEX RECONCILED green (`cbaa54b1a`, 129 open/930
+archived). RULINGS added late-session: private is an ATTRIBUTE never a
+wall (full publication; custody re-proven 5/24); public functions are
+the namespace's API (foreign walks render the API card; own namespace
+full; private-elsewhere on explicit ask).
+
+**THE DISK STORY IS OVER**: the dry-run census measured the store at
+11,021 files / 282 MiB — the rename pass's reset destroyed the old
+374 GiB store. No one-time reclaim is needed; the sweep machinery is
+the RECURRING guarantee.
+
+OPEN RIGHT NOW: (1) `refork!`→`cleanup-cluster!` CONTROL-LOCK
+DEADLOCK, dump-proven (non-reentrant FileChannel lock re-acquired at
+state.clj:208 from operator.clj:783→:455) — the ops lane is fixing it
+with under-lock arms per its spec's own composition rule; until it
+lands, `bin/seon init NAME --force` hangs and `default` is DOWN
+(stopped for the restart that exposed the sovereign-branch refusal;
+republished digest `22c91b9a…` is ready to refork). (2) The held
+verifications (gen.loop var 3, D19/D20 READY proofs) complete on the
+fixed tree. (3) Remaining red classes: error-catalog, render census,
+flow-config NPE, blob NPE tail, schema alias — then the GREEN BARE
+GATE exits the wave.
+
+NEXT SPECS READY FOR LANES (owner said spec ahead):
+[grader-wave-2026-08-05.md](grader-wave-2026-08-05.md) (O4 causal
+episode, O5 predicate, O1 replication, one matrix rerun) and
+[p17-ambient-slices-2026-08-05.md](p17-ambient-slices-2026-08-05.md)
+(S1 providers/plans → S2 SCI hook → S3 doc faces → S4 seon.db
+conversion). Behind them: desk W-B/W-C (checkout + my.branch, PRD §6),
+the error-model wave (docs/prds/error-model/README.md), output-floor
+steps 3-8, curation W3.
+
 **WORKING EDGE — 2026-08-05 STEWARDSHIP SESSION (supersedes the 08-04
 night block below).** The owner's fresh session ran root-causes-first:
 converse, rule, plan, delete — no rushing.
