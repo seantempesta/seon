@@ -139,6 +139,42 @@
    :seon.problems/errored-receipts commit-errored-receipt!
    :seon.problems/missing-models commit-missing-model!})
 
+(def ^:private optional-error-evidence
+  {:seon.error/throwable-class "clojure.lang.ExceptionInfo"
+   :seon.error/proc :seon.problems-test/proc
+   :seon.error/op :seon.problems-test/op
+   :seon.error/cid :seon.problems-test/cid
+   :seon.error/basis-t 7
+   :seon.instrument/fn "seon.problems-test/generated"
+   :seon.instrument/arm :output
+   :seon.instrument/expected ":seon.error/fact"
+   :seon.instrument/args "[{:generated true}]"})
+
+(def ^:private error-attribution-cases
+  [[false false]
+   [true false]
+   [false true]
+   [true true]])
+
+(defn- generated-error-fact
+  [ordinal optional-attributes [run? agent?]]
+  (cond-> (merge
+           {:seon.error/id (str "generated-error-" ordinal)
+            :seon.error/at now
+            :seon.error/process live
+            :seon.error/kind
+            (keyword "seon.problems-test" (str "generated-" ordinal))
+            :seon.error/message (str "generated error " ordinal)
+            :seon.error/signature
+            (apply str (repeat 64 (nth "abcd" ordinal)))
+            :seon.error/data-edn "{}"
+            :seon.error/capped? false}
+           (select-keys optional-error-evidence optional-attributes))
+    run? (assoc :seon.error/run
+                [:seon.cluster.run/id "generated-error-run"])
+    agent? (assoc :seon.error/agent
+                  [:seon.cluster.agent/id "agent-a"])))
+
 ;;; ---------------------------------------------------------------------------
 ;;; A healthy cluster says nothing at all
 ;;; ---------------------------------------------------------------------------
@@ -290,6 +326,53 @@
           (is (= [2 1] (mapv :seon.problems/occurrences entries))
               "worst-recurring first, so the pattern is the first thing
                read rather than something to scan for"))))))
+
+(deftest every-committed-error-fact-shape-is-projectable
+  (test-support/assert-check!
+   (tc/quick-check
+    60
+    (prop/for-all
+     [optional-attributes
+      (gen/set (gen/elements (vec (keys optional-error-evidence))))]
+     (with-db
+       (fn [connection]
+         (db/transact!
+          connection
+          [{:seon.cluster.run/id "generated-error-run"
+            :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
+            :seon.cluster.run/opened-at now}])
+         (let [facts (mapv (fn [ordinal attribution]
+                             (generated-error-fact
+                              ordinal optional-attributes attribution))
+                           (range)
+                           error-attribution-cases)
+               _ (db/transact! connection facts)
+               value (found connection)
+               projected (mapv :seon.error/fact
+                               (:seon.problems/error-signatures value))
+               projected-by-id (into {} (map (juxt :seon.error/id identity))
+                                     projected)]
+           (and
+            (= (count error-attribution-cases) (count projected))
+            (every? #(seon.schema/valid-candidate-value?
+                      :seon.error/fact %)
+                    facts)
+            (every? #(seon.schema/valid-candidate-value?
+                      :seon.error/fact %)
+                    projected)
+            (every?
+             (fn [fact]
+               (= (select-keys fact [:seon.error/run :seon.error/agent])
+                  (select-keys (get projected-by-id (:seon.error/id fact))
+                               [:seon.error/run :seon.error/agent])))
+             facts)
+            (seon.schema/valid-candidate-value?
+             :seon.problems/problems value)
+            (= (count error-attribution-cases)
+               (count (str/split-lines (problems/log-report value))))
+            (hiccup/hiccup? (problems/html-report value)))))))
+    :seed 202608060401)
+   "A committed error fact escaped the problems projection."))
 
 (deftest signature-only-rows-are-not-error-facts
   (with-db

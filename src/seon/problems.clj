@@ -76,10 +76,35 @@
 ;;; The derivations
 ;;; ---------------------------------------------------------------------------
 
+(defn- restore-error-ref
+  "Restore one pulled error ref to its transaction representation."
+  [pulled identity-attribute]
+  (cond
+    (not (map? pulled)) pulled
+    (contains? pulled identity-attribute)
+    [identity-attribute (get pulled identity-attribute)]
+    (contains? pulled :db/id) (:db/id pulled)
+    :else pulled))
+
+(defn- restore-error-fact
+  "Restore a pulled error entity to the fact shape its contract declares."
+  [pulled]
+  (cond-> (dissoc pulled :db/id)
+    (contains? pulled :seon.error/run)
+    (update :seon.error/run restore-error-ref :seon.cluster.run/id)
+
+    (contains? pulled :seon.error/agent)
+    (update :seon.error/agent restore-error-ref :seon.cluster.agent/id)))
+
 (defn- error-signatures
   "Every committed error, grouped by signature, worst-recurring first."
   [db]
-  (->> (db/q '[:find [(pull ?error [*]) ...]
+  (->> (db/q '[:find [(pull ?error
+                             [*
+                              {:seon.error/run
+                               [:db/id :seon.cluster.run/id]
+                               :seon.error/agent
+                               [:db/id :seon.cluster.agent/id]}]) ...]
               :where
               ;; Membership is the declared error identity, not any row
               ;; that happens to carry a signature. Signature-only rows
@@ -87,15 +112,14 @@
               [?error :seon.error/id _]
               [?error :seon.error/signature _]]
             db)
+       (map restore-error-fact)
        (group-by :seon.error/signature)
        (mapv (fn [[signature facts]]
                (let [latest (last (sort-by (comp inst-ms :seon.error/at) facts))]
                  {:seon.error/signature signature
                   :seon.error/kind (:seon.error/kind latest)
                   :seon.problems/occurrences (count facts)
-                  ;; the entity id is Datahike's, not ours; a projected
-                  ;; fact carrying it would not validate as one
-                  :seon.error/fact (dissoc latest :db/id)})))
+                  :seon.error/fact latest})))
        (sort-by (juxt (comp - :seon.problems/occurrences)
                       :seon.error/signature))
        vec))
