@@ -1046,7 +1046,7 @@
                   [db/transact!
                    (fn [target transaction]
                      (if (transition-transaction?
-                          transaction #'run/receipt-refusal-call)
+                          transaction #'run/receipt-settle-call)
                        {:seon.error/kind :seon.db/rejected
                         :seon.error/message "injected settlement refusal"
                         :seon.error/data {:error :transact/schema}}
@@ -1578,7 +1578,7 @@
                                "my.agents.agent-a/strict")
                 "the second agent crossed the one live context-install seam")))))))
 
-(deftest a-refused-definition-stays-live-for-another-agent
+(deftest a-refused-definition-stays-in-its-agents-desk
   (with-cluster
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
@@ -1625,14 +1625,19 @@
           (is (nil? (db/pull @connection [:db/id]
                             [:seon.fn/sym function-sym]))
               "the refused terminal transaction persists no function row")
+          (is (= function-sym
+                 (db/q '[:find ?definition .
+                         :in $ ?agent
+                         :where
+                         [?agent-eid :seon.cluster.agent/id ?agent]
+                         [?desk :seon.def/agent ?agent-eid]
+                         [?desk :seon.def/id ?definition]]
+                       @connection "agent-a"))
+              "the refused shared definition settles into the agent's desk")
           (db/transact!
            connection
-           [{:seon.ns/name 'my.agents.agent-b}
-            (assoc (agent-row "agent-b")
-                   :seon.cluster.agent/namespace
-                   [:seon.ns/name 'my.agents.agent-b])
-            {:seon.cluster.message/id "m-agent-b-after-refusal"
-             :seon.cluster.message/to [:seon.cluster.agent/id "agent-b"]
+           [{:seon.cluster.message/id "m-agent-a-after-refusal"
+             :seon.cluster.message/to [:seon.cluster.agent/id "agent-a"]
              :seon.cluster.message/content "call the refused definition"
              :seon.cluster.message/at now}])
           (drive! cluster 10)
@@ -1641,7 +1646,7 @@
                            :where
                            [_ :seon.cluster.eval/result-edn ?result]]
                          @connection))
-              "the refusal is session state; the live REPL definition remains"))))))
+              "the refusal is desk state; the originating agent restores it"))))))
 
 (deftest acquisition-orders-agent-authored-refer-targets-and-ignores-alias-cycles
   (test-support/with-database
@@ -2068,9 +2073,16 @@
                      receipt))
               (is (= 1 (count terminal-txs))
                   "receipt facts, program row, and completion close commit together")
-              (is (= [row]
+              (is (= [row row]
                      (mapv :seon.program/row @installed))
-                  "installation receives the committed program row afterwards"))))))))
+                  "the committed row installs once in each live context")
+              (is (identical? (:seon.sci.eval/ctx cluster)
+                              (:seon.sci.eval/ctx (first @installed)))
+                  "the first install advances the live program base")
+              (is (not (identical?
+                        (:seon.sci.eval/ctx (first @installed))
+                        (:seon.sci.eval/ctx (second @installed))))
+                  "the second install advances the distinct current-turn fork"))))))))
 
 (deftest a-waiting-disposition-frees-the-agent-and-keeps-its-note
   ;; REVISED TWICE, each time toward one commit. First: a wait used to

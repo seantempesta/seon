@@ -736,11 +736,11 @@
   the database refuses any one of them. Before the second transaction
   exists, the refusal passes through the one bounded admission codec and
   the resulting error fact plus flat value must satisfy their registered
-  shapes. This second transaction therefore carries only the SAME
-  presence-fenced receipt settlement, the run close, and a pre-admitted
-  normalized durable error record. There is no program row, disposition,
-  unbounded source value, or schema-invalid error value left for this
-  minimal transaction to refuse.
+  shapes. This second transaction carries the SAME presence-fenced receipt
+  settlement, the agent-scoped desk rows already admitted for the first
+  attempt, the run close, and a pre-admitted normalized durable error record.
+  It omits the refused program row and disposition: refusal blocks the shared
+  commit, never the originating agent's desk.
 
   The receipt terminal fact, run close, and error fact commit together.
   Success is checked rather than assumed. If construction is invalid or
@@ -801,15 +801,24 @@
              failure))
            terminal
            (when valid?
-             (run/receipt-refusal-tx
-              {:seon.cluster.run/id (:seon.cluster.run/id receipt)
-               :seon.cluster.eval/ordinal
-               (:seon.cluster.run.form/ordinal receipt)
-               :seon.cluster.run/closed-at now
-               :seon.cluster.eval/result-edn failure-edn
-               :seon.cluster.eval/result-size (long (count failure-edn))
-               :seon.cluster.eval/error (:seon.error/message failure)
-               :seon.error/kind (:seon.error/kind failure)}))]
+             (let [settlement
+                   (cond->
+                    {:seon.cluster.run/id (:seon.cluster.run/id receipt)
+                     :seon.cluster.eval/ordinal
+                     (:seon.cluster.run.form/ordinal receipt)
+                     :seon.cluster.eval/result-edn failure-edn
+                     :seon.cluster.eval/result-size (long (count failure-edn))
+                     :seon.cluster.eval/error (:seon.error/message failure)
+                     :seon.error/kind (:seon.error/kind failure)}
+                     (seq (:seon.def/rows receipt))
+                     (assoc :seon.def/rows (:seon.def/rows receipt)))]
+               (into
+                (run/receipt-settle-tx settlement)
+                (run/close-tx
+                 {:seon.cluster.run/id (:seon.cluster.run/id receipt)
+                  :seon.cluster.run/process
+                  (:seon.cluster.run/process receipt)
+                  :seon.cluster.run/closed-at now}))))]
        (when-not valid?
          (terminal-settlement-fault!
           cluster
@@ -1658,16 +1667,26 @@
                             ::settlement-evaluation settlement-evaluation}
                      problem (assoc :seon.problems/form-problem problem)
                      settled (assoc :my.run/value settled)))
-                  outcome
+                  terminal
                   (blob/with-publication!
                    connection (into (vec settlement-stages) desk-stages)
                    (fn []
-                     (db/transact!
-                      connection
-                      {:tx-data
-                       (into (terminal-tx receipt now)
-                             (concat rows
-                                     refusals))})))
+                     (let [outcome
+                           (db/transact!
+                            connection
+                            {:tx-data
+                             (into (terminal-tx receipt now)
+                                   (concat rows
+                                           refusals))})]
+                       {::outcome outcome
+                        ::terminal-refused?
+                        (terminal-refused!
+                         cluster outcome now
+                         {:seon.cluster.agent/id agent-id
+                          :seon.cluster.run/id run-id}
+                         receipt)})))
+                  outcome (::outcome terminal)
+                  terminal-refused? (::terminal-refused? terminal)
                   _
                   (if (and (:seon.program/row evaluation)
                            (not (:seon.error/kind outcome)))
@@ -1698,11 +1717,7 @@
                        :seon.cluster.run/process process
                        :seon.cluster.work/now now})))]
               (cond
-                (terminal-refused!
-                 cluster outcome now
-                 {:seon.cluster.agent/id agent-id
-                  :seon.cluster.run/id run-id}
-                 receipt)
+                terminal-refused?
                 (report :error ran)
 
                 ;; both dispositions CLOSE the run in the terminal

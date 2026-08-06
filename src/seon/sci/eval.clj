@@ -471,15 +471,13 @@
          observed-built-in-calls)})
 
 (defn- desk-defs
-  [ctx namespace-name before source form contracted-function
-   observed-built-in-calls]
+  [ctx namespace-name before source form observed-built-in-calls]
   (let [after (intern-values ctx)
         replay-risks (built-in-replay-risks observed-built-in-calls)]
     (into []
           (comp
            (remove (fn [[qualified value]]
-                     (or (= (str qualified) contracted-function)
-                         (identical? absent-intern value)
+                     (or (identical? absent-intern value)
                          (and (not (instance? clojure.lang.Atom value))
                               (same-intern-value?
                                (get before qualified absent-intern) value)))))
@@ -1737,10 +1735,14 @@
               ;; sequence dies at the time limit here rather than in the
               ;; receipt writer
               evaluation-record (record :ok)
+              ;; Keep a contracted definition as a desk candidate until the
+              ;; terminal transaction decides which world owns it. Successful
+              ;; program admission filters the matching desk row inside
+              ;; `receipt-settle-call`; a refused shared commit retains it in
+              ;; this agent's desk.
               desk-definitions
-              (desk-defs
-               execution-ctx namespace-name before-intern-values source form
-               (:seon.fn/sym row) (built-in-calls))
+              (desk-defs execution-ctx namespace-name before-intern-values
+                         source form (built-in-calls))
               admitted (admit/admit
                         {:seon.sci.admit/value value
                          :seon.sci.admit/interrupt-fn interrupt-fn
@@ -1772,7 +1774,7 @@
                   ;; to the desk, including a contracted def whose declaration
                   ;; never reached the terminal transaction.
                   (desk-defs
-                   failed-ctx namespace-name before source failed-form nil
+                   failed-ctx namespace-name before source failed-form
                    (built-in-calls)))
                 value (kernel/failure-value
                        {::kernel/time-limit-kind ::time-limit
