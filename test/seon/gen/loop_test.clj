@@ -24,6 +24,7 @@
   derivations are all the production ones."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow.core]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
@@ -202,8 +203,27 @@
 (def ^:private planner-attempt
   (str program "(my.run/wait \"asked the namespace owners\")"))
 
-(def ^:private problem-identity
-  #"problem-\[\"[^\"]+\" \d+\]")
+(defn- assigned-receipt-id
+  "The receipt identity named by an assignment in a rendered prompt."
+  [prompt recipient]
+  (let [prefix (str "said to " recipient ": Repair problem ")
+        suffix " from run "]
+    (loop [offset 0]
+      (when-let [start (str/index-of prompt prefix offset)]
+        (let [identity-start (+ start (count prefix))
+              end (str/index-of prompt suffix identity-start)
+              receipt-id (when end (subs prompt identity-start end))
+              receipt
+              (when receipt-id
+                (try
+                  (edn/read-string receipt-id)
+                  (catch Throwable _ nil)))]
+          (if (and (vector? receipt)
+                   (= 2 (count receipt))
+                   (string? (first receipt))
+                   (int? (second receipt)))
+            receipt-id
+            (recur (inc start))))))))
 
 (defn- prompt-agent-id
   "The focal agent is the first agent block in its rendered prompt."
@@ -233,8 +253,8 @@
      ;; beta DECLINES, naming the problem it was assigned — the D10
      ;; shape, read out of its own context the way an agent would.
      "beta"
-     (if-let [identity (re-find problem-identity prompt)]
-       (str "(my.message/decline \"planner\" " (pr-str identity)
+     (if-let [receipt-id (assigned-receipt-id prompt "beta")]
+       (str "(my.message/decline \"planner\" " (pr-str receipt-id)
             " \"That namespace has no contract to satisfy.\")\n"
             "(my.run/complete \"declined\")")
        "(my.run/complete \"I was told nothing I can act on\")")
@@ -312,14 +332,14 @@
              db run-id)))
 
 (defn- assignments
-  "Messages about one run's problems: #{[recipient problem-id]}."
+  "Messages about one run's red receipts: #{[recipient receipt-id]}."
   [db run-id]
-  (set (db/q '[:find ?to-id ?problem-id
+  (set (db/q '[:find ?to-id ?receipt-id
               :in $ ?run-id
               :where
               [?run :seon.cluster.run/id ?run-id]
               [?receipt :seon.cluster.eval/run ?run]
-              [?receipt :seon.problems/id ?problem-id]
+              [?receipt :seon.cluster.eval/id ?receipt-id]
               [?m :seon.cluster.message/about ?receipt]
               [?m :seon.cluster.message/to ?to]
               [?to :seon.cluster.agent/id ?to-id]]
@@ -422,9 +442,9 @@
          (testing "an assignment rides the terminal transaction of the
                    very form that produced it"
            (let [assignment-tx (db/q '[:find ?tx .
-                                      :in $ ?problem-id
+                                      :in $ ?receipt-id
                                       :where
-                                      [?about :seon.problems/id ?problem-id]
+                                      [?about :seon.cluster.eval/id ?receipt-id]
                                       [?m :seon.cluster.message/about ?about
                                        ?tx]]
                                     db (work/problem-id run-id 2))]
@@ -482,9 +502,9 @@
            (is (= 1 (message/chain-depth
                      db
                      (db/q '[:find ?id .
-                            :in $ ?problem-id
+                            :in $ ?receipt-id
                             :where
-                            [?about :seon.problems/id ?problem-id]
+                            [?about :seon.cluster.eval/id ?receipt-id]
                             [?m :seon.cluster.message/about ?about]
                             [?m :seon.cluster.message/to ?to]
                             [?to :seon.cluster.agent/id "alpha"]

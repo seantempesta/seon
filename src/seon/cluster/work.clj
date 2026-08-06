@@ -151,12 +151,12 @@
          (tree-seq coll? seq value))))
 
 (defn problem-id
-  "The unambiguous identity of one form's derived problem."
+  "The receipt identity naming one form's derived problem."
   {:malli/schema [:=> [:cat :seon.cluster.run/id
                        :seon.cluster.run.form/ordinal]
                   :seon.problems/id]}
   [run-id ordinal]
-  (str "problem-" (pr-str [run-id ordinal])))
+  (pr-str [run-id ordinal]))
 
 (defn planner-scoped-attempt?
   "True when `run-id` belongs to a goal's caused-by message chain.
