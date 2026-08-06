@@ -859,6 +859,58 @@ changes. Grounding:
 and the two 08-06 foundation reports. This unblocks the messaging
 implementation wave.
 
+### Rulings 2026-08-06 (owner, evening design session) — roots ruled from the elegance pass
+
+Grounding: [root-cause-synthesis-2026-08-06.md](../research/root-cause-synthesis-2026-08-06.md)
+(seven roots over 29 blockers) refined by
+[elegant-solutions-2026-08-06.md](../research/elegant-solutions-2026-08-06.md)
+(owner-directed Fable pass; most synthesis questions dissolved into
+structure). Rulings:
+
+- **INIT VETO = ONLY CAN'T-LOAD ERRORS.** `bin/seon init` publication
+  refuses only syntax, unresolved name/namespace, privacy, and arity
+  errors on a required artifact; cosmetic/style/info findings print as
+  warnings and never block (the my.web dead-exclude 44-error cascade is
+  the provenance).
+- **HEAP = LOCAL AND SAFE-ISH; BUILD NOTHING.** Owner verbatim: "I like
+  the model that everything is local and safe('ish)... in practice it
+  should be okay." The mechanism is the existing one: per-eval
+  allocation measurement + the O4 watermark → uncatchable `interrupt!`
+  → flat steering error → GC reclaims; admission caps bound escape.
+  No per-cluster accounting subsystem; hard isolation when wanted is
+  deployment topology (`bin/seon --root`, own JVM). The co-hosted-heap
+  blocker closes as doctrine. Follow-up owed: verify the watermark
+  TRIGGER is wired, not only measured; file the gap if not.
+- **EVAL-HARNESS RETENTION = LAST-N PER EXPERIMENT, A CONFIG FACT**
+  (never a literal). Agent transcripts/desks are untouched — results
+  referenced from a transcript stay reachable; out-of-transcript
+  receipts are reclaimable by maintenance.
+- **RECURRING PROOF CADENCE**: every checkpoint runs the full
+  scratch-cluster end-to-end drive on a DETERMINISTIC provider ("fake
+  LLM agent? sure"); real DeepSeek + graphical visual QA at release
+  checkpoints.
+- **THE ELEGANCE SEQUENCE IS THE PLAN** (owner-directed session:
+  "overly complicated run loop... simplify", "processes are supposed
+  to be converted to flows", "no hacky bandaids"): (1) MINIMAL TURN —
+  one proc, phases as pure values, ONE `settle!` terminal exit,
+  receipts derive from the transaction report, schema-key
+  immutability at admission; deletes the five failure paths, the
+  loop's second admission mechanism, pre-commit string ids, pass
+  counters (~1,906 → ~800 lines). (2) OPENING-BASIS PROMPT —
+  `run/opening-db` via Datahike `as-of`; the one `@connection` deref
+  at the prompt call site was the R3 leak; message order derives from
+  transaction order. (3) R4 SINGLES — prompt budget error +
+  auto-compact at lower distance; `seon.db` error-value
+  short-circuit; caller-supplied render identity. (4) ACTIVATION
+  CLOSURE — publication-time query; global `!schema-state` projection
+  deleted into the existing per-cluster ctx mechanism; the 22
+  load-time sentinels die with it. (5) R6 singles (coalesced
+  drop fact through the fault committer; claim terminal transition;
+  retention dial). (6) the recurring deterministic drive in
+  `bin/test`, absorbing each step's falsifier, graduation gate at the
+  end. Behavior-testable roots land WITH their class-killing
+  regressions (standing rule).
+
 ### Rulings 2026-07-27 session 2 (owner, conversational) — the fresh tree IS the project
 
 - **Stop thinking temporary; drop the "nucleus" vocabulary.** The fresh
