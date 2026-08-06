@@ -962,7 +962,7 @@
             nil))]
     {:seon.error/kind ::rejected
      :seon.error/message (rejection-message conflict throwable)
-     :seon.error/data (or conflict data)
+     :seon.error/data (merge data conflict)
      ::transaction-refused true}))
 
 (declare agent-transaction-report)

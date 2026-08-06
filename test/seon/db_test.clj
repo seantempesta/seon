@@ -461,13 +461,20 @@
            conflict (:seon.error/data rejected)]
        (is (= :seon.db/rejected (:seon.error/kind rejected)))
        (is (true? (:seon.db/transaction-refused rejected)))
+       (is (= {:error :transact/unique
+               :attribute :seon.cluster.agent/namespace}
+              (select-keys conflict [:error :attribute])))
+       (is (instance? datahike.datom.Datom (:datom conflict)))
        (is (= {:seon.db/conflict-attribute
                :seon.cluster.agent/namespace
                :seon.db/conflict-value
                [:seon.ns/name 'my.agents.db-conflict]
                :seon.db/conflict-owner
                [:seon.cluster.agent/id "db-conflict-owner"]}
-              conflict))
+              (select-keys conflict
+                           [:seon.db/conflict-attribute
+                            :seon.db/conflict-value
+                            :seon.db/conflict-owner])))
        (is (str/includes? (:seon.error/message rejected)
                           "db-conflict-owner"))
        (is (not (str/includes? (:seon.error/message rejected)
@@ -481,6 +488,28 @@
                    (some #(when (= :seon.db/transaction-refused-error
                                    (:seon.schema/key %))
                             (:seon.render/ai %))))))))))
+
+(deftest non-unique-writer-rejections-retain-their-datahike-data
+  (test-support/with-database
+   (fn [connection]
+     (db/transact!
+      connection
+      [{:seon.cluster.agent/id "db-cas-owner"}])
+     (let [rejected
+           (db/transact!
+            connection
+            [[:db.fn/cas
+              [:seon.cluster.agent/id "db-cas-owner"]
+              :seon.cluster.agent/id
+              "not-the-current-id"
+              "db-cas-replacement"]])
+           data (:seon.error/data rejected)]
+       (is (= :seon.db/rejected (:seon.error/kind rejected)))
+       (is (= {:error :transact/cas
+               :expected "not-the-current-id"
+               :new "db-cas-replacement"}
+              (select-keys data [:error :expected :new])))
+       (is (instance? datahike.datom.Datom (:old data)))))))
 
 (deftest temporal-reads-use-explicit-and-ambient-database-values
   (test-support/with-database
