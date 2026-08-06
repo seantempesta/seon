@@ -16,6 +16,30 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**WORKING EDGE — 2026-08-06 SESSION (cleanup wave + messaging design).**
+Landed and pushed: p12 shape-canonicalization fix (`9adf1ef7f`, green
+complete-init tail); necessity + drift audits (`9858dabfe`,
+`7be16cc71`); doc-drift repairs D1-D11 complete (7 commits, 3 of 4
+blocker issues archived, fourth downgraded `38856a871`); six PRD
+folders archived (generate-code, mcp-surface, operator-integration,
+source-cleanup, package-capabilities, agent-bootstrap with extracted
+rulings note); code deletion sweep in flight (findings 1,3,4,7,9
+landed; ~5,900 lines gone so far). Owner rulings this session (full
+batch in README "Rulings 2026-08-06"): messaging/lifecycle redesign
+(one-value send/complete, wait-on-send, explicit addressing, no
+inferred replies, result/<eid> handles, prompt-line awaiting-you nag,
+bare wait REFUSED — done means complete); `seon.cluster.export` is
+EXPOSED as `bin/seon export`, not deleted; all four conditional PRDs
+KEPT (error-model, background-work, operational-events,
+in-server-tests) — each needs a refreshed dependency edge, owner wants
+per-folder design questions then implementation. QUEUE ADDITIONS:
+`bin/seon export` wiring lane (after the deletion sweep lands — shared
+operator owner); messaging-implementation wave (after archaeology +
+sci-probe lanes return and the id ruling seals); four PRD
+dependency-edge refreshes + design sessions. In flight:
+cleanup-code-deletions (units 5,6,8,10 + export now excluded from
+unit 8 scope), archaeology-result-ids, sci-result-symbol-probe.
+
 **WORKING EDGE FINAL — 2026-08-05 SESSION CLOSE.** The platform is
 WHOLE and LIVE: `default` serves at 7994 (pid 47346) reforked from
 digest `603ea178…` carrying every landing of the day. The last two

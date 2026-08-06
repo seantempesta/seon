@@ -770,6 +770,60 @@ and the GIT FRAMING adopted (conversational, owner-ruled):**
   is a loopback-socket event; slow-but-progressing boot proven to
   outlive the backstop; silent boot proven loud).
 
+### Rulings 2026-08-06 (owner, conversational session) — agent lifecycle and messaging redesigned; cleanup rulings
+
+Design conversation still iterating on implementation detail; the ruled
+substance so far:
+
+- **RESULT HANDLES RETURN: `result/<eid>`.** Every eval's rendered face
+  ends with a trailing comment naming its handle — THE ONE SANCTIONED
+  EXCEPTION to decision 11's no-comment-output rule, explained in
+  `(help)`. The id is DERIVED, never allocated: the receipt's Datahike
+  entity id (owner: "I kinda like the eid as it has much more meaning
+  in our db"), rendered from the terminal transaction's db-after (L9).
+  Storage is the existing receipt split (inline result-edn or blob
+  digest + size); the handle resolves by query at the evaluation's
+  basis. A `result/<eid>` reference used in a later form is an ORDINARY
+  VALUE wherever it appears — never positional, never special. Open:
+  the transparent SCI resolution seam (probe lane in flight) and the
+  system-wide id-generator verdict (archaeology lane in flight).
+- **ONE VALUE EVERYWHERE.** `(my.run/complete value)` and
+  `(my.message/send recipient value)` each take exactly ONE value of
+  any admitted shape; the vector idiom covers mixed content (prose +
+  data + function symbols + result references). No variadic forms, no
+  reply strings — schema'd values travel, not text.
+- **EXPLICIT ADDRESSING; NO INFERRED REPLIES.** You send TO an agent;
+  you reply by sending back TO that agent. The derived-reply synthesis
+  (`message/reply`, the answering-us terminator) is DELETED. The chain
+  bound survives as a pure backstop.
+- **WAIT TAKES WHAT YOU AWAIT — the send's return value.** Taught as
+  `(my.run/wait (my.message/send ...))`. Parks the agent until the
+  next message from that agent addressed to it OR the close of the run
+  its message triggered (custody edge, not inference) — B completing
+  without sending back still wakes A with the completion value (the
+  forgotten-reply safety net). A vector of sends wakes on ANY answer.
+  **A BARE `(my.run/wait)` IS REFUSED** (owner: "complete is a better
+  choice if the agent is done and has nothing to wait for") — wait
+  always names its target; done means `complete`.
+- **MID-TURN MESSAGES: NO FAKED FORMS.** There is no check-messages
+  call. A message is a fact with an arrival ordinal; the transcript
+  interleaves it honestly at its position, and the next turn's fresh
+  walk carries it.
+- **THE PROMPT LINE IS A DERIVED RENDER — the awaiting-you nag.** The
+  bootstrap-set readline shows who is literally parked on your reply
+  (`sensor.batches [awaiting-you: a·m-42]=>`), derived per turn from
+  committed wait facts, gone the moment the reply commits. The
+  bootstrap teaches answer-your-waiters-first beside ruling #52's
+  errors-first beat.
+- **CLEANUP RULINGS, same session:** `seon.cluster.export` is EXPOSED
+  as a `bin/seon export` operator verb, not deleted (wiring lane
+  queued behind the deletion sweep). ALL FOUR conditional PRD folders
+  are KEPT — error-model, background-work, operational-events,
+  in-server-tests — each owed a refreshed current dependency edge,
+  per-folder design questions to the owner, then implementation. The
+  2026-08-06 audits' approved deletion sweep and doc-drift repairs are
+  recorded in the working edge.
+
 ### Rulings 2026-07-27 session 2 (owner, conversational) — the fresh tree IS the project
 
 - **Stop thinking temporary; drop the "nucleus" vocabulary.** The fresh
