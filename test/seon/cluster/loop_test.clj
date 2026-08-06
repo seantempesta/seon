@@ -344,51 +344,6 @@
         (is (= failures
                (mapv #(nth % 3) (rest @requests))))))))
 
-(deftest receipt-request-projects-one-schema-valid-terminal-request
-  (let [result-blob (apply str (repeat 64 "a"))
-        completed (my.run/complete "done")
-        row {:seon.schema/key :my.agent/registered
-                     :seon.schema/form ":string"}
-        request
-        ((private-loop-fn 'receipt-request)
-         {:seon.cluster.run/id "run-1"
-          :seon.cluster.run/process process
-          :seon.cluster.run.form/ordinal 2
-          :seon.sci.eval/evaluation
-          {:seon.sci.admit/value
-           {:seon.error/kind :evaluation/kind}
-           :seon.cluster.eval/error "evaluation error"
-           :seon.cluster.eval/interrupted-at now
-           :seon.cluster.eval/output "printed\n"
-           :seon.cluster.eval/ns [:seon.ns/name 'my.agent]
-           :seon.sci.eval/ending-ns 'my.agent.after
-           :seon.program/row row}
-          :seon.cluster.loop/settlement-evaluation
-          {:seon.cluster.eval/result-edn "{:result :projected}"
-           :seon.cluster.eval/result-blob result-blob
-           :seon.cluster.eval/result-size 100}
-          :seon.problems/form-problem
-          {:seon.cluster.eval/error "problem error"
-           :seon.error/kind :problem/kind}
-          :my.run/value completed})]
-    (is (= {:seon.cluster.run/id "run-1"
-            :seon.cluster.run/process process
-            :seon.cluster.run.form/ordinal 2
-            :seon.cluster.eval/result-edn "{:result :projected}"
-            :seon.cluster.eval/result-blob result-blob
-            :seon.cluster.eval/result-size 100
-            :seon.cluster.eval/error "evaluation error"
-            :seon.cluster.eval/interrupted-at now
-            :seon.error/kind :evaluation/kind
-            :seon.cluster.eval/output "printed\n"
-            :seon.cluster.eval/ns [:seon.ns/name 'my.agent]
-            :seon.sci.eval/ending-ns 'my.agent.after
-            :seon.program/row row
-            :my.run/value completed}
-           request))
-    (is (schema/valid-candidate-value?
-         :seon.cluster.loop/terminal-request request))))
-
 (deftest committed-ending-namespace-seeds-a-resumed-fold
   (test-support/with-database
     (fn [connection]
@@ -454,17 +409,15 @@
           (is (= ending-ns (:seon.sci.eval/ending-ns first-evaluation)))
           (db/transact!
            connection
-           (cluster.loop/terminal-tx
+           (run/receipt-settle-tx
             {:seon.cluster.run/id run-id
-             :seon.cluster.run/process process
-             :seon.cluster.run.form/ordinal 0
+             :seon.cluster.eval/ordinal 0
              :seon.cluster.eval/result-edn
              (:seon.cluster.eval/result-edn first-evaluation)
              :seon.cluster.eval/ns
              (:seon.cluster.eval/ns first-evaluation)
              :seon.sci.eval/ending-ns
-             (:seon.sci.eval/ending-ns first-evaluation)}
-            now))
+             (:seon.sci.eval/ending-ns first-evaluation)}))
           (is (= ending-ns
                  (:seon.sci.eval/ending-ns
                   (db/pull @connection
@@ -695,17 +648,15 @@
                   :seon.cluster.run.form/ordinal 0})]
             (db/transact!
              connection
-             (cluster.loop/terminal-tx
+             (run/receipt-settle-tx
               {:seon.cluster.run/id run-id
-               :seon.cluster.run/process process
-               :seon.cluster.run.form/ordinal 0
+               :seon.cluster.eval/ordinal 0
                :seon.cluster.eval/result-edn
                (:seon.cluster.eval/result-edn evaluation)
                :seon.cluster.eval/ns
                (:seon.cluster.eval/ns evaluation)
                :seon.sci.eval/ending-ns
-               (:seon.sci.eval/ending-ns evaluation)}
-              now))
+               (:seon.sci.eval/ending-ns evaluation)}))
             (is (= assigned-namespace
                    (:seon.sci.admit/value evaluation)))
             (is (= assigned-namespace
@@ -898,42 +849,6 @@
       (is (nil? (cluster.loop/disposition value))
           (str "must not read as a disposition: " (pr-str value))))))
 
-(deftest the-terminal-transaction-is-one-transaction
-  (let [base {:seon.cluster.run/id "run-1"
-              :seon.cluster.run/process "process/one"
-              :seon.cluster.run.form/ordinal 0
-              :seon.cluster.eval/result-edn "[1 :seon.sci.admit/elided]"
-              :seon.cluster.eval/result-blob (apply str (repeat 64 "a"))
-              :seon.cluster.eval/result-size 1000}
-        without (cluster.loop/terminal-tx base now)
-        with (cluster.loop/terminal-tx
-              (assoc base :my.run/value (my.run/complete "all done"))
-              now)]
-    (is (vector? without))
-    (is (seq without) "a receipt is always written")
-    (is (= (select-keys base
-                        [:seon.cluster.eval/result-edn
-                         :seon.cluster.eval/result-blob
-                         :seon.cluster.eval/result-size])
-           (select-keys (nth (first without) 2)
-                        [:seon.cluster.eval/result-edn
-                         :seon.cluster.eval/result-blob
-                         :seon.cluster.eval/result-size]))
-        "the closed terminal request carries both primitive blob facts")
-    (testing "the disposition rides in the SAME tx-data, never a second one"
-      (is (> (count with) (count without))
-          "the completion's facts are in this vector, not a later commit")
-      (is (some #(and (sequential? %)
-                      (= :db.fn/call (first %)))
-                with)
-          "and it goes through a transition, so the run's own fence
-           applies to the close as much as to the claim")
-      (is (= [now]
-             (keep (comp :seon.cluster.run/closed-at last)
-                   with))
-          "the close receives the exact pass instant, not a second clock"))))
-
-;;; ---------------------------------------------------------------------------
 ;;; THE CLASS-KILLER: what boot installs must cover what the loop writes
 ;;;
 ;;; The live drive died in its first second on `Bad entity attribute

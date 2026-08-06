@@ -147,8 +147,8 @@
   (when (schema/valid-candidate-value? :my.message/value value)
     value))
 
-(defn- receipt-request
-  "Terminal receipt request projected from one completed evaluation."
+(defn- evaluation-receipt
+  "The one receipt projection built from a completed evaluation."
   [{:keys [:seon.cluster.run/id :seon.cluster.run/process
            :seon.cluster.run.form/ordinal :seon.sci.eval/evaluation
            :seon.problems/form-problem :seon.def/rows :my.run/value]
@@ -190,63 +190,6 @@
              (:seon.program/row evaluation))
       (seq rows) (assoc :seon.def/rows rows)
       value (assoc :my.run/value value))))
-
-(defn terminal-tx
-  "The ONE transaction ending a form: its receipt AND the disposition.
-  Pure tx-data. When the admitted value carries a disposition, that
-  disposition's own facts (close + completion message, or release) ride
-  in this same commit — one transaction, no torn window. When it does
-  not, this is the receipt alone."
-  {:malli/schema [:=> [:cat :seon.cluster.loop/terminal-request :inst]
-                  [:vector :some]]}
-  [{:keys [:seon.cluster.run/id :seon.cluster.run/process
-           :seon.cluster.run.form/ordinal
-           :seon.cluster.eval/result-edn :seon.cluster.eval/result-blob
-           :seon.cluster.eval/result-size :seon.cluster.eval/error
-           :seon.cluster.eval/triage-edn
-           :seon.cluster.eval/interrupted-at
-           :seon.cluster.eval/output :seon.cluster.eval/ns
-           :seon.sci.eval/ending-ns
-           :seon.program/row :seon.def/rows :seon.error/kind
-           :my.run/value]}
-   now]
-  (let [receipt (cond-> {:seon.cluster.run/id id
-                         :seon.cluster.eval/ordinal ordinal}
-                  result-edn (assoc :seon.cluster.eval/result-edn result-edn)
-                  result-blob (assoc :seon.cluster.eval/result-blob result-blob)
-                  result-size (assoc :seon.cluster.eval/result-size result-size)
-                  error (assoc :seon.cluster.eval/error error)
-                  triage-edn
-                  (assoc :seon.cluster.eval/triage-edn triage-edn)
-                  ;; the cut instant, present exactly when the time
-                  ;; limit fired — its presence IS the interrupted state
-                  interrupted-at (assoc :seon.cluster.eval/interrupted-at
-                                        interrupted-at)
-                  kind (assoc :seon.error/kind kind)
-                  ns (assoc :seon.cluster.eval/ns ns)
-                  ending-ns (assoc :seon.sci.eval/ending-ns ending-ns)
-                  row (assoc :seon.program/row row)
-                  (seq rows) (assoc :seon.def/rows rows)
-                  ;; what the form printed is evidence, and evidence is
-                  ;; durable or it is nothing
-                  output (assoc :seon.cluster.eval/output output))]
-    (into (run/receipt-settle-tx receipt)
-          ;; ONE transaction: the disposition's own transition rides
-          ;; here, so the receipt and what it means are never two
-          ;; commits with a window between them. A `wait` CLOSES the
-          ;; run exactly as `complete` does (README owner-decisions #4,
-          ;; folded into F1): releasing instead left an
-          ;; unheld-open-planned run at a committed basis — the P1
-          ;; feeder state — and nothing could ever resume it, because
-          ;; its plan was fully executed. What differs is only what
-          ;; rides beside the close: a completion delivers a reply, a
-          ;; wait delivers nothing and leaves its note in the receipt.
-          (case (:my.run/disposition value)
-            (:completed :wait)
-            (run/close-tx {:seon.cluster.run/id id
-                           :seon.cluster.run/process process
-                           :seon.cluster.run/closed-at now})
-            nil))))
 
 (defn- capability-free-references?
   "True when no referenced program-graph function reaches a capability leaf.
@@ -649,7 +592,7 @@
         desk-evaluation (dissoc desk-evaluation :seon.blob/staged-writes)
         rows (desk-rows database agent-id desk-evaluation ordinal)
         receipt
-        (receipt-request
+        (evaluation-receipt
          (cond-> {:seon.cluster.run/id run-id
                   :seon.cluster.run/process process
                   :seon.cluster.run.form/ordinal ordinal
@@ -664,8 +607,14 @@
                     {:seon.cluster.agent/id agent-id
                      :seon.cluster.run/id run-id}))
         tx-data
-        (into (terminal-tx receipt now)
+        (into (run/receipt-settle-tx receipt)
               (concat
+               (when (contains? #{:completed :wait}
+                                 (:my.run/disposition settled))
+                 (run/close-tx
+                  {:seon.cluster.run/id run-id
+                   :seon.cluster.run/process process
+                   :seon.cluster.run/closed-at now}))
                (:seon.cluster.message/rows delivery)
                (:seon.error/values-tx delivery)
                recording))]
