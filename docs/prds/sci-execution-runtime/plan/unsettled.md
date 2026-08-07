@@ -25,13 +25,22 @@ ruling block has the compact form). Provenance: the
 four source deep dives in `research/environment-mechanism-*.md`. It is the
 spine of the test-infrastructure work, AMENDS r2's dynamic-custody
 invariant, and carries the deletion list for the whole ambient carrier
-layer. Next: Phase 0 REPL falsifiers (env-on-fork, runtime-ctx hook, env on
-IO submissions), then value+constructor with `start-fork!`, live-drive
-iteration on forks, then the farmed-out production sweep. Open platform
-items riding with it: interrupt-arm probe, dropped-fault durability, the
-sci analysis-ctx observer bug, the work-launcher `:io` executor gap,
-hyperlith lockstep deltas (measure tick batching; pin bump sweep).
-Docs-as-queryable-facts is deliberately parked for its own short design.
+layer. **PHASE 0 CLOSED same evening — three for three** (PRD Phase 0
+findings log; reports `env-phase0-*-2026-08-07.md`): fork carriage PASS
+(24 forks, 576 arms, 0 failures), runtime-ctx hook minimal-edit viable
+(sci scratch branch `seon-env-hook-probe`, contract validated, 386-test
+fork suite green), flow carriage PASS (540 observations, 0 cross-reads,
+rebuild re-delivery sub-ms). The interrupt-arm hypothesis is CONFIRMED
+(work handed across a thread runs unarmed — blocker
+`interrupt-arm-does-not-cross-a-thread-hop`, rides Phase 1). Corrections
+absorbed: env `assoc`'d onto ctx (init drops unknown keys); interpreted
+fns pin their ctx (program fns = host Vars or fork-created); hook
+consultation gated to planned call sites (~80 ns otherwise); missing-env
+refusal is Seon's own (`:params` path falsified); carrier key
+`:seon.env/environment`. Next: owner reviews Phase 0 evidence → Phase 1
+(env value + constructor with `start-fork!` + arm fix + hook landing) →
+Phase 2 live-drive iteration → Phase 3 sweep (bound-fn* deletions land in
+the same change as the merge). Docs-as-queryable-facts still parked.
 
 **ELEGANCE SEQUENCE EXECUTING — 2026-08-06 night (steps 1-4 LANDED).**
 The owner-sealed plan (README evening ruling block) is mostly in, all

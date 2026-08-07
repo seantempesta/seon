@@ -277,6 +277,35 @@ across threads (0 can mean 20k entrances elsewhere) — the same root cause;
 the vocabulary table's "12 reads as blocked" caveat gains "or the work ran
 on another thread" until the arm fix lands.
 
+**Flow carriage — PASS. Phase 0 CLOSED: three for three**
+([report](../research/env-phase0-flow-carriage-2026-08-07.md)). Three real
+launchers, three submitter threads, 540 work + 180 `complete!` observations
+over 3 repetitions with decoy bindings installed: io/compute/callback each
+received exactly their submission's environment (60/60 each per round),
+zero cross-submission or cross-launcher reads, and stop→create→start
+re-delivered proc `:args` value-identically at 0.034–0.44 ms per cycle.
+Two corrections the implementation MUST absorb:
+
+1. **The flow report's `:params` refusal recommendation is FALSIFIED** —
+   `start-proc` assoc's `::flow/pid` into args so flow's own assert always
+   sees a truthy map. The missing-environment refusal is SEON'S OWN, at
+   `var-process` (which already refuses non-Var steps and `:mixed`) and at
+   `submit!`/`submit!!`.
+2. **Carrier key is `:seon.env/environment`, owned by `seon.env`** — the
+   same key on a submission, in proc `:args`, and on a web request map;
+   never a flow-namespaced key.
+3. Sequencing constraint for Phase 3: the `bound-fn*` deletions land IN THE
+   SAME CHANGE as the environment merge — while conveyance remains, a
+   forgotten environment is invisible on `:compute` and fatal on `:io`
+   (the exact audited signature).
+
+Side finding filed with honest qualification:
+[flow-work-launcher-graph-omits-its-root-io-executor](../../../seon/issues/flow-work-launcher-graph-omits-its-root-io-executor.md)
+(inert today — the process root's `:io` IS core.async's global executor).
+Recurring ugly-output theme across all three lanes: virtual threads report
+an empty `.getName`, so name-based thread diagnostics render blank on
+exactly the executor where failures live — use `.threadId`/`.isVirtual`.
+
 ## Rollout — test-first, REPL-iterated, then farmed out
 
 Phase 0 — falsify the three load-bearing mechanics live (opus REPL lanes,
