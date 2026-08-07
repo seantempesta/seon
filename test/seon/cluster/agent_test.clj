@@ -269,6 +269,17 @@
               (:seon.cluster.agent-test/listener-key event-source))
   (async/close! (:seon.cluster.agent-test/events event-source)))
 
+(deftest graph-definition-inherits-the-cluster-io-executor
+  (with-connection
+    (fn [connection ctx]
+      (let [executor (reify Executor (execute [_ _]))
+            definition
+            (agent/graph-definition
+             {:seon.cluster.loop/cluster
+              (assoc (handle connection ctx) :seon.flow/executor executor)
+              :seon.cluster.agent/id "executor-proof"})]
+        (is (identical? executor (:io-exec definition)))))))
+
 (deftest prompt-request-without-context-channel-is-a-flat-refusal
   (with-connection
     (fn [connection ctx]

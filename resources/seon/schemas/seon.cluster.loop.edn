@@ -6,6 +6,9 @@
                      [:seon.cluster.run/process
                       :seon.cluster.run/process]
                      [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+                     [:seon.flow/executor
+                      {:optional true}
+                      :seon.flow/executor]
                      [:seon.cluster.wake/channel :seon.flow/channel]
                      [:seon.cluster.loop/stream-channel
                       {:optional true}

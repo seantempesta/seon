@@ -2013,7 +2013,7 @@
   ping/error/pause uniformity every other proc has. The render proc's
   channels are external ports (created by `arm-agents!`, carried on the
   handle and the view), so the graph definition stays pure data."
-  [handle routing view io-executor]
+  [handle routing view]
   {:procs {:seon.cluster.agent/armer
            {:proc (flow/var-process #'cluster.agent/armer-step :io
                                     {:seon.cluster.loop/cluster handle
@@ -2032,7 +2032,7 @@
                                      :seon.search/completion
                                      (:seon.search/completion view)})}}
    :conns []
-   :io-exec io-executor})
+   :io-exec (:seon.flow/executor handle)})
 
 (defn- arm-agents!
   "Arm this cluster: the armer graph, fan-out, routing listener, prime.
@@ -2060,10 +2060,16 @@
         stream-channel (async/chan (async/sliding-buffer 1))
         context-channel (async/chan)
         completion (async/promise-chan)
-        handle (loop-handle connection cluster-name process
-                            (:seon.sci.eval/ctx instance)
-                            (:seon.flow/work-launcher instance)
-                            armer-channel stream-channel context-channel completion)
+        io-executor
+        (projection-executor
+         (:seon.sci.eval/projection-state (:seon.sci.eval/ctx instance)))
+        handle
+        (assoc
+         (loop-handle connection cluster-name process
+                      (:seon.sci.eval/ctx instance)
+                      (:seon.flow/work-launcher instance)
+                      armer-channel stream-channel context-channel completion)
+         :seon.flow/executor io-executor)
         routing (cluster.agent/routing)
         ;; the render pipeline's external ports (F2 §1): the wake
         ;; channel route! delivers into, the pages channel the proc's
@@ -2098,11 +2104,8 @@
               ;; judges are the same string.
               :seon.cluster.run/process (:seon.cluster.run/process handle)}
         drops (atom 0)
-        io-executor
-        (projection-executor
-         (:seon.sci.eval/projection-state (:seon.sci.eval/ctx instance)))
         graph (flow.core/create-flow
-               (cluster-graph-definition handle routing view io-executor))
+               (cluster-graph-definition handle routing view))
         started (flow.core/start graph)
         _ (flow.core/resume graph)
         fanout (flow/start-error-fanout!

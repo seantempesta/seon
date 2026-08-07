@@ -309,7 +309,8 @@
              :seon.cluster.agent/id agent-id
              :seon.schedule/channel
              (:seon.schedule/channel handle)})}}
-   :conns [[[::mailbox ::episode] [::turn ::episode]]]})
+   :conns [[[::mailbox ::episode] [::turn ::episode]]]
+   :io-exec (:seon.flow/executor handle)})
 
 ;;; ---------------------------------------------------------------------------
 ;;; The routing entry and the lifecycle
