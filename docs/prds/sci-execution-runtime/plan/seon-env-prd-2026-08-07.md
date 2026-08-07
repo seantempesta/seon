@@ -257,6 +257,26 @@ constraints the implementation MUST absorb:
    have a plan (cluster-scoped program-graph data); only the environment
    read is per-fork.
 
+**Fork carriage — PASS; interrupt arm — CONFIRMED UNARMED**
+([report](../research/env-phase0-fork-carriage-2026-08-07.md)). 24 forks × 8
+rounds, 576 checked arms, 0 failures: every fork's code resolved ITS fork's
+environment on raw and virtual threads through three carriers
+(`:interrupt-fn`, a per-fork provider closure, the runtime-ctx hook); the
+negative control reproduced the audited defect 192/192 off-thread. Measured
+cross-fork carriage: a closure built in fork A resolves fork A's environment
+even called from inside fork B's evaluation — the sci report's invariant
+(fn objects never cross a turn boundary; round-trip through source) is
+load-bearing. **Probe B confirmed the top hypothesis:** the guard's arm is a
+plain ThreadLocal, so work handed to another thread runs with NO time limit
+and cannot be interrupted (unbounded loop still running at 5× its 300 ms
+limit; control interrupted at 310 ms). Blocker filed:
+[interrupt-arm-does-not-cross-a-thread-hop](../../../seon/issues/interrupt-arm-does-not-cross-a-thread-hop.md),
+riding the Phase 1 constructor wave — the arm travels exactly like the
+environment. Corollary: `:seon.eval/fn-entries` silently under-reports
+across threads (0 can mean 20k entrances elsewhere) — the same root cause;
+the vocabulary table's "12 reads as blocked" caveat gains "or the work ran
+on another thread" until the arm fix lands.
+
 ## Rollout — test-first, REPL-iterated, then farmed out
 
 Phase 0 — falsify the three load-bearing mechanics live (opus REPL lanes,
