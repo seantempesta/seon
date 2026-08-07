@@ -1,11 +1,48 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, sci, runtime]
 ---
 
 # Read the SCI built-in call observer from the runtime context
+
+## Resolution (2026-08-07, Phase 1 W3)
+
+Fixed in the maintained fork on branch `seon-env-hook`, commit `af8a5fb`
+("Read the built-in call observer from the runtime ctx"), branched from pin
+`2db3358c`; branch head `f934044`. The superproject pin bump is the
+orchestrator's, deliberately not staged by the lane. Evidence and suite
+results: [env-phase1-w3-notes-2026-08-07.md](../../prds/sci-execution-runtime/research/env-phase1-w3-notes-2026-08-07.md).
+
+The fully qualified symbol still resolves at analysis time (it is a property
+of the callee), but the observer is read from the node's runtime `ctx`. The
+observation node is therefore generated whenever the callee is a built-in Var
+rather than only when an observer was installed at analysis time — otherwise a
+node analyzed without an observer would stay unobservable in every fork.
+Acceptance met by `sci.interop-test/built-in-call-observer-runtime-ctx-test`:
+one node analyzed once, executed under two forks carrying different observers
+and then under a fork with none, each notifying only its own. Fork JVM suite
+green (393 tests / 1470 assertions / 0 failures on Clojure 1.10.3 and 1.11.1);
+CLJS unchanged from the pin.
+
+**The `:interrupt-fn` half of this issue is withdrawn as misdiagnosed.**
+`fns/fun` is called from inside the fn-node's body
+(`reference-code/sci/src/sci/impl/analyzer.cljc:368-370,400,417-419`), so its
+`ctx` is the RUNTIME context at the moment the `fn` form is evaluated — the fn
+object's creation context, not an analysis context. An interpreted fn is later
+invoked as a plain `IFn` with no ctx argument, so no other context exists at
+invocation to read instead. That is sci's load-bearing "the ctx travels with
+the code" design, the same mechanism as Phase 0 finding 2 (a fn created
+against the base ctx pins the base environment). Threading a caller ctx into
+every interpreted invocation is a separate and much larger design question,
+not a corollary of this fix.
+
+Related, found while verifying and left open for a separate fork issue:
+`sci.interop-test/built-in-call-observer-test` already fails under
+`script/test/node` at the pin. Our `:built-in-call-observer` feature is
+JVM-only in practice, because CLJS reaches a Var through the var-deref path
+where `return-call` never sees a Var callee.
 
 ## Problem
 
