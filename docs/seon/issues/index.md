@@ -39,7 +39,7 @@ See `README.md` for the convention.
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 | [Arm the time limit on the thread that runs the work](interrupt-arm-does-not-cross-a-thread-hop.md) | blocker | seon.env Phase 1 constructor wave |
 
-## Friction (102)
+## Friction (103)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -54,6 +54,7 @@ See `README.md` for the convention.
 | [Quiet the unreadable-external-claim flood in `bin/seon status`](status-floods-unreadable-external-claim-warnings.md) | friction | operator status-face hygiene (follow-up to gate-fix-operator) |
 | [One bounded log face per expected transaction refusal](expected-refusal-logs-raw-datom-error-twice.md) | friction | Datahike fork logging-seam wave |
 | [Make the changed-test report readable at a glance](changed-test-report-is-one-enormous-line.md) | friction | dev-tooling face hygiene |
+| [Resolve declarations once per `seon.db` read, not per attribute](db-read-decoding-resolves-declarations-per-attribute.md) | friction | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Render live-proof roots have no declared lifecycle owner](render-live-proof-roots-have-no-lifecycle-owner.md) | friction | operator directory-claim governor wave |
 | [Render adversarial roots outlive their fault experiment](render-adversarial-roots-outlive-their-experiment.md) | friction | operator directory-claim governor wave |
 | [Include non-installed operator and MCP leaves in the sink proof](output-sink-query-excludes-operator-and-mcp-scripts.md) | friction | universal output floor graduation wave |

@@ -173,3 +173,42 @@
                (db/q '[:find ?title .
                       :where [_ ::title ?title]]
                     (db/db connection))))))))
+
+(deftest encode-transaction-resolves-the-declaration-population-once
+  ;; The class: the encode seam resolving the declaration population PER
+  ;; ATTRIBUTE. With no population supplied on the calling thread,
+  ;; `schema/registered-schemas` falls through to
+  ;; `seon.schema.edn/packaged-forms`, which re-reads and re-validates every
+  ;; schema resource from the classpath (~14 ms). Per attribute that turned
+  ;; `seon.cluster.work-test/situation-totality-property` into a suite wedge
+  ;; that never finished inside the 300 s liveness backstop
+  ;; (docs/prds/sci-execution-runtime/research/parallel-turns-hang-cause-2026-08-07.md).
+  ;; One resolution per transaction is the wanted behavior, and it must not
+  ;; grow with the transaction's attribute count or nesting depth.
+  (let [resolutions (atom 0)
+        real-registered-schemas schema/registered-schemas
+        wide {:seon.cluster.agent/id "agent-a"
+              :seon.cluster.message/id "m-1"
+              :seon.cluster.message/content "do the thing"
+              :seon.cluster.message/at (java.util.Date.)
+              :seon.cluster.run/id "run-1"
+              ::title "Alpha"}
+        nested {:seon.cluster.agent/id "agent-b"
+                :seon.cluster.agent/namespace {:seon.ns/name 'my.agents.b}}]
+    (with-redefs [schema/registered-schemas
+                  (fn [] (swap! resolutions inc) (real-registered-schemas))]
+      (testing "a six-attribute transaction resolves the population once"
+        (reset! resolutions 0)
+        (schema.datahike/encode-transaction [wide])
+        (is (= 1 @resolutions)))
+
+      (testing "nesting does not add resolutions"
+        (reset! resolutions 0)
+        (schema.datahike/encode-transaction [nested])
+        (is (= 1 @resolutions)))
+
+      (testing "the argument-map transaction shape resolves once as well"
+        (reset! resolutions 0)
+        (schema.datahike/encode-transaction {:tx-data [wide nested]})
+        (is (= 1 @resolutions)
+            "resolution count is per transaction, never per entity")))))

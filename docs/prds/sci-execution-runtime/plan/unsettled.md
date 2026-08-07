@@ -60,11 +60,25 @@ acquisition, process-global !schema-state deleted, cluster-bound
 `blocking-findings`, bounded refusal face; `656cea270`..`2f70fa837`).
 Orchestrator integration fixes en route: db/basis-t class fix (14
 map-key sites, `39f1a5eb3`), capture-basis interface read
-(`419a5e529`), my.web dead exclude (`b07ccfef0`). GATE: two blockers
-remain — n-agent-parallel-turns-property hangs at the 300 s liveness
-backstop (first concurrency probe of the new seams; dumps retained in
-tmp/test-runs/run.8KPLyX) and seon.ai-test's stale one-model roster
-pin; `gate-exit` lane on both. THEN: bare green → reset → drive-arc
+(`419a5e529`), my.web dead exclude (`b07ccfef0`). GATE: **the suite
+wedge is FIXED and was MISATTRIBUTED** — it is
+`seon.cluster.work-test/situation-totality-property`, never
+`n-agent-parallel-turns-property` (which passes in 19.8 s; both
+retained liveness dumps name work-test, one from a work-test-only
+selection). Not a deadlock: `main` RUNNABLE re-reading the classpath.
+Cause is audit Defect I at its most expensive — with no declaration
+population supplied, `registered-schemas` falls through to
+`packaged-forms` (all 151 schema resources re-read, 14 ms) and the
+Datahike encode seam called it PER ATTRIBUTE (3 attrs = 43.4 ms vs
+0.004 ms explicit). Fixed by DELETING the duplicate ambient encode
+family so `encode-transaction` resolves once and delegates to the
+existing `encode-transaction-in`; class regression counts resolutions.
+work-test 300 s+ wedge → 59.9 s green. Read side (`seon.db` decode,
+same class, per attribute) filed, not fixed —
+[issue](../../../seon/issues/db-read-decoding-resolves-declarations-per-attribute.md).
+Full evidence:
+[parallel-turns-hang-cause-2026-08-07.md](../research/parallel-turns-hang-cause-2026-08-07.md).
+Remaining gate blocker: seon.ai-test's stale one-model roster pin. THEN: bare green → reset → drive-arc
 rerun (the first-turn proof) → step 5 R6 singles → step 6 recurring
 deterministic drive in bin/test (graduation gate) → messaging wave
 (spec ready, result/eid-N ruled).

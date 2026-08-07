@@ -416,57 +416,22 @@
     (update transaction :tx-data #(encode-transaction-data-in projection %))
     (encode-transaction-data-in projection transaction)))
 
-(defn- encode-entity
-  [entity]
-  (reduce-kv
-   (fn [encoded attr value]
-     (assoc encoded attr
-            (cond
-              (edn-encoded-attr? attr)
-              (pr-str (validate-logical-slot! attr value))
-
-              (map? value)
-              (encode-entity value)
-
-              (and (vector? value) (some map? value))
-              (mapv #(if (map? %) (encode-entity %) %) value)
-
-              (and (set? value) (some map? value))
-              (into #{} (map #(if (map? %) (encode-entity %) %)) value)
-
-              (and (sequential? value) (some map? value))
-              (mapv #(if (map? %) (encode-entity %) %) value)
-
-              :else value)))
-   (empty entity)
-   entity))
-
-(defn- encode-transaction-data
-  [transaction-data]
-  (mapv
-   (fn [operation]
-     (cond
-       (map? operation)
-       (encode-entity operation)
-
-       (and (vector? operation)
-            (= :db/add (first operation))
-            (edn-encoded-attr? (nth operation 2 nil)))
-       (update operation 3
-               #(pr-str
-                 (validate-logical-slot! (nth operation 2) %)))
-
-       :else operation))
-   transaction-data))
-
 (defn encode-transaction
-  "Encode heterogeneous union slots once at the Datahike transaction seam."
+  "Encode heterogeneous union slots once at the Datahike transaction seam.
+
+   The declaration population is resolved EXACTLY ONCE per transaction and
+   then passed explicitly to [[encode-transaction-in]]. Resolving it per
+   attribute was the 2026-08-07 suite wedge: with no declaration population
+   supplied on the calling thread, `schema/registered-schemas` falls through
+   to `seon.schema.edn/packaged-forms`, which re-reads and re-validates all
+   151 schema resources from the classpath — 14 ms per attribute, against
+   0.004 ms once the population is a value in hand."
   {:malli/schema [:=> [:cat :seon.store/transaction]
                   :seon.store/transaction]}
   [transaction]
-  (if (map? transaction)
-    (update transaction :tx-data encode-transaction-data)
-    (encode-transaction-data transaction)))
+  (encode-transaction-in
+   {:seon.schema.projection/forms (schema/registered-schemas)}
+   transaction))
 
 (defn decode-attribute-value
   "Decode and validate one value read from an EDN-backed attribute."
