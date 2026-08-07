@@ -502,6 +502,30 @@ vocabulary table updated in the same change, and the
 Candidate terms already known dead: "ambient", "tower", "batteries";
 the sweep enumerates the rest by reading, not by grep-guessing.
 
+Owner extension (2026-08-07 night): the boot/environment/running triad
+is the settled vocabulary (AGENTS.md table row added); "the runtime" and
+"the platform" retire as umbrella nouns (~60 doc uses, heaviest in
+`architecture.md`). Sweep candidates surveyed from the live namespace
+list, each to be grounded in its file before renaming:
+
+- `seon.operator.runtime` → `seon.operator.resources` (it holds the live
+  resource registries — instances, store holder, flocks, executors);
+- `seon.fresh-operator` (+ `script/seon/fresh_operator.clj`) → merge into
+  `seon.operator` ("fresh" distinguished against the deleted old system);
+- `seon.bootstrap` / `seon.bootstrap-drive` → `seon.initial-forms` /
+  `-drive` (the mechanism's own ruled name; ends the boot/bootstrap
+  confusion);
+- `seon.sci.kernel` → `seon.sci.guard` or a split (no kernel exists in
+  sci's vocabulary; the file owns guard/arm, invoke, install);
+- `seon.schema-split` → evaluate merge-or-delete (schema-monolith
+  deletion artifact);
+- `seon.oversight`, `seon.problems`, `seon.maintenance` → read and either
+  justify or rename to the literal function.
+
+Deliberately kept: operator, cluster, store (Datahike's own word for its
+store), ctx/fork (sci), graph/proc (flow), `my.*`. Historical PRD
+directory and document titles are never renamed.
+
 Graduation gate: the test-infrastructure spec's gate (every ordinary test
 receives a distinct branch, connection, sci fork, and projection state from
 one source base; two concurrent forks cannot exchange a compiled schema,

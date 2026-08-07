@@ -634,6 +634,8 @@ Use discoverable code names, not umbrella nouns or synonyms:
 |---|---|---|
 | functions, schemas, tests | verbs | ordinary Clojure constructs |
 | database or `db` | store, inventory, memory | the `seon.db` authority |
+| boot, environment, running | the runtime, the platform, the tower, ambient | the triad (owner ruling 2026-08-07): BOOT is the 0→1 construction in dependency order; the ENVIRONMENT is the one per-cluster value it produces (`seon.env` ↔ `resources/seon/schemas/seon.env.edn`); RUNNING code receives it — via the sci ctx/fork, submission data, proc `:args`, or the request map — and never constructs or reaches sideways for it. "Runtime"/"platform" as umbrella nouns are retired; historical doc/dir titles keep their names |
+| call preparation, supplied defaults | ambient injection, batteries | sci's own name for the hook seam (`:call-preparation-hook`, `reference-code/sci/src/sci/core.cljc` init docstring at the `seon-env-hook` pin) supplying a function's declared-and-absent arguments from the environment; caller wins; unavailable is a flat error |
 | canvas | tile, live-tile, world | `:seon.render.canvas/content`, the focal agent surface |
 | surface; card for CSS only | tile | a context render; a visual component |
 | web UI | inspector | `/`, `/agent/{id}`, debug, and `/data` |
