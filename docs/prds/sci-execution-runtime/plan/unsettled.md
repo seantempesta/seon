@@ -78,7 +78,12 @@ same class, per attribute) filed, not fixed —
 [issue](../../../seon/issues/db-read-decoding-resolves-declarations-per-attribute.md).
 Full evidence:
 [parallel-turns-hang-cause-2026-08-07.md](../research/parallel-turns-hang-cause-2026-08-07.md).
-Remaining gate blocker: seon.ai-test's stale one-model roster pin. THEN: bare green → reset → drive-arc
+The seon.ai-test roster pin is ALSO closed (`547c0a1ea` removed it;
+`cf4d31095` strengthened the replacement to a derived whole-roster
+assertion from `seon.config/default-population` — no list to maintain).
+Both named blockers are done; a verification bare run is in flight.
+THEN: bare green → seon.env Phase 1 launch
+([specs](seon-env-phase1-specs-2026-08-07.md)) → reset → drive-arc
 rerun (the first-turn proof) → step 5 R6 singles → step 6 recurring
 deterministic drive in bin/test (graduation gate) → messaging wave
 (spec ready, result/eid-N ruled).
