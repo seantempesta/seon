@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, sci, runtime, concurrency]
 ---
@@ -57,7 +57,7 @@ Measured, one shared ctx:
 
 The `seon.sci.kernel` guard, with the `seon.env` Phase 1 constructor.
 
-## State — the guard is fixed; the submission seam is the remaining step
+## State — RESOLVED
 
 Landed 2026-08-07 in `src/seon/sci/kernel.clj` (commit "Carry the interrupt
 arm with the work, not with the thread"). The arm is a VALUE: `current-arm`
@@ -71,14 +71,22 @@ and the regression fails (detached loop still running at 3 s, 183,830 ticks)
 when `adopt-arm` is neutered. Evidence:
 [env-phase1-w2-notes-2026-08-07.md](../../prds/sci-execution-runtime/research/env-phase1-w2-notes-2026-08-07.md).
 
-REMAINING, and the only reason this stays open: the real crossings in
-`src/seon/flow.clj` (lane W1's owned path) do not carry the arm yet. Two
-calls close it — `(assoc environment :seon.sci.kernel/arm
-(kernel/current-arm))` on the submitting thread in `submit!`/`submit!!`, and
-`(kernel/adopt-arm (:seon.sci.kernel/arm environment) …)` around the work-fn
-and `complete!` on the running thread. A nil arm is not a refusal case: it
-means the submitter was not inside an armed evaluation. Close this issue when
-those land with a submission-level proof.
+CLOSED 2026-08-07 by lane W1: the real crossings in `src/seon/flow.clj` now
+carry the arm. `submit!` and `submit!!` capture `(kernel/current-arm)` onto
+the submission's environment under the declared optional
+`:seon.sci.kernel/arm` member (`resources/seon/schemas/seon.env.edn`), and
+the io task, the compute task, and the terminal `complete!` callback each run
+inside `kernel/adopt-arm` with it. Reading the arm from submission DATA is
+what survives the Phase 3 `bound-fn*` deletions — nothing here depends on a
+binding frame. An unarmed submitter carries no arm, which is ordinary
+system-side work and never a refusal.
+
+Submission-level proof:
+`seon.env-test/a-submission-carries-the-submitting-threads-interrupt-arm` —
+an io submission made from inside an armed extent delivers the submitting
+thread's arm to the io thread (`identical?` at both halves, carried and
+adopted), and an unarmed submitter delivers none. Evidence:
+[env-phase1-w1-notes-2026-08-07.md](../../prds/sci-execution-runtime/research/env-phase1-w1-notes-2026-08-07.md).
 
 ## Acceptance criteria
 
