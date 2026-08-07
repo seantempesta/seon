@@ -462,6 +462,30 @@ exclusion seeded from the live registry, so EVERY edit to an existing
 schema resource collided with its own published self — pure accretion
 included; measured and fixed at the one owner.
 
+**W1 landed — Phase 1 complete (pending one foreign-red baseline)**
+([notes](../research/env-phase1-w1-notes-2026-08-07.md); commits
+`a808ad980`, `ee00c6dd3`, `19d61b1b4`, `204e94421`, `61b65efbe`). The
+environment value + boot constructor are live: schema-declared members
+read once, refuse-up-front naming the first failed layer, subset
+construction, environment on the ctx (never init options), submissions
+carrying `:seon.env/environment` with refusal at all four crossings, the
+W2 arm wired (capture on submit, `adopt-arm` around io/compute/`complete!`
+— [interrupt-arm issue](../../../seon/issues/archive/) RESOLVED with
+submission-level proof), Phase 0 probes graduated as
+`test/seon/env_test.clj`, `bin/seon init` publishes at HEAD, and the
+reset-boundary live proof SUCCEEDED (full boot to every layer; ctx
+environment `identical?` to the instance's; two-cluster isolation across
+two roots). W1 also caught its own perf regression via thread dump
+(construction now 0.37 µs) and filed the underlying owner defect
+([packaged-forms per-call re-read](../../../seon/issues/packaged-forms-rereads-every-schema-resource-per-call.md)
+— dispatched to a lane), plus the day's most consequential new blocker:
+[a cohosted second cluster cannot boot](../../../seon/issues/a-cohosted-second-cluster-cannot-boot.md)
+(Defect II at the boot boundary; blocks the four-worker parallel target;
+dispatched to a lane). Three suite reds are PROVEN pre-existing by
+worktree baseline at a pre-W1 SHA: render.web SSE timeouts, gen.loop
+planner census, and (baseline in flight) boot-test refork — these set the
+integration checkpoint's honest expectations.
+
 ## Rollout — test-first, REPL-iterated, then farmed out
 
 Phase 0 — falsify the three load-bearing mechanics live (opus REPL lanes,
