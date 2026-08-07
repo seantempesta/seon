@@ -42,6 +42,20 @@ survived.
 Full audit:
 [parallel-isolation-audit-2026-08-07.md](../../prds/sci-execution-runtime/research/parallel-isolation-audit-2026-08-07.md).
 
+Dependency grounding in core.async's own source (2026-08-07):
+[environment-mechanism-flow-2026-08-07.md](../../prds/sci-execution-runtime/research/environment-mechanism-flow-2026-08-07.md).
+Flow conveys NO bindings anywhere — its one off-thread hop is
+`futurize`'s bare `#(apply f args)`
+(`reference-code/core.async/.../flow/impl.clj:29-36`), used for the proc run
+loop (`:323`), each `:compute` transform (`:258-260`), and even `inject`
+(`:197`). core.async conveys bindings only in `thread-call`
+(`clojure/core/async.clj:528`) and `go` (`impl/go.clj:1048`, `:895-897`) —
+never in flow. The `:io` executor starts a fresh virtual thread per
+`.execute` (`impl/dispatch.clj:82-89`), so IO work never *had* the
+submitter's frame; `:compute`/`:mixed` are cached pools
+(`dispatch.clj:71-73`), so a pooled thread can even carry a previous task's
+stale frame.
+
 ## Owner
 
 `seon.flow/submit!` (`src/seon/flow.clj:610-650`).
@@ -54,6 +68,17 @@ Full audit:
   projection as data and no dynamic binding needs to cross a thread. Land that
   first if the two are scheduled together.
 - If that is deferred, `bound-fn*` on `::work-fn` is the minimal stopgap and is
-  recorded in the source as a stopgap, not as the design.
+  recorded in the source as a stopgap, not as the design. The source grounding
+  above raises the bar on that stopgap: flow's author declined binding
+  conveyance throughout flow, so a third `bound-fn*` would make Seon's
+  capability door depend on a mechanism the dependency deliberately does not
+  use. The flow-native shape is `:args` → init arity → state
+  (`flow/impl.clj:48`, `:155`, `:263`, `:271`, `:304`), which a graph rebuild
+  re-delivers for free because `spi/start` re-reads args on every start
+  (`flow/impl.clj:166-167`, `flow/spi.clj:19-22`).
+- The class-killing regression asserts BOTH halves: `:io` and `:compute` work
+  each receive a complete environment argument, AND the ambient dynamic Vars
+  are at their root values inside the work fn — the second assertion is what
+  stops a future `bound-fn*` from quietly becoming the real mechanism again.
 - Either way the asymmetry between `submit!` and `submit!!` is gone: one
   function pair, one conveyance rule, stated once.

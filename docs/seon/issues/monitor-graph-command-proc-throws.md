@@ -21,7 +21,8 @@ than its absence: a future lifecycle surface could reasonably reach for it.
 
 ## Evidence
 
-- `src/seon/flow.clj:623-624` — the delegating arity.
+- `src/seon/flow.clj:835-836` — the delegating arity (was `:623-624` before the
+  namespace grew; re-confirmed present 2026-08-07).
 - `reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl/graph.clj:24-25`
   — `command-proc` declared in the protocol.
 - `reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:87-197`
