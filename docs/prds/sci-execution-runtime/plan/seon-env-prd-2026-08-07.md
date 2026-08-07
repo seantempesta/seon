@@ -348,6 +348,36 @@ Recurring ugly-output theme across all three lanes: virtual threads report
 an empty `.getName`, so name-based thread diagnostics render blank on
 exactly the executor where failures live — use `.threadId`/`.isVirtual`.
 
+**Branch verbs for root — designed and probed, six for six**
+([branch-verbs-design-2026-08-07.md](../research/branch-verbs-design-2026-08-07.md)).
+checkout = the checkout fact selecting the run's opening value (foreign
+head or pinned commit — downstream already takes an explicit value); log =
+a store-only commit walk via `parent-commit-ids` (Datahike's
+`branch-history` is unusable for root: needs an attached connection,
+returns a channel, not exported); diff = `since` over the branch's
+`history` view (bare `since` is refuted by probe — replaced values
+vanish), cross-branch as two diffs from the fork point, symmetric diff
+refused; status = head + basis + behind-count, pure query; fork =
+`registry/branch!` (the one owner). Out: remotes, index, merge
+(`versioning/merge!` records parents and leaves merged tx-data to the
+caller — not trivial), `force-branch!`, `fork-database`. Probed on an
+isolated store: explicit foreign value beats current resolution (5/5 at
+the caller's basis), foreign WRITE refused with both `[store-id branch]`
+ids while foreign reads stay open; fork 17.0 ms median, foreign head
+value 0.219 ms. **Blocker absorbed into the Phase 3 contract:** the
+foreign-write fence is `(when (some? *conn*) …)` (`src/seon/db.clj:163-174`)
+— deleting `*conn*` without moving the fence ADMITS every foreign write
+silently (an unbound caller's write commits today, probed). The fence
+moves to environment-carried custody IN THE SAME CHANGE that deletes the
+dynamic var
+([issue](../../../seon/issues/foreign-write-fence-reads-only-the-dynamic-var.md)).
+Friction: `seon.db` has no branch/commit reads, so the verbs currently
+must reach past it to `datahike.api`
+([issue](../../../seon/issues/seon-db-has-no-branch-or-commit-reads.md));
+`diff` refuses on `:keep-history? false` rather than answering wrongly;
+`log` needs a declared `:seon.render/ai` producer (raw commit walks render
+as full uuids + 536M transaction ids — unreadable).
+
 ## Rollout — test-first, REPL-iterated, then farmed out
 
 Phase 0 — falsify the three load-bearing mechanics live (opus REPL lanes,
