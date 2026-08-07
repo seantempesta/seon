@@ -2006,7 +2006,8 @@
         ;; source population. The finally below restores instrumentation from
         ;; an extant cluster's own projection after publication settles.
         (when-let [remove!#
-                   (ns-resolve 'seon.instrument (symbol "remove!"))]
+                   (some-> (find-ns 'seon.instrument)
+                           (ns-resolve (symbol "remove!")))]
           (remove!#))
         ;; The live JVM owns the process-root store lock. Reload the
         ;; source-analysis owners before asking that JVM to publish
