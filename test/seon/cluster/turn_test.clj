@@ -111,7 +111,11 @@
               :seon.render.web/completion completion
               :seon.render.web/root-agent-id "agent-a"
               :seon.cluster.loop/cluster cluster-handle})}}
-          :conns []})
+          :conns []
+          :io-exec
+          (cluster/projection-executor
+           (:seon.sci.eval/projection-state
+            (:seon.sci.eval/ctx cluster-handle)))})
         {:keys [report-chan error-chan]} (flow.core/start graph)]
     (async/go-loop [] (when (async/<! report-chan) (recur)))
     (async/go-loop [] (when (async/<! error-chan) (recur)))
