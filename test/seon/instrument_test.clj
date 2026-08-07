@@ -276,6 +276,10 @@
     (try
       (instrument/apply! {:seon.config/on-core-error :panic
                           :seon.sci.admit/caps caps})
+      ;; Projection acquisition is deliberately per test. Exercise the
+      ;; instrumented boundary once so this measurement isolates violation
+      ;; construction rather than first-use registry realization.
+      (try (integer-inspector registry) (catch Exception _))
       (let [before (.getThreadAllocatedBytes thread-bean thread-id)
             failure (try (integer-inspector registry)
                          (catch Exception thrown thrown))
