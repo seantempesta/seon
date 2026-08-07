@@ -7,6 +7,7 @@
             [datahike.api :as d]
             [seon.db :as db]
             [seon.cluster :as cluster]
+            [seon.env :as env]
             [seon.fs :as fs]
             [seon.fn :as seon.fn]
             [seon.schema :as schema])
@@ -112,6 +113,25 @@
   ;; One new test JVM gets one newly populated base. Nothing survives process
   ;; exit, and bin/test never reuses this delay across invocations.
   (delay (create-base)))
+
+(defn environment
+  "One subset environment (store + facts, no graphs, no web) for a test.
+
+  The bracket allocates nothing of its own here: it calls the same
+  `seon.env` constructor boot calls, with only the layers the test
+  actually stood up. A test that has a connection supplies it and gets
+  the facts layer too; a test exercising pure Flow plumbing supplies
+  only its cluster name."
+  ([cluster-name]
+   (environment cluster-name nil))
+  ([cluster-name connection]
+   (env/refuse-incomplete-environment!
+    (env/environment
+     (cond-> {:seon.boot/cluster-name cluster-name}
+       connection
+       (assoc :seon.db/connection connection
+              :seon.schema/projection
+              (schema/projection-from-database @connection)))))))
 
 (defn await-event!
   "Await one channel, latch, or future event with a loud backstop."

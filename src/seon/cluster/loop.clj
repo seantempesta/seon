@@ -331,7 +331,8 @@
   (let [submission
         (seon.flow/submit!!
          (:seon.flow/work-launcher cluster)
-         {::seon.flow/submission-id submission-id
+         {:seon.env/environment (:seon.env/environment cluster)
+          ::seon.flow/submission-id submission-id
           ::seon.flow/workload :compute
           ::seon.flow/time-limit-ms
           (* 2 (:seon.sci.eval/time-limit-ms request))

@@ -12,6 +12,7 @@
             [clojure.core.async.impl.protocols :as async.impl]
             [clojure.datafy :as datafy]
             [clojure.test.check.generators :as gen]
+            [seon.env :as env]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn])
   (:import [clojure.lang Counted]
@@ -87,7 +88,14 @@
   graphs — and REFUSES a missing or `:mixed` workload, because the
   `:mixed` default pins one platform thread per proc forever and is
   the one measured scaling cliff (flow-mechanics 2026-07-28 §1). Both
-  refusals are construction-time throws, never review items. `args`
+  refusals are construction-time throws, never review items. It also
+  REFUSES `args` that name no `:seon.env/environment`: flow conveys no
+  bindings anywhere by design, so a proc that cannot name its cluster
+  runs with whatever thread-local state its executor happens to carry —
+  invisible on `:compute` and fatal on `:io`, the exact audited
+  signature. flow's own `:params` assertion cannot make that refusal
+  (`start-proc` assoc's `::flow/pid` into args, so args is always
+  truthy — falsified live 2026-08-07), so this door makes it. `args`
   merge into the start options' `:args` so `create-flow` definitions
   stay pure data."
   {:malli/schema
@@ -108,6 +116,7 @@
        "A Flow proc must declare either :io or :compute workload."
        {::step step-var
         ::workload workload})))
+   (env/refuse-absent-environment! args ::var-process)
    (let [launcher
          (flow/process
           step-var
@@ -250,6 +259,9 @@
 (defn- execute-work!
   [compute-executor completion active-work
    {::keys [submission-id work-fn result status] :as work}]
+  ;; The environment travels as DATA on the submission and is merged into
+  ;; what the work-fn receives, so the compute thread names its own cluster
+  ;; instead of reading whatever binding frame it inherited.
   (if-not (compare-and-set! status ::queued ::running)
     (async/offer!
      completion
@@ -278,7 +290,8 @@
                      (vreset! started-at (System/nanoTime))))
                  terminal
                  (try
-                   (let [value (work-fn {::started! started!})]
+                   (let [value (work-fn (env/carry {::started! started!}
+                                                   (env/of work)))]
                      (started!)
                      {::started-at @started-at
                       ::value value})
@@ -318,7 +331,10 @@
   (when (or (compare-and-set! status ::queued ::completed)
             (compare-and-set! status ::running ::completed))
     (try
-      (complete! terminal)
+      ;; The terminal callback runs on whichever thread settled the work —
+      ;; the io task, the launcher proc, or a stopping caller — so it too
+      ;; receives its submission's environment as data.
+      (complete! (env/carry terminal (env/of work)))
       (finally
         (swap! active-work dissoc submission-id)
         (swap! submissions dissoc submission-id)
@@ -363,7 +379,8 @@
                   terminal
                   (try
                     {::started-at started-at
-                     ::value (work-fn {::started! (fn [])})}
+                     ::value (work-fn (env/carry {::started! (fn [])}
+                                                 (env/of work)))}
                     (catch Throwable throwable
                       {::started-at started-at
                        ::throwable throwable}))]
@@ -496,8 +513,10 @@
 (defn- work-launcher-graph-definition
   [{::keys [parallelism active-work queue-depth compute-executor
             task-executor io-parallelism io-queue-depth io-submissions
-            proc-stopped]}]
-  (let [admission-buffer
+            proc-stopped]
+    :as request}]
+  (let [environment (env/of request)
+        admission-buffer
         (refusing-buffer (+ parallelism queue-depth)
                          refuse-compute-submission!)
         io-admission-buffer
@@ -508,22 +527,26 @@
      {::work-launcher
       {:proc
        (work-launcher-proc
-        {::parallelism parallelism
-         ::active-work active-work
-         ::admission-buffer admission-buffer
-         ::task-executor task-executor
-         ::io-parallelism io-parallelism
-         ::io-submissions io-submissions
-         ::io-admission-buffer io-admission-buffer
-         ::proc-stopped proc-stopped})
+        (env/carry
+         {::parallelism parallelism
+          ::active-work active-work
+          ::admission-buffer admission-buffer
+          ::task-executor task-executor
+          ::io-parallelism io-parallelism
+          ::io-submissions io-submissions
+          ::io-admission-buffer io-admission-buffer
+          ::proc-stopped proc-stopped}
+         environment))
        :chan-opts
        {::compute-submission {:buf-or-n admission-buffer}
         ::io-submission {:buf-or-n io-admission-buffer}}}
       ::capacity-observer
       {:proc
        (capacity-observer-proc
-        {::parallelism parallelism
-         ::active-work active-work})}}
+        (env/carry
+         {::parallelism parallelism
+          ::active-work active-work}
+         environment))}}
      :conns []
      :compute-exec compute-executor}))
 
@@ -532,8 +555,10 @@
   {:malli/schema
    [:=> [:cat :seon.flow/work-launcher-request]
     :seon.flow/work-launcher]}
-  [{::keys [configuration]}]
-  (let [configuration (required-launcher-configuration configuration)
+  [{::keys [configuration] :as request}]
+  (let [environment (env/refuse-absent-environment!
+                     request ::start-work-launcher!)
+        configuration (required-launcher-configuration configuration)
         queue-depth
         (:seon.config.flow.compute/queue-depth configuration)
         parallelism
@@ -560,15 +585,17 @@
         graph
         (flow/create-flow
          (work-launcher-graph-definition
+          (env/carry
            {::parallelism parallelism
-           ::active-work active-work
-           ::queue-depth queue-depth
-           ::io-queue-depth io-queue-depth
-           ::io-parallelism io-parallelism
-           ::io-submissions io-submissions
-           ::proc-stopped proc-stopped
-           ::compute-executor (:compute root-executors)
-           ::task-executor task-executor}))
+            ::active-work active-work
+            ::queue-depth queue-depth
+            ::io-queue-depth io-queue-depth
+            ::io-parallelism io-parallelism
+            ::io-submissions io-submissions
+            ::proc-stopped proc-stopped
+            ::compute-executor (:compute root-executors)
+            ::task-executor task-executor}
+           environment)))
         started (flow/start graph)]
     (flow/resume graph)
     {::graph graph
@@ -608,12 +635,19 @@
   nil)
 
 (defn submit!
-  "Submit bounded IO work without waiting for its terminal callback."
+  "Submit bounded IO work without waiting for its terminal callback.
+
+  The submission must name its cluster's `:seon.env/environment`, which
+  is merged into the maps the work-fn and `complete!` receive. This is
+  the crossing the isolation audit found empty: io work runs on a
+  virtual thread with both dynamic carriers at their root nil, so an
+  environment that is not data does not arrive."
   {:malli/schema
    [:=> [:cat :seon.flow/work-launcher :seon.flow/io-submission]
     :boolean]}
   [work-launcher
    {::keys [submission-id complete!] :as submission}]
+  (env/refuse-absent-environment! submission ::submit!)
   (let [{::keys [graph accepting? io-submissions]} work-launcher
         completion (bound-fn* complete!)
         work
@@ -641,12 +675,14 @@
             false)))
       (do
         (completion
-         {::started-at (System/nanoTime)
-          ::value
-          {:seon.error/kind ::launcher-stopped
-           :seon.error/message
-           "A background call requires a running work launcher."
-           :seon.error/data {::submission-id submission-id}}})
+         (env/carry
+          {::started-at (System/nanoTime)
+           ::value
+           {:seon.error/kind ::launcher-stopped
+            :seon.error/message
+            "A background call requires a running work launcher."
+            :seon.error/data {::submission-id submission-id}}}
+          (env/of submission)))
         false))))
 
 (defn submit!!
@@ -661,12 +697,13 @@
    [:=> [:cat :seon.flow/work-launcher :seon.flow/work-submission]
     :seon.flow/work-result]}
   [work-launcher
-   {::keys [submission-id workload work-fn time-limit-ms]}]
+   {::keys [submission-id workload work-fn time-limit-ms] :as submission}]
   (when-not work-launcher
     (throw
      (ex-info
       "A compute submission must name its cluster's work launcher."
       {:seon.error/kind :configuration})))
+  (env/refuse-absent-environment! submission ::submit!!)
   (let [{::keys [graph active-work]} work-launcher
         result (promise)
         status (atom ::queued)
@@ -676,11 +713,13 @@
         (flow/inject
          graph
          [::work-launcher ::compute-submission]
-         [{::submission-id submission-id
-           ::workload workload
-           ::work-fn work-fn
-           ::result result
-           ::status status}])
+         [(env/carry
+           {::submission-id submission-id
+            ::workload workload
+            ::work-fn work-fn
+            ::result result
+            ::status status}
+           (env/of submission))])
         injection-elapsed-ms
         (quot (+ (- (System/nanoTime) submitted-at) 999999) 1000000)
         remaining-ms (max 0 (- time-limit-ms injection-elapsed-ms))
@@ -855,8 +894,11 @@
   {:malli/schema
    [:=> [:catn [::request ::error-fanout-request]] ::error-fanout]}
   [{::keys [graph started fault-buffer-capacity monitor-buffer-capacity
-            read-core-error-mode commit-fault! commit-drop! panic!]}]
-  (let [report-mult (async/mult (:report-chan started))
+            read-core-error-mode commit-fault! commit-drop! panic!]
+    :as request}]
+  (let [environment (env/refuse-absent-environment!
+                     request ::start-error-fanout!)
+        report-mult (async/mult (:report-chan started))
         error-mult (async/mult (:error-chan started))
         application-report-channel
         (async/chan (async/sliding-buffer monitor-buffer-capacity))
@@ -871,11 +913,13 @@
         fault-graph
         (flow/create-flow
          (fault-graph-definition
-          {::fault-channel fault-channel
-           ::completion completion
-           ::read-core-error-mode read-core-error-mode
-           ::commit-fault! commit-fault!
-           ::panic! panic!}))
+          (env/carry
+           {::fault-channel fault-channel
+            ::completion completion
+            ::read-core-error-mode read-core-error-mode
+            ::commit-fault! commit-fault!
+            ::panic! panic!}
+           environment)))
         _ (flow/start fault-graph)
         _ (flow/resume fault-graph)
         monitor-view

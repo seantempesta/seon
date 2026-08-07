@@ -65,7 +65,8 @@
               :seon.flow/read-core-error-mode]
              [:seon.flow/commit-fault! :seon.flow/commit-fault!]
              [:seon.flow/commit-drop! :seon.flow/commit-drop!]
-             [:seon.flow/panic! :seon.flow/panic!]],
+             [:seon.flow/panic! :seon.flow/panic!]
+             [:seon.env/environment :seon.env/environment]],
             :executor
             [:fn
              {:error/message "must be a java.util.concurrent Executor"
@@ -130,7 +131,8 @@
              [:seon.flow/submission-id :seon.flow/submission-id]
              [:seon.flow/workload [:= :io]]
              [:seon.flow/work-fn :seon.flow/work-fn]
-             [:seon.flow/complete! :seon.flow/io-complete!]],
+             [:seon.flow/complete! :seon.flow/io-complete!]
+             [:seon.env/environment :seon.env/environment]],
             :work-call
             [:or
              [:map [:seon.flow/started! :seon.flow/started!]]
@@ -149,7 +151,8 @@
             :work-launcher-request
             [:map
              [:seon.flow/configuration
-              :seon.flow/launcher-configuration]],
+              :seon.flow/launcher-configuration]
+             [:seon.env/environment :seon.env/environment]],
             :work-result
             [:or
              [:map
@@ -166,7 +169,8 @@
              [:seon.flow/submission-id :seon.flow/submission-id]
              [:seon.flow/workload :seon.flow/workload]
              [:seon.flow/work-fn :seon.flow/work-fn]
-             [:seon.flow/time-limit-ms :seon.flow/compute-timeout-ms]],
+             [:seon.flow/time-limit-ms :seon.flow/compute-timeout-ms]
+             [:seon.env/environment :seon.env/environment]],
             :workload [:enum :compute :io],
             :proc-id :keyword,
             :submission-capacity :seon.flow/proc-id

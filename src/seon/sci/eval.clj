@@ -115,6 +115,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.effect :as effect]
+            [seon.env :as env]
             [seon.instrument :as instrument]
             [seon.print :as print]
             [seon.program :as program]
@@ -1713,7 +1714,17 @@
        (binding [db/*conn* connection
                  effect/*request-context*
                  (when (and run-id (some? form-ordinal) cluster-name)
-                   {:seon.db/connection connection
+                   {;; The environment the ctx carries, scoped to this turn.
+                    ;; Every crossing this request makes — a background io
+                    ;; submission above all — carries it as DATA rather than
+                    ;; hoping the executor inherited a binding frame.
+                    :seon.env/environment
+                    (some-> (env/of evaluation-ctx)
+                            (env/scope
+                             {:seon.cluster.agent/id agent-id
+                              :seon.cluster.run/id run-id
+                              :seon.cluster.run.form/ordinal form-ordinal}))
+                    :seon.db/connection connection
                     :seon.cluster.run/id run-id
                     :seon.cluster.run.form/ordinal form-ordinal
                     :seon.cluster.agent/id agent-id

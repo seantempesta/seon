@@ -72,6 +72,7 @@
             [seon.cluster.work :as work]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.flow :as seon.flow]
             [seon.schedule :as schedule]
             [seon.schema.edn :as schema.edn])
@@ -290,29 +291,37 @@
   pass's wake safe."
   {:malli/schema [:=> [:cat :seon.cluster.agent/blueprint-request] :map]}
   [{handle :seon.cluster.loop/cluster agent-id :seon.cluster.agent/id}]
-  (cond->
-   {:procs
-    {::mailbox
-     {:proc (seon.flow/var-process
-             #'mailbox-step :io
-             {:seon.cluster.wake/channel
-              (:seon.cluster.wake/channel handle)})}
-     ::turn
-     {:proc (seon.flow/var-process
-             #'turn-step :io
-             {:seon.cluster.loop/cluster handle
-              :seon.cluster.agent/id agent-id})
-      :chan-opts {::episode {:buf-or-n (async/sliding-buffer 1)}}}
-     ::schedule
-     {:proc (seon.flow/var-process
-             #'schedule/schedule-step :io
-             {:seon.cluster.loop/cluster handle
-              :seon.cluster.agent/id agent-id
-              :seon.schedule/channel
-              (:seon.schedule/channel handle)})}}
-    :conns [[[::mailbox ::episode] [::turn ::episode]]]}
-    (:seon.flow/executor handle)
-    (assoc :io-exec (:seon.flow/executor handle))))
+  ;; Every proc in this agent's graph carries the cluster's environment
+  ;; SCOPED to this agent, so work leaving a proc on any thread still names
+  ;; which cluster and which agent it belongs to.
+  (let [environment (env/scope (env/of handle)
+                               {:seon.cluster.agent/id agent-id})]
+    (cond->
+     {:procs
+      {::mailbox
+       {:proc (seon.flow/var-process
+               #'mailbox-step :io
+               (env/carry {:seon.cluster.wake/channel
+                           (:seon.cluster.wake/channel handle)}
+                          environment))}
+       ::turn
+       {:proc (seon.flow/var-process
+               #'turn-step :io
+               (env/carry {:seon.cluster.loop/cluster handle
+                           :seon.cluster.agent/id agent-id}
+                          environment))
+        :chan-opts {::episode {:buf-or-n (async/sliding-buffer 1)}}}
+       ::schedule
+       {:proc (seon.flow/var-process
+               #'schedule/schedule-step :io
+               (env/carry {:seon.cluster.loop/cluster handle
+                           :seon.cluster.agent/id agent-id
+                           :seon.schedule/channel
+                           (:seon.schedule/channel handle)}
+                          environment))}}
+      :conns [[[::mailbox ::episode] [::turn ::episode]]]}
+      (:seon.flow/executor handle)
+      (assoc :io-exec (:seon.flow/executor handle)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The routing entry and the lifecycle

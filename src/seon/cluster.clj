@@ -39,6 +39,7 @@
             [clojure.string :as str]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.flow :as flow]
             [seon.fn :as seon.fn]
             [seon.operator.runtime :as operator.runtime
@@ -1973,7 +1974,12 @@
   [connection cluster-name process ctx work-launcher
    wake-channel stream-channel context-channel completion]
   (let [dials (config/effective @connection cluster-name)]
-    (cond-> {:seon.db/connection connection
+    (cond-> {;; The one environment value this cluster's procs and
+             ;; submissions carry. The handle's remaining entries are
+             ;; process-local ports and structural dials, which are not
+             ;; environment members.
+             :seon.env/environment (env/of ctx)
+             :seon.db/connection connection
               :seon.cluster/name cluster-name
               :seon.cluster.run/process process
               :seon.flow/work-launcher work-launcher
@@ -2029,25 +2035,32 @@
   channels are external ports (created by `arm-agents!`, carried on the
   handle and the view), so the graph definition stays pure data."
   [handle routing view]
-  {:procs {:seon.cluster.agent/armer
-           {:proc (flow/var-process #'cluster.agent/armer-step :io
-                                    {:seon.cluster.loop/cluster handle
-                                     :seon.cluster.agent/routing routing})}
-           :seon.render.web/render
-           {:proc (flow/var-process #'web/render-step :io
-                                    (assoc view
-                                           :seon.cluster.loop/cluster
-                                           handle))}
-           :seon.search/index
-           {:proc (flow/var-process #'search/index-step :io
-                                    {:seon.search/index
-                                     (:seon.search/index view)
-                                     :seon.search/channel
-                                     (:seon.search/channel view)
-                                     :seon.search/completion
-                                     (:seon.search/completion view)})}}
-   :conns []
-   :io-exec (:seon.flow/executor handle)})
+  (let [environment (env/of handle)]
+    {:procs {:seon.cluster.agent/armer
+             {:proc (flow/var-process
+                     #'cluster.agent/armer-step :io
+                     (env/carry {:seon.cluster.loop/cluster handle
+                                 :seon.cluster.agent/routing routing}
+                                environment))}
+             :seon.render.web/render
+             {:proc (flow/var-process
+                     #'web/render-step :io
+                     (env/carry (assoc view
+                                       :seon.cluster.loop/cluster
+                                       handle)
+                                environment))}
+             :seon.search/index
+             {:proc (flow/var-process
+                     #'search/index-step :io
+                     (env/carry {:seon.search/index
+                                 (:seon.search/index view)
+                                 :seon.search/channel
+                                 (:seon.search/channel view)
+                                 :seon.search/completion
+                                 (:seon.search/completion view)}
+                                environment))}}
+     :conns []
+     :io-exec (:seon.flow/executor handle)}))
 
 (defn- arm-agents!
   "Arm this cluster: the armer graph, fan-out, routing listener, prime.
@@ -2124,7 +2137,8 @@
         started (flow.core/start graph)
         _ (flow.core/resume graph)
         fanout (flow/start-error-fanout!
-                {:seon.flow/graph graph
+                {:seon.env/environment (env/of handle)
+                 :seon.flow/graph graph
                  :seon.flow/started started
                  :seon.flow/fault-buffer-capacity 64
                  :seon.flow/monitor-buffer-capacity 64
@@ -2305,15 +2319,45 @@
            instance (publish!
                      (assoc instance :seon.search/index
                             (search/open! connection search-path)))
-           instance (publish!
-                     (assoc instance :seon.sci.eval/ctx
-                            (sci.eval/cluster-ctx
-                             @connection connection projection-state)))
+           bare-ctx (sci.eval/cluster-ctx
+                     @connection connection projection-state)
+           boot-dials (config/effective @connection cluster-name)
+           ;; The launcher's own graph belongs to this cluster too, but the
+           ;; launcher cannot be a member of the environment its own procs
+           ;; carry. Its graph therefore receives this cluster's environment
+           ;; up to the facts layer; every LATER carrier gets the complete
+           ;; one built immediately below.
+           pre-graph-environment
+           (env/refuse-incomplete-environment!
+            (env/environment
+             {:seon.boot/cluster-name cluster-name
+              :seon.db/connection connection
+              :seon.schema/projection
+              (:seon.schema/projection @projection-state)
+              :seon.sci.admit/caps (config/result-caps boot-dials)
+              :seon.config/on-core-error
+              (:seon.config/on-core-error boot-dials)}))
            work-launcher
            (flow/start-work-launcher!
-            {::flow/configuration
-             (select-keys (config/effective @connection cluster-name)
-                          flow/flow-workload-attributes)})
+            {:seon.env/environment pre-graph-environment
+             ::flow/configuration
+             (select-keys boot-dials flow/flow-workload-attributes)})
+           ;; Boot's 0->1 constructor. A missing layer refuses HERE with a
+           ;; flat error naming it, so no partial environment is ever handed
+           ;; to a proc, a submission, or a fork.
+           environment
+           (env/refuse-incomplete-environment!
+            (env/boot-environment
+             (assoc pre-graph-environment
+                    :seon.flow/work-launcher work-launcher)))
+           ;; The environment rides the ctx by `assoc` — never through
+           ;; `sci/init` options, which silently drop unknown keys. Every
+           ;; per-turn `sci/fork` and every closure built inside it then
+           ;; carries this cluster's environment across any thread by
+           ;; construction.
+           instance (publish!
+                     (assoc instance :seon.sci.eval/ctx
+                            (env/carry bare-ctx environment)))
            instance (publish!
                      (assoc instance :seon.flow/work-launcher work-launcher))
            instance (publish!

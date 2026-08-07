@@ -506,7 +506,9 @@
                        (do
                          (flow/submit!
                           (:seon.flow/work-launcher *request-context*)
-                          {::flow/submission-id effect-id
+                          {:seon.env/environment
+                           (:seon.env/environment *request-context*)
+                           ::flow/submission-id effect-id
                            ::flow/workload :io
                            ::flow/work-fn
                            (fn [_]
