@@ -440,6 +440,28 @@ the observer when the hook was installed) — reauthored, not
 cherry-picked. Costs measured under load: 12 ns unhooked / 115 ns
 empty-plan / 396 ns prepared — ruling 8's premise confirmed.
 
+**W2 landed — the arm is a value; the fn-entries lie is dead**
+([notes](../research/env-phase1-w2-notes-2026-08-07.md), commits
+`06b065a99`/`237f74d96`). `new-armed` extracts the arm as a value
+(AtomicLong counters, latch, identity); `current-arm`/`adopt-arm` are
+the one hand-out/install pair; adoption is strictly nested
+(save/serve/restore) so no merge or refusal cases exist on a worker;
+`stop!` no longer cancels a travelled arm's deadline — detached work is
+cut at ITS limit after the parent disarms. Proven: Probe B inverted
+(detached unbounded loop settled by sci's own interrupt at ~300 ms limit,
+5+3 consecutive greens, non-vacuous — neutered adoption survives 3 s at
+183k ticks); 20k-entry workload on a virtual thread records ≥20000 where
+baseline recorded 0; class regression at
+`test/seon/sci/kernel_arm_carriage_test.clj`. Handoff to W1 is exactly
+two calls (assoc `current-arm` into the submission environment; wrap
+work/`complete!` in `adopt-arm`); the arm member is OPTIONAL (nil =
+submitter unarmed), unlike the environment itself. The blocker issue
+stays open until W1 wires the flow crossings. BONUS root-cause fix for
+everyone (`de31c5316`, archived with evidence): schema admission's
+exclusion seeded from the live registry, so EVERY edit to an existing
+schema resource collided with its own published self — pure accretion
+included; measured and fixed at the one owner.
+
 ## Rollout — test-first, REPL-iterated, then farmed out
 
 Phase 0 — falsify the three load-bearing mechanics live (opus REPL lanes,
