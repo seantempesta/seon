@@ -18,6 +18,26 @@ Owner mandate, verbatim:
 The performance widening is part of the same mandate: testing must be fast and
 efficient.
 
+**Owner ruling addendum (2026-08-07 night) — tiers, à la carte with smart
+defaults.** Parallel-on-forks is THE GOAL FOR THE WHOLE SYSTEM, not a
+starting point. The suite is staged and tiered:
+
+1. **Platform first, fail-fast.** Every invocation runs the platform
+   moving-part regressions FIRST (seconds); the parallel bulk fans out only
+   over a proven platform. A broken platform fails in seconds, never by
+   poisoning a thousand forked tests.
+2. **Default tier = changed only.** Bare `bin/test` runs the platform
+   regressions plus only the tests REACHING code changed since the last
+   green basis — computed from `:seon.fn/calls` reachability over the
+   program graph (F11's tests-reaching), never file mtimes or filename
+   conventions. Generative properties for unreached namespaces do not
+   re-run. "Changed" is defined against the last GREEN basis of the
+   reachability graph, so a shared-schema change re-runs every dependent.
+3. **À la carte on demand:** the complete parallel suite with all
+   generative properties (`--full`, and at integration checkpoints); the
+   boot/reset-boundary proofs; the booted-system drive with generative
+   load. Each is one flag, never a second runner.
+
 The organizing ruling is now recorded in the active plan:
 
 > "The test suite should use the same features our system has to make forking
