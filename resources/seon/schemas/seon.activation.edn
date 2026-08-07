@@ -56,6 +56,17 @@
                     [:seon.activation/executable-symbol
                      :seon.fn/sym]]],
                   :missing [:vector :seon.activation/missing-fact],
+                  :missing-count [:int {:min 1}],
+                  :missing-elision :seon.print/elision,
+                  :refusal
+                  [:map
+                   [:seon.error/message :seon.error/message]
+                   [:seon.activation/missing-count
+                    :seon.activation/missing-count]
+                   [:seon.activation/missing :seon.activation/missing]
+                   [:seon.activation/missing-elision
+                    {:optional true}
+                    :seon.activation/missing-elision]],
                   :result
                   [:map
                    [:seon.activation/closure :seon.activation/closure]

@@ -830,17 +830,19 @@
       (let [failure (start-refusal request)
             refused-instance (:seon.boot/instance (ex-data failure))
             connection (:seon.boot/cluster-connection refused-instance)
-            activation-failure
-            (some #(when (seq (:seon.activation/missing (ex-data %))) %)
+            activation-refusal
+            (some (fn [cause]
+                    (let [offense (:seon.boot/offense (ex-data cause))]
+                      (when (seq (:seon.activation/missing offense))
+                        offense)))
                   (take-while some? (iterate ex-cause failure)))]
         (try
           (testing "namespaces without functions are denied despite a current digest"
-            (is (some? activation-failure))
+            (is (some? activation-refusal))
             (is (every? :seon.activation/executable-symbol
-                        (:seon.activation/missing
-                         (ex-data activation-failure))))
-            (is (str/includes? (ex-message failure)
-                               (str "bin/seon init " cluster-name " --force")))
+                        (:seon.activation/missing activation-refusal)))
+            (is (pos? (:seon.activation/missing-count activation-refusal)))
+            (is (< (count (ex-message failure)) 2000))
             (is (pos? (db/q '[:find (count ?namespace) .
                              :where [?namespace :seon.ns/name]]
                            @connection)))

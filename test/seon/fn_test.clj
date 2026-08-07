@@ -444,7 +444,7 @@
                              (not [?arity :seon.fn.arity/return-schema])))]
                     @connection))))))))
 
-(deftest publication-refuses-every-error-level-analyzer-finding
+(deftest publication-refuses-a-required-artifact-load-finding
   (let [root (fixture-root)]
     (write-source! root "audit/unresolved.clj"
                    "(ns audit.unresolved)\n(defn broken [] missing)\n")
@@ -456,6 +456,80 @@
       (is (= :seon.fn/index-refused (:seon.error/kind (ex-data failure))))
       (is (some #(= :unresolved-symbol (::analyzer/type %))
                 (::seon.fn/findings (ex-data failure)))))))
+
+(deftest publication-veto-is-exactly-the-cant-load-finding-classes
+  (let [root (fixture-root)
+        source-file
+        (write-source! root "audit/valid.clj"
+                       "(ns audit.valid)\n(defn value [] 1)\n")
+        request {:seon.fn/roots [(.getPath root)]}
+        base-analysis
+        (analyzer/analyze
+         {::analyzer/paths [(.getCanonicalPath source-file)]})
+        finding
+        (fn [finding-type]
+          {::analyzer/filename (.getCanonicalPath source-file)
+           ::analyzer/row 2
+           ::analyzer/col 1
+           ::analyzer/level :error
+           ::analyzer/type finding-type
+           ::analyzer/message (str "synthetic " (name finding-type))})]
+    (doseq [finding-type
+            [:syntax :unresolved-symbol :unresolved-namespace
+             :unresolved-var :private-call :invalid-arity]]
+      (testing (name finding-type)
+        (let [failure
+              (with-redefs
+                [analyzer/analyze
+                 (fn [_]
+                   (assoc base-analysis ::analyzer/findings
+                          [(finding finding-type)]))]
+                (try
+                  (seon.fn/build-manifest request)
+                  nil
+                  (catch clojure.lang.ExceptionInfo error error)))]
+          (is (= :seon.fn/index-refused
+                 (:seon.error/kind (ex-data failure)))))))
+    (testing "an elevated non-load finding remains visible as a warning"
+      (with-redefs
+        [analyzer/analyze
+         (fn [_]
+           (assoc base-analysis ::analyzer/findings
+                  [(finding :unused-binding)]))]
+        (let [manifest (seon.fn/build-manifest request)]
+          (is (= [:warning]
+                 (mapv ::analyzer/level
+                       (:seon.fn.manifest/findings manifest)))))))))
+
+(deftest my-web-cascade-class-warns-without-vetoing-publication
+  (let [root (fixture-root)
+        source-file
+        (write-source! root "my/web.clj"
+                       "(ns my.web)\n(defn fetch [] :ok)\n")
+        request {:seon.fn/roots [(.getPath root)]}
+        base-analysis
+        (analyzer/analyze
+         {::analyzer/paths [(.getCanonicalPath source-file)]})
+        cascade
+        (mapv
+         (fn [ordinal]
+           {::analyzer/filename (.getCanonicalPath source-file)
+            ::analyzer/row 2
+            ::analyzer/col (inc ordinal)
+            ::analyzer/level :error
+            ::analyzer/type :unused-binding
+            ::analyzer/message (str "my.web cascade " ordinal)})
+         (range 44))]
+    (with-redefs
+      [analyzer/analyze
+       (fn [_]
+         (assoc base-analysis ::analyzer/findings cascade))]
+      (let [manifest (seon.fn/build-manifest request)
+            findings (:seon.fn.manifest/findings manifest)]
+        (is (= 44 (count findings)))
+        (is (every? #(= :warning (::analyzer/level %)) findings))
+        (is (some #{[:seon.fn/sym "my.web/fetch"]}
+                  (:seon.fn.manifest/identities manifest)))))))
 
 (deftest file-artifacts-and-manifests-are-byte-digested-and-deterministic
   (let [root (fixture-root)

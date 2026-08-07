@@ -25,6 +25,37 @@
   "The one branch that names the latest complete source database value."
   :current-src)
 
+(def ^:private activation-missing-sample-size 10)
+
+(defn activation-refusal
+  "Bound a missing activation set for an operator-facing refusal."
+  {:malli/schema [:=> [:cat :seon.activation/missing]
+                  :seon.activation/refusal]}
+  [missing]
+  (let [total (count missing)
+        sample (vec (take activation-missing-sample-size missing))
+        omitted (- total (count sample))
+        elision
+        (when (pos? omitted)
+          {:seon.print/face :seon.print/elided
+           :seon.print/omitted omitted
+           :seon.print/elision-unit :children
+           :seon.render.data/total total
+           :seon.render.data/path [:seon.activation/missing]
+           :seon.render.data/next-offset (count sample)
+           :seon.render.profile/id :seon.render.profile/operator
+           :seon.print/requery-refusal
+           "Activation refusal facts are available only at the refused database value."})]
+    (cond->
+     {:seon.error/message
+      (str "The source activation closure is missing " total
+           (if (= 1 total) " fact: " " facts: ")
+           (pr-str sample)
+           (when (pos? omitted) (str " … " omitted " more.")))
+      :seon.activation/missing-count total
+      :seon.activation/missing sample}
+      elision (assoc :seon.activation/missing-elision elision))))
+
 (def ^:private source-attributes
   [:seon.source/digest
    :seon.source/built-at
@@ -183,11 +214,10 @@
                 (assoc row :db/id (get lookup-tempids id)))
               lookup-rows)]
     (when (seq missing)
-      (refuse! ::activation-incomplete
-               (str "the source activation closure is missing facts: "
-                    (pr-str missing))
-               {:seon.source/digest source-digest
-                :seon.activation/missing missing}))
+      (let [refusal (activation-refusal missing)]
+        (refuse! ::activation-incomplete
+                 (:seon.error/message refusal)
+                 (assoc refusal :seon.source/digest source-digest))))
     (when-not (pos? requirement-count)
       (refuse! ::activation-empty
                "the source activation closure is empty"

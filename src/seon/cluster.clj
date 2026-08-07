@@ -82,6 +82,17 @@
   (*source-progress!* phase)
   nil)
 
+(defn- report-analysis-warnings!
+  [manifest]
+  (doseq [finding (:seon.fn.manifest/findings manifest)]
+    (report-source-progress!
+     (str "WARNING "
+          (name (:seon.fn.analyzer/type finding))
+          " " (:seon.fn.analyzer/filename finding)
+          (when-let [row (:seon.fn.analyzer/row finding)] (str ":" row))
+          " — " (:seon.fn.analyzer/message finding))))
+  nil)
+
 (defn socket-server?
   "True for the java.net.ServerSocket an io-prepl listens on."
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
@@ -1044,9 +1055,8 @@
           (closure-fact-missing database closure lookup-rows)
           [{:seon.activation/schema-key :seon.activation/closure}])]
     (when (seq missing)
-      (refused!
-       (str "The source activation closure is incomplete: " (pr-str missing))
-       {:seon.activation/missing missing}))
+      (let [refusal (source/activation-refusal missing)]
+        (refused! (:seon.error/message refusal) refusal)))
     closure))
 
 (defn- accrete-schema-population!
@@ -1346,6 +1356,7 @@
                    (seon.fn/build-manifest
                     {:seon.fn/roots seon.fn/source-roots}))
         _ (report-source-progress! "analysis complete")
+        _ (report-analysis-warnings! manifest)
         snapshot-after (current-source-snapshot)]
     (when-not (= snapshot-before snapshot-after)
       (refused! "Source changed while current-src was being analyzed; retry."
@@ -1435,6 +1446,7 @@
                 (mapv :seon.fn.change/artifact changes)
                 next-manifest
                 (seon.fn/replace-manifest-artifacts manifest desired-artifacts)
+                _ (report-analysis-warnings! next-manifest)
                 rows (into [] (mapcat :seon.fn.change/rows) changes)
                 result
                 (source/upsert!

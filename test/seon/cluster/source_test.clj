@@ -175,6 +175,21 @@
             (is (= [missing] (:seon.activation/missing data))
                 "the refusal names the missing fact")))))))
 
+(deftest activation-refusal-bounds-the-operator-face
+  (let [missing
+        (mapv (fn [ordinal]
+                {:seon.activation/executable-symbol
+                 (str "missing/function-" ordinal)})
+              (range 12))
+        face (source/activation-refusal missing)
+        elision (:seon.activation/missing-elision face)]
+    (is (= 12 (:seon.activation/missing-count face)))
+    (is (= (subvec missing 0 10) (:seon.activation/missing face)))
+    (is (= 2 (:seon.print/omitted elision)))
+    (is (= 12 (:seon.render.data/total elision)))
+    (is (= 10 (:seon.render.data/next-offset elision)))
+    (is (< (count (:seon.error/message face)) 1000))))
+
 (deftest publication-advances-one-branch-and-retires-scratch
   (with-store
     (fn [opened]

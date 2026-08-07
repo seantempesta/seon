@@ -8,7 +8,8 @@
             [seon.db :as db]
             [seon.cluster :as cluster]
             [seon.fs :as fs]
-            [seon.fn :as seon.fn])
+            [seon.fn :as seon.fn]
+            [seon.schema :as schema])
   (:import [java.util.concurrent CountDownLatch Future TimeUnit
             TimeoutException]))
 
@@ -257,9 +258,15 @@
 
 (defn- run-database-body
   [connection extra-schema body]
-  (when (seq extra-schema)
-    (db/transact! connection {:tx-data extra-schema}))
-  (body connection))
+  (let [projection-state
+        (atom {:seon.schema/projection
+               (schema/projection-from-database @connection)})]
+    (schema/call-with-projection-state
+     projection-state
+     (fn []
+       (when (seq extra-schema)
+         (db/transact! connection {:tx-data extra-schema}))
+       (body connection)))))
 
 (defn- with-fresh-database
   [database-id extra-schema body]

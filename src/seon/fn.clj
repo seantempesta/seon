@@ -369,17 +369,35 @@
 
       :else nil)))
 
+(def ^:private load-refusal-finding-types
+  #{:syntax
+    :unresolved-symbol
+    :unresolved-namespace
+    :unresolved-var
+    :private-call
+    :invalid-arity})
+
+(defn- load-refusal-finding?
+  [finding]
+  (contains? load-refusal-finding-types (::analyzer/type finding)))
+
+(defn- publication-findings
+  [analysis]
+  (mapv #(cond-> %
+           (not (load-refusal-finding? %))
+           (assoc ::analyzer/level :warning))
+        (::analyzer/findings analysis)))
+
 (defn- blocking-findings
   [analysis]
-  (filterv #(= :error (::analyzer/level %))
-           (::analyzer/findings analysis)))
+  (filterv load-refusal-finding? (::analyzer/findings analysis)))
 
 (defn- assert-clean-analysis!
   [analysis]
   (when (seq (blocking-findings analysis))
     (throw (ex-info "Static program analysis found blocking errors."
                     {:seon.error/kind ::index-refused
-                     ::findings (::analyzer/findings analysis)}))))
+                     ::findings (publication-findings analysis)}))))
 
 (defn- analysis-rows-by-file
   [analysis first-party-functions]
@@ -398,17 +416,19 @@
              (::analyzer/var-definitions analysis)))))
 
 (defn- artifact
-  [file rows]
+  [file rows findings]
   (let [canonical-path (.getCanonicalPath ^java.io.File file)
         canonical-rows (mapv program/canonical-row rows)]
-    {:seon.fn.file/path canonical-path
-     :seon.fn.file/digest (file-digest file)
-     :seon.fn.file/rows canonical-rows
-     :seon.fn.file/identities
-     (->> canonical-rows
-          (keep program/row-identity)
-          (sort-by pr-str)
-     vec)}))
+    (cond->
+     {:seon.fn.file/path canonical-path
+      :seon.fn.file/digest (file-digest file)
+      :seon.fn.file/rows canonical-rows
+      :seon.fn.file/identities
+      (->> canonical-rows
+           (keep program/row-identity)
+           (sort-by pr-str)
+           vec)}
+      (seq findings) (assoc :seon.fn.file/findings findings))))
 
 (def ^:private request-symbol "seon.effect/request!")
 
@@ -764,6 +784,7 @@
                        :seon.fn.file/path (.getCanonicalPath file)})))
     (let [canonical-path (.getCanonicalPath file)
           analysis (analyzer/analyze {::analyzer/paths [canonical-path]})
+          findings (publication-findings analysis)
           first-party-functions
           (into (set known-functions)
                 (first-party-function-symbols analysis))]
@@ -771,7 +792,8 @@
       (artifact file
                 (get (analysis-rows-by-file analysis first-party-functions)
                      canonical-path
-                     [])))))
+                     [])
+                findings))))
 
 (defn artifact-by-path
   "The manifest artifact carrying one canonical file path."
@@ -802,20 +824,23 @@
   (let [artifacts (->> artifacts
                        (sort-by :seon.fn.file/path)
                        vec
-                       assert-capability-contracts!)]
-    {:seon.fn.manifest/roots roots
-     :seon.fn.manifest/digest
-     (sha-256 (.getBytes
-               (pr-str (mapv (juxt :seon.fn.file/path
-                                   :seon.fn.file/digest)
-                             artifacts))
-               java.nio.charset.StandardCharsets/UTF_8))
-     :seon.fn.manifest/artifacts artifacts
-     :seon.fn.manifest/identities
-     (->> artifacts
-          (mapcat :seon.fn.file/identities)
-          (sort-by pr-str)
-          vec)}))
+                       assert-capability-contracts!)
+        findings (into [] (mapcat :seon.fn.file/findings) artifacts)]
+    (cond->
+     {:seon.fn.manifest/roots roots
+      :seon.fn.manifest/digest
+      (sha-256 (.getBytes
+                (pr-str (mapv (juxt :seon.fn.file/path
+                                    :seon.fn.file/digest)
+                              artifacts))
+                java.nio.charset.StandardCharsets/UTF_8))
+      :seon.fn.manifest/artifacts artifacts
+      :seon.fn.manifest/identities
+      (->> artifacts
+           (mapcat :seon.fn.file/identities)
+           (sort-by pr-str)
+           vec)}
+      (seq findings) (assoc :seon.fn.manifest/findings findings))))
 
 (defn replace-manifest-artifacts
   "Replace file artifacts and recompute one deterministic manifest."
@@ -851,12 +876,17 @@
         files (source-files roots)
         paths (mapv #(.getCanonicalPath ^java.io.File %) files)
         analysis (analyzer/analyze {::analyzer/paths paths})
+        findings-by-file
+        (group-by ::analyzer/filename (publication-findings analysis))
         first-party-functions (first-party-function-symbols analysis)
         rows-by-file (analysis-rows-by-file analysis first-party-functions)
         artifacts
         (mapv (fn [file]
                 (artifact file
                           (get rows-by-file
+                               (.getCanonicalPath ^java.io.File file)
+                               [])
+                          (get findings-by-file
                                (.getCanonicalPath ^java.io.File file)
                                [])))
               files)
