@@ -229,6 +229,34 @@ from the test-infrastructure spec (construction owners as resolvable
    path, file keeps the body" thesis; the current-era skills + corpus-facts
    mechanism).
 
+## Phase 0 findings (running log)
+
+**Runtime-ctx hook — MINIMAL-EDIT VIABLE**
+([report](../research/env-phase0-runtime-ctx-hook-2026-08-07.md)). No-edit is
+refuted with file:line (the observer never sees copy-var leaves, discards its
+return, and takes no ctx; `wrap` is analyzer-internal, unreachable from
+options, and replaces the callee rather than reshaping args). The ~30-line
+hook on sci branch `seon-env-hook-probe` (submodule commit `a072c8e`, pin
+untouched) validates the contract
+`(hook runtime-ctx var evaluated-args) -> prepared-args | (reduced result)`,
+firing on the calling thread inside the node body: declared-and-absent
+filling, caller-wins, nested + interpreted-defn call sites, 320 concurrent
+virtual-thread calls across 8 forks with zero mismatches, unavailable
+short-circuits without entering the callee; sci suite green. Three
+constraints the implementation MUST absorb:
+
+1. **The environment is `assoc`'d onto the ctx, never passed to `sci/init`** —
+   `opts/init` silently drops unknown option keys (a quiet wrong answer;
+   loud refusal queued for our fork).
+2. **Interpreted functions pin the ctx they were evaluated against.** A fn
+   pre-evaluated into the shared base resolves the BASE environment forever.
+   Program-graph functions are host Vars or are (re)created in the running
+   fork — never pre-evaluated once into the shared base ctx.
+3. **Hook consultation costs ~80 ns even with an empty plan (vs 9 ns for the
+   inert node).** Phase 1 gates consultation to call sites that actually
+   have a plan (cluster-scoped program-graph data); only the environment
+   read is per-fork.
+
 ## Rollout — test-first, REPL-iterated, then farmed out
 
 Phase 0 — falsify the three load-bearing mechanics live (opus REPL lanes,
