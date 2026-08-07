@@ -375,6 +375,19 @@ amended per ruling 2 above), fix `submit!`/`submit!!`, move the compiled
 caches onto the projection. Each slice is one lane with owned paths and the
 probes as acceptance evidence.
 
+Phase 4 — the terminology sweep (owner-directed, 2026-08-07 evening): after
+the production sweep lands, the whole project — source, docstrings, schemas,
+docs, skills, plan documents — is swept and STANDARDIZED on the proper
+terms of the libraries we interface with (Clojure, sci, Datahike, Malli,
+core.async/flow, konserve) or the literal common name, per ruling 5 and the
+standing names-grounded-in-source rule. Mechanics: orchestrator-owned
+atomic rename waves (shared-tree renames are never split across lanes),
+each wave grounded in the dependency's own source for the chosen term, the
+vocabulary table updated in the same change, and the
+[rename pass precedent](rename-pass-2026-08-05.md) as the working model.
+Candidate terms already known dead: "ambient", "tower", "batteries";
+the sweep enumerates the rest by reading, not by grep-guessing.
+
 Graduation gate: the test-infrastructure spec's gate (every ordinary test
 receives a distinct branch, connection, sci fork, and projection state from
 one source base; two concurrent forks cannot exchange a compiled schema,
