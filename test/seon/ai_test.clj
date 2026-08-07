@@ -261,9 +261,14 @@
                             {:seon.ai.model/example true})
             ai-render (ai/registry-ai @connection)
             html-render (ai/registry-html @connection)]
-        (is (some #(= "registered-model" (:seon.ai.model/id %))
-                  (ai/models @connection))
-            "the fixture model is queryable beside the shipped registry")
+        (is (= (conj (into #{} (keep :seon.ai.model/id)
+                           (config/default-population))
+                     "registered-model")
+               (into #{} (map :seon.ai.model/id) (ai/models @connection)))
+            "the roster is every shipped declared model row plus what this
+             test seeded — DERIVED from the same initialization document, so
+             adding or dropping a shipped model is caught without any list
+             here to update")
         (is (not (contains? model :seon.config.ai/endpoint))
             "provider wire facts never duplicate onto model rows")
         (is (schema/valid-candidate-value? :seon.ai.model/entity accreted)
