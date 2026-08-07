@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, schema, runtime]
 ---
@@ -49,3 +49,13 @@ predicate symbols at the acquired generation and refresh on Var redefinition.
 - Any unavoidable Malli default-registry integration is an explicit
   process-bootstrap resource operation, not schema authority and not a hidden
   one-time registration.
+
+## Resolution
+
+Resolved by `656cea270`, `6012df4ce`, and `c04e90ea8`. Shipped schema shapes are
+resource declarations published as database facts; declaration-by-side-effect
+sentinels and `packaged-base-forms` are gone. Runtime registrations occur only
+inside an explicit isolated delta based on the addressed projection, including
+the archived Datahike/model-schema test instances. The remaining global
+predicate cache is keyed by qualified symbol and refreshes through ordinary
+registration, not a `defonce` sentinel.

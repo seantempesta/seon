@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, cluster, boot, operator, database]
 ---
@@ -67,3 +67,14 @@ program graph that predates one of those instruction rows therefore still
 passes the first gate and reaches Datahike's missing-entity refusal. The
 current boot test proves partial-program steering, not this transitive
 population prerequisite.
+
+## Resolution
+
+Resolved by `edd10732f`, `bf5eabc96`, and `096904527`. Publication now derives
+and atomically preflights one nonempty activation closure containing every
+initialization lookup ref and executable symbol before advancing
+`:current-src`. A fork also requires that stored closure and refuses with a
+bounded missing-fact value instead of reaching Datahike's lookup-ref failure.
+The five parameterized missing-prerequisite cases refuse before a cluster can
+boot; a complete publication was proven READY with `bootstrap:root` closed in
+an isolated operator root.

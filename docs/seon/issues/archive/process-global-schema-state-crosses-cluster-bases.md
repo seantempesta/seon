@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, schema, cluster, runtime]
 ---
@@ -59,3 +59,13 @@ cluster context that acquired them.
   have different program commits.
 - A two-cluster live proof changes or reforks one cluster's schema facts and
   proves the other cluster's validation and error classification do not change.
+
+## Resolution
+
+Resolved by `656cea270`, `6012df4ce`, `d9f360997`, and `61ccb7332`.
+Database-derived schema forms now live in each cluster's projection state; the
+only process-local schema cache maps qualified predicate symbols to reloadable
+host functions. Cluster and agent Flow graphs execute on the cluster-bound IO
+executor, so native and SCI consumers retain the addressed cluster projection.
+The two-cluster projection regressions and the fresh isolated bootstrap proof
+exercise different database bases without cross-cluster mutation.
