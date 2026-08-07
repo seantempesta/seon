@@ -174,6 +174,10 @@ checked against this change rather than assumed:
   `{:value [2 3 4] :fn-entries 1 :built-in-calls-observed 1 :sample
   (clojure.core/mapv)}`. Under the thread-local arm the observer would have
   no-op'd off-thread and reported zero.
+- The guard's existing consumers are unaffected:
+  `bin/test seon.sci.eval-test seon.sci.admit-test` ran 59 tests / 275
+  assertions with 0 failures, twice — once with the change in the tree before
+  the pin bump and once after it.
 - The regression is green three more consecutive runs on the new pin
   (4 tests / 16 assertions each), and the liveness check still separates
   cleanly there: `{:settled {:interrupted? true} :ticks 3066}` with carriage
