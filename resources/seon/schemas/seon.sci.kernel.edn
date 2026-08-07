@@ -1,4 +1,10 @@
-#:seon.sci.kernel{:failure-request
+#:seon.sci.kernel{:arm
+                  [:fn
+                   {:error/message
+                    "must be a live arm value from seon.sci.kernel/current-arm"
+                    :gen/gen seon.sci.kernel/arm-generator}
+                   seon.sci.kernel/arm?],
+                  :failure-request
                   [:map
                    [:seon.fn/sym {:optional true} :seon.fn/sym]
                    [:seon.sci.kernel/time-limit-kind :qualified-keyword]

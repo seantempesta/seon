@@ -5,16 +5,26 @@
   loop entrances. One process guard keeps per-thread arm state; an invocation
   either owns a new arm or inherits the identical context's active arm. Values
   are admitted before disarm. Host calls remain SCI's documented interruption
-  ceiling and are never described as hard-stoppable."
-  (:require [sci.core :as sci]
+  ceiling and are never described as hard-stoppable.
+
+  THE ARM IS A VALUE AND TRAVELS WITH THE WORK. The thread-local slot is the
+  fast path for finding the arm governing the running thread, never the arm's
+  identity: `current-arm` hands the governing arm out as a value that rides a
+  submission the way the environment does, and `adopt-arm` installs it on the
+  thread that actually runs the work. The deadline is a latch shared by the
+  arm's value, so every thread serving one evaluation observes one deadline,
+  counts into one entrance total, and is reachable by one `interrupt!`."
+  (:require [clojure.test.check.generators :as gen]
+            [sci.core :as sci]
             [sci.impl.utils :as sci.utils]
             [sci.interrupt :as sci.interrupt]
             [seon.db :as db]
             [seon.error.refusal :as error.refusal]
+            [seon.schema :as schema]
             [seon.sci.admit :as admit])
   (:import [java.lang.management ManagementFactory]
            [java.util.concurrent Future ScheduledThreadPoolExecutor TimeUnit]
-           [java.util.concurrent.atomic AtomicBoolean]))
+           [java.util.concurrent.atomic AtomicBoolean AtomicLong]))
 
 (defn interrupted?
   "True when a throwable or one of its causes is SCI's interrupt."
@@ -48,31 +58,34 @@
         interrupt-fn
         (fn []
           (when-let [armed (.get ^ThreadLocal thread-arm)]
-            (let [^longs entries (::entries armed)
+            (let [^AtomicLong entries (::entries armed)
                   ^longs sampled (::sampled armed)
                   ^AtomicBoolean reached (::reached armed)
                   outcome (::outcome armed)
                   ^long allocated-at-start (::allocated-at-start armed)
-                  entrance-count (unchecked-inc (aget entries 0))]
-              (aset entries 0 (long entrance-count))
+                  entrance-count (.incrementAndGet entries)]
               (when (.get reached)
                 (vreset! outcome :time)
                 (sci.interrupt/interrupt! "time-limit"))
               (when (and (::measurable armed)
-                         (zero? (bit-and entrance-count 1023)))
+                         (zero? (bit-and entrance-count 1023))
+                         ;; Allocation is a per-thread JVM counter, so only
+                         ;; the owning thread's sample is comparable with
+                         ;; `allocated-at-start`. An adopting thread's
+                         ;; allocation is accumulated by `adopt-arm` instead.
+                         (= (::owner-thread-id armed)
+                            (.threadId (Thread/currentThread))))
                 (aset sampled 0
                       (long (- (allocated-bytes)
                                allocated-at-start)))))))
         host-interop-observer
         (fn []
           (when-let [armed (.get ^ThreadLocal thread-arm)]
-            (let [^longs observations (::host-interop-observations armed)]
-              (aset observations 0
-                    (long (unchecked-inc (aget observations 0)))))))
+            (.incrementAndGet ^AtomicLong (::host-interop-observations armed))))
         built-in-call-observer
         (fn [qualified-symbol]
           (when-let [armed (.get ^ThreadLocal thread-arm)]
-            (vswap! (::built-in-calls armed) conj qualified-symbol)))]
+            (swap! (::built-in-calls armed) conj qualified-symbol)))]
     {::thread-arm thread-arm
      ::interrupt-fn interrupt-fn
      ::host-interop-observer host-interop-observer
@@ -172,35 +185,50 @@
 
 (defn- record
   [armed final-outcome]
-  (let [^longs entries (::entries armed)
+  (let [^AtomicLong entries (::entries armed)
         ^longs sampled (::sampled armed)
-        ^longs host-interop-observations (::host-interop-observations armed)
+        ^AtomicLong host-interop-observations (::host-interop-observations armed)
+        ^AtomicLong adopted-allocated (::adopted-allocated-bytes armed)
         started-at (::started-at armed)
-        allocated-at-start (::allocated-at-start armed)]
-    {:seon.eval/fn-entries (aget entries 0)
-     :seon.eval/host-interop-count (aget host-interop-observations 0)
+        allocated-at-start (::allocated-at-start armed)
+        owning-thread? (= (::owner-thread-id armed)
+                          (.threadId (Thread/currentThread)))]
+    {:seon.eval/fn-entries (.get entries)
+     :seon.eval/host-interop-count (.get host-interop-observations)
      :seon.eval/duration-ms
      (quot (- (System/nanoTime) started-at) 1000000)
      :seon.eval/allocated-bytes
      (if (::measurable armed)
-       (max (aget sampled 0) (- (allocated-bytes) allocated-at-start))
+       (+ (if owning-thread?
+            (max (aget sampled 0) (- (allocated-bytes) allocated-at-start))
+            (aget sampled 0))
+          (.get adopted-allocated))
        -1)
      :seon.eval/outcome (or @(::outcome armed) final-outcome)}))
+
+(defn- new-armed
+  "The arm VALUE: every counter, latch, and identity one evaluation needs,
+  shared by whichever threads serve it. Nothing here is thread-local."
+  [ctx]
+  (let [allocated-at-start (allocated-bytes)]
+    {::ctx ctx
+     ::entries (AtomicLong. 0)
+     ::sampled (long-array 1)
+     ::host-interop-observations (AtomicLong. 0)
+     ::adopted-allocated-bytes (AtomicLong. 0)
+     ::built-in-calls (atom #{})
+     ::reached (AtomicBoolean. false)
+     ::travelled (AtomicBoolean. false)
+     ::outcome (volatile! nil)
+     ::started-at (System/nanoTime)
+     ::owner-thread-id (.threadId (Thread/currentThread))
+     ::allocated-at-start allocated-at-start
+     ::measurable (not (neg? allocated-at-start))}))
 
 (defn- own-arm
   [ctx guard time-limit-ms]
   (let [^ThreadLocal thread-arm (::thread-arm guard)
-        allocated-at-start (allocated-bytes)
-        armed {::ctx ctx
-               ::entries (long-array 1)
-               ::sampled (long-array 1)
-               ::host-interop-observations (long-array 1)
-               ::built-in-calls (volatile! #{})
-               ::reached (AtomicBoolean. false)
-               ::outcome (volatile! nil)
-               ::started-at (System/nanoTime)
-               ::allocated-at-start allocated-at-start
-               ::measurable (not (neg? allocated-at-start))}]
+        armed (new-armed ctx)]
     (.set thread-arm armed)
     (try
       (let [task (.schedule deadline-timer
@@ -212,8 +240,13 @@
          ::built-in-calls (fn [] @(::built-in-calls armed))
          ::stop!
          (fn []
-           (.cancel ^Future task false)
-           (.set ^AtomicBoolean (::reached armed) false)
+           ;; The deadline is the arm's latch, not the owning thread's timer.
+           ;; Once the arm has TRAVELLED, work elsewhere is still governed by
+           ;; it, so the latch must be allowed to close on schedule; the
+           ;; owner only stops serving the arm on its own thread. An arm that
+           ;; never travelled has no other observer, so its task is cancelled.
+           (when-not (.get ^AtomicBoolean (::travelled armed))
+             (.cancel ^Future task false))
            (.remove thread-arm)
            nil)
          ::record #(record armed %)})
@@ -231,7 +264,13 @@
   nested work can never restart the clock and outlive the limit that admitted
   it. A DIFFERENT context on an armed thread is refused, because one thread
   cannot honestly serve two limits. `::built-in-calls` reports the governing
-  arm's observations either way."
+  arm's observations either way.
+
+  THE THREAD IS NOT THE ARM. Work that leaves this thread carries the arm as
+  a value (`current-arm`) and the receiving thread installs it for the extent
+  of that work (`adopt-arm`), so a crossing neither escapes the deadline nor
+  starts a second one: there is exactly one latch, one entrance total, and
+  one reachable `interrupt!` per armed evaluation, on however many threads."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx
                        :seon.sci.eval/time-limit-ms]
                   :map]}
@@ -252,6 +291,75 @@
          ::stop! (constantly nil)
          ::record #(record armed %)})
       (own-arm ctx guard time-limit-ms))))
+
+(defn arm?
+  "True for a live arm value as handed out by `current-arm`."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [value]
+  (and (map? value)
+       (instance? AtomicLong (::entries value))
+       (instance? AtomicBoolean (::reached value))
+       (instance? AtomicBoolean (::travelled value))))
+
+(schema/register-core-predicate! 'seon.sci.kernel/arm? arm?)
+
+(def arm-generator
+  "A real arm value — honest by constructing an instance."
+  (gen/fmap (fn [_] (new-armed nil)) (gen/return nil)))
+
+(defn current-arm
+  "The arm governing this thread right now, as a value work can carry.
+
+  This is the ONE way an arm leaves the thread that created it. Capture it on
+  the submitting thread, put it in what crosses — the submission's
+  environment under `:seon.sci.kernel/arm` — and the receiving thread hands
+  it to `adopt-arm`. Nil means the caller is not inside an armed evaluation
+  (system-side work), which is not an error: unarmed work simply carries no
+  arm. Capturing marks the arm as travelled, so its deadline latch is kept
+  live for the crossing even after the arming evaluation disarms."
+  {:malli/schema [:=> [:cat] [:or :nil :seon.sci.kernel/arm]]}
+  []
+  (let [guard @process-guard]
+    (when-let [armed (.get ^ThreadLocal (::thread-arm guard))]
+      (.set ^AtomicBoolean (::travelled armed) true)
+      armed)))
+
+(defn adopt-arm
+  "Run `work` on this thread governed by `carried-arm`, then restore.
+
+  The receiving half of `current-arm`. Inside the extent, this thread's
+  interpreted entrances count into `carried-arm`'s total, its deadline is the
+  one being observed, and its `interrupt!` reaches this thread — so detached
+  work is cut by the limit that admitted it rather than running unbounded.
+
+  RE-ENTRANCY, one rule: adoption is strictly nested. A thread already armed
+  saves that arm, serves the carried one for the extent of `work`, and
+  restores on the way out. That is why arriving work never has to be refused
+  and never merges two limits: at every instant the thread serves exactly one
+  arm, and the displaced arm's deadline is a latch on its own value rather
+  than a clock on this thread, so nothing about it is lost while it waits.
+  A nil `carried-arm` runs `work` unarmed, unchanged."
+  {:malli/schema [:=> [:cat [:or :nil :seon.sci.kernel/arm]
+                       [:fn clojure.core/ifn?]]
+                  :any]}
+  [carried-arm work]
+  (if-not carried-arm
+    (work)
+    (let [^ThreadLocal thread-arm (::thread-arm @process-guard)
+          displaced (.get thread-arm)
+          allocated-at-entry (allocated-bytes)]
+      (.set thread-arm carried-arm)
+      (try
+        (work)
+        (finally
+          (let [allocated-at-exit (allocated-bytes)]
+            (when (and (not (neg? allocated-at-entry))
+                       (not (neg? allocated-at-exit)))
+              (.addAndGet ^AtomicLong (::adopted-allocated-bytes carried-arm)
+                          (- allocated-at-exit allocated-at-entry))))
+          (if displaced
+            (.set thread-arm displaced)
+            (.remove thread-arm)))))))
 
 (defn failure-value
   "The ONE flat `:seon.error` value for a failure at the guarded boundary.
