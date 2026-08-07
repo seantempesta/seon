@@ -932,7 +932,14 @@ fixture bites are the provenance; (4) test artifacts get the same
 lifecycle discipline as production resources (declared location, owner,
 reap-on-success, BOUNDED failure retention as a config fact). The
 test-infrastructure spec (in flight) is organized around this ruling;
-owner review before implementation.
+owner review before implementation. ALSO RULED same morning:
+`seon.shell.jvm-test` and `seon.web.jvm-test` (410 s of the ~16-minute
+bare suite between them) move to the `--full` tier for now via
+namespace-level `:seon.test/long`; suite tiering is revisited on the
+fork-based infrastructure's parallel numbers. Design iteration
+DISCIPLINE (owner): far-reaching designs iterate in chat with the owner
+first — agents launch ONCE with the settled design, never
+launch-then-steer.
 
 ### Rulings 2026-07-27 session 2 (owner, conversational) — the fresh tree IS the project
 

@@ -1,4 +1,8 @@
-(ns seon.shell.jvm-test
+(ns ^{:seon.test/long
+      "Real subprocess exercises (~208 s serial); full-tier only until the
+       fork-based test infrastructure lands parallel numbers (owner,
+       2026-08-07)."}
+ seon.shell.jvm-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as datahike]

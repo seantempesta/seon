@@ -1,4 +1,8 @@
-(ns seon.web.jvm-test
+(ns ^{:seon.test/long
+      "Real HTTP server exercises (~202 s serial); full-tier only until the
+       fork-based test infrastructure lands parallel numbers (owner,
+       2026-08-07)."}
+ seon.web.jvm-test
   (:require [clojure.data.json :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
