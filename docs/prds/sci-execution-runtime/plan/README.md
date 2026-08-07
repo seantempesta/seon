@@ -911,6 +911,29 @@ structure). Rulings:
   end. Behavior-testable roots land WITH their class-killing
   regressions (standing rule).
 
+### Ruling 2026-08-07 (owner, morning) — the platform IS the test infrastructure
+
+Owner verbatim: "The test suite should use the same features our system
+has to make forking into fresh test environments cheap and fast. We
+don't have that many moving parts to the platform. We need to make sure
+they work and have minimal tests catching regressions and then
+everything else should be using the cheap forking to get clean
+environments where they can do their tests in isolation." So: (1) the
+few PLATFORM MOVING PARTS (store+flock, branch fork, publication/
+activation, the flow graph constructor, settle!, the SCI fork/
+projection acquisition) each get MINIMAL direct regressions proving
+they work; (2) EVERYTHING ELSE tests on the platform's own cheap
+forking — one built base per suite run (published source, base ctx,
+canonical projection), each test forking a clean sovereign environment
+(branch fork ~17 ms, sci/fork sub-microsecond) exactly as production
+does; (3) NO hand-built test graphs, no imitation fixtures, no second
+construction mechanism — the five 2026-08-06/07 projection-binding
+fixture bites are the provenance; (4) test artifacts get the same
+lifecycle discipline as production resources (declared location, owner,
+reap-on-success, BOUNDED failure retention as a config fact). The
+test-infrastructure spec (in flight) is organized around this ruling;
+owner review before implementation.
+
 ### Rulings 2026-07-27 session 2 (owner, conversational) — the fresh tree IS the project
 
 - **Stop thinking temporary; drop the "nucleus" vocabulary.** The fresh
