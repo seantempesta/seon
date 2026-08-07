@@ -38,12 +38,13 @@ See `README.md` for the convention.
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 | [Arm the time limit on the thread that runs the work](interrupt-arm-does-not-cross-a-thread-hop.md) | blocker | seon.env Phase 1 constructor wave |
 
-## Friction (100)
+## Friction (101)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Carry the submitting environment across the IO half of the work launcher](flow-io-work-does-not-carry-its-environment.md) | friction | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Read the SCI built-in call observer from the runtime context](sci-built-in-call-observer-is-read-from-the-analysis-context.md) | friction | seon.env Phase 1 sci fork hook landing ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
+| [Pass the root :io executor to the work-launcher graph](flow-work-launcher-graph-omits-its-root-io-executor.md) | friction | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Hyperlith pin is 23 commits behind the upstream lockstep rework](hyperlith-pin-behind-lockstep-rework.md) | friction | upstream-delta sweep after seon.env Phase 0 |
 | [Give system-generated messages arrival ordinals](system-generated-messages-omit-arrival-ordinals.md) | friction | message transaction-data repair |
 | [Attribute and fix the ~70 s complete publication](complete-publication-takes-seventy-seconds.md) | friction | publication velocity incident |
