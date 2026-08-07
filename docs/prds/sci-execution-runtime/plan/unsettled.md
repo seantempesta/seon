@@ -16,6 +16,33 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**ELEGANCE SEQUENCE EXECUTING — 2026-08-06 night (steps 1-4 LANDED).**
+The owner-sealed plan (README evening ruling block) is mostly in, all
+pushed through `2f70fa837`: STEP 1 minimal turn (one `settle!` terminal
+exit, receipts from the transaction report, schema-key immutability,
+five failure paths + second admission + string ids + counters deleted,
+net −837 lines, loop.clj 1,906→1,514, generative phase-failure property
+green, four blocker classes archived; completion-permit deletion
+REFUTED by probe — kept); STEP 2 opening-basis prompts (`run/opening-db`
+via as-of, A/B leak regression, `0b3ff2d65`); STEP 3 R4 singles (prompt
+budget error+compact from config facts, db error short-circuit with
+Datahike owning acceptance, supplied render identity); STEP 4
+activation closure (atomic closure publication + fork refusal naming
+missing facts, five-class regression, per-cluster projection
+acquisition, process-global !schema-state deleted, cluster-bound
+:io-exec through agent graphs, can't-load-only init veto at
+`blocking-findings`, bounded refusal face; `656cea270`..`2f70fa837`).
+Orchestrator integration fixes en route: db/basis-t class fix (14
+map-key sites, `39f1a5eb3`), capture-basis interface read
+(`419a5e529`), my.web dead exclude (`b07ccfef0`). GATE: two blockers
+remain — n-agent-parallel-turns-property hangs at the 300 s liveness
+backstop (first concurrency probe of the new seams; dumps retained in
+tmp/test-runs/run.8KPLyX) and seon.ai-test's stale one-model roster
+pin; `gate-exit` lane on both. THEN: bare green → reset → drive-arc
+rerun (the first-turn proof) → step 5 R6 singles → step 6 recurring
+deterministic drive in bin/test (graduation gate) → messaging wave
+(spec ready, result/eid-N ruled).
+
 **LIVE DRIVE VERDICT + REPAIR WAVE — 2026-08-06 evening.** The
 owner-directed live drive
 ([live-drive-2026-08-06.md](../research/live-drive-2026-08-06.md),
