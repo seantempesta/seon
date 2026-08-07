@@ -57,6 +57,29 @@ Owner rulings recorded in this document (chat, 2026-08-07 afternoon):
    "Sometimes I want a DB value and the ability to get the next db value
    via the transaction return and sometimes I just want it always to be
    current." Encoded below in [[#Current versus pinned database values]].
+7. **Sequencing vs gate-red (owner, night).** Gate-exit finishes first;
+   Phase 1 starts at bare green. The parallel-turn hang is investigated
+   through the isolation lens before anyone symptom-patches it.
+8. **Hook consultation cost is implementation discretion (owner, night).**
+   The ~80 ns vs ~9 ns question is a performance ordering detail only —
+   the safety guarantees (time limit, interrupt, output caps, admission
+   bounds) are a separate mechanism and are unaffected; Phase 1 fixes the
+   unarmed-thread hole regardless. Land the simple hook first; add
+   plan-gating when the S1 machinery lands.
+9. **The read-evidence sink rides the environment (owner, night).** The
+   environment carries an optional declared evidence-sink handle; the db
+   read path offers evidence to it when present. The last surviving
+   dynamic var joins the deletion list.
+10. **Cross-cluster debugging runs AS the target agent (owner, night).**
+    Root is limited to its own cluster like everyone else; debugging
+    another cluster means opening the evaluation as one of THAT cluster's
+    agents, in that cluster's context — records land naturally as that
+    agent's activity, no separate root log. The real initiator may be
+    named through ordinary transaction metadata (the existing
+    `:seon.db/user`/`:seon.db/process` provenance), never a second record
+    path. This REPLACES the earlier "named cross-cluster platform
+    function" phrasing in ruling 1: the mechanism is agent selection, not
+    a cross-cluster eval capability.
 
 ## The defect this repairs
 
