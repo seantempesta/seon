@@ -57,6 +57,29 @@ Measured, one shared ctx:
 
 The `seon.sci.kernel` guard, with the `seon.env` Phase 1 constructor.
 
+## State — the guard is fixed; the submission seam is the remaining step
+
+Landed 2026-08-07 in `src/seon/sci/kernel.clj` (commit "Carry the interrupt
+arm with the work, not with the thread"). The arm is a VALUE: `current-arm`
+hands the governing arm to whatever crosses a thread, `adopt-arm` installs it
+where the work runs and restores the displaced arm on the way out, the
+deadline is a latch on the arm value rather than a timer on the arming
+thread, and the counters are `AtomicLong` so entrances accumulate wherever
+they happen. Every acceptance criterion above is met and proven by
+`test/seon/sci/kernel_arm_carriage_test.clj` — five consecutive green runs,
+and the regression fails (detached loop still running at 3 s, 183,830 ticks)
+when `adopt-arm` is neutered. Evidence:
+[env-phase1-w2-notes-2026-08-07.md](../../prds/sci-execution-runtime/research/env-phase1-w2-notes-2026-08-07.md).
+
+REMAINING, and the only reason this stays open: the real crossings in
+`src/seon/flow.clj` (lane W1's owned path) do not carry the arm yet. Two
+calls close it — `(assoc environment :seon.sci.kernel/arm
+(kernel/current-arm))` on the submitting thread in `submit!`/`submit!!`, and
+`(kernel/adopt-arm (:seon.sci.kernel/arm environment) …)` around the work-fn
+and `complete!` on the running thread. A nil arm is not a refusal case: it
+means the submitter was not inside an armed evaluation. Close this issue when
+those land with a submission-level proof.
+
 ## Acceptance criteria
 
 - Work handed across a thread from inside an armed evaluation is governed by
