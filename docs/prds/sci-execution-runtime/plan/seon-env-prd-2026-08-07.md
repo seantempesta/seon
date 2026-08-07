@@ -9,10 +9,11 @@ tags: [prd, runtime, platform, boot, testing]
 The environment — everything that makes one cluster's computation different
 from another's — becomes ONE explicit value, constructed only by boot,
 carried by the sci ctx for agent code, by submissions and proc args for
-thread crossings, and by request maps for the web. The ambient carrier layer
-(dynamic vars, thread-locals behind global facades, load-time registration)
-is deleted. A parallel provisioning design becomes unwritable, not merely
-forbidden: the ingredients only exist inside the environment value.
+thread crossings, and by request maps for the web. The dynamic-var carrier
+layer (dynamic vars, ThreadLocals behind process-global facades, load-time
+registration) is deleted. A parallel provisioning design becomes unwritable,
+not merely forbidden: the ingredients only exist inside the environment
+value.
 
 Owner rulings recorded in this document (chat, 2026-08-07 afternoon):
 
@@ -23,16 +24,17 @@ Owner rulings recorded in this document (chat, 2026-08-07 afternoon):
    handed to agent code, but its contents are supplied by declaration. Root
    can see every cluster's environment and evaluate code in any cluster's
    context to debug — through a named, recorded platform function (the
-   cross-cluster evaluation MCP `eval_clj` already models), never ambiently.
-2. **r2 amendment.** The sealed ambient-injection r2 invariant
-   "`seon.db/*conn*` remains the one dynamic source of custody" is AMENDED:
-   injection providers read the runtime ctx's environment; the dynamic vars
+   cross-cluster evaluation MCP `eval_clj` already models), never through a
+   dynamic var.
+2. **r2 amendment.** The sealed r2 invariant "`seon.db/*conn*` remains the
+   one dynamic source of custody" is AMENDED: providers read the runtime
+   ctx's environment at call preparation; the dynamic vars
    (`seon.db/*conn*`, `seon.effect/*request-context*`,
    `seon.render/*walk-context*`, the schema projection bindings) are deleted
-   in the same change. Time travel and cross-branch work need no ambient:
-   the db value is a battery (`as-of`/`history`/`since` are ordinary verbs
-   over it), foreign branch values are obtained explicitly and win by the
-   caller-wins rule, custody-fenced.
+   in the same change. Time travel and cross-branch work need no dynamic
+   var: the db value is a supplied default (`as-of`/`history`/`since` are
+   ordinary verbs over it), foreign branch values are obtained explicitly
+   and win by the caller-wins rule, custody-fenced.
 3. **Sequencing.** This design is the spine of the test-infrastructure work
    ([test-infrastructure-spec-2026-08-07.md](test-infrastructure-spec-2026-08-07.md)),
    not a separate wave. Tests consume the same constructor via fork; the
@@ -42,13 +44,27 @@ Owner rulings recorded in this document (chat, 2026-08-07 afternoon):
    (prepl at second zero survives later-layer failure), failures are clear
    flat errors naming the failed layer, and a partial environment is never
    handed out. Running code receives, never constructs.
+5. **Naming (owner, evening).** No "ambient", no "tower". Call things what
+   the interfacing libraries call them or the literal common name: dynamic
+   vars / thread-local bindings (Clojure's names for the carriers),
+   **call preparation** (sci's name for the hook seam — supersedes
+   "ambient injection" as the working name; the P17 documents keep their
+   historical titles), **boot** (just boot, in dependency order), supplied
+   **defaults** (not "batteries"). Database temporality uses Datahike's own
+   words: `d/db` on a connection is CURRENT; a database VALUE is pinned;
+   the transaction report's `:db-after` is the next value.
+6. **Database temporality — both modes are first-class (owner, evening).**
+   "Sometimes I want a DB value and the ability to get the next db value
+   via the transaction return and sometimes I just want it always to be
+   current." Encoded below in [[#Current versus pinned database values]].
 
 ## The defect this repairs
 
 The [parallel isolation audit](../research/parallel-isolation-audit-2026-08-07.md)
 (seven probes run, four failures, two design defects):
 
-- **Defect I — the environment is ambient.** Cluster identity, declarations,
+- **Defect I — the environment rides thread-local bindings.** Cluster
+  identity, declarations,
   connection, and request identity ride thread-local dynamic bindings read
   through process-global facades. A raw or virtual-thread hop silently
   drops them all together — probed for the schema registry, `seon.db/*conn*`,
@@ -130,7 +146,7 @@ explicitly.
 
 ### Construction — boot, the only constructor
 
-The boot tower builds one environment per cluster in dependency order
+Boot builds one environment per cluster in dependency order
 (store → branch → facts/projection → ctx → graphs), refusing the
 configuration up front and naming the failed layer in a flat error. The
 prepl opens at second zero and survives later-layer failure. The
@@ -156,6 +172,32 @@ supported for tests that want less. Teardown is the same graph reversed.
    request map; the render walk uses its explicit walk context; SSE writer
    procs receive it as proc args.
 
+### Current versus pinned database values
+
+The environment stores the CONNECTION, never a database value. Two modes,
+both first-class, selected by what the caller does — Datahike's own
+semantics, no new mechanism:
+
+- **Current (the default).** A function that declares `:seon.db/db` and is
+  called without one receives `(d/db connection)` derefed AT CALL TIME by
+  the provider — always the latest committed value. This is the right
+  default for most reads (renders, probes, one-off queries) and is why the
+  provider derives rather than the environment storing: a stored value
+  goes stale silently.
+- **Pinned (explicit, for consistency).** A caller that needs one
+  consistent basis passes the database value explicitly and it WINS —
+  never replaced by injection. The next value comes from the transaction
+  report's `:db-after` (or `as-of`/`since` for time travel), so a
+  consistent chain is `opening-db → transact! → :db-after → …`, exactly
+  the run loop's shape (the reduce over forms whose accumulator is the
+  basis; `run/opening-db` via `as-of` already landed). The run loop, plan
+  execution, and any multi-read invariant use this mode.
+
+The rule in one line: **elide for current, pass for consistent.** Both ride
+the same declared contract; there is no mode flag, no second function, and
+no way to get a silently mixed basis — a call either derefed once at its
+own preparation or used the caller's explicit value throughout.
+
 ### Derived state
 
 Compiled/derived state hangs off the value it derives from: the
@@ -165,7 +207,7 @@ Any surviving shared cache is keyed by complete identity
 read exactly once. `ensure-shape-generation-for!`'s check-then-act shape is
 banned.
 
-### Deletion list (the ambient half dies)
+### Deletion list (the dynamic-var half dies)
 
 - `seon.db/*conn*`, `seon.effect/*request-context*`,
   `seon.render/*walk-context*`, `seon.cluster/*source-progress!*` /
@@ -327,8 +369,8 @@ turns run end to end clean; the design is not "first thing tried" — it is
 revised in this phase with evidence, in chat with the owner.
 
 Phase 3 — the production sweep, farmed out with well-written specs: delete
-the ambient carriers, convert the named readers, land the r2 injection
-slices (S1–S4 in [p17-ambient-slices-2026-08-05.md](p17-ambient-slices-2026-08-05.md)
+the dynamic-var carriers, convert the named readers, land the r2 call-
+preparation slices (S1–S4 in [p17-ambient-slices-2026-08-05.md](p17-ambient-slices-2026-08-05.md)
 amended per ruling 2 above), fix `submit!`/`submit!!`, move the compiled
 caches onto the projection. Each slice is one lane with owned paths and the
 probes as acceptance evidence.
