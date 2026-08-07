@@ -13,8 +13,7 @@
             [seon.cluster.work :as work]
             [seon.config :as config]
             [seon.print :as print]
-            [seon.render.transcript :as transcript]
-            [seon.sci.eval :as sci.eval])
+            [seon.render.transcript :as transcript])
   (:import [java.util Date UUID]))
 
 (def ^:private default-run-cap 6)
@@ -279,6 +278,7 @@
     :seon.db/connection (:seon.boot/cluster-connection instance)
     :seon.sci.eval/ctx (:seon.sci.eval/ctx instance)
     :seon.cluster.agent/id agent-id
+    :seon.render.value/root [:seon.cluster.agent/id agent-id]
     :seon.sci.admit/caps (config/result-caps settings)
     :seon.sci.eval/time-limit-ms
     (:seon.config.eval/time-limit-ms settings)
