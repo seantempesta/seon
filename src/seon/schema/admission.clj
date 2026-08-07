@@ -122,25 +122,38 @@
   [path]
   (some-> path io/file .getCanonicalPath))
 
+(defn- read-declarations
+  [^java.io.File file]
+  (let [{:keys [declarations findings]}
+        (parse-source (.getPath file) (slurp file))]
+    (if (seq findings)
+      (throw
+       (ex-info "An existing schema resource is unreadable."
+                {:seon.schema.admission/findings findings}))
+      declarations)))
+
 (defn- default-registry-excluding
   [candidate-files]
   (let [excluded (into #{} (keep canonical-path) candidate-files)
         resource-directory (default-schema-directory)
+        resource-files (schema-files resource-directory)
+        {excluded-files true other-files false}
+        (group-by (fn [^java.io.File file]
+                    (contains? excluded (.getCanonicalPath file)))
+                  resource-files)
+        ;; The live registry ALREADY holds every published declaration,
+        ;; including the candidate file's own. Skipping that file in the disk
+        ;; walk therefore cannot remove its keys, and without this subtraction
+        ;; every edit to an existing schema resource — even adding one new key
+        ;; — collides with its own published self and is refused.
+        registered
+        (apply dissoc
+               (schema/registered-schemas)
+               (mapcat (comp keys read-declarations) excluded-files))
         existing
-        (reduce
-         (fn [forms ^java.io.File file]
-           (if (contains? excluded (.getCanonicalPath file))
-             forms
-             (let [{:keys [declarations findings]}
-                   (parse-source (.getPath file) (slurp file))]
-               (if (seq findings)
-                 (throw
-                  (ex-info
-                   "An existing schema resource is unreadable."
-                   {:seon.schema.admission/findings findings}))
-                 (merge forms declarations)))))
-         (schema/registered-schemas)
-         (schema-files resource-directory))]
+        (reduce (fn [forms file] (merge forms (read-declarations file)))
+                registered
+                other-files)]
     (schema.edn/derive-config-forms existing)))
 
 (defn- form-properties
