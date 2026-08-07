@@ -671,7 +671,7 @@
                          @connection run-id))
                 "the settled receipt records the evaluated namespace")))))))
 
-(deftest call-resolves-once-records-settings-and-sees-next-turn-config
+(deftest prompt-and-call-resolve-once-record-settings-and-see-next-turn-config
   (test-support/with-database
    (fn [connection]
      (let [cluster-name "live-settings"
@@ -752,9 +752,11 @@
               :seon.cluster.work/next
               (call-work agent-id "settings-run-1")}
              now)
-            (testing "failover reuses the turn's one resolution"
-              (is (= 1 (count @overlays)))
-              (is (= 1 (count @resolutions)))
+            (testing "the opening prompt and paid call each resolve once"
+              (is (= 2 (count @overlays))
+                  "failover does not resolve either phase again")
+              (is (= 2 (count @resolutions))
+                  "prompt budget uses opening facts; attempts share call settings")
               (is (= ["before-apply" "backup-before-apply"]
                      (mapv :seon.ai/model @requests)))
               (is (= [:high :high]
@@ -795,9 +797,9 @@
               :seon.cluster.work/next
               (call-work agent-id "settings-run-2")}
              now)
-            (testing "the same loop handle sees config apply on the next turn"
-              (is (= 2 (count @overlays)))
-              (is (= 2 (count @resolutions)))
+            (testing "both phases see the next run opened after config apply"
+              (is (= 4 (count @overlays)))
+              (is (= 4 (count @resolutions)))
               (is (= "after-apply" (:seon.ai/model (last @requests))))
               (is (= :high (:seon.ai/thinking (last @requests))))
               (let [last-row (last (settings-attempts @connection))]
