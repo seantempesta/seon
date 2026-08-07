@@ -81,6 +81,7 @@
         stream-channel (async/chan (async/sliding-buffer 1))
         completion (async/promise-chan)
         cluster (assoc cluster
+                       :seon.env/environment @test-environment
                        :seon.render/context-channel context-channel
                        :seon.cluster.loop/stream-channel stream-channel)
         graph

@@ -125,7 +125,8 @@
                :seon.config.flow.io/queue-depth 2
                :seon.config.flow.io/concurrency 2}})
             context
-            {:seon.db/connection connection
+            {:seon.env/environment @test-environment
+             :seon.db/connection connection
              :seon.cluster.agent/id "binary-agent"
              :seon.cluster.run/id "binary-run"
              :seon.cluster.run.form/ordinal 0

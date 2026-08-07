@@ -178,7 +178,8 @@
                     :seon.cluster.message/at now}])
       (with-render-context-proc
          connection
-         {:seon.db/connection connection
+         {:seon.env/environment @test-environment
+               :seon.db/connection connection
                :seon.cluster/name "turn-test"
                :seon.flow/work-launcher launcher
                :seon.cluster.run/process process

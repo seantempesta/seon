@@ -146,7 +146,8 @@
 
 (defn- handle
   [connection ctx]
-  {:seon.db/connection connection
+  {:seon.env/environment @test-environment
+   :seon.db/connection connection
    :seon.cluster/name
    (db/q '[:find ?cluster . :where [_ :seon.config/cluster ?cluster]]
         @connection)

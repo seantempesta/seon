@@ -186,6 +186,12 @@
    [:=> [:cat :seon.env/environment :map]
     [:or :seon.env/environment :seon.error/value]]}
   [carried supplied]
+  (when-not (environment? carried)
+    (throw
+     (ex-info
+      "Scoping requires an environment; there is nothing to narrow."
+      {:seon.error/kind ::absent-environment
+       :seon.error/data {:seon.env/supplied (str (type carried))}})))
   (let [turn-members
         (into #{}
               (comp (filter (comp #{:turn} :seon.env/layer))
