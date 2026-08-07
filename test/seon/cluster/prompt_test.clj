@@ -4,6 +4,7 @@
             [clojure.core.async.flow :as flow.core]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [seon.cluster :as cluster]
             [seon.config :as config]
             [seon.db :as db]
             [seon.cluster.agent :as agent]
@@ -78,7 +79,10 @@
                    (:seon.config.eval/time-limit-ms (config/defaults))
                    :seon.config/on-core-error :panic
                    :seon.cluster.run/process "prompt-test"}})}}
-              :conns []})
+              :conns []
+              :io-exec
+              (cluster/projection-executor
+               (:seon.sci.eval/projection-state ctx))})
             {:keys [report-chan error-chan]} (flow.core/start graph)]
         (async/go-loop [] (when (async/<! report-chan) (recur)))
         (async/go-loop [] (when (async/<! error-chan) (recur)))
