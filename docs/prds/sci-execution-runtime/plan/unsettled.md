@@ -16,6 +16,23 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**SEON.ENV SEALED — 2026-08-07 afternoon.** The environment-is-a-value
+design is owner-ruled and recorded in
+[seon-env-prd-2026-08-07.md](seon-env-prd-2026-08-07.md) (README afternoon
+ruling block has the compact form). Provenance: the
+[parallel isolation audit](../research/parallel-isolation-audit-2026-08-07.md)
+(two design defects, four probe failures, forking primitives sound) plus
+four source deep dives in `research/environment-mechanism-*.md`. It is the
+spine of the test-infrastructure work, AMENDS r2's dynamic-custody
+invariant, and carries the deletion list for the whole ambient carrier
+layer. Next: Phase 0 REPL falsifiers (env-on-fork, runtime-ctx hook, env on
+IO submissions), then value+constructor with `start-fork!`, live-drive
+iteration on forks, then the farmed-out production sweep. Open platform
+items riding with it: interrupt-arm probe, dropped-fault durability, the
+sci analysis-ctx observer bug, the work-launcher `:io` executor gap,
+hyperlith lockstep deltas (measure tick batching; pin bump sweep).
+Docs-as-queryable-facts is deliberately parked for its own short design.
+
 **ELEGANCE SEQUENCE EXECUTING — 2026-08-06 night (steps 1-4 LANDED).**
 The owner-sealed plan (README evening ruling block) is mostly in, all
 pushed through `2f70fa837`: STEP 1 minimal turn (one `settle!` terminal

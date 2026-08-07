@@ -941,6 +941,32 @@ DISCIPLINE (owner): far-reaching designs iterate in chat with the owner
 first — agents launch ONCE with the settled design, never
 launch-then-steer.
 
+### Ruling 2026-08-07 (owner, afternoon) — seon.env: the environment is a value
+
+Sealed in [seon-env-prd-2026-08-07.md](seon-env-prd-2026-08-07.md), grounded
+in the [parallel isolation audit](../research/parallel-isolation-audit-2026-08-07.md)
+and four source deep dives (flow, sci, system composition, malli+datahike —
+dated reports in `research/`). The environment (connection, projection,
+identity, capability handles) is ONE explicit `seon.env` value using existing
+key names, constructed only by boot (0→1, REPL never hostage, refuse up
+front, no partial environment handed out), carried by the sci ctx/fork for
+agent code, by submission maps and proc `:args` across threads (no
+`bound-fn*`), and merged into request maps on the web. The ambient carrier
+layer is DELETED (`*conn*`, `*request-context*`, `*walk-context*`, the
+projection bindings, the 22 load-time sentinels, the predicate cache, the
+global compiled-validator slots — compiled state moves onto the projection
+value). r2's "`*conn*` remains the one dynamic source" invariant is AMENDED:
+injection providers read the runtime ctx's environment. Agents keep
+right-default everything by declaration (db value and connection are
+batteries; time travel is `as-of`/`history` over the injected value;
+cross-branch is explicit and custody-fenced). Root debugs any cluster
+through a named recorded platform function, never ambiently. Mutable-ref
+rule the hook enforces: resource handles and invocation-local coordination
+only — nothing that varies by cluster. Rollout is test-first per the
+test-infrastructure spec: probe the three load-bearing mechanics in the
+REPL, land the value+constructor with `start-fork!`, iterate live drives on
+forks, THEN farm out the production deletion sweep as specced slices.
+
 ### Rulings 2026-07-27 session 2 (owner, conversational) — the fresh tree IS the project
 
 - **Stop thinking temporary; drop the "nucleus" vocabulary.** The fresh

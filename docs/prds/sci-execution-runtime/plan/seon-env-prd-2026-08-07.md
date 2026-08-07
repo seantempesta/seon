@@ -1,0 +1,275 @@
+---
+type: prd
+status: active
+tags: [prd, runtime, platform, boot, testing]
+---
+
+# seon.env — the environment is a value (RULED, owner, 2026-08-07)
+
+The environment — everything that makes one cluster's computation different
+from another's — becomes ONE explicit value, constructed only by boot,
+carried by the sci ctx for agent code, by submissions and proc args for
+thread crossings, and by request maps for the web. The ambient carrier layer
+(dynamic vars, thread-locals behind global facades, load-time registration)
+is deleted. A parallel provisioning design becomes unwritable, not merely
+forbidden: the ingredients only exist inside the environment value.
+
+Owner rulings recorded in this document (chat, 2026-08-07 afternoon):
+
+1. **Name and visibility.** The owning namespace/schema is `seon.env`. Its
+   keys are the EXISTING names (`:seon.db/connection`, `:seon.db/db`,
+   `:seon.schema/projection`, `:seon.cluster.agent/id`, …) — no new umbrella
+   nouns inside the value. Agents are scoped as needed; the container is not
+   handed to agent code, but its contents are supplied by declaration. Root
+   can see every cluster's environment and evaluate code in any cluster's
+   context to debug — through a named, recorded platform function (the
+   cross-cluster evaluation MCP `eval_clj` already models), never ambiently.
+2. **r2 amendment.** The sealed ambient-injection r2 invariant
+   "`seon.db/*conn*` remains the one dynamic source of custody" is AMENDED:
+   injection providers read the runtime ctx's environment; the dynamic vars
+   (`seon.db/*conn*`, `seon.effect/*request-context*`,
+   `seon.render/*walk-context*`, the schema projection bindings) are deleted
+   in the same change. Time travel and cross-branch work need no ambient:
+   the db value is a battery (`as-of`/`history`/`since` are ordinary verbs
+   over it), foreign branch values are obtained explicitly and win by the
+   caller-wins rule, custody-fenced.
+3. **Sequencing.** This design is the spine of the test-infrastructure work
+   ([test-infrastructure-spec-2026-08-07.md](test-infrastructure-spec-2026-08-07.md)),
+   not a separate wave. Tests consume the same constructor via fork; the
+   parallel suite at load is the standing stress test of environment
+   isolation ("this is a stress test of our multi branching system", owner).
+4. **Boot contract.** Boot is a 0→1 process: the REPL is never hostage
+   (prepl at second zero survives later-layer failure), failures are clear
+   flat errors naming the failed layer, and a partial environment is never
+   handed out. Running code receives, never constructs.
+
+## The defect this repairs
+
+The [parallel isolation audit](../research/parallel-isolation-audit-2026-08-07.md)
+(seven probes run, four failures, two design defects):
+
+- **Defect I — the environment is ambient.** Cluster identity, declarations,
+  connection, and request identity ride thread-local dynamic bindings read
+  through process-global facades. A raw or virtual-thread hop silently
+  drops them all together — probed for the schema registry, `seon.db/*conn*`,
+  and `seon.effect/*request-context*` in one shot. Every capability request
+  crossing the guarded door on `:io` runs with no cluster identity today; it
+  survives only because with one cluster the fallback happens to be right.
+- **Defect II — derived state parked in process-wide slots.** One compiled
+  validator generation for the whole JVM with a check-then-re-deref race;
+  reproduced reading another environment's validators in both directions.
+
+The platform's forking primitives are sound (branch forks at 24-way, sci/fork
+at 16-way concurrency, shared executors, lease pool — all probed). What is
+missing is only that code inside a fork can name which environment it is in.
+
+## Source grounding — the pattern, from four deep dives
+
+The four dated reports (all in `../research/`, every claim file:line):
+
+- [flow](../research/environment-mechanism-flow-2026-08-07.md) —
+  core.async.flow conveys NO bindings anywhere by design (zero `bound-fn`
+  under `flow/`); the flow-native carrier is `:args` → state, delivered at
+  proc start, re-delivered free on graph rebuild. Verdict: one
+  namespaced key carrying one immutable map on every submission and in
+  every proc's args; the three `bound-fn*` sites deleted; a missing
+  environment refused at construction.
+- [sci](../research/environment-mechanism-sci-2026-08-07.md) — the ctx
+  travels with the code, not the thread: every interpreted node evaluates
+  against the ctx it was built with; a closure handed to a virtual-thread
+  executor still carries its captured ctx (`:interrupt-fn` already rides
+  this path). Everything else in sci is thread-local. The P17 hook must
+  read the RUNTIME ctx (a present bug: the built-in call observer is read
+  from the analysis ctx). Containment: the environment container is a host
+  record absent from `:classes`; no installed function returns it.
+- [system composition](../research/environment-mechanism-system-composition-2026-08-07.md)
+  — adopt the value, reject the registry: integrant's dependency-ordered
+  init producing a flat map with the config's exact key set, refuse-up-front
+  before any side effect, reversed teardown, free subset boot; hyperlith's
+  ctx map merged into every request surviving three thread transitions with
+  zero dynamic vars. Reject every open extension point (defmulti resolving
+  arbitrary keywords to vars); dev conveniences live in a separate
+  REPL-only namespace.
+- [malli + datahike](../research/environment-mechanism-malli-datahike-2026-08-07.md)
+  — compiled state hangs off the value it derives from (Malli validators on
+  the schema instance; Datahike rschema/writer on the db record/connection),
+  so cache identity is structural and there is nothing to invalidate.
+  Shared caches are keyed by complete identity, never a "current X" slot.
+  Protocols only where a second implementation exists: **the environment is
+  a map, not a protocol.** Malli's strict mode
+  (`-Dmalli.registry/mode=strict`) makes the global-registry mutator throw —
+  an enforcement lever we turn on.
+
+Independent confirmation: upstream hyperlith's lockstep rework (23 commits
+past our pin, inspected 2026-08-07) delivers its effects entry point `tx!`
+as a member of the ctx map, captured lexically — the same two moves
+(environment as a value in the request; effects entry as an environment
+member). Borrowable and queued below: tick-coalesced write batching
+(measure, never adopt blind) and deterministic broadcast order.
+
+## The design
+
+### The value
+
+`seon.env` declares the environment schema: a flat open map of existing
+keys. Initial contents (exact set settled at implementation against the
+current `*request-context*` assembly and ctx custody):
+
+- `:seon.db/connection` — the cluster's live branch connection (custody);
+- `:seon.db/db` — supplied at basis by the provider, not stored;
+- `:seon.schema/projection` — the acquired projection (carrying its own
+  compiled-validator cache, per Defect II);
+- `:seon.boot/cluster-name`, `:seon.cluster.agent/id`,
+  `:seon.cluster.run/id`, `:seon.cluster.run.form/ordinal` — identity;
+- `:seon.flow/work-launcher`, `:seon.sci.admit/caps` — capability handles.
+
+The container is a host record type not registered in sci `:classes`, so
+agent code cannot traverse it; its contents reach agent code only by
+declaration (injection). Platform code passes it, or its members,
+explicitly.
+
+### Construction — boot, the only constructor
+
+The boot tower builds one environment per cluster in dependency order
+(store → branch → facts/projection → ctx → graphs), refusing the
+configuration up front and naming the failed layer in a flat error. The
+prepl opens at second zero and survives later-layer failure. The
+production constructor (`start-fork!` in the test-infrastructure spec) IS
+the test bracket's constructor; subset boot (store+facts, no web) is
+supported for tests that want less. Teardown is the same graph reversed.
+
+### Carriage — how it travels, one rule per medium
+
+1. **Agent code: the sci ctx/fork.** The environment attaches to the
+   per-cluster ctx; each turn's fork carries it; closures capture it across
+   any thread by construction. The P17 call-preparation hook reads it from
+   the RUNTIME ctx and fills declared-and-absent arguments (schema is the
+   request; caller wins; unavailable is a flat error). The r2 design
+   otherwise stands.
+2. **Thread crossings: data on the submission.** `submit!`/`submit!!`
+   require the environment on the submission map and merge it into what the
+   work-fn and `complete!` receive. Proc `:args` carry it at graph
+   construction. No `bound-fn*` anywhere; missing environment is refused at
+   construction.
+3. **Web: merged into the request.** Each cluster's web service is built at
+   boot holding that cluster's environment; handlers receive it with the
+   request map; the render walk uses its explicit walk context; SSE writer
+   procs receive it as proc args.
+
+### Derived state
+
+Compiled/derived state hangs off the value it derives from: the
+compiled-shape and identity-only caches move onto the projection value.
+Any surviving shared cache is keyed by complete identity
+(cf. Datahike's `[connection-id generation commit-id]` query cache) and
+read exactly once. `ensure-shape-generation-for!`'s check-then-act shape is
+banned.
+
+### Deletion list (the ambient half dies)
+
+- `seon.db/*conn*`, `seon.effect/*request-context*`,
+  `seon.render/*walk-context*`, `seon.cluster/*source-progress!*` /
+  `*boot-progress!*` as carriers, the four schema projection dynamic vars,
+  and the registry facade's cluster-specific global backing;
+- the 22 load-time registration sentinels + `packaged-base-forms` +
+  `!source-files` — replaced by acquisition at a basis;
+- `!predicate-functions` — replaced by `requiring-resolve`d Vars keyed by
+  qualified symbol;
+- `!shape-generation` / `!identity-only-generation` as process slots;
+- the three `bound-fn*` conveyance sites in `seon.flow`;
+- `seon.schema/*verified-release-identity*` (namespace-load env read) —
+  becomes an acquired config fact;
+- the bespoke `seon.db` elision internals (`current-database-value`,
+  `current-connection`) per the r2 deletion boundary, plus the named
+  non-owner readers: `src/my/background.clj:54`, `src/seon/search.clj:411`,
+  `src/seon/fs/jvm.clj:453`, `src/seon/render.clj:521-523`,
+  `src/seon/web/jvm.clj:301-303,384-389`.
+
+### What stays mutable, and the enforceable rule
+
+From the [atom census](../research/atom-census-2026-08-06.md) (77
+constructors): the process-root resource registries (`running-instances`,
+`root-store-holder`, `held-flocks`, `search/owners`) stay — they hold live
+OS/JVM objects, become boot's private bookkeeping keyed by cluster/store,
+and running code never reads them (handles arrive through the
+environment). Invocation-local coordination stays. The rule the edit hook
+enforces:
+
+**A mutable reference is admissible only if it holds a live resource handle
+or invocation-local coordination — never facts, never state derived from a
+value, and never anything that varies by cluster.** If two clusters would
+need different contents, it belongs in the environment. The exemption set
+is the declared resource-owner namespaces (a fact, not a judgment call).
+
+Enforcement stack: no side channel exists (carriers deleted); Malli strict
+mode on; sci refuses unregistered classes; the program-graph query pattern
+from the test-infrastructure spec (construction owners as resolvable
+`:seon.fn/calls` targets) — never a namespace prefix, filename, or regex.
+
+## Also in scope (platform items this design does not itself fix)
+
+1. **Interrupt-arm probe (top hypothesis, unprobed).** The `:interrupt-fn`
+   arm is a ThreadLocal on the process guard; work handed across a thread
+   by agent code plausibly runs unarmed. Falsifier first; if confirmed, the
+   arm rides the ctx/fork and submissions like everything else.
+2. **Dropped-fault durability.** The `drops` counter violation — dropped
+   core faults reach the fault committer as facts
+   ([issue](../../../seon/issues/dropped-core-fault-count-is-not-durable.md)).
+3. **sci observer bug.** The built-in call observer is read from the
+   analysis ctx (`analyzer.cljc:1719`); a node cache would pin the wrong
+   fork's observer. File and fix in the maintained fork with the hook work.
+4. **Work-launcher executor gap.** The launcher graph passes only
+   `:compute-exec`, so its loop runs on core.async's global `:io` executor,
+   not the process root's (flow report).
+5. **Hyperlith deltas (measured, not adopted blind):** tick-coalesced write
+   batching for high-churn non-receipt paths; deterministic broadcast order
+   in render fan-out; pin bump for the upstream-delta sweep.
+6. **Docs-as-queryable-facts** is explicitly OUT of this PRD — separate
+   short design after this seals (prior art: the pod-era "DB stores the
+   path, file keeps the body" thesis; the current-era skills + corpus-facts
+   mechanism).
+
+## Rollout — test-first, REPL-iterated, then farmed out
+
+Phase 0 — falsify the three load-bearing mechanics live (opus REPL lanes,
+own scratch clusters, no production edits): (a) environment-on-fork — a
+closure crossing to a virtual thread still resolves ITS fork's environment;
+(b) the runtime-ctx hook seam in the maintained sci fork prepares arguments
+for a host function; (c) a flow submission carrying the environment as data
+delivers it to `:io` work. Each is a probe file → future class regression.
+
+Phase 1 — the environment value + constructor land with the
+test-infrastructure work: `start-fork!`/`with-cluster` consume it; the
+audit's probes graduate as the isolation regressions; deliberately
+overlapping tests run in parallel and pass with repetition.
+
+Phase 2 — live-drive iteration: opus lanes drive real end-to-end agent
+turns on forks (the standing dogfood pattern), hammering overlap at load.
+The parallel suite becomes the standing stress harness. Iterate here until
+turns run end to end clean; the design is not "first thing tried" — it is
+revised in this phase with evidence, in chat with the owner.
+
+Phase 3 — the production sweep, farmed out with well-written specs: delete
+the ambient carriers, convert the named readers, land the r2 injection
+slices (S1–S4 in [p17-ambient-slices-2026-08-05.md](p17-ambient-slices-2026-08-05.md)
+amended per ruling 2 above), fix `submit!`/`submit!!`, move the compiled
+caches onto the projection. Each slice is one lane with owned paths and the
+probes as acceptance evidence.
+
+Graduation gate: the test-infrastructure spec's gate (every ordinary test
+receives a distinct branch, connection, sci fork, and projection state from
+one source base; two concurrent forks cannot exchange a compiled schema,
+predicate function, declaration population, or IO-submission environment)
+PLUS a live two-cluster drive where an agent turn in each cluster completes
+end to end while the parallel suite runs, and the deletion list is empty in
+`src/`.
+
+## Dependency ledger
+
+Carried by the four research reports and the audit (revisions pinned
+there): sci `2db3358c`, Malli `80138076`, Datahike `10540578`, core.async
+`1.10.874-alpha3` / flow at the vendored pin, Clojure 1.12.5. Existing
+mechanisms: `cluster-ctx` custody + `::projection-state`
+(`src/seon/sci/eval.clj:1430-1460`), P12 argument-address facts (graduated
+2026-08-05), the r2 injection design, the test-infrastructure spec, the
+custody-isolation invariants (re-proven, not deleted).
