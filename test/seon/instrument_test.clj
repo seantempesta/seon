@@ -338,38 +338,26 @@
      (is (thrown? Exception (doubled 2.0))
          "and apply! is the explicit re-application that restores it"))))
 
-(deftest applying-activates-newly-loaded-schema-references
-  (let [schema-state (seon.schema/snapshot-state)
-        schema-key :seon.instrument-test/late-value
+(deftest applying-uses-the-acquired-projection-without-publishing-it
+  (let [schema-key :seon.instrument-test/late-value
         var-name (symbol (str "late-contract-" (random-uuid)))
-        contract-var (intern *ns* var-name identity)]
+        contract-var (intern *ns* var-name identity)
+        projection
+        (schema/build-projection (assoc (schema/snapshot) schema-key :int))]
     (try
-      ;; Reproduce a long-lived JVM: its active projection predates a schema
-      ;; resource contribution, while a hot-reloaded public Var already names
-      ;; that new schema in its contract.
-      (seon.schema/activate! (seon.schema/snapshot))
-      (seon.schema/contribute-candidate-forms! {schema-key :int})
       (alter-meta! contract-var assoc
                    :malli/schema [:=> [:cat schema-key] schema-key])
-      (is (contains? (seon.schema/snapshot) schema-key))
-      (is (not (contains?
-                (:seon.schema.projection/forms
-                 (seon.schema/current-projection))
-                schema-key)))
+      (schema/call-with-projection
+       projection
+       #(instrument/apply! {:seon.config/on-core-error :panic}))
 
-      (instrument/apply! {:seon.config/on-core-error :panic})
-
-      (is (contains?
-           (:seon.schema.projection/forms
-            (seon.schema/current-projection))
-           schema-key)
-          "apply! publishes the admitted candidate generation before collect")
+      (is (nil? (schema/current-projection))
+          "the acquired projection remains evaluation-local")
       (is (thrown? Exception (@contract-var "not-an-int"))
-          "Malli collected the hot-reloaded contract against that generation")
+          "Malli collected the contract against the acquired projection")
       (finally
         (instrument/remove!)
-        (ns-unmap *ns* var-name)
-        (seon.schema/restore-state! schema-state)))))
+        (ns-unmap *ns* var-name)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The dial

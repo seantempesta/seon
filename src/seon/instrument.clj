@@ -86,7 +86,6 @@
             [malli.error :as me]
             [malli.instrument :as mi]
             [seon.print :as print]
-            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]))
 
@@ -373,18 +372,11 @@
   this tree — so it says so on stderr rather than passing quietly.
 
   Call it again after re-evaluating anything: a re-`defn` silently
-  strips the wrapper and no watch fires. Every apply first reloads and
-  activates the complete candidate schema population because Malli collection
-  compiles against Seon's stable active registry. Merely contributing a new
-  named reference leaves an already-active projection unchanged."
+  strips the wrapper and no watch fires. Malli collection compiles against
+  the caller's cluster-bound schema projection; instrumentation never loads,
+  publishes, or replaces schema declarations."
   {:malli/schema [:=> [:cat :seon.instrument/request] :seon.instrument/applied]}
   [{mode :seon.config/on-core-error caps :seon.sci.admit/caps}]
-  (schema.edn/load! {})
-  (let [candidates (schema/snapshot)
-        active (some-> (schema/current-projection)
-                       :seon.schema.projection/forms)]
-    (when-not (= active candidates)
-      (schema/activate! candidates)))
   (let [registered (count (mi/clj-collect! {:ns (all-ns)}))]
     (case mode
       :panic
