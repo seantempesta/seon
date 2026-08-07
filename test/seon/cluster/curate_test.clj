@@ -9,7 +9,8 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.eval.drive]
-            [seon.render.transcript :as transcript]))
+            [seon.render.transcript :as transcript]
+            [seon.schema :as schema]))
 
 (defn- await-run! [connection run-id]
   ((ns-resolve 'seon.eval.drive 'await-fact!)
@@ -53,19 +54,27 @@
   (let [connection (:seon.boot/cluster-connection instance)
         database @connection
         cluster-value (:seon.cluster.loop/cluster instance)
+        projection-state
+        (get-in cluster-value
+                [:seon.sci.eval/ctx :seon.sci.eval/projection-state])
         settings (config/effective database
                                    (get-in instance [:seon.boot/config
                                                      :seon.boot/cluster-name]))]
-    (transcript/render-ai
-     {:seon.db/db database
-      :seon.db/connection connection
-      :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster-value)
-      :seon.cluster.agent/id "root"
-      :seon.sci.admit/caps (config/result-caps settings)
-      :seon.sci.eval/time-limit-ms
-      (:seon.config.eval/time-limit-ms settings)
-      :seon.config/on-core-error (:seon.config/on-core-error settings)
-      :seon.render.transcript/token-budget 1000000})))
+    (schema/call-with-projection-state
+     projection-state
+     (fn []
+       (schema/call-with-projection
+        (:seon.schema/projection @projection-state)
+        #(transcript/render-session-ai
+          {:seon.db/db database
+           :seon.db/connection connection
+           :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster-value)
+           :seon.cluster.agent/id "root"
+           :seon.sci.admit/caps (config/result-caps settings)
+           :seon.sci.eval/time-limit-ms
+           (:seon.config.eval/time-limit-ms settings)
+           :seon.config/on-core-error
+           (:seon.config/on-core-error settings)}))))))
 
 (deftest proof-acceptance-and-atomic-adopt-curate-one-messy-span
   (let [suffix (subs (str (random-uuid)) 0 8)

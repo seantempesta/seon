@@ -1,6 +1,7 @@
 ---
 type: issue
 status: resolved
+severity: blocker
 tags: [issue, schema, sci, performance]
 ---
 
