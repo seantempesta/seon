@@ -257,16 +257,24 @@
                    (pr-str (without-duplicate-error check))))))))
 
 (defn- run-database-body
-  [connection extra-schema body]
+  [connection projection-state extra-schema body]
+  (schema/call-with-projection-state
+   projection-state
+   (fn []
+     (when (seq extra-schema)
+       (db/transact! connection {:tx-data extra-schema}))
+     (body connection))))
+
+(defn- reconnect-with-projection
+  [configuration provisional-connection]
   (let [projection-state
         (atom {:seon.schema/projection
-               (schema/projection-from-database @connection)})]
-    (schema/call-with-projection-state
-     projection-state
-     (fn []
-       (when (seq extra-schema)
-         (db/transact! connection {:tx-data extra-schema}))
-       (body connection)))))
+               (schema/projection-from-database @provisional-connection)})]
+    (d/release provisional-connection)
+    {:seon.test-support/connection
+     (schema/call-with-projection-state
+      projection-state #(d/connect configuration))
+     :seon.sci.eval/projection-state projection-state}))
 
 (defn- with-fresh-database
   [database-id extra-schema body]
@@ -275,12 +283,18 @@
          :keep-history? true
          :schema-flexibility :write}
         _ (d/create-database configuration)
-        connection (d/connect configuration)]
+        provisional-connection (d/connect configuration)]
     (try
-      (populate-database! connection)
-      (run-database-body connection extra-schema body)
+      (populate-database! provisional-connection)
+      (let [{connection :seon.test-support/connection
+             projection-state :seon.sci.eval/projection-state}
+            (reconnect-with-projection configuration provisional-connection)]
+        (try
+          (run-database-body connection projection-state extra-schema body)
+          (finally
+            (d/release connection))))
       (finally
-        (d/release connection)
+        (d/release provisional-connection)
         (d/delete-database configuration)))))
 
 (defn- with-branched-database
@@ -293,11 +307,19 @@
       ;; exposed or transacted. Branch creation overwrites this lease's stale
       ;; deleted head with that same immutable base value.
       (d/branch! base-connection :db branch)
-      (let [connection (d/connect (assoc configuration :branch branch))]
+      (let [branch-configuration (assoc configuration :branch branch)
+            provisional-connection (d/connect branch-configuration)]
         (try
-          (run-database-body connection extra-schema body)
+          (let [{connection :seon.test-support/connection
+                 projection-state :seon.sci.eval/projection-state}
+                (reconnect-with-projection branch-configuration
+                                           provisional-connection)]
+            (try
+              (run-database-body connection projection-state extra-schema body)
+              (finally
+                (d/release connection))))
           (finally
-            (d/release connection))))
+            (d/release provisional-connection))))
       (finally
         ;; Datahike refuses deletion while a child connection remains active.
         ;; Return the name only after successful retirement; a teardown failure
