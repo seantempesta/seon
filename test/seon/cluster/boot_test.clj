@@ -166,11 +166,25 @@
               (schema/canonical-database-attributes forms)))]
         (try
           (db/transact! connection declarations)
-          (db/transact!
-           connection
-           [{:seon.source/digest (apply str (repeat 64 "a"))}
+          (let [source-digest (apply str (repeat 64 "a"))]
+            (db/transact!
+             connection
+             [{:seon.source/digest source-digest
+               ;; Even this deliberately old sovereign source represents a
+               ;; publication. Its stored activation closure is complete for
+               ;; the sparse legacy facts; boot may then reach the intended
+               ;; incompatible-schema refusal instead of correctly refusing
+               ;; an unsealed source first.
+               :seon.source/activation-closure
+               {:seon.activation/source-digest source-digest
+                :seon.activation/schema-keys #{}
+                :seon.activation/required-attributes #{}
+                :seon.activation/config-defaults #{}
+                :seon.activation/config-required #{}
+                :seon.activation/executable-symbols #{"legacy.core/f"}
+                :seon.activation/lookup-refs []}}
             {:seon.ns/name 'legacy.core}
-            {:seon.fn/sym "legacy.core/f"}])
+              {:seon.fn/sym "legacy.core/f"}]))
           (finally
             (d/release connection))))
       (finally
