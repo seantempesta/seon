@@ -2000,6 +2000,14 @@
               store# source# (get instances# ~name))))]
     (pr-str
      `(do
+        ;; Instrumentation wrappers are process-local compiled artifacts. They
+        ;; may describe the cluster projection that was active before this
+        ;; publication request, so no wrapper may validate the candidate
+        ;; source population. The finally below restores instrumentation from
+        ;; an extant cluster's own projection after publication settles.
+        (when-let [remove!#
+                   (ns-resolve 'seon.instrument (symbol "remove!"))]
+          (remove!#))
         ;; The live JVM owns the process-root store lock. Reload the
         ;; source-analysis owners before asking that JVM to publish
         ;; `current-src`; the running clusters and their program facts remain
@@ -2058,16 +2066,19 @@
                 (flush))]
           (with-bindings
             {progress-var# progress!#}
-            ~(if source-process?
-               `(println
-                 ~init-result-prefix
-                 (pr-str
-                  (try
-                    {:seon.fresh-operator/value ~operation}
-                    (catch Throwable failure#
-                      {:seon.fresh-operator/message (ex-message failure#)
-                       :seon.fresh-operator/data (ex-data failure#)}))))
-               operation)))))))
+            (try
+              ~(if source-process?
+                 `(println
+                   ~init-result-prefix
+                   (pr-str
+                    (try
+                      {:seon.fresh-operator/value ~operation}
+                      (catch Throwable failure#
+                        {:seon.fresh-operator/message (ex-message failure#)
+                         :seon.fresh-operator/data (ex-data failure#)}))))
+                 operation)
+              (finally
+                ~(refresh-instrument-form)))))))))
 
 (defn- source-process-value!
   [root form]

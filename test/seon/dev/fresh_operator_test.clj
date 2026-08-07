@@ -1240,10 +1240,8 @@
                `(do
                   (require 'seon.db 'seon.schema)
                   (seon.schema/restore-state!
-                   (update-in
+                   (dissoc
                     (seon.schema/snapshot-state)
-                    [:seon.schema.state/predicate-functions]
-                    dissoc
                     'seon.db/connection?
                     'seon.db/database-value?))
                   {:seon.dev.fresh-operator-test/owner-loaded?
