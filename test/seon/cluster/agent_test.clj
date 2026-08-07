@@ -117,8 +117,11 @@
                    :seon.sci.eval/ctx ctx
                    :seon.config.eval/time-limit-ms 2000
                    :seon.config/on-core-error :panic
-                   :seon.cluster.run/process process}})}}
-              :conns []})
+                  :seon.cluster.run/process process}})}}
+              :conns []
+              :io-exec
+              (cluster/projection-executor
+               (:seon.sci.eval/projection-state ctx))})
             {:keys [report-chan error-chan]} (flow/start graph)]
         (async/go-loop [] (when (async/<! report-chan) (recur)))
         (async/go-loop [] (when (async/<! error-chan) (recur)))
@@ -140,6 +143,9 @@
    (db/q '[:find ?cluster . :where [_ :seon.config/cluster ?cluster]]
         @connection)
    :seon.flow/work-launcher *work-launcher*
+   :seon.flow/executor
+   (cluster/projection-executor
+    (:seon.sci.eval/projection-state ctx))
    :seon.sci.eval/ctx ctx
    :seon.render/context-channel *context-channel*
    :seon.cluster.loop/stream-channel *stream-channel*
@@ -692,6 +698,9 @@
               (test-support/await-event!
                server-finished
                ::never-answering-provider-released)
+              (test-support/await-event!
+               (:seon.cluster.agent/turn-stopped entry)
+               ::released-provider-turn-stopped)
               (agent/disarm! {:seon.cluster.agent/id agent-id
                               :seon.cluster.agent/routing routing})
               (is (nil? (agent/armed routing agent-id)))

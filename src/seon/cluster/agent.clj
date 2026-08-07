@@ -290,27 +290,29 @@
   pass's wake safe."
   {:malli/schema [:=> [:cat :seon.cluster.agent/blueprint-request] :map]}
   [{handle :seon.cluster.loop/cluster agent-id :seon.cluster.agent/id}]
-  {:procs
-   {::mailbox
-    {:proc (seon.flow/var-process
-            #'mailbox-step :io
-            {:seon.cluster.wake/channel
-             (:seon.cluster.wake/channel handle)})}
-    ::turn
-    {:proc (seon.flow/var-process
-            #'turn-step :io
-            {:seon.cluster.loop/cluster handle
-             :seon.cluster.agent/id agent-id})
-     :chan-opts {::episode {:buf-or-n (async/sliding-buffer 1)}}}
-    ::schedule
-    {:proc (seon.flow/var-process
-            #'schedule/schedule-step :io
-            {:seon.cluster.loop/cluster handle
-             :seon.cluster.agent/id agent-id
-             :seon.schedule/channel
-             (:seon.schedule/channel handle)})}}
-   :conns [[[::mailbox ::episode] [::turn ::episode]]]
-   :io-exec (:seon.flow/executor handle)})
+  (cond->
+   {:procs
+    {::mailbox
+     {:proc (seon.flow/var-process
+             #'mailbox-step :io
+             {:seon.cluster.wake/channel
+              (:seon.cluster.wake/channel handle)})}
+     ::turn
+     {:proc (seon.flow/var-process
+             #'turn-step :io
+             {:seon.cluster.loop/cluster handle
+              :seon.cluster.agent/id agent-id})
+      :chan-opts {::episode {:buf-or-n (async/sliding-buffer 1)}}}
+     ::schedule
+     {:proc (seon.flow/var-process
+             #'schedule/schedule-step :io
+             {:seon.cluster.loop/cluster handle
+              :seon.cluster.agent/id agent-id
+              :seon.schedule/channel
+              (:seon.schedule/channel handle)})}}
+    :conns [[[::mailbox ::episode] [::turn ::episode]]]}
+    (:seon.flow/executor handle)
+    (assoc :io-exec (:seon.flow/executor handle))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The routing entry and the lifecycle

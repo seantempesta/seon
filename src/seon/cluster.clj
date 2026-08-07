@@ -2004,7 +2004,10 @@
       (assoc :seon.config.error/escalate-to
              (:seon.config.error/escalate-to dials)))))
 
-(defn- projection-executor
+(defn projection-executor
+  "Run IO work on the process executor with one cluster projection bound."
+  {:malli/schema [:=> [:cat :seon.sci.eval/projection-state]
+                  :seon.flow/executor]}
   [projection-state]
   (let [^Executor delegate (:io (root-executors))]
     (reify Executor
