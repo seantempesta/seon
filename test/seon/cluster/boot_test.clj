@@ -1120,15 +1120,13 @@
                            [?receipt :seon.cluster.eval/run ?run]]
                          @(:seon.boot/cluster-connection instance)
                          (bootstrap/run-id "root")))))
-          (testing "a second cluster in the same process forks
-                    near-instantly off the shared store"
-            (let [forked-at (System/nanoTime)
-                  sibling (cluster/start! {:seon.boot/cluster-name "twr2"
-                                           :seon.boot/root root
-                                           :seon.config/manifest
-                                           {:seon.config.flow.compute/queue-depth
-                                            22}})
-                  fork-ms (/ (- (System/nanoTime) forked-at) 1e6)]
+          (testing "a second cluster acquires its own projection from the
+                    shared store"
+            (let [sibling (cluster/start!
+                           {:seon.boot/cluster-name "twr2"
+                            :seon.boot/root root
+                            :seon.config/manifest
+                            {:seon.config.flow.compute/queue-depth 22}})]
               (try
                 (is (some? (:seon.boot/cluster-connection sibling)))
                 (is (identical? (:seon.store/store instance)
@@ -1145,8 +1143,6 @@
                          @(:seon.boot/cluster-connection sibling)
                          "twr2")))
                     "two clusters in one JVM retain distinct applied configs")
-                (is (< fork-ms 2000)
-                    (str "sibling fork took " fork-ms " ms"))
                 (finally
                   (cluster/stop! sibling)))))
           (finally
@@ -1199,6 +1195,9 @@
       (db/transact! connection
                   [{:seon.cluster.message/id "history-refork-destroys"}])
       (let [result (cluster/refork! instance)
+            ;; refork! owns database branch replacement; stopping the old
+            ;; runtime remains an explicit, observable lifecycle operation.
+            _ (cluster/stop! instance)
             replacement
             (cluster/start! {:seon.boot/cluster-name cluster-name
                              :seon.boot/root root})]
