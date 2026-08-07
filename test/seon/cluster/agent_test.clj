@@ -262,12 +262,13 @@
        (empty? (open-runs db))))
 
 (defn- database-events
-  [connection]
-  (let [events (async/chan 64)
-        listener-key (random-uuid)]
-    (d/listen connection listener-key #(async/put! events %))
-    {:seon.cluster.agent-test/events events
-     :seon.cluster.agent-test/listener-key listener-key}))
+  ([connection]
+   (database-events connection (random-uuid)))
+  ([connection listener-key]
+   (let [events (async/chan 64)]
+     (d/listen connection listener-key #(async/put! events %))
+     {:seon.cluster.agent-test/events events
+      :seon.cluster.agent-test/listener-key listener-key})))
 
 (defn- stop-database-events!
   [connection event-source]
@@ -410,10 +411,10 @@
                             {:seon.config.run/max-episode-runs 100})]
                           (map agent-row)
                           agent-ids))
-        (try
-          (with-redefs [ai/complete
-                        (recording-completer
-                         ledger (fn [_] "(my.run/complete \"done\")"))]
+        (with-redefs [ai/complete
+                      (recording-completer
+                       ledger (fn [_] "(my.run/complete \"done\")"))]
+          (try
             (doseq [agent-id agent-ids]
               (arm-one! connection ctx routing agent-id))
             (wake/route! {:seon.cluster.wake/connection connection
@@ -428,59 +429,72 @@
                           :seon.cluster.wake/fault-channel
                           (:seon.cluster.agent/fault-channel @routing)
                           :seon.cluster.wake/key ::route})
-            ;; every commit below is delivered by the ROUTING listener,
-            ;; concurrently across the agents' independent graphs
-            (doseq [[agent-id message-id] triggers]
-              (outside-trigger! connection agent-id message-id "work"))
-            (let [settled? (await-until
-                            #(quiescent? @connection agent-ids))
-                  db @connection
-                  answers (answers-by-trigger db)
-                  run-count (or (db/q '[:find (count ?run) . :where
-                                       [?run :seon.cluster.run/id _]]
-                                     db)
-                                0)
-                  duplicate-receipts
-                  (->> (db/q '[:find ?run ?ordinal (count ?receipt)
-                              :where
-                              [?receipt :seon.cluster.eval/run ?run]
-                              [?receipt :seon.cluster.eval/ordinal
-                               ?ordinal]]
-                            db)
-                       (remove (fn [[_ _ n]] (= 1 n))))
-                  ;; the per-agent serial oracle's outcome, computed
-                  ;; from the generated spec: each trigger is answered
-                  ;; by exactly one run that closes after one form
-                  per-agent-serial?
-                  (every? (fn [[index agent-id]]
-                            (= (nth triggers-per-agent index)
-                               (or (db/q '[:find (count ?run) .
-                                          :in $ ?agent-id
-                                          :where
-                                          [?agent :seon.cluster.agent/id
-                                           ?agent-id]
-                                          [?run :seon.cluster.run/agent
-                                           ?agent]
-                                          [?run :seon.cluster.run/closed-at
-                                           _]]
-                                        db agent-id)
-                                   0)))
-                          (map-indexed vector agent-ids))]
-              {:settled? (boolean settled?)
-               :answered-once?
-               (and (= (count triggers) (count answers))
-                    (every? #(= 1 (val %)) answers))
-               :ledger-equals-runs? (= (count @ledger) run-count)
-               :receipts-unique? (empty? duplicate-receipts)
-               :fences-quiet?
-               (empty? (db/q '[:find ?error :where
-                              [?error :seon.error/id _]]
-                            db))
-               :per-agent-serial? per-agent-serial?}))
-          (finally
-            (wake/unlisten! {:seon.cluster.wake/connection connection
-                             :seon.cluster.wake/key ::route})
-            (disarm-all! routing)))))))
+            (let [events (database-events connection ::parallel-turns)]
+              (try
+                ;; Every commit below is delivered by the routing listener,
+                ;; concurrently across the agents' independent graphs. The
+                ;; terminal transaction is the observable completion event;
+                ;; Datahike's one writer may legitimately serialize several
+                ;; agents beyond a polling window under suite load.
+                (doseq [[agent-id message-id] triggers]
+                  (outside-trigger! connection agent-id message-id "work"))
+                (let [terminal
+                      (test-support/await-event!
+                       (:seon.cluster.agent-test/events events)
+                       ::parallel-turns-settled
+                       #(let [db (:db-after %)]
+                          (and (= (count triggers)
+                                  (count (answers-by-trigger db)))
+                               (quiescent? db agent-ids))))
+                      db (:db-after terminal)
+                      answers (answers-by-trigger db)
+                      run-count (or (db/q '[:find (count ?run) . :where
+                                           [?run :seon.cluster.run/id _]]
+                                         db)
+                                    0)
+                      duplicate-receipts
+                      (->> (db/q '[:find ?run ?ordinal (count ?receipt)
+                                  :where
+                                  [?receipt :seon.cluster.eval/run ?run]
+                                  [?receipt :seon.cluster.eval/ordinal
+                                   ?ordinal]]
+                                db)
+                           (remove (fn [[_ _ n]] (= 1 n))))
+                      ;; the per-agent serial oracle's outcome, computed
+                      ;; from the generated spec: each trigger is answered
+                      ;; by exactly one run that closes after one form
+                      per-agent-serial?
+                      (every? (fn [[index agent-id]]
+                                (= (nth triggers-per-agent index)
+                                   (or (db/q '[:find (count ?run) .
+                                              :in $ ?agent-id
+                                              :where
+                                              [?agent :seon.cluster.agent/id
+                                               ?agent-id]
+                                              [?run :seon.cluster.run/agent
+                                               ?agent]
+                                              [?run :seon.cluster.run/closed-at
+                                               _]]
+                                            db agent-id)
+                                       0)))
+                              (map-indexed vector agent-ids))]
+                  {:settled? true
+                   :answered-once?
+                   (and (= (count triggers) (count answers))
+                        (every? #(= 1 (val %)) answers))
+                   :ledger-equals-runs? (= (count @ledger) run-count)
+                   :receipts-unique? (empty? duplicate-receipts)
+                   :fences-quiet?
+                   (empty? (db/q '[:find ?error :where
+                                  [?error :seon.error/id _]]
+                                db))
+                   :per-agent-serial? per-agent-serial?})
+                (finally
+                  (stop-database-events! connection events))))
+            (finally
+              (wake/unlisten! {:seon.cluster.wake/connection connection
+                               :seon.cluster.wake/key ::route})
+              (disarm-all! routing))))))))
 
 (deftest n-agent-parallel-turns-property
   (let [result
@@ -1202,14 +1216,14 @@
                     "one fresh provider call for each unanswered message")
                 (is (= 1 (get answers "m-unanswered")))
                 (is (= 1 (get answers "m-waiting"))))
-              (testing "the next episode sees honest interruption evidence"
-                (let [interrupt-prompts
+              (testing "the recovered receipt stays an unterminated REPL entry"
+                (let [interrupted-input-prompts
                       (->> @ledger
                            (map :seon.ai/prompt)
                            (filter string?)
-                           (filter #(str/includes? % "interrupted"))
+                           (filter #(str/includes? % "user=> (+ 3 4)"))
                            vec)
-                      prompt (first interrupt-prompts)
+                      prompt (first interrupted-input-prompts)
                       forms
                       (mapv (fn [ordinal]
                               {:seon.cluster.run.form/ordinal ordinal})
@@ -1222,11 +1236,11 @@
                                     :seon.cluster.run.form/ordinal ?ordinal]]
                                  db))
                       receipts (mapv #(db/pull db '[*] %) run-receipts)]
-                  (is (= 1 (count interrupt-prompts))
-                      (str "only the interrupted agent sees recovery evidence: "
-                           (pr-str (mapv :seon.ai/prompt @ledger))))
+                  (is (= 1 (count interrupted-input-prompts))
+                      "only the interrupted agent sees its unterminated input")
                   (is (and (string? prompt)
-                           (str/includes? prompt "result(s) are missing")))
+                           (not (str/includes? prompt "result(s) are missing")))
+                      "the faithful transcript adds no recovery narration")
                   (is (some?
                        (run/interrupted-warning forms receipts)))))))
           (finally

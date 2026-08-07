@@ -261,8 +261,9 @@
                             {:seon.ai.model/example true})
             ai-render (ai/registry-ai @connection)
             html-render (ai/registry-html @connection)]
-        (is (= ["registered-model"]
-               (mapv :seon.ai.model/id (ai/models @connection))))
+        (is (some #(= "registered-model" (:seon.ai.model/id %))
+                  (ai/models @connection))
+            "the fixture model is queryable beside the shipped registry")
         (is (not (contains? model :seon.config.ai/endpoint))
             "provider wire facts never duplicate onto model rows")
         (is (schema/valid-candidate-value? :seon.ai.model/entity accreted)
