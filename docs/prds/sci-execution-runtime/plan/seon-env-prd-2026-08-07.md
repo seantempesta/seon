@@ -423,6 +423,23 @@ identity between base and forks, so per-fork state needs a per-fork
 holder set at turn start (proven isolated 16/16), never a shared-atom
 installed-check.
 
+**W3 landed — the fork pin is `seon-env-hook` f934044**
+([notes](../research/env-phase1-w3-notes-2026-08-07.md), pin bump
+`288fab5c6` after orchestrator review). Three commits: runtime-ctx
+observer read (issue resolved — and its `:interrupt-fn` half WITHDRAWN
+with evidence: `fns/fun` receives the runtime ctx at fn-creation, sci's
+ctx-travels-with-code design working correctly); the
+`:call-preparation-hook` `(hook ctx var args) -> args | reduced` on the
+direct-Var path only, documented in the init docstring; loud refusal of
+unknown option keys in `sci/init`/`merge-opts` — which immediately
+caught two silent-drop defects in sci's own upstream tests. JVM suite
+393/1470 green on Clojure 1.10.3 AND 1.11.1; CLJS failures unchanged
+from the pin; Phase 0 falsifiers 320/320. The graduation also fixed a
+bug in the Phase 0 probe itself (its node ordering silently disabled
+the observer when the hook was installed) — reauthored, not
+cherry-picked. Costs measured under load: 12 ns unhooked / 115 ns
+empty-plan / 396 ns prepared — ruling 8's premise confirmed.
+
 ## Rollout — test-first, REPL-iterated, then farmed out
 
 Phase 0 — falsify the three load-bearing mechanics live (opus REPL lanes,
