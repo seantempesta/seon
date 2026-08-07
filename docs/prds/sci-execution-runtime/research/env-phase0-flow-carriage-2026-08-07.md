@@ -256,6 +256,13 @@ clojure -M:dev -e '(load-file "tmp/env-probes/flow_env_carriage.clj")
 `(run {:repetitions 1})` for a fast pass; `(run {:launcher-count N
 :per-launcher M :cycles C :repetitions R})` to widen it.
 
+`tmp/` is gitignored, so the probe file itself is not committed (the same is
+true of the audit's `tmp/isolation-probes/probe_work_launcher_binding.clj`).
+This report carries its inventory, its exact invocation, and its verbatim
+results; when the mechanic lands in Phase 3, `carriage-probe` and
+`rebuild-probe` graduate into a committed class regression under `test/` per
+the PRD's Phase 1 plan.
+
 ## What this means for Phase 3
 
 1. **The mechanic is sound.** The environment as a submission key and as proc
