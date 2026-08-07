@@ -481,10 +481,12 @@ two roots). W1 also caught its own perf regression via thread dump
 — dispatched to a lane), plus the day's most consequential new blocker:
 [a cohosted second cluster cannot boot](../../../seon/issues/a-cohosted-second-cluster-cannot-boot.md)
 (Defect II at the boot boundary; blocks the four-worker parallel target;
-dispatched to a lane). Three suite reds are PROVEN pre-existing by
-worktree baseline at a pre-W1 SHA: render.web SSE timeouts, gen.loop
-planner census, and (baseline in flight) boot-test refork — these set the
-integration checkpoint's honest expectations.
+dispatched to a lane). ALL THREE suite reds are PROVEN pre-existing by
+worktree baseline at a pre-W1 SHA (`4f5b8c5ac`): render.web SSE timeouts,
+gen.loop planner census, and boot-test refork — these set the integration
+checkpoint's honest expectations. W1 CLOSED 2026-08-07 night; Phase 1 is
+complete. The checkpoint (complete bare run) waits only on the two
+dispatched repair lanes landing so the tree is coherent.
 
 ## Rollout — test-first, REPL-iterated, then farmed out
 
