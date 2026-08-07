@@ -505,8 +505,12 @@ the sweep enumerates the rest by reading, not by grep-guessing.
 Owner extension (2026-08-07 night): the boot/environment/running triad
 is the settled vocabulary (AGENTS.md table row added); "the runtime" and
 "the platform" retire as umbrella nouns (~60 doc uses, heaviest in
-`architecture.md`). Sweep candidates surveyed from the live namespace
-list, each to be grounded in its file before renaming:
+`architecture.md`). **The rename list below is owner-APPROVED verbatim
+("I approve all of those renames. Make it happen when the time is
+right.")** — execution waits for Phase 4's window (post-production-sweep,
+frozen-tree rename waves); the per-file grounding read remains as an
+execution step and may only downgrade a rename back to the owner with
+evidence, never silently substitute a different name:
 
 - `seon.operator.runtime` → `seon.operator.resources` (it holds the live
   resource registries — instances, store holder, flocks, executors);
