@@ -25,15 +25,17 @@
 
 (defn- with-default-document
   [document body]
-  (let [directory (io/file "tmp/config-test-initialization")
+  (let [resource io/resource
+        directory (io/file "tmp/config-test-initialization")
         packaged-file (io/file directory "default.edn")]
     (.mkdirs directory)
     (spit packaged-file (str (pr-str document) "\n"))
     (try
       (with-redefs [io/resource
                     (fn [path]
-                      (when (= config/default-manifest-path path)
-                        (-> packaged-file .toURI .toURL)))]
+                      (if (= config/default-manifest-path path)
+                        (-> packaged-file .toURI .toURL)
+                        (resource path)))]
         (body))
       (finally
         (.delete packaged-file)
@@ -160,7 +162,8 @@
                  "an identical config and population write no transaction")))))))
 
 (deftest packaged-defaults-use-the-same-shipped-document-authority
-  (let [directory (io/file "tmp/config-test-packaged")
+  (let [resource io/resource
+        directory (io/file "tmp/config-test-packaged")
         packaged-file (io/file directory "default.edn")
         repository-decisions (edn/read-string
                               (slurp config/default-manifest-path))
@@ -172,8 +175,9 @@
     (try
       (with-redefs [io/resource
                     (fn [path]
-                      (when (= config/default-manifest-path path)
-                        (-> packaged-file .toURI .toURL)))]
+                      (if (= config/default-manifest-path path)
+                        (-> packaged-file .toURI .toURL)
+                        (resource path)))]
         (is (= 19
                (:seon.config.flow.compute/queue-depth
                 (config/default-decisions)))
