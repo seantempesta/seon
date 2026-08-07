@@ -175,6 +175,23 @@ A second cluster in its own operator root (`tmp/w1-operator-b`, cluster
 Two live clusters, two distinct environment values, each one the identical
 object its own loop handle and its own ctx carry.
 
+## Foreign reds, attribution PROVEN rather than assumed
+
+Three namespaces are red at HEAD and none of them is this lane. The method
+was a throwaway git worktree at `4f5b8c5ac` — the commit BEFORE W1's first
+commit and before the sci pin bump — with the old sci pin
+(`2db3358c`) extracted from the submodule's own object store, running the
+same namespaces there. The worktree was removed afterwards.
+
+| Namespace | At HEAD | At `4f5b8c5ac` (pre-W1, old pin) | Verdict |
+|---|---|---|---|
+| `seon.render.web-test` | every SSE patch read times out; ~7 tests error at `test-support/await-event!` | IDENTICAL — same tests, same timeout at the same read | pre-existing |
+| `seon.gen.loop-test` | 3 errors, "the planner attempt census did not commit" | IDENTICAL — 3 errors, same names | pre-existing |
+| `seon.cluster.boot-test` | 2 failures in `explicit-refork-destroys-the-old-branch-and-forks-current-source` (`:seon.cluster/created?` nil; the old branch's message survives the refork) | IDENTICAL — 2 failures, same test | pre-existing |
+
+Recording this because a wrong attribution costs another lane real time, and
+because "red after my change" is not evidence that a change caused it.
+
 ## Defects met, with honest attribution
 
 1. **A cohosted second cluster in ONE JVM cannot boot** —
@@ -193,7 +210,24 @@ object its own loop handle and its own ctx carry.
    "move the compiled caches onto the projection" slice repairs, and it is a
    useful acceptance test for that slice.
 
-2. **`current-src` publication is red in a long-lived JVM whenever a NEW
+2. **The environment declaration must be read ONCE, not per construction.**
+   `seon.env/members` originally called `schema/schema-definition` on every
+   construction and every scope. With no projection bound — the state on
+   exactly the hot paths (a flow submission, a turn's request context) —
+   that falls through to `seon.schema.edn/packaged-forms`, which re-reads and
+   re-merges every schema resource from disk on each call. A
+   virtual-thread-aware `jcmd Thread.dump_to_file` of a wedged
+   `seon.cluster.loop-test` caught the responsible virtual thread inside
+   `merge-schema-resources`; the namespace went from 91 s to still running at
+   15 minutes. Fixed here by reading the declaration once (`204e94421`):
+   measured after, construction 0.37 us and scope 0.19 us. The OWNER defect
+   is filed separately —
+   [packaged-forms-rereads-every-schema-resource-per-call](../../../seon/issues/packaged-forms-rereads-every-schema-resource-per-call.md)
+   — and note that `seon.config/registration-defaults` calls
+   `schema-definition` inside a `keep` over config keys, so one call there is
+   one complete resource merge PER CONFIG KEY.
+
+3. **`current-src` publication is red in a long-lived JVM whenever a NEW
    first-party namespace lands.** Every edit this lane made returned
    `ADVISORY — current-src publication failed`, ultimately
    `Syntax error compiling at (seon/sci/eval.clj:1723:29)` — the reload path
