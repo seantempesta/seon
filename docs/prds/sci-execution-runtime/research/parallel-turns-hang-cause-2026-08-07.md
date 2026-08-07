@@ -56,9 +56,32 @@ other retained roots DO hold liveness dumps, and both name a different test:
 |---|---|---|
 | `tmp/test-runs/run.jEV5qx` | `default tier` (bare) | `BEGIN test seon.cluster.work-test/situation-totality-property` |
 | `tmp/test-runs/run.AWdxwi` | `seon.cluster.work-test` | `BEGIN test seon.cluster.work-test/situation-totality-property` |
+| `tmp/test-runs/run.cHRqCf` | `default tier` (bare) | `BEGIN test seon.cluster.work-test/situation-totality-property` |
 
 The second is decisive: it is a run whose selection was *only* work-test, so
 the parallel-turns property was not even loaded for that wedge.
+
+The third arrived DURING this investigation and is the cleanest evidence of
+all. A bare `bin/test` at `e2a539d58` had loaded its namespaces at 20:34, before
+the fix was written, so it ran the old code. It reached the property at
+`20:57:57` and fired `SUITE LIVENESS BUG — no reporter progress for 300
+seconds` at `21:02:57`, naming that property — while two runs of the FIXED
+code completed the same property in 59.9 s and 61.9 s on the same machine at
+the same time. Its dump caught `main` one frame deeper than the other two,
+inside the actual disk read:
+
+```
+at [java.io.FileInputStream open0 FileInputStream.java -2]
+at [clojure.java.io$reader invokeStatic io.clj 105]
+at [seon.schema.edn$read_schema_resource invoke edn.clj 202]
+at [seon.schema.edn$resource_population invoke edn.clj 315]
+at [seon.schema.edn$packaged_forms invoke edn.clj 337]
+at [seon.schema$registered_schemas invoke schema.clj 2287]
+at [seon.schema.datahike$edn_encoded_attr_QMARK_ invoke datahike.clj 331]
+at [seon.schema.datahike$encode_entity invoke datahike.clj 419]
+```
+
+Three dumps, three runs, one stack, ending in `FileInputStream.open0`.
 
 Three independent confirmations that the parallel-turns property is healthy:
 
@@ -202,8 +225,44 @@ the value, which is what the design says.
 | `bin/test seon.cluster.agent-test` | already green (19.8 s for the property) | green |
 
 Five consecutive runs of `bin/test seon.cluster.work-test
-seon.cluster.agent-test` were executed; results are in the commit message and
-the lane report.
+seon.cluster.agent-test` — 26 tests / 162 assertions / **0 failures, 0 errors**
+in every run, with both properties completing every time:
+
+| Run | `situation-totality-property` | `n-agent-parallel-turns-property` |
+|---|---|---|
+| 1 | 59.2 s | 28.0 s |
+| 2 | 61.9 s | 27.3 s |
+| 3 | 57.7 s | 26.5 s |
+| 4 | 61.7 s | 25.7 s |
+| 5 | 56.9 s | 26.1 s |
+
+Runs 1-3 overlapped the old-code bare suite that was wedging on the same
+property on the same machine, so these numbers are under adversarial load,
+not on an idle box.
+
+### One hypothesis worth refuting explicitly
+
+It is natural to read "300 s of silent file opens under a generative property"
+as *per generative sample* — schema resources reloading once per trial,
+plausibly connected to the load-time `schema.edn/load!` sentinels catalogued in
+[load-time-schema-sentinels-bypass-basis-acquisition](../../../seon/issues/load-time-schema-sentinels-bypass-basis-acquisition.md).
+That reading is wrong on both counts and would send a fix lane to the wrong
+owner.
+
+- It is **per attribute**, not per sample. `encode-entity`'s `reduce-kv`
+  (`datahike.clj:421-425`) called `edn-encoded-attr?` on every key, and the
+  three-attribute measurement is exactly three times the one-attribute
+  measurement (43.4 ms vs 14.3 ms). A per-sample reload would be flat in
+  attribute count.
+- It is **not load-time registration**. Nothing is being required or
+  registered in the hot loop; `resource-population` is a pure function being
+  called from a resolution fallback at `schema.clj:590-599`. The load-time
+  sentinel issue is real and separate, and neither causes nor is caused by
+  this.
+
+The two findings share an ancestor — declaration authority that is not a value
+in hand — which is the audit's Defect I and the reason the seon.env PRD exists.
+They do not share an owner or a fix.
 
 ## The class regression
 
