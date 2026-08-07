@@ -401,6 +401,28 @@ must reach past it to `datahike.api`
 `log` needs a declared `:seon.render/ai` producer (raw commit walks render
 as full uuids + 536M transaction ids — unreadable).
 
+**W4 measurement — the per-fork installation question DISSOLVES to a
+hybrid, adopted**
+([report](../research/env-phase1-w4-fork-install-measurement-2026-08-07.md)).
+Numbers: `sci/fork` 225 ns; per-defn install ~24 µs median (25–65 µs
+band); eager at N=1000 costs 120 ms and — the binding constraint —
+23 MB PER FORK (232 MB across 10 concurrent turns); lazy collapses on
+chained corpora (sci resolves callees at definition time) to 66–114 ms.
+The hazard also SHRANK under probing: each cluster's own base ctx makes
+cross-cluster leakage impossible; only TURN-scoped members can be wrong,
+and an ABSENT member refuses loudly instead of lying. Adopted (owner may
+veto on review): the base carries only cluster-scoped environment
+members — converting the silent class to loud refusals for free — and
+the fork re-creates only the turn-scoped CALLER closure derived over
+`:seon.fn/calls` (callees are forced by sci's definition-time
+resolution; the closure is caller-directed). Today's real installed
+program has zero agent-authored interpreted defns, so nothing is urgent.
+Two constraints for W1/W2: `sci/fork` copies ONLY `:env` — every other
+ctx key (including kernel's `::installed-functions` atom) is shared by
+identity between base and forks, so per-fork state needs a per-fork
+holder set at turn start (proven isolated 16/16), never a shared-atom
+installed-check.
+
 ## Rollout — test-first, REPL-iterated, then farmed out
 
 Phase 0 — falsify the three load-bearing mechanics live (opus REPL lanes,
