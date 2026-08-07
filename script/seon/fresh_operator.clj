@@ -1274,20 +1274,26 @@
 
 (defn- instrument-form
   [instance-symbol name]
-  `(let [dials#
+  `(let [projection-state#
+         (:seon.sci.eval/projection-state
+          (:seon.sci.eval/ctx ~instance-symbol))
+         dials#
          ((ns-resolve 'seon.config (symbol "effective"))
           @(get ~instance-symbol :seon.boot/cluster-connection)
           ~name)]
-     ((ns-resolve 'seon.instrument (symbol "apply!"))
-      {:seon.config/on-core-error
-       (:seon.config/on-core-error dials#)
-       :seon.sci.admit/caps
-       (select-keys
-        dials#
-        [:seon.config.eval.result/max-depth
-         :seon.config.eval.result/max-collection
-         :seon.config.eval.result/max-string
-         :seon.config.eval.result/max-nodes])})))
+     ((ns-resolve 'seon.schema (symbol "call-with-projection-state"))
+      projection-state#
+      (fn []
+        ((ns-resolve 'seon.instrument (symbol "apply!"))
+         {:seon.config/on-core-error
+          (:seon.config/on-core-error dials#)
+          :seon.sci.admit/caps
+          (select-keys
+           dials#
+           [:seon.config.eval.result/max-depth
+            :seon.config.eval.result/max-collection
+            :seon.config.eval.result/max-string
+            :seon.config.eval.result/max-nodes])})))))
 
 (defn- refresh-instrument-form
   []
@@ -1998,9 +2004,12 @@
         ;; source-analysis owners before asking that JVM to publish
         ;; `current-src`; the running clusters and their program facts remain
         ;; untouched because their process state is held in defonce Vars.
-        ;; Reload the schema loader before any namespace whose top-level forms
-        ;; call `load!`, then reload predicate registration owners before
-        ;; admission runs during publication.
+        ;; Reload the schema runtime before its loader and before any namespace
+        ;; whose top-level forms call `load!`. A long-lived JVM may predate a
+        ;; newly published schema API that the publication owner calls.
+        (println "● current-src: reload schema runtime")
+        (flush)
+        (require 'seon.schema :reload)
         (println "● current-src: reload schema declarations")
         (flush)
         (require 'seon.schema.edn :reload)
@@ -2022,6 +2031,9 @@
         (println "● current-src: reload database functions")
         (flush)
         (require 'seon.db :reload)
+        (println "● current-src: reload evaluation runtime")
+        (flush)
+        (require 'seon.sci.eval :reload)
         (println "● current-src: reload publication owners")
         (flush)
         (require 'seon.cluster.source :reload)

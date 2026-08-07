@@ -1193,7 +1193,7 @@
         (delete-recursively! root)))))
 
 (deftest ^{:seon.test/long "Runs live initialization and reload through a fresh operator JVM."}
-  live-init-reloads-a-moved-core-predicate-owner-before-admission
+  live-init-reloads-schema-runtime-and-moved-predicate-owners-before-admission
   (let [root (fresh-root)
         cluster-name "predicate-owner-reload"
         launched-identities (atom [])]
@@ -1206,6 +1206,28 @@
         (is (= 0 (::exit started)) (::output started)))
       (swap! launched-identities conj
              (advertisement-process-identity root cluster-name))
+      (let [advertisement
+            (edn/read-string
+             (slurp (io/file root "data" "clusters"
+                             cluster-name "prepl.edn")))
+            stale
+            (edn/read-string
+             (prepl-eval
+              advertisement
+              (pr-str
+               `(do
+                  (require 'seon.schema 'seon.sci.eval)
+                  (ns-unmap 'seon.schema (symbol "call-with-forms"))
+                  (ns-unmap 'seon.sci.eval (symbol "projection-state"))
+                  {:seon.dev.fresh-operator-test/schema-api-loaded?
+                   (boolean
+                    (ns-resolve 'seon.schema (symbol "call-with-forms")))
+                   :seon.dev.fresh-operator-test/projection-api-loaded?
+                   (boolean
+                    (ns-resolve 'seon.sci.eval
+                                (symbol "projection-state")))}))))]
+        (is (false? (::schema-api-loaded? stale)) stale)
+        (is (false? (::projection-api-loaded? stale)) stale))
       (let [advertisement
             (edn/read-string
              (slurp (io/file root "data" "clusters"

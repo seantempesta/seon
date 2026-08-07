@@ -25,7 +25,8 @@
             [seon.error :as error]
             [seon.flow :as flow]
             [seon.instrument :as instrument]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.test-support :as test-support]))
 
 (def ^:private function-schemas-state
   ;; Malli exposes collection as a process-global defonce atom but no exact
@@ -35,19 +36,21 @@
 
 (defn- preserving-instrumentation-state
   [body]
-  (let [instrumented-roots (into {}
-                                 (map (juxt identity deref))
-                                 (instrument/instrumented))
-        function-schemas @@function-schemas-state]
-    (try
-      (body)
-      (finally
-        (try
-          (instrument/remove!)
-          (finally
-            (reset! @function-schemas-state function-schemas)))
-        (doseq [[instrumented-var root] instrumented-roots]
-          (alter-var-root instrumented-var (constantly root)))))))
+  (test-support/with-database
+   (fn [_connection]
+     (let [instrumented-roots (into {}
+                                    (map (juxt identity deref))
+                                    (instrument/instrumented))
+           function-schemas @@function-schemas-state]
+       (try
+         (body)
+         (finally
+           (try
+             (instrument/remove!)
+             (finally
+               (reset! @function-schemas-state function-schemas)))
+           (doseq [[instrumented-var root] instrumented-roots]
+             (alter-var-root instrumented-var (constantly root)))))))))
 
 (use-fixtures :each preserving-instrumentation-state)
 
@@ -343,16 +346,22 @@
         var-name (symbol (str "late-contract-" (random-uuid)))
         contract-var (intern *ns* var-name identity)
         projection
-        (schema/build-projection (assoc (schema/snapshot) schema-key :int))]
+        (schema/build-projection (assoc (schema/snapshot) schema-key :int))
+        projection-state (atom {:seon.schema/projection projection})]
     (try
       (alter-meta! contract-var assoc
                    :malli/schema [:=> [:cat schema-key] schema-key])
-      (schema/call-with-projection
-       projection
-       #(instrument/apply! {:seon.config/on-core-error :panic}))
+      (let [observed
+            (schema/call-with-projection-state
+             projection-state
+             #(do
+                (instrument/apply!
+                 {:seon.config/on-core-error :panic})
+                (schema/snapshot)))]
+        (is (contains? observed schema-key)))
 
-      (is (nil? (schema/current-projection))
-          "the acquired projection remains evaluation-local")
+      (is (not (contains? (schema/snapshot) schema-key))
+          "the acquired projection remains cluster-local")
       (is (thrown? Exception (@contract-var "not-an-int"))
           "Malli collected the contract against the acquired projection")
       (finally
