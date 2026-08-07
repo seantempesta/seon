@@ -14,6 +14,7 @@
             [clojure.test.check.generators :as gen]
             [seon.env :as env]
             [seon.schema :as schema]
+            [seon.sci.kernel :as kernel]
             [seon.schema.edn :as schema.edn])
   (:import [clojure.lang Counted]
            [java.util LinkedList]
@@ -189,6 +190,25 @@
   [request]
   (var-process #'capacity-observer-step :compute request))
 
+(defn- with-current-arm
+  "Capture the submitting thread's interrupt arm onto the submission.
+
+  The arm travels exactly as the environment does — as data on the
+  submission — so detached work counts its fn-entries into the arm that
+  admitted it, observes that deadline, and is reachable by `interrupt!`.
+  An unarmed submitter carries no arm, which is ordinary system-side
+  work and never a refusal."
+  [submission]
+  (if-let [armed (kernel/current-arm)]
+    (assoc submission :seon.env/environment
+           (env/refuse-incomplete-environment!
+            (env/scope (env/of submission) {:seon.sci.kernel/arm armed})))
+    submission))
+
+(defn- carried-arm
+  [work]
+  (:seon.sci.kernel/arm (env/of work)))
+
 (defn- submission-capacity-error
   [submission-id workload]
   {:seon.error/kind ::submission-capacity
@@ -290,8 +310,11 @@
                      (vreset! started-at (System/nanoTime))))
                  terminal
                  (try
-                   (let [value (work-fn (env/carry {::started! started!}
-                                                   (env/of work)))]
+                   (let [value
+                         (kernel/adopt-arm
+                          (carried-arm work)
+                          #(work-fn (env/carry {::started! started!}
+                                               (env/of work))))]
                      (started!)
                      {::started-at @started-at
                       ::value value})
@@ -333,8 +356,10 @@
     (try
       ;; The terminal callback runs on whichever thread settled the work —
       ;; the io task, the launcher proc, or a stopping caller — so it too
-      ;; receives its submission's environment as data.
-      (complete! (env/carry terminal (env/of work)))
+      ;; receives its submission's environment as data, under its arm.
+      (kernel/adopt-arm
+       (carried-arm work)
+       #(complete! (env/carry terminal (env/of work))))
       (finally
         (swap! active-work dissoc submission-id)
         (swap! submissions dissoc submission-id)
@@ -379,8 +404,11 @@
                   terminal
                   (try
                     {::started-at started-at
-                     ::value (work-fn (env/carry {::started! (fn [])}
-                                                 (env/of work)))}
+                     ::value
+                     (kernel/adopt-arm
+                      (carried-arm work)
+                      #(work-fn (env/carry {::started! (fn [])}
+                                           (env/of work))))}
                     (catch Throwable throwable
                       {::started-at started-at
                        ::throwable throwable}))]
@@ -645,10 +673,11 @@
   {:malli/schema
    [:=> [:cat :seon.flow/work-launcher :seon.flow/io-submission]
     :boolean]}
-  [work-launcher
-   {::keys [submission-id complete!] :as submission}]
+  [work-launcher submission]
   (env/refuse-absent-environment! submission ::submit!)
-  (let [{::keys [graph accepting? io-submissions]} work-launcher
+  (let [{::keys [submission-id complete!] :as submission}
+        (with-current-arm submission)
+        {::keys [graph accepting? io-submissions]} work-launcher
         completion (bound-fn* complete!)
         work
         (assoc submission
@@ -696,15 +725,16 @@
   {:malli/schema
    [:=> [:cat :seon.flow/work-launcher :seon.flow/work-submission]
     :seon.flow/work-result]}
-  [work-launcher
-   {::keys [submission-id workload work-fn time-limit-ms] :as submission}]
+  [work-launcher submission]
   (when-not work-launcher
     (throw
      (ex-info
       "A compute submission must name its cluster's work launcher."
       {:seon.error/kind :configuration})))
   (env/refuse-absent-environment! submission ::submit!!)
-  (let [{::keys [graph active-work]} work-launcher
+  (let [{::keys [submission-id workload work-fn time-limit-ms] :as submission}
+        (with-current-arm submission)
+        {::keys [graph active-work]} work-launcher
         result (promise)
         status (atom ::queued)
         work-fn (bound-fn* work-fn)

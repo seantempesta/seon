@@ -12,6 +12,8 @@
             [seon.effect :as effect]
             [seon.env :as sut]
             [seon.flow :as flow]
+            [seon.sci.eval :as eval]
+            [seon.sci.kernel :as kernel]
             [seon.test-support :as test-support])
   (:import [java.util.concurrent Executors]))
 
@@ -198,6 +200,62 @@
             "io ran with the dynamic carrier at its root nil, as the audit found"))
       (finally
         (run! flow/stop-work-launcher! launchers)))))
+
+(deftest a-submission-carries-the-submitting-threads-interrupt-arm
+  (let [environment (test-support/environment "arm-carriage")
+        launcher (flow/start-work-launcher!
+                  {:seon.env/environment environment
+                   :seon.flow/configuration launcher-configuration})
+        ctx (eval/build-base-ctx)]
+    (try
+      (testing "an armed submitter's arm reaches the io thread"
+        (let [observed (promise)
+              armed (kernel/arm ctx 15000)
+              submitting-arm (atom nil)]
+          (try
+            (reset! submitting-arm (kernel/current-arm))
+            (flow/submit!
+             launcher
+             {:seon.env/environment environment
+              :seon.flow/submission-id ::armed-io
+              :seon.flow/workload :io
+              :seon.flow/work-fn
+              (fn [call]
+                (deliver observed
+                         {:carried (:seon.sci.kernel/arm (sut/of call))
+                          :adopted (kernel/current-arm)})
+                ::done)
+              :seon.flow/complete! (fn [_])})
+            (finally
+              ((:seon.sci.kernel/stop! armed))))
+          (let [{:keys [carried adopted]}
+                (test-support/await-event! (future @observed) ::armed-io)]
+            (is (identical? @submitting-arm carried)
+                "the submission carried the submitting thread's arm as data")
+            (is (identical? @submitting-arm adopted)
+                "the io thread ran under that same arm, not unarmed"))))
+
+      (testing "an unarmed submitter carries no arm, which is not a refusal"
+        (let [observed (promise)]
+          (is (true?
+               (flow/submit!
+                launcher
+                {:seon.env/environment environment
+                 :seon.flow/submission-id ::unarmed-io
+                 :seon.flow/workload :io
+                 :seon.flow/work-fn
+                 (fn [call]
+                   (deliver observed
+                            {:carried (:seon.sci.kernel/arm (sut/of call))
+                             :adopted (kernel/current-arm)})
+                   ::done)
+                 :seon.flow/complete! (fn [_])})))
+          (let [{:keys [carried adopted]}
+                (test-support/await-event! (future @observed) ::unarmed-io)]
+            (is (nil? carried))
+            (is (nil? adopted)))))
+      (finally
+        (flow/stop-work-launcher! launcher)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Refusal at the crossings

@@ -664,7 +664,8 @@
   (try
     (let [evaluation
           (#'cluster.loop/submit-evaluation!!
-           {:seon.flow/work-launcher @test-work-launcher}
+           {:seon.env/environment @test-environment
+            :seon.flow/work-launcher @test-work-launcher}
            sci.eval/evaluate
            "turn-boundary-0"
            {:seon.cluster.run.form/source
