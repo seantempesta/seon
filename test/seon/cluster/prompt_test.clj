@@ -16,6 +16,12 @@
             [seon.test-support :as support])
   (:import [java.util Date]))
 
+(def ^:private test-environment
+  ;; The subset environment (store layer only) every crossing this
+  ;; namespace constructs names; boot's own constructor, fewer layers.
+  (delay (support/environment "seon.cluster.prompt-test")))
+
+
 (def ^:private caps
   {:seon.config.eval.result/max-depth 12
    :seon.config.eval.result/max-collection 64
@@ -63,7 +69,8 @@
                {:proc
                 (flow/var-process
                  #'web/render-step :io
-                 {:seon.render.web/render-channel render-channel
+                 {:seon.env/environment @test-environment
+                  :seon.render.web/render-channel render-channel
                   :seon.render/context-channel context-channel
                   :seon.render.web/pages-channel pages-channel
                   :seon.render.web/registration (atom {})

@@ -38,6 +38,12 @@
            [java.util Date]
            [java.util.concurrent CountDownLatch Executor]))
 
+(def ^:private test-environment
+  ;; The subset environment (store layer only) every crossing this
+  ;; namespace constructs names; boot's own constructor, fewer layers.
+  (delay (test-support/environment "seon.cluster.agent-test")))
+
+
 (set! *warn-on-reflection* true)
 
 (def ^:dynamic *work-launcher* nil)
@@ -82,7 +88,8 @@
       (let [ctx (sci.eval/cluster-ctx @connection connection)
             launcher
             (seon.flow/start-work-launcher!
-             {::seon.flow/configuration
+             {:seon.env/environment @test-environment
+              ::seon.flow/configuration
               {:seon.config.flow.compute/queue-depth 10
                :seon.config.flow.compute/concurrency 3
                :seon.config.flow.io/queue-depth 2
@@ -99,7 +106,8 @@
                {:proc
                 (seon.flow/var-process
                  #'web/render-step :io
-                 {:seon.render.web/render-channel render-channel
+                 {:seon.env/environment @test-environment
+                  :seon.render.web/render-channel render-channel
                   :seon.render/context-channel context-channel
                   :seon.render.web/pages-channel pages-channel
                   :seon.render.web/registration (atom {})

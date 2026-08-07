@@ -15,6 +15,12 @@
   (:import [java.io ByteArrayOutputStream]
            [java.util Arrays]))
 
+(def ^:private test-environment
+  ;; The subset environment (store layer only) every crossing this
+  ;; namespace constructs names; boot's own constructor, fewer layers.
+  (delay (support/environment "seon.background-blob-test")))
+
+
 (defn- with-file-effect-store
   [body]
   (let [root (io/file "tmp/background-effect-binary-test")]
@@ -112,7 +118,8 @@
                                 #(async/put! events %))
             launcher
             (flow/start-work-launcher!
-             {::flow/configuration
+             {:seon.env/environment @test-environment
+              ::flow/configuration
               {:seon.config.flow.compute/queue-depth 1
                :seon.config.flow.compute/concurrency 1
                :seon.config.flow.io/queue-depth 2

@@ -37,6 +37,12 @@
             [seon.test-support :as test-support])
   (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
+(def ^:private test-environment
+  ;; The subset environment (store layer only) every crossing this
+  ;; namespace constructs names; boot's own constructor, fewer layers.
+  (delay (test-support/environment "seon.cluster.boot-test")))
+
+
 ;;; ---------------------------------------------------------------------------
 ;;; Fixtures
 ;;; ---------------------------------------------------------------------------
@@ -386,7 +392,9 @@
   (let [{:keys [compute io]} (cluster/root-executors)
         observations (atom {})
         completed (CountDownLatch. 2)
-        proc-args {::observations observations ::completed completed}
+        proc-args {:seon.env/environment @test-environment
+                   ::observations observations
+                   ::completed completed}
         graph
         (flow/create-flow
          {:procs

@@ -11,6 +11,12 @@
             [seon.test-support :as test-support])
   (:import [java.util Date]))
 
+(def ^:private test-environment
+  ;; The subset environment (store layer only) every crossing this
+  ;; namespace constructs names; boot's own constructor, fewer layers.
+  (delay (test-support/environment "seon.effect-test")))
+
+
 (def ^:private handler-calls (atom []))
 
 (defn- test-handler
@@ -77,7 +83,8 @@
             _ (datahike/listen! connection listener-key #(async/put! events %))
             launcher
             (flow/start-work-launcher!
-             {::flow/configuration
+             {:seon.env/environment @test-environment
+              ::flow/configuration
               {:seon.config.flow.compute/queue-depth 1
                :seon.config.flow.compute/concurrency 1
                :seon.config.flow.io/queue-depth 1

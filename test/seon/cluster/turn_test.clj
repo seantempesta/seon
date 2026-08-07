@@ -39,6 +39,12 @@
             [seon.test-support :as test-support])
   (:import [java.util Date]))
 
+(def ^:private test-environment
+  ;; The subset environment (store layer only) every crossing this
+  ;; namespace constructs names; boot's own constructor, fewer layers.
+  (delay (test-support/environment "seon.cluster.turn-test")))
+
+
 ;;; NO explicit attribute list. The live boot path installs whatever
 ;;; `canonical-database-attributes` derives, and a fixture that installs
 ;;; its own list is exactly how the missing entity maps stayed invisible
@@ -103,7 +109,8 @@
            {:proc
             (seon.flow/var-process
              #'web/render-step :io
-             {:seon.render.web/render-channel render-channel
+             {:seon.env/environment @test-environment
+              :seon.render.web/render-channel render-channel
               :seon.render/context-channel context-channel
               :seon.render.web/pages-channel pages-channel
               :seon.render.web/registration (atom {})
@@ -131,7 +138,8 @@
    (fn [connection]
     (let [launcher
           (seon.flow/start-work-launcher!
-           {::seon.flow/configuration
+           {:seon.env/environment @test-environment
+            ::seon.flow/configuration
             {:seon.config.flow.compute/queue-depth 10
              :seon.config.flow.compute/concurrency 2
              :seon.config.flow.io/queue-depth 2
@@ -2959,7 +2967,8 @@
                 {:seon.render.web/render
                  {:proc (seon.flow/var-process
                          #'web/render-step :io
-                         {:seon.render.web/render-channel
+                         {:seon.env/environment @test-environment
+                          :seon.render.web/render-channel
                           render-channel
                           :seon.render/context-channel (async/chan)
                           :seon.render.web/pages-channel

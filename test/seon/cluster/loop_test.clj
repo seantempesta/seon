@@ -39,6 +39,12 @@
             [seon.test-support :as test-support])
   (:import [java.util Date]))
 
+(def ^:private test-environment
+  ;; The subset environment (store layer only) every crossing this
+  ;; namespace constructs names; boot's own constructor, fewer layers.
+  (delay (test-support/environment "seon.cluster.loop-test")))
+
+
 ;;; ---------------------------------------------------------------------------
 ;;; The pure parts
 ;;; ---------------------------------------------------------------------------
@@ -546,7 +552,8 @@
            {:proc
             (seon.flow/var-process
              #'web/render-step :io
-             {:seon.render.web/render-channel render-channel
+             {:seon.env/environment @test-environment
+              :seon.render.web/render-channel render-channel
               :seon.render/context-channel context-channel
               :seon.render.web/pages-channel pages-channel
               :seon.render.web/registration (atom {})

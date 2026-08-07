@@ -27,6 +27,12 @@
 
 (def ^:private test-work-launcher (atom nil))
 
+(def ^:private test-environment
+  ;; Flow plumbing is a store-layer subject: these tests stand up no branch
+  ;; and no facts, so they construct the subset environment every crossing
+  ;; in this namespace names.
+  (delay (test-support/environment "seon.flow-test")))
+
 (def ^:private test-io-configuration
   {:seon.config.flow.io/queue-depth 2
    :seon.config.flow.io/concurrency 2})
@@ -35,8 +41,10 @@
   [request]
   (let [launcher
         (sut/start-work-launcher!
-         (update request ::sut/configuration
-                 #(merge test-io-configuration %)))]
+         (-> request
+             (assoc :seon.env/environment @test-environment)
+             (update ::sut/configuration
+                     #(merge test-io-configuration %))))]
     (reset! test-work-launcher launcher)
     launcher))
 
@@ -48,7 +56,9 @@
 
 (defn- submit-test!!
   [submission]
-  (sut/submit!! @test-work-launcher submission))
+  (sut/submit!! @test-work-launcher
+                (assoc submission
+                       :seon.env/environment @test-environment)))
 
 (def ^:private callback-schema-keys
   [:seon.flow/commit-drop!
@@ -122,7 +132,8 @@
           {:observer
            {:proc
             (sut/capacity-observer-proc
-             {::sut/parallelism 1
+             {:seon.env/environment @test-environment
+              ::sut/parallelism 1
               ::sut/active-work (atom {})})}}
           :conns []})
         started (flow/start graph)]
@@ -343,11 +354,13 @@
          :seon.config.flow.io/queue-depth 1
          :seon.config.flow.io/concurrency 1}
         launcher
-        (sut/start-work-launcher! {::sut/configuration configuration})
+        (sut/start-work-launcher! {:seon.env/environment @test-environment
+                                   ::sut/configuration configuration})
         terminals (mapv (fn [_] (promise)) (range 3))
         submission
         (fn [ordinal]
-          {::sut/submission-id (keyword (str "background-" ordinal))
+          {:seon.env/environment @test-environment
+           ::sut/submission-id (keyword (str "background-" ordinal))
            ::sut/workload :io
            ::sut/work-fn
            (fn [_]
@@ -598,12 +611,14 @@
         release-a (CountDownLatch. 1)
         calls-a (atom 0)
         launcher-a
-        (sut/start-work-launcher! {::sut/configuration configuration})]
+        (sut/start-work-launcher! {:seon.env/environment @test-environment
+                                   ::sut/configuration configuration})]
     (let [result-a
           (future
             (sut/submit!!
              launcher-a
-             {::sut/submission-id ::cluster-a-work
+             {:seon.env/environment @test-environment
+              ::sut/submission-id ::cluster-a-work
               ::sut/workload :compute
               ::sut/time-limit-ms 5000
               ::sut/work-fn
@@ -616,13 +631,15 @@
         (test-support/await-event! entered-a ::cluster-a-work-entered)
         (let [launcher-b
               (sut/start-work-launcher!
-               {::sut/configuration configuration})]
+               {:seon.env/environment @test-environment
+                ::sut/configuration configuration})]
           (try
             (is (= ::cluster-b-completed
                    (::sut/value
                     (sut/submit!!
                      launcher-b
-                     {::sut/submission-id ::cluster-b-work
+                     {:seon.env/environment @test-environment
+                      ::sut/submission-id ::cluster-b-work
                       ::sut/workload :compute
                       ::sut/time-limit-ms 5000
                       ::sut/work-fn (fn [_] ::cluster-b-completed)}))))
@@ -668,7 +685,8 @@
 (defn- start-test-fanout!
   [connection graph started fault-buffer-capacity monitor-buffer-capacity]
   (sut/start-error-fanout!
-   {::sut/graph graph
+   {:seon.env/environment @test-environment
+    ::sut/graph graph
     ::sut/started started
     ::sut/fault-buffer-capacity fault-buffer-capacity
     ::sut/monitor-buffer-capacity monitor-buffer-capacity
@@ -928,7 +946,8 @@
         finish-commit (CountDownLatch. 1)
         fanout
         (sut/start-error-fanout!
-         {::sut/graph graph
+         {:seon.env/environment @test-environment
+          ::sut/graph graph
           ::sut/started started
           ::sut/fault-buffer-capacity 1
           ::sut/monitor-buffer-capacity 1
@@ -1278,7 +1297,8 @@
         client (HttpClient/newHttpClient)
         fanout
         (sut/start-error-fanout!
-         {::sut/graph graph
+         {:seon.env/environment @test-environment
+          ::sut/graph graph
           ::sut/started started
           ::sut/fault-buffer-capacity 8
           ::sut/monitor-buffer-capacity 8

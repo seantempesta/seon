@@ -4,7 +4,8 @@
             [clojure.test :refer [deftest is]]
             [seon.cluster]
             [seon.cluster.agent]
-            [seon.flow :as sut])
+            [seon.flow :as sut]
+            [seon.test-support :as test-support])
   (:import [java.util.concurrent ExecutorService]))
 
 (defn- private-var
@@ -26,13 +27,17 @@
   ([state _input _message]
    [state nil]))
 
+(def ^:private test-environment
+  (delay (test-support/environment "seon.flow-configuration-test")))
+
 (deftest proc-construction-refuses-the-mixed-scaling-cliff
   (let [constructor (private-var 'seon.flow 'var-process)]
     (is
      (thrown-with-msg?
       clojure.lang.ExceptionInfo
       #"must declare either :io or :compute"
-      (constructor #'inert-step :mixed {})))))
+      (constructor #'inert-step :mixed
+                   {:seon.env/environment @test-environment})))))
 
 (deftest every-built-graph-proc-declares-a-specific-workload
   (let [compute-executor (sut/bounded-platform-executor 1)
@@ -42,7 +47,8 @@
       (let [graph-definitions
             [[:work-launcher
               ((private-var 'seon.flow 'work-launcher-graph-definition)
-               {::sut/parallelism 1
+               {:seon.env/environment @test-environment
+                ::sut/parallelism 1
                 ::sut/active-work (atom {})
                 ::sut/queue-depth 1
                 ::sut/compute-executor compute-executor
@@ -53,7 +59,8 @@
                 ::sut/proc-stopped (promise)})]
              [:fault
               ((private-var 'seon.flow 'fault-graph-definition)
-               {::sut/fault-channel fault-channel
+               {:seon.env/environment @test-environment
+                ::sut/fault-channel fault-channel
                 ::sut/completion completion
                 ::sut/read-core-error-mode (constantly :record)
                 ::sut/commit-fault! identity
@@ -63,11 +70,12 @@
               ;; built through `var-process`, which refuses `:mixed` at
               ;; construction, and `describe` needs no live channels
               ((private-var 'seon.cluster 'cluster-graph-definition)
-               {} (atom {}) {})]
+               {:seon.env/environment @test-environment} (atom {}) {})]
              [:agent
               (seon.cluster.agent/graph-definition
                {:seon.cluster.loop/cluster
-                {:seon.cluster.wake/channel
+                {:seon.env/environment @test-environment
+                 :seon.cluster.wake/channel
                  (async/chan (async/sliding-buffer 1))}
                 :seon.cluster.agent/id "census"})]]
             proc-facts

@@ -41,6 +41,12 @@
             [seon.test-support :as test-support])
   (:import [java.util Date]))
 
+(def ^:private test-environment
+  ;; The subset environment (store layer only) every crossing this
+  ;; namespace constructs names; boot's own constructor, fewer layers.
+  (delay (test-support/environment "seon.gen.loop-test")))
+
+
 (def ^:private process
   (cluster/process-identity {:seon.boot/pid 4242
                              :seon.boot/start-instant (Date. 1700000000000)}))
@@ -84,7 +90,8 @@
            {:proc
             (seon.flow/var-process
              #'web/render-step :io
-             {:seon.render.web/render-channel render-channel
+             {:seon.env/environment @test-environment
+              :seon.render.web/render-channel render-channel
               :seon.render/context-channel context-channel
               :seon.render.web/pages-channel pages-channel
               :seon.render.web/registration (atom {})
@@ -110,7 +117,8 @@
    (fn [connection]
      (let [launcher
            (seon.flow/start-work-launcher!
-            {::seon.flow/configuration
+            {:seon.env/environment @test-environment
+             ::seon.flow/configuration
              {:seon.config.flow.compute/queue-depth 10
               :seon.config.flow.compute/concurrency 2
               :seon.config.flow.io/queue-depth 2

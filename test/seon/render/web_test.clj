@@ -51,6 +51,12 @@
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
             HttpResponse$BodyHandlers]))
 
+(def ^:private test-environment
+  ;; The subset environment (store layer only) every crossing this
+  ;; namespace constructs names; boot's own constructor, fewer layers.
+  (delay (support/environment "seon.render.web-test")))
+
+
 (def ^:private caps
   (config/result-caps (config/defaults)))
 
@@ -106,7 +112,9 @@
                     {:seon.render.web/render
                      {:proc (flow/var-process
                              #'web/render-step :io
-                             (assoc view :seon.cluster.loop/cluster
+                             (assoc view
+                                    :seon.env/environment @test-environment
+                                    :seon.cluster.loop/cluster
                                     {:seon.db/connection connection
                                      :seon.sci.admit/caps caps
                                      :seon.sci.eval/ctx ctx
