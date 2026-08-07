@@ -81,9 +81,17 @@ Full evidence:
 The seon.ai-test roster pin is ALSO closed (`547c0a1ea` removed it;
 `cf4d31095` strengthened the replacement to a derived whole-roster
 assertion from `seon.config/default-population` — no list to maintain).
-Both named blockers are done; a verification bare run is in flight.
-THEN: bare green → seon.env Phase 1 launch
-([specs](seon-env-phase1-specs-2026-08-07.md)) → reset → drive-arc
+Both named blockers are done. The verification bare run was STOPPED at
+the owner's direction (>30 min; suite duration is its own filed tax) after
+55 namespaces with ZERO failures INCLUDING both fixed blockers completing
+in-run (n-agent 16.5 s; situation-totality 114 s). Owner-directed
+amendment to ruling 7's gate: Phase 1 launches on this evidence; the
+COMPLETE bare run moves to the Phase 1 integration checkpoint. Full-suite
+runs are held until then — lanes use focused/changed selectors only.
+seon.env PHASE 1 LAUNCHED ([specs](seon-env-phase1-specs-2026-08-07.md):
+W1 env+constructor, W2 interrupt arm, W3 hook→fork pin, W4 per-fork
+install measurement). THEN: integration checkpoint (complete bare run) →
+reset → drive-arc
 rerun (the first-turn proof) → step 5 R6 singles → step 6 recurring
 deterministic drive in bin/test (graduation gate) → messaging wave
 (spec ready, result/eid-N ruled).
