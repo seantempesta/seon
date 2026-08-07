@@ -166,8 +166,9 @@ Confirms PRD ruling 8's premise: the cost is consulting the hook at all, and
 it is a per-call tax once a hook is installed cluster-wide. Plan-gating stays
 queued for Phase 3 / S1.
 
-Observer wrapper cost (`tmp/env-probes/w3_builtin_observer_cost.clj`, three
-paired runs, pin clone vs branch, same session):
+Observer wrapper cost — committed as
+`env-phase1-w3-probes/w3_builtin_observer_cost.clj` (its docstring carries the
+paired-run command), three paired runs, pin clone vs branch, same session:
 
 | site | pin | branch |
 |---|---|---|
