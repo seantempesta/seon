@@ -1,0 +1,43 @@
+#:probe{:name "B — interrupt arm across a thread hop",
+        :verdict :confirmed-unarmed,
+        :hypothesis
+        "work handed across a thread from inside an armed eval runs UNARMED",
+        :arms
+        [#:probe{:arm :b1-armed-same-thread,
+                 :fn-entries 20002,
+                 :outcome :ok,
+                 :value 20000,
+                 :error nil}
+         #:probe{:arm :b2-armed-work-on-virtual-thread,
+                 :fn-entries 0,
+                 :outcome :ok,
+                 :ran-on #:probe{:thread-id 841, :virtual? true},
+                 :value 20000,
+                 :error nil}
+         #:probe{:ticks-after 52426,
+                 :spawned-interrupted? nil,
+                 :parent-eval #:probe{:value :spawned},
+                 :still-running-after-deadline? true,
+                 :time-limit-ms 300,
+                 :parent-outcome :ok,
+                 :arm :b3-detached-virtual-thread-under-time-limit,
+                 :ticks-at-half 25986,
+                 :spawned-error nil,
+                 :parent-fn-entries 0,
+                 :spawned-thread
+                 #:probe{:thread-id 842, :virtual? true},
+                 :observed-ms 1500}
+         #:probe{:arm :b4-control-unbounded-loop-on-arming-thread,
+                 :time-limit-ms 300,
+                 :elapsed-ms 310,
+                 :fn-entries 3108328,
+                 :outcome :time,
+                 :interrupted? true,
+                 :error
+                 "class clojure.lang.ExceptionInfo: time-limit"}],
+        :summary
+        #:probe{:fn-entries-same-thread 20002,
+                :fn-entries-cross-thread 0,
+                :detached-survived-deadline? true,
+                :detached-interrupted? false,
+                :control-interrupted-on-arming-thread? true}}

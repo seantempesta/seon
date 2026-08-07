@@ -1,0 +1,81 @@
+#:probe{:cross-fork-carriage
+        #:probe{:fork-a-id :fork-a,
+                :fork-b-id :fork-b,
+                :called-from-host
+                #:probe{:env-id :fork-a,
+                        :hook
+                        #:probe{:env-id :fork-a,
+                                :env-token
+                                "56a3d04e-e4e1-4fd5-96c8-7ef326ee45d4"},
+                        :thread
+                        #:probe{:thread-name "main",
+                                :thread-id 3,
+                                :virtual? false}},
+                :called-from-host-virtual-thread
+                #:probe{:thread-name "",
+                        :thread-id 840,
+                        :virtual? true,
+                        :value
+                        #:probe{:env-id :fork-a,
+                                :hook
+                                #:probe{:env-id :fork-a,
+                                        :env-token
+                                        "56a3d04e-e4e1-4fd5-96c8-7ef326ee45d4"},
+                                :thread
+                                #:probe{:thread-name "",
+                                        :thread-id 840,
+                                        :virtual? true}},
+                        :started-ns 1286463845943416,
+                        :ended-ns 1286463845946541},
+                :called-from-fork-b
+                #:probe{:env-id :fork-a,
+                        :hook
+                        #:probe{:env-id :fork-a,
+                                :env-token
+                                "56a3d04e-e4e1-4fd5-96c8-7ef326ee45d4"},
+                        :thread
+                        #:probe{:thread-name "main",
+                                :thread-id 3,
+                                :virtual? false}},
+                :fork-b-own
+                #:probe{:env-id :fork-b,
+                        :hook
+                        #:probe{:env-id :fork-b,
+                                :env-token
+                                "08140a21-20e5-4203-9939-4a8d436aaa6e"},
+                        :thread
+                        #:probe{:thread-name "main",
+                                :thread-id 3,
+                                :virtual? false}},
+                :fork-a-interrupt-entrances 3,
+                :fork-b-interrupt-entrances 1},
+        :verdict :pass,
+        :fork-count 24,
+        :evaluations 192,
+        :arms-checked 576,
+        :failures [],
+        :rounds 8,
+        :off-thread-interrupt-fn-thread-sample
+        [[129 true]
+         [673 false]
+         [786 false]
+         [498 false]
+         [323 true]
+         [702 true]],
+        :interrupt-fn-entrances 576,
+        :peak-concurrent-off-thread-work 24,
+        :ctx-store-control
+        #:probe{:on-thread-resolved 192,
+                :on-thread-sample [0 0],
+                :off-thread-total 192,
+                :off-thread-failures 192,
+                :off-thread-sample
+                #:probe{:thread-name "",
+                        :thread-id 145,
+                        :virtual? true,
+                        :value
+                        #:probe{:ctx-store-error
+                                "No context found in: sci.ctx-store/*ctx*. Please set it using sci.ctx-store/reset-ctx!"},
+                        :started-ns 1286463670835083,
+                        :ended-ns 1286463670879541}},
+        :name "A — environment on fork across thread hops"}
