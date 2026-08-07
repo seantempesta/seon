@@ -76,20 +76,32 @@
     (vector? definition)
     (some map-entries (rest definition))))
 
-(def ^:private members-of
-  ;; Keyed by the complete declaration value, never by a "current" slot: a
-  ;; changed declaration is a different key and derives again.
-  (memoize
-   (fn [definition]
-     (into []
-           (map (fn [[member properties]]
-                  (let [properties (if (map? properties) properties {})]
-                    {:seon.env/member member
-                     :seon.env/layer (:seon.env/layer properties)
-                     :seon.env/optional? (true? (:optional properties))
-                     :seon.env/boot-required?
-                     (= :required (:seon.env/boot properties))})))
-           (map-entries definition)))))
+(def ^:private declared-members
+  ;; Read the declaration ONCE. `schema/schema-definition` falls through to
+  ;; `seon.schema.edn/packaged-forms`, which re-reads and re-merges every
+  ;; schema resource on each call whenever no projection is bound — and no
+  ;; projection is bound on exactly the paths that construct or scope an
+  ;; environment most often (a flow submission, a turn's request context).
+  ;; Reading per construction cost minutes of a suite run before this delay.
+  ;; Reading once is honest here because `:seon.env/environment` is a CORE
+  ;; packaged declaration: exact-key redefinition is refused at admission,
+  ;; so this value cannot change while the process lives.
+  (delay
+    (let [definition (schema/schema-definition :seon.env/environment)]
+      (when-not definition
+        (throw
+         (ex-info
+          "The :seon.env/environment schema is not registered."
+          {:seon.error/kind ::schema-absent})))
+      (into []
+            (map (fn [[member properties]]
+                   (let [properties (if (map? properties) properties {})]
+                     {:seon.env/member member
+                      :seon.env/layer (:seon.env/layer properties)
+                      :seon.env/optional? (true? (:optional properties))
+                      :seon.env/boot-required?
+                      (= :required (:seon.env/boot properties))})))
+            (map-entries definition)))))
 
 (defn members
   "The declared environment members, in the dependency order boot builds.
@@ -104,13 +116,14 @@
               [:seon.env/optional? :boolean]
               [:seon.env/boot-required? :boolean]]]]}
   []
-  (let [definition (schema/schema-definition :seon.env/environment)]
-    (when-not definition
-      (throw
-       (ex-info
-        "The :seon.env/environment schema is not registered."
-        {:seon.error/kind ::schema-absent})))
-    (members-of definition)))
+  @declared-members)
+
+(def ^:private turn-members
+  (delay
+    (into #{}
+          (comp (filter (comp #{:turn} :seon.env/layer))
+                (map :seon.env/member))
+          @declared-members)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Construction — refuse up front, in dependency order
@@ -192,12 +205,7 @@
       "Scoping requires an environment; there is nothing to narrow."
       {:seon.error/kind ::absent-environment
        :seon.error/data {:seon.env/supplied (str (type carried))}})))
-  (let [turn-members
-        (into #{}
-              (comp (filter (comp #{:turn} :seon.env/layer))
-                    (map :seon.env/member))
-              (members))
-        outside (vec (sort (remove turn-members (keys supplied))))]
+  (let [outside (vec (sort (remove @turn-members (keys supplied))))]
     (if (seq outside)
       {:seon.error/kind ::unscopable-member
        :seon.error/message
