@@ -1,5 +1,5 @@
 (ns seon.schema.datahike-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -8,7 +8,20 @@
             [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as support]))
 
-(schema/register! ::title :string)
+(def ^:private schema-delta (schema/begin-registration-delta))
+
+(schema/call-with-registration-delta
+ schema-delta
+ {:seon.schema.admission/source :core}
+ #(schema/register! ::title :string))
+
+(use-fixtures
+ :each
+ (fn [test-body]
+   (schema/call-with-registration-delta
+    schema-delta
+    {:seon.schema.admission/source :core}
+    test-body)))
 
 (def ^:private scalar-generator
   (gen/elements

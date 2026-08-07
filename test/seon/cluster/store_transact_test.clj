@@ -13,7 +13,7 @@
   against a real connection, because the
   outcome that matters most (a refusing transaction function) can only
   be produced by a real writer."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is use-fixtures]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -23,7 +23,20 @@
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]))
 
-(schema/register! ::mixed-value [:or :string :int])
+(def ^:private schema-delta (schema/begin-registration-delta))
+
+(schema/call-with-registration-delta
+ schema-delta
+ {:seon.schema.admission/source :core}
+ #(schema/register! ::mixed-value [:or :string :int]))
+
+(use-fixtures
+ :each
+ (fn [test-body]
+   (schema/call-with-registration-delta
+    schema-delta
+    {:seon.schema.admission/source :core}
+    test-body)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; C6 — the pure cause-chain walk

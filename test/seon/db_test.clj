@@ -1,6 +1,6 @@
 (ns seon.db-test
   (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [datahike.api :as d]
             [seon.config :as config]
             [seon.db :as db]
@@ -11,11 +11,26 @@
             [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as test-support]))
 
-(schema/register! ::ai-declaration
-                  [:and {:seon.db/index true}
-                   [:or :string :qualified-symbol]])
-(schema/register! ::html-declaration [:or [:vector :any] :qualified-symbol])
-(schema/register! ::row-id [:string {:seon.db/identity true}])
+(def ^:private schema-delta (schema/begin-registration-delta))
+
+(schema/call-with-registration-delta
+ schema-delta
+ {:seon.schema.admission/source :core}
+ (fn []
+   (schema/register! ::ai-declaration
+                     [:and {:seon.db/index true}
+                      [:or :string :qualified-symbol]])
+   (schema/register! ::html-declaration
+                     [:or [:vector :any] :qualified-symbol])
+   (schema/register! ::row-id [:string {:seon.db/identity true}])))
+
+(use-fixtures
+ :each
+ (fn [test-body]
+   (schema/call-with-registration-delta
+    schema-delta
+    {:seon.schema.admission/source :core}
+    test-body)))
 
 (def ^:private exam-query
   '[:find (count ?key) .
