@@ -16,10 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (22)
+## Blocker (23)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Re-root the foreign-write custody fence on the environment](foreign-write-fence-reads-only-the-dynamic-var.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Commit every dropped core-fault observation](dropped-core-fault-count-is-not-durable.md) | blocker | fault-committer durability wave |
 | [Make the schema environment an explicit argument, not an ambient binding](schema-environment-is-ambient-not-explicit.md) | blocker | environment-as-a-value design session |
 | [Pass ordered entity ids to transcript `pull-many`](transcript-about-lookup-passes-a-set-to-pull-many.md) | blocker | live-drive render repair wave |
@@ -38,10 +39,11 @@ See `README.md` for the convention.
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 | [Arm the time limit on the thread that runs the work](interrupt-arm-does-not-cross-a-thread-hop.md) | blocker | seon.env Phase 1 constructor wave |
 
-## Friction (101)
+## Friction (102)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Give `seon.db` the branch and commit reads root needs](seon-db-has-no-branch-or-commit-reads.md) | friction | `my.branch` verb wave (W-C, [PRD](../../prds/sci-execution-runtime/plan/agent-desk-and-checkout-prd-2026-08-05.md)) |
 | [Carry the submitting environment across the IO half of the work launcher](flow-io-work-does-not-carry-its-environment.md) | friction | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Read the SCI built-in call observer from the runtime context](sci-built-in-call-observer-is-read-from-the-analysis-context.md) | friction | seon.env Phase 1 sci fork hook landing ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Pass the root :io executor to the work-launcher graph](flow-work-launcher-graph-omits-its-root-io-executor.md) | friction | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |

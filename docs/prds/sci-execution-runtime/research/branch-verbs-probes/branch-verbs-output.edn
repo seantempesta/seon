@@ -1,0 +1,149 @@
+#:probe{:verdict
+        #:probe{:i-enumerate
+                #:probe{:roster-before #{:db},
+                        :roster-after #{:db :probe-b :probe-a},
+                        :fork-a
+                        {:seon.store/branch :probe-a,
+                         :seon.cluster/created? true},
+                        :fork-b
+                        {:seon.store/branch :probe-b,
+                         :seon.cluster/created? true},
+                        :pass true},
+                :ii-fork-and-pin
+                #:probe{:head-b-commit-id
+                        #uuid "6a763cce-4087-540c-859d-ada20ab97739",
+                        :pinned-a-label ["a-first"],
+                        :pass true,
+                        :foreign-head-b-commit-id
+                        #uuid "6a763cce-4087-540c-859d-ada20ab97739",
+                        :head-b-label ["b-only"],
+                        :pinned-a-t 536870914,
+                        :log-a
+                        [{:datahike/commit-id
+                          #uuid "6a763cce-afd6-5c1a-b1bc-53ba12766625",
+                          :t 536870915}
+                         {:datahike/commit-id
+                          #uuid "6a763cce-bb60-5c33-b368-d10e1b93ac48",
+                          :t 536870914}
+                         {:datahike/commit-id
+                          #uuid "6a763ccd-6d80-5357-af56-f98cc4aa42d0",
+                          :t 536870913}
+                         {:datahike/commit-id
+                          #uuid "6a763ccd-dec1-5795-b066-7287d18ebaf1",
+                          :t 536870912}],
+                        :as-of-a-label ["a-first"],
+                        :head-a-commit-id
+                        #uuid "6a763cce-afd6-5c1a-b1bc-53ba12766625",
+                        :head-a-label ["a-second"]},
+                :iii-caller-wins
+                #:probe{:current-label ["a-second"],
+                        :explicit-head-b-label ["b-only"],
+                        :explicit-foreign-head-b-label ["b-only"],
+                        :explicit-pinned-a-label ["a-first"],
+                        :explicit-as-of-a-label ["a-first"],
+                        :pass true},
+                :iv-custody-fence
+                #:probe{:foreign-write-error-kind
+                        :seon.db/foreign-connection,
+                        :foreign-write-message
+                        "The explicit transaction connection does not belong to the calling agent's cluster.",
+                        :foreign-write-data
+                        #:seon.db{:ambient-connection-id
+                                  [#uuid "af329f83-e600-30cf-a216-b74688e522af"
+                                   :probe-a],
+                                  :explicit-connection-id
+                                  [#uuid "af329f83-e600-30cf-a216-b74688e522af"
+                                   :probe-b]},
+                        :own-write-tx 536870916,
+                        :unbound-foreign-write-committed? true,
+                        :branch-b-label-after
+                        ["b-only" "unbound-write"],
+                        :reads-open? true,
+                        :pass true},
+                :vi-log-and-diff
+                #:probe{:pass true,
+                        :attached-history-a-count 5,
+                        :store-log-b
+                        [{:datahike/commit-id
+                          #uuid "6a763cce-ce05-5177-9eb3-522b0c002b39",
+                          :t 536870915,
+                          :datahike/parents
+                          [#uuid "6a763cce-4087-540c-859d-ada20ab97739"]}
+                         {:datahike/commit-id
+                          #uuid "6a763cce-4087-540c-859d-ada20ab97739",
+                          :t 536870914,
+                          :datahike/parents
+                          [#uuid "6a763ccd-6d80-5357-af56-f98cc4aa42d0"]}
+                         {:datahike/commit-id
+                          #uuid "6a763ccd-6d80-5357-af56-f98cc4aa42d0",
+                          :t 536870913,
+                          :datahike/parents
+                          [#uuid "6a763ccd-dec1-5795-b066-7287d18ebaf1"]}
+                         {:datahike/commit-id
+                          #uuid "6a763ccd-dec1-5795-b066-7287d18ebaf1",
+                          :t 536870912,
+                          :datahike/parents []}],
+                        :shared-ancestor-commits
+                        [#uuid "6a763ccd-6d80-5357-af56-f98cc4aa42d0"
+                         #uuid "6a763ccd-dec1-5795-b066-7287d18ebaf1"],
+                        :since-history-a
+                        [{:a :probe/label, :v "a-first", :added true}
+                         {:a :probe/label, :v "a-first", :added false}
+                         {:a :probe/label, :v "a-second", :added true}
+                         {:a :probe/label, :v "a-third", :added true}
+                         {:a :db/txInstant,
+                          :v #inst "2026-08-07T20:15:09.998-00:00",
+                          :added true}
+                         {:a :db/txInstant,
+                          :v #inst "2026-08-07T20:15:10.018-00:00",
+                          :added true}
+                         {:a :db/txInstant,
+                          :v #inst "2026-08-07T20:15:10.314-00:00",
+                          :added true}],
+                        :since-a-labels ["a-second" "a-third"],
+                        :fork-point
+                        {:datahike/commit-id
+                         #uuid "6a763ccd-6d80-5357-af56-f98cc4aa42d0",
+                         :t 536870913,
+                         :datahike/parents
+                         [#uuid "6a763ccd-dec1-5795-b066-7287d18ebaf1"]},
+                        :since-b-labels ["b-only" "unbound-write"],
+                        :head-b-labels ["b-only" "unbound-write"]},
+                :v-timings
+                #:probe{:branch-fork
+                        #:probe{:samples-ms
+                                [18.699
+                                 16.826
+                                 17.031
+                                 17.093
+                                 16.882
+                                 17.046
+                                 16.979
+                                 16.979
+                                 17.078
+                                 17.857],
+                                :median-ms 17.046},
+                        :foreign-head-value
+                        #:probe{:samples-ms
+                                [0.701
+                                 0.421
+                                 0.413
+                                 0.248
+                                 0.22
+                                 0.199
+                                 0.212
+                                 0.267
+                                 0.364
+                                 0.43
+                                 0.363
+                                 0.269
+                                 0.29
+                                 0.196
+                                 0.193
+                                 0.182
+                                 0.178
+                                 0.177
+                                 0.177
+                                 0.18],
+                                :median-ms 0.248},
+                        :roster-final-count 13}}}
