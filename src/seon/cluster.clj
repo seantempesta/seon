@@ -1756,7 +1756,16 @@
           :tx-meta {:seon.db/process [:seon.db.process/id process]}})]
     (if (:seon.error/kind transaction-result)
       transaction-result
-      (let [database (:db-after transaction-result)
+      ;; Read back from the CONNECTION, never from the report. `transact!`
+      ;; returns Datahike's exact report to a system caller and the
+      ;; agent-facing projection — which carries `:tx` and the commit id but
+      ;; no `:db-after` — whenever `seon.db/*conn*` is bound. So this
+      ;; function used to work at boot and hand `nil` to `pull` the moment an
+      ;; agent called it, which nothing could see until call preparation made
+      ;; the two-argument call reachable at all. The connection's current
+      ;; value is at or after the commit this call just made, which is all a
+      ;; read-back needs.
+      (let [database (db/db connection)
             agent-id (:seon.cluster.agent/id request)
             bootstrap-run-id (bootstrap/run-id agent-id)
             agent

@@ -22,7 +22,10 @@ declared rows). Slices, each one lane, in order:
    listener-plus-basis-comparison invalidation exactly as the r2 draft
    specifies. Proof: the draft's registry-derived and
    provider-publication-race falsifiers.
-2. **S2 — the SCI hook primitive.** The optional call-preparation hook
+2. **S2 — the SCI hook primitive. LANDED 2026-08-08** (`1029a4de7`,
+   fork `6ee57c9`; evidence
+   [p17-s2-notes-2026-08-08.md](../research/p17-s2-notes-2026-08-08.md)).
+   The optional call-preparation hook
    in the maintained fork routing both the analyzed call path and
    `kernel/invoke`; derived-arity preparation (all-or-nothing +
    predicate dispatch; declared arity always wins); required-key map
@@ -31,6 +34,14 @@ declared rows). Slices, each one lane, in order:
    unavailable-with-body-counter, nested direct call, compiled
    first-party, two-cluster custody/plan isolation) plus the
    MANDATORY empty-plan hot-path benchmark before acceptance.
+
+   Two things S3 and S4 inherit from how it went. **The fork gated its
+   hook on `sci.lang.Var` and most first-party functions are bound as
+   RAW host Vars**, so installing the state was necessary and not
+   sufficient; any future binding path must keep callee identity
+   visible. And the first live drive immediately exposed
+   [`transact!`'s dynamic-var-conditioned return shape](../../../seon/issues/transact-returns-a-different-shape-depending-on-a-dynamic-var.md),
+   which S4 owns together with the bespoke-elision deletion.
 3. **S3 — `(doc f)` renders derived call shapes** as declared-looking
    arities (the ruled visibility half), and the program graph exposes
    them by query.

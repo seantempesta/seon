@@ -1,11 +1,51 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, agent, sci, live-drive]
 ---
 
 # Install call preparation on the cluster's sci context
+
+## Resolution (2026-08-08, P17 S2)
+
+**Fixed in `seon.sci.eval/cluster-ctx` and `build-base-ctx`, in
+`seon.sci.kernel/invoke`, in `seon.call-preparation`, and — the half this
+issue did not know about — in the maintained sci fork. Commit `1029a4de7`,
+fork commit `6ee57c9`. Evidence:
+[p17-s2-notes-2026-08-08.md](../../../prds/sci-execution-runtime/research/p17-s2-notes-2026-08-08.md).**
+
+**The filed diagnosis was correct and INCOMPLETE, and the missing half was
+the larger one.** Installing the state was necessary and did not fix the
+call. This issue quotes S1's claim that production binds first-party
+functions as `sci/new-var` forwarders, so the sci-Var-only hook gate was
+harmless. It does not.
+`seon.sci.eval/bind-first-party-namespaces!` wraps a host Var only when some
+namespace row REFERS that symbol; every other compiled first-party function
+is installed as its raw `clojure.lang.Var`, and sci's hook node was generated
+only for `sci.lang.Var` callees. Measured on an acquired context,
+`seon.cluster/ensure-entity!`, `seon.db/pull` and `my.message/send` are all
+raw host Vars. With the state installed and a correct plan compiled, the
+2-argument call STILL failed with the identical arity error. The fork now
+keys on any identity-bearing Var.
+
+The stated acceptance is met in full: `cluster-ctx` installs the state and
+registers the row listener; the `db?`/`connection?` dispatch landed as the
+supplied default's own compiled value schema so no `seon.db` positional
+shortcut changed meaning; and the class regression
+(`an-acquired-cluster-context-prepares-its-calls`) exercises the ACQUIRED
+cluster context, never a scratch one. Recurring gate:
+`bin/test seon.call-preparation-test` — 14 tests, 127 assertions, 0 failures.
+
+**Live proof, the arc's exact call**, on cluster `s3` in an isolated root
+through the shared SCI ctx: `(seon.cluster/ensure-entity! "91331-…" {…})`
+with two arguments returned its creation result and committed the agent.
+The first production call preparation.
+
+**It exposed a second defect immediately**, which is what unblocking a dead
+path is supposed to do:
+[`seon.db/transact!` returns a different shape depending on a dynamic var](../transact-returns-a-different-shape-depending-on-a-dynamic-var.md).
+`ensure-entity!` was repaired at its own site here; the class is that issue's.
 
 ## Problem
 

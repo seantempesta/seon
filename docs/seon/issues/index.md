@@ -48,7 +48,7 @@ See `README.md` for the convention.
 | [Reuse one HttpClient so concurrent provider calls stop closing mid-read](concurrent-provider-calls-fail-with-a-closed-response-body.md) | blocker | whole-system arc repair wave |
 | [Give the transcript's floor-rendered values a root identity](transcript-floor-renders-a-missing-root-identity-refusal.md) | blocker | render floor repair (found by the token-calibration lane) |
 | [Settle what arrived when a provider stream closes mid-body](a-mid-stream-provider-disconnect-discards-the-whole-turn.md) | blocker | whole-system arc repair wave |
-| [Install call preparation on the cluster's sci context](call-preparation-is-never-installed-on-the-cluster-sci-context.md) | blocker | whole-system arc repair wave |
+| [Stop `seon.db/transact!` returning a different shape per dynamic var](transact-returns-a-different-shape-depending-on-a-dynamic-var.md) | blocker | P17 S4 `seon.db` conversion sweep |
 
 ## Friction (121)
 
