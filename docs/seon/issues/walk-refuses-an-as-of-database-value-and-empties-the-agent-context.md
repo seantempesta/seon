@@ -100,3 +100,50 @@ capture's `basis-t` does not record the as-of point: `dbi/-max-tx` on an
 `AsOfDB` returns the ORIGIN's max-tx (probed: as-of 536870990 reports
 536870997), so the capture id names the current basis while the content is
 historical. That is a separate honesty defect in the same seam.
+
+## Independent verification — observer lane, 2026-08-08
+
+The observer lane reproduced this without reference to the driver's analysis
+and confirms it. Three additions.
+
+**`history` fails the same way, not only `as-of`.** One probe over the three
+value shapes, on cluster `default` (pid 79576):
+
+```clojure
+{:label :current, :evidence-ok? true,
+ :revision [[:datahike.cache/attribute-revisions :datahike.cache/connection-id
+             :datahike.cache/generation :datahike.read/attributes]]}
+{:label :as-of,   :evidence-ok? false, :cc nil,
+ :err "CONTRACT: seon.db/read-evidence violated its contract (invalid-output)…"}
+{:label :history, :evidence-ok? false, :cc nil,
+ :err "CONTRACT: seon.db/read-evidence violated its contract (invalid-output)…"}
+```
+
+So the acceptance criterion naming all four shapes is the right one; `history`
+is confirmed broken today, not merely suspected.
+
+**The failure is silent at the point of loss, loud only much later.**
+`dependency-revision` (`src/seon/db.clj:260-262`) builds its identity with
+`select-keys`, and `select-keys` over a value with no `:cache-context` returns
+`{}` rather than failing. The two required keys are dropped without a word,
+and the first complaint arrives frames later at `read-evidence`'s output arm.
+Whatever the fix, the read of the identity should refuse where the identity is
+missing.
+
+**Every prompt on this cluster is this error — five for five.** Context
+captures at bases 536870998, 536871016, 536871026, 536871041 and one later are
+each exactly 509 characters / 127 estimated tokens with identical content. The
+agent has never once seen its instructions, its message, or its REPL.
+
+**Two faces inside the error mislead the reader, and demonstrably misled the
+model.** The value is branch-2 shaped (an attribute set), but the `[:or]`
+reports branch 1's complaint, `"should be :all"`. The model spent its turn
+acting on that: its plan proposed `:datahike.read/attributes :all` as the fix.
+The set also prints as a bare `#` (`{:value #, :message "should be :all"}`),
+which is not a legible face for a set.
+
+**Cost of leaving it running.** Because each failed turn commits a fault
+message that wakes the next turn, this defect does not fail once — it loops,
+at 225 prompt tokens and ~6,700 completion tokens per lap. Four laps in four
+minutes produced 26,952 completion tokens, 23,641 of them reasoning. See
+[Stop a failed turn from waking itself through its own fault message](a-failed-turn-wakes-itself-through-its-own-fault-message.md).

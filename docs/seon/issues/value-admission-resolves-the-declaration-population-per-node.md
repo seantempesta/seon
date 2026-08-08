@@ -229,3 +229,49 @@ of the derived-state slots
 ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)).
 The threading above is worth landing first because it is measurable today
 and does not wait on Phase 3.
+
+## Observer evidence, 2026-08-08 live drive — the class is not closed
+
+The overnight report records the admission blocker as CLOSED. That is true of
+the admission seam and understates the class. An independent read-only census
+on cluster `default` (pid 79576) during the 08-08 live drive found the
+population still being resolved thousands of times per JVM-hour, with the
+dominant caller now OUTSIDE admission.
+
+`seon.schema/!fallback-counts` at 04:36Z, six minutes after boot — 3,118
+resolutions across 26 callers:
+
+| Caller | Count |
+|---|---:|
+| `seon.print (print.cljc:232)` | 1,288 |
+| `seon.sci.admit (admit.clj:431)` | 408 |
+| `seon.db (db.clj:362)` | 352 |
+| `seon.sci.admit (admit.clj:510)` | 136 |
+| `seon.sci.admit (admit.clj:569)` | 124 |
+| `seon.error (error.clj:310)` | 118 |
+| `seon.schema.datahike (datahike.clj:71)` | 86 |
+| `seon.cluster (cluster.clj:308)` | 78 |
+| … 18 more callers | 528 |
+
+By 04:37Z the total was 5,104. `seon.print/option-defaults`
+(`src/seon/print.cljc:232`) is the largest single caller: its own comment says
+the population is read "ONCE here" per emit, which is correct per emit and
+wrong per render — a walk emits hundreds of times.
+
+Two measurements that bound the cost, both on this cluster:
+
+- **Not memoized.** 10 calls and 100 calls both average **10.6 ms per call**
+  (`{:warm-ms-per-call-10 10.8665916 :warm-ms-per-call-100 10.588492}`), so
+  the counter multiplies directly into wall time. 3,118 resolutions is about
+  **33 seconds of CPU** in a six-minute-old JVM.
+- **One HTTP route is nothing but this.** A single `/data` request measured
+  5.441 s caused **556 resolutions**; 556 × 10.6 ms = 5,894 ms estimated,
+  within 8% of observed. About 530 of the 556 came from
+  `seon.schema.datahike` (lines 71, 72, 112, 113, 184, 203, 205, 220, 223) —
+  the Malli-to-Datahike bridge, a caller this note does not currently name.
+  Filed as the user-visible surface in
+  [Return `/data` without a five-second stall](data-page-takes-five-and-a-half-seconds-for-three-kilobytes.md).
+
+The diagnostic is also 80% of the boot log's volume: `data/clusters/default/
+logs/seon.log` is 87 lines, of which 70 are `DECLARATION POPULATION FALLBACK`
+occurrence lines.
