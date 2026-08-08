@@ -45,10 +45,11 @@ See `README.md` for the convention.
 | [Read a bounded window of a file larger than the read ceiling](my-fs-read-refuses-a-bounded-window-of-a-large-file.md) | blocker | capability surface repair wave |
 | [Delete the `now` that `next-agent-work` never reads, and unbreak `curate/prove!`](next-agent-work-requires-a-now-it-never-reads.md) | blocker | session-curation proof repair |
 
-## Friction (110)
+## Friction (111)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Unwedge the flow test that hangs without its namespace siblings](a-flow-test-hangs-when-run-without-its-namespace-siblings.md) | friction | suite-speed tiering (platform tier granularity) |
 | [Record the activation closure's schema keys and required attributes](activation-closure-records-no-schema-keys.md) | friction | boot velocity incident (co-hosted second boot) |
 | [Lead a boot refusal with the layer that refused and why](boot-refusal-has-no-render-producer.md) | friction | operator status-face hygiene |
 | [Make `my.fs/write`'s docstring teach the shape it accepts](my-fs-write-docstring-hides-its-own-request-shape.md) | friction | capability surface repair wave |

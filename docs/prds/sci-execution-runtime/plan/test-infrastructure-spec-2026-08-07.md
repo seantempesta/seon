@@ -38,6 +38,12 @@ starting point. The suite is staged and tiered:
    boot/reset-boundary proofs; the booted-system drive with generative
    load. Each is one flag, never a second runner.
 
+**Landing note — the tiering shipped 2026-08-07 night; the fork constructor
+did not.** What is live in `bin/test` today, and what the rest of this
+specification still describes as unbuilt, is recorded in the addendum at the
+end of this document. Read that section before planning against the numbers
+above: they describe the pre-tiering serial gate.
+
 The organizing ruling is now recorded in the active plan:
 
 > "The test suite should use the same features our system has to make forking
@@ -879,3 +885,153 @@ The review should know about four current discrepancies:
 
 These are reported here because this lane is restricted to the spec document;
 they are not silently fixed as part of design review.
+
+## Addendum: what the tiering landed, 2026-08-07 night
+
+The owner's directive that opened this lane: "fix the test suite so it runs
+faster before you start gating things on it passing. It just bogs everything
+down and we can run individual namespaces much easier for targeted testing."
+
+This addendum records what is LIVE against what this specification still
+describes as unbuilt. The production `source-base!`/`start-fork!` constructor,
+the seven consolidated moving-part regressions, the claim-backed artifact
+lifecycle, and namespace parallelism are all still ahead; the tiering that
+makes the ordinary loop cheap is in.
+
+### Landed
+
+**Tiers, in `bin/test` + `seon.test.runner` + the new `seon.test.selection`.
+No second runner.**
+
+| Invocation | Meaning |
+|---|---|
+| `bin/test` | platform tier, then only the tests reaching code changed since the last recorded GREEN basis |
+| `bin/test --all` | platform tier, then every non-long test (the previous bare behaviour) |
+| `bin/test --full` | platform tier, then every test |
+| `bin/test --platform` | the declared moving-part regressions alone |
+| `bin/test --changed PATH` | platform tier, then the tests reaching PATH (repeatable) |
+| `bin/test NAMESPACE...` | unchanged: every test in those namespaces, no tiers, no basis |
+
+**Platform first, fail-fast.** A test namespace or var declares
+`:seon.test/platform "<reason>"` exactly as `:seon.test/long` already worked
+(one `marker-reason` reader, both markers). Every tiered invocation runs that
+set first and, when it is red, prints `PLATFORM TIER RED` and does not run the
+bulk. Measured value on its first night: an `--all` invocation returned the
+platform verdict in 37 s instead of spending ~30 minutes to report the same
+three fixture errors.
+
+**Changed-only default, from the program graph.** `seon.test.selection` derives
+the bulk tier from the `:seon.fn/calls` and `:seon.test/subject` edges of the
+manifest `seon.fn/build-manifest` already produces — the same edges
+`seon.fn/tests-reaching` queries once a program graph is published. The gate
+runs before any cluster exists, so it reads them from the manifest value rather
+than a database. Seeds are every identity DEFINED in a changed file, so a
+require-only edit still selects that namespace's dependents. No modification
+time, filename convention, or maintained list participates.
+
+**The green basis is a recorded artifact**, `tmp/test-basis/green-basis.edn`,
+holding SHA-256 by repository-relative path for every declared gate input plus
+the recording run's mode and git SHA. It is a file rather than a database fact
+because the gate runs before any cluster exists and its own run-root store is
+deleted on success; there is no database home for it yet. When the in-server
+runner of this specification lands, the basis becomes a fact and this file
+goes away. Digests are content, so rewriting identical bytes is not a change.
+
+**Widening is loud and named**, never a silent narrow guess: no recorded basis,
+an input removed since the basis, or a change to a declared gate input that no
+call edge can reach (`resources/`, `config/`, `script/`, `bin/test`, `bb.edn`,
+`deps.edn`, `.clj-kondo/config.edn`) all run every eligible test and say which
+input widened them.
+
+**One selector.** `seon.dev.changed-test` carried a second one — a
+namespace-require reverse closure over hand-partitioned "operator" and "writer"
+test roots. It now names the changed paths and runs `bin/test --changed`;
+`host-impact`, `reverse-closure`, the two path partitions, and the two boundary
+runners are deleted. Its clj-kondo `analyze-host` pass stays for lint findings.
+
+**Class regression:** `test/seon/test/selection_test.clj`, itself in the
+platform tier. It asserts exactness in BOTH directions — every reaching test
+present, every non-reaching test absent — so a selector that returns everything
+fails it. It also pins content-not-mtime detection and the symlink rule (a
+symlinked FILE is digested through the link because `bin/test` symlinks
+top-level files into its run root; a symlinked DIRECTORY is never descended).
+
+### Measured
+
+Machine: the owner's M-series Mac, same as the 2026-08-06 baseline.
+
+| Measurement | Before | After |
+|---|---:|---:|
+| Bare gate, no input changed | 965.9 s of namespace execution (2026-08-06 green bare gate) | **43.6 s wall** — platform tier only; the selector chose 0 of 969 bulk tests |
+| Bare gate, one changed file | same 965.9 s | **68.7 s wall to the platform verdict**; 5 changed paths (four of them a sibling lane's), 207 reaching tests, **162 of 969 bulk tests selected — 83% skipped** |
+| Program-graph build, when a change exists | n/a | 7.4 s (`seon.fn/build-manifest` over `src` + `test`, 206 files); skipped entirely when nothing changed |
+| Runner load phase | 5.9 s | 8.0 s (116 namespaces; unchanged mechanism) |
+| Platform tier | n/a | 24.7–31 s over 12 namespaces |
+
+The bulk tier's own runtime under the new default is NOT yet measured: the
+platform tier was red from foreign in-flight work throughout the measurement
+window (first `seon.test-support/populate-database!` refusing initialization
+lookup refs, then `seon.env-test/a-submission-carries-the-submitting-threads-interrupt-arm`).
+The full-tier time is likewise unmeasured for the same reason. The honest
+statement is that the default tier now returns its verdict in 44–69 s where it
+previously took roughly sixteen minutes, and that the bulk work it does run is
+83% smaller on a one-file change.
+
+### Platform tier composition, and why it is what it is
+
+Declared today, with measured cost: `seon.cluster.store-test` 2.7 s,
+`seon.cluster.registry-test` 6–9.7 s, `seon.cluster.source-test` 7.6–8.5 s,
+`seon.test-support-test` 8.5 s, `seon.sci.kernel-arm-carriage-test` 0.5 s,
+`seon.db.declaration-population-test` 0.4 s,
+`seon.sci.admit.declaration-population-test` (added by a sibling lane),
+`seon.schema.declaration-population-test` 0.14 s, `seon.env-test` 0.07 s,
+`seon.test.selection-test` 0.03 s, `seon.flow-configuration-test` 0.00 s,
+`seon.fs-test` 0.00 s, `seon.cluster.cohost-boot-test` (all `:seon.test/long`).
+
+Three of this specification's moving parts have NO platform coverage yet:
+production Flow construction, atomic settlement, and sci fork plus projection.
+Their namespaces are large scenario suites — `seon.sci.eval-test` 118.9 s
+(71.9 s of it one generative test), `seon.cluster.run-test` 39.7 s,
+`seon.flow-test` 12.8 s — and this specification is explicit that a large
+scenario suite does not become a moving-part test by touching a branch or a
+graph. Declaring their small structural vars instead was tried and reverted:
+`seon.flow-test/submission-time-limit-covers-the-pre-start-wait` hangs when run
+without its namespace siblings, which wedged the gate at the 300 s liveness
+backstop
+([issue](../../../seon/issues/a-flow-test-hangs-when-run-without-its-namespace-siblings.md)).
+The durable fix is this specification's seven consolidated direct regressions,
+which are small and structural by construction.
+
+### Deliberately not done
+
+**`situation-totality-property` (~55 s) is untouched.** The read-side lane was
+right to refuse masking it in the fixture, and the tiering makes the question
+moot the way the ruling intended: it runs only when a change reaches
+`seon.cluster.work`. Marking it `:seon.test/long` would ALSO remove it when
+someone changes that namespace — exactly when the property earns its cost — so
+it stays in the default tier. Its 14 ms-per-transaction floor is the write-seam
+declaration population, and Phase 1 of the environment work erases it.
+
+**The 1.9 s render pass is untouched** (its issue,
+`render-package-proc-reruns-unchanged-renderers`, is open and owned elsewhere).
+The tier system stops the bare gate paying it on unrelated changes, which is
+all this lane owed it.
+
+### What remains, in this specification's own order
+
+Unchanged: the production `source-base!`/`start-fork!` extraction, the thin
+`with-cluster`, the seven consolidated moving-part regressions plus the
+program-graph query that makes hand-built graphs unrepresentable, the fixture
+deletion inventory, the claim-backed artifact lifecycle with config-backed
+retention, the projection/cache/thread-hop isolation prerequisites, and
+namespace parallelism. The tiering neither substitutes for nor blocks any of
+them; it changes only WHICH tests one invocation runs, never how one runs.
+
+Two smaller items this lane surfaced and did not take:
+
+1. `bin/test`'s literal three-roots/24-hour retention scanner is still there,
+   still not claim-backed. Its replacement is this specification's artifact
+   section.
+2. The green basis becomes a database fact when the in-server runner lands;
+   until then a lane that wants the previous behaviour unconditionally uses
+   `bin/test --all`.
