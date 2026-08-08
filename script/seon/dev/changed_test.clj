@@ -1,9 +1,15 @@
 (ns seon.dev.changed-test
-  "Select and run affected writer and operator tests."
+  "Run the tests one set of changed paths reaches.
+
+  Selection is NOT decided here. `bin/test --changed PATH...` owns the one
+  selector (`seon.test.selection`), which derives the answer from the
+  `:seon.fn/calls` edges of the program-graph manifest. This namespace
+  supplies the changed paths, runs the gate, and returns its bounded
+  advisory result together with the clj-kondo findings from the same
+  analysis pass."
   (:require [babashka.fs :as fs]
             [babashka.process :as process]
             [clojure.edn :as edn]
-            [clojure.set :as set]
             [clojure.string :as str]
             [seon.dev.clj-kondo :as dev.kondo]
             [seon.dev.state :as state]
@@ -154,81 +160,6 @@
         {:seon.dev.changed-test/host-status :unavailable
          :seon.dev.changed-test/reason (.getMessage error)}))))
 
-(defn- reverse-closure [requires seeds]
-  (loop [known (set seeds)]
-    (let [expanded (into known
-                         (keep (fn [[namespace dependencies]]
-                                 (when (seq (set/intersection
-                                             known dependencies))
-                                   namespace)))
-                         requires)]
-      (if (= known expanded) known (recur expanded)))))
-
-(defn- operator-path? [path]
-  (or (str/starts-with? path "script/seon/dev/")
-      (str/starts-with? path "test/seon/dev/")
-      (= path "bb.edn")))
-
-(defn- writer-path? [path]
-  (or (str/starts-with? path "src/seon/db/")
-      (str/starts-with? path "src/seon/embed")
-      (str/starts-with? path "test/seon/db/")
-      (= path "test/seon/embed_writer_test.clj")
-      (= path "bin/test")))
-
-(defn host-impact
-  "Select retained operator and writer tests from host namespace facts."
-  [host-result paths]
-  (let [graph (:seon.dev.changed-test/host-graph host-result)
-        host-paths (filterv host-path? paths)
-        path->namespace (:seon.dev.changed-test/path->namespace graph)
-        changed-namespaces (set (keep #(get path->namespace %) host-paths))
-        unknown (filterv #(nil? (get path->namespace %)) host-paths)
-        affected (when graph
-                   (reverse-closure (:seon.dev.changed-test/requires graph)
-                                    changed-namespaces))
-        all-operator (:seon.dev.changed-test/operator-tests graph)
-        all-writer (:seon.dev.changed-test/writer-tests graph)
-        unknown-operator? (some operator-path? unknown)
-        unknown-writer? (some writer-path? unknown)
-        unknown-shared? (some #(and (str/starts-with? % "src/")
-                                    (not (operator-path? %))
-                                    (not (writer-path? %)))
-                              unknown)
-        unavailable? (nil? graph)
-        dependency-input? (some #{"deps.edn"} paths)
-        force-operator? (some #{"bb.edn"} paths)
-        force-writer? (some #{"bin/test"} paths)
-        operator-tests (cond
-                         (and unavailable? (seq paths)) :all
-                         (or dependency-input? force-operator?)
-                         all-operator
-                         (or unknown-operator? unknown-shared?) all-operator
-                         graph (set/intersection affected all-operator)
-                         :else #{})
-        writer-tests (cond
-                       (and unavailable? (seq paths)) :all
-                       (or dependency-input? force-writer?)
-                       all-writer
-                       (or unknown-writer? unknown-shared?) all-writer
-                       graph (set/intersection affected all-writer)
-                       :else #{})]
-    {:seon.dev.changed-test/host-namespaces changed-namespaces
-     :seon.dev.changed-test/operator-tests
-     (if (= :all operator-tests) :all (vec (sort-by str operator-tests)))
-     :seon.dev.changed-test/writer-tests
-     (if (= :all writer-tests) :all (vec (sort-by str writer-tests)))
-     :seon.dev.changed-test/widening
-     (cond-> []
-       unavailable?
-       (conj {:seon.dev.changed-test/reason :host-analysis-unavailable
-              :seon.dev.changed-test/detail
-              (:seon.dev.changed-test/reason host-result)})
-
-       (seq unknown)
-       (conj {:seon.dev.changed-test/reason :unknown-host-resource
-              :seon.dev.changed-test/paths unknown}))}))
-
 (defn- prune-logs! [directory]
   (doseq [path (->> (fs/list-dir directory "changed-*.log")
                     (sort-by fs/last-modified-time)
@@ -338,19 +269,19 @@
     (prune-logs! log-dir)
     result))
 
-(defn- run-operator! [root test-namespaces]
-  (let [argv (cond-> [(str (fs/path root "bin/test"))]
-               (not= :all test-namespaces)
-               (into (map str test-namespaces)))]
-    (assoc (run-command! root :operator argv {})
-           :seon.dev.changed-test/test-namespaces test-namespaces)))
+(defn- run-gate!
+  "Run the one gate over the named changed paths.
 
-(defn- run-writer! [root test-namespaces]
-  (let [argv (cond-> [(str (fs/path root "bin/test"))]
-               (not= :all test-namespaces)
-               (into (map str test-namespaces)))]
-    (assoc (run-command! root :writer argv {})
-           :seon.dev.changed-test/test-namespaces test-namespaces)))
+   `bin/test --changed PATH...` owns the selection: it runs the declared
+   platform moving-part regressions first, then only the tests those paths
+   reach through the program graph. This namespace decides nothing about
+   which tests those are."
+  [root paths]
+  (let [argv (into [(str (fs/path root "bin/test"))]
+                   (mapcat (fn [path] ["--changed" (str path)]))
+                   paths)]
+    (assoc (run-command! root :gate argv {})
+           :seon.dev.changed-test/paths (vec paths))))
 
 (defn- aggregate-status [boundary-results]
   (let [statuses (set (map :seon.dev.changed-test/status boundary-results))]
@@ -368,7 +299,7 @@
     (assoc result :seon.dev.changed-test/report (str report))))
 
 (defn- run-changed-unlocked!
-  "Run the selected boundaries while the caller owns the changed-test lock."
+  "Run the gate while the caller owns the changed-test lock."
   [configuration requested-paths]
   (let [root (:seon.dev.config/root configuration)
         paths (filterv root-runtime-path? requested-paths)
@@ -376,25 +307,10 @@
         (filterv (complement root-runtime-path?) requested-paths)
         dependency-cache (dev.kondo/ensure-dependency-cache! root)
         host-result (analyze-host root)
-        host-selection (assoc (host-impact host-result paths)
-                              :seon.dev.changed-test/host-graph
-                              (:seon.dev.changed-test/host-graph host-result))
-        operator-tests
-        (:seon.dev.changed-test/operator-tests host-selection)
-        writer-tests
-        (:seon.dev.changed-test/writer-tests host-selection)
-        boundary-results
-        (cond-> []
-          (or (= :all operator-tests) (seq operator-tests))
-          (conj (run-operator! root operator-tests))
-
-          (or (= :all writer-tests) (seq writer-tests))
-          (conj (run-writer! root writer-tests)))]
+        boundary-results (if (seq paths) [(run-gate! root paths)] [])]
     {:seon.dev.changed-test/paths requested-paths
      :seon.dev.changed-test/status (aggregate-status boundary-results)
      :seon.dev.changed-test/boundaries boundary-results
-     :seon.dev.changed-test/test-namespaces
-     (if (= :all writer-tests) [] (vec writer-tests))
      :seon.dev.changed-test/host-status
      (:seon.dev.changed-test/host-status host-result)
      :seon.dev.changed-test/findings
@@ -406,12 +322,10 @@
       (:seon.dev.clj-kondo/reason dependency-cache)}
      :seon.dev.changed-test/widening
      (vec
-      (concat
-       (when (seq dependency-source-paths)
-         [{:seon.dev.changed-test/reason
-           :independent-reference-repository
-           :seon.dev.changed-test/paths dependency-source-paths}])
-       (:seon.dev.changed-test/widening host-selection)))}))
+      (when (seq dependency-source-paths)
+        [{:seon.dev.changed-test/reason
+          :independent-reference-repository
+          :seon.dev.changed-test/paths dependency-source-paths}]))}))
 
 (def changed-test-lock-timeout-ms
   (+ (* 2 test-timeout-ms) 10000))

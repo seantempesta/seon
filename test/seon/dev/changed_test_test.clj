@@ -1,6 +1,6 @@
 (ns seon.dev.changed-test-test
   (:require [clojure.edn :as edn]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is testing]]))
 
 (defn- run-babashka [expression]
   (let [root (System/getProperty "user.dir")
@@ -13,26 +13,31 @@
         exit (.waitFor process)]
     {:exit exit :out @out :err @err}))
 
-(deftest operator-tests-use-the-fresh-jvm-gate
-  (let [expression
-        (str
-         "(require 'seon.dev.changed-test) "
-         "(let [calls (atom []) run (ns-resolve 'seon.dev.changed-test "
-         "'run-command!) operator (ns-resolve 'seon.dev.changed-test "
-         "'run-operator!)] "
-         "(prn (with-redefs-fn {run (fn [root boundary command environment] "
-         "(swap! calls conj [root boundary command environment]) "
-         "{:seon.dev.changed-test/status :passed})} "
-         "#(do (operator \"/checkout\" "
-         "['seon.dev.fresh-operator-test 'seon.dev.mcp-bridge-test]) @calls))))")
-        {:keys [exit out err]} (run-babashka expression)]
-    (is (zero? exit) err)
-    (is (= [["/checkout" :operator
-             ["/checkout/bin/test"
-              "seon.dev.fresh-operator-test"
-              "seon.dev.mcp-bridge-test"]
-             {}]]
-           (edn/read-string out)))))
+(deftest changed-paths-are-handed-to-the-one-gate-selector
+  (testing "changed-test decides no test selection of its own: it names the
+            changed paths and `bin/test --changed` derives the tests they
+            reach. A second selector here is exactly the drift this
+            delegation removes."
+    (let [expression
+          (str
+           "(require 'seon.dev.changed-test) "
+           "(let [calls (atom []) run (ns-resolve 'seon.dev.changed-test "
+           "'run-command!) gate (ns-resolve 'seon.dev.changed-test "
+           "'run-gate!)] "
+           "(prn (with-redefs-fn {run (fn [root boundary command environment] "
+           "(swap! calls conj [root boundary command environment]) "
+           "{:seon.dev.changed-test/status :passed})} "
+           "#(do (gate \"/checkout\" "
+           "[\"src/seon/cluster/run.clj\" \"test/seon/fn_test.clj\"]) "
+           "@calls))))")
+          {:keys [exit out err]} (run-babashka expression)]
+      (is (zero? exit) err)
+      (is (= [["/checkout" :gate
+               ["/checkout/bin/test"
+                "--changed" "src/seon/cluster/run.clj"
+                "--changed" "test/seon/fn_test.clj"]
+               {}]]
+             (edn/read-string out))))))
 
 (deftest cleanup-awaits-the-process-owners-exit-event
   (let [python

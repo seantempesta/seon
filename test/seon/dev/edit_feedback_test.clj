@@ -340,22 +340,3 @@
       (finally
         (delete-files! [broken valid source-directory directory])))))
 
-(deftest unavailable-analysis-fails-wide-for-an-unknown-source-file
-  (let [expression
-        (str "(do (require 'seon.dev.changed-test) "
-             "(prn (select-keys "
-             "(seon.dev.changed-test/host-impact "
-             "{:seon.dev.changed-test/host-status :unavailable "
-             ":seon.dev.changed-test/reason \"missing\"} "
-             "[\"src/new_file.clj\"]) "
-             "[:seon.dev.changed-test/operator-tests "
-             ":seon.dev.changed-test/writer-tests])))")
-        result
-        (run-process
-         {::command ["bb" "--config" (str (io/file repo-root "bb.edn"))
-                     "--deps-root" (str repo-root) "-e" expression]
-          ::directory repo-root})
-        selection (edn/read-string (str/trim (::stdout result)))]
-    (is (zero? (::exit result)) (::stderr result))
-    (is (= :all (:seon.dev.changed-test/operator-tests selection)))
-    (is (= :all (:seon.dev.changed-test/writer-tests selection)))))

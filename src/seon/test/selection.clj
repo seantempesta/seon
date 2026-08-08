@@ -17,7 +17,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str])
   (:import (java.io File)
-           (java.nio.file Files LinkOption)
+           (java.nio.file Files)
            (java.security MessageDigest)))
 
 (def graph-roots
@@ -44,13 +44,27 @@
   (str/replace (str (.relativize (.toPath root) (.toPath file)))
                File/separator "/"))
 
+(defn- symbolic-link?
+  [^File file]
+  (Files/isSymbolicLink (.toPath file)))
+
+(defn- files-below
+  "Regular files below one input, never descending a symbolic link.
+
+  A symbolic link to a FILE is digested through the link — `bin/test` copies
+  the first-party directories into its isolated run root but symlinks
+  top-level files such as `deps.edn`, and their content is what the basis
+  compares. A symbolic link to a DIRECTORY is never traversed, so the walk
+  can only ever see paths below its own root."
+  [^File input]
+  (cond
+    (symbolic-link? input) (when (.isFile input) [input])
+    (.isDirectory input) (mapcat files-below (.listFiles input))
+    (.isFile input) [input]))
+
 (defn- digestible?
   [^File file]
-  (and (.isFile file)
-       (Files/isRegularFile (.toPath file)
-                            (into-array LinkOption
-                                        [LinkOption/NOFOLLOW_LINKS]))
-       (not (str/includes? (.getPath file) "/__pycache__/"))))
+  (not (str/includes? (.getPath file) "/__pycache__/")))
 
 (defn input-digests
   "SHA-256 by repository-relative path for every declared gate input."
@@ -61,11 +75,7 @@
     (into
      (sorted-map)
      (comp
-      (mapcat (fn [input]
-                (let [file (io/file root-file input)]
-                  (if (.isDirectory file)
-                    (file-seq file)
-                    [file]))))
+      (mapcat (fn [input] (files-below (io/file root-file input))))
       (filter digestible?)
       (map (fn [^File file]
              [(relative-path root-file file)

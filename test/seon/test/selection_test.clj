@@ -10,6 +10,7 @@
   and content digests), never from a modification time, a filename, or a
   maintained list."
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.test.selection :as selection])
   (:import (java.nio.file Files)
@@ -131,6 +132,42 @@
         ((requiring-resolve 'seon.fs/delete-recursively!)
          (.getCanonicalPath (io/file "tmp"))
          (.getCanonicalPath root))))))
+
+(deftest a-symlinked-input-is-digested-through-the-link-never-traversed
+  (testing "THE CLASS: bin/test copies first-party directories into its
+            isolated run root but SYMLINKS top-level files. A digest walk
+            that skips symlinks reports deps.edn as removed on every run and
+            silently widens the tier forever; a walk that follows symlinked
+            DIRECTORIES escapes the root it was given."
+    (let [root (.toFile (Files/createTempDirectory
+                         (.toPath (io/file "tmp")) "selection-links"
+                         (into-array FileAttribute [])))
+          outside (io/file root "outside")
+          _ (.mkdirs (io/file outside "nested"))
+          _ (spit (io/file outside "nested" "escaped.clj") "(ns escaped)\n")
+          _ (spit (io/file outside "target.edn") "{:a 1}\n")
+          checkout (io/file root "checkout")
+          _ (.mkdirs (io/file checkout "src"))]
+      (try
+        (spit (io/file checkout "src" "real.clj") "(ns real)\n")
+        (Files/createSymbolicLink
+         (.toPath (io/file checkout "deps.edn"))
+         (.toPath (.getCanonicalFile (io/file outside "target.edn")))
+         (into-array FileAttribute []))
+        (Files/createSymbolicLink
+         (.toPath (io/file checkout "config"))
+         (.toPath (.getCanonicalFile outside))
+         (into-array FileAttribute []))
+        (let [digests (selection/input-digests (.getPath checkout))]
+          (is (contains? digests "deps.edn")
+              "a symlinked file's content is the basis input")
+          (is (contains? digests "src/real.clj"))
+          (is (not-any? #(str/includes? % "escaped") (keys digests))
+              "a symlinked directory is never descended"))
+        (finally
+          ((requiring-resolve 'seon.fs/delete-recursively!)
+           (.getCanonicalPath (io/file "tmp"))
+           (.getCanonicalPath root)))))))
 
 (deftest a-recorded-green-basis-round-trips
   (let [root (.toFile (Files/createTempDirectory
