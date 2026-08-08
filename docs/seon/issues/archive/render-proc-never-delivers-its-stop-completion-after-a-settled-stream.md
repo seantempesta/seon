@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, web, flow]
 ---
@@ -79,30 +79,41 @@ that lack the recorded polymorphic-boundary exemption. Maps are open, so the
 key works undeclared, but the declaration is owed and that file's `:any` debt
 is what blocks it.
 
-## Remaining
+## Resolution
 
-Verification of the final guard is blocked by a FOREIGN break, not by this
-change: `src/seon/test/selection.clj` (appeared 22:22:17) declares an
-unregistered `(partial instance? File)` predicate, and
-`seon.schema/bind-predicates` therefore refuses every corpus projection in the
-tree — see
-[[an-inline-fn-predicate-in-src-refuses-every-corpus-projection]]. Before that
-file landed, an earlier form of this fix took
-`bin/test seon.render.web-test` from 38 tests / **1 error** to 38 tests /
-**0 errors**, and the isolated `test-vars` run of
-`thinking-stream-morphs-into-the-settled-session-transcript` completed in
-~30 s instead of hanging.
+Fixed in `8872311d1`, "The render walk cannot re-enter a producer that
+delegates its own value" (`src/seon/render.clj`).
+
+Proof, 2026-08-07:
+
+- `bin/test seon.render-coverage-test`: 3 tests, 83 assertions, **0 failures,
+  0 errors**, including the class regression
+  `a-producer-that-delegates-its-own-value-is-never-re-entered`. The unguarded
+  code does not fail it, it never returns, so its oracle is the shared loud
+  backstop around the render.
+- `bin/test seon.render.web-test`: **38 tests, 274 assertions, 0 failures,
+  0 errors**, twice consecutively — the first zero-error run this namespace has
+  had. It was 38/271 with 1 error before, and that error was deterministic
+  (3 of 3 isolated `test-vars` runs). The isolated `test-vars` run of
+  `thinking-stream-morphs-into-the-settled-session-transcript` also completes
+  in ~30 s instead of hanging.
+
+A third consecutive namespace run was prevented by unrelated foreign churn in
+the shared tree — `src/seon/cluster.clj:443` began refusing every fixture with
+`Initialization lookup refs do not resolve`, which also fails
+`bin/test seon.cluster.agent-test`, so it is tree-wide and independent of this
+change.
 
 ## Owner
 
 `seon.render/project-node` and `seon.render/invoke-selected`
 (`src/seon/render.clj`).
 
-## Acceptance
+## Follow-up owed
 
-`bin/test seon.render.web-test` green three times in a row once the foreign
-predicate refusal is cleared, plus
-`bin/test seon.render-coverage-test`, whose
-`a-producer-that-delegates-its-own-value-is-never-re-entered` is the class
-regression: the unguarded code does not fail there, it never returns, so the
-oracle is the shared loud backstop around the render.
+`:seon.render/rendering` is not declared in
+`resources/seon/schemas/seon.render.edn`: the admission gate refuses every edit
+to that file for five PRE-EXISTING `:any` declarations
+(`:seon.render/call-request`, `candidate-request`, `output`, `unit`, `value`)
+that lack the recorded polymorphic-boundary exemption. Maps are open, so the
+key works undeclared, but the declaration is owed once that `:any` debt is paid.

@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (22)
+## Blocker (21)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -40,7 +40,6 @@ See `README.md` for the convention.
 | [Eight `:seon.config.web/*` dials are registered with no shipped default](web-config-dials-ship-without-shipped-defaults.md) | blocker | web config default repair |
 | [Isolate session deltas from other runs' context mutations](shared-context-session-delta-crosses-run-attribution.md) | blocker | per-run fork context wave |
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
-| [Deliver the render proc's stop completion after a settled stream](render-proc-never-delivers-its-stop-completion-after-a-settled-stream.md) | blocker | render shutdown repair wave |
 | [Register the inline `[:fn]` predicate that refuses every corpus projection](an-inline-fn-predicate-in-src-refuses-every-corpus-projection.md) | blocker | changed-test selector lane |
 
 ## Friction (110)
