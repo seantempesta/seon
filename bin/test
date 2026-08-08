@@ -1,14 +1,27 @@
 #!/usr/bin/env bash
-# The system test gate: every suite under test/, or an explicit selection.
+# The system test gate. Tiered, à la carte, with smart defaults.
 #
-#   bin/test                        # run the default, non-long tier
-#   bin/test --full                 # run every test under test/
-#   bin/test seon.cluster.run-test  # run exactly these namespaces
+#   bin/test                        # platform tier, then tests reaching
+#                                   #   code changed since the last GREEN basis
+#   bin/test --all                  # platform tier, then every non-long test
+#   bin/test --full                 # platform tier, then every test
+#   bin/test --platform             # the moving-part regressions alone
+#   bin/test --changed PATH [...]   # platform tier, then tests reaching PATHs
+#   bin/test seon.cluster.run-test  # run exactly these namespaces, every test
 #   bin/test --result-cluster scratch [namespaces...]
 #
-# Source classpath, in-memory Datahike, no artifact, no operator —
-# seconds per cycle. Exit code is the suite verdict. Result facts are
-# opt-in only and refuse the owner's `default` cluster.
+# Every tiered invocation runs the declared `:seon.test/platform` moving-part
+# regressions FIRST and stops there when they are red: a broken platform fails
+# in seconds instead of poisoning the bulk. The bare default then runs only the
+# tests that reach changed code, derived from `:seon.fn/calls` edges in the one
+# program-graph manifest — never a file modification time or a filename
+# convention. The green basis is a recorded artifact under
+# `tmp/test-basis/green-basis.edn`; a green tiered run rewrites it.
+#
+# Each invocation owns one isolated operator root below `tmp/test-runs`, copies
+# the first-party checkout into it, and deletes it on success. Exit code is the
+# suite verdict. Result facts are opt-in only and refuse the owner's `default`
+# cluster.
 
 set -euo pipefail
 
@@ -29,11 +42,18 @@ source bin/_java-home-resolver
 
 usage() {
   cat <<'USAGE'
-Usage: bin/test [--full] [--result-cluster NAME] [--result-root PATH] [namespaces...]
+Usage: bin/test [--all|--full|--platform|--changed PATH]...
+                [--result-cluster NAME] [--result-root PATH] [namespaces...]
 
-With no namespaces, runs every non-long test under test/. Use --full or
-SEON_TEST_FULL=1 for the complete checkpoint suite. An explicit namespace
-selection always runs every test in those namespaces.
+  (bare)          platform tier, then the tests reaching code changed since
+                  the last recorded green basis
+  --all           platform tier, then every non-long test
+  --full          platform tier, then every test (SEON_TEST_FULL=1 too)
+  --platform      the declared moving-part regressions alone
+  --changed PATH  platform tier, then the tests reaching PATH (repeatable)
+
+An explicit namespace selection always runs every test in those namespaces
+and records no green basis.
 USAGE
 }
 
@@ -55,13 +75,22 @@ fi
 
 result_cluster=${SEON_TEST_RESULT_CLUSTER:-}
 result_root=${SEON_TEST_RESULT_ROOT:-}
-full_requested=0
+requested_mode=
 explicit_selection=0
 namespaces=()
+changed_paths=()
+
+set_mode() {
+  if [ -n "$requested_mode" ] && [ "$requested_mode" != "$1" ]; then
+    echo "bin/test: --$requested_mode and --$1 select different tiers" >&2
+    exit 64
+  fi
+  requested_mode=$1
+}
 
 case "${SEON_TEST_FULL:-0}" in
   0) ;;
-  1) full_requested=1 ;;
+  1) set_mode full ;;
   *)
     echo "bin/test: SEON_TEST_FULL must be 0 or 1" >&2
     exit 64
@@ -75,8 +104,25 @@ while [ $# -gt 0 ]; do
       exit 0
       ;;
     --full)
-      full_requested=1
+      set_mode full
       shift
+      ;;
+    --all)
+      set_mode all
+      shift
+      ;;
+    --platform)
+      set_mode platform
+      shift
+      ;;
+    --changed)
+      if [ $# -lt 2 ]; then
+        echo "bin/test: --changed requires a repository-relative path" >&2
+        exit 2
+      fi
+      set_mode changed
+      changed_paths+=("$2")
+      shift 2
       ;;
     --result-cluster)
       if [ $# -lt 2 ]; then
@@ -128,18 +174,27 @@ else
   done < <(find test -type f \( -name '*_test.clj' -o -name '*_test.cljc' \) | sort)
 fi
 
-if [ "$full_requested" -eq 1 ] || [ "$explicit_selection" -eq 1 ]; then
-  selection_mode=full
-else
-  selection_mode=default
-fi
-
 if [ "$explicit_selection" -eq 1 ]; then
+  if [ -n "$requested_mode" ]; then
+    echo "bin/test: an explicit namespace selection takes no tier flag" >&2
+    exit 64
+  fi
+  selection_mode=explicit
   selection="${namespaces[*]}"
-elif [ "$selection_mode" = "full" ]; then
-  selection="full suite"
 else
-  selection="default tier"
+  selection_mode=${requested_mode:-changed}
+  case "$selection_mode" in
+    changed)
+      if [ ${#changed_paths[@]} -gt 0 ]; then
+        selection="changed tier (${#changed_paths[@]} named path(s))"
+      else
+        selection="changed tier (since the green basis)"
+      fi
+      ;;
+    all) selection="platform tier plus every non-long test" ;;
+    full) selection="full suite" ;;
+    platform) selection="platform tier" ;;
+  esac
 fi
 
 if [ ${#namespaces[@]} -eq 0 ]; then
@@ -327,9 +382,18 @@ trap reap_runner_on_launcher_exit EXIT
 echo "bin/test: isolated operator root $run_root pid=$$ selection=$selection"
 cd "$run_root"
 set +e
+changed_paths_file="$run_root/changed-paths.txt"
+if [ ${#changed_paths[@]} -gt 0 ]; then
+  printf '%s\n' "${changed_paths[@]}" >"$changed_paths_file"
+else
+  : >"$changed_paths_file"
+fi
+
 clojure \
   "-J-Dseon.operator.root=$run_root" \
   "-J-Dseon.test.root=$run_root" \
+  "-J-Dseon.test.source-root=$source_root" \
+  "-J-Dseon.test.changed-paths-file=$changed_paths_file" \
   -M:test -m seon.test.runner \
   "${result_cluster:--}" "$result_root" "$git_sha" "$selection_mode" \
   "${namespaces[@]}" &

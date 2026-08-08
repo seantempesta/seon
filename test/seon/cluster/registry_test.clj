@@ -1,4 +1,6 @@
-(ns seon.cluster.registry-test
+(ns ^{:seon.test/platform
+       "Moving part: branch fork, roster publication, retirement, and reset."}
+    seon.cluster.registry-test
   "Sealed acceptance for the branch-lifecycle registry (B2).
 
   DRAFT FOR ORCHESTRATOR SEAL (drafted 2026-07-27). The implementation

@@ -1,4 +1,6 @@
-(ns seon.cluster.store-test
+(ns ^{:seon.test/platform
+       "Moving part: the file store and its process-root flock."}
+    seon.cluster.store-test
   "Sealed acceptance for the store rung (B1).
 
   Orchestrator-authored (2026-07-27). The implementation lane makes

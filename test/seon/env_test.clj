@@ -1,4 +1,6 @@
-(ns seon.env-test
+(ns ^{:seon.test/platform
+       "Moving part: environment construction and carriage across every crossing."}
+    seon.env-test
   "The environment-isolation class regressions.
 
   These graduate the three Phase 0 falsifiers of the seon.env PRD

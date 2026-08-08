@@ -1,4 +1,6 @@
-(ns seon.fs-test
+(ns ^{:seon.test/platform
+       "Moving part: the one no-follow recursive deletion owner."}
+    seon.fs-test
   "Recurring proof for the one recursive filesystem deletion owner."
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]

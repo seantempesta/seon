@@ -1,4 +1,6 @@
-(ns seon.cluster.cohost-boot-test
+(ns ^{:seon.test/platform
+       "Moving part: two sovereign clusters cohosted in one JVM."}
+    seon.cluster.cohost-boot-test
   "Two sovereign clusters in ONE JVM, with instrumentation live.
 
   The class this kills: a value read back out of the database violates the

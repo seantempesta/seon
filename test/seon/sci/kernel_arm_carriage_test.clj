@@ -1,4 +1,6 @@
-(ns seon.sci.kernel-arm-carriage-test
+(ns ^{:seon.test/platform
+       "Moving part: the interrupt arm travelling with the work."}
+    seon.sci.kernel-arm-carriage-test
   "The arm travels with the work — one class regression.
 
   THE CLASS: work handed from an armed evaluation to another thread escapes

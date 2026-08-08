@@ -1,4 +1,6 @@
-(ns seon.test-support-test
+(ns ^{:seon.test/platform
+       "Moving part: the one test bracket every other test forks through."}
+    seon.test-support-test
   (:require [clojure.core.async :as async]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]

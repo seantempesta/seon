@@ -1,4 +1,6 @@
-(ns seon.flow-configuration-test
+(ns ^{:seon.test/platform
+       "Moving part: production Flow graph construction and lifecycle."}
+    seon.flow-configuration-test
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow.spi :as flow.spi]
             [clojure.test :refer [deftest is]]

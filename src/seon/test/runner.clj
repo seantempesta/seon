@@ -5,7 +5,8 @@
             [clojure.string :as str]
             [clojure.test :as test]
             [seon.config :as config]
-            [seon.db :as db])
+            [seon.db :as db]
+            [seon.test.selection :as selection])
   (:import (java.lang ProcessHandle Runtime Thread)
            (java.lang.management ManagementFactory ThreadInfo)
            (java.time Instant)
@@ -378,34 +379,62 @@
                 (sort-by var-symbol))))
         namespaces))
 
-(defn- long-reason
-  [test-var]
+(defn- marker-reason
+  "The declared non-blank reason for one test marker, from the var or its ns."
+  [test-var marker-attribute]
   (let [var-metadata (meta test-var)
         namespace-metadata (meta (:ns var-metadata))
-        marker (if (contains? var-metadata :seon.test/long)
-                 (:seon.test/long var-metadata)
-                 (:seon.test/long namespace-metadata))]
+        marker (if (contains? var-metadata marker-attribute)
+                 (get var-metadata marker-attribute)
+                 (get namespace-metadata marker-attribute))]
     (when (some? marker)
       (when-not (and (string? marker) (not (str/blank? marker)))
         (throw
          (ex-info
-          ":seon.test/long must contain a non-blank reason."
-          {:seon.error/kind ::invalid-long-reason
+          (str marker-attribute " must contain a non-blank reason.")
+          {:seon.error/kind ::invalid-marker-reason
            :seon.test/sym (str (var-symbol test-var))
-           :seon.test/long marker})))
+           ::marker marker-attribute
+           ::value marker})))
       marker)))
 
+(defn- long-reason
+  [test-var]
+  (marker-reason test-var :seon.test/long))
+
+(defn- platform-reason
+  [test-var]
+  (marker-reason test-var :seon.test/platform))
+
 (defn- test-selection
-  [namespaces include-long?]
+  "Partition every test var into the platform tier, the bulk tier, and skips.
+
+  The platform tier is the declared `:seon.test/platform` moving-part
+  regression set: it runs FIRST on every invocation so a broken platform
+  fails in seconds instead of poisoning the bulk. `selected-symbols` bounds
+  the bulk tier to the tests one change can reach; `:all` runs every
+  eligible test."
+  [namespaces {::keys [include-long? selected-symbols]}]
   (reduce
    (fn [selection test-var]
-     (let [reason (long-reason test-var)]
-       (if (and (not include-long?) reason)
+     (let [test-symbol (var-symbol test-var)
+           long-marker (long-reason test-var)
+           platform (platform-reason test-var)]
+       (cond
+         (and (not include-long?) long-marker)
          (update selection ::skipped conj
-                 {::test-symbol (var-symbol test-var)
-                  ::reason reason})
-         (update selection ::selected conj test-var))))
-   {::selected [] ::skipped []}
+                 {::test-symbol test-symbol ::reason long-marker})
+
+         platform
+         (update selection ::platform conj test-var)
+
+         (or (= :all selected-symbols)
+             (contains? selected-symbols (str test-symbol)))
+         (update selection ::selected conj test-var)
+
+         :else
+         (update selection ::unreached conj test-symbol))))
+   {::platform [] ::selected [] ::skipped [] ::unreached []}
    (test-vars-in namespaces)))
 
 (defn- run-selected-tests
@@ -430,12 +459,44 @@
                :seon.ns/name namespace-name})))
           (test/test-vars namespace-vars))
         (test/do-report {:type :end-test-ns :ns namespace-object}))
-      (let [summary (assoc @test/*report-counters* :type :summary)]
-        (test/do-report summary)
-        summary))))
+      @test/*report-counters*)))
+
+(defn- red?
+  [raw-summary]
+  (pos? (+ (or (:fail raw-summary) 0) (or (:error raw-summary) 0))))
+
+(defn- sum-summaries
+  [raw-summaries]
+  (reduce (fn [total summary]
+            (merge-with + total (select-keys summary
+                                             [:test :pass :fail :error])))
+          {:test 0 :pass 0 :fail 0 :error 0}
+          raw-summaries))
+
+(defn- run-tiers!
+  "Run ordered tiers, stopping after the first red fail-fast tier."
+  [namespaces progress tiers]
+  (loop [remaining tiers
+         summaries []
+         stopped nil]
+    (if-let [{::keys [tier-name vars fail-fast?]} (first remaining)]
+      (if (empty? vars)
+        (recur (rest remaining) summaries stopped)
+        (do
+          (when progress
+            (announce! progress
+                       (str "TIER " (name tier-name) " " (count vars)
+                            " tests")))
+          (let [raw-summary (run-selected-tests namespaces vars)
+                summaries (conj summaries raw-summary)]
+            (if (and fail-fast? (red? raw-summary))
+              (recur nil summaries tier-name)
+              (recur (rest remaining) summaries stopped)))))
+      {::raw-summary (sum-summaries summaries)
+       ::stopped-after stopped})))
 
 (defn- run-request!
-  [request progress selected-vars]
+  [request progress tiers]
   (let [selected-namespaces (set (:seon.test.runner/namespaces request))
         options (select-keys
                  (config/defaults)
@@ -445,7 +506,7 @@
         capture (atom {::order [] ::results {}})
         reported-signatures (atom #{})
         default-report test/report
-        raw-summary
+        {::keys [raw-summary stopped-after]}
         (binding [test/report
                   (fn [event]
                     (capture-event! options capture selected-namespaces event)
@@ -453,20 +514,25 @@
                       (progress-event! progress event))
                     (report-event! options default-report
                                    reported-signatures event))]
-          (if selected-vars
-            (run-selected-tests (:seon.test.runner/namespaces request)
-                                selected-vars)
-            (apply test/run-tests (:seon.test.runner/namespaces request))))
+          (if tiers
+            (let [outcome (run-tiers! (:seon.test.runner/namespaces request)
+                                      progress tiers)]
+              (test/do-report (assoc (::raw-summary outcome) :type :summary))
+              outcome)
+            {::raw-summary
+             (apply test/run-tests (:seon.test.runner/namespaces request))}))
         summary
         {::test-count (:test raw-summary)
          ::pass-count (:pass raw-summary)
          ::fail-count (:fail raw-summary)
          ::error-count (:error raw-summary)}]
-    {:seon.test.run/id (:seon.test.run/id request)
-     :seon.test.run/at (:seon.test.run/at request)
-     :seon.test.run/git-sha (:seon.test.run/git-sha request)
-     :seon.test.runner/summary summary
-     :seon.test.runner/results (captured-results @capture)}))
+    (cond->
+     {:seon.test.run/id (:seon.test.run/id request)
+      :seon.test.run/at (:seon.test.run/at request)
+      :seon.test.run/git-sha (:seon.test.run/git-sha request)
+      :seon.test.runner/summary summary
+      :seon.test.runner/results (captured-results @capture)}
+      stopped-after (assoc ::stopped-after stopped-after))))
 
 (defn run!
   "Run namespaces through `clojure.test` and return per-test values.
@@ -604,22 +670,127 @@
       (println " -" test-symbol "-" reason))
     (println "bin/test: run skipped coverage with: bin/test --full")))
 
+(def ^:private selection-modes
+  #{"changed" "all" "full" "platform" "explicit"})
+
+(defn- source-root
+  []
+  (or (System/getProperty "seon.test.source-root")
+      (System/getProperty "seon.test.root")
+      "."))
+
+(defn- requested-changed-paths
+  "Repository-relative paths the launcher named with `--changed`."
+  []
+  (let [file (some-> (System/getProperty "seon.test.changed-paths-file")
+                     io/file)]
+    (if (and file (.isFile file))
+      (->> (str/split-lines (slurp file))
+           (remove str/blank?)
+           (mapv str/trim))
+      [])))
+
+(defn- reaching-selection
+  "Bulk-tier test symbols for one set of changed repository-relative paths."
+  [progress changed-paths]
+  (let [build-manifest (requiring-resolve 'seon.fn/build-manifest)
+        relative (requiring-resolve 'seon.test.selection/manifest-relative-artifacts)]
+    (announce! progress
+               (str "SELECT building the program graph for "
+                    (count changed-paths) " changed path(s)"))
+    (let [manifest (build-manifest {:seon.fn/roots selection/graph-roots})
+          artifacts (relative "." manifest)
+          tests (selection/reaching-tests artifacts changed-paths)]
+      {::symbols (set tests)
+       ::reason (str (count tests) " test(s) reach "
+                     (count changed-paths) " changed path(s)")})))
+
+(defn- bulk-selection
+  "Resolve the bulk tier: every eligible test, a reaching subset, or none.
+
+  Widening is loud and named. A missing basis, a removed file, or a change to
+  a declared gate input no call edge can reach all widen to every eligible
+  test rather than guessing a narrower answer."
+  [selection-mode progress]
+  (case selection-mode
+    ("all" "full") {::symbols :all
+                    ::reason (str "the " selection-mode " tier")
+                    ::digests (selection/input-digests ".")}
+    "platform" {::symbols #{} ::reason "platform tier only"}
+    "changed"
+    (let [explicit (requested-changed-paths)]
+      (if (seq explicit)
+        (if-let [widening (seq (filter selection/widening-path? explicit))]
+          {::symbols :all
+           ::reason (str "changed gate input outside the program graph: "
+                         (str/join ", " (take 5 widening)))}
+          (reaching-selection progress explicit))
+        (if-let [basis (selection/read-basis (source-root))]
+          (let [current (selection/input-digests ".")
+                {changed :seon.test.selection/changed
+                 removed :seon.test.selection/removed}
+                (selection/changed-inputs
+                 (:seon.test.basis/digests basis) current)]
+            (cond
+              (seq removed)
+              {::symbols :all
+               ::reason (str "input(s) removed since the green basis: "
+                             (str/join ", " (take 5 removed)))
+               ::digests current}
+
+              (empty? changed)
+              {::symbols #{}
+               ::reason (str "no input changed since the green basis recorded "
+                             (:seon.test.basis/at basis))
+               ::digests current}
+
+              :else
+              (if-let [widening (seq (filter selection/widening-path? changed))]
+                {::symbols :all
+                 ::reason (str "changed gate input outside the program graph: "
+                               (str/join ", " (take 5 widening)))
+                 ::digests current}
+                (assoc (reaching-selection progress changed)
+                       ::digests current
+                       ::changed changed))))
+          {::symbols :all
+           ::reason "no green basis is recorded yet"
+           ::digests (selection/input-digests ".")})))))
+
+(defn- record-green-basis!
+  {:seon.fn/external-sink :codec-storage
+   :seon.fn/projection-boundary :none}
+  [selection-mode git-sha digests]
+  (selection/write-basis!
+   (source-root)
+   {:seon.test.basis/at (str (Instant/now))
+    :seon.test.basis/git-sha git-sha
+    :seon.test.basis/mode selection-mode
+    :seon.test.basis/digests digests})
+  (println "bin/test: recorded a new green basis over"
+           (count digests) "declared inputs"))
+
 (defn -main
   "Run selected tests with progress and a liveness backstop.
 
-  Record results when the cluster argument names a non-default cluster, then
-  exit zero exactly when no test failed or errored."
+  Every tiered invocation runs the declared `:seon.test/platform` moving-part
+  regressions FIRST and stops there when they are red. The bulk tier follows:
+  every eligible test under `all`/`full`, or only the tests reaching code
+  changed since the last recorded GREEN basis under the bare `changed`
+  default. Record results when the cluster argument names a non-default
+  cluster, then exit zero exactly when no test failed or errored."
   {:malli/schema
    [:=> [:cat :seon.boot/cluster-name :seon.boot/root :string :string
          [:* :string]]
     :nil]}
   [cluster-name root git-sha selection-mode & namespace-names]
-  (when-not (contains? #{"default" "full"} selection-mode)
+  (when-not (contains? selection-modes selection-mode)
     (throw
      (ex-info
-      "The test selection mode must be default or full."
+      "The test selection mode is not one this runner knows."
       {:seon.error/kind ::invalid-selection-mode
-       ::selection-mode selection-mode})))
+       ::selection-mode selection-mode
+       ::known selection-modes})))
   (let [namespaces (mapv symbol namespace-names)
         progress (atom {::description "JVM runner initialized"
                         ::at-nanos (System/nanoTime)
@@ -642,31 +813,55 @@
         (announce! progress
                    (str "LOADED " (inc index) "/" (count namespaces)
                         " " test-namespace)))
-      (let [{::keys [selected skipped]}
-            (test-selection namespaces (= "full" selection-mode))
+      (let [explicit? (= "explicit" selection-mode)
+            bulk (when-not explicit? (bulk-selection selection-mode progress))
+            {::keys [platform selected skipped unreached]}
+            (if explicit?
+              {::platform [] ::selected (test-vars-in namespaces)
+               ::skipped [] ::unreached []}
+              (test-selection namespaces
+                              {::include-long? (= "full" selection-mode)
+                               ::selected-symbols (::symbols bulk)}))
+            _ (when bulk
+                (announce! progress
+                           (str "SELECTION " selection-mode " — "
+                                (::reason bulk)
+                                "; platform " (count platform)
+                                ", bulk " (count selected)
+                                ", not reached " (count unreached))))
             run-result
             (run-request! {:seon.test.runner/namespaces namespaces
                            :seon.test.run/id (str (random-uuid))
                            :seon.test.run/at (java.util.Date.)
                            :seon.test.run/git-sha git-sha}
                           progress
-                          (when (= "default" selection-mode) selected))
+                          [{::tier-name :platform ::vars platform
+                            ::fail-fast? true}
+                           {::tier-name :bulk ::vars selected}])
             _ (when-not (= "-" cluster-name)
                 (record! {:seon.test.runner/run-result run-result
                           :seon.boot/cluster-name cluster-name
                           :seon.boot/root root}))
             summary (:seon.test.runner/summary run-result)
+            green? (zero? (+ (::fail-count summary) (::error-count summary)))
             failures (->> (:seon.test.runner/results run-result)
                           (filter #(= :fail (:seon.test.result/outcome %)))
                           (map :seon.test/sym)
                           sort)]
+        (when-let [stopped (::stopped-after run-result)]
+          (println)
+          (println "bin/test: PLATFORM TIER RED —" (name stopped)
+                   "moving-part regressions failed; the bulk tier did not run.")
+          (println "bin/test: fix the platform first; a broken platform"
+                   "poisons every test that forks it."))
         (when (seq failures)
           (println "\nFailing tests:")
           (doseq [test-symbol failures]
             (println " -" test-symbol)))
         (print-skipped! skipped)
+        (when (and green? (::digests bulk))
+          (record-green-basis! selection-mode git-sha (::digests bulk)))
         (flush)
-        (System/exit
-         (if (zero? (+ (::fail-count summary) (::error-count summary))) 0 1)))
+        (System/exit (if green? 0 1)))
       (finally
         (.shutdownNow backstop)))))

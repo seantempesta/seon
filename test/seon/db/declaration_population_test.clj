@@ -1,4 +1,6 @@
-(ns seon.db.declaration-population-test
+(ns ^{:seon.test/platform
+       "Moving part: one declaration population per operation, read side."}
+    seon.db.declaration-population-test
   "The class regression for per-attribute declaration resolution at DB reads.
 
   Every `seon.db` read that may contain an EDN-backed attribute asks the
