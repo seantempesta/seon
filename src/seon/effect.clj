@@ -12,9 +12,11 @@
             [seon.blob :as blob]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.flow :as flow]
             [seon.print :as print]
             [seon.sci.admit :as admit]
+            [seon.sci.kernel :as kernel]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn])
   (:import [java.io ByteArrayInputStream]
@@ -183,13 +185,23 @@
    owner-sym
    [request]))
 
+(defn- admission
+  "The value-admission dials this request settles under, read ONCE on the
+  requesting thread.
+
+  A background request settles on whichever thread ran its work, so the
+  dials travel as data with the settlement rather than as a binding frame
+  the far side hopes it inherited."
+  []
+  {:seon.sci.admit/caps (:seon.sci.admit/caps *request-context*)
+   :seon.config/on-core-error (:seon.config/on-core-error *request-context*)})
+
 (defn- admitted-value
-  [value]
+  [dials value]
   (admit/admit-value
-   {:seon.sci.admit/value value
-    :seon.sci.admit/interrupt-fn (constantly nil)
-    :seon.sci.admit/caps (:seon.sci.admit/caps *request-context*)
-    :seon.config/on-core-error (:seon.config/on-core-error *request-context*)}))
+   (assoc dials
+          :seon.sci.admit/value value
+          :seon.sci.admit/interrupt-fn (constantly nil))))
 
 (defn open-call
   "Open one never-before-recorded effect identity inside the writer."
@@ -311,12 +323,56 @@
                 (not [?receipt :seon.effect/interrupted-at])]
               database run-eid)))
 
+(defn- dispatching-environment
+  "This request's environment, carrying the requesting thread's interrupt arm.
+
+  The door is a thread hop like every other one and obeys the same rule: the
+  arm is captured HERE, on the thread that asked, and adopted where the
+  handler actually runs. Without it a capability request executes unarmed —
+  the interpreted entrances it makes are attributed to nothing, so the
+  evaluation's `:seon.eval/fn-entries` under-reports what its own request
+  did, and `interrupt!` cannot reach the handler's thread at all. An unarmed
+  requester carries no arm, which is ordinary system-side work and never a
+  refusal."
+  []
+  (when-let [environment (env/of *request-context*)]
+    (if-let [armed (kernel/current-arm)]
+      (env/refuse-incomplete-environment!
+       (env/scope environment {:seon.sci.kernel/arm armed}))
+      environment)))
+
+(defn- with-request-context
+  "Run `work` with this request's context re-established FROM DATA.
+
+  Flow conveys no bindings anywhere, by design, so a detached handler
+  arrives on a worker thread with `*request-context*` and `seon.db/*conn*`
+  at their root nil — which is why every background `my.shell/run` failed
+  on a nil connection while the identical foreground command succeeded.
+  The far side therefore REBUILDS the frame from the value its submission
+  carried instead of hoping to inherit one.
+
+  These two dynamic vars are named readers on the seon.env Phase 3 deletion
+  list (`src/seon/shell/jvm.clj:290` is the one this repaired). When a
+  handler takes its environment as an argument, this wrapper goes with
+  them."
+  [context work]
+  (binding [*request-context* context
+            db/*conn* (:seon.db/connection context)]
+    (work)))
+
 (defn- dispatch
   [handler request effective]
   (let [executor (:io ((requiring-resolve
                         'seon.operator.runtime/root-executors)))
+        ;; Captured on THIS thread and closed over as data, so the executor
+        ;; thread reads the arm from the crossing rather than from a binding
+        ;; frame it happens to have inherited.
+        carried-arm (:seon.sci.kernel/arm (dispatching-environment))
         task (FutureTask. ^java.util.concurrent.Callable
-                          (bound-fn [] (handler request effective)))]
+                          (bound-fn []
+                            (kernel/adopt-arm
+                             carried-arm
+                             #(handler request effective))))]
     (.execute ^Executor executor task)
     (try
       (.get task)
@@ -351,37 +407,37 @@
      :seon.blob/staged-writes (cond-> [] staged (conj staged))}))
 
 (defn- settle-value!
-  [connection effect-id opened-at threshold raw-value]
-  (let [content-stages (if (map? raw-value)
-                         (:seon.blob/staged-writes raw-value)
-                         [])
-        public-value (if (map? raw-value)
-                       (dissoc raw-value :seon.blob/staged-writes)
-                       raw-value)
-        admitted-result (admitted-value public-value)
-        result (:seon.sci.admit/value admitted-result)
-        settled-at (Date.)
-        staged-result (staged-result connection threshold public-value result)
-        staged-writes (into (vec content-stages)
-                            (:seon.blob/staged-writes staged-result))
-        request
-        (merge
-         {:seon.effect/id effect-id
-          :seon.effect/settled-at settled-at
-          :seon.effect/duration-ms
-          (max 0 (- (.getTime settled-at) (.getTime opened-at)))}
-         (:seon.effect/stored-result staged-result)
-         (when (seq content-stages)
-           {:seon.effect/content-blobs
-            (mapv :seon.blob/digest content-stages)}))]
-    {:seon.effect/value result
-     :seon.effect/transaction
-     (blob/with-publication!
-      connection staged-writes
-      (fn []
-        (db/transact!
-         connection
-         [[:db.fn/call #'settle-call request]])))}))
+  ([connection dials effect-id opened-at threshold raw-value]
+   (let [content-stages (if (map? raw-value)
+                          (:seon.blob/staged-writes raw-value)
+                          [])
+         public-value (if (map? raw-value)
+                        (dissoc raw-value :seon.blob/staged-writes)
+                        raw-value)
+         admitted-result (admitted-value dials public-value)
+         result (:seon.sci.admit/value admitted-result)
+         settled-at (Date.)
+         staged-result (staged-result connection threshold public-value result)
+         staged-writes (into (vec content-stages)
+                             (:seon.blob/staged-writes staged-result))
+         request
+         (merge
+          {:seon.effect/id effect-id
+           :seon.effect/settled-at settled-at
+           :seon.effect/duration-ms
+           (max 0 (- (.getTime settled-at) (.getTime opened-at)))}
+          (:seon.effect/stored-result staged-result)
+          (when (seq content-stages)
+            {:seon.effect/content-blobs
+             (mapv :seon.blob/digest content-stages)}))]
+     {:seon.effect/value result
+      :seon.effect/transaction
+      (blob/with-publication!
+       connection staged-writes
+       (fn []
+         (db/transact!
+          connection
+          [[:db.fn/call #'settle-call request]])))})))
 
 (defn- interrupt!
   ([connection effect-id]
@@ -406,14 +462,14 @@
               {:seon.fn/sym (str owner-sym)}))
 
 (defn- settle-background-terminal!
-  [connection effect-id owner-sym opened-at threshold terminal]
-  (if-let [throwable (::flow/throwable terminal)]
-    (if (instance? InterruptedException throwable)
-      (interrupt! connection effect-id)
-      (settle-value! connection effect-id opened-at threshold
-                     (handler-failure owner-sym)))
-    (settle-value! connection effect-id opened-at threshold
-                   (::flow/value terminal))))
+  ([connection dials effect-id owner-sym opened-at threshold terminal]
+   (if-let [throwable (::flow/throwable terminal)]
+     (if (instance? InterruptedException throwable)
+       (interrupt! connection effect-id)
+       (settle-value! connection dials effect-id opened-at threshold
+                      (handler-failure owner-sym)))
+     (settle-value! connection dials effect-id opened-at threshold
+                    (::flow/value terminal)))))
 
 (defn- request*
   [owner request execution]
@@ -430,7 +486,14 @@
                    {})
 
        :else
-       (let [connection (:seon.db/connection *request-context*)
+       (let [requesting-context *request-context*
+             connection (:seon.db/connection *request-context*)
+             ;; Read ONCE here, on the requesting thread. A background
+             ;; request settles on whichever thread ran its work, so the
+             ;; admission dials travel with that settlement as data instead
+             ;; of being re-read from a binding frame the far side may not
+             ;; have.
+             dials (admission)
              effect-ordinal (swap! (:seon.effect/counter *request-context*) inc)
              database @connection
              owner-row
@@ -460,7 +523,7 @@
             {:seon.fn/sym (str owner-sym)})
 
            :else
-           (let [projected-request (admitted-value request)]
+           (let [projected-request (admitted-value dials request)]
              (if (:seon.sci.admit/capped? projected-request)
                (flat-error
                 :seon.effect/request-too-large
@@ -512,14 +575,16 @@
                            ::flow/workload :io
                            ::flow/work-fn
                            (fn [_]
-                             (handler
-                              (:seon.sci.admit/value projected-request)
-                              effective))
+                             (with-request-context
+                               requesting-context
+                               #(handler
+                                 (:seon.sci.admit/value projected-request)
+                                 effective)))
                            ::flow/complete!
                            (fn [terminal]
                              (settle-background-terminal!
-                              connection effect-id owner-sym opened-at threshold
-                              terminal))})
+                              connection dials effect-id owner-sym opened-at
+                              threshold terminal))})
                          result-ref)
                        (let [outcome
                              (try
@@ -536,18 +601,18 @@
                                     (dissoc handler-value
                                             :seon.effect/disposition))
                                    (settle-value!
-                                    connection effect-id opened-at threshold
-                                    handler-value)))
+                                    connection dials effect-id opened-at
+                                    threshold handler-value)))
                                (catch InterruptedException _
                                  (interrupt! connection effect-id))
                                (catch ExecutionException _
                                  (settle-value!
-                                  connection effect-id opened-at threshold
-                                  (handler-failure owner-sym)))
+                                  connection dials effect-id opened-at
+                                  threshold (handler-failure owner-sym)))
                                (catch Throwable _
                                  (settle-value!
-                                  connection effect-id opened-at threshold
-                                  (handler-failure owner-sym))))]
+                                  connection dials effect-id opened-at
+                                  threshold (handler-failure owner-sym))))]
                          (if (:seon.error/kind
                               (:seon.effect/transaction outcome))
                            (:seon.effect/transaction outcome)

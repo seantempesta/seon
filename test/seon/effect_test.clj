@@ -2,14 +2,17 @@
   (:require [clojure.core.async :as async]
             [clojure.test :refer [deftest is testing]]
             [datahike.core :as datahike]
+            [sci.core :as sci]
             [seon.cluster.run :as run]
             [seon.config :as config]
             [seon.db :as db]
             [seon.effect :as effect]
             [seon.flow :as flow]
             [seon.sci.eval :as sci.eval]
+            [seon.sci.kernel :as kernel]
             [seon.test-support :as test-support])
-  (:import [java.util Date]))
+  (:import [java.util Date]
+           [java.util.concurrent.atomic AtomicBoolean]))
 
 (def ^:private test-environment
   ;; The subset environment (store layer only) every crossing this
@@ -35,6 +38,77 @@
                   [:or :map :seon.error/value]]}
   [request]
   request)
+
+;;; ---------------------------------------------------------------------------
+;;; The arm at the door — a handler that really enters interpreted code
+;;; ---------------------------------------------------------------------------
+
+;;; A capability handler is host code, so sci's `interrupt!` can only reach it
+;;; where it ENTERS interpreted code. That is exactly the observable this
+;;; regression needs: entrance counting and interruption both prove the arm
+;;; arrived, and neither can be faked by the test.
+
+(defonce ^:private probe-ctx (delay (sci.eval/build-base-ctx)))
+
+(def ^:private bounded-loop
+  '(fn [] (loop [i 0] (if (< i 20000) (recur (inc i)) i))))
+
+(def ^:private unbounded-loop
+  '(fn [] (loop [i 0] (recur (inc i)))))
+
+(def ^:private handler-gate (atom nil))
+
+(defn- arm-probe-handler
+  {:malli/schema [:=> [:cat
+                       [:map [:seon.effect-test/iterations :int]]
+                       :seon.config/effective]
+                  :map]}
+  [request _effective]
+  (let [gated? (:seon.effect-test/gated? request)
+        gate @handler-gate
+        _ (when (and gated? gate) (deref gate 10000 :seon.effect-test/timeout))
+        form (if (neg? (:seon.effect-test/iterations request))
+               unbounded-loop
+               bounded-loop)]
+    {:seon.effect-test/armed? (some? (kernel/current-arm))
+     ;; The connection every capability handler needs. Background handlers
+     ;; got nil here until the far side rebuilt its context from data, and
+     ;; every `my.shell/run` submitted in the background failed on it.
+     :seon.effect-test/connection?
+     (some? (:seon.db/connection effect/*request-context*))
+     :seon.effect-test/outcome
+     (try
+       (sci/eval-form @probe-ctx (list form))
+       :seon.effect-test/completed
+       (catch Throwable failure
+         (if (kernel/interrupted? failure)
+           :seon.effect-test/interrupted
+           :seon.effect-test/failed)))}))
+
+(defn arm-probe-owner
+  {:malli/schema [:=> [:cat [:map [:seon.effect-test/iterations :int]]]
+                  [:or :map :seon.error/value]]}
+  [request]
+  request)
+
+(defn- install-arm-probe!
+  [connection]
+  (let [handler-meta (meta #'arm-probe-handler)]
+    (db/transact!
+     connection
+     [{:seon.schema/key :seon.effect-test/arm-probe-request
+       :seon.schema/form
+       (pr-str [:map
+                [:seon.effect-test/iterations :int]
+                [:seon.effect-test/gated? {:optional true} :boolean]])}
+      {:seon.fn/sym "seon.effect-test/arm-probe-owner"
+       :seon.fn/spec
+       (pr-str [:=> [:cat :seon.effect-test/arm-probe-request]
+                [:or :map :seon.error/value]])
+       :seon.fn/workload :io
+       :seon.effect/capability
+       (symbol (str (ns-name (:ns handler-meta)))
+               (str (:name handler-meta)))}])))
 
 (defn- install-capability!
   [connection]
@@ -119,6 +193,139 @@
             (is (int? (:seon.effect/duration-ms receipt)))
             (is (not (neg? (:seon.effect/duration-ms receipt)))))
           (finally
+            (datahike/unlisten! connection listener-key)
+            (async/close! events)
+            (flow/stop-work-launcher! launcher)))))))
+
+(deftest the-door-runs-its-handler-under-the-requesting-evaluations-arm
+  ;; THE CLASS: work that crosses a thread escapes the ONE limit. The
+  ;; guarded door is a crossing like any other — it hands the handler to the
+  ;; process root's `:io` executor — and until the arm travelled with the
+  ;; request, every fs/shell/web/llm/db handler ran on a thread with no arm
+  ;; at all: entrances attributed to nothing and `interrupt!` unable to reach
+  ;; it. Both halves are asserted, and neither can pass vacuously: the
+  ;; entrance count comes from sci's own `:interrupt-fn` and the second
+  ;; handler's loop is genuinely unbounded, so only the carried deadline can
+  ;; end it.
+  (test-support/with-database
+    (fn [connection]
+      (db/transact! connection [{:seon.config/cluster "default"}
+                                {:seon.cluster.run/id "effect-run"}])
+      (install-arm-probe! connection)
+      (let [ctx @probe-ctx]
+        (testing "entrances made inside the handler reach the requester's arm"
+          (let [arm (kernel/arm ctx 60000)
+                result
+                (binding [effect/*request-context* (request-context connection)]
+                  (effect/request! #'arm-probe-owner
+                                   {:seon.effect-test/iterations 20000}))
+                record ((:seon.sci.kernel/record arm) :ok)]
+            ((:seon.sci.kernel/stop! arm))
+            (is (true? (:seon.effect-test/armed? result))
+                "the handler thread served the requesting evaluation's arm")
+            (is (= :seon.effect-test/completed
+                   (:seon.effect-test/outcome result)))
+            (is (<= 20000 (:seon.eval/fn-entries record))
+                (str "20k interpreted entrances inside a capability handler "
+                     "must reach the requesting arm; a 0 here is the lying "
+                     "diagnostic this regression exists to kill"))))
+
+        (testing "a handler that outruns the limit is interrupted by it"
+          (let [context (request-context connection)
+                started (System/nanoTime)
+                arm (kernel/arm ctx 300)
+                result
+                (binding [effect/*request-context*
+                          (assoc context :seon.effect/counter (atom 0))]
+                  (effect/request! #'arm-probe-owner
+                                   {:seon.effect-test/iterations -1}))
+                elapsed-ms (quot (- (System/nanoTime) started) 1000000)]
+            ((:seon.sci.kernel/stop! arm))
+            (is (= :seon.effect-test/interrupted
+                   (:seon.effect-test/outcome result))
+                (str "an unbounded handler must end by SCI's own interrupt; "
+                     "got " (pr-str result)))
+            (is (< elapsed-ms 5000)
+                (str "the handler must end at its ~300ms limit; elapsed "
+                     elapsed-ms "ms"))))))))
+
+(deftest background-work-outlives-the-deadline-of-the-turn-that-started-it
+  ;; THE CLASS: a semantic inversion, not a crash. `my.background` exists so
+  ;; work can finish AFTER the run that started it, so a background
+  ;; submission must not inherit the submitting turn's deadline latch. It is
+  ;; asserted the only honest way: the turn's limit has demonstrably fired
+  ;; (its own `reached` latch is closed) BEFORE the handler enters
+  ;; interpreted code, so an inherited arm would cut it at the first
+  ;; entrance and the receipt would settle as a handler failure.
+  (test-support/with-database
+    (fn [connection]
+      (db/transact!
+       connection
+       [{:seon.config/cluster "default"}
+        {:seon.cluster.agent/id "effect-agent"}
+        {:seon.cluster.run/id "effect-run"
+         :seon.cluster.run/agent [:seon.cluster.agent/id "effect-agent"]}])
+      (install-arm-probe! connection)
+      (let [events (async/chan 4)
+            listener-key (random-uuid)
+            _ (datahike/listen! connection listener-key #(async/put! events %))
+            launcher
+            (flow/start-work-launcher!
+             {:seon.env/environment @test-environment
+              ::flow/configuration
+              {:seon.config.flow.compute/queue-depth 1
+               :seon.config.flow.compute/concurrency 1
+               :seon.config.flow.io/queue-depth 1
+               :seon.config.flow.io/concurrency 1}})
+            effect-id (pr-str ["effect-run" 3 0])
+            gate (promise)
+            arm (kernel/arm @probe-ctx 150)
+            submitting-arm (kernel/current-arm)]
+        (reset! handler-gate gate)
+        (try
+          (is (= [:seon.effect/id effect-id]
+                 (binding [effect/*request-context*
+                           (request-context connection launcher)]
+                   (effect/request!
+                    #'arm-probe-owner
+                    {:seon.effect-test/iterations 20000
+                     :seon.effect-test/gated? true}
+                    {:seon.effect/background? true}))))
+          ((:seon.sci.kernel/stop! arm))
+          ;; Wait on the OBSERVABLE, not on a sleep: the turn's deadline task
+          ;; closing its own latch is the event this regression depends on.
+          (test-support/await-event!
+           (future
+             (while (not (.get ^AtomicBoolean
+                               (:seon.sci.kernel/reached submitting-arm)))
+               (Thread/sleep 5))
+             ::deadline-reached)
+           ::submitting-turn-deadline-reached)
+          (deliver gate ::released)
+          (test-support/await-event!
+           events
+           ::background-effect-settled
+           #(:seon.effect/result-edn
+             (db/pull (:db-after %) [:seon.effect/result-edn]
+                      [:seon.effect/id effect-id])))
+          (let [result-edn
+                (:seon.effect/result-edn
+                 (db/pull @connection [:seon.effect/result-edn]
+                          [:seon.effect/id effect-id]))
+                settled (read-string result-edn)]
+            (is (= :seon.effect-test/completed
+                   (:seon.effect-test/outcome settled))
+                (str "background work must survive the deadline of the turn "
+                     "that submitted it; got " result-edn))
+            (is (false? (:seon.effect-test/armed? settled))
+                "and it must not be running under that turn's arm at all")
+            (is (true? (:seon.effect-test/connection? settled))
+                (str "a background handler must still receive its cluster's "
+                     "connection: every my.shell/run submitted in the "
+                     "background failed on a nil one")))
+          (finally
+            (reset! handler-gate nil)
+            (deliver gate ::released)
             (datahike/unlisten! connection listener-key)
             (async/close! events)
             (flow/stop-work-launcher! launcher)))))))
