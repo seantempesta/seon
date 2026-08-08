@@ -56,6 +56,7 @@ See `README.md` for the convention.
 | [Return a UTF-8 `my.web/fetch` body as text, not integers](my-web-fetch-returns-plain-html-as-a-vector-of-integers.md) | friction | capability surface repair wave |
 | [Unwedge the flow test that hangs without its namespace siblings](a-flow-test-hangs-when-run-without-its-namespace-siblings.md) | friction | suite-speed tiering (platform tier granularity) |
 | [Scope the JVM operator's per-root work off the installation lock](jvm-operator-work-takes-the-installation-lock-for-one-root.md) | friction | operator lock-scope follow-up |
+| [Clear the pre-rename root claims that make every status noisy](pre-rename-root-claims-are-unreadable-noise-on-every-status.md) | friction | operator lock-scope follow-up |
 | [Record the activation closure's schema keys and required attributes](activation-closure-records-no-schema-keys.md) | friction | boot velocity incident (co-hosted second boot) |
 | [Lead a boot refusal with the layer that refused and why](boot-refusal-has-no-render-producer.md) | friction | operator status-face hygiene |
 | [Make `my.fs/write` and `my.shell/run` docstrings teach the shapes they accept](my-fs-write-docstring-hides-its-own-request-shape.md) | friction | capability surface repair wave |
