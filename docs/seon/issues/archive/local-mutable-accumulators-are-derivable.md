@@ -49,8 +49,9 @@ Behavioural proof, beyond the focused namespace suites:
   (both namespaces loaded side by side, 2026-08-07).
 - `seon.dev.markdown-test` 26 tests / 350 assertions green;
   `seon.fs.jvm-test` 10 / 45 green; both after the change.
-- `seon.render.walk` was compared with and without the change on
-  `seon.render.transcript-test` and produced an identical result; its own
-  focused namespaces could not be re-run at landing time because a foreign
-  in-flight parse error in `test/seon/schema_test.clj` was killing every
-  `with-database` fixture tree-wide.
+- `seon.render.walk` verified after the tree recovered from a foreign parse
+  error: `seon.render-coverage-test` 3 tests / 83 assertions green and
+  `seon.render-simplification-test` green, both of which call
+  `walk/neighborhood` directly. `seon.render.transcript-test` carries 28
+  failures that belong to another owner — the failing tests, line numbers,
+  and counts are identical with and without this change.
