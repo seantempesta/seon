@@ -246,6 +246,16 @@ moment default stands.
   attributed the turn-test red precisely (the conveyance deletion vs
   the suite's dynamic stub) — relayed to the triage lane.
 
+- **Turn-test red CLOSED, attribution verified not inherited**
+  (`1d055a7dd`): the conveyance deletion was correct and stands — the
+  fixture pinned the deleted carrier (a dynamic Var whose binding the
+  old `bound-fn*` carried; git -S shows that wrap was introduced FOR
+  this in July and deleted tonight). Fix: a NON-dynamic injection Var —
+  `binding` on it will not compile, so the thread-local shape is
+  unrepresentable, not just fixed. Zero production change; 49/339 green
+  ×3; platform tier clean. One new ugly-output issue: a bare `case`
+  over print faces throws "No matching clause: " naming nothing.
+
 ## Pending milestones
 
 - stop-completion lands → reset → 08-06 drive-arc rerun with observer →
