@@ -5,7 +5,7 @@ severity: blocker
 tags: [issue, runtime, architecture, toolkit]
 ---
 
-# Every background capability request loses its connection on the `:io` hop
+# Confirm the background `:io` connection fix with a real `my.shell` drive
 
 ## Problem
 
@@ -99,3 +99,31 @@ A background `my.shell/run` with output large enough to require blob
 staging settles with a real result, proven by a regression that drives the
 background path through a real run — not by a direct handler call, which
 cannot see this defect at all.
+
+## Fixed at cause — 2026-08-08 (`f3b8eabda`); one confirmation outstanding
+
+The background work-fn now rebuilds its request context from the value its
+submission carried, instead of hoping to inherit a binding frame flow does
+not convey (`with-request-context` in `src/seon/effect.clj`). The foreground
+arm is unchanged, so the two arms are symmetric for the first time.
+
+Regression: `seon.effect-test/background-work-outlives-the-deadline-of-the-turn-that-started-it`
+drives a REAL background submission through `effect/request!` and the work
+launcher, and asserts the settled receipt reports a live connection. That is
+the class this note names, and it is asserted at the door where the class
+lives rather than in one capability.
+
+Still open because the acceptance criterion asks for more than the class
+regression, and it has not been run: a background `my.shell/run` whose output
+is large enough to require blob staging, driven through a real run on a live
+cluster, settling with a real result. The tool-exercise lane's harness is
+committed at
+`docs/prds/sci-execution-runtime/research/probes/tool-exercise/` and is the
+right instrument — re-running it against `f3b8eabda` closes this note.
+
+Named remainder, and the reason the fix is a rebuild rather than an argument:
+`src/seon/shell/jvm.clj:290` still READS the dynamic var. Converting it (and
+its peers) to take the environment as an argument is the seon.env Phase 3
+reader conversion, at which point `with-request-context` is deleted with
+them. The rebuild is honest about being transitional and its docstring says
+so.
