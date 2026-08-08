@@ -6,6 +6,28 @@ tags: [prd, runtime, testing]
 
 # Overnight report — 2026-08-08 (accumulating; final version at morning)
 
+## THE HEADLINE: THE ARC RUNS
+
+([drive-fix-redrive-2026-08-08.md](../research/drive-fix-redrive-2026-08-08.md),
+`a7683f0ae`..`4bfc2fdfa`.) A human message opens its own run, renders a
+REAL 24,257-token context, the model plans against it, four forms settle
+four receipts, and the run closes with a settled reply — twice. The
+first human-triggered end-to-end agent turns in the fresh system's
+life, achieved by hot reload alone (509-char context → 80,834 across
+the two reader fixes, no restart). The as-of reader class is dead
+across all four database views (derived through Datahike's own
+IHistory interface, with one documented deliberate divergence: the
+run-opening instant is `<=`, not strictly past). The fault loop is
+stopped (a self-escalation guard; the full second-mechanism deletion is
+the recorded follow-on — a protected test pins per-failure cross-agent
+escalation). Token economics restored: completion:prompt 0.22 (from
+46.7); the 08-06 prompt explosion is measurable again and 45% smaller
+(24,257 vs 44,306) — still the open sentinel at that size. The
+starvation diagnosis was REFUTED (selection was never starving; the
+observer's 46/41 receipt gap did not reproduce). The healthy context
+immediately exposed the next blocker, dispatched: an agent cannot
+define a CONTRACTED function — the first thing a healthy agent tries.
+
 Owner directives in force: run hot until morning; uncapped parallelism
 until measured degradation (load is a stress test); multivariate success
 (fewer bugs, faster, fewer lines, better agent context); adversarial
