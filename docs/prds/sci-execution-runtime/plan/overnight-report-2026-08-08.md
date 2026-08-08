@@ -56,9 +56,18 @@ truth-checks, not gates.
   owned by running lanes). Dead-code sweep found NOTHING deletable —
   the 5 kondo unused-private warnings in fs/jvm.clj are false (reached
   via capability symbols; kondo cannot see that edge).
-- Suite tiering SHIPPED (test-infrastructure spec addendum records what
-  landed vs what remains — the fork constructor is still unbuilt; the
-  spec's perf numbers describe the pre-tiering serial gate).
+- **Suite tiering SHIPPED — the overnight headline number**
+  (`b6886bf36`..`0cc63c829`): bare `bin/test` went **965.9 s → 43.6 s**
+  no-change (platform tier only), **52.5 s green end-to-end** on a
+  one-file change, 83% bulk skipped under four-lane churn, fail-fast
+  verdicts in ~37 s. One runner evolved in place; the old
+  namespace-closure selector DELETED; changed = program-graph
+  reachability against a content-digest green basis; widening loud and
+  named; selector class regression non-vacuous both directions. Honest
+  gaps recorded in the spec addendum: the platform tier lacks
+  flow/settle/sci-fork coverage until the spec's seven consolidated
+  regressions land (a flow test hangs without its siblings — issue
+  filed); macroexpand-only test edges are a missing index fact.
 - New loose ends queued: `settle!` has no `:malli/schema` (contract
   census catch, W1 wave); `seon.render.transcript-test` 28 failures
   (needs a lane once the tree is coherent); `seon.fn-test`/`program-test`
