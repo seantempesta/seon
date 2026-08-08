@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, boot]
 ---
@@ -93,3 +93,36 @@ context promises to bind and a classpath that cannot back it.
 Tool-exercise lane, 2026-08-08 00:1x, isolated operator root
 `tmp/tool-exercise-operator`, at `70bcd6bcc`. The same root booted cleanly
 to every layer earlier in the evening, before `2db8a4be4` landed.
+
+## Resolution (tool-repairs lane, 2026-08-08, `4eb8c6ab4`)
+
+This note's diagnosis was exactly right, including that the refusal itself was
+good and refused a wrong premise. Graph membership and PROCESS membership are
+two different facts, and the classpath is the one that answers the second.
+`seon.sci.eval/classpath-locatable?` asks the process itself — a computed fact,
+not a path convention and not a maintained list, so it stays true when the
+source roots, the aliases, or the packaging change. A row this process cannot
+serve is nil; a row it CAN serve that still fails to load remains the loud
+refusal naming the namespace and the cause.
+
+The note's preferred expression (a `test/`-rooted row is excluded by its own
+declared provenance) was not available: no per-row source-root fact is
+recorded today, and `:seon.test` rows identify only namespaces that contain a
+`deftest`, so `test/seon/test_support.clj` and its kind would still have been
+required. Recording a source-root fact at index time is the stronger version
+of this fix and is worth its own note if the classpath answer ever proves
+insufficient.
+
+Both halves proven, neither traded for the other:
+
+- `bin/seon --root tmp/repairs-check init && bin/seon --root tmp/repairs-check
+  start x` boots to every layer, `1/1 clusters alive`;
+- in that started cluster's ctx, `my.web/fetch` and `my.web/search` both
+  resolve alongside `my.fs`, `my.shell`, `my.edit`, `my.background`, and
+  `my.run`, and one real `my.web/fetch` crossed the door with status 200 in
+  148 ms.
+
+Recurring regression: `the-context-binds-only-the-graph-this-process-can-serve`
+in `test/seon/sci/eval_test.clj`, which asserts the RULE rather than the boot,
+because a test-runner JVM has `test/` on its classpath and cannot see this
+failure at all — exactly as this note required.

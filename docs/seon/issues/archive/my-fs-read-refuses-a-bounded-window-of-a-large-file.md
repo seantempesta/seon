@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, toolkit, fs, agent-surface]
 ---
@@ -94,3 +94,46 @@ read a window instead.
   value produced.
 - One regression drives both through a real capability request, not a
   direct handler call.
+
+## Resolution (tool-repairs lane, 2026-08-08, `06c338d10`)
+
+The class — a bound measured against something other than the thing it bounds
+— is unrepresentable at this seam now. `window-pass` takes no ceiling
+parameter at all: it seeks to `:my.fs/byte-offset`, reads at most
+`:my.fs/max-bytes`, and digests exactly what it returns, so a window of a file
+of any size is an ordinary read. `whole-file-pass` is the one arm whose result
+genuinely IS the whole file (a complete read, a write precondition's digest),
+so it is the only arm the ceiling bounds and the only one that can refuse for
+a file's size.
+
+`:my.fs/digest` keeps its one meaning, the whole file's digest, and is present
+only when the window WAS the whole file; `:my.fs/window-digest` always digests
+what was returned. Two names for two facts. The read-limit refusal now names
+the path, the observed size, and the key that reads a window instead — its own
+declaration always said it must identify the path and never did.
+
+Live proof, cluster `x` in isolated operator root `tmp/repairs-check`, driven
+as a REAL capability request through the full path (sci eval → effect door →
+`:io` → receipt), on a 20,971,520-byte file with a 16 MiB ceiling:
+
+```clojure
+(my.fs/read {:my.fs/path "…/large-32mib.txt"
+             :my.fs/byte-offset 20967424 :my.fs/max-bytes 4096})
+;; settled effect result, 76 ms:
+#:my.fs{:path "…", :window-digest "f67519bc…ae73", :file-bytes 20971520,
+        :byte-offset 20967424, :bytes-read 4096, :eof? true, :text "st0123…"}
+```
+
+That request was an outright refusal costing 125 ms of wasted IO before this.
+
+Recurring regression: `a-window-is-bounded-by-the-window-not-by-the-file` in
+`test/seon/fs/jvm_test.clj` (handler level, fast tier), which also asserts the
+refusal's path, observed size, ceiling, and remedial key.
+
+Deviation from this note's acceptance, recorded deliberately: a WINDOWLESS
+`my.fs/read` of an over-ceiling file no longer refuses either. It returns the
+first `:seon.config.fs/max-inline-bytes` bytes with `:my.fs/eof? false` and
+the true `:my.fs/file-bytes`, exactly as it already did for a 1 MB file — the
+old refusal was the anomaly, since every `read` is inline-bounded anyway. The
+refusal this note asked for survives on `read-complete`, the arm that genuinely
+demands the whole file, and carries the path and observed size as specified.

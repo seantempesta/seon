@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, toolkit, runtime, observability]
 ---
@@ -111,3 +111,48 @@ The error text above ends in an elision that refuses its own requery —
 diagnostic is told a subtree exists, told it cannot have it, and given a
 profile name instead of a reason it can act on. Elision inside an error
 message should either fit or name a retrievable identity.
+
+## Resolution (tool-repairs lane, 2026-08-08, `70bcd6bcc`)
+
+All three failures fixed at one cause each.
+
+**The orphan.** Two limits govern a foreground child and only one was
+observed. The handler waited on `:seon.config.shell/time-limit-ms`; the ARM's
+deadline is the limit that ADMITTED the work, and a thread parked in a host
+call makes no interpreted function entrance, so SCI's interrupt could never
+reach it — which is why `sleep 300` outlived a 4 s limit by 29 s. The arm now
+carries its deadline as a value and PUBLISHES it
+(`seon.sci.kernel/deadline-remaining-ms` and `deadline-reached?`), which is the
+interface change the timeout rule asks for: blocking work asks the one
+deadline that already exists instead of carrying a second clock.
+`seon.shell.jvm/await-exit` waits on whichever limit ends first and returns
+which one it was, so no arm of the handler can return while its child is
+alive.
+
+**The dangling receipt.** Both timeout arms return
+`:seon.effect/disposition :interrupted`, which `seon.effect/request*` already
+stamps `:seon.effect/interrupted-at` from. The process and the receipt now
+terminate together or not at all. No change to `src/seon/effect.clj` was
+needed, and none was made — it was mid-flight under the carriage lane.
+
+**The recorder's contract violation.** It was a SECOND constructor of
+`:seon.sci.eval/evaluation`: the submission backstop hand-built four keys of a
+value with nine required ones, so its own report reached
+`seon.problems/form-problem` missing `:seon.cluster.eval/ns`,
+`:seon.sci.eval/ending-ns`, `:seon.print/options`, and
+`:seon.sci.admit/capped?` — exactly the four in the evidence above. There is
+now one constructor, `seon.sci.eval/unrun-evaluation`, and an arm that does not
+name the value's keys cannot omit them.
+
+Recurring regression:
+`an-evaluations-deadline-reaps-the-child-it-admitted` in
+`test/seon/shell/jvm_test.clj` — a long-lived child under a 750 ms evaluation
+deadline with the shell's own limit at 600 s: the handler returns in seconds
+with a refusal naming the evaluation limit and the `:interrupted` disposition,
+and no matching OS process survives. Its sibling
+`time-limit-reaps-the-process-tree-and-marks-the-receipt-interrupted` covers
+the receipt half through the door.
+
+Remaining, filed rather than fixed: the elision inside the error text that
+refuses its own requery is untouched, and is the render-quality half of this
+note.

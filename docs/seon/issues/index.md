@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (30)
+## Blocker (26)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -40,21 +40,20 @@ See `README.md` for the convention.
 | [Eight `:seon.config.web/*` dials are registered with no shipped default](web-config-dials-ship-without-shipped-defaults.md) | blocker | web config default repair |
 | [Isolate session deltas from other runs' context mutations](shared-context-session-delta-crosses-run-attribution.md) | blocker | per-run fork context wave |
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
+| [Attribute and cut the ~2.4 s a run pays between every form](a-run-pays-two-and-a-half-seconds-between-every-form.md) | blocker | development-velocity incident (run loop per-form cost) |
 | [Register the inline `[:fn]` predicate that refuses every corpus projection](an-inline-fn-predicate-in-src-refuses-every-corpus-projection.md) | blocker | changed-test selector lane |
 | [`init NAME --force` destroys the branch, then refuses its own second store open](init-force-destroys-the-branch-then-refuses-its-own-second-store-open.md) | blocker | operator launch-concurrency wave |
-| [Bind only the program rows this process can load into the evaluation context](the-evaluation-context-requires-test-namespaces-that-boot-cannot-load.md) | blocker | evaluation-context binding repair |
 | [Stop a schema-resource edit from bricking value admission in running clusters](a-schema-resource-edit-bricks-value-admission-in-every-running-cluster.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
-| [Read a bounded window of a file larger than the read ceiling](my-fs-read-refuses-a-bounded-window-of-a-large-file.md) | blocker | capability surface repair wave |
-| [Delete the `now` that `next-agent-work` never reads, and unbreak `curate/prove!`](next-agent-work-requires-a-now-it-never-reads.md) | blocker | session-curation proof repair |
 | [Confirm the background `:io` connection fix with a real `my.shell` drive](every-background-capability-request-loses-its-connection.md) | blocker | tool-exercise lane re-run against `f3b8eabda` |
-| [Make `my.web` resolvable in every cluster's SCI context](my-web-is-unreachable-from-agent-code.md) | blocker | capability surface repair wave |
-| [Reap the child and settle the receipt when an eval is interrupted](an-interrupted-my-shell-run-orphans-its-child-and-its-receipt.md) | blocker | capability surface repair wave |
 
-## Friction (112)
+## Friction (115)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [May a run refine a schema key nothing depends on?](within-run-schema-key-refinement-needs-an-owner-ruling.md) | friction | owner design ruling (schema-key immutability vs the usage guard) |
+| [Cut `my.background/poll`'s ~290 tokens per polled result](my-background-poll-costs-290-tokens-per-polled-result.md) | friction | capability surface repair wave |
+| [Bound a six-word evaluation error to something near six words](a-six-word-eval-error-renders-as-two-thousand-characters.md) | friction | error-face budget wave |
+| [Return a UTF-8 `my.web/fetch` body as text, not integers](my-web-fetch-returns-plain-html-as-a-vector-of-integers.md) | friction | capability surface repair wave |
 | [Unwedge the flow test that hangs without its namespace siblings](a-flow-test-hangs-when-run-without-its-namespace-siblings.md) | friction | suite-speed tiering (platform tier granularity) |
 | [Scope the JVM operator's per-root work off the installation lock](jvm-operator-work-takes-the-installation-lock-for-one-root.md) | friction | operator lock-scope follow-up |
 | [Record the activation closure's schema keys and required attributes](activation-closure-records-no-schema-keys.md) | friction | boot velocity incident (co-hosted second boot) |

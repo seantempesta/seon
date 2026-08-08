@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, testing]
 ---
@@ -78,3 +78,27 @@ direction is chosen, the two must agree.
   real `prove!` (not `execute-revision!` in isolation).
 - No required key in `resources/seon/schemas/seon.cluster.work.edn` is
   unread by `src/seon/cluster/work.clj`.
+
+## Resolution (tool-repairs lane, 2026-08-08, `e9a49f8f4`)
+
+`:seon.cluster.work/now` is gone from `:seon.cluster.work/agent-request`. The
+derivation is pure over committed facts and reads no clock, so the request now
+expresses exactly its real dependencies and there is no unread required key
+left to forget. Removing a required input is accretion — it requires no more —
+so the three callers that still passed a clock were simply accreted; they have
+been updated to pass what the derivation actually reads.
+
+Recurring regression:
+`the-request-declares-exactly-the-dependencies-the-derivation-reads` in
+`test/seon/cluster/work_test.clj` — the two-key request validates, a request
+still carrying a clock validates, and dropping either real key does not. An
+unread required key cannot come back without failing there.
+
+Rotation note, recorded because it changes what this note claimed:
+`seon.cluster.curate-test` — which drives the real `prove!` end to end —
+passes at HEAD both BEFORE and AFTER the change. The gate does not instrument
+this call, so the contract violation the finder saw is reachable in a live
+instrumented cluster but not from the suite. The acceptance item "prove!
+executes end to end without a ::proof-fault" is therefore satisfied by an
+existing recurring test that was already green; the declaration mismatch is
+what this commit makes unrepresentable.
