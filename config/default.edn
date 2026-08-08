@@ -397,7 +397,26 @@
  ; DECLARED INITIALIZATION ROWS. Provider wire facts live only on provider
  ; descriptor rows; model rows point to them and carry only model facts.
  :seon.config/initialization
- [{:seon.ai.model/provider-id "deepseek"
+ [; CALL PREPARATION — the supplied defaults. A function whose contract
+  ; declares one of these keys, called without it, receives it. Adding a
+  ; third is adding one row here plus one ordinary contracted function that
+  ; takes this cluster's environment; no dispatch code changes.
+  ;
+  ; `:seon.db/db` is CURRENT by construction: the supplier derefs the
+  ; connection at call time, so an elided database value is always the
+  ; latest committed one. A caller that needs a consistent basis passes its
+  ; own value and it wins. Elide for current, pass for consistent.
+  {:seon.call-preparation/key :seon.db/db
+   :seon.call-preparation/schema [:seon.schema/key :seon.db/database-value]
+   :seon.call-preparation/supplier
+   [:seon.fn/sym "seon.db/supplied-database-value"]}
+
+  {:seon.call-preparation/key :seon.db/connection
+   :seon.call-preparation/schema [:seon.schema/key :seon.db/connection]
+   :seon.call-preparation/supplier
+   [:seon.fn/sym "seon.db/supplied-connection"]}
+
+  {:seon.ai.model/provider-id "deepseek"
    :seon.config.ai/endpoint "https://api.deepseek.com/chat/completions"
    :seon.config.ai/api-key-variable "DEEPSEEK_API_KEY"
    :seon.ai.model/openai-chat-completions true
