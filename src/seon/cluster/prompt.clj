@@ -19,7 +19,7 @@
   than the measurement's own accuracy is admitted LOUDLY instead of
   silently."
   (:require [clojure.edn :as edn]
-            [clojure.tools.logging :as log]
+            [taoensso.timbre :as log]
             [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
             [seon.cluster.message :as message]
