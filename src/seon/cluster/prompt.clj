@@ -183,8 +183,8 @@
           (recur (dec distance))
           {:seon.error/kind ::budget-exceeded
            :seon.error/message
-           (str "The prompt still needs " (tokens/report-sentence report)
-                " at render distance 0, so it was not sent.")
+           (str "At render distance 0 the prompt still needs "
+                (tokens/report-sentence report) ". It was not sent.")
            :seon.error/data
            (assoc report
                   :seon.config.ai/prompt-token-budget budget
