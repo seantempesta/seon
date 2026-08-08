@@ -15,11 +15,20 @@ truth-checks, not gates.
 
 ## Decisions needing you (ranked)
 
-1. **Background work bounds** — background submissions no longer inherit
-   the turn's deadline (semantic inversion fixed), so they currently run
-   unarmed. What bounds should background work have — its own config-fact
-   caps? ([issue addendum](../../../seon/issues/the-effect-door-runs-capability-handlers-unarmed.md))
-2. (accumulating)
+1. **Background work bounds** — detached submissions correctly no longer
+   inherit the turn's deadline and currently run unarmed. The carriage
+   lane parked three options on the issue with a recommendation (own
+   config-fact caps + a fresh arm)
+   ([issue](../../../seon/issues/the-effect-door-runs-capability-handlers-unarmed.md)).
+2. **Two 30-second naming/shape calls from P17-S1** (accepted on your
+   existing rulings' authority, veto open): (a) the row schema landed as
+   `:seon.call-preparation/*` — "provider" was deliberately NOT reused
+   because the vocabulary table binds "provider descriptor row" to
+   hosted-model config rows in the same initialization vector; (b)
+   suppliers take ONE argument (the environment) — r2's zero-arg
+   spec is impossible once the dynamic var dies (ruling 2), and a
+   one-arg declared contract keeps everything a query.
+3. (accumulating)
 
 ## Landed overnight (chronological, with commits)
 
@@ -104,6 +113,30 @@ truth-checks, not gates.
   still blocks every cluster boot tree-wide (config rows referencing
   unpublished supplied-* fns). Second, urgent notice sent with exact
   restore steps and a stop-and-hand-over option.
+
+- **Carriage COMPLETE** (`226da97f8`..`43544d48a`): all three `bound-fn*`
+  sites deleted (dependence falsifier written first, fails both ways
+  when wraps restore); arm capture DERIVED from the surface — awaited
+  submissions carry the submitter's arm, detached ones don't (no flag);
+  the effect door adopts the arm (unbounded handler now interrupted at
+  ~300 ms; 0 → ≥20000 attributed entrances); the background connection
+  loss fixed at cause (worker rebuilds the request frame from the
+  submission's environment); a LATENT break found that conveyance had
+  hidden (admission dials read through a binding frame at settlement).
+  Platform tier green before and after. Named remainder: the foreground
+  `bound-fn` survives until Phase 3 converts the dynamic-var readers
+  (shell.jvm:290 and peers) — recorded in source and issues.
+- **P17-S1 COMPLETE** (`2a12b95ed`..`331b9f310`): call-preparation rows,
+  plan derivation, cluster-local cache with basis refresh, the two
+  database suppliers, shipped config rows landed LAST with a
+  fixture-boot proof; 9/32 green. It also fixed two cluster.clj defects
+  in passing (the bare-`distinct` refusal crash and the true sequencing
+  cause: initialization rows transacted BEFORE program rows — moved to
+  the end of populate-source!). S2's key finding recorded: the hook
+  fires only for sci.lang.Var callees. And it exonerated itself on my
+  stale second escalation — config was restored within a minute of the
+  first flag; the shared-root refusal was the stale-projection class,
+  and the sovereign old default branch then needed the refork (running).
 
 ## In flight at last update
 
