@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (24)
+## Blocker (28)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -44,6 +44,9 @@ See `README.md` for the convention.
 | [Stop a schema-resource edit from bricking value admission in running clusters](a-schema-resource-edit-bricks-value-admission-in-every-running-cluster.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Read a bounded window of a file larger than the read ceiling](my-fs-read-refuses-a-bounded-window-of-a-large-file.md) | blocker | capability surface repair wave |
 | [Delete the `now` that `next-agent-work` never reads, and unbreak `curate/prove!`](next-agent-work-requires-a-now-it-never-reads.md) | blocker | session-curation proof repair |
+| [Carry the environment across the background `:io` hop so handlers keep their connection](every-background-capability-request-loses-its-connection.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
+| [Make `my.web` resolvable in every cluster's SCI context](my-web-is-unreachable-from-agent-code.md) | blocker | capability surface repair wave |
+| [Reap the child and settle the receipt when an eval is interrupted](an-interrupted-my-shell-run-orphans-its-child-and-its-receipt.md) | blocker | capability surface repair wave |
 
 ## Friction (111)
 
@@ -52,7 +55,7 @@ See `README.md` for the convention.
 | [Unwedge the flow test that hangs without its namespace siblings](a-flow-test-hangs-when-run-without-its-namespace-siblings.md) | friction | suite-speed tiering (platform tier granularity) |
 | [Record the activation closure's schema keys and required attributes](activation-closure-records-no-schema-keys.md) | friction | boot velocity incident (co-hosted second boot) |
 | [Lead a boot refusal with the layer that refused and why](boot-refusal-has-no-render-producer.md) | friction | operator status-face hygiene |
-| [Make `my.fs/write`'s docstring teach the shape it accepts](my-fs-write-docstring-hides-its-own-request-shape.md) | friction | capability surface repair wave |
+| [Make `my.fs/write` and `my.shell/run` docstrings teach the shapes they accept](my-fs-write-docstring-hides-its-own-request-shape.md) | friction | capability surface repair wave |
 | [Make the history-policy refusal test independent of machine load](history-policy-refusal-test-is-load-flaky.md) | friction | test fixture repair wave |
 | [Give `malli-form?` its declarations from the environment](malli-form-predicate-resolves-the-declaration-population-itself.md) | friction | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Stop marker declarations from flooding the exact-reuse advisory](schema-exact-reuse-warnings-are-unreadable-at-volume.md) | friction | dev-tooling face hygiene |

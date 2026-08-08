@@ -1,0 +1,101 @@
+---
+type: issue
+status: open
+severity: blocker
+tags: [issue, runtime, architecture, toolkit]
+---
+
+# Every background capability request loses its connection on the `:io` hop
+
+## Problem
+
+`my.background/background` submissions reach their handler with
+`seon.effect/*request-context*` bound to `nil`, so any handler that reads
+the cluster connection from it gets `nil` and fails. The foreground path
+works only because it conveys the binding by hand.
+
+The asymmetry is one function apart in `src/seon/effect.clj`:
+
+- **foreground** — `dispatch` wraps the handler in `(bound-fn [] (handler …))`
+  before handing it to the `:io` executor, so the dynamic binding rides
+  along.
+- **background** — `flow/submit!` is given a plain `(fn [_] (handler …))`.
+  Flow conveys NO bindings anywhere, by design (the environment research
+  confirms zero `bound-fn` under `flow/`), so the worker thread sees the
+  root value `nil`.
+
+`seon.shell.jvm` reads exactly that dynamic var:
+
+```clojure
+;; src/seon/shell/jvm.clj:290
+(let [connection (:seon.db/connection effect/*request-context*)
+```
+
+so every background `my.shell/run` fails, whatever it runs.
+
+This is [Defect I of the parallel isolation audit](../../prds/sci-execution-runtime/research/parallel-isolation-audit-2026-08-07.md)
+— "Every capability request crossing the guarded door on `:io` runs with no
+cluster identity today; it survives only because with one cluster the
+fallback happens to be right" — except here there is no fallback that
+happens to be right, so it does not survive at all. The audit predicted the
+class; this is the first observation of it failing outright, on the one path
+nobody had driven.
+
+## Evidence
+
+Tool-exercise lane, 2026-08-07, cluster `tools` in an isolated operator
+root, driven through a real run. Complete result:
+`docs/prds/sci-execution-runtime/research/probes/tool-exercise/background-ordinals.edn`.
+
+Eight concurrent background submissions from one form:
+
+```clojure
+(def refs
+  (mapv (fn [i]
+          (my.background/background
+           (my.shell/run {:my.shell/argv ["sh" "-c" (str "sleep 1; echo done-" i)]
+                          :my.shell/cwd  "…/tool-exercise-scratch"})))
+        (range 8)))
+```
+
+All eight settled, and all eight settled with the SAME failure:
+
+```text
+#:seon.error{:kind :seon.instrument/contract-violated,
+  :message "seon.blob/stage-binary! violated its contract (invalid-input):
+            [[{:value nil, :message \"must be a live unreleased Datahike
+            connection from the calling cluster\"}]]", …}
+```
+
+The control is decisive: the IDENTICAL command run in the FOREGROUND
+succeeds, including a 40,000,000-byte stdout correctly staged to the blob
+tier with `:preview-complete? false` and a digest
+(`…/probes/tool-exercise/shell-basics.edn`). Only the background path
+fails, and it fails on a 7-byte stdout.
+
+## What is NOT broken (worth recording)
+
+The same exercise proves the identity half is sound: the eight concurrent
+submissions produced eight DISTINCT ordered identities —
+`["exercise:c6139a2e-…" 0 0]` through `["…" 0 7]` — all terminal, each
+carrying its run reference. The effect-ordinal counter is correct under
+concurrency; it is only the environment that does not travel.
+
+## Expected
+
+The submission carries the environment, and the handler receives it as an
+argument rather than reading a dynamic var — the seon.env Phase 3 direction
+exactly. `seon.effect/request!` already puts `:seon.env/environment` on the
+background submission map; the handler side has not been converted, and
+`src/seon/shell/jvm.clj:290` is one of the named readers on the PRD's
+deletion list. The foreground `bound-fn*` in `dispatch` is deleted in the
+same change, per the flow-carriage sequencing constraint (while conveyance
+remains, a forgotten environment is invisible on `:compute` and fatal on
+`:io` — which is precisely what happened here).
+
+## Acceptance
+
+A background `my.shell/run` with output large enough to require blob
+staging settles with a real result, proven by a regression that drives the
+background path through a real run — not by a direct handler call, which
+cannot see this defect at all.

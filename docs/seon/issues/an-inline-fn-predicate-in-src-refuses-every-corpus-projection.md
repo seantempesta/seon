@@ -38,7 +38,7 @@ with no intervening change to the namespace or its owners.
 The refusal itself is correct and loud — the gate is doing its job. The defect
 is the declaration.
 
-Second independent observation (tool-exercise lane, 2026-08-07 22:26–22:52):
+Second independent observation (tool-exercise lane, 2026-08-07 22:26 onward):
 the blast radius is wider than tests — it refuses **every publication**, so
 `bin/seon init` cannot complete in ANY operator root while the declaration is
 present:
@@ -52,8 +52,8 @@ $ bin/seon --root tmp/tool-exercise-operator init
 
 Consequence: a fresh isolated root cannot be booted at all (`bin/seon start`
 refuses with `No 'current-src' branch is published; run 'bin/seon init'
-first`), which blocked this lane's cluster for ~30 minutes. Reproduced at
-22:26, 22:41, and 22:52.
+first`), which blocked this lane's cluster. Reproduced three consecutive
+times from a freshly created isolated root.
 
 ## Owner
 
