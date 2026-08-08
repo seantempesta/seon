@@ -23,7 +23,6 @@ See `README.md` for the convention.
 | [Schema-key immutability refuses before the usage guard can answer](schema-key-immutability-swallows-the-usage-guard.md) | blocker | gate-red triage (bin/test seon.schema-usage-guard-test) |
 | [Boot the co-hosted second cluster without a 63 s stall or a false failure](cohosted-second-boot-is-slow-and-trips-the-silence-backstop.md) | blocker | boot velocity incident (co-hosted second boot) |
 | [Instrument each cluster under its own projection, not the anchor's](instrumentation-compiles-under-one-clusters-projection.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
-| [Scope the operator lifecycle lock to its own root](an-isolated-operator-root-locks-the-shared-repository-root.md) | blocker | development-velocity repair wave |
 | [Resolve the declaration population once per admission, not once per node](value-admission-resolves-the-declaration-population-per-node.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Re-root the foreign-write custody fence on the environment](foreign-write-fence-reads-only-the-dynamic-var.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Commit every dropped core-fault observation](dropped-core-fault-count-is-not-durable.md) | blocker | fault-committer durability wave |
