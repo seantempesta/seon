@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (21)
+## Blocker (24)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -41,6 +41,9 @@ See `README.md` for the convention.
 | [Isolate session deltas from other runs' context mutations](shared-context-session-delta-crosses-run-attribution.md) | blocker | per-run fork context wave |
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 | [Register the inline `[:fn]` predicate that refuses every corpus projection](an-inline-fn-predicate-in-src-refuses-every-corpus-projection.md) | blocker | changed-test selector lane |
+| [Stop a schema-resource edit from bricking value admission in running clusters](a-schema-resource-edit-bricks-value-admission-in-every-running-cluster.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
+| [Read a bounded window of a file larger than the read ceiling](my-fs-read-refuses-a-bounded-window-of-a-large-file.md) | blocker | capability surface repair wave |
+| [Delete the `now` that `next-agent-work` never reads, and unbreak `curate/prove!`](next-agent-work-requires-a-now-it-never-reads.md) | blocker | session-curation proof repair |
 
 ## Friction (110)
 
@@ -48,6 +51,7 @@ See `README.md` for the convention.
 |-------|----------|------|
 | [Record the activation closure's schema keys and required attributes](activation-closure-records-no-schema-keys.md) | friction | boot velocity incident (co-hosted second boot) |
 | [Lead a boot refusal with the layer that refused and why](boot-refusal-has-no-render-producer.md) | friction | operator status-face hygiene |
+| [Make `my.fs/write`'s docstring teach the shape it accepts](my-fs-write-docstring-hides-its-own-request-shape.md) | friction | capability surface repair wave |
 | [Make the history-policy refusal test independent of machine load](history-policy-refusal-test-is-load-flaky.md) | friction | test fixture repair wave |
 | [Give `malli-form?` its declarations from the environment](malli-form-predicate-resolves-the-declaration-population-itself.md) | friction | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Stop marker declarations from flooding the exact-reuse advisory](schema-exact-reuse-warnings-are-unreadable-at-volume.md) | friction | dev-tooling face hygiene |
@@ -99,7 +103,6 @@ See `README.md` for the convention.
 | [Give config-dial discovery one explicit authority](config-dial-discovery-has-three-authorities.md) | friction | config derivation wave |
 | [Derive changed-test ownership instead of classifying paths](changed-test-selector-classifies-hosts-by-path-prefix.md) | friction | changed-test selector repair |
 | [Make the public-contract census prove its subjects exist](public-contract-census-can-pass-with-no-subjects.md) | friction | contract-gate repair |
-| [Generate fresh Flow contract values](flow-generators-reuse-one-mutable-sample.md) | friction | contract-generator repair |
 | [Give thinking tool continuations one faithful request shape](thinking-tool-continuations-have-no-faithful-request-shape.md) | friction | future model-continuation wave |
 | [Fence the MCP parent watchdog by captured process identity](mcp-parent-watchdog-can-follow-a-reused-pid.md) | friction | MCP process-lifetime repair |
 | [Make the oversized terminal-refusal settle as one schema-valid error fact](terminal-refusal-error-fact-fails-on-oversized-data.md) | friction | settlement fix wave |
@@ -157,12 +160,11 @@ See `README.md` for the convention.
 | [Reconcile the error-class catalog with declared schemas and renderers](error-class-catalog-and-renderers-disagree.md) | friction | error class contract repair |
 | [Make the generative loop fixture commit the run facts it asserts](generative-loop-fixture-commits-no-run-facts.md) | friction | generative loop fixture repair |
 
-## Cleanup (14)
+## Cleanup (13)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Carry schema source provenance as immutable admission data](schema-source-provenance-accumulates-in-a-global-atom.md) | cleanup | schema admission cleanup wave |
-| [Replace derivable local mutable accumulators](local-mutable-accumulators-are-derivable.md) | cleanup | data-oriented Clojure cleanup wave |
 | [Make fresh CLJC namespaces portable or name them CLJ](fresh-cljc-files-are-jvm-only.md) | cleanup | fresh portability cleanup wave |
 | [Select duplicate-identity refusal evidence deterministically](duplicate-identity-refusal-evidence-is-unordered.md) | cleanup | reconcile evidence cleanup wave |
 | [Delete five readerless schema rows left by completed cuts](schema-population-retains-five-readerless-rows.md) | cleanup | schema population deletion wave |
