@@ -1340,25 +1340,29 @@
                           (when (seq tx-data)
                             (let [total (count tx-data)
                                   stride (progress-stride
-                                          total progress-line-budget)
-                                  completed (volatile! 0)]
-                              (doseq [batch (if progress!
-                                             (partition-all stride tx-data)
-                                             [tx-data])]
-                                (require-committed!
-                                 (db/transact!
-                                  connection
-                                  (cond-> {:tx-data (vec batch)}
-                                    process
-                                    (assoc :tx-meta
-                                           {:seon.db/process process})))
-                                 phase)
-                                (when progress!
-                                  (report-index-progress!
-                                   progress!
-                                   (str (name phase) ": "
-                                        (vswap! completed + (count batch))
-                                        "/" total)))))))]
+                                          total progress-line-budget)]
+                              (reduce
+                               (fn [completed batch]
+                                 (require-committed!
+                                  (db/transact!
+                                   connection
+                                   (cond-> {:tx-data (vec batch)}
+                                     process
+                                     (assoc :tx-meta
+                                            {:seon.db/process process})))
+                                  phase)
+                                 (let [completed (+ completed (count batch))]
+                                   (when progress!
+                                     (report-index-progress!
+                                      progress!
+                                      (str (name phase) ": "
+                                           completed "/" total)))
+                                   completed))
+                               0
+                               (if progress!
+                                 (partition-all stride tx-data)
+                                 [tx-data]))
+                              nil)))]
        ;; Datahike processes tx-data in order. Every identity therefore exists
        ;; before a requires lookup ref resolves it, including the shared
        ;; name-only rows for external namespaces.
