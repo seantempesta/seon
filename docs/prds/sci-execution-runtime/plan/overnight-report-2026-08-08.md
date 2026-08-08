@@ -138,6 +138,26 @@ truth-checks, not gates.
   first flag; the shared-root refusal was the stale-projection class,
   and the sovereign old default branch then needed the refork (running).
 
+- **Schema-environment lane CLOSED (criterion 1b correctly deferred)**
+  (`f2903354a`, `37700ec64`): predicate resolution = the Var a qualified
+  symbol names (the last-writer-wins cache and its snapshot machinery
+  DELETED — with a mid-flight refutation that mattered: naive
+  requiring-resolve would have let an agent [:fn] form load arbitrary
+  namespaces; constrained to already-loaded Vars); compiled state hangs
+  off the projection (the process slots deleted). The third criterion
+  was implemented, measured green on 177/178, and REVERTED on the one
+  real dependency: malli.instrument registers contracts through Malli's
+  global default — which enlarges the class (malli.core's
+  -function-schemas* is a second process-wide slot). The reverted diff
+  lives as the issue's falsifier. The four dynamic vars stay for Phase 3
+  (hook consumption first — boundary named, not crossed).
+- **PLATFORM DEFECT dispatched: `--root` lock isolation is broken** —
+  with-operator-lock ignores its root and locks the shared repository
+  file; six commands across three roots queued silently (oldest
+  11m35s). "Clusters can't boot" tonight was partly QUEUED, not broken;
+  the default refork is likely in that queue now. Repair lane launched
+  (root-derived lock, bounded loud waiting, stale-holder cleanup).
+
 ## In flight at last update
 
 stop-completion (render proc liveness) · suite-speed (tiers +
