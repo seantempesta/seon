@@ -573,6 +573,27 @@ message since 2026-07-29; one owner now mints both derivations; second
 live instance filed by query:
 [one-identity-string-names-two-entities](../../../seon/issues/one-identity-string-names-two-entities.md)).
 
+**Adversarial audit (2026-08-08 overnight) — the rotation that mattered**
+([report](../research/adversarial-audit-2026-08-08.md), `ae98ef06a`).
+Headline: "the declaration-population family is done" was FALSE — the
+dominant instance is on the ADMISSION seam
+([value-admission-resolves-the-declaration-population-per-node](../../../seon/issues/value-admission-resolves-the-declaration-population-per-node.md):
+per-value-node identity-only resolution, 54,884 fallbacks/hour on a live
+cluster, ~2/3 of the cluster's CPU; the generation atom compares AFTER
+paying — lane dispatched). Also: a THIRD identity-collision family that
+is DECLARED, not data (identity-attribute-of-an-identity-value —
+appended to the open issue; the run-scoped regression cannot see it);
+the effect door runs handlers UNARMED and background work wrongly
+inherits the turn's deadline latch (lane dispatched: door adopts,
+background explicitly unarmed, bounds policy PARKED for owner); the
+three `bound-fn*` sites are now deletable (same lane, with the missing
+dependence falsifier written first). Calibration — held up under
+verification: boot as the only constructor, schema-derived member list,
+the sci refusal live, db-side fixes with per-item resolvers DELETED not
+shadowed, arm-as-value structure, the registry-cost claim re-measured
+true. Ugly: the MCP envelope echoes the submitted form in EVERY event
+(5× duplication — token explosion on the most-used surface; queued).
+
 ## Rollout — test-first, REPL-iterated, then farmed out
 
 Phase 0 — falsify the three load-bearing mechanics live (opus REPL lanes,
