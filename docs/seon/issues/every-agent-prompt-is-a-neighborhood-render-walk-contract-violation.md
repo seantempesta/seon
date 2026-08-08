@@ -82,4 +82,64 @@ WITHOUT collapsing when a producer returns a bare string:
   whose one producer returns a bare string still yields a well-formed prompt for
   the rest of the walk. A green test that constructs the bare-string producer and
   asserts the surviving blocks render.
+
+## Root cause pinned, and the proposed fix corrected (model-authoring re-drive, 2026-08-08)
+
+Independent re-drive on the same cluster (`default`, pid 14148) reproduced this
+and located the exact cause. It is NOT (only) that producers return bare strings —
+it is a **shared globally-identified key with two meanings**, tightened on one side.
+
+- Commit `102fdeac3` ("Make seon.render.edn editable…") retyped the shared key
+  `:seon.render/output` from `:any` to `[:enum :seon.render/ai :seon.render/html]`,
+  correctly, because it IS the projection **selector** in the request map
+  (`resources/seon/schemas/seon.render.walk.edn:29-30`, the `:request` key).
+- But `:seon.render.walk/unit` reuses that SAME key for each unit's rendered
+  **output field** (`seon.render.walk.edn:55-57`), and that field holds the actual
+  rendered value — a `String` for AI, Hiccup for HTML — assigned at
+  `src/seon/render/walk.clj:462` (`:seon.render/output rendered-output`),
+  `:455` (`failure-output`), and `:323` (elision bare string).
+- So every unit's rendered output is now validated against a two-keyword enum and
+  fails, because rendered text can never equal the literal keyword `:seon.render/ai`.
+
+**The failure is universal, not producer-specific.** Falsified live: walking the
+healthy cluster entity at distance 0 —
+
+```clojure
+(neighborhood {… :seon.render.walk/lookup [:seon.cluster/name "default"]
+                 :seon.render/distance 0})
+;; invalid-output: [#:seon.render{:output
+;;   [{:value "Cluster default.\nConfiguration default and bootstrap plan :default;
+;;             1 shared instruction and 7 toolkit namespaces.",
+;;     :message "should be either :seon.render/ai or :seon.render/html"}]}]
+```
+
+A perfectly well-formed AI render string fails the contract. There is no producer
+bug here — the value is correct; the field's declared type is wrong.
+
+**Therefore the "Wanted behavior" option "producers tag every item as
+`{:seon.render/ai …}`/`{:seon.render/html …}`" WILL NOT fix this** — a
+`{:seon.render/ai "…"}` map fails `[:enum :seon.render/ai :seon.render/html]` exactly
+as a bare string does. Only the literal keyword passes. The fix must **split the
+shared key**: give the unit's rendered-output field its own value type (a
+string-or-Hiccup rendered-value schema, e.g. what `:seon.render/ai` / `:seon.render/html`
+already are: `[:or :qualified-symbol :string]` and `[:or :qualified-symbol
+:seon.render/hiccup]`), distinct from the request's `:seon.render/output` selector.
+This is a schema-EDN + re-registration change (not hot-reloadable) and a render-
+contract design decision — owner/render-owner call, not a lane one-liner.
+
+### Live impact this re-drive (facts only, cluster `default`, 11:52–12:07Z)
+
+- A human message (`inbound-536871012-0`, 25876) asked root to define a contracted
+  `word-count` and complete. It was claimed by run `fe68fac3` (25909),
+  `:seon.cluster.run/trigger` = 25876 — but that run's provider prompt was
+  **336 tokens** of the render-contract error, not the message, so root produced
+  only render-fix prose.
+- Six paid provider attempts across four root turns (25872/25891/25909/…), each a
+  ~336-token error prompt, each burning 10–14k reasoning tokens; `word-count` never
+  appears in `:seon.fn/sym`; **0 receipts** cluster-wide; still only the one agent.
+- The prompt collapse also drives the paid self-waking loop of
+  [a-failed-turn-wakes-itself-through-its-own-fault-message.md](a-failed-turn-wakes-itself-through-its-own-fault-message.md):
+  `renderer-failure` (`src/seon/render.clj:479-519`) messages the namespace owner
+  "A renderer in <ns> failed… repair its declared contract", and root owns
+  `my.agents.root`, so each collapse re-wakes root with another broken prompt.
 </content>
