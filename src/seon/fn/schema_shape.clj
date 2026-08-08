@@ -197,32 +197,46 @@
       (and (vector? form) (seq form))))
 
 (defn- child-row
-  [shape-fingerprint order child schema-child? shape-row*]
-  (let [child-id (str "seon.schema.shape.child/" shape-fingerprint "/" order)]
-    (cond-> {:db/id child-id
-             :seon.schema.shape.child/id child-id
-           :seon.schema.shape.child/order (long order)}
-      (and schema-child? (schema-form? child))
-      (assoc :seon.schema.shape.child/schema (shape-row* child))
-      (not (and schema-child? (schema-form? child)))
-      (assoc :seon.schema.shape.child/value-edn (pr-str child)))))
+  "`[row seen]` for one non-map child of a shape."
+  [shape-fingerprint order child schema-child? seen encode]
+  (let [child-id (str "seon.schema.shape.child/" shape-fingerprint "/" order)
+        base {:db/id child-id
+              :seon.schema.shape.child/id child-id
+              :seon.schema.shape.child/order (long order)}]
+    (if (and schema-child? (schema-form? child))
+      (let [[schema seen] (encode child seen)]
+        [(assoc base :seon.schema.shape.child/schema schema) seen])
+      [(assoc base :seon.schema.shape.child/value-edn (pr-str child)) seen])))
 
 (defn- entry-row
-  [shape-fingerprint order entry shape-row*]
+  "`[row seen]` for one map entry of a shape."
+  [shape-fingerprint order entry seen encode]
   (let [[entry-key a b] entry
         [properties child] (if (map? a) [a b] [nil a])
-        entry-id (str "seon.schema.shape.entry/" shape-fingerprint "/" order)]
-    (cond->
-     (merge
-      {:db/id entry-id
-       :seon.schema.shape.entry/id entry-id
-     :seon.schema.shape.entry/order (long order)
-     :seon.schema.shape.entry/optional? (true? (:optional properties))
-     :seon.schema.shape.entry/schema (shape-row* child)}
-      (typed-key-facts entry-key))
-      (seq properties)
-      (assoc :seon.schema.shape.entry/properties
-             (pr-str (canonical-form properties))))))
+        entry-id (str "seon.schema.shape.entry/" shape-fingerprint "/" order)
+        [schema seen] (encode child seen)]
+    [(cond->
+      (merge
+       {:db/id entry-id
+        :seon.schema.shape.entry/id entry-id
+        :seon.schema.shape.entry/order (long order)
+        :seon.schema.shape.entry/optional? (true? (:optional properties))
+        :seon.schema.shape.entry/schema schema}
+       (typed-key-facts entry-key))
+       (seq properties)
+       (assoc :seon.schema.shape.entry/properties
+              (pr-str (canonical-form properties))))
+     seen]))
+
+(defn- ordered-rows
+  "`[rows seen]` from `row-of` over ordered `children`, threading `seen`."
+  [row-of seen children]
+  (reduce
+   (fn [[rows seen] [order child]]
+     (let [[row seen] (row-of order child seen)]
+       [(conj rows row) seen]))
+   [[] seen]
+   (map-indexed vector children)))
 
 (defn- form-parts
   [form]
@@ -240,6 +254,51 @@
      (if (keyword? form) form :malli.core/predicate)
      :seon.schema.shape/children []}))
 
+;;; The already-encoded fingerprint set is the ENCODING'S RETURN VALUE,
+;;; threaded child to child and back out to the parent, so a recursive
+;;; schema is deduplicated without any reference outliving the call.
+(defn- encode-form
+  "`[row-or-lookup seen]` for one normalized schema form."
+  [form comparison seen]
+  (let [shape-fingerprint (fingerprint form)
+        lookup [:seon.schema.shape/fingerprint shape-fingerprint]
+        {shape-type :seon.schema.shape/type
+         properties :seon.schema.shape/properties
+         children :seon.schema.shape/children
+         schema-children? :seon.schema.shape/schema-children?}
+        (form-parts form)]
+    (if (contains? seen shape-fingerprint)
+      [lookup seen]
+      (let [seen (conj seen shape-fingerprint)
+            encode #(encode-form %1 comparison %2)
+            row (cond-> {:seon.schema.shape/fingerprint shape-fingerprint
+                         :seon.schema.shape/normalization-revision
+                         normalization-revision
+                         :seon.schema.shape/form (pr-str form)
+                         :seon.schema.shape/comparison comparison
+                         :seon.schema.shape/type shape-type}
+                  (seq properties)
+                  (assoc :seon.schema.shape/properties (pr-str properties)))]
+        (cond
+          (and (= :map shape-type) (seq children))
+          (let [[entries seen]
+                (ordered-rows
+                 (fn [order entry seen]
+                   (entry-row shape-fingerprint order entry seen encode))
+                 seen children)]
+            [(assoc row :seon.schema.shape/entries entries) seen])
+
+          (and (not= :map shape-type) (seq children))
+          (let [[child-rows seen]
+                (ordered-rows
+                 (fn [order child seen]
+                   (child-row shape-fingerprint order child
+                              schema-children? seen encode))
+                 seen children)]
+            [(assoc row :seon.schema.shape/children child-rows) seen])
+
+          :else [row seen])))))
+
 (defn shape-row
   "Shared content-addressed row for one compiled Malli schema."
   {:malli/schema
@@ -252,53 +311,10 @@
   ([compiled forms]
    (shape-row compiled forms {}))
   ([compiled forms predicate-functions]
-  (let [seen (volatile! #{})]
-    (letfn [(encode-form [form comparison]
-              (let [shape-fingerprint (fingerprint form)
-                    lookup [:seon.schema.shape/fingerprint shape-fingerprint]
-                    {shape-type :seon.schema.shape/type
-                     properties :seon.schema.shape/properties
-                     children :seon.schema.shape/children
-                     schema-children? :seon.schema.shape/schema-children?}
-                    (form-parts form)]
-                (if (contains? @seen shape-fingerprint)
-                  lookup
-                  (let [_ (vswap! seen conj shape-fingerprint)]
-                    (cond->
-                     {:seon.schema.shape/fingerprint shape-fingerprint
-                      :seon.schema.shape/normalization-revision
-                      normalization-revision
-                      :seon.schema.shape/form (pr-str form)
-                      :seon.schema.shape/comparison comparison
-                      :seon.schema.shape/type shape-type}
-                      (seq properties)
-                      (assoc :seon.schema.shape/properties
-                             (pr-str properties))
-                      (and (= :map shape-type) (seq children))
-                      (assoc :seon.schema.shape/entries
-                             (mapv (fn [order entry]
-                                     (entry-row
-                                      shape-fingerprint order entry
-                                      #(encode-form % comparison)))
-                                   (range) children))
-                      (and (not= :map shape-type) (seq children))
-                      (assoc :seon.schema.shape/children
-                             (mapv (fn [order child]
-                                     (child-row
-                                      shape-fingerprint order child
-                                      schema-children?
-                                      #(encode-form % comparison)))
-                                   (range) children)))))))
-            (encode [compiled]
-              (let [{form :seon.schema.shape/form
-                     comparison :seon.schema.shape/comparison}
-                    (normalized-form compiled forms predicate-functions)
-                    shape-fingerprint (fingerprint form)
-                    lookup [:seon.schema.shape/fingerprint shape-fingerprint]]
-                (if (contains? @seen shape-fingerprint)
-                  lookup
-                  (encode-form form comparison))))]
-      (encode compiled)))))
+   (let [{form :seon.schema.shape/form
+          comparison :seon.schema.shape/comparison}
+         (normalized-form compiled forms predicate-functions)]
+     (first (encode-form form comparison #{})))))
 
 (defn row-form
   "Canonical normalized form retained by a schema-shape row."
