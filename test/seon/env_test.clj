@@ -139,8 +139,15 @@
         complete-observed (atom [])
         per-launcher 8]
     (try
-      ;; A decoy in the dynamic carriers: work that reads a binding frame
-      ;; instead of its submission returns the decoy and fails loudly.
+      ;; A decoy in the dynamic carriers, and the DEPENDENCE half of this
+      ;; regression: every crossing records what it read from the binding
+      ;; frame as well as from its submission. The submission's data must be
+      ;; the only carrier, so each crossing must see its own environment AND
+      ;; see the decoys ABSENT. While flow conveyed bindings with `bound-fn*`
+      ;; the compute work and the terminal callback both inherited these
+      ;; decoys, which is exactly why the environment refusal could not yet
+      ;; catch a submission that named the wrong cluster: correct and
+      ;; incorrect code behaved identically.
       (binding [db/*conn* ::decoy-connection
                 effect/*request-context* {:seon.env/marker ::decoy-context}]
         (doseq [[ordinal launcher] (map-indexed vector launchers)
@@ -157,13 +164,16 @@
                    (swap! io-observed conj
                           [ordinal
                            (:seon.boot/cluster-name (sut/of call))
-                           db/*conn*])
+                           db/*conn*
+                           effect/*request-context*])
                    ::io-done)
                  :seon.flow/complete!
                  (fn [terminal]
                    (swap! complete-observed conj
                           [ordinal
-                           (:seon.boot/cluster-name (sut/of terminal))]))})))
+                           (:seon.boot/cluster-name (sut/of terminal))
+                           db/*conn*
+                           effect/*request-context*]))})))
           (is (= :seon.flow/completed
                  (:seon.flow/outcome
                   (flow/submit!!
@@ -177,7 +187,9 @@
                     (fn [call]
                       (swap! compute-observed conj
                              [ordinal
-                              (:seon.boot/cluster-name (sut/of call))])
+                              (:seon.boot/cluster-name (sut/of call))
+                              db/*conn*
+                              effect/*request-context*])
                       ::compute-done)}))))))
       (test-support/await-event!
        (future
@@ -190,7 +202,11 @@
             wrong (fn [rows]
                     (vec (remove (fn [[ordinal observed & _]]
                                    (= (expected ordinal) observed))
-                                 rows)))]
+                                 rows)))
+            conveyed (fn [rows]
+                       (vec (remove (fn [[_ _ conn context]]
+                                      (and (nil? conn) (nil? context)))
+                                    rows)))]
         (is (= (* 2 per-launcher) (count @io-observed)))
         (is (= [] (wrong @io-observed))
             "io work read exactly its own submission's environment")
@@ -198,44 +214,85 @@
             "compute work read exactly its own submission's environment")
         (is (= [] (wrong @complete-observed))
             "each terminal callback read exactly its submission's environment")
-        (is (every? nil? (map #(nth % 2) @io-observed))
-            "io ran with the dynamic carrier at its root nil, as the audit found"))
+        ;; Dependence: with no conveyance left, the ONLY way any of these
+        ;; three could name a cluster is the data on their submission.
+        (is (= [] (conveyed @io-observed))
+            "io work inherited no submitter binding")
+        (is (= [] (conveyed @compute-observed))
+            "compute work inherited no submitter binding")
+        (is (= [] (conveyed @complete-observed))
+            "the terminal callback inherited no submitter binding"))
       (finally
         (run! flow/stop-work-launcher! launchers)))))
 
-(deftest a-submission-carries-the-submitting-threads-interrupt-arm
+(deftest an-awaited-submission-carries-its-arm-and-a-detached-one-does-not
+  ;; THE CLASS: which submissions a turn's deadline latch governs. An
+  ;; AWAITED submission is the turn — the submitter blocks on it, so its
+  ;; limit must reach the worker. A DETACHED submission exists precisely to
+  ;; OUTLIVE the turn (`my.background`), so inheriting that latch would cut
+  ;; background work at the turn's deadline. Both directions are asserted
+  ;; here because a mechanism that captures unconditionally satisfies the
+  ;; first and silently inverts the second.
   (let [environment (test-support/environment "arm-carriage")
         launcher (flow/start-work-launcher!
                   {:seon.env/environment environment
                    :seon.flow/configuration launcher-configuration})
         ctx (eval/build-base-ctx)]
     (try
-      (testing "an armed submitter's arm reaches the io thread"
+      (testing "an armed submitter's arm reaches the awaited compute worker"
         (let [observed (promise)
               armed (kernel/arm ctx 15000)
               submitting-arm (atom nil)]
           (try
             (reset! submitting-arm (kernel/current-arm))
-            (flow/submit!
+            (flow/submit!!
              launcher
              {:seon.env/environment environment
-              :seon.flow/submission-id ::armed-io
-              :seon.flow/workload :io
+              :seon.flow/submission-id ::armed-compute
+              :seon.flow/workload :compute
+              :seon.flow/time-limit-ms 15000
               :seon.flow/work-fn
               (fn [call]
                 (deliver observed
                          {:carried (:seon.sci.kernel/arm (sut/of call))
                           :adopted (kernel/current-arm)})
-                ::done)
-              :seon.flow/complete! (fn [_])})
+                ::done)})
             (finally
               ((:seon.sci.kernel/stop! armed))))
           (let [{:keys [carried adopted]}
-                (test-support/await-event! (future @observed) ::armed-io)]
+                (test-support/await-event! (future @observed) ::armed-compute)]
             (is (identical? @submitting-arm carried)
                 "the submission carried the submitting thread's arm as data")
             (is (identical? @submitting-arm adopted)
-                "the io thread ran under that same arm, not unarmed"))))
+                "the compute thread ran under that same arm, not unarmed"))))
+
+      (testing "a DETACHED submission from an armed submitter carries no arm"
+        (let [observed (promise)
+              armed (kernel/arm ctx 15000)]
+          (try
+            (is (some? (kernel/current-arm))
+                "the submitting thread really is armed")
+            (is (true?
+                 (flow/submit!
+                  launcher
+                  {:seon.env/environment environment
+                   :seon.flow/submission-id ::detached-io
+                   :seon.flow/workload :io
+                   :seon.flow/work-fn
+                   (fn [call]
+                     (deliver observed
+                              {:carried (:seon.sci.kernel/arm (sut/of call))
+                               :adopted (kernel/current-arm)})
+                     ::done)
+                   :seon.flow/complete! (fn [_])})))
+            (finally
+              ((:seon.sci.kernel/stop! armed))))
+          (let [{:keys [carried adopted]}
+                (test-support/await-event! (future @observed) ::detached-io)]
+            (is (nil? carried)
+                (str "detached work must not inherit the submitting turn's "
+                     "deadline latch; background work exists to outlive it"))
+            (is (nil? adopted)))))
 
       (testing "an unarmed submitter carries no arm, which is not a refusal"
         (let [observed (promise)]

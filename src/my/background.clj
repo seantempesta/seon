@@ -19,7 +19,14 @@
 
   Takes exactly one direct capability call and returns its
   `:seon.effect/id` lookup ref. Use it for work that can finish after the
-  current run."
+  current run.
+
+  Background work is NOT bounded by the run that started it. It carries no
+  interrupt arm, so the submitting turn's time limit does not cut it — that
+  is the whole point of the surface, and a turn ending never cancels work
+  already in flight. What bounds it instead is an open owner question; until
+  it is ruled, prefer capability calls that bound themselves (a shell time
+  limit, a web timeout)."
   [& calls]
   (let [call (first calls)]
     (if (and (= 1 (count calls))

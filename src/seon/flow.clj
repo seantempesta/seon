@@ -200,13 +200,22 @@
   (var-process #'capacity-observer-step :compute request))
 
 (defn- with-current-arm
-  "Capture the submitting thread's interrupt arm onto the submission.
+  "Capture the submitting thread's interrupt arm onto an AWAITED submission.
 
   The arm travels exactly as the environment does — as data on the
-  submission — so detached work counts its fn-entries into the arm that
-  admitted it, observes that deadline, and is reachable by `interrupt!`.
-  An unarmed submitter carries no arm, which is ordinary system-side
-  work and never a refusal."
+  submission — so the work counts its fn-entries into the arm that admitted
+  it, observes that deadline, and is reachable by `interrupt!`. An unarmed
+  submitter carries no arm, which is ordinary system-side work and never a
+  refusal.
+
+  THIS APPLIES TO `submit!!` ONLY, and the asymmetry is the whole point.
+  `submit!!` blocks its submitter until the work settles, so the submitter's
+  limit is exactly the limit the work must honour. `submit!` is detached by
+  construction — its whole reason to exist is work that OUTLIVES the frame
+  that started it (`my.background`) — so inheriting the submitting turn's
+  deadline latch would kill background work at the turn's limit, which
+  inverts the surface's meaning. A detached submission therefore carries
+  only the arm its own data names, and today that is none."
   [submission]
   (if-let [armed (kernel/current-arm)]
     (assoc submission :seon.env/environment
@@ -682,22 +691,27 @@
   is merged into the maps the work-fn and `complete!` receive. This is
   the crossing the isolation audit found empty: io work runs on a
   virtual thread with both dynamic carriers at their root nil, so an
-  environment that is not data does not arrive."
+  environment that is not data does not arrive.
+
+  DETACHED BY CONSTRUCTION: nothing here captures the submitting thread —
+  not its bindings and not its interrupt arm. The work observes exactly
+  what its submission names, which is why `my.background` work can outlive
+  the turn that started it instead of dying at that turn's deadline. A
+  submitter that genuinely wants its own limit to govern awaits the work
+  with `submit!!` or puts an arm in the submission's environment itself."
   {:malli/schema
    [:=> [:cat :seon.flow/work-launcher :seon.flow/io-submission]
     :boolean]}
   [work-launcher submission]
   (env/refuse-absent-environment! submission ::submit!)
-  (let [{::keys [submission-id complete!] :as submission}
-        (with-current-arm submission)
+  (let [{::keys [submission-id complete!]} submission
         {::keys [graph accepting? io-submissions]} work-launcher
-        completion (bound-fn* complete!)
         work
         (assoc submission
-               ::complete! completion
                ::status (atom ::queued)
                ::active? (atom false)
-               ::task (atom nil))]
+               ::task (atom nil))
+        completion complete!]
     (if (and graph @accepting?)
       (do
         (swap! io-submissions assoc submission-id work)
@@ -750,7 +764,6 @@
         {::keys [graph active-work]} work-launcher
         result (promise)
         status (atom ::queued)
-        work-fn (bound-fn* work-fn)
         submitted-at (System/nanoTime)
         _
         (flow/inject
@@ -1001,7 +1014,7 @@
     (.execute
      ^Executor io-executor
      ^Runnable
-     (bound-fn []
+     (fn []
        (try
          (loop []
            (when-some [fault (async/<!! error-channel)]
