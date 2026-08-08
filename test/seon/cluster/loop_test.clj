@@ -822,13 +822,22 @@
 ;;; commits to the failing agent is a wake, and the woken turn meets the same
 ;;; unfixed cause. On cluster `default` that cycle made nine paid provider
 ;;; calls in twenty minutes with no external stimulus, because
-;;; `:seon.config.error/escalate-to` names root and root was the only agent.
+;;; `:seon.config.error/escalate-to` named root and root was the only agent —
+;;; and because this site had hand-rolled a SECOND escalation path that
+;;; `dissoc`ed the dial to silence `seon.error/commit-tx` and then mailed one
+;;; unbounded message per failure, never asking who had failed.
 ;;;
-;;; The wanted behavior is stated once, over both directions of the same
-;;; derivation: a refused phase escalates to ANOTHER agent and never to the
-;;; agent whose run was refused. Asserting only the self case would leave the
-;;; fix indistinguishable from switching escalation off.
-(defn- escalation-recipients
+;;; That copy is deleted. The wanted behavior is stated here over both
+;;; directions of the one surviving derivation, because asserting only the
+;;; self case would leave the fix indistinguishable from switching escalation
+;;; off: a refused phase escalates to ANOTHER agent, ONCE per signature per
+;;; process at the recurrence limit, and never to the agent whose run was
+;;; refused. The bound is the part that makes the class unrepresentable — a
+;;; hundred refusals cannot become a hundred wakes for anyone.
+(defn- refuse-phase!
+  "Settle one refused `:prompt` phase and return who the transaction mails.
+  COMMITS, because the recurrence fence is a query over committed facts:
+  a preparation that never lands cannot recur."
   [connection escalate-to agent-id]
   (let [refusal-terminal-data (private-loop-fn 'refusal-terminal-data)
         prepared
@@ -840,30 +849,49 @@
          @connection now agent-id nil process nil nil
          {:seon.error/kind :seon.cluster.loop.phase/prompt
           :seon.error/message "injected prompt failure"
-          :seon.error/data {:seon.cluster.loop/phase :prompt}})]
-    (into #{}
-          (keep #(second (:seon.cluster.message/to %)))
-          (filter :seon.cluster.message/id (:seon.db/tx-data prepared)))))
+          :seon.error/data {:seon.cluster.loop/phase :prompt}})
+        recipients (into []
+                         (keep #(second (:seon.cluster.message/to %)))
+                         (filter :seon.cluster.message/id
+                                 (:seon.db/tx-data prepared)))]
+    (db/transact! connection (:seon.db/tx-data prepared))
+    recipients))
 
-(deftest a-refused-phase-never-escalates-to-the-agent-whose-run-was-refused
-  (test-support/with-database
-   (fn [connection]
-     (db/transact! connection
-                   [{:seon.cluster.agent/id "worker"}
-                    {:seon.cluster.agent/id "supervisor"}])
-     (testing "a supervisor still hears about a worker's refused phase"
-       (is (= #{"supervisor"}
-              (escalation-recipients connection "supervisor" "worker"))))
-     (testing "the failing agent is never mailed its own refusal"
-       (is (empty? (escalation-recipients connection "worker" "worker"))
+(defn- committed-error-count
+  [connection]
+  (or (db/q '[:find (count ?error) . :where [?error :seon.error/id _]]
+            @connection)
+      0))
+
+(deftest a-refused-phase-escalates-once-per-signature-and-never-to-itself
+  (testing "a supervisor hears about a worker's refused phases — once"
+    (test-support/with-database
+     (fn [connection]
+       (db/transact! connection
+                     [{:seon.cluster.agent/id "worker"}
+                      {:seon.cluster.agent/id "supervisor"}])
+       (is (= [[] [] ["supervisor"] [] [] []]
+              (mapv (fn [_] (refuse-phase! connection "supervisor" "worker"))
+                    (range 6)))
+           "silent below the recurrence limit, one escalation AT it, silence
+            past it — the same fence every other failure passes through")
+       (is (= 6 (committed-error-count connection))
+           "every occurrence is still evidence; only the mailing is bounded"))))
+  (testing "the failing agent is never mailed about its own refusal"
+    (test-support/with-database
+     (fn [connection]
+       (db/transact! connection [{:seon.cluster.agent/id "worker"}])
+       (is (= [[] [] [] [] [] []]
+              (mapv (fn [_] (refuse-phase! connection "worker" "worker"))
+                    (range 6)))
            "escalating to yourself is not a notification, it is a wake, and
-            the woken turn meets the same unfixed cause"))
-     (testing "repeating the same refusal cannot accumulate self-wakes"
-       (is (empty? (into #{}
-                         (mapcat (fn [_]
-                                   (escalation-recipients
-                                    connection "worker" "worker")))
-                         (range 5))))))))
+            the woken turn meets the same unfixed cause")
+       (is (empty?
+            (db/q '[:find ?message
+                    :where [?message :seon.cluster.message/about _]]
+                  @connection))
+           "not one fault message exists to wake it with")
+       (is (= 6 (committed-error-count connection)))))))
 
 (deftest the-committed-set-is-computed-and-covers-what-the-loop-writes
   (let [committed (cluster.loop/committed-attributes)]

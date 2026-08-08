@@ -495,16 +495,28 @@
       (= kind :seon.cluster.run/refused)
       (refusal-prose fact)
 
+      ;; The latest occurrence's OWN message and run ride this clause. An
+      ;; escalation that named only a kind and an id made the reader look
+      ;; the failure up before it could act — the detail the deleted
+      ;; hand-rolled run-phase escalation carried, folded into the one
+      ;; owner. Both are declared facts on the entity, omitted when absent.
       (= reason :recurring)
-      (if-let [occurrence (:seon.error/occurrence notice)]
-        (str "Core fault " kind " reached " occurrence " occurrences in process "
-             process " (notification limit "
-             (:seon.error/notification-limit notice)
-             "). Further occurrences remain in seon.problems but will not"
-             " message you. Latest error: " id ". Signature: " signature ".")
-        (str "Core fault " kind " reached its final notification for signature "
-             signature ". Later occurrences remain in seon.problems. Latest"
-             " error: " id "."))
+      (str/join
+       " "
+       (remove
+        nil?
+        [(if-let [occurrence (:seon.error/occurrence notice)]
+           (str "Core fault " kind " reached " occurrence
+                " occurrences in process " process " (notification limit "
+                (:seon.error/notification-limit notice) ").")
+           (str "Core fault " kind
+                " reached its final notification for signature "
+                signature "."))
+         (when message (str "Latest: " message))
+         (when run-id (str "It interrupted run " run-id "."))
+         (str "Further occurrences remain in seon.problems but will not"
+              " message you. Latest error: " id ". Signature: "
+              signature ".")]))
 
       (= kind :seon.ai/no-credential)
       (str "The model was not called: " message
@@ -530,8 +542,13 @@
                 (str "The " (or (some-> proc name) "proc") " " op
                      " failed with " kind ".")
                 (str message " (" kind ").")))
+         ;; The run clause rides the RUN, not the reason. An agent
+         ;; attributed with no run took this branch and read "It
+         ;; interrupted run ." on a live cluster (2026-08-08 probe) —
+         ;; the omit-when-absent rule this docstring states, broken by
+         ;; the one clause that assumed its fact was always there.
          (case reason
-           :your-run (str "It interrupted run " run-id ".")
+           :your-run (when run-id (str "It interrupted run " run-id "."))
            :no-attributable-agent "No agent or run could be attributed."
            nil)
          (str "Inspect error " id "; "

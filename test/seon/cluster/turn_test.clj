@@ -2793,11 +2793,6 @@
                               :seon.error/value failure}
                        evaluation?
                        (assoc :seon.cluster.run.form/ordinal 0)))
-                    error-id
-                    (get-in settled
-                            [:seon.error/value :seon.error/data
-                             :seon.error/id])
-                    escalation-id (str error-id "-escalation")
                     receipt-count
                     (or
                      (db/q '[:find (count ?receipt) .
@@ -2808,6 +2803,7 @@
                            @connection run-id)
                      0)]
                 (and
+                 (some? settled)
                  (= 1
                     (db/q '[:find (count ?closed) .
                             :in $ ?run-id
@@ -2822,25 +2818,46 @@
                             :where
                             [?run :seon.cluster.run/id ?run-id]
                             [?error :seon.error/run ?run]]
-                          @connection run-id))
-                 (= "root"
-                    (db/q '[:find ?agent-id .
-                            :in $ ?message-id
-                            :where
-                            [?message :seon.cluster.message/id ?message-id]
-                            [?message :seon.cluster.message/to ?agent]
-                            [?agent :seon.cluster.agent/id ?agent-id]]
-                          @connection escalation-id))
-                 (contains?
-                  (into #{} (map :seon.cluster.message/id)
-                        (work/unanswered-triggers @connection "root"))
-                  escalation-id)
-                 (= :open
-                    (:seon.cluster.work/situation
-                     (work/next-agent-work @connection
-                                           (request connection "root"))))))))
+                          @connection run-id))))))
           :seed 2026080601)
-         "Every injected phase failure must settle once, escalate durably, and wake fresh work.")))))
+         "Every injected phase failure must settle once, close once, and record
+          exactly one durable error fact.")
+        ;; ESCALATION IS THE ONE BOUNDED OWNER'S, and this is where that is
+        ;; asserted — over the whole ledger the property just produced, not
+        ;; per sample. `seon.cluster.loop/refusal-terminal-data` used to
+        ;; `dissoc` the escalation dial and hand-roll one unbounded
+        ;; `"A run phase failed: …"` message per failure; that second copy is
+        ;; deleted, and the surviving behavior is what these queries state:
+        ;; one message per SIGNATURE at the recurrence limit, addressed to the
+        ;; escalation owner, and never to the agent whose run was refused.
+        (let [db @connection
+              faults (db/q '[:find ?to ?signature
+                             :keys :seon.cluster.agent/id :seon.error/signature
+                             :where
+                             [?message :seon.cluster.message/about ?error]
+                             [?message :seon.cluster.message/to ?agent]
+                             [?agent :seon.cluster.agent/id ?to]
+                             [?error :seon.error/signature ?signature]]
+                           db)
+              signatures (db/q '[:find ?signature
+                                 :where
+                                 [?error :seon.error/signature ?signature]
+                                 [?error :seon.error/run _]]
+                               db)]
+          (is (seq faults)
+              "the escalation dial is on: a supervisor does hear about a
+               worker's refused phases, which is the whole point of it")
+          (is (= #{"root"} (into #{} (map :seon.cluster.agent/id) faults))
+              "only the escalation owner is mailed; the failing agent is never
+               told about its own refusal, because delivery is the wake
+               attribute and that message would wake the same unfixed cause")
+          (is (every? #(= 1 %) (vals (frequencies (map :seon.error/signature
+                                                       faults))))
+              "one escalation per signature per process — the storm fence.
+               Twenty-four failures over six phases may not be twenty-four
+               messages")
+          (is (<= (count faults) (count signatures))
+              "and never more messages than there are distinct signatures"))))))
 
 (deftest a-prompt-refusal-is-a-recorded-error-value-never-a-throw
   ;; `seon.cluster.prompt/prompt` refuses by THROWING (`::no-trigger`,

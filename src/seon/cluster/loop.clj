@@ -532,50 +532,34 @@
      :seon.blob/staged-writes settlement-stages
      :seon.db/tx-data tx-data}))
 
-;;; AN ESCALATION GOES TO SOMEONE ELSE. Escalating a refused phase to the very
-;;; agent whose run was refused is not a notification — the run's own facts
-;;; already say what happened and the agent reads them in its next prompt — but
-;;; it IS a wake, because delivery is the wake attribute
-;;; (`wake-attributes` is `#{:seon.cluster.message/to}`). So the failing agent
-;;; mails itself, wakes on its own message, meets the same unfixed cause, and
-;;; mails itself again. `seon.error/commit-tx`'s docstring names that exact
-;;; cycle — error -> message -> wake -> turn -> error — and already skips a
-;;; recurrence escalation to the attributed agent for this reason; this site
-;;; simply never asked.
+;;; A REFUSED PHASE ESCALATES THROUGH `seon.error/commit-tx`, LIKE EVERY OTHER
+;;; FAILURE. This site used to `dissoc` the escalation dial — silencing the one
+;;; designed owner — and then hand-roll its own `"A run phase failed: …"`
+;;; message: unbounded, and addressed without ever asking who had failed.
+;;; `error-tx`'s own docstring names that hazard: "a second copy of it is how
+;;; one of them quietly stops escalating."
 ;;;
-;;; Measured on cluster `default`, 2026-08-08: `:seon.config.error/escalate-to`
-;;; names root and root is the only agent, so every refused phase of root's
-;;; woke root about root — nine paid provider calls in twenty minutes with no
-;;; external stimulus, 66,591 completion tokens, each lap re-reading the same
-;;; broken 509-character context and committing the message that started the
-;;; next lap.
+;;; What the second copy cost, measured on cluster `default`, 2026-08-08:
+;;; delivery is the wake attribute (`wake-attributes` is
+;;; `#{:seon.cluster.message/to}`), `:seon.config.error/escalate-to` named root,
+;;; and root was the only agent — so every refused phase of root's mailed root
+;;; about root, woke root, met the same unfixed cause, and mailed root again.
+;;; Nine paid provider calls in twenty minutes with no external stimulus.
 ;;;
-;;; A cross-agent escalation is unchanged: a supervisor still hears about a
-;;; worker's refused phase, which is the whole point of the dial.
+;;; The surviving owner cannot write that cycle. A phase failure is a VALUE, not
+;;; a Throwable, so no `:your-run` message is sent at all; the escalation owner
+;;; hears once per signature per process, at the recurrence limit and never
+;;; after it; and a recurrence escalation to the attributed agent is skipped, so
+;;; the failing agent is structurally unmailable about its own refusal. The
+;;; interim `(not= escalate-to agent-id)` guard this function grew on 2026-08-08
+;;; went with the copy it was guarding.
 (defn- refusal-terminal-data
   [cluster database now agent-id run-id process ordinal receipt source]
-  (let [escalate-to (:seon.config.error/escalate-to cluster)
-        recording
-        (error-tx (dissoc cluster :seon.config.error/escalate-to)
-                  database source now
+  (let [recording
+        (error-tx cluster database source now
                   (cond-> {:seon.cluster.agent/id agent-id}
                     run-id (assoc :seon.cluster.run/id run-id)))
-        fact (first recording)
         value (error/value (first recording))
-        escalation
-        (when (and escalate-to
-                   (not= escalate-to agent-id)
-                   (db/q '[:find ?agent .
-                           :in $ ?agent-id
-                           :where [?agent :seon.cluster.agent/id ?agent-id]]
-                         database escalate-to))
-          {:seon.cluster.message/id
-           (str (:seon.error/id fact) "-escalation")
-           :seon.cluster.message/to
-           [:seon.cluster.agent/id escalate-to]
-           :seon.cluster.message/content
-           (str "A run phase failed: " (:seon.error/message fact))
-           :seon.cluster.message/at now})
         receipt-tx
         (when ordinal
           (run/receipt-settle-tx
@@ -600,8 +584,7 @@
                {:seon.cluster.run/id run-id
                 :seon.cluster.run/process process
                 :seon.cluster.run/closed-at now}))
-            recording
-            (when escalation [escalation])])}))
+            recording])}))
 
 (defn settle!
   "The sole terminal writer for one run.
