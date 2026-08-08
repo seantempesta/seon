@@ -274,6 +274,26 @@
   [lock-key]
   (swap! lifecycle-lock-owners dissoc lock-key))
 
+(defn- open-locked-file
+  "Open a descriptor holding the file lock as `[file channel]`, else nil.
+
+  A descriptor is never left open: a refused lock or a failure while opening
+  closes what it opened, so no later close can drop this process's lock."
+  [lock-key]
+  (let [file (RandomAccessFile. lock-key "rw")]
+    (try
+      (let [channel (.getChannel file)]
+        (try
+          (if (try-file-lock channel)
+            [file channel]
+            (do (.close channel) (.close file) nil))
+          (catch Throwable error
+            (.close channel)
+            (throw error))))
+      (catch Throwable error
+        (.close file)
+        (throw error)))))
+
 (defn lock-holder
   "The recorded holder of one lifecycle lock, with its liveness, when present."
   [lock-path]
@@ -321,10 +341,12 @@
     (loop [announced-at nil]
       (let [outcome
             (when (acquire-lock-slot! lock-key)
-              (let [file (RandomAccessFile. lock-key "rw")
-                    channel (.getChannel file)
-                    lock (try-file-lock channel)]
-                (if lock
+              (let [held (try
+                           (open-locked-file lock-key)
+                           (catch Throwable error
+                             (release-lock-slot! lock-key)
+                             (throw error)))]
+                (if held
                   (try
                     (write-edn! (lock-holder-path path)
                                 (assoc (current-process-identity)
@@ -337,12 +359,10 @@
                       ;; Closing the channel releases its FileLock. Babashka
                       ;; permits FileChannel/close but intentionally does not
                       ;; expose FileLock/release through SCI.
-                      (.close channel)
-                      (.close file)
+                      (.close ^java.nio.channels.FileChannel (second held))
+                      (.close ^RandomAccessFile (first held))
                       (release-lock-slot! lock-key)))
                   (do
-                    (.close channel)
-                    (.close file)
                     (release-lock-slot! lock-key)
                     nil))))]
         (if outcome
