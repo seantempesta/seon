@@ -275,3 +275,29 @@ Two measurements that bound the cost, both on this cluster:
 The diagnostic is also 80% of the boot log's volume: `data/clusters/default/
 logs/seon.log` is 87 lines, of which 70 are `DECLARATION POPULATION FALLBACK`
 occurrence lines.
+
+## Threading note from the as-of reader lane — 2026-08-08
+
+Asked to thread `seon.print` (`print.cljc:232`) while sweeping the as-of
+reader class. I did not, and the reason is worth recording so the owning wave
+does not inherit a half-done seam.
+
+- **The two facts in this note should not be merged.** `print.cljc:232` is the
+  largest single caller BY COUNT across the JVM; `seon.schema.datahike` is
+  what prices `/data` (about 530 of that request's 556 resolutions, against 4
+  from print). Threading print alone would leave the 5.5 s stall untouched.
+- **`print/default-options` is public** and read by `seon.effect:48`,
+  `seon.render.value:68`, and `seon.render.transcript:509`, plus
+  `effective-options` at three internal emit sites and `print.cljc:769`.
+  Threading the population is a signature change across two namespaces this
+  lane did not own, concurrent with the seon.env Phase 3 sweep that owns this
+  issue.
+- **The shape of the fix is already ruled** and is the same one this note
+  names: derived state hangs off the value it derives from. `option-defaults`
+  is a pure function of the declaration population, so the population — not a
+  memo of the options — is the value to pass, and the same argument closes
+  `seon.schema.datahike`. One change, both callers.
+
+Independently confirmed on the live cluster: the resolver is per EMIT, not per
+node, so a walk pays it hundreds of times rather than thousands. That makes
+print a real cost and not the dominant one.
