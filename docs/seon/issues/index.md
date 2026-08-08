@@ -50,6 +50,7 @@ See `README.md` for the convention.
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [May a run refine a schema key nothing depends on?](within-run-schema-key-refinement-needs-an-owner-ruling.md) | friction | owner design ruling (schema-key immutability vs the usage guard) |
+| [Name the face when `semantic-value` cannot match one](an-unmatched-print-face-throws-no-matching-clause-and-names-nothing.md) | friction | error-face budget wave |
 | [Cut `my.background/poll`'s ~290 tokens per polled result](my-background-poll-costs-290-tokens-per-polled-result.md) | friction | capability surface repair wave |
 | [Bound a six-word evaluation error to something near six words](a-six-word-eval-error-renders-as-two-thousand-characters.md) | friction | error-face budget wave |
 | [Return a UTF-8 `my.web/fetch` body as text, not integers](my-web-fetch-returns-plain-html-as-a-vector-of-integers.md) | friction | capability surface repair wave |
