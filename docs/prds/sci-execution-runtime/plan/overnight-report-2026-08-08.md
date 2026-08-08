@@ -220,6 +220,22 @@ moment default stands.
   judges it right-shaped but unproven. Ten minutes of work once boot
   stands.
 
+- **Tool-repairs COMPLETE and boot FIXED** (`4eb8c6ab4` + five more):
+  process-membership is a computed classpath fact (graph membership ≠
+  process membership — two facts, the second answered by the
+  classpath, never a path rule); boot reaches every layer AND my.web
+  resolves — both halves proven, neither traded. All four agent-facing
+  defects landed: windowed reads (a 4 KB tail of a 20 MB file in 76 ms
+  where refusal was the old answer), my.web reachable (cause measured:
+  it registered no predicate so nothing ever loaded it), interrupted
+  shell runs cut at the arm's published deadline with one evaluation
+  constructor, the unread `now` deleted. New finds filed: the ~2.4 s
+  per-form cost (blocker, velocity incident), poll's token cost, the
+  2,154-char error face, and my.web returning HTML as a vector of
+  integers (two capabilities disagreeing on text decoding). It also
+  attributed the turn-test red precisely (the conveyance deletion vs
+  the suite's dynamic stub) — relayed to the triage lane.
+
 ## Pending milestones
 
 - stop-completion lands → reset → 08-06 drive-arc rerun with observer →
