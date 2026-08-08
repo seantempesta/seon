@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, database, render, context, live-drive]
 ---
@@ -92,6 +92,62 @@ declaration.
   map key, so no fourth value shape can reintroduce the class.
 - One class regression asserts `read-evidence` totality across all four value
   shapes (current, as-of, since, history).
+
+## Resolution — 2026-08-08
+
+Commits `a7683f0ae` (the reader), `072a6b25e` (the fixed-point bound), and
+`8510a021d` (the class regression).
+
+The revision is now derived exactly as Datahike derives its own query-cache
+key (`reference-code/datahike/src/datahike/query.cljc:2658-2671`), through the
+`IHistory` interface rather than a map key:
+
+- a committed raw `DB` by its `:cache-context`;
+- an `AsOfDB` over a committed origin by the ORIGIN's context plus its fixed
+  time point, read with `dbi/-origin` and `dbi/-time-point`;
+- since, history, filtered, and speculative values by nothing, because they
+  carry no committed identity — Datahike's own `committed-value-identity`
+  returns nil for them. That absence is now STATED as
+  `:datahike.read/cache-eligible? false` rather than produced as nils, and
+  `read-evidence-current?` replays such a read instead of comparing.
+
+One deliberate divergence, and it is the whole second half of this fix.
+Datahike's cache key requires the time point to be STRICTLY past. Copied
+literally, that bound excluded every as-of the run loop ever holds — a run
+renders at the instant it opens, when its opening transaction IS the origin's
+max-tx — so the first re-drive turn went straight back to the 509-character
+error. An as-of value is a fixed point at any committed time point (its
+content is the datoms with tx <= that point, and the origin advancing never
+changes them), and the revision already carries the origin's commit id, so the
+bound is now `<=`. Datahike's stricter one is its own cache-admission policy.
+
+The sibling instance is fixed in the same wave: `database-value-identity`
+built a map with a nil commit id for any non-committed value and threw. It now
+returns a flat error value naming `basis-t` as the reader that answers for
+every shape.
+
+Live proof on cluster `default` (pid 79576), by hot reload, no restart: the
+context capture went from 509 characters to 78,836 and then 80,834, and the
+next two human messages each opened their own run and reached a settled
+reply.
+
+The class regression owed by the archived sibling is written and covers both
+instances — `seon.db-test/every-database-value-reader-answers-for-all-four-view-shapes`
+plus `an-as-of-view-is-keyed-on-its-own-fixed-point`, which pins the max-tx
+boundary that cost the re-drive its first turn.
+
+Two follow-ons deliberately NOT taken here, both recorded rather than fixed:
+
+1. The AI projection still fails WHOLE. One render call's contract violation
+   replaced the agent's entire prompt, while the HTML projection of the same
+   blocks degraded per block and rendered 255 articles around 34 embedded
+   errors. That asymmetry is the reason this defect was catastrophic rather
+   than cosmetic, and it belongs to the render owner.
+2. `:datahike.read/attributes`, `:datahike.read/revision`,
+   `:datahike.read/time-point`, and `:datahike.read/cache-eligible?` are OURS
+   in Datahike's namespace. Only `:datahike.read/dependency-plan` is actually
+   Datahike's. The drift predates this change; the new keys follow the local
+   convention rather than splitting the map across two namespaces.
 
 ## Note for whoever fixes this
 

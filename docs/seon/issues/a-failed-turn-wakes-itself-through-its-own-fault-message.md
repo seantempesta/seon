@@ -85,6 +85,58 @@ addressed to the failing agent.
 - One class regression drives a turn whose reply cannot be read and asserts a
   bounded number of provider attempts rather than an unbounded sequence.
 
+## Partial resolution — 2026-08-08, commit `7f0cb6bda`
+
+The unbounded half is fixed at cause. There were TWO paths committing a wake
+about a run's own failure, and only one of them was governed:
+
+1. `seon.error/commit-tx` — the ONE designed owner. Its docstring already
+   states the policy and the reason: delivery is the wake attribute, so
+   error -> message -> wake -> turn -> error is a real cycle, and every
+   notification is bounded by the per-signature recurrence fence. It already
+   skips a recurrence escalation to the attributed agent.
+2. `seon.cluster.loop/refusal-terminal-data` — a second copy, which
+   `dissoc`ed the escalation dial to keep owner 1 quiet and then hand-rolled
+   its own `"A run phase failed: …"` message. Unbounded, and it never asked
+   who had failed. `error-tx`'s own docstring names this exact hazard: "a
+   second copy of it is how one of them quietly stops escalating."
+
+On a single-agent cluster `:seon.config.error/escalate-to` names root and root
+is the only agent, so path 2 mailed the failing agent about itself on every
+lap. That was the engine of the nine paid calls above. Path 2 now refuses to
+escalate to the agent whose run was refused; a cross-agent escalation is
+unchanged, which is the whole point of the dial.
+
+Class regression:
+`seon.cluster.loop-test/a-refused-phase-never-escalates-to-the-agent-whose-run-was-refused`,
+which asserts BOTH directions — a supervisor still hears about a worker's
+refused phase — because asserting only the self case would leave the fix
+indistinguishable from switching escalation off.
+
+Live: the loop stopped. After the context fix and this one, the cluster made
+no unstimulated provider call; the two human messages driven afterwards each
+opened exactly one run and closed it.
+
+### Still open in this note
+
+- **Path 2 is still a second mechanism.** It should be deleted and its intent
+  folded into `seon.error/commit-tx`, so run-phase escalation is bounded by
+  the same recurrence fence as everything else. It was NOT deleted here
+  because `seon.cluster.turn-test/generated-phase-failures-converge-through-one-terminal-exit`
+  pins the per-failure cross-agent escalation as intended behavior, and that
+  file was protected during this lane. Deleting the path and amending that
+  property is the follow-on.
+- **Path 2 is still unbounded across agents.** A worker refusing a hundred
+  times mails a supervisor a hundred times. Not a self-feeding loop, but the
+  same storm the fence exists to prevent.
+- **The acceptance clause about a distinguishable zero-form run is already
+  satisfied** and needs no work: `refusal-terminal-data` writes
+  `:seon.cluster.run/error` whenever a run closes with no ordinal, and four
+  such runs were queryable on the live cluster.
+- **The reply-reader refusals remain**, and are the reason those turns failed
+  at all: `Invalid symbol: refused:` and `Reader tag is not accepted:
+  :message`, both from ordinary model prose.
+
 ## Note for whoever fixes this
 
 The two reader refusals seen here are worth keeping as fixtures:

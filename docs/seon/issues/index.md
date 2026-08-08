@@ -16,14 +16,13 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (30)
+## Blocker (29)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [Give an as-of database value a dependency revision](walk-refuses-an-as-of-database-value-and-empties-the-agent-context.md) | blocker | live-drive context repair wave |
 | [Stop a failed turn from waking itself through its own fault message](a-failed-turn-wakes-itself-through-its-own-fault-message.md) | blocker | live-drive context repair wave |
+| [Let an agent define a contracted function](an-agent-cannot-define-a-contracted-function.md) | blocker | live-drive context repair wave |
 | [Settle a receipt for every recorded run form](a-runs-last-form-can-close-without-a-receipt.md) | blocker | live-drive context repair wave |
-| [Keep an unclaimed message out of an unrelated run's prompt](unclaimed-message-enters-an-unrelated-run-prompt.md) | blocker | live-drive context repair wave |
 | [Substitute the bootstrap plan's namespace placeholder before it is evaluated](bootstrap-plan-forms-ship-unsubstituted-namespace-placeholders.md) | blocker | live-drive context repair wave |
 | [Boot the co-hosted second cluster without a 63 s stall or a false failure](cohosted-second-boot-is-slow-and-trips-the-silence-backstop.md) | blocker | boot velocity incident (co-hosted second boot) |
 | [Instrument each cluster under its own projection, not the anchor's](instrumentation-compiles-under-one-clusters-projection.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |

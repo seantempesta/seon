@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, context, messaging, runtime, honesty, live-drive]
 ---
@@ -128,3 +128,41 @@ drive, `src/seon/context.clj`).
   selected by `next-agent-work` before or fairly among the system messages;
   the live drive's exact sequence is the regression.
 - A run's own failure message cannot starve the human queue.
+
+## The recurrence was misattributed — 2026-08-08 re-drive
+
+The reopening above is withdrawn on its own evidence. Selection was never
+starving human messages.
+
+The independent observer lane had already refuted the claim from the same
+cluster: at all 84 samples every claimed message was claimed by exactly one
+run, in strict eid order, with no fan-out, and `LIVE-DRIVE-0808-A` (eid 25372)
+**was** claimed by a run of its own. The reopening read "the human message
+never reached a prompt" as "the human message was never selected". Those are
+different failures with different owners, and the true one was that no message
+reached any prompt because the walk had collapsed the entire context to a
+509-character error.
+
+Confirmed directly after that defect was fixed. Two human messages submitted
+through `POST /agent/root/message`, with an error backlog present on the
+cluster:
+
+| Message | Run | Opened |
+|---|---|---|
+| `inbound-536871134-0` (`LIVE-DRIVE-0808-C`) | `c9c653a5-…` | 05:36:37Z |
+| `inbound-536871139-0` (`LIVE-DRIVE-0808-D`) | `d95c5c42-…` | 05:39:16Z |
+
+Each opened its own run, with itself as the recorded trigger, and each reached
+a real context (78,836 and 80,834 characters) and a settled reply. No fairness
+change was made to `next-agent-work`, `wake`, or `message` — nothing in the
+selection path was touched.
+
+The second added acceptance clause — "a run's own failure message cannot
+starve the human queue" — is owned by
+[Stop a failed turn from waking itself through its own fault message](a-failed-turn-wakes-itself-through-its-own-fault-message.md),
+where the self-feeding escalation was fixed at cause. It does not belong here.
+
+This note therefore returns to its archived state: the original defect (a
+message committed after a run opened entering that run's prompt) remains
+fixed by `seon.cluster.run/opening-db`, and the first half of that mechanism
+is now exercised by real turns rather than by an empty walk.
