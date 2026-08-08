@@ -8,7 +8,9 @@
   records, sequences, and host collections are rebuilt within the
   configured depth, width, string, and node caps. Reference values with a
   registry-declared identity projection admit only that identity; other
-  reference types and arrays are never entered.
+  reference types and arrays are never entered. That registry question is
+  asked against ONE declaration projection resolved for the whole admission,
+  never once per node.
 
   `admit-value` returns the one bounded print node and its derived semantic
   value without constructing a print sink. `admit` adds
@@ -138,9 +140,33 @@
 
 (declare project)
 
+(defn- admission-declarations
+  "ONE declaration projection for the whole admission.
+
+  A `delay`, not a value, for the same reason `seon.db/read-declarations`
+  is one: the commonest admission is a scalar or a string, which asks no
+  identity question at all, and resolving eagerly would make every result
+  pay one complete classpath population (152 resource reads, ~14 ms) for a
+  question it never asks.
+
+  Asking per NODE instead of per ADMISSION was the defect this replaces:
+  `{:rows [20 small maps]}` resolved the population 22 times — 374 ms of
+  re-reading schema resources for one twenty-one-map value, and 54,884
+  fallbacks from this one line in an hour of an ordinary cluster
+  (`docs/seon/issues/value-admission-resolves-the-declaration-population-per-node.md`).
+
+  A projection supplied on the calling thread is used as-is, which is what
+  makes this free rather than merely bounded: it is the same object across
+  admissions, so the descriptors compiled from it are reused too."
+  []
+  (delay (or (schema/current-projection)
+             (schema/declaration-projection))))
+
 (defn- identity-only-node
   [value child-depth state]
-  (when-let [projection (schema/identity-only-projection value)]
+  (when-let [projection (schema/identity-only-projection-in
+                         @(:declarations state)
+                         value)]
     (if (take-node! state)
       (assoc (object-node value (:caps state))
              ::print/value
@@ -472,6 +498,9 @@
   (let [state {:interrupt-fn interrupt-fn
                :caps caps
                :on-core-error on-core-error
+               ;; ONE for the whole walk, forced only if an identity
+               ;; question is actually asked
+               :declarations (admission-declarations)
                ;; the root is a node like any other
                :nodes (volatile! (dec (long (:seon.config.eval.result/max-nodes
                                              caps))))
