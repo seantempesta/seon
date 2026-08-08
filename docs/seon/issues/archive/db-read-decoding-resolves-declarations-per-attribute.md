@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, database, schema, isolation, performance]
 ---
@@ -22,7 +22,7 @@ This is the read-side half of the defect that wedged the bare suite on
 2026-08-07. The write-side half is fixed: `encode-transaction` now resolves the
 population exactly once per transaction and delegates to the explicit-projection
 `encode-transaction-in`
-([research](../../prds/sci-execution-runtime/research/parallel-turns-hang-cause-2026-08-07.md)).
+([research](../../../prds/sci-execution-runtime/research/parallel-turns-hang-cause-2026-08-07.md)).
 The read side was left alone deliberately, to keep that repair surgical.
 
 It is the audit's Defect I: the fallback is not merely semantically wrong under
@@ -92,11 +92,56 @@ already thread it on the write side — the pattern is written and proven.
 
 Note the sequencing: `seon.db`'s ambient elision internals and its named
 readers are already inside the seon.env Phase 3 deletion boundary
-([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)). Once
+([PRD](../../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)). Once
 the environment is a value, the single resolution point becomes an environment
 read rather than a `registered-schemas` fallback. Fixing this issue before
 Phase 1 is worthwhile only for the velocity win; the resolve-once shape is the
 same either way and is not wasted work.
+
+## Resolution, 2026-08-07
+
+Fixed. Evidence and numbers:
+[db-read-declaration-population-2026-08-07.md](../../../prds/sci-execution-runtime/research/db-read-declaration-population-2026-08-07.md).
+
+Every `seon.db` decode walker takes the declarations as an argument;
+`read-declarations` creates them ONCE per public read operation, as a `delay`
+so a `q` that decodes nothing still resolves nothing. Threading alone was NOT
+sufficient: `edn-encoded-attr-in?` reaches `schema/malli-form?`, a registered
+core predicate Malli calls with the value alone, so one attribute question
+cost 1,824 resource reads with the projection merely passed and 0 with it also
+SUPPLIED through `schema/call-with-forms`. Both halves are in
+`seon.db/ask-declarations`.
+
+Two callers that loop `seon.db` reads supply for their own extent —
+`seon.reconcile/plan` (once per managed entity, the actual cause of both
+wedges) and `seon.config/effective`.
+
+| Measurement | Before | After |
+|---|---|---|
+| `datoms :eavt`, 34 datoms (load-only) | 5,168 reads / 372.5 ms | 152 / 12.3 ms |
+| `db/pull '[*]` of the 65-key config row (live) | 148,504 reads / 5,946 ms | 430 / 19.8 ms |
+| `config/effective` (live) | 84,664 reads | 311-376 / 19.0 ms |
+| `reconciliation-uses-current-provenance-without-history` | backstop, never finished | 5.3 s, 6.3 s |
+| `applied-values-shape-the-running-system` | backstop, never finished | 75.9 s, 72.9 s |
+| `situation-totality-property` | ~60 s | 54.9 s (see below) |
+
+Class regression: `test/seon/db/declaration_population_test.clj` (3 tests, 12
+assertions), counting reads at the one read seam.
+
+Found and fixed in passing: `bbb8c673f` had broken every EDN-backed attribute
+WRITE (`:malli.core/invalid-schema`) by handing the encode seam a forms-only
+projection with no registry. `schema/declaration-projection` is now the one
+place a population is paired with its registry, and the round trip is covered.
+
+Acceptance criterion 3 is met only MARGINALLY and the honest reason matters:
+`situation-totality-property` went 60 s -> 54.9 s (`bin/test
+seon.cluster.work-test`: 10 tests / 63 assertions / 0 failures). Its cost is
+not the read side. Its hand-built fixture supplies nothing, and each of its
+~600 transactions pays ONE unbound resolution at the write seam — 14 ms each,
+by design, since resolve-once-per-operation is what the sealed model permits.
+That floor disappears when Phase 1 supplies `:seon.schema/projection` from the
+environment; supplying it in the fixture instead would mask the class and is
+deliberately not done.
 
 ## Acceptance criteria
 

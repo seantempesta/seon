@@ -64,16 +64,16 @@
            data))))
 
 (defn- identity-attributes
-  []
   ;; One resolution for the whole scan. `schema/identity-attr?`'s one-argument
   ;; arity resolves the declaration population per call, which with no
   ;; projection supplied re-reads and re-merges every schema resource per key
   ;; — measured 2026-08-07 at 25,916 ms and 286,672 resource reads for this one
   ;; function (issue packaged-forms-rereads-every-schema-resource-per-call).
-  (let [forms (schema/registered-schemas)]
-    (into #{}
-          (filter #(schema/identity-attr? forms %))
-          (keys forms))))
+  ([] (identity-attributes (schema/declaration-population)))
+  ([forms]
+   (into #{}
+         (filter #(schema/identity-attr? forms %))
+         (keys forms))))
 
 (defn- desired-identity
   [identity-attrs desired]
@@ -309,6 +309,8 @@
       (cond-> retracts
         (> (count additions) 1) (conj additions)))))
 
+(declare plan-transaction-data)
+
 (defn plan
   "The exact tx-data converging `db` onto the desired population.
   Pure. Empty vector = converged, and the caller must then issue NO
@@ -321,9 +323,21 @@
   {:malli/schema [:=> [:cat :seon.db/database-value ::request]
                   :seon.store/transaction-data]}
   [db request]
+  ;; ONE declaration population for the whole plan. Every `seon.db` read below
+  ;; resolves its own when nothing is supplied, and `plan` pulls once PER
+  ;; MANAGED ENTITY — thousands of complete classpath re-reads, which wedged
+  ;; `seon.reconcile-test` and `seon.config-application-test` at the 300 s
+  ;; liveness backstop (2026-08-07). `db/pull` deliberately takes no population
+  ;; argument, so the operation supplies the one it already resolved for its
+  ;; own extent; this is the same value, made visible, not a cache.
+  (let [forms (schema/declaration-population)]
+    (schema/call-with-forms forms #(plan-transaction-data forms db request))))
+
+(defn- plan-transaction-data
+  [forms db request]
   (let [{::keys [desired process adopt-identities]} request
         adopt-identities (or adopt-identities #{})
-        identity-attrs (identity-attributes)
+        identity-attrs (identity-attributes forms)
         identities (desired-identities identity-attrs desired)
         installed-attrs
         (installed-identity-attributes db identity-attrs)

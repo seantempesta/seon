@@ -145,7 +145,7 @@
                        (not (contains? types ::unmappable)))
               (first types))
             ;; Mixed unions deliberately store their logical values as EDN
-            ;; strings. `edn-encoded-attr?`, `encode-transaction`, and
+            ;; strings. `edn-encoded-attr-in?`, `encode-transaction`, and
             ;; `decode-attribute-value` own the matching codec at this bridge.
             :db.type/string))
       (schema.form/nilable-value-schema? resolved)
@@ -328,14 +328,6 @@
             (or (> (count types) 1)
                 (contains? types ::unmappable)))))))
 
-(defn edn-encoded-attr?
-  "True when a canonical JVM attribute uses the EDN string fallback."
-  {:malli/schema [:=> [:cat :keyword] :boolean]}
-  [attr]
-  (edn-encoded-attr-in?
-   {:seon.schema.projection/forms (schema/registered-schemas)}
-   attr))
-
 (defn- refuse-slot!
   [rule attr value]
   (throw
@@ -345,12 +337,6 @@
      ::attr attr
      ::value value
      :seon.error/kind :user-input})))
-
-(defn- validate-logical-slot!
-  [attr value]
-  (when-not (schema/valid-candidate-value? attr value)
-    (refuse-slot! ::schema-invalid attr value))
-  value)
 
 (defn- validate-logical-slot-in!
   [projection attr value]
@@ -429,28 +415,7 @@
   {:malli/schema [:=> [:cat :seon.store/transaction]
                   :seon.store/transaction]}
   [transaction]
-  (encode-transaction-in
-   {:seon.schema.projection/forms (schema/registered-schemas)}
-   transaction))
-
-(defn decode-attribute-value
-  "Decode and validate one value read from an EDN-backed attribute."
-  {:malli/schema [:=> [:cat :keyword :seon.schema/value]
-                  :seon.schema/value]}
-  [attr value]
-  (if-not (edn-encoded-attr? attr)
-    value
-    (do
-      (when-not (string? value)
-        (refuse-slot! ::storage-not-string attr value))
-      (let [decoded
-            (try
-              (edn/read-string value)
-              (catch Throwable _
-                (refuse-slot! ::malformed-edn attr value)))]
-        (when-not (= value (pr-str decoded))
-          (refuse-slot! ::noncanonical-edn attr value))
-        (validate-logical-slot! attr decoded)))))
+  (encode-transaction-in (schema/declaration-projection) transaction))
 
 (defn decode-attribute-value-in
   "Decode one attribute value against exactly one projection."
@@ -470,3 +435,13 @@
         (when-not (= value (pr-str decoded))
           (refuse-slot! ::noncanonical-edn attr value))
         (validate-logical-slot-in! projection attr decoded)))))
+
+(defn decode-attribute-value
+  "Decode and validate one value read from an EDN-backed attribute.
+
+   Resolves the declaration population ONCE; a caller decoding more than one
+   attribute resolves it itself and calls [[decode-attribute-value-in]]."
+  {:malli/schema [:=> [:cat :keyword :seon.schema/value]
+                  :seon.schema/value]}
+  [attr value]
+  (decode-attribute-value-in (schema/declaration-projection) attr value))

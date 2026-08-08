@@ -177,7 +177,7 @@
 (deftest encode-transaction-resolves-the-declaration-population-once
   ;; The class: the encode seam resolving the declaration population PER
   ;; ATTRIBUTE. With no population supplied on the calling thread,
-  ;; `schema/registered-schemas` falls through to
+  ;; `schema/declaration-population` falls through to
   ;; `seon.schema.edn/packaged-forms`, which re-reads and re-validates every
   ;; schema resource from the classpath (~14 ms). Per attribute that turned
   ;; `seon.cluster.work-test/situation-totality-property` into a suite wedge
@@ -186,7 +186,7 @@
   ;; One resolution per transaction is the wanted behavior, and it must not
   ;; grow with the transaction's attribute count or nesting depth.
   (let [resolutions (atom 0)
-        real-registered-schemas schema/registered-schemas
+        real-declaration-population schema/declaration-population
         wide {:seon.cluster.agent/id "agent-a"
               :seon.cluster.message/id "m-1"
               :seon.cluster.message/content "do the thing"
@@ -195,8 +195,10 @@
               ::title "Alpha"}
         nested {:seon.cluster.agent/id "agent-b"
                 :seon.cluster.agent/namespace {:seon.ns/name 'my.agents.b}}]
-    (with-redefs [schema/registered-schemas
-                  (fn [] (swap! resolutions inc) (real-registered-schemas))]
+    (with-redefs [schema/declaration-population
+                  (fn []
+                    (swap! resolutions inc)
+                    (real-declaration-population))]
       (testing "a six-attribute transaction resolves the population once"
         (reset! resolutions 0)
         (schema.datahike/encode-transaction [wide])

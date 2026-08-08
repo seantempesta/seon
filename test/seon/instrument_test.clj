@@ -191,6 +191,30 @@
            "and with no caps to bound them they are OMITTED, never
             printed unbounded")))))
 
+(deftest a-flat-error-value-at-a-contract-boundary-is-its-own-face
+  (let [violation @#'instrument/violation
+        inner {:seon.error/kind :seon.db/missing-connection-binding
+               :seon.error/message "No connection is bound on this thread."
+               :seon.error/data {:seon.db/binding 'seon.db/*conn*}}]
+    (testing "the inner error is the answer, never buried in wrapper prose"
+      (is (= inner
+             (violation nil :malli.core/invalid-input
+                        {:fn-name 'seon.config/effective
+                         :input [:cat :map]
+                         :args [inner]})))
+      (is (= inner
+             (violation nil :malli.core/invalid-output
+                        {:fn-name 'seon.config/effective
+                         :output :map
+                         :value inner}))))
+    (testing "an ordinary contract violation still reports as one"
+      (is (= :seon.instrument/contract-violated
+             (:seon.error/kind
+              (violation nil :malli.core/invalid-input
+                         {:fn-name 'seon.config/effective
+                          :input [:cat :map]
+                          :args [42]})))))))
+
 (deftest contract-problems-have-a-readable-inline-face-and-a-complete-tree
   (let [caps {:seon.config.eval.result/max-depth 8
               :seon.config.eval.result/max-collection 32

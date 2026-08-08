@@ -492,6 +492,8 @@
       :seon.config/environment
       :seon.boot/cluster-name]))))
 
+(declare effective-in)
+
 (defn effective
   "Read one cluster's effective config or return one bounded error value."
   {:malli/schema
@@ -505,12 +507,22 @@
   ([db]
    (effective db "default"))
   ([db cluster-name]
-   (let [cluster-name (or cluster-name "default")
-         forms (schema/declaration-population)
-         row (db/pull db '[*] [:seon.config/cluster cluster-name])
-         effective (select-keys row (dial-attributes forms))
-         missing (sort (set/difference (required-dial-attributes forms)
-                                       (set (keys effective))))]
+   ;; ONE population for the whole read. `db/pull` deliberately takes no
+   ;; population argument and resolves its own, so this operation supplies the
+   ;; one it already resolved for its extent — measured live 2026-08-07:
+   ;; 84,664 resource reads before the read seam was repaired, 1,216 after it,
+   ;; and 152 (one population, 12.6 ms) once supplied.
+   (schema/call-with-forms
+    (schema/declaration-population)
+    #(effective-in db (or cluster-name "default")))))
+
+(defn- effective-in
+  [db cluster-name]
+  (let [forms (schema/declaration-population)
+        row (db/pull db '[*] [:seon.config/cluster cluster-name])
+        effective (select-keys row (dial-attributes forms))
+        missing (sort (set/difference (required-dial-attributes forms)
+                                      (set (keys effective))))]
      (if (and row (empty? missing))
        effective
        (let [shown (take 6 missing)
@@ -531,4 +543,4 @@
                    (str " and " remaining " more")) ".")
             (str "No effective configuration facts match cluster "
                  (pr-str cluster-name) "; available clusters "
-                 (pr-str available) "."))})))))
+                 (pr-str available) "."))}))))

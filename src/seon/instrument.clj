@@ -160,6 +160,28 @@
   [caps value]
   (:seon.instrument/value (admitted-face caps value)))
 
+(defn- flat-error-value?
+  [value]
+  (and (map? value)
+       (keyword? (:seon.error/kind value))
+       (string? (:seon.error/message value))))
+
+(defn- buried-error
+  "The flat error value a contract report would otherwise bury, if any.
+
+   Seon's boundaries answer with `:seon.error` values, so one arriving at a
+   contract seam is the real answer, already in the honest shape. Reporting it
+   as a schema problem replaces a one-line cause with a wall of humanized
+   Malli text — reported 2026-08-07, where `seon.config/effective` surfaced
+   `... violated its contract (invalid-input)` instead of the inner
+   `seon.db/missing-connection-binding` and its remedy."
+  [kind data]
+  (case kind
+    :malli.core/invalid-input (first (filter flat-error-value? (:args data)))
+    :malli.core/invalid-output (when (flat-error-value? (:value data))
+                                 (:value data))
+    nil))
+
 (defn- offending-leaf
   "One exact map key plus bounded value, or one bounded scalar value."
   [caps path value]
@@ -195,7 +217,9 @@
   ;; schema instead — the first thing this reporter did — humanizes to
   ;; the useless "should be a valid function".
   [caps kind data]
-  (if (= :malli.core/invalid-arity kind)
+  (if-let [inner (buried-error kind data)]
+    inner
+    (if (= :malli.core/invalid-arity kind)
     (let [function-symbol (:fn-name data)
           arglists (some-> function-symbol find-var meta :arglists)]
       {:seon.error/kind ::contract-violated
@@ -268,7 +292,7 @@
                  (assoc ::problems (:seon.instrument/edn problem-face)))}
         argument-face
         (update :seon.error/data assoc
-                ::args (:seon.instrument/value-edn argument-face))))))
+                ::args (:seon.instrument/value-edn argument-face)))))))
 
 (defn- throwing-report
   "The `:panic` reporter: raise the violation as our own flat error.

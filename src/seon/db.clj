@@ -100,22 +100,28 @@
     (catch Throwable cause
       (dependency-error ::db cause))))
 
+(defn- missing-connection-error
+  [needed]
+  (error-value
+   ::missing-connection-binding
+   (str "This read needs " needed
+        ", and no cluster connection is bound on this thread. Custody is "
+        "elided only inside an agent evaluation; elsewhere — a raw or "
+        "virtual thread, a fixture, a REPL — pass the database value or "
+        "connection explicitly, as in (db/pull db selector eid).")
+   {::binding 'seon.db/*conn*
+    ::needed needed}))
+
 (defn- current-database-value
   []
   (if (nil? *conn*)
-    (error-value
-     ::missing-connection-binding
-     "No current cluster connection is bound to seon.db/*conn*."
-     {::binding 'seon.db/*conn*})
+    (missing-connection-error "a database value")
     (resolve-database-value *conn*)))
 
 (defn- current-connection
   []
   (if (nil? *conn*)
-    (error-value
-     ::missing-connection-binding
-     "No current cluster connection is bound to seon.db/*conn*."
-     {::binding 'seon.db/*conn*})
+    (missing-connection-error "a connection")
     *conn*))
 
 (defn- connection-id
@@ -287,7 +293,7 @@
                    :seon.db/read-result (:seon.db/read-result entry))))
         captured))
 
-(declare decode-query-result decode-pull-result pull-selector)
+(declare decode-query-result decode-pull-result pull-selector read-declarations)
 
 (defn- replay-read
   [database request]
@@ -298,20 +304,23 @@
                   (fn [arguments]
                     (mapv #(if (= ::database %) database %) arguments)))
           response (d/q-with-evidence query-request)]
-      (decode-query-result query-request
+      (decode-query-result (read-declarations)
+                           query-request
                            (:datahike.query/result response)))
 
     :pull
     (let [arguments (:seon.db/pull-arguments request)
           response (apply d/pull-with-evidence database arguments)]
-      (decode-pull-result (pull-selector arguments)
+      (decode-pull-result (read-declarations)
+                          (pull-selector arguments)
                           :datahike.pull/result
                           (:datahike.pull/result response)))
 
     :pull-many
     (let [arguments (:seon.db/pull-arguments request)
           response (apply d/pull-many-with-evidence database arguments)]
-      (decode-pull-result (pull-selector arguments)
+      (decode-pull-result (read-declarations)
+                          (pull-selector arguments)
                           :datahike.pull-many/result
                           (:datahike.pull-many/result response)))))
 
@@ -336,32 +345,72 @@
                (catch Throwable _ false)))))
      retained)))
 
+;;; THE declaration population for ONE read operation. Every decode walker
+;;; below takes it as its first argument and never resolves it again: asking
+;;; `edn-encoded-attr-in?` per attribute re-read all 152 schema resources per
+;;; question whenever nothing was supplied on the calling thread, which wedged
+;;; two tests at the 300 s liveness backstop and cost one `config/effective`
+;;; 84,664 file reads (2026-08-07).
+;;;
+;;; It is a `delay` so a read that decodes nothing — the common `q` — still
+;;; pays nothing, while a read that decodes a thousand attributes pays exactly
+;;; one resolution. The delay is created fresh per operation and dies with it:
+;;; operation-local, never a process-global cache of declaration facts.
+(defn- read-declarations
+  []
+  (delay (schema/declaration-projection)))
+
+(defn- ask-declarations
+  "Ask one declaration question with the population both PASSED and SUPPLIED.
+
+   Passing answers `edn-encoded-attr-in?` itself. Supplying answers the
+   registered core predicates Malli calls underneath it with the value alone —
+   `schema/malli-form?` builds its own registry and cannot take an argument —
+   which is the instance no amount of threading can reach. Measured live
+   2026-08-07 on cluster `dbread`, ONE `edn-encoded-attr-in?` over a config
+   attribute: projection merely passed = 1,824 resource reads / 76.6 ms;
+   projection also supplied = 0 reads / 0.17 ms. Supplying is the same one
+   value made visible for one call, never a cache."
+  [declarations question]
+  (let [projection @declarations]
+    (schema/call-with-forms
+     (:seon.schema.projection/forms projection)
+     #(question projection))))
+
+(defn- edn-encoded?
+  [declarations attribute]
+  (ask-declarations
+   declarations
+   #(schema.datahike/edn-encoded-attr-in? % attribute)))
+
 (defn- decode-attribute-value
-  [attribute value]
-  (schema.datahike/decode-attribute-value attribute value))
+  [declarations attribute value]
+  (ask-declarations
+   declarations
+   #(schema.datahike/decode-attribute-value-in % attribute value)))
 
 (defn- decode-attribute-maps
-  [value]
+  [declarations value]
   (cond
     (map? value)
     (reduce-kv
      (fn [decoded attribute child]
        (assoc decoded attribute
               (if (and (keyword? attribute)
-                       (schema.datahike/edn-encoded-attr? attribute))
-                (decode-attribute-value attribute child)
-                (decode-attribute-maps child))))
+                       (edn-encoded? declarations attribute))
+                (decode-attribute-value declarations attribute child)
+                (decode-attribute-maps declarations child))))
      (empty value)
      value)
 
     (vector? value)
-    (mapv decode-attribute-maps value)
+    (mapv #(decode-attribute-maps declarations %) value)
 
     (set? value)
-    (into #{} (map decode-attribute-maps) value)
+    (into #{} (map #(decode-attribute-maps declarations %)) value)
 
     (sequential? value)
-    (doall (map decode-attribute-maps value))
+    (doall (map #(decode-attribute-maps declarations %) value))
 
     :else value))
 
@@ -403,7 +452,7 @@
      (filter #(instance? Pattern %) (parsed-nodes (:qwhere parsed-query))))))
 
 (defn- query-find-attributes
-  [parsed-query arguments]
+  [declarations parsed-query arguments]
   (let [variable-attributes
         (query-variable-attributes parsed-query arguments)]
     (mapv
@@ -412,19 +461,19 @@
          (let [attributes (get variable-attributes (:symbol element))]
            (when (= 1 (count attributes))
              (let [attribute (first attributes)]
-               (when (schema.datahike/edn-encoded-attr? attribute)
+               (when (edn-encoded? declarations attribute)
                  attribute))))))
      (parser/find-elements (:qfind parsed-query)))))
 
 (defn- decode-query-field
-  [attribute value]
+  [declarations attribute value]
   (if (and attribute (some? value))
-    (decode-attribute-value attribute value)
-    (decode-attribute-maps value)))
+    (decode-attribute-value declarations attribute value)
+    (decode-attribute-maps declarations value)))
 
 (defn- decode-query-tuple
-  [attributes tuple]
-  (mapv decode-query-field attributes tuple))
+  [declarations attributes tuple]
+  (mapv #(decode-query-field declarations %1 %2) attributes tuple))
 
 (defn- query-return-map-keys
   [return-maps]
@@ -436,7 +485,7 @@
       [])))
 
 (defn- decode-query-return-maps
-  [return-maps attributes result]
+  [declarations return-maps attributes result]
   (let [mapping-keys (query-return-map-keys return-maps)
         attributes-by-key (zipmap mapping-keys attributes)]
     (mapv
@@ -445,37 +494,42 @@
         (fn [decoded mapping-key value]
           (assoc decoded mapping-key
                  (decode-query-field
+                  declarations
                   (get attributes-by-key mapping-key) value)))
         (empty row)
         row))
      result)))
 
 (defn- decode-query-result
-  [normalized result]
+  [declarations normalized result]
   (let [parsed-query (query/memoized-parse-query (:query normalized))
-        attributes (query-find-attributes parsed-query (:args normalized))
+        attributes (query-find-attributes
+                    declarations parsed-query (:args normalized))
         find-clause (:qfind parsed-query)
         return-maps (:qreturnmaps parsed-query)
         decode-result
         (fn [value]
           (cond
             return-maps
-            (decode-query-return-maps return-maps attributes value)
+            (decode-query-return-maps
+             declarations return-maps attributes value)
 
             (instance? FindRel find-clause)
-            (into (empty value) (map #(decode-query-tuple attributes %)) value)
+            (into (empty value)
+                  (map #(decode-query-tuple declarations attributes %))
+                  value)
 
             (instance? FindColl find-clause)
-            (mapv #(decode-query-field (first attributes) %) value)
+            (mapv #(decode-query-field declarations (first attributes) %) value)
 
             (instance? FindScalar find-clause)
-            (decode-query-field (first attributes) value)
+            (decode-query-field declarations (first attributes) value)
 
             (instance? FindTuple find-clause)
-            (some->> value (decode-query-tuple attributes))
+            (some->> value (decode-query-tuple declarations attributes))
 
             :else
-            (decode-attribute-maps value)))]
+            (decode-attribute-maps declarations value)))]
     (if (and (map? result) (contains? result :ret))
       (update result :ret decode-result)
       (decode-result result))))
@@ -498,16 +552,17 @@
 (declare decode-pull-entity)
 
 (defn- decode-pull-child
-  [spec value]
+  [declarations spec value]
   (cond
-    (map? value) (decode-pull-entity spec value)
-    (vector? value) (mapv #(decode-pull-child spec %) value)
-    (set? value) (into #{} (map #(decode-pull-child spec %)) value)
-    (sequential? value) (doall (map #(decode-pull-child spec %) value))
+    (map? value) (decode-pull-entity declarations spec value)
+    (vector? value) (mapv #(decode-pull-child declarations spec %) value)
+    (set? value) (into #{} (map #(decode-pull-child declarations spec %)) value)
+    (sequential? value)
+    (doall (map #(decode-pull-child declarations spec %) value))
     :else value))
 
 (defn- decode-pull-entity
-  [spec entity]
+  [declarations spec entity]
   (let [options-by-output (pull-output-options spec)]
     (reduce-kv
      (fn [decoded output-key value]
@@ -517,28 +572,28 @@
          (assoc decoded output-key
                 (cond
                   subpattern
-                  (decode-pull-child subpattern value)
+                  (decode-pull-child declarations subpattern value)
 
                   (and (keyword? attribute)
                        (= display-key attribute)
-                       (schema.datahike/edn-encoded-attr? attribute))
-                  (decode-attribute-value attribute value)
+                       (edn-encoded? declarations attribute))
+                  (decode-attribute-value declarations attribute value)
 
                   (and (keyword? output-key)
-                       (schema.datahike/edn-encoded-attr? output-key))
-                  (decode-attribute-value output-key value)
+                       (edn-encoded? declarations output-key))
+                  (decode-attribute-value declarations output-key value)
 
                   :else
-                  (decode-attribute-maps value)))))
+                  (decode-attribute-maps declarations value)))))
      (empty entity)
      entity)))
 
 (defn- decode-pull-result
-  [selector result-key result]
+  [declarations selector result-key result]
   (let [spec (pull.parser/parse-pull selector)]
     (if (= :datahike.pull-many/result result-key)
-      (mapv #(when % (decode-pull-entity spec %)) result)
-      (when result (decode-pull-entity spec result)))))
+      (mapv #(when % (decode-pull-entity declarations spec %)) result)
+      (when result (decode-pull-entity declarations spec result)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Reads over immutable database values
@@ -641,6 +696,7 @@
           (let [request (assoc normalized :args aligned)
                 response (d/q-with-evidence request)
                 result (decode-query-result
+                        (read-declarations)
                         request (:datahike.query/result response))]
             (append-query-evidence! request response result)
             result)))
@@ -656,7 +712,7 @@
     (try
       (let [response (apply operation database arguments)
             selector (pull-selector arguments)
-            result (decode-pull-result selector result-key
+            result (decode-pull-result (read-declarations) selector result-key
                                        (get response result-key))]
         (append-pull-evidence! database arguments operation-key response result)
         result)
@@ -775,16 +831,16 @@
    (entity-call database entity-id)))
 
 (defn- datom->data
-  [database datom]
+  [declarations database datom]
   (let [stored-attribute (:a datom)
         attribute (:ident (db.utils/attr-info database stored-attribute))
         value (:v datom)]
     {:e (:e datom)
      :a stored-attribute
      :v (if (and (keyword? attribute)
-                 (schema.datahike/edn-encoded-attr? attribute))
-          (decode-attribute-value attribute value)
-          (decode-attribute-maps value))
+                 (edn-encoded? declarations attribute))
+          (decode-attribute-value declarations attribute value)
+          (decode-attribute-maps declarations value))
      :tx (:tx datom)
      :added (:added datom)}))
 
@@ -795,7 +851,8 @@
     (try
       ;; Datahike's index cursor is lazy and each element is a host Datom.
       ;; Realize both layers here so no process-local cursor escapes to SCI.
-      (let [result (mapv #(datom->data database %)
+      (let [declarations (read-declarations)
+            result (mapv #(datom->data declarations database %)
                          (apply d/datoms database arguments))]
         (append-database-evidence! database :all)
         result)
@@ -1068,13 +1125,14 @@
   [report]
   (let [database (:db-after report)
         datoms (:tx-data report)
-        limit (transaction-report-limit database)]
+        limit (transaction-report-limit database)
+        declarations (read-declarations)]
     {:tx (:tx (first datoms))
      :datahike/commit-id (or (get-in report [:tx-meta :db/commitId])
                              (d/commit-id database))
      ::datom-count (count datoms)
      :tx-data (into []
-                    (map #(datom->data database %))
+                    (map #(datom->data declarations database %))
                     (take limit datoms))
      :tempids (:tempids report)}))
 
