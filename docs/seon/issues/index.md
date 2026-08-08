@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (27)
+## Blocker (31)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -45,8 +45,12 @@ See `README.md` for the convention.
 | [Register the inline `[:fn]` predicate that refuses every corpus projection](an-inline-fn-predicate-in-src-refuses-every-corpus-projection.md) | blocker | changed-test selector lane |
 | [Stop a schema-resource edit from bricking value admission in running clusters](a-schema-resource-edit-bricks-value-admission-in-every-running-cluster.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Confirm the background `:io` connection fix with a real `my.shell` drive](every-background-capability-request-loses-its-connection.md) | blocker | tool-exercise lane re-run against `f3b8eabda` |
+| [Bound the prompt by the provider's token count, not a chars/4 estimate](prompt-token-budget-is-checked-against-a-25-percent-low-estimate.md) | blocker | whole-system arc repair wave |
+| [Reuse one HttpClient so concurrent provider calls stop closing mid-read](concurrent-provider-calls-fail-with-a-closed-response-body.md) | blocker | whole-system arc repair wave |
+| [Settle what arrived when a provider stream closes mid-body](a-mid-stream-provider-disconnect-discards-the-whole-turn.md) | blocker | whole-system arc repair wave |
+| [Install call preparation on the cluster's sci context](call-preparation-is-never-installed-on-the-cluster-sci-context.md) | blocker | whole-system arc repair wave |
 
-## Friction (120)
+## Friction (121)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -54,6 +58,7 @@ See `README.md` for the convention.
 | [Stop a failed turn from waking itself through its own fault message](a-failed-turn-wakes-itself-through-its-own-fault-message.md) | friction | live-drive context repair wave |
 | [Make `clojure.pprint` available in the agent's REPL](agent-repl-cannot-require-clojure-pprint.md) | friction | live-drive context repair wave |
 | [Name the arity when an agent calls its own function with the wrong one](a-wrong-arity-call-reports-a-missing-namespace.md) | friction | live-drive context repair wave |
+| [Project an MCP value whose map keys are not keywords](mcp-projection-crashes-on-non-keyword-map-keys.md) | friction | whole-system arc repair wave |
 | [Name `index-step`'s predicate so its contract can be made durable](a-search-contract-predicate-cannot-be-made-durable.md) | friction | live-drive context repair wave |
 | [Return `/data` without a five-second stall](data-page-takes-five-and-a-half-seconds-for-three-kilobytes.md) | friction | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Name the face when `semantic-value` cannot match one](an-unmatched-print-face-throws-no-matching-clause-and-names-nothing.md) | friction | error-face budget wave |
