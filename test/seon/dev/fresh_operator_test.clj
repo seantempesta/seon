@@ -875,18 +875,6 @@
             :else
             (recur)))))))
 
-(defn- registry-without-render-value-form
-  []
-  (pr-str
-   '(let [state (seon.schema/snapshot-state)]
-      (seon.schema/restore-state!
-       (-> state
-           (update :seon.schema.state/candidate-forms
-                   dissoc
-                   :seon.render/value)
-           (assoc :seon.schema.state/projection nil)))
-      :schema-stale)))
-
 (defn- fresh-process-operator-paths
   [root]
   (with-open [ready-server
@@ -902,14 +890,7 @@
                        'seon.instrument
                        'seon.render.value
                        'seon.schema)
-              (let [state# (seon.schema/snapshot-state)
-                    original-resolve# seon.cluster/resolve-bootstrap]
-                (seon.schema/restore-state!
-                 (-> state#
-                     (update :seon.schema.state/candidate-forms
-                             dissoc
-                             :seon.render/value)
-                     (assoc :seon.schema.state/projection nil)))
+              (let [original-resolve# seon.cluster/resolve-bootstrap]
                 (with-redefs
                   [seon.cluster/resolve-bootstrap
                   (fn [overrides#]
@@ -934,8 +915,6 @@
               (edn/read-string
                (slurp (io/file root "data" "clusters"
                                "anchor" "prepl.edn")))
-              _ (prepl-eval anchor-advertisement
-                            (registry-without-render-value-form))
               added (run-operator root "start" "scratch")
               scratch-advertisement
               (when (zero? (or (::exit added) 1))
@@ -1228,29 +1207,30 @@
                                 (symbol "projection-state")))}))))]
         (is (false? (::schema-api-loaded? stale)) stale)
         (is (false? (::projection-api-loaded? stale)) stale))
+      ;; A loaded predicate owner used to be able to lose its predicates: the
+      ;; process-global symbol->function cache could be rewritten out from
+      ;; under it, so "loaded" and "resolvable" were two different facts. They
+      ;; are one fact now — resolution reads the Var the qualified symbol
+      ;; names — so this staging has nothing left to stage, and the class it
+      ;; simulated is unrepresentable rather than merely untested.
       (let [advertisement
             (edn/read-string
              (slurp (io/file root "data" "clusters"
                              cluster-name "prepl.edn")))
-            stale
+            resolved
             (edn/read-string
              (prepl-eval
               advertisement
               (pr-str
                `(do
                   (require 'seon.db 'seon.schema)
-                  (seon.schema/restore-state!
-                   (dissoc
-                    (seon.schema/snapshot-state)
-                    'seon.db/connection?
-                    'seon.db/database-value?))
                   {:seon.dev.fresh-operator-test/owner-loaded?
                    (boolean (find-ns 'seon.db))
                    :seon.dev.fresh-operator-test/connection-registered?
                    (seon.schema/core-predicate-registered?
                     'seon.db/connection?)}))))]
-        (is (true? (::owner-loaded? stale)) stale)
-        (is (false? (::connection-registered? stale)) stale))
+        (is (true? (::owner-loaded? resolved)) resolved)
+        (is (true? (::connection-registered? resolved)) resolved))
       (let [advertisement
             (edn/read-string
              (slurp (io/file root "data" "clusters"

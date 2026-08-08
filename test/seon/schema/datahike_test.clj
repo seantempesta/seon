@@ -73,18 +73,14 @@
 
 (defn- declarations
   [{:keys [base properties]}]
-  (let [direct (carry-properties base properties)
-        snapshot (schema/snapshot-state)]
-    (try
-      (schema/register! ::direct direct)
-      (schema/register! ::wrapped [:and properties base])
-      (schema/register! ::alias-base direct)
-      (schema/register! ::alias-middle ::alias-base)
-      (schema/register! ::aliased ::alias-middle)
-      (mapv #(dissoc (schema.datahike/malli->datahike-attr %) :db/ident)
-            [::direct ::wrapped ::aliased])
-      (finally
-        (schema/restore-state! snapshot)))))
+  (let [direct (carry-properties base properties)]
+    (schema/register! ::direct direct)
+    (schema/register! ::wrapped [:and properties base])
+    (schema/register! ::alias-base direct)
+    (schema/register! ::alias-middle ::alias-base)
+    (schema/register! ::aliased ::alias-middle)
+    (mapv #(dissoc (schema.datahike/malli->datahike-attr %) :db/ident)
+          [::direct ::wrapped ::aliased])))
 
 (deftest supported-ast-wrappers-and-aliases-have-one-declaration
   (support/assert-check!
@@ -109,14 +105,10 @@
            [1 :db.type/long]
            [1.0 :db.type/double]]]
     (testing (pr-str literal)
-      (let [snapshot (schema/snapshot-state)]
-        (try
-          (schema/register! ::literal [:= literal])
-          (is (= expected
-                 (:db/valueType
-                  (schema.datahike/malli->datahike-attr ::literal))))
-          (finally
-            (schema/restore-state! snapshot)))))))
+      (schema/register! ::literal [:= literal])
+      (is (= expected
+             (:db/valueType
+              (schema.datahike/malli->datahike-attr ::literal)))))))
 
 (deftest schema-row-properties-lift-only-when-their-declarations-are-storable
   (let [forms {:seon.error/class [:= true]
@@ -147,18 +139,14 @@
    (tc/quick-check
     40
     (prop/for-all [{:keys [form]} refused-form-generator]
-      (let [snapshot (schema/snapshot-state)]
-        (try
-          (let [data (try
-                       (schema/register! ::refused form)
-                       (schema.datahike/malli->datahike-attr ::refused)
-                       support/committed
-                       (catch clojure.lang.ExceptionInfo error
-                         (ex-data error)))]
-            (and (map? data)
-                 (= :user-input (:seon.error/kind data))))
-          (finally
-            (schema/restore-state! snapshot)))))
+      (let [data (try
+                   (schema/register! ::refused form)
+                   (schema.datahike/malli->datahike-attr ::refused)
+                   support/committed
+                   (catch clojure.lang.ExceptionInfo error
+                     (ex-data error)))]
+        (and (map? data)
+             (= :user-input (:seon.error/kind data)))))
     :seed 202607280702)
    "unsupported database attribute refusal"))
 

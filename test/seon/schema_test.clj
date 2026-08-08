@@ -27,8 +27,83 @@
          :qualified-symbol]]
     (is (= definition (schema/canonical-definition definition {})))
     (is (schema/malli-form? definition))
+    (is (nil? (find-ns 'clojure.java.shell))
+        "precondition: the arbitrary predicate namespace is not loaded")
     (is (false? (schema/malli-form? [:fn 'clojure.java.shell/sh]))
-        "schema validation never loads an arbitrary predicate namespace")))
+        "schema validation never loads an arbitrary predicate namespace")
+    (is (nil? (find-ns 'clojure.java.shell))
+        "and asking the question did not load it either")))
+
+(defn predicate-under-test?
+  "Root-rebound by the collision regression below. Its value is never asserted
+   directly; what is asserted is which environment's answer a projection gets."
+  [value]
+  (= value :original))
+
+(deftest one-predicate-symbol-cannot-name-two-environments-callables
+  ;; CLASS: two isolated environments declaring the same qualified predicate
+  ;; symbol used to overwrite each other process-wide, last writer winning, so
+  ;; a value valid under the first stopped validating after the second —
+  ;; though both projections were rebuilt from identical immutable form data
+  ;; (2026-08-07 parallel isolation audit, Defect I.3,
+  ;; `probe_predicate_function_cache`, deterministic FAIL).
+  ;;
+  ;; The class is dissolved by construction rather than defended against: a
+  ;; qualified symbol names exactly ONE Var, and a projection that wants a
+  ;; different callable must SAY SO in its own explicit predicate-functions,
+  ;; which no other projection reads. There is no process-global slot left to
+  ;; overwrite, so the two assertions here are "each environment keeps its own
+  ;; answer" and "no such slot exists".
+  (let [predicate 'seon.schema-test/predicate-under-test?
+        form [:fn predicate]
+        forms (assoc (schema/registered-schemas)
+                     :seon.schema-test/predicated form)
+        project (fn [predicate-functions]
+                  (schema/build-projection
+                   forms {}
+                   {:seon.schema/predicate-functions predicate-functions}))
+        valid? (fn [projection value]
+                 ((schema/projection-validator
+                   projection :seon.schema-test/predicated)
+                  value))
+        environment-a (project {predicate (fn [value] (= value :a))})
+        environment-b (project {predicate (fn [value] (= value :b))})]
+    (testing "a second environment's declaration cannot reach the first"
+      (is (true? (valid? environment-a :a)))
+      (is (false? (valid? environment-a :b)))
+      (is (true? (valid? environment-b :b)))
+      (is (false? (valid? environment-b :a)))
+      (is (true? (valid? environment-a :a))
+          "and the first still answers for itself after the second was built"))
+    (testing "the probe's own move — a second registration of one symbol —
+              is now refused instead of quietly winning process-wide"
+      ;; This is the arm that reproduces `probe_predicate_function_cache`.
+      ;; It used to succeed and silently retarget the symbol for every
+      ;; environment in the JVM; it now cannot even be expressed, because a
+      ;; registration that does not agree with the Var the symbol names is a
+      ;; core bug rather than a new binding.
+      (let [refused (refusal
+                     #(schema/register-core-predicate!
+                       predicate (fn [value] (= value :b))))]
+        (is (instance? clojure.lang.ExceptionInfo refused)
+            "registering a different callable under a live symbol must refuse")
+        (is (= :seon.schema/unresolved-predicate
+               (:seon.schema/error (ex-data refused))))
+        (is (true? (valid? (project {}) :original))
+            "and the refused attempt changed nothing for anybody")))
+    (testing "an environment that declares nothing resolves the one named Var"
+      (let [resolved (project {})]
+        (is (true? (valid? resolved :original)))
+        (is (false? (valid? resolved :a)))))
+    (testing "no process-global predicate cache survives to be overwritten"
+      (is (empty?
+           (filter (fn [[symbol-name a-var]]
+                     (and (instance? clojure.lang.IDeref (var-get a-var))
+                          (str/includes? (str symbol-name) "predicate")))
+                   (ns-interns 'seon.schema)))
+          (str "seon.schema holds a mutable reference named for predicates; "
+               "predicate resolution is requiring-resolve over a qualified "
+               "symbol and must own no process-global state.")))))
 
 (deftest named-predicate-violations-humanize-to-the-declared-requirement
   (let [humanized
@@ -183,33 +258,29 @@
     (is (= (pr-str definition) (:seon.schema/form row)))))
 
 (deftest matching-shapes-derive-required-attributes-through-and-refs
-  (let [state (schema/snapshot-state)]
-    (try
-      (let [forms {:seon.error/message :string
-                   :seon.error/refusal-value
-                   [:map [:seon.error/message :seon.error/message]]
-                   :seon.schema-test/refused [:= true]
-                   :seon.schema-test/refused-error
-                   [:and {:seon.error/class true
-                          :seon.render/ai 'seon.error/refusal-prose}
-                    :seon.error/refusal-value
-                    [:map
-                     [:seon.schema-test/refused
-                      :seon.schema-test/refused]]]}
-            projection (schema/build-projection forms)
-            value {:seon.schema-test/refused true
-                   :seon.error/message "The transition was refused."}
-            row (get (:seon.schema.projection/shape-rows projection)
-                     :seon.schema-test/refused-error)]
-        (is (= #{:seon.schema-test/refused :seon.error/message}
-               (:seon.schema/required-attrs row)))
-        (is (= 'seon.error/refusal-prose (:seon.render/ai row)))
-        (is (= :seon.schema-test/refused-error
-               (-> (schema/matching-shapes-in projection value)
-                   first
-                   :seon.schema/key))))
-      (finally
-        (schema/restore-state! state)))))
+  (let [forms {:seon.error/message :string
+               :seon.error/refusal-value
+               [:map [:seon.error/message :seon.error/message]]
+               :seon.schema-test/refused [:= true]
+               :seon.schema-test/refused-error
+               [:and {:seon.error/class true
+                      :seon.render/ai 'seon.error/refusal-prose}
+                :seon.error/refusal-value
+                [:map
+                 [:seon.schema-test/refused
+                  :seon.schema-test/refused]]]}
+        projection (schema/build-projection forms)
+        value {:seon.schema-test/refused true
+               :seon.error/message "The transition was refused."}
+        row (get (:seon.schema.projection/shape-rows projection)
+                 :seon.schema-test/refused-error)]
+    (is (= #{:seon.schema-test/refused :seon.error/message}
+           (:seon.schema/required-attrs row)))
+    (is (= 'seon.error/refusal-prose (:seon.render/ai row)))
+    (is (= :seon.schema-test/refused-error
+           (-> (schema/matching-shapes-in projection value)
+               first
+               :seon.schema/key)))))
 
 (deftest agent-authored-function-input-maps-accrete
   (is (empty?

@@ -410,23 +410,22 @@
         file (assoc ::file file))))))
 
 (defn- predicate-registered?
-  "True when the `[:fn]` symbol names a registered core predicate,
-  loading its owner namespace first if needed. A qualified symbol
-  carries its owner; `requiring-resolve` loads that namespace, whose
-  load-time `register-core-predicate!` call registers the predicate —
-  the same symbols-as-data idiom as `:seon.source/populate`. This is
-  the COMPUTED rule that removes load-order from admission: no
-  activation site needs to require every package whose EDN file names
-  a predicate. (Dormant cycle risk, stated: a predicate owner that
-  itself activates the population would recurse — `load!` does not
-  activate, so registering predicates at load time cannot cycle.)"
+  "True when the `[:fn]` symbol resolves to a callable Var.
+
+  A qualified symbol carries its owner namespace, so `requiring-resolve`
+  loads that namespace and answers with the one Var the symbol names — the
+  same symbols-as-data idiom as `:seon.source/populate`. This is the COMPUTED
+  rule that removes load-order from admission: no activation site needs to
+  require every package whose EDN file names a predicate.
+
+  It used to ask twice — once against a process-global registration cache,
+  then again after forcing the load. The cache is gone (2026-08-07 isolation
+  audit, Defect I.3: last-writer-wins across environments), and resolution
+  now IS the answer, so the second ask has nothing left to add. (Dormant
+  cycle risk, stated: a predicate owner that itself activates the population
+  would recurse — `load!` does not activate, so this cannot cycle.)"
   [predicate]
-  (and (qualified-symbol? predicate)
-       (or (schema/core-predicate-registered? predicate)
-           (and (some? (try
-                         (requiring-resolve predicate)
-                         (catch Throwable _ nil)))
-                (schema/core-predicate-registered? predicate)))))
+  (schema/core-predicate-registered? predicate))
 
 (defn- assert-predicates!
   [forms]

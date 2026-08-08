@@ -111,11 +111,41 @@
 
     :else #{}))
 
-(defn- runtime-predicate [predicate]
+(defn- runtime-predicate
+  "The Var a qualified predicate symbol names, or nil.
+
+   THE resolution rule for host-authored predicates. A qualified symbol names
+   exactly one Var, so resolution is collision-free by construction — two
+   environments declaring the same predicate cannot overwrite each other the
+   way the process-global symbol->function cache did (2026-08-07 isolation
+   audit, `probe_predicate_function_cache`: a second registration of one
+   symbol made a value that was valid under the first stop validating,
+   process-wide, though both projections were rebuilt from immutable forms).
+
+   The VAR is retained rather than its current value. Invoking a Var reads its
+   root at call time, so re-evaluating a `defn` changes what an already
+   compiled schema calls, exactly as it changes every other caller."
+  [predicate]
   (try
-    (some-> (requiring-resolve predicate) deref)
+    (when (qualified-symbol? predicate)
+      (requiring-resolve predicate))
     (catch Throwable _
       nil)))
+
+(defn- loaded-predicate-var
+  "The Var a qualified predicate symbol names, WITHOUT loading its namespace.
+
+   Compilation must never load code as a side effect of examining a
+   declaration: agents author `[:fn ...]` forms, and [[malli-form?]] answers
+   structural questions about them, so a loading resolver would let an
+   arbitrary namespace be required by writing its name into a schema. The
+   load-time `register-core-predicate!` assertion is what makes this
+   sufficient — a predicate's owner is loaded before anything can declare
+   against it, and `clojure.core` is always loaded."
+  [predicate]
+  (when (qualified-symbol? predicate)
+    (some-> (find-ns (symbol (namespace predicate)))
+            (ns-resolve (symbol (name predicate))))))
 
 (defn bind-predicates
   "Replace every predicate symbol before Malli compilation.
@@ -123,7 +153,14 @@
    Malli evaluates symbol/string/list predicate code by constructing its own
    SCI context. Seon admits only named predicates and supplies their already
    materialized callables from the corpus environment, so unresolved code
-   fails closed here instead of opening that second evaluator."
+   fails closed here instead of opening that second evaluator.
+
+   `predicate-functions` is the caller's explicit override — a preprocessed
+   projection carries its own callables. Anything absent from it resolves
+   through [[loaded-predicate-var]], which never loads a namespace: there is
+   no process-global cache to consult, so there is nothing a second
+   environment can overwrite, and examining a declaration still cannot make
+   the process require code."
   {:malli/schema
    [:=> [:cat :seon.schema/value :map] :seon.schema/value]}
   [form predicate-functions]
@@ -141,10 +178,7 @@
              bound
              (when (qualified-symbol? predicate)
                (or (get predicate-functions predicate)
-                   (when (= "clojure.core" (namespace predicate))
-                     (some-> (ns-resolve 'clojure.core
-                                         (symbol (name predicate)))
-                             deref))))]
+                   (loaded-predicate-var predicate)))]
          (cond
            (and (ifn? predicate)
                 (not (or (symbol? predicate)
@@ -185,26 +219,28 @@
       (-schemas [_]
         @all-schemas))))
 
-(declare ^:private core-predicate-functions)
-
 (defn canonical-definition
   "Return one Malli definition as durable EDN.
 
    Evaluating Clojure metadata resolves predicate symbols to callable roots.
-   This is the inverse of `bind-predicates`: registered core predicates win,
-   then the supplied qualified Var roots are considered. Anonymous or
-   otherwise unresolvable callables are refused instead of being printed as
-   unreadable `#object` values."
+   This is the inverse of `bind-predicates`: a bound predicate IS the Var its
+   qualified symbol names, and a Var carries that symbol, so the inverse is
+   reading the name back off the Var — no process-global table of callables
+   is scanned, and no second environment's registration can supply a
+   different answer. Callables the caller supplied explicitly (a preprocessed
+   projection carries raw functions) are matched by identity against that
+   supplied map. Anonymous or otherwise unresolvable callables are refused
+   instead of being printed as unreadable `#object` values."
   {:malli/schema
    [:=> [:cat :seon.schema/value
          :map]
     ::definition]}
   [definition predicate-functions]
-  (let [bindings (concat (sort-by (comp str key) (core-predicate-functions))
-                         (sort-by (comp str key) predicate-functions))
+  (let [bindings (sort-by (comp str key) predicate-functions)
         callable-symbol
         (fn [value]
-          (or (some (fn [[predicate f]]
+          (or (when (var? value) (symbol value))
+              (some (fn [[predicate f]]
                       (when (identical? value f) predicate))
                     bindings)
               (throw
@@ -530,10 +566,6 @@
 ;;; Registry Setup
 ;;; ---------------------------------------------------------------------------
 
-;; Host functions cannot be stored as database facts. Their qualified symbols
-;; are durable; this reloadable cache is the sole process-local schema state.
-(defonce ^:private !predicate-functions (atom {}))
-
 (def ^:dynamic ^:private *candidate-forms-overlay* nil)
 (def ^:dynamic ^:private *projection* nil)
 (def ^:dynamic ^:private *projection-state* nil)
@@ -793,24 +825,44 @@
   *projection*)
 
 (defn register-core-predicate!
-  "Cache one host-authored predicate function for portable Malli compilation.
+  "Assert at load time that `predicate` names the callable `f`, and return it.
 
-   The qualified symbol remains the durable schema form and admission
-   authority; this reloadable function cache only supplies Malli's SCI tier."
+   This no longer caches anything: resolution is [[runtime-predicate]], which
+   reads the Var the qualified symbol names, so there is no process-global
+   symbol->function map for a second environment to overwrite (2026-08-07
+   isolation audit, Defect I.3).
+
+   It remains a call rather than nothing for one reason worth keeping: it
+   resolves the predicate EAGERLY, as the owning namespace loads, instead of
+   leaving the first resolution to happen lazily inside a schema compile —
+   which is where a `require` triggered mid-compile could meet a load cycle.
+   A typo'd symbol therefore fails while loading the namespace that declared
+   it, naming that namespace, rather than at some later projection build.
+
+   The call sites are queued for deletion with the rest of the load-time
+   registration sentinels when acquisition-at-a-basis lands (seon.env PRD
+   deletion list); they are spread across namespaces this owner does not
+   hold."
   {:malli/schema
    [:=> [:cat :qualified-symbol [:fn clojure.core/ifn?]]
     :qualified-symbol]}
   [predicate f]
-  (swap! !predicate-functions assoc predicate f)
+  (let [resolved (runtime-predicate predicate)]
+    (when-not (and resolved (identical? f (var-get resolved)))
+      (throw
+       (ex-info
+        (str "Predicate " predicate " does not name the supplied callable.")
+        {:seon.schema/error :seon.schema/unresolved-predicate
+         :seon.schema/predicate predicate
+         :seon.schema/resolved resolved
+         :seon.error/kind :core-bug}))))
   predicate)
 
-(defn- core-predicate-functions [] @!predicate-functions)
-
 (defn core-predicate-registered?
-  "True when `predicate` has a callable registered by core."
+  "True when `predicate` resolves to a callable Var."
   {:malli/schema [:=> [:cat :qualified-symbol] :boolean]}
   [predicate]
-  (ifn? (get (core-predicate-functions) predicate)))
+  (boolean (some-> (runtime-predicate predicate) var-get ifn?)))
 
 (register-core-predicate! 'seon.schema/byte-array? byte-array?)
 
@@ -828,15 +880,14 @@
 (defn- candidate-registry
   ([] (candidate-registry (candidate-forms)))
   ([forms]
-   (let [defaults (mr/fast-registry (m/default-schemas))
-         predicate-functions (core-predicate-functions)]
+   (let [defaults (mr/fast-registry (m/default-schemas))]
      (reify
        mr/Registry
        (-schema [this type]
          (or (mr/-schema defaults type)
              (when-let [form (get forms type)]
                (m/schema
-                (bind-predicates form predicate-functions)
+                (bind-predicates form {})
                 {:registry this}))))
        (-schemas [_]
          (merge (mr/-schemas defaults) forms))))))
@@ -875,7 +926,7 @@
         (or (mr/-schema defaults type)
             (when-let [form (get (active-forms) type)]
               (m/schema
-               (bind-predicates form (core-predicate-functions))
+               (bind-predicates form {})
                {:registry this}))))
       (-schemas [_]
         (merge (mr/-schemas defaults) (active-forms))))))
@@ -904,9 +955,7 @@
           decoded (edn/read-string encoded)]
       (and (= value decoded)
            (some? (m/schema
-                   (bind-predicates
-                    decoded
-                    (core-predicate-functions))
+                   (bind-predicates decoded {})
                    {:registry (candidate-registry)}))))
     (catch Exception _
       false)))
@@ -1266,11 +1315,10 @@
      :map]]}
   ([forms]
    (build-projection
-    forms {} {:seon.schema/predicate-functions (core-predicate-functions)}))
+    forms {} {}))
   ([forms function-contracts]
    (build-projection
-    forms function-contracts
-    {:seon.schema/predicate-functions (core-predicate-functions)}))
+    forms function-contracts {}))
   ([forms function-contracts
     {:seon.schema/keys [schema-admissions function-admissions
                         function-source-admissions artifact-exports
@@ -1286,9 +1334,7 @@
      (materialize-projection
       (compose-projection-data forms function-contracts)
       options)
-     (let [predicate-functions
-         (merge (core-predicate-functions) predicate-functions)
-         predicate-symbols
+     (let [predicate-symbols
          (into (into #{} (mapcat predicate-symbols-in) (vals forms))
                (mapcat predicate-symbols-in)
                (vals function-contracts))
@@ -1749,10 +1795,9 @@
      :map]]}
   ([pure-data]
    (materialize-projection pure-data {}))
-  ([pure-data {:seon.schema/keys [predicate-functions]}]
-   (let [predicate-functions
-         (merge (core-predicate-functions) predicate-functions)
-         forms (:seon.schema.projection/forms pure-data)
+  ([pure-data {:seon.schema/keys [predicate-functions]
+               :or {predicate-functions {}}}]
+   (let [forms (:seon.schema.projection/forms pure-data)
          contracts (:seon.schema.projection/function-contracts pure-data)
          predicate-symbols
          (into (into #{} (mapcat predicate-symbols-in) (vals forms))
@@ -2049,7 +2094,7 @@
           :seon.schema/function-source-admissions source-admissions
           :seon.schema/artifact-exports artifact-exports
           :seon.schema/pure-predicate-symbols pure-predicate-symbols
-          :seon.schema/predicate-functions (core-predicate-functions)})))))))
+          :seon.schema/predicate-functions {}})))))))
 
 (defn projection-from-database
   "Build the immutable program projection at exactly `db`.
@@ -2441,19 +2486,6 @@
   [before]
   (when-let [candidate (:seon.schema.delta/candidate-forms before)]
     (reset! candidate (:seon.schema.delta/before before)))
-  nil)
-
-(defn ^:no-doc snapshot-state
-  "Capture the sole process-local predicate function cache."
-  {:malli/schema [:=> [:cat] :any]}
-  []
-  @!predicate-functions)
-
-(defn ^:no-doc restore-state!
-  "Restore a predicate function cache captured by [[snapshot-state]]."
-  {:malli/schema [:=> [:catn [::state :any]] :nil]}
-  [state]
-  (reset! !predicate-functions state)
   nil)
 
 (defn register-all!
