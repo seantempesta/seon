@@ -779,9 +779,8 @@
         (is (str/includes? (::output outcome) "recorded JVM pid 1")
             (::output outcome))
         (is (.isFile
-             (io/file (str (operator.state/control-root project-root))
-                      "lifecycle.lock"))
-            "the installation authority owns one lifecycle lock"))
+             (io/file (str (operator.state/root-lifecycle-lock-path root))))
+            "the selected root owns the lifecycle lock its command took"))
       (finally
         (operator-private-value
          'clear-process-record! (str root) record)
