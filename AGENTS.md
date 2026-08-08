@@ -586,6 +586,41 @@ After writing code, verify the running system—not only the tests. Falsify the
 change with an observed datom, page/feed, log line, or REPL result. Report what
 is still broken honestly.
 
+## Loud failures, unrepresentable classes (owner ethos, ruled 2026-08-07)
+
+"I want loud and correct failures to make entire error classes
+unrepresentable." This is a REQUIREMENT on how anything gets built or
+fixed in this project, not a taste note:
+
+- **Fix the class, not the instance.** Before fixing any defect, name the
+  CLASS it belongs to; the fix restructures so the class cannot be
+  WRITTEN, and lands with exactly one regression proving the class dead.
+  A fix that leaves the class representable is a symptom patch.
+- **Prefer structures with no field to forget over validation that checks
+  the field.** Custody derived from one source cannot disagree with
+  itself; a value handed to work cannot be dropped by a thread hop; an
+  argument that does not exist cannot be passed wrongly. Making the wrong
+  state unconstructable beats checking for it every time.
+- **A refusal is loud, typed, flat, and names what was missing** — the
+  layer that failed, the member that was absent, the key that was
+  unknown. A silent fallback or default that "happens to be right" is a
+  defect EVEN WHILE IT WORKS: it survives exactly until the second
+  cluster, the second thread, or the second caller, and then lies. The
+  guarded-door fallback that was "right under one cluster" and the
+  option keys sci silently dropped for years are the canonical scars.
+- **Diagnostics must tell the truth or say nothing.** A thread dump that
+  omits virtual threads, a counter that under-reports across threads, a
+  warning wall that buries the one real signal — each is a defect to fix
+  at its owner, because cheap correct diagnosis is what makes the next
+  class cheap to kill. The flywheel is real: the 2026-08-07 environment
+  work killed six classes in one day BECAUSE each loud fix made the next
+  defect pattern-match a named class instead of a novel mystery
+  (ledger: [seon-env-prd-2026-08-07.md](docs/prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)).
+- **Derived state rides the value it derives from** (a validator on its
+  projection, a writer on its connection, an index on its db value), so
+  staleness and cross-environment reads are structurally impossible —
+  never a process-wide slot with a check-then-act fence.
+
 ## One mechanism, no hacks
 
 ### Owner design gate — stop before hairy semantics
