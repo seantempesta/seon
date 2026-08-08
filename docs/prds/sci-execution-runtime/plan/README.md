@@ -941,6 +941,55 @@ DISCIPLINE (owner): far-reaching designs iterate in chat with the owner
 first — agents launch ONCE with the settled design, never
 launch-then-steer.
 
+### Rulings 2026-08-08 (owner, overnight batch)
+
+Recorded from the overnight autonomous run; evidence in
+[overnight-report-2026-08-08.md](overnight-report-2026-08-08.md) and the
+dated `research/` drives. The seon.env Phase 1 platform LANDED and is
+PROVEN (call preparation live in production; four-agent concurrency; a
+restart-safe crash model). Owner decisions ruled this batch:
+
+- **Component ref admits the component value (Option 1, derived).** A
+  `:seon.db/component true` child position compiles as "existing ref OR
+  the component's own entity", derived at one choke point (`compilable-form`)
+  — agents can now define contracted functions. LANDED `e7bafc957`.
+- **Background work bounds:** a `:seon.config.effect.background/*`
+  time-limit config default (600 s) plus an optional per-call override
+  that wins in EITHER direction with NO clamp (great defaults, intuitive
+  overrides); a fresh detached arm makes "unbounded" unrepresentable.
+  LANDED `aeb17ec7f`.
+- **Escalation is one bounded owner.** The hand-rolled unbounded
+  cross-agent escalation is DELETED; `seon.error/commit-tx` decides who
+  is told, one message per signature. LANDED `c3f526cb3`.
+- **Operator installation-lock: keep serial for now** — single-root work
+  serializes on the installation lock, annotated; the per-root redesign
+  (lock-handle ownership transfer) is the recorded end state, revisited
+  only at measured four-worker contention.
+- **`seon.db` colliding call spellings:** reviewed live during Phase 2
+  dogfood, not from a spec table.
+- **Docs-as-queryable-facts: TABLED** (owner too tired to design; the
+  indexing direction is liked, deferred).
+- **Within-run schema-key refinement folds into the BRANCH model:**
+  agents may redefine anything on a private basis with warnings; only
+  merge-back is gated (invalidates stored data OR breaks other
+  namespaces' contracts). The guard-decides reading stands as the
+  interim on the shared basis. See the branch-work design inputs below.
+- **Naming (from 2026-08-07, reaffirmed):** boot / environment / running;
+  call preparation / supplied defaults; NO "ambient", "tower",
+  "batteries". Phase 4 terminology sweep + the six namespace renames
+  (`operator.runtime`→`resources`, `fresh-operator` merge,
+  `bootstrap`→`initial-forms`, `kernel`→`guard`/split, `schema-split`
+  evaluate, `oversight`/`problems`/`maintenance` ground-or-rename) are
+  owner-APPROVED, executed at the Phase 4 window.
+
+Two design artifacts carved this batch, both non-committal:
+[whole-system-arc-2026-08-08.md](whole-system-arc-2026-08-08.md) (the
+"system works, UI included" graduation demo) and
+[branch-work-design-inputs-2026-08-08.md](branch-work-design-inputs-2026-08-08.md)
+(the agent-works-on-a-branch idea as design-agnostic INGREDIENTS — build
+only what a present owner already needs; no branching infrastructure
+built ahead of a sealed design).
+
 ### Ruling 2026-08-07 (owner, afternoon) — seon.env: the environment is a value
 
 Sealed in [seon-env-prd-2026-08-07.md](seon-env-prd-2026-08-07.md), grounded

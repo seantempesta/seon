@@ -16,6 +16,41 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**CURRENT EDGE — 2026-08-08 morning.** The seon.env platform is BUILT
+and PROVEN; the full ruling + evidence ledger is
+[overnight-report-2026-08-08.md](overnight-report-2026-08-08.md) and the
+2026-08-08 README ruling block. State in one paragraph:
+
+- LANDED and proven live: environment-as-a-value across Phase 1; call
+  preparation IN PRODUCTION (P17-S1+S2, sci pin `6ee57c9`; an agent's
+  elided-arg call receives its supplied connection and commits);
+  four-agent concurrent turns with a live SSE UI; a restart-safe crash
+  model (recovery marks interrupted runs); provider transport (shared
+  client, honest truncation, no retries); token estimation calibrated
+  from recorded usage; the control-token reply leak closed; the suite
+  tiered (965 s→43 s changed-only default); ~30 defect classes killed.
+- THE ONE OPEN BLOCKER on the model-authoring milestone:
+  [every agent prompt is a neighborhood render-walk contract violation](../../../seon/issues/every-agent-prompt-is-a-neighborhood-render-walk-contract-violation.md)
+  — a regression from this night's own render work (`102fdeac3`
+  retyped the SHARED key `:seon.render/output`, which serves BOTH the
+  request selector AND the walk unit's rendered-value field; the enum
+  now rejects every rendered value). Accretion-correct fix = SPLIT the
+  overloaded key (selector stays the enum; the unit field gets its own
+  string-or-Hiccup type). A fix lane is running; after it lands: refork
+  default → re-drive the model-authoring proof.
+- NEXT after the milestone: the whole-system arc's remaining stages
+  (canvas is UNBUILT — a target needing its own wave; agents need a
+  taught route to declaring data attributes; disposition-less turns
+  close vs. the docstring saying stay-open). Then Phase 3 (delete the
+  dynamic-var carriers per the deletion list), Phase 4 (terminology
+  sweep + approved renames), and — when the owner designs it — the
+  branch-work model
+  ([ingredients ledger](branch-work-design-inputs-2026-08-08.md)).
+- Owner decisions still pending (all with priced options in the
+  overnight report's "Decisions needing you"): none blocking — the four
+  live ones were ruled overnight; docs-indexing is tabled; the branch
+  design is the owner's to seal when rested.
+
 **SEON.ENV SEALED — 2026-08-07 afternoon.** The environment-is-a-value
 design is owner-ruled and recorded in
 [seon-env-prd-2026-08-07.md](seon-env-prd-2026-08-07.md) (README afternoon
