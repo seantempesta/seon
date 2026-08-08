@@ -34,6 +34,67 @@
     (is (nil? (find-ns 'clojure.java.shell))
         "and asking the question did not load it either")))
 
+(deftest two-projections-never-exchange-a-compiled-validator
+  ;; CLASS: compiled validators and explainers are a pure function of the
+  ;; projection they were compiled from, but they used to live in ONE
+  ;; process-global slot whose read was a check-then-act — reset the slot to
+  ;; the caller's projection, then deref it AGAIN for the answer. Between
+  ;; those two reads a second environment could reset the slot to its own
+  ;; projection, so a caller silently validated against another environment's
+  ;; schema. Reproduced in both directions, intermittently, 2 runs in 5
+  ;; (2026-08-07 parallel isolation audit, Defect II,
+  ;; `probe_shape_generation_cache`) — a flake, which is exactly why it had
+  ;; survived: a suite would have triaged it as noise.
+  ;;
+  ;; It is dissolved structurally: the cache hangs off the projection value,
+  ;; so there is no slot for two projections to share and no comparison that
+  ;; can be wrong. The repetition below is the probe's own shape, kept
+  ;; because an intermittent race needs iterations to be falsified at all.
+  (let [population (schema/registered-schemas)
+        project (fn [marker]
+                  (schema/build-projection
+                   (assoc population
+                          :seon.schema-test/marker [:= marker]
+                          :seon.schema-test/thing
+                          [:map [:seon.schema-test/marker
+                                 :seon.schema-test/marker]])))
+        projection-a (project "a")
+        projection-b (project "b")
+        value-a {:seon.schema-test/marker "a"}
+        value-b {:seon.schema-test/marker "b"}
+        matches? (fn [projection value]
+                   (boolean
+                    (some #(= :seon.schema-test/thing (:seon.schema/key %))
+                          (schema/matching-shapes-in projection value))))
+        iterations 2000
+        side (fn [projection own foreign label]
+               (fn []
+                 (into []
+                       (comp (map (fn [i]
+                                    (cond
+                                      (not (matches? projection own))
+                                      {:side label :iteration i
+                                       :expected :match :got :no-match}
+                                      (matches? projection foreign)
+                                      {:side label :iteration i
+                                       :expected :no-match :got :match})))
+                             (remove nil?))
+                       (range iterations))))
+        violations
+        (mapcat deref
+                [(future ((side projection-a value-a value-b :a)))
+                 (future ((side projection-b value-b value-a :b)))])]
+    (is (empty? violations)
+        (str "a projection answered with another projection's compiled "
+             "validator: " (pr-str (vec (take 5 violations)))))
+    (testing "the compiled state is on the projection, not in a shared slot"
+      (is (some? (:seon.schema.projection/compiled projection-a)))
+      (is (not (identical? (:seon.schema.projection/compiled projection-a)
+                           (:seon.schema.projection/compiled projection-b))))
+      (is (not (contains? (schema/projection-pure-data projection-a)
+                          :seon.schema.projection/compiled))
+          "and it is runtime state, never part of the projection's EDN"))))
+
 (defn predicate-under-test?
   "Root-rebound by the collision regression below. Its value is never asserted
    directly; what is asserted is which environment's answer a projection gets."

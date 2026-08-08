@@ -201,6 +201,39 @@
        :else value))
    form))
 
+(defn- with-compiled-cache
+  "Give one projection its own holder for state compiled FROM it.
+
+   Malli's pattern, applied: a validator is a pure function of the schema it
+   was compiled from, so it lives on that instance and cache identity is
+   structural — there is nothing to invalidate and nothing to compare.
+
+   Seon's compiled validators, explainers, and identity-only descriptors used
+   to live in two process-global slots with room for ONE projection each,
+   guarded by comparing the slot's projection against the caller's. That
+   comparison was a check-then-act on shared mutable state — the check and
+   the returned value were two independent derefs — so one environment could
+   be handed another environment's validator for the same schema key,
+   reproduced in both directions, 2 runs in 5 (2026-08-07 parallel isolation
+   audit, Defect II, `probe_shape_generation_cache`).
+
+   The holder is installed FRESH at every construction and never inherited: a
+   projection derived by changing forms would otherwise carry its parent's
+   compiled answers for definitions it no longer has. It needs no key,
+   because its key is the value it hangs on."
+  [projection]
+  (assoc projection :seon.schema.projection/compiled (atom {})))
+
+(defn- projection-cache
+  "The holder [[with-compiled-cache]] installed, or nil.
+
+   Nil is honest rather than exceptional: a projection assembled by a caller
+   that did not go through a constructor still answers every question, it
+   just recompiles. Correctness never depends on the cache being there, which
+   is what makes it safe for it to be absent."
+  [projection]
+  (:seon.schema.projection/compiled projection))
+
 (defn- bound-forms [forms predicate-functions]
   (update-vals forms #(bind-predicates % predicate-functions)))
 
@@ -908,8 +941,9 @@
     [:=> [:catn [::forms :map]] ::projection]]}
   ([] (declaration-projection (declaration-population)))
   ([forms]
-   {:seon.schema.projection/forms forms
-    :seon.schema.projection/registry (candidate-registry forms)}))
+   (with-compiled-cache
+    {:seon.schema.projection/forms forms
+     :seon.schema.projection/registry (candidate-registry forms)})))
 
 ;; THE one stable registry facade Seon installs as Malli's process-global
 ;; default. Once a projection is active it reads only that committed
@@ -1330,7 +1364,8 @@
           pure-predicate-symbols #{}
           predicate-functions {}}
      :as options}]
-   (if (contains? forms :seon.schema.projection/forms)
+   (with-compiled-cache
+    (if (contains? forms :seon.schema.projection/forms)
      (materialize-projection
       (compose-projection-data forms function-contracts)
       options)
@@ -1546,11 +1581,12 @@
      :seon.schema.projection/catalog catalog
      :seon.schema.projection/fingerprint-version
      projection-fingerprint-version
-     :seon.schema.projection/fingerprint fingerprint}))))
+     :seon.schema.projection/fingerprint fingerprint})))))
 
 (def ^:private projection-runtime-keys
   #{:seon.schema.projection/registry
     :seon.schema.projection/compile-options
+    :seon.schema.projection/compiled
     :seon.schema.projection/predicate-functions})
 
 (defn projection-pure-data
@@ -1823,11 +1859,12 @@
        (m/schema form options))
      (doseq [[_ contract] (bound-forms contracts predicate-functions)]
        (m/function-schema contract options))
-     (assoc pure-data
-            :seon.schema.projection/registry registry
-            :seon.schema.projection/compile-options options
-            :seon.schema.projection/predicate-functions
-            predicate-functions))))
+     (with-compiled-cache
+      (assoc pure-data
+             :seon.schema.projection/registry registry
+             :seon.schema.projection/compile-options options
+             :seon.schema.projection/predicate-functions
+             predicate-functions)))))
 
 (defn- predicate-functions-with
   [projection definitions]
@@ -2226,11 +2263,12 @@
              (get (:seon.schema.projection/schema-admissions projection)
                   schema-key ::absent)
              admission))]
-    (merge candidate shape-data
-           {:seon.schema.projection/shape-rows shape-rows
-            :seon.schema.projection/fingerprint-version
-            projection-fingerprint-version
-            :seon.schema.projection/fingerprint fingerprint})))
+    (with-compiled-cache
+     (merge candidate shape-data
+            {:seon.schema.projection/shape-rows shape-rows
+             :seon.schema.projection/fingerprint-version
+             projection-fingerprint-version
+             :seon.schema.projection/fingerprint fingerprint}))))
 
 (defn projection-without-schema
   "Validate the projection produced by removing one unused schema.
@@ -2632,11 +2670,16 @@
   "Optional test instrumentation called once per diagnostic schema visit."
   (fn [_schema-key] nil))
 
-(defonce ^:private !shape-generation
+;; The ONE thing this slot still holds: the projection last BUILT from a given
+;; packaged population, so the ambient fallback does not rebuild it per call.
+;; It never holds compiled validators or explainers again — those hang off the
+;; projection value itself ([[with-compiled-cache]]). The read below is a
+;; single deref compared by `=` against the forms in hand, so it cannot tear;
+;; that is why the 2026-08-07 audit calibrated THIS path as correct while the
+;; validator cache that used to share the slot was the race.
+(defonce ^:private !ambient-shape-projection
   (atom {:seon.schema.shape/projection nil
-         :seon.schema.shape/candidate-forms nil
-         :seon.schema.shape/validators {}
-         :seon.schema.shape/explainers {}}))
+         :seon.schema.shape/candidate-forms nil}))
 
 (defn projection-validator
   "Compile a validator against exactly one immutable projection."
@@ -2714,22 +2757,16 @@
 (defn- shape-projection []
   (or (current-projection)
       (let [forms (candidate-forms)
-            cached @!shape-generation]
+            cached @!ambient-shape-projection]
         ;; Packaged forms are immutable values read from resources, so two
         ;; accesses may return equal maps without sharing object identity.
         (if (= forms (:seon.schema.shape/candidate-forms cached))
           (:seon.schema.shape/projection cached)
           (let [projection (build-projection forms)]
-            (reset! !shape-generation
+            (reset! !ambient-shape-projection
                     {:seon.schema.shape/projection projection
-                     :seon.schema.shape/candidate-forms forms
-                     :seon.schema.shape/validators {}
-                     :seon.schema.shape/explainers {}})
+                     :seon.schema.shape/candidate-forms forms})
             projection)))))
-
-(defonce ^:private !identity-only-generation
-  (atom {:seon.schema.identity-only/projection nil
-         :seon.schema.identity-only/descriptors []}))
 
 (defn- identity-only-descriptors-in
   [projection]
@@ -2766,16 +2803,20 @@
             (:seon.schema.projection/forms projection))))
 
 (defn- identity-only-descriptors
+  "The identity-only descriptors of exactly `projection`.
+
+   Derived once and kept on the projection's own holder, so asking twice
+   costs one map lookup and asking about a DIFFERENT projection cannot be
+   answered with this one's descriptors. Value admission asks this per node,
+   which is why it must be cheap and why it must be right."
   [projection]
-  (let [cached @!identity-only-generation]
-    (if (identical? projection
-                    (:seon.schema.identity-only/projection cached))
-      (:seon.schema.identity-only/descriptors cached)
-      (let [descriptors (identity-only-descriptors-in projection)]
-        (reset! !identity-only-generation
-                {:seon.schema.identity-only/projection projection
-                 :seon.schema.identity-only/descriptors descriptors})
-        descriptors))))
+  (if-let [cache (projection-cache projection)]
+    (or (:seon.schema.identity-only/descriptors @cache)
+        (let [descriptors (identity-only-descriptors-in projection)]
+          (swap! cache assoc
+                 :seon.schema.identity-only/descriptors descriptors)
+          descriptors))
+    (identity-only-descriptors-in projection)))
 
 (defn identity-only-projection-in
   "Project a registered reference value to its declared identity data."
@@ -2797,29 +2838,22 @@
   [value]
   (identity-only-projection-in (shape-projection) value))
 
-(defn- ensure-shape-generation-for! [projection]
-    (when-not (identical? projection
-                           (:seon.schema.shape/projection @!shape-generation))
-      (reset! !shape-generation
-              {:seon.schema.shape/projection projection
-               :seon.schema.shape/candidate-forms
-               nil
-               :seon.schema.shape/validators {}
-               :seon.schema.shape/explainers {}}))
-    @!shape-generation)
+(defn- cached-compiler-in!
+  "One compiled validator or explainer for `schema-key` in `projection`.
 
-(defn- cached-compiler-in! [projection cache-key compiler schema-key]
-  (let [generation (ensure-shape-generation-for! projection)]
-    (or (get (get generation cache-key) schema-key)
+   The compiled result is kept on the projection's own holder, so the cache
+   cannot be asked about one projection and answer about another. The old
+   shape — reset a process-global slot to the caller's projection, then deref
+   it AGAIN to read the answer — was two independent reads of shared mutable
+   state between which a second environment could reset the slot to its own
+   projection; that check-then-act is banned rather than tightened."
+  [projection cache-key compiler schema-key]
+  (if-let [cache (projection-cache projection)]
+    (or (get-in @cache [cache-key schema-key])
         (let [compiled (compiler projection schema-key)]
-          (swap! !shape-generation
-                 (fn [current]
-                   (if (identical?
-                         projection
-                         (:seon.schema.shape/projection current))
-                     (assoc-in current [cache-key schema-key] compiled)
-                     current)))
-          compiled))))
+          (swap! cache assoc-in [cache-key schema-key] compiled)
+          compiled))
+    (compiler projection schema-key)))
 
 (defn- shape-rank [row]
   [(- (count (:seon.schema/required-attrs row)))
