@@ -161,47 +161,57 @@
                   ::line line-num})))))
         lines))
 
-(defn- extract-links
-  "Extract all link types from lines. Returns vector of ::link maps.
-   Skips links inside code blocks."
-  [lines code-lines]
-  (let [results (atom [])]
-    (doseq [[idx line] (map-indexed vector lines)]
-      (let [line-num (inc idx)]
-        (when-not (contains? code-lines line-num)
-          ;; Strip inline code spans to avoid false positives across all link types
-          (let [stripped (str/replace line #"`[^`]+`" (fn [m] (apply str (repeat (count m) " "))))]
-            ;; Wikilinks: [[target]] or [[target|text]]
-            (doseq [m (re-seq #"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]" stripped)]
-              (swap! results conj
+(defn- bare-url-links
+  "The bare-URL links in one already-stripped line, in source order."
+  [stripped line-num]
+  (let [matcher
+        (re-matcher
+         #"(?<!\(|\"|\[)https?://[^\s\)>\]\"']+"
+         stripped)]
+    (loop [links []]
+      (if (.find matcher)
+        (let [target (.group matcher)
+              before-url (subs stripped 0 (.start matcher))]
+          (recur
+           (if (or (re-find #"\]\($" before-url)
+                   (str/ends-with? before-url "<"))
+             links
+             (conj links {::type :bare-url
+                          ::target target
+                          ::line line-num}))))
+        links))))
+
+(defn- line-links
+  "Every link in one line, wikilinks then markdown links then bare URLs."
+  [line line-num]
+  ;; Strip inline code spans to avoid false positives across all link types
+  (let [stripped (str/replace line #"`[^`]+`" (fn [m] (apply str (repeat (count m) " "))))]
+    (-> []
+        ;; Wikilinks: [[target]] or [[target|text]]
+        (into (map (fn [m]
                      (cond-> {::type :wikilink
                               ::target (nth m 1)
                               ::line line-num}
                        (nth m 2) (assoc ::text (nth m 2)))))
-            ;; Markdown links: [text](url) — but not images ![text](url)
-            (doseq [m (re-seq #"(?<!!)\[([^\]]*)\]\(([^)]+)\)" stripped)]
-              (swap! results conj
+              (re-seq #"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]" stripped))
+        ;; Markdown links: [text](url) — but not images ![text](url)
+        (into (map (fn [m]
                      {::type :markdown
                       ::target (nth m 2)
                       ::text (nth m 1)
                       ::line line-num}))
-            ;; Bare URLs
-            (let [matcher
-                  (re-matcher
-                   #"(?<!\(|\"|\[)https?://[^\s\)>\]\"']+"
-                   stripped)]
-              (loop []
-                (when (.find matcher)
-                  (let [target (.group matcher)
-                        before-url (subs stripped 0 (.start matcher))]
-                    (when-not (or (re-find #"\]\($" before-url)
-                                  (str/ends-with? before-url "<"))
-                      (swap! results conj
-                             {::type :bare-url
-                              ::target target
-                              ::line line-num})))
-                  (recur))))))))
-    @results))
+              (re-seq #"(?<!!)\[([^\]]*)\]\(([^)]+)\)" stripped))
+        (into (bare-url-links stripped line-num)))))
+
+(defn- extract-links
+  "Extract all link types from lines. Returns vector of ::link maps.
+   Skips links inside code blocks."
+  [lines code-lines]
+  (into []
+        (comp (map-indexed (fn [idx line] [(inc idx) line]))
+              (remove (fn [[line-num _]] (contains? code-lines line-num)))
+              (mapcat (fn [[line-num line]] (line-links line line-num))))
+        lines))
 
 (defn- extract-sections
   "Extract sections (content between headings). Returns vector of ::section maps."
@@ -672,28 +682,35 @@
   (let [had-trailing-newline (str/ends-with? content "\n")
         lines (str/split-lines content)
         code-lines (in-code-block? lines)
-        result (atom [])]
-    (doseq [[idx line] (map-indexed vector lines)]
-      (let [line-num (inc idx)
-            is-heading (and (not (contains? code-lines line-num))
-                            (re-matches #"^#{1,6}\s+.*" line))
-            prev-line (when (pos? idx) (nth lines (dec idx)))]
-        ;; Add blank line before heading if needed
-        (when (and is-heading
-                   prev-line
-                   (not (str/blank? prev-line))
-                   (not (= "---" (str/trim prev-line))))
-          (swap! result conj ""))
-        (swap! result conj line)
-        ;; Add blank line after heading if needed
-        (when (and is-heading
-                   (< (inc idx) (count lines))
-                   (not (str/blank? (nth lines (inc idx)))))
-          (swap! result conj ""))))
-    (let [joined (str/join "\n" @result)]
-      (if had-trailing-newline
-        (str joined "\n")
-        joined))))
+        result
+        (reduce
+         (fn [output idx]
+           (let [line (nth lines idx)
+                 line-num (inc idx)
+                 is-heading (and (not (contains? code-lines line-num))
+                                 (re-matches #"^#{1,6}\s+.*" line))
+                 prev-line (when (pos? idx) (nth lines (dec idx)))]
+             (cond-> output
+               ;; Add blank line before heading if needed
+               (and is-heading
+                    prev-line
+                    (not (str/blank? prev-line))
+                    (not= "---" (str/trim prev-line)))
+               (conj "")
+
+               :always (conj line)
+
+               ;; Add blank line after heading if needed
+               (and is-heading
+                    (< (inc idx) (count lines))
+                    (not (str/blank? (nth lines (inc idx)))))
+               (conj ""))))
+         []
+         (range (count lines)))
+        joined (str/join "\n" result)]
+    (if had-trailing-newline
+      (str joined "\n")
+      joined)))
 
 (defn- fix-blanks-around-fences
   "Insert blank lines around code fences that don't have them."
@@ -892,20 +909,17 @@
      ;; => {::content \"# No blank after\\n\\ntext\\n\" ::fixed-count 2}"
   {:malli/schema [:=> [:cat #'fix-request-schema] #'fix-response-schema]}
   [{::keys [content]}]
-  (let [fixes (atom 0)
-        apply-fix (fn [c fix-fn]
-                    (let [result (fix-fn c)]
-                      (when (not= c result)
-                        (swap! fixes inc))
-                      result))
-        result (-> content
-                   (apply-fix fix-trailing-whitespace)
-                   (apply-fix fix-multiple-blanks)
-                   (apply-fix fix-blanks-around-headings)
-                   (apply-fix fix-blanks-around-fences)
-                   (apply-fix fix-trailing-newline))]
-    {::content result
-     ::fixed-count @fixes}))
+  (reduce
+   (fn [{::keys [content fixed-count]} fix-fn]
+     (let [fixed (fix-fn content)]
+       {::content fixed
+        ::fixed-count (cond-> fixed-count (not= content fixed) inc)}))
+   {::content content ::fixed-count 0}
+   [fix-trailing-whitespace
+    fix-multiple-blanks
+    fix-blanks-around-headings
+    fix-blanks-around-fences
+    fix-trailing-newline]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Development Helpers (REPL)

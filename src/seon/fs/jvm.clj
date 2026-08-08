@@ -626,42 +626,61 @@
                                 :seon.fs.jvm/attrs attrs})
                  (dec remaining)))))))
 
-(defn- glob-walk!
+;;; The traversal state — collected paths, examined count, and whether
+;;; every cap still holds — is the walk's RETURN VALUE. A recursive
+;;; child hands its state back to its parent, so no reference outlives
+;;; the call that owns it and an early stop is one `reduced`.
+(declare glob-walk)
+
+(defn- glob-entry
+  [^SecureDirectoryStream directory relative depth matcher limits state
+   {entry-name :seon.fs.jvm/name attrs :seon.fs.jvm/attrs}]
+  (if-not (:my.fs/complete? state)
+    (reduced state)
+    (let [child-relative (if (empty? (str relative))
+                           entry-name
+                           (.resolve ^Path relative ^Path entry-name))
+          state
+          (if (.matches ^java.nio.file.PathMatcher matcher child-relative)
+            (if (< (count (:my.fs/paths state))
+                   (:seon.fs.jvm/max-results limits))
+              (update state :my.fs/paths conj (str child-relative))
+              (assoc state :my.fs/complete? false))
+            state)]
+      (if (and (:my.fs/complete? state)
+               (:seon.fs.jvm/directory? attrs))
+        (cond
+          (< depth (:seon.fs.jvm/effective-depth limits))
+          (with-open [child (.newDirectoryStream
+                             directory entry-name no-follow-links)]
+            (when-not (instance? SecureDirectoryStream child)
+              (refuse! :my.fs/glob-failed
+                       "This filesystem cannot securely traverse the tree."
+                       {:my.fs/path (str child-relative)}))
+            (glob-walk child child-relative (inc depth)
+                       state matcher limits))
+
+          (:seon.fs.jvm/depth-policy-limited? limits)
+          (assoc state :my.fs/complete? false)
+
+          :else state)
+        state))))
+
+(defn- glob-walk
   [^SecureDirectoryStream directory relative depth state matcher limits]
-  (when (:my.fs/complete? @state)
+  (if-not (:my.fs/complete? state)
+    state
     (let [remaining (- (:seon.fs.jvm/max-entries limits)
-                       (:my.fs/examined @state))
+                       (:my.fs/examined state))
           {:seon.fs.jvm/keys [entries exhausted?]}
           (directory-entries directory remaining)
           ordered (sort-by (comp str :seon.fs.jvm/name) entries)]
-      (swap! state update :my.fs/examined + (count entries))
-      (when-not exhausted?
-        (swap! state assoc :my.fs/complete? false))
-      (doseq [{entry-name :seon.fs.jvm/name attrs :seon.fs.jvm/attrs} ordered
-              :while (:my.fs/complete? @state)]
-        (let [child-relative (if (empty? (str relative))
-                               entry-name
-                               (.resolve ^Path relative ^Path entry-name))]
-          (when (.matches ^java.nio.file.PathMatcher matcher child-relative)
-            (if (< (count (:my.fs/paths @state))
-                   (:seon.fs.jvm/max-results limits))
-              (swap! state update :my.fs/paths conj (str child-relative))
-              (swap! state assoc :my.fs/complete? false)))
-          (when (and (:my.fs/complete? @state)
-                     (:seon.fs.jvm/directory? attrs))
-            (cond
-              (< depth (:seon.fs.jvm/effective-depth limits))
-              (with-open [child (.newDirectoryStream
-                                 directory entry-name no-follow-links)]
-                (when-not (instance? SecureDirectoryStream child)
-                  (refuse! :my.fs/glob-failed
-                           "This filesystem cannot securely traverse the tree."
-                           {:my.fs/path (str child-relative)}))
-                (glob-walk! child child-relative (inc depth)
-                            state matcher limits))
-
-              (:seon.fs.jvm/depth-policy-limited? limits)
-              (swap! state assoc :my.fs/complete? false))))))))
+      (reduce
+       (fn [state entry]
+         (glob-entry directory relative depth matcher limits state entry))
+       (cond-> (update state :my.fs/examined + (count entries))
+         (not exhausted?) (assoc :my.fs/complete? false))
+       ordered))))
 
 (defn- glob
   {:malli/schema
@@ -689,13 +708,13 @@
                         (> requested-depth policy-depth))}
             {directory :seon.fs.jvm/directory
              streams :seon.fs.jvm/streams}
-            (directory-access root effective)
-            state (atom {:my.fs/paths []
-                         :my.fs/examined 0
-                         :my.fs/complete? true})]
+            (directory-access root effective)]
         (try
-          (glob-walk! directory (fs/path "") 0 state matcher limits)
-          (let [result @state
+          (let [result (glob-walk directory (fs/path "") 0
+                                  {:my.fs/paths []
+                                   :my.fs/examined 0
+                                   :my.fs/complete? true}
+                                  matcher limits)
                 paths (vec (sort (:my.fs/paths result)))]
             {:my.fs/root root
              :my.fs/paths paths
