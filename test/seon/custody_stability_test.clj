@@ -24,7 +24,14 @@
   #{["seon.cluster.store/open-branch!" :seon.db/connection]
     ["seon.cluster.store/open-store!" :seon.store/store]
     ["seon.sci.eval/build-base-ctx" :seon.sci.eval/ctx]
-    ["seon.sci.eval/cluster-ctx" :seon.sci.eval/ctx]})
+    ["seon.sci.eval/cluster-ctx" :seon.sci.eval/ctx]
+    ;; The fifth, reviewed 2026-08-08 (P17 S2). `seon.db/supplied-connection`
+    ;; is the declared supplier of `:seon.db/connection`: handing out that
+    ;; cluster's connection IS its whole contract, and it can only produce
+    ;; the one carried by the environment it is called with, so it widens no
+    ;; custody. This snapshot caught it exactly as intended — the row landed
+    ;; with S1 and this census was the thing that noticed.
+    ["seon.db/supplied-connection" :seon.db/connection]})
 
 (def ^:private custody-returning-query
   '[:find ?function-symbol ?schema-key
