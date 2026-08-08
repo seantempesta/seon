@@ -4,6 +4,7 @@
        2026-08-07)."}
  seon.shell.jvm-test
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as datahike]
             [my.shell :as shell]
@@ -14,6 +15,8 @@
             [seon.db :as db]
             [seon.effect :as effect]
             [seon.fs :as filesystem]
+            [seon.sci.eval :as sci.eval]
+            [seon.sci.kernel :as kernel]
             [seon.shell.jvm]
             [seon.test-support :as support])
   (:import [java.nio.charset StandardCharsets]
@@ -322,5 +325,62 @@
               (is (nil? (:seon.effect/result-edn receipt)))
               (is (nil? (:seon.effect/settled-at receipt))))
             (testing "the descendant that ignored polite termination is gone"
+              (is (or (.isEmpty child-handle)
+                      (not (.isAlive ^ProcessHandle (.get child-handle))))))))))))
+
+(deftest an-evaluations-deadline-reaps-the-child-it-admitted
+  ;; The class: a child process outliving the evaluation that admitted it.
+  ;; Two limits govern a foreground child — the shell's own and the ARM's —
+  ;; and only the shell's was observed. When an eval time limit fired while
+  ;; the handler was parked on the child, SCI's interrupt had no interpreted
+  ;; function entrance to reach, so `sleep 300` was still running 29 s after
+  ;; its 4 s limit and its receipt stayed permanently pending. The wait is
+  ;; now bounded by whichever limit ends first, so no arm of the handler can
+  ;; return while its child is alive, and the `:interrupted` disposition is
+  ;; what stamps the receipt (proven by the sibling shell-limit test, which
+  ;; drives the same disposition through the door).
+  (with-temp-tree
+    (fn [root]
+      (with-file-database
+        root
+        (fn [connection]
+          (db/transact!
+           connection
+           [{:seon.config/cluster "default"
+             :seon.config.eval.result/blob-threshold 4096}])
+          (let [effective-map
+                (effective root
+                           ;; the shell's own limit is far away: only the
+                           ;; evaluation's deadline can end this child
+                           {:seon.config.shell/time-limit-ms 600000
+                            :seon.config.shell/termination-grace-ms 100})
+                armed (kernel/arm (sci.eval/build-base-ctx) 750)
+                started (System/nanoTime)
+                result
+                (try
+                  (binding [effect/*request-context*
+                            {:seon.db/connection connection}]
+                    ((handler)
+                     {:my.shell/argv
+                      ["/bin/sh" "-c"
+                       (str "printf '%s' \"$$\" > child.pid; "
+                            "while :; do /bin/sleep 1; done")]
+                      :my.shell/cwd "."}
+                     effective-map))
+                  (finally ((:seon.sci.kernel/stop! armed))))
+                elapsed-ms (quot (- (System/nanoTime) started) 1000000)
+                child-pid
+                (parse-long
+                 (slurp (.toFile (.resolve ^Path root "child.pid"))))
+                child-handle (ProcessHandle/of child-pid)]
+            (testing "the child is cut by the evaluation deadline, not the shell's"
+              (is (= :my.shell/time-limit (:seon.error/kind result)))
+              (is (str/includes? (:seon.error/message result) "evaluation")
+                  "the refusal names which limit ended the child")
+              (is (< elapsed-ms 30000)
+                  "the handler returned at the evaluation deadline"))
+            (testing "the terminal disposition is what settles the receipt"
+              (is (= :interrupted (:seon.effect/disposition result))))
+            (testing "no orphan survives the run"
               (is (or (.isEmpty child-handle)
                       (not (.isAlive ^ProcessHandle (.get child-handle))))))))))))

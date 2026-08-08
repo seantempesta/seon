@@ -6,7 +6,8 @@
             [seon.effect :as effect]
             [seon.fs.jvm]
             [seon.schema :as schema]
-            [seon.schema.form :as schema.form])
+            [seon.schema.form :as schema.form]
+            [seon.sci.kernel :as kernel])
   (:import [java.io InputStream OutputStream]
            [java.lang ProcessHandle Thread$Builder$OfVirtual]
            [java.nio ByteBuffer]
@@ -250,11 +251,30 @@
     nil))
 
 (defn- await-exit
+  "Wait for the child, bounded by whichever limit ends first.
+
+  Two limits govern a foreground child and only one of them used to be
+  observed. `:seon.config.shell/time-limit-ms` is the shell's own bound; the
+  ARM's deadline is the evaluation's, and it is the one that admitted this
+  work. Waiting only on the shell's limit is why an interrupted run left
+  `sleep 300` alive 29 s after its 4 s evaluation limit fired: the eval thread
+  was parked in a host call, so SCI's interrupt had no interpreted entrance to
+  reach, and the handler was waiting on a limit nobody had reached.
+
+  Returns `:exited`, `:shell-limit`, or `:evaluation-limit` — a disposition,
+  never a bare boolean, because the caller must say which limit ended the
+  child."
   [^Process child time-limit-ms]
-  (try
-    (.get (.onExit child) (long time-limit-ms) TimeUnit/MILLISECONDS)
-    true
-    (catch TimeoutException _ false)))
+  (let [remaining (kernel/deadline-remaining-ms)
+        evaluation-first? (and remaining (< remaining (long time-limit-ms)))
+        wait-ms (if evaluation-first? (max 0 remaining) (long time-limit-ms))]
+    (try
+      (.get (.onExit child) wait-ms TimeUnit/MILLISECONDS)
+      :exited
+      (catch TimeoutException _
+        (if (or evaluation-first? (kernel/deadline-reached?))
+          :evaluation-limit
+          :shell-limit)))))
 
 (defn- output-descriptor
   [connection captured effective]
@@ -304,30 +324,42 @@
         (stdin-task connection (:in process-record) (:my.shell/stdin request)
                     (:seon.config.shell/stdin-max-bytes effective))]
     (try
-      (if (await-exit child (:seon.config.shell/time-limit-ms effective))
-        (let [evidence (finish-evidence connection stdout-task stderr-task
-                                        effective)]
-          (task-result input-task)
-          (merge {:my.shell/argv argv
-                  :my.shell/cwd (:my.shell/cwd request)
-                  :my.shell/exit (.exitValue child)}
-                 evidence))
-        (do
-          (terminate-tree! process-record
-                           (:seon.config.shell/termination-grace-ms effective))
+      (let [disposition (await-exit child
+                                    (:seon.config.shell/time-limit-ms
+                                     effective))]
+        (if (= :exited disposition)
           (let [evidence (finish-evidence connection stdout-task stderr-task
                                           effective)]
-            (try
-              (task-result input-task)
-              (catch Throwable _))
-            (assoc
-             (flat-error
-              :my.shell/time-limit
-              "The foreign process exceeded its configured time limit."
-              (merge {:my.shell/argv argv
-                      :my.shell/cwd (:my.shell/cwd request)}
-                     evidence))
-             :seon.effect/disposition :interrupted))))
+            (task-result input-task)
+            (merge {:my.shell/argv argv
+                    :my.shell/cwd (:my.shell/cwd request)
+                    :my.shell/exit (.exitValue child)}
+                   evidence))
+          ;; Both limits reap the tree before this frame goes away — the
+          ;; handler owns its resource, so no arm of this function can return
+          ;; while its child is still alive. The `:interrupted` disposition is
+          ;; what stamps `:seon.effect/interrupted-at` on the receipt, so the
+          ;; process and the receipt terminate together or not at all.
+          (do
+            (terminate-tree! process-record
+                             (:seon.config.shell/termination-grace-ms
+                              effective))
+            (let [evidence (finish-evidence connection stdout-task stderr-task
+                                            effective)]
+              (try
+                (task-result input-task)
+                (catch Throwable _))
+              (assoc
+               (flat-error
+                :my.shell/time-limit
+                (if (= :evaluation-limit disposition)
+                  (str "The foreign process was terminated when its "
+                       "evaluation reached its time limit.")
+                  "The foreign process exceeded its configured time limit.")
+                (merge {:my.shell/argv argv
+                        :my.shell/cwd (:my.shell/cwd request)}
+                       evidence))
+               :seon.effect/disposition :interrupted)))))
       (catch InterruptedException interrupted
         (terminate-tree! process-record
                          (:seon.config.shell/termination-grace-ms effective))

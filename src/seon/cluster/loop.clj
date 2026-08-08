@@ -312,19 +312,25 @@
 (declare turn settle-interruption!)
 
 (defn- submission-time-limit-evaluation
-  [time-limit-ms submission-wait-ms]
-  (let [message
-        (str "Evaluation submission did not settle within "
-             time-limit-ms "ms.")
-        value
-        {:seon.error/kind :seon.flow/time-limit
-         :seon.error/message message
-         :seon.error/data
-         {:seon.flow/submission-wait-ms submission-wait-ms}}]
-    {:seon.sci.admit/value value
-     :seon.cluster.eval/result-edn (pr-str value)
-     :seon.cluster.eval/error message
-     :seon.cluster.eval/interrupted-at (Date.)}))
+  "The evaluation value for a submission the backstop cut.
+
+  Built by `seon.sci.eval/unrun-evaluation`, the ONE constructor of that
+  value, so this arm cannot omit a required key the way a hand-built map did.
+  Its own report used to reach `seon.problems/form-problem` missing four
+  required keys, and the durable evidence of the interruption became a
+  contract violation from the recorder instead of the interruption."
+  [request submission-wait-ms]
+  (let [time-limit-ms (:seon.sci.eval/time-limit-ms request)
+        message (str "Evaluation submission did not settle within "
+                     time-limit-ms "ms.")]
+    (sci.eval/unrun-evaluation
+     {:seon.sci.admit/value
+      {:seon.error/kind :seon.flow/time-limit
+       :seon.error/message message
+       :seon.error/data {:seon.flow/submission-wait-ms submission-wait-ms}}
+      :seon.cluster.run.form/ns (:seon.cluster.run.form/ns request)
+      :seon.eval/duration-ms (long submission-wait-ms)
+      :seon.cluster.eval/interrupted-at (Date.)})))
 
 (defn- submit-evaluation!!
   [cluster evaluate submission-id request]
@@ -343,7 +349,7 @@
     (if (= ::seon.flow/completed (::seon.flow/outcome submission))
       (::seon.flow/value submission)
       (submission-time-limit-evaluation
-       (:seon.sci.eval/time-limit-ms request)
+       request
        (::seon.flow/submission-wait-ms submission)))))
 
 (defn- digest

@@ -228,7 +228,15 @@
 (defn- own-arm
   [ctx guard time-limit-ms]
   (let [^ThreadLocal thread-arm (::thread-arm guard)
-        armed (new-armed ctx)]
+        base (new-armed ctx)
+        ;; The deadline as a value ON the arm, so work that BLOCKS can honour
+        ;; it. The latch alone is reachable only from an interpreted function
+        ;; entrance, and a thread parked in a host call makes none — which is
+        ;; how an interrupted `my.shell/run` left its child running for its
+        ;; natural lifetime while its receipt stayed open.
+        armed (assoc base
+                     ::deadline-nanos
+                     (+ (::started-at base) (* (long time-limit-ms) 1000000)))]
     (.set thread-arm armed)
     (try
       (let [task (.schedule deadline-timer
@@ -306,6 +314,33 @@
 (def arm-generator
   "A real arm value — honest by constructing an instance."
   (gen/fmap (fn [_] (new-armed nil)) (gen/return nil)))
+
+(defn deadline-remaining-ms
+  "Milliseconds left on the arm governing this thread, or nil when unarmed.
+
+  The evaluation deadline is what ADMITTED the work, so blocking work must be
+  able to ask how long it may block. Zero or a negative remainder means the
+  deadline has already passed; nil means this thread is serving no arm, or is
+  serving one that carries no deadline (an inherited nested arm), and the
+  caller keeps its own bound.
+
+  This is the interface change the timeout rule asks for: rather than bolting
+  a second clock onto a handler, the arm publishes the one deadline it already
+  owns, so a child process, a socket read, or any other host wait is cut by
+  the limit that admitted it instead of outliving its evaluation."
+  {:malli/schema [:=> [:cat] [:or :nil :int]]}
+  []
+  (when-let [armed (.get ^ThreadLocal (::thread-arm @process-guard))]
+    (when-let [deadline (::deadline-nanos armed)]
+      (quot (- (long deadline) (System/nanoTime)) 1000000))))
+
+(defn deadline-reached?
+  "True when the arm governing this thread has latched its deadline."
+  {:malli/schema [:=> [:cat] :boolean]}
+  []
+  (boolean
+   (when-let [armed (.get ^ThreadLocal (::thread-arm @process-guard))]
+     (.get ^AtomicBoolean (::reached armed)))))
 
 (defn current-arm
   "The arm governing this thread right now, as a value work can carry.
