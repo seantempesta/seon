@@ -61,3 +61,39 @@ The bootstrap plan owner that materializes `:seon.bootstrap.plan/forms` into
   `:seon.instrument/contract-violated` facts from `bootstrap:root`.
 - One class regression asserts the materialized forms are placeholder-free for
   an agent whose namespace is not `my.agents.root`.
+
+## Narrowed, 2026-08-08 (whole-system-arc observer lane)
+
+Cluster `default` (pid 31475). Still open, but the failure is now precisely
+bounded — and it is the opposite way round from what the acceptance criterion
+above anticipates.
+
+Across all 114 recorded `:seon.cluster.run.form/source` rows, **exactly 2**
+carry a placeholder, and both belong to `bootstrap:root`:
+
+```clojure
+(in-ns '{{seon.ns/name}})
+(seon.db/q '[:find ?spec . :in $ ?sym
+             :where [?f :seon.fn/sym ?sym] [?f :seon.fn/spec ?spec]]
+           "{{seon.ns/name}}/largest")
+```
+
+The distinct `in-ns` forms in the cluster:
+
+```clojure
+["(in-ns '{{seon.ns/name}})"     ; bootstrap:root — raw
+ "(in-ns 'my.agents.root)"
+ "(in-ns 'arc.inventory)"        ; created at runtime — substituted
+ "(in-ns 'arc.health)"
+ "(in-ns 'arc.timeline)"]
+```
+
+So substitution works for agents created at runtime — the three arc agents all
+received correct forms and their `in-ns` succeeded — and fails only for the
+**root bootstrap at cluster boot**. The acceptance criterion should be inverted
+accordingly: the non-root case is the one that already passes.
+
+One consequence for whoever fixes this: because the three runtime agents' `in-ns`
+succeeded, the `No such namespace: arc.inventory` error they still hit at
+`(largest)` is *not* caused by this issue. That is a separate defect, filed as
+[Report a wrong-arity call as an arity error, not a missing namespace](wrong-arity-call-reports-no-such-namespace.md).

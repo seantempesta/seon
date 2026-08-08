@@ -301,3 +301,38 @@ does not inherit a half-done seam.
 Independently confirmed on the live cluster: the resolver is per EMIT, not per
 node, so a walk pays it hundreds of times rather than thousands. That makes
 print a real cost and not the dominant one.
+
+## Recurrence, 2026-08-08 (whole-system-arc observer lane)
+
+Cluster `default` (pid 31475), 28 minutes after boot, under a four-agent
+concurrent workload: **14,583 resolutions across 45 callers**.
+
+The caller mix has shifted materially since the morning lane, and `seon.print`
+is now the single dominant caller rather than a secondary one:
+
+| Caller | Count | Share |
+|---|---:|---:|
+| `seon.print (print.cljc:232)` | 6,337 | 43% |
+| `seon.schema.datahike (datahike.clj:71)` | 2,080 | 14% |
+| `seon.schema.datahike (datahike.clj:72)` | 1,040 | 7% |
+| `seon.schema.datahike (datahike.clj:112)` | 768 | 5% |
+| `seon.schema.datahike (datahike.clj:220)` | 600 | 4% |
+
+Per-call cost re-measured directly on this JVM rather than reused from the
+earlier note, and still flat with repetition — so still not memoized:
+
+```clojure
+{:ms-per-call-10 12.90, :ms-per-call-50 11.51}
+```
+
+14,583 × ~11.5 ms ≈ **168 seconds of CPU in a 28-minute JVM**.
+
+The note above argues print is "a real cost and not the dominant one". Under
+concurrent agent turns that is no longer true by count: print is 43% of all
+resolutions and more than three times the next caller. The `seon.schema.datahike`
+callers remain the worse cost per surface — one `/data` request alone spends 927
+resolutions, ~530 of them in the bridge — but a fix that addresses only the
+bridge would now leave the largest single caller untouched.
+
+The warning wall also persists by volume: 44 of the first 62 boot log lines
+(71%) are fallback occurrence lines.

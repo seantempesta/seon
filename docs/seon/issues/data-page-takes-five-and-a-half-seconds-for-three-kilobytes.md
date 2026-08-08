@@ -103,3 +103,35 @@ because the bridge is a caller that note does not currently name.
 - Repeat requests at an unchanged basis do not recompute the page.
 - The measurement is a recurring one, so a later change cannot quietly
   reintroduce a multi-second floor.
+
+## Recurrence and regression, 2026-08-08 (whole-system-arc observer lane)
+
+Cluster `default` (pid 31475), a fresh cluster. Not fixed, and slower:
+
+| Sample | Status | Bytes | TTFB | Total |
+|---|---|---:|---:|---:|
+| 1 | 200 | 3,168 | 6.537 s | 6.537 s |
+| 2 | 200 | 3,168 | 6.412 s | 6.412 s |
+
+TTFB equals total on every sample and there is still no warm path, while `/`
+serves 397 KB warm in 15 ms on the same server.
+
+Priced independently by snapshotting `seon.schema/!fallback-counts` around one
+6.412 s request:
+
+```clojure
+{:total-delta 927
+ :top {"seon.schema.datahike (datahike.clj:71)"  264
+       "seon.schema.datahike (datahike.clj:72)"  133
+       "seon.schema.datahike (datahike.clj:112)" 109
+       "seon.schema.datahike (datahike.clj:220)"  80
+       "seon.schema.datahike (datahike.clj:203)"  80
+       "seon.schema.datahike (datahike.clj:184)"  76}}
+```
+
+927 resolutions for one 3 KB page — 67% more than the 556 originally recorded,
+and still essentially all from the Malli-to-Datahike bridge. Same cause, larger.
+
+The per-resolution cost was re-measured directly on this JVM rather than reused
+from the earlier note: 12.90 ms at n=10 and 11.51 ms at n=50, flat, confirming
+it is still not memoized.
