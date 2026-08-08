@@ -98,7 +98,14 @@
                               :seon.ai.attempt/reasoning
                               :seon.ai.attempt/reasoning-blob
                               :seon.ai.attempt/reasoning-size))]
-    (assoc unit :seon.render/value attempt)))
+    ;; The caller counted the value it handed in. Withholding reasoning
+    ;; changes what this producer renders, so it restates the total too —
+    ;; otherwise the elision machinery reports omitted children that the
+    ;; agent projection is never meant to show, and the AI bytes change the
+    ;; moment a provider returns reasoning.
+    (assoc unit
+           :seon.render/value attempt
+           :seon.render.data/total (count attempt))))
 
 (defn attempt-ai
   "Render an attempt without exposing provider reasoning to agent context."

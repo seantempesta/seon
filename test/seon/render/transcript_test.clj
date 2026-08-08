@@ -859,6 +859,13 @@
                     visible-ids)
                    (<= (tokens/estimate ai) budget)
                    (<= (tokens/estimate html) budget)
+                   ;; Every entry roots the values it renders, so no reader
+                   ;; ever meets a render-contract refusal where its value
+                   ;; belongs.
+                   (not (str/includes?
+                         ai (str :seon.render.value/missing-root-identity)))
+                   (not (str/includes?
+                         html (str :seon.render.value/missing-root-identity)))
                    (not-any? #(str/includes? ai %)
                              forbidden-session-narration)))))))
          :seed property-seed)]

@@ -9,38 +9,56 @@ tags: [issue, render, agent]
 
 ## Resolution (2026-08-08, render floor repair lane)
 
-Fixed at cause in `seon.render.transcript/projected-entry`
-(`src/seon/render/transcript.clj`). The projection now derives a stable root
-identity from the entry's OWN declared block name and threads it onto the unit
-before building any text:
+Fixed at cause in `seon.render.transcript` (`src/seon/render/transcript.clj`,
+commit `d4ac2ba40`). Two lanes converged on this file; the landed shape is the
+one below.
+
+`history` now derives each entry's durable identity ONCE, from the entity's own
+declared unique identity attribute (`identity-attributes` over `(:schema db)` —
+a query, never a per-kind rule), and carries it as `::root`. `projected-entry`
+threads that root onto the unit before building any text:
 
 ```clojure
-(let [unit (assoc unit :seon.render.block/name (entry-name entry))]
+(let [unit (assoc unit :seon.render.value/root (::root entry))]
   …)
 ```
 
-`entry-name` was already the entry's stable identity — `:seon.transcript.<kind>/<id>`,
-the same block name the HTML list uses at `block/surface-id` — so nothing is
-invented. `value/node-id` accepts `:seon.render.block/name` as a root address,
-so every `floor-text`, `bounded-scalar`, and `rendered-family` call inside an
-entry now renders the value instead of the refusal. `:seon.render.block/name`
-(not `:seon.render.value/root`) was chosen deliberately: it supplies the node
-id WITHOUT changing the print requery-id, so no unrelated pager/requery
-semantics shift. `entry-name` was moved above `projected-entry` to resolve.
+So every `floor-text`, `bounded-scalar`, and `rendered-family` call inside an
+entry renders the value instead of the refusal, and a new entry kind is rooted
+without anyone remembering to add a rule. `:seon.render.value/root` (rather
+than the block name) is deliberate: it also becomes the print
+`:seon.print/requery-id`, so an elided value now names an identity the reader
+can actually pull — `requery by [:seon.cluster.eval/id "…"]` — instead of
+"requery refused: the value has no durable blob or entity identity". The entity
+id is the honest fallback if a pulled entity ever carries no identity
+attribute.
 
-- `seon.render.transcript-test`: **28 failures → 0 refusal failures** (207
-  assertions), stable across three runs. The error face, capped face, and
-  bounded scalar now assert the value. One residual, unrelated failure remains
-  and is its own note (see below).
-- Live proof (scratch cluster `rr-scratch`, isolated root): the root agent's
-  `/agent/root/debug` page — rendered through the full production pipeline,
-  13 eval receipts — contains **zero** `missing-root-identity` strings and
-  shows real receipt faces (`=> error`, `=> (help)…`) where results/errors
-  belong.
+- `seon.render.transcript-test`: **28 failures → 0** (12 tests, 207
+  assertions). The error face, capped face, and bounded scalar assert the
+  value.
+- Class regression: the generative totality property
+  `every-generated-history-is-ordered-total-and-token-bounded` now also asserts
+  that neither the AI text nor the HTML of ANY generated history contains
+  `:seon.render.value/missing-root-identity` — the class is dead for every
+  entry kind and detail level, not just the three faces that were noticed.
+- Live falsifier (cluster `default`, `eval_clj`, namespaces reloaded): the root
+  agent's real transcript renders 8,967 characters of actual REPL forms,
+  printed output, and a `#:my.run{:disposition :completed, :result "…"}`
+  receipt face with **zero** `missing-root-identity` strings. Same live unit,
+  root removed → the refusal returns; root supplied → the value:
 
-The one remaining `seon.render.transcript-test` failure is a SEPARATE class in
-a foreign owner, not the refusal: see
-[Model reasoning perturbs the agent AI projection's elision](../reasoning-attribute-perturbs-the-agent-ai-walk-projection.md).
+  ```text
+  without-root → #:seon.error{:kind :seon.render.value/missing-root-identity, …}
+  with-root    → #:my.run{:disposition :completed}
+  ```
+
+The one remaining `seon.render.transcript-test` failure was a SEPARATE class —
+reasoning inflating the attempt block's child count — root-caused and fixed in
+the same session:
+[Model reasoning perturbs the agent AI projection's elision](reasoning-attribute-perturbs-the-agent-ai-walk-projection.md).
+The namespace is now fully green (0 failures, 0 errors), as is
+`bin/test --changed src/seon/ai.clj --changed src/seon/render/transcript.clj`
+(213 tests, 1,161 assertions).
 
 ## Problem
 

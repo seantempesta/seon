@@ -49,11 +49,10 @@ See `README.md` for the convention.
 | [Settle what arrived when a provider stream closes mid-body](a-mid-stream-provider-disconnect-discards-the-whole-turn.md) | blocker | whole-system arc repair wave |
 | [Stop `seon.db/transact!` returning a different shape per dynamic var](transact-returns-a-different-shape-depending-on-a-dynamic-var.md) | blocker | P17 S4 `seon.db` conversion sweep |
 
-## Friction (122)
+## Friction (121)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [Keep model reasoning out of the agent AI walk projection's elision](reasoning-attribute-perturbs-the-agent-ai-walk-projection.md) | friction | render-selection / walk repair wave |
 | [May a run refine a schema key nothing depends on?](within-run-schema-key-refinement-needs-an-owner-ruling.md) | friction | owner design ruling (schema-key immutability vs the usage guard) |
 | [Stop a failed turn from waking itself through its own fault message](a-failed-turn-wakes-itself-through-its-own-fault-message.md) | friction | live-drive context repair wave |
 | [Make `clojure.pprint` available in the agent's REPL](agent-repl-cannot-require-clojure-pprint.md) | friction | live-drive context repair wave |
