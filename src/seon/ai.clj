@@ -1017,8 +1017,110 @@
       ;; request may have been transmitted) are all terminal
       :else :fail)))
 
+(defn- cause-chain
+  "Every throwable in `failure`'s cause chain as `class: message` strings.
+
+  THE JDK PUTS THE REAL CAUSE IN THE CAUSE. A body whose stream ends
+  early surfaces as `java.io.IOException: closed` with the actual
+  failure attached underneath
+  (`ResponseSubscribers.java:355-380`, openjdk 26.0.1 — `throw new
+  IOException(\"closed\", failed)`). Recording only `ex-message` is how
+  seven consecutive production failures said `closed` and named nothing:
+  the diagnosis was thrown away at the catch site. A diagnostic that
+  omits what it holds is a defect even while it 'works'.
+
+  Private and unschema'd on purpose: its argument is a host Throwable,
+  which is not a declarable value shape, and a `:seon.ai/throwable`
+  placeholder would be an invented schema for a host object."
+  [^Throwable failure]
+  (loop [failure failure chain []]
+    (if (nil? failure)
+      chain
+      (recur (.getCause failure)
+             (conj chain (str (.getName (class failure)) ": "
+                              (ex-message failure)))))))
+
+(defn- interruptible-lines
+  "Lines from `reader`, recording a read failure in `failure` rather
+  than throwing it.
+
+  This is the whole reason a truncated stream can keep what arrived: the
+  fold above consumes an ordinary sequence, and a sequence that ENDS on
+  a transport failure leaves the accumulated snapshot in the caller's
+  hands instead of unwinding past it. The atom is invocation-local
+  coordination between this seq and its one consumer, nothing durable."
+  [^BufferedReader reader failure]
+  (lazy-seq
+   (let [line (try (.readLine reader)
+                   (catch Throwable read-failure
+                     (reset! failure read-failure)
+                     nil))]
+     (when (some? line)
+       (cons line (interruptible-lines reader failure))))))
+
+(defn- truncation
+  "ONE flat `::stream-truncated` error value for a stream that ended
+  before its terminal event.
+
+  One value, both arms. When nothing arrived this IS the call's outcome;
+  when text arrived it rides beside the text as
+  `:seon.ai/truncation`, so the same fact reaches the durable record
+  either way and nothing has to reconstruct \"how did this end\" from a
+  second shape. Its data is EVIDENCE ONLY: the characters actually
+  folded, the JDK's whole cause chain, and whether this thread was
+  interrupted — an interrupt reaches a reader as a closed stream too,
+  and the two have completely different owners."
+  [snapshot failure]
+  (let [received (count (:seon.ai/text snapshot))
+        chain (cause-chain failure)]
+    {:seon.error/kind ::stream-truncated
+     :seon.error/message
+     (if (pos? received)
+       (str "The provider's stream ended after " received
+            " characters of assistant text, before its terminal event."
+            " What arrived was kept and may stop mid-thought. The"
+            " transport ended with: " (str/join " <- " chain))
+       (str "The provider answered 200 and then ended the stream before"
+            " sending any assistant text. The transport ended with: "
+            (str/join " <- " chain)))
+     :seon.error/data
+     (cond-> {::cause-chain chain
+              ::text-received received
+              ::thread-interrupted? (.isInterrupted (Thread/currentThread))}
+       (:seon.ai/reasoning-partial snapshot)
+       (assoc ::reasoning-received
+              (count (:seon.ai/reasoning-partial snapshot))))}))
+
+(defn- truncated-completion
+  "One completion value for a 2xx stream that ended before its terminal.
+
+  THE TURN KEEPS WHAT ARRIVED. The provider generated and charged for
+  the text already folded, so discarding it to report a clean failure
+  costs money AND the agent's progress. When any text arrived this is an
+  ORDINARY completion carrying the truncation fact beside it —
+  downstream settles the forms that arrived, and the truncation is
+  queryable rather than inferred. When nothing arrived there is no
+  partial to keep, so the truncation IS the outcome, and it says that
+  explicitly instead of blaming an unreadable body.
+
+  NOTHING HERE RETRIES (owner ruling, 2026-07-27 late). The evidence
+  says output was observed exactly when it was, `disposition` reads that
+  evidence, and a re-request is never issued on either arm."
+  [snapshot failure]
+  (let [ended (truncation snapshot failure)]
+    (if (seq (:seon.ai/text snapshot))
+      (cond-> {:seon.ai/text (:seon.ai/text snapshot)
+               :seon.ai/truncation ended}
+        (:seon.ai/reasoning-partial snapshot)
+        (assoc :seon.ai/reasoning-content (:seon.ai/reasoning-partial snapshot))
+        (:seon.ai/usage snapshot) (assoc :seon.ai/usage (:seon.ai/usage snapshot))
+        (:seon.ai/tokens snapshot) (assoc :seon.ai/tokens (:seon.ai/tokens snapshot))
+        (:seon.ai/finish-reason snapshot)
+        (assoc :seon.ai/finish-reason (:seon.ai/finish-reason snapshot)))
+      ended)))
+
 (defn- streamed-completion
-  "Read an SSE body to natural EOF and return one completion value.
+  "Read an SSE body and return one completion value.
 
   A streamed call and a one-shot call return the SAME shape — that is
   the point, and it is why this lives beside `completion-text` rather
@@ -1031,14 +1133,24 @@
   is parsed once, so aborting on the first form would be a different
   evaluation mode, not an optimization.
 
+  THREE WAYS A STREAM ENDS, and all three are values here: its terminal
+  event (an ordinary completion), a payload this cannot read (a flat
+  data error — the fold stops rather than joining text across the gap),
+  and the transport ending early (`truncated-completion`, which keeps
+  what arrived). A read failure never unwinds past the snapshot, so a
+  mid-stream disconnect cannot discard billed output.
+
   Empty text is an error, not an empty reply, exactly as
   `completion-text` treats it — a provider that streamed nothing has
   failed the call however cleanly it closed the socket."
   [body sink]
   (with-open [reader (BufferedReader. (InputStreamReader. body "UTF-8"))]
-    (let [snapshot (stream-fold (line-seq reader) sink)]
-      (if (:seon.error/kind snapshot)
-        snapshot
+    (let [failure (atom nil)
+          snapshot (stream-fold (interruptible-lines reader failure) sink)]
+      (cond
+        (:seon.error/kind snapshot) snapshot
+        (some? @failure) (truncated-completion snapshot @failure)
+        :else
         (parsed-completion
          (:seon.ai/text snapshot)
          (:seon.ai/reasoning-partial snapshot)
@@ -1058,6 +1170,22 @@
     (:seon.ai/sink request)
     (assoc :seon.ai/sink (:seon.ai/sink request))))
 
+(defonce ^{:private true :tag HttpClient
+           :doc "THE process's one HTTP client, exactly as `seon.web.jvm`
+  holds one (`src/seon/web/jvm.clj:21-24`). A JDK `HttpClient` owns a
+  connection pool and a selector thread; building one per request throws
+  both away every call, so nothing is ever kept alive and each provider
+  call pays a fresh connection and a fresh thread. The deadline stays
+  per-request on the request builder, which is where the JDK puts it.
+
+  This is NOT the fix for the mid-stream disconnects — that hypothesis
+  was tested and refuted (`tmp/provider-transport/`, and the JDK holds an
+  operation reference for the whole body read:
+  `Http1Response.java:119-147`, `Http2Connection.java:1565-1580`). It is
+  the right shape on its own merits."}
+  client
+  (.build (HttpClient/newBuilder)))
+
 (defn- send-request
   "Send one ordinary request map through the JDK HTTP leaf."
   {:seon.fn/external-sink :ai-visible-text
@@ -1066,8 +1194,7 @@
            :seon.ai.http/headers :seon.ai.http/body]
     stream? :seon.ai/stream?
     sink :seon.ai/sink}]
-  (let [client (.build (HttpClient/newBuilder))
-        ;; THE one deadline, and it is the HTTP client's own: a request
+  (let [;; THE one deadline, and it is the HTTP client's own: a request
         ;; timeout the JVM enforces, not a wrapper thread racing the call.
         builder (-> (HttpRequest/newBuilder (URI/create endpoint))
                     (.timeout (Duration/ofMillis (long timeout-ms))))
@@ -1113,16 +1240,27 @@
                          ::http-status status
                          ::request-transmitted? true
                          ::response-started? true
-                         ::output-observed? true})
+                         ;; DERIVED, NEVER ASSERTED. This flag used to be
+                         ;; a hardcoded `true` on every 2xx failure, so
+                         ;; the attempt row said "output WAS seen" about
+                         ;; streams that delivered nothing — a durable
+                         ;; fact that lied, and one that `disposition`
+                         ;; reads. A truncation counted its characters;
+                         ;; every other 2xx failure holds a body the
+                         ;; provider generated and charged for.
+                         ::output-observed?
+                         (pos? (get (:seon.error/data completion)
+                                    ::text-received 1))})
                 completion))
             (catch Throwable failure
               {:seon.error/kind ::unparseable-body
                :seon.error/message (str "The provider's response was not "
                                         "readable JSON: "
-                                        (ex-message failure))
+                                        (str/join " <- " (cause-chain failure)))
                :seon.error/data {::status status
                                  ::error-class :response
                                  ::http-status status
+                                 ::cause-chain (cause-chain failure)
                                  ::request-transmitted? true
                                  ::response-started? true
                                  ;; a 2xx body EXISTS, so the provider
@@ -1187,7 +1325,11 @@
   - `::timeout` — the deadline fired. An ordinary outcome;
   - `::transport-failure` — the request never completed;
   - `::provider-error` — a non-2xx response, carrying its status;
-  - `::unparseable-body` — 2xx with a body this cannot read."
+  - `::unparseable-body` — 2xx with a body this cannot read;
+  - `::stream-truncated` — 2xx whose stream ended before ANY assistant
+    text arrived. A stream that ends early after some text arrived is
+    NOT an error: it returns the ordinary completion carrying a
+    `:seon.ai/truncation` fact, so the turn keeps what was paid for."
   {:malli/schema [:=> [:cat :seon.ai/request] :seon.ai/completion]}
   [{:keys [:seon.ai/api-key-variable]
     no-auth :seon.config.ai/no-auth

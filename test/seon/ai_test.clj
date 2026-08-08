@@ -671,6 +671,97 @@
                         [:seon.error/data :seon.ai/reasoning-content])))))
 
 ;;; ---------------------------------------------------------------------------
+;;; A stream that ends before its terminal event
+;;; ---------------------------------------------------------------------------
+
+;;; THE CLASS: a transport failure part-way through a 2xx body used to
+;;; unwind past the accumulated snapshot, so everything the provider had
+;;; already generated (and charged for) was discarded and reported as an
+;;; unreadable body. The construction that kills the class is that the
+;;; read failure ENDS the line sequence instead of throwing through the
+;;; fold — after which there is no code path on which a partial can be
+;;; dropped, because the snapshot is simply in the caller's hands.
+
+(defn- truncating-stream
+  "A body that delivers `text` and then fails the way the JDK fails a
+  stream whose connection went away."
+  [text]
+  (let [delivered (java.io.ByteArrayInputStream. (.getBytes ^String text "UTF-8"))]
+    (proxy [java.io.InputStream] []
+      (read
+        ([]
+         (let [byte-read (.read delivered)]
+           (if (neg? byte-read)
+             (throw (java.io.IOException.
+                     "closed"
+                     (java.io.IOException. "connection reset by peer")))
+             byte-read)))
+        ([buffer offset length]
+         (let [read (.read delivered buffer offset length)]
+           (if (neg? read)
+             (throw (java.io.IOException.
+                     "closed"
+                     (java.io.IOException. "connection reset by peer")))
+             read)))))))
+
+(defn- streamed-lines [& lines] (str (str/join "\n" lines) "\n"))
+
+(deftest a-stream-that-ends-mid-body-keeps-every-character-that-arrived
+  (let [seen (atom [])
+        body (truncating-stream
+              (streamed-lines
+               "data: {\"choices\":[{\"delta\":{\"content\":\"(+ 1 2)\"}}]}"
+               "data: {\"choices\":[{\"delta\":{\"content\":\" (+ 3\"}}]}"))
+        completion (#'seon.ai/streamed-completion body #(swap! seen conj %))]
+    (is (= "(+ 1 2) (+ 3" (:seon.ai/text completion))
+        "the turn keeps what arrived rather than discarding a paid completion")
+    (is (nil? (:seon.error/kind completion))
+        "a partial completion is a completion, not a refusal")
+    (is (= 2 (count @seen)) "every arrived delta still published to the sink")
+    (let [truncation (:seon.ai/truncation completion)]
+      (is (= :seon.ai/stream-truncated (:seon.error/kind truncation))
+          "the truncation is a flat error value the caller can record")
+      (is (= 12 (get-in truncation [:seon.error/data :seon.ai/text-received])))
+      (is (= false (get-in truncation
+                           [:seon.error/data :seon.ai/thread-interrupted?])))
+      (is (= ["java.io.IOException: closed"
+              "java.io.IOException: connection reset by peer"]
+             (get-in truncation [:seon.error/data :seon.ai/cause-chain]))
+          "the JDK's real cause is recorded, not just the word closed")
+      (is (str/includes? (:seon.error/message truncation)
+                         "connection reset by peer")
+          "the rendered message names the cause the database holds"))))
+
+(deftest a-stream-that-ends-before-any-text-is-named-truncation-not-bad-json
+  (let [completion (#'seon.ai/streamed-completion (truncating-stream "") nil)]
+    (is (= :seon.ai/stream-truncated (:seon.error/kind completion))
+        "an early close is distinguished from a body that could not be parsed")
+    (is (zero? (get-in completion [:seon.error/data :seon.ai/text-received])))
+    (is (= ["java.io.IOException: closed"
+            "java.io.IOException: connection reset by peer"]
+           (get-in completion [:seon.error/data :seon.ai/cause-chain])))
+    (is (not (str/includes? (:seon.error/message completion) "readable JSON"))
+        "nothing blames the body for a transport that ended")))
+
+(deftest a-truncated-stream-never-reports-output-that-never-arrived
+  ;; the flag `disposition` reads was a hardcoded true on every 2xx
+  ;; failure, so an attempt row asserted "output WAS seen" about a stream
+  ;; that delivered nothing. It is derived now, and a truncation that
+  ;; delivered nothing is still terminal — no re-request either way.
+  (let [empty-truncation (#'seon.ai/streamed-completion (truncating-stream "") nil)
+        evidenced (update empty-truncation :seon.error/data merge
+                          {:seon.ai/error-class :response
+                           :seon.ai/output-observed?
+                           (pos? (get-in empty-truncation
+                                         [:seon.error/data
+                                          :seon.ai/text-received]
+                                         1))})]
+    (is (false? (get-in evidenced [:seon.error/data :seon.ai/output-observed?])))
+    (is (= :fail (ai/disposition {:seon.error/value evidenced
+                                  :seon.ai/backup? false}))
+        "nothing re-requests a 2xx whose stream died, paid or not")))
+
+;;; ---------------------------------------------------------------------------
 ;;; complete — one attempt, four failure shapes, never a throw
 ;;; ---------------------------------------------------------------------------
 
@@ -740,6 +831,96 @@
                   ai/request-body (fn [request] (swap! calls inc) {})]
       (ai/complete base))
     (is (= 1 @calls) "exactly one request was built, and so one was made")))
+
+;;; ---------------------------------------------------------------------------
+;;; The whole leaf, against a server that really truncates
+;;; ---------------------------------------------------------------------------
+
+;;; The unit tests above pin the fold; these pin the HTTP leaf itself,
+;;; because the class showed up as an HTTP fact and a stub that only
+;;; replaces the InputStream cannot see the client, the connection, or
+;;; concurrency. The server answers 200, promises a Content-Length it
+;;; does not deliver, and closes — which is what a provider disconnect
+;;; looks like from inside the JDK.
+
+(defn- sse-chunk [text]
+  (str "data: {\"choices\":[{\"delta\":{\"content\":" (json/write-str text)
+       "}}]}\n\n"))
+
+(defn- start-stub!
+  "A local server: /truncate ends a 200 early, /stream completes normally."
+  []
+  (let [server (com.sun.net.httpserver.HttpServer/create
+                (java.net.InetSocketAddress. "127.0.0.1" 0) 0)
+        write (fn [exchange promised body]
+                (.add (.getResponseHeaders exchange)
+                      "Content-Type" "text/event-stream")
+                (.sendResponseHeaders exchange 200 (long promised))
+                (let [out (.getResponseBody exchange)]
+                  (.write out (.getBytes ^String body "UTF-8"))
+                  (.flush out)
+                  (.close exchange)))]
+    (.createContext
+     server "/truncate"
+     (reify com.sun.net.httpserver.HttpHandler
+       (handle [_ exchange]
+         (let [body (str (sse-chunk "(+ 1 2)") (sse-chunk " (+ 3"))]
+           ;; promise more than we send, then hang up
+           (write exchange (+ 4096 (count body)) body)))))
+    (.createContext
+     server "/stream"
+     (reify com.sun.net.httpserver.HttpHandler
+       (handle [_ exchange]
+         (let [body (str (sse-chunk "(+ 1 2)")
+                         "data: {\"choices\":[{\"delta\":{\"content\":\"\"},"
+                         "\"finish_reason\":\"stop\"}]}\n\n"
+                         "data: [DONE]\n\n")]
+           (write exchange (count body) body)))))
+    (.setExecutor
+     server (java.util.concurrent.Executors/newVirtualThreadPerTaskExecutor))
+    (.start server)
+    server))
+
+(defn- stub-request [server path]
+  (assoc base
+         :seon.ai/endpoint (str "http://127.0.0.1:"
+                                (.getPort (.getAddress server)) path)
+         :seon.ai/stream? true
+         :seon.ai/timeout-ms 10000))
+
+(deftest a-provider-that-hangs-up-mid-body-settles-what-it-already-sent
+  (let [server (start-stub!)]
+    (try
+      (let [completion (with-redefs [ai/credential (constantly "test-key")]
+                         (ai/complete (stub-request server "/truncate")))
+            truncation (:seon.ai/truncation completion)]
+        (is (= "(+ 1 2) (+ 3" (:seon.ai/text completion))
+            "a run built from this settles forms instead of closing with zero")
+        (is (nil? (:seon.error/kind completion)))
+        (is (= :seon.ai/stream-truncated (:seon.error/kind truncation)))
+        (is (pos? (get-in truncation
+                          [:seon.error/data :seon.ai/text-received])))
+        (is (seq (get-in truncation [:seon.error/data :seon.ai/cause-chain]))
+            "the transport's own account of the ending is recorded"))
+      (finally (.stop server 0)))))
+
+(deftest one-client-serves-concurrent-streams
+  ;; the seam that produced the whole-system arc's failures ran several
+  ;; agents' streams at once; the process holds ONE HttpClient, so this
+  ;; is the shape that must not degrade
+  (let [server (start-stub!)]
+    (try
+      (let [outcomes (with-redefs [ai/credential (constantly "test-key")]
+                       (mapv deref
+                             (mapv (fn [_]
+                                     (future
+                                       (ai/complete
+                                        (stub-request server "/stream"))))
+                                   (range 6))))]
+        (is (= 6 (count (filter #(= "(+ 1 2)" (:seon.ai/text %)) outcomes)))
+            (str "every concurrent stream completed: "
+                 (pr-str (mapv #(or (:seon.error/message %) :ok) outcomes)))))
+      (finally (.stop server 0)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The evidence, and the disposition computed from it
