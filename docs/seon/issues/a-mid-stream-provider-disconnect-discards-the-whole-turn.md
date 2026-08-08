@@ -110,3 +110,52 @@ condition it would have to ride out.
 
 `src/seon/ai.clj` (response reading and `:seon.ai/unparseable-body`) with
 `src/seon/cluster/loop.clj` at the phase-refusal boundary.
+
+## Recovery landed 2026-08-08 — commit `8c6c2d90c`
+
+Evidence and the refuted hypothesis:
+[provider-stream-truncation-2026-08-08.md](../../prds/sci-execution-runtime/research/provider-stream-truncation-2026-08-08.md).
+
+The class is dead by construction rather than by a check. A read failure
+now ENDS the line sequence instead of throwing through the fold, so the
+accumulated snapshot is in the caller's hands and there is no path on
+which a partial can be dropped:
+
+- text that arrived returns an ORDINARY completion carrying a flat
+  `:seon.ai/stream-truncated` value under `:seon.ai/truncation`, so the
+  run settles the forms that arrived instead of closing with zero;
+- nothing arriving makes that same value the outcome — distinguished
+  from an unreadable body, and it no longer blames the JSON;
+- the message and data carry the JDK's WHOLE cause chain, the characters
+  received, and whether the reading thread was interrupted. The old
+  message said only `closed` because the catch site kept `ex-message`
+  and dropped `.getCause` — which is why seven consecutive failures were
+  never rooted.
+
+Two corrections to this note's own premises, from the durable rows:
+
+- **`:seon.ai/output-observed? true` was not an observation.** It was a
+  hardcoded constant on every 2xx failure path, so "output WAS seen" was
+  asserted, not measured. It is derived now, and the eight affected
+  attempt rows carry no usage, no finish-reason and no reasoning —
+  nothing arrived from those streams at all.
+- **The runs opened and closed within the same second**, and one
+  occurrence (10:05:00) had no concurrency, so this is not a long stream
+  dying late.
+
+Regressions (`test/seon/ai_test.clj`, 44 tests / 186 assertions green):
+a mid-body end keeps every character and records the cause chain; an
+early close with no text is a named truncation, not bad JSON; a
+truncated stream never reports output that never arrived and stays
+terminal for `disposition`; and a stub server that promises a
+Content-Length it does not deliver settles what it sent.
+
+**Still open, and the reason this note is not archived:** the truncation
+is on the value but is not yet a durable FACT. It must ride a new
+`:seon.ai.attempt/truncation` ref recorded by `seon.cluster.loop` —
+never `:seon.ai.attempt/error`, whose presence already means "this
+attempt failed" (`test/seon/cluster/turn_test.clj:2393`). Declaring that
+attribute is blocked: `src/seon/cluster/prompt.clj:22` requires
+`clojure.tools.logging`, which is absent from `deps.edn`, so
+`seon.cluster` will not load and schema admission refuses every edit to
+`resources/seon/schemas/seon.ai.edn`.

@@ -89,6 +89,54 @@ Neither substitutes for the other: recovery without prevention keeps paying for
 discarded completions, and prevention without recovery still loses a turn on the
 disconnects that remain.
 
+## The hypothesis was tested and REFUTED — 2026-08-08, commit `8c6c2d90c`
+
+This note asked for exactly this: "A falsifier runs first and is
+recorded… If it still recurs, the hypothesis is wrong and the real cause
+is named before any fix lands." The falsifier ran. The hypothesis is
+wrong. Full evidence:
+[provider-stream-truncation-2026-08-08.md](../../prds/sci-execution-runtime/research/provider-stream-truncation-2026-08-08.md).
+
+**The JDK holds an operation reference for the whole body read**, so a
+per-request client cannot be shut down under a stream that is still
+being read. HTTP/1.1 does it through `ClientRefCountTracker`, whose own
+comment says it increments the count "to prevent the SelectorManager
+thread from exiting until our operation is complete"
+(`Http1Response.java:119-147,318-330`); HTTP/2 holds one while the
+stream is in the connection's map (`Http2Connection.java:1565-1580`).
+
+Four probes agree (`tmp/provider-transport/`):
+
+| Probe | Result |
+|---|---|
+| client closed mid-read | throws `IOException: closed` verbatim — the mechanism is real |
+| 280 per-request clients, WeakReference watched | **280/280 collected mid-read, 0 failures** |
+| 12-second streams, 4 concurrent | `ok:121` both arms, clients collected |
+| **live DeepSeek, 24 concurrent streaming calls**, both client shapes | **24/24 succeeded** |
+
+The durable rows also weaken the correlation this note rests on: the 14
+error facts are **8 attempt rows, all ordinal 0** (so the "retry pairs"
+are not second calls), and one occurrence at 10:05:00 had no concurrency
+at all.
+
+**The shared client landed anyway, on its own merits** — one
+`HttpClient` for the process, exactly as `src/seon/web/jvm.clj:21-24`
+already does. A client per call throws away a connection pool and a
+selector thread every request. It is presented as hygiene, not as a
+cause, and the commit message says so.
+
+**The real cause is still unnamed, and naming it needs the evidence we
+were discarding.** The JDK puts the actual failure in the CAUSE of the
+`IOException("closed")`; the catch site kept only `ex-message`. That is
+fixed — the next occurrence records the whole cause chain and the
+thread-interrupt flag, which separates a provider reset, a connection
+failure, and an interrupted reading thread. Until one occurs with that
+evidence, a fifth hypothesis would be a guess.
+
+The billed-and-discarded half is fixed regardless: see the companion
+note, whose recovery work means a mid-stream disconnect now keeps what
+arrived.
+
 ## Acceptance
 
 - One `HttpClient` is built once and reused for every provider request, so a
