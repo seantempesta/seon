@@ -7,7 +7,7 @@
             [seon.dev.clj-kondo :as dev.kondo]
             [seon.dev.state :as state]
             [seon.operator.state :as operator.state])
-  (:import [java.io PushbackReader RandomAccessFile]
+  (:import [java.io PushbackReader]
            [java.net InetSocketAddress ServerSocket Socket
             SocketTimeoutException]
            [java.nio.channels FileChannel]
@@ -219,16 +219,16 @@
     (catch Throwable _ nil)))
 
 (defn- with-operator-lock
-  [_root transition]
-  (let [directory (operator.state/control-root (repository-root))
-        path (fs/path directory "lifecycle.lock")]
-    (fs/create-dirs directory)
-    (with-open [file (RandomAccessFile. (str path) "rw")
-                channel (.getChannel file)]
-      ;; The kernel publishes lock release when the current command finishes.
-      ;; No clock stands in for that observable event.
-      (.lock channel)
-      (transition))))
+  "Serialize one operator root's lifecycle transitions on that root's own lock.
+
+  The lock file is derived from the SELECTED root, so two isolated `--root`
+  operator roots never contend; only two commands in the same root queue, and
+  that wait announces the holder instead of blocking silently."
+  ([root command transition]
+   (operator.state/with-lifecycle-lock!
+    {:seon.operator.lock/path (operator.state/root-lifecycle-lock-path root)
+     :seon.operator.lock/command command}
+    transition)))
 
 (defn- unquote-value
   [value]
@@ -2758,7 +2758,7 @@
       (if (contains? #{"start" "config" "export" "init" "status"
                        "stop" "down" "reset"}
                      command)
-        (with-operator-lock root run-command)
+        (with-operator-lock root (str/join " " arguments) run-command)
         (run-command))
       (catch Throwable error
         (binding [*out* *err*]

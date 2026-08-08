@@ -207,18 +207,185 @@
   [repository-root generation]
   (fs/path (process-claim-directory repository-root) (str generation ".edn")))
 
+(def lifecycle-lock-announce-ms
+  "How long a lock wait stays silent before it announces itself."
+  1000)
+
+(def lifecycle-lock-repeat-ms
+  "How often an announced lock wait repeats while it keeps waiting."
+  5000)
+
+(def lifecycle-lock-timeout-ms
+  "The backstop deadline for a lifecycle lock wait.
+
+  Firing is a bug report — a lifecycle transition that holds one root's lock
+  this long is the defect, not the waiter."
+  900000)
+
+(defn root-lifecycle-lock-path
+  "The lifecycle lock of ONE operator root.
+
+  Every operator root — the repository root and each isolated `--root` — owns
+  its own file under its own control directory, so two isolated roots never
+  contend. The installation control lock below is a different file and is
+  taken only by cross-root work."
+  [managed-root]
+  (fs/path (control-root managed-root) "root-lifecycle.lock"))
+
+(defn control-lock-path
+  "The installation-wide control lock, for cross-root transitions only."
+  [repository-root]
+  (fs/path (control-root repository-root) "lifecycle.lock"))
+
+(defn- lock-holder-path
+  [lock-path]
+  (fs/path (str lock-path ".holder.edn")))
+
+(defn- try-file-lock
+  [channel]
+  (try
+    (.tryLock channel)
+    (catch Throwable error
+      (if (= "java.nio.channels.OverlappingFileLockException"
+             (.getName (class error)))
+        nil
+        (throw error)))))
+
+(defonce ^:private lifecycle-lock-owners
+  ;; A POSIX file lock belongs to the PROCESS, and closing ANY descriptor for
+  ;; the file drops it. So a second thread in this JVM must never open its own
+  ;; descriptor while a sibling thread holds the lock — its polling close
+  ;; would silently release the holder's lock. Threads therefore claim the
+  ;; path in this map first, and only the claiming thread opens a descriptor.
+  (atom {}))
+
+(defn- acquire-lock-slot!
+  [lock-key]
+  (loop []
+    (let [owners @lifecycle-lock-owners]
+      (if (contains? owners lock-key)
+        false
+        (or (compare-and-set! lifecycle-lock-owners owners
+                              (assoc owners lock-key
+                                     (.getName (Thread/currentThread))))
+            (recur))))))
+
+(defn- release-lock-slot!
+  [lock-key]
+  (swap! lifecycle-lock-owners dissoc lock-key))
+
+(defn lock-holder
+  "The recorded holder of one lifecycle lock, with its liveness, when present."
+  [lock-path]
+  (when-let [holder (read-edn (lock-holder-path lock-path))]
+    (assoc holder
+           :seon.operator.lock/holder-alive?
+           (process-identity-alive?
+            (select-keys holder
+                         [:seon.boot/pid :seon.boot/start-instant])))))
+
+(defn- instant-text
+  [value]
+  (if (inst? value)
+    (str (.toInstant ^Date value))
+    (str value)))
+
+(defn- holder-sentence
+  [lock-path]
+  (if-let [holder (lock-holder lock-path)]
+    (str "pid " (:seon.boot/pid holder)
+         " (started " (instant-text (:seon.boot/start-instant holder)) ")"
+         " running `" (:seon.operator.lock/command holder) "`"
+         " since " (instant-text (:seon.operator.lock/acquired-at holder))
+         (when-not (:seon.operator.lock/holder-alive? holder)
+           (str " — that process is NOT alive, so the holder record is stale;"
+                " the kernel already released its lock")))
+    "a process that left no holder record beside the lock"))
+
+(defn with-lifecycle-lock!
+  "Run one lifecycle transition under a named kernel-owned file lock.
+
+  Waiting is bounded and loud: after `lifecycle-lock-announce-ms` the wait
+  prints the lock path, the recorded holder's process identity and command,
+  and how long it has waited; the deadline refusal names the same facts. The
+  deadline is a backstop whose firing is a bug report."
+  [{path :seon.operator.lock/path
+    command :seon.operator.lock/command
+    timeout-ms :seon.operator.lock/timeout-ms
+    :or {timeout-ms lifecycle-lock-timeout-ms}}
+   transition]
+  (fs/create-dirs (fs/parent path))
+  (let [started (System/currentTimeMillis)
+        deadline (+ started timeout-ms)
+        lock-key (str path)]
+    (loop [announced-at nil]
+      (let [outcome
+            (when (acquire-lock-slot! lock-key)
+              (let [file (RandomAccessFile. lock-key "rw")
+                    channel (.getChannel file)
+                    lock (try-file-lock channel)]
+                (if lock
+                  (try
+                    (write-edn! (lock-holder-path path)
+                                (assoc (current-process-identity)
+                                       :seon.operator.lock/path lock-key
+                                       :seon.operator.lock/command (str command)
+                                       :seon.operator.lock/acquired-at (Date.)))
+                    [::ran (transition)]
+                    (finally
+                      (delete-edn! (lock-holder-path path))
+                      ;; Closing the channel releases its FileLock. Babashka
+                      ;; permits FileChannel/close but intentionally does not
+                      ;; expose FileLock/release through SCI.
+                      (.close channel)
+                      (.close file)
+                      (release-lock-slot! lock-key)))
+                  (do
+                    (.close channel)
+                    (.close file)
+                    (release-lock-slot! lock-key)
+                    nil))))]
+        (if outcome
+          (second outcome)
+          (let [now (System/currentTimeMillis)
+                waited (- now started)]
+            (when (<= deadline now)
+              (throw
+               (ex-info
+                (str "Timed out after " waited
+                     " ms waiting for the operator lifecycle lock "
+                     lock-key " held by " (holder-sentence path) ".")
+                {:seon.error/kind :seon.operator/lifecycle-lock-timeout
+                 :seon.operator.lock/path lock-key
+                 :seon.operator.lock/command (str command)
+                 :seon.operator.lock/waited-ms waited
+                 :seon.operator.lock/holder (lock-holder path)})))
+            (let [announce?
+                  (if announced-at
+                    (<= lifecycle-lock-repeat-ms (- now announced-at))
+                    (<= lifecycle-lock-announce-ms waited))]
+              (when announce?
+                (println
+                 (str "! waiting " waited " ms for the operator lifecycle "
+                      "lock " lock-key " — held by " (holder-sentence path)))
+                (flush))
+              (.sleep TimeUnit/MILLISECONDS 100)
+              (recur (if announce? now announced-at)))))))))
+
 (defn- with-control-lock*
   [repository-root transition]
-  (let [directory (control-root repository-root)
-        path (fs/path directory "lifecycle.lock")]
-    (fs/create-dirs directory)
-    (with-open [file (RandomAccessFile. (str path) "rw")
-                channel (.getChannel file)]
-      (.lock channel)
-      (transition))))
+  (with-lifecycle-lock!
+   {:seon.operator.lock/path (control-lock-path repository-root)
+    :seon.operator.lock/command "installation control transition"}
+   transition))
 
 (defn with-control-lock!
-  "Run one lifecycle transition under the installation control lock."
+  "Run one CROSS-ROOT transition under the installation control lock.
+
+  This is the installation-wide lock and it serializes every root that takes
+  it, so only work that genuinely spans roots — reaping dead roots, writing a
+  claim in the shared control directory — belongs here. One root's own
+  lifecycle transitions take that root's `root-lifecycle-lock-path` instead."
   [repository-root transition]
   (with-control-lock* repository-root transition))
 

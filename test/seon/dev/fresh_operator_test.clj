@@ -1823,3 +1823,83 @@
           (.destroyForcibly child)
           (.waitFor child 10 TimeUnit/SECONDS))
         (delete-recursively! root)))))
+
+(deftest isolated-operator-roots-do-not-serialize-on-one-lifecycle-lock
+  (let [held-root (fresh-root)
+        other-root (fresh-root)
+        held-lock (operator.state/root-lifecycle-lock-path (str held-root))
+        other-lock (operator.state/root-lifecycle-lock-path (str other-root))
+        acquired (promise)
+        release (promise)
+        holder
+        (future
+          (operator.state/with-lifecycle-lock!
+           {:seon.operator.lock/path held-lock
+            :seon.operator.lock/command "the regression's holder"}
+           (fn []
+             (deliver acquired true)
+             (deref release 60000 :backstop))))]
+    (try
+      (is (not= (str held-lock) (str other-lock))
+          "each operator root owns its own lifecycle lock file")
+      (is (true? (deref acquired 10000 false))
+          "the regression could not take the held root's lifecycle lock")
+      (testing "a command in another root runs while this root's lock is held"
+        (let [outcome (run-operator other-root "down")]
+          (is (::completed? outcome) (::output outcome))
+          (is (= 0 (::exit outcome)) (::output outcome))
+          (is (not (str/includes? (::output outcome)
+                                  "for the operator lifecycle lock"))
+              (::output outcome))
+          (is (not (realized? release))
+              "the isolated root finished before the held lock was released")))
+      (testing "a second command in the SAME root waits loudly, then refuses"
+        (let [captured (java.io.StringWriter.)
+              refusal
+              (binding [*out* captured]
+                (try
+                  (operator.state/with-lifecycle-lock!
+                   {:seon.operator.lock/path held-lock
+                    :seon.operator.lock/command "a second same-root command"
+                    :seon.operator.lock/timeout-ms 2000}
+                   (fn [] ::ran))
+                  (catch clojure.lang.ExceptionInfo error
+                    (ex-data error))))
+              announcement (str captured)
+              pid (:seon.boot/pid (operator.state/current-process-identity))]
+          (is (= :seon.operator/lifecycle-lock-timeout
+                 (:seon.error/kind refusal))
+              (pr-str refusal))
+          (is (= pid (get-in refusal [:seon.operator.lock/holder
+                                      :seon.boot/pid]))
+              (pr-str refusal))
+          (is (str/includes? announcement "for the operator lifecycle lock")
+              announcement)
+          (is (str/includes? announcement (str "pid " pid)) announcement)
+          (is (str/includes? announcement "the regression's holder")
+              announcement)))
+      (testing "a real command binds to the SELECTED root's lifecycle lock"
+        (let [process
+              (.start
+               (doto (ProcessBuilder.
+                      ^java.util.List (operator-command held-root "down"))
+                 (.directory project-root)
+                 (.redirectErrorStream true)))
+              output-future (process-output process)
+              pid (:seon.boot/pid (operator.state/current-process-identity))]
+          (is (not (.waitFor process 2500 TimeUnit/MILLISECONDS))
+              "the command did not wait for the selected root's held lock")
+          (deliver release :released)
+          (let [outcome (await-process! process output-future
+                                        "The queued fresh operator")]
+            (is (= 0 (::exit outcome)) (::output outcome))
+            (is (str/includes? (::output outcome)
+                               "for the operator lifecycle lock")
+                (::output outcome))
+            (is (str/includes? (::output outcome) (str "pid " pid))
+                (::output outcome)))))
+      (finally
+        (deliver release :released)
+        (deref holder 30000 :abandoned)
+        (delete-recursively! held-root)
+        (delete-recursively! other-root)))))
