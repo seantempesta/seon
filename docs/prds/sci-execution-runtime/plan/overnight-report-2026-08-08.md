@@ -34,6 +34,18 @@ truth-checks, not gates.
   computed from the CLI basis (rotation applied after audit objection);
   issues index check-clean including fixing the checker's own regex bug.
 
+- Render-proc stop completion (`8872311d1`..`897aeb51d`) — cause was
+  NOT the stop path: a declared producer delegating its own value
+  RE-ENTERED selection (infinite render recursion at depth 13 on one
+  virtual thread; found by in-window virtual-thread dump). Class made
+  unconstructable via the rendering-chain set, not depth-capped.
+  `seon.render.web-test`: first zero-error run ever (38/274, twice).
+  The recent SSE fix was checked first and is innocent. Follow-up owed:
+  `resources/seon/schemas/seon.render.edn` is currently UNEDITABLE (five
+  pre-existing `:any` declarations block every edit at admission) — the
+  new `:seon.render/rendering` key works via open maps but cannot be
+  declared until that file is repaired (queued).
+
 ## In flight at last update
 
 stop-completion (render proc liveness) · suite-speed (tiers +
