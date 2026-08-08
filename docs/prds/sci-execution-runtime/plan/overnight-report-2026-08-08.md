@@ -28,7 +28,17 @@ truth-checks, not gates.
    suppliers take ONE argument (the environment) — r2's zero-arg
    spec is impossible once the dynamic var dies (ruling 2), and a
    one-arg declared contract keeps everything a query.
-3. (accumulating)
+3. **May a run refine a schema key nothing depends on?**
+   ([issue](../../../seon/issues/within-run-schema-key-refinement-needs-an-owner-ruling.md))
+   — a genuinely irreducible tension: the accretion rule's "a key's
+   definition never changes" refuses it; the usage guard (which knows no
+   data depends on it) permits it. The guard-decides reading is
+   IMPLEMENTED (the blocker's own acceptance mandated it verbatim);
+   the issue prices the strict alternative. Related follow-up when you
+   rule: the unified decision path's two refusals have mismatched faces
+   (flat typed value vs ex-info surfacing as a Datahike write-rejected
+   prose string).
+4. (accumulating)
 
 ## Landed overnight (chronological, with commits)
 
