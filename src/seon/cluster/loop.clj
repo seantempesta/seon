@@ -1423,8 +1423,7 @@
                                    (work/next-agent-work
                                     @connection
                                     {:seon.cluster.agent/id agent-id
-                                     :seon.cluster.run/process process
-                                     :seon.cluster.work/now now})))]
+                                     :seon.cluster.run/process process})))]
                             (cond
                               refused? (report :error ran)
                               failure (report :error ran)

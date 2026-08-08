@@ -2,8 +2,7 @@
                     [:map
                      [:seon.cluster.agent/id :seon.cluster.agent/id]
                      [:seon.cluster.run/process
-                      :seon.cluster.run/process]
-                     [:seon.cluster.work/now :inst]],
+                      :seon.cluster.run/process]],
                     :episode-runs [:int {:min 0}],
                     :form-settlement
                     [:map

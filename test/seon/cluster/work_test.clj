@@ -201,8 +201,7 @@
   central pass; the totality property is unchanged in strength — it
   always was a per-agent question, and now it says so."
   {:seon.cluster.agent/id agent-id
-   :seon.cluster.run/process process
-   :seon.cluster.work/now now})
+   :seon.cluster.run/process process})
 
 ;;; ---------------------------------------------------------------------------
 ;;; The enumeration
@@ -317,6 +316,29 @@
               :seon.cluster.run/id run-id
               :seon.cluster.agent/id agent-id
               :seon.cluster.run.form/ordinal 0}}])
+
+(deftest the-request-declares-exactly-the-dependencies-the-derivation-reads
+  ;; The class: a required argument no code reads. It cannot be passed
+  ;; wrongly, so it can only ever be forgotten — and
+  ;; seon.cluster.curate/execute-revision! forgot it, turning every
+  ;; session-curation proof into an opaque ::proof-fault. The derivation is
+  ;; pure over committed facts and reads no clock, so the request now says
+  ;; exactly that, and an unread required key cannot be reintroduced without
+  ;; failing here.
+  (let [complete {:seon.cluster.agent/id agent-id
+                  :seon.cluster.run/process process}]
+    (is (true? (seon.schema/valid-candidate-value?
+                :seon.cluster.work/agent-request complete))
+        "the two facts the derivation reads are the whole request")
+    (is (true? (seon.schema/valid-candidate-value?
+                :seon.cluster.work/agent-request
+                (assoc complete :seon.cluster.work/now (Date.))))
+        "a caller still passing a clock is accreted, never refused")
+    (doseq [required (keys complete)]
+      (is (false? (seon.schema/valid-candidate-value?
+                   :seon.cluster.work/agent-request
+                   (dissoc complete required)))
+          (str required " is genuinely required")))))
 
 (deftest the-derivation-is-total-over-every-state
   (doseq [{::keys [label build expect]} states]

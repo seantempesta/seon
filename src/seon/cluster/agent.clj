@@ -243,8 +243,7 @@
                    (cluster.loop/settle-interruption!
                     cluster (:seon.cluster.run/id orphan) now))
                request {:seon.cluster.agent/id agent-id
-                        :seon.cluster.run/process process
-                        :seon.cluster.work/now now}
+                        :seon.cluster.run/process process}
                ;; ONE database value for the derivation
                next (work/next-agent-work @connection request)]
            (if (nil? next)
