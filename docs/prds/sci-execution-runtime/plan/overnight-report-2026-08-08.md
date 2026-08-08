@@ -487,7 +487,20 @@ usage facts, and the control-token reply leak.
   preparation, provider transport) are closed — a focused re-drive
   follows.**
 
-## NEXT: the model-authoring re-drive (gated on tree coherence)
+## Render dogfood lane LANDED; tree coherent; re-drive reforking
+
+Both render units closed (`102fdeac3` render.edn editable — five bare
+`:any` retired for real shapes; `adf67c5c6` transcript floor root
+identity — derived from each entity's own unique attribute, a query not
+a per-kind rule, and it also fixes the elided-value requery face; a
+reasoning-elision defect fixed in passing at `seon.ai`). transcript-test
+28 failures → 0. Coordination note from the lane: a peer swept its tree
+into `d4ac2ba40` whose MESSAGE says `block/name` but whose CODE is the
+`:seon.render.value/root` version — the archived note describes what
+actually shipped. Tree now coherent (all core loads); reforking onto the
+S2 pin for the model-authoring re-drive.
+
+## NEXT: the model-authoring re-drive (reforking now)
 
 Both arc walls are closed, so a focused re-drive can now attempt the
 stage the arc could not reach: a REAL MODEL authoring a contracted
