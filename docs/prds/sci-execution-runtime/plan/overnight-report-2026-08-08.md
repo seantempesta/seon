@@ -432,6 +432,30 @@ usage facts, and the control-token reply leak.
   where agent output belongs, and the render.edn-uneditable blocker
   (both agent-facing dogfood defects).
 
+- **Provider transport LANDED, unifying hypothesis REFUTED**
+  (`8c6c2d90c`): 24/24 concurrent live streams succeeded on both client
+  shapes — the per-request HttpClient cannot drop a body (JDK source
+  proves it). Three issue premises also refuted (`output-observed?` was
+  a hardcoded constant — those streams delivered NOTHING, weren't
+  truncated). Structural fix: a read failure ends the line sequence
+  (partial-as-dropped unrepresentable) + the diagnostic now carries the
+  whole cause chain (why 7 failures went unrooted). One process client
+  as honest hygiene, explicitly not the cause. Durable-truncation-fact
+  half pending (a new `:seon.ai.attempt/truncation` ref, ~3 lines, was
+  blocked by the tools.logging break — now clear).
+- **Recovery-marks-interrupted LANDED** (`3a1be9863`): recovery stamped
+  RECEIPTS correctly but never the RUN — `:seon.cluster.run/interrupted-at`
+  now asserted from the one owner across both recovery paths; the
+  existing restart test strengthened with a control (not a second
+  test). Confirmed the observer's "zero datoms" was the `:avet`
+  non-indexed trap (full query proves 1 where :avet returned 0) — fix
+  stands on run-level evidence.
+- **Tree-wide load break fixed** (`00761c30e`): the token lane reached
+  for `clojure.tools.logging` (not a dependency); prompt.clj now uses
+  timbre, the project logger. Schema admission unblocked. The operator
+  lock-wait during the fix was LOUD and named its holder — the
+  2026-08-08 lock fix working as designed.
+
 ## Pending milestones
 
 - stop-completion lands → reset → 08-06 drive-arc rerun with observer →
