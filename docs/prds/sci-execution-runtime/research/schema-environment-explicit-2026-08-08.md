@@ -37,7 +37,7 @@ REVERTED — it is blocked by a real implementation dependency outside
 ### Criterion 3 — predicate resolution retains the Var
 
 `!predicate-functions` was a process-global `{qualified-symbol function}` map
-written by 44 load-time calls. Two environments registering the same symbol
+written by 37 load-time calls across `src/`. Two environments registering the same symbol
 overwrote each other, last writer winning process-wide.
 
 **Refuters checked before editing** (`tmp/schema-env/probe_predicates.clj`,
@@ -70,7 +70,7 @@ asserting the namespace is unloaded before AND after the question.
 `register-core-predicate!` survives as a load-time ASSERTION rather than a
 registration: it resolves eagerly as the owner namespace loads, so a typo
 fails there and schema compilation never has to require code lazily. That
-eagerness is what makes the non-loading binder sufficient. Its 44 call sites
+eagerness is what makes the non-loading binder sufficient. Its 37 call sites
 belong to the load-time-sentinel deletion; eight sit in `seon.flow` and
 `seon.sci.admit`, which this owner may not touch.
 

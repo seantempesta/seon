@@ -872,10 +872,10 @@
    A typo'd symbol therefore fails while loading the namespace that declared
    it, naming that namespace, rather than at some later projection build.
 
-   The call sites are queued for deletion with the rest of the load-time
-   registration sentinels when acquisition-at-a-basis lands (seon.env PRD
-   deletion list); they are spread across namespaces this owner does not
-   hold."
+   Its 37 call sites across `src/` are queued for deletion with the rest of
+   the load-time registration sentinels when acquisition-at-a-basis lands
+   (seon.env PRD deletion list); eight of them sit in `seon.flow` and
+   `seon.sci.admit`, which this owner does not hold."
   {:malli/schema
    [:=> [:cat :qualified-symbol [:fn clojure.core/ifn?]]
     :qualified-symbol]}
