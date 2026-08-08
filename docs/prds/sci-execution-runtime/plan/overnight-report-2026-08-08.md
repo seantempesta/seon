@@ -37,11 +37,13 @@ truth-checks, not gates.
 
 ## Decisions needing you (ranked)
 
-1. **Background work bounds** — detached submissions correctly no longer
-   inherit the turn's deadline and currently run unarmed. The carriage
-   lane parked three options on the issue with a recommendation (own
-   config-fact caps + a fresh arm)
-   ([issue](../../../seon/issues/the-effect-door-runs-capability-handlers-unarmed.md)).
+1. ~~Background work bounds~~ **RULED AND LANDED** (`aeb17ec7f`):
+   config default 600 s (`:seon.config.effect.background/time-limit-ms`)
+   + optional per-call override winning in either direction, no clamp —
+   the owner's "great defaults and easy and intuitive overrides"
+   verbatim; a fresh detached arm makes unbounded unrepresentable;
+   proven live both directions
+   ([archived issue](../../../seon/issues/archive/the-effect-door-runs-capability-handlers-unarmed.md)).
 2. **Two 30-second naming/shape calls from P17-S1** (accepted on your
    existing rulings' authority, veto open): (a) the row schema landed as
    `:seon.call-preparation/*` — "provider" was deliberately NOT reused
