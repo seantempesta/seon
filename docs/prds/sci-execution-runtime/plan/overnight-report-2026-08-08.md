@@ -419,6 +419,19 @@ live proof), provider transport (shared client + honest truncation, no
 retries), recovery-marks-interrupted, token calibration from recorded
 usage facts, and the control-token reply leak.
 
+- **Token calibration LANDED** (`cc9357948`, `26a047ca2`): the estimator
+  fits chars-per-token PER MODEL from the provider's own recorded
+  prompt_tokens (one new scalar fact, no second sizer), reports its
+  measured error band, admits near-limit only with a loud warn, names
+  every judgement's basis, and the shipped fallback invents NO band
+  (unknown error stays unknown). Proven: the observer's 35.8k prompt
+  that passed a 32.7k budget under chars/4 is now refused (+0.7% from
+  actual); reproduces from the live cluster's 14 attempts (3.28
+  chars/tok, 9.3% band). Render lane dispatched on its two foreign
+  finds: the transcript floor rendering a missing-root-identity refusal
+  where agent output belongs, and the render.edn-uneditable blocker
+  (both agent-facing dogfood defects).
+
 ## Pending milestones
 
 - stop-completion lands → reset → 08-06 drive-arc rerun with observer →
