@@ -510,6 +510,30 @@ naming its caller (the 286k-read "map lookup" logged NOTHING — found
 only by thread dump), which is the ethos section's diagnostics rule
 applied to this exact seam.
 
+**Read side CLOSED — the declaration-population family is done**
+([research](../research/db-read-declaration-population-2026-08-07.md),
+commits `8500755d6`/`281115a07`). Both suite wedges killed (reconcile
+backstop → 5.3 s; config-application backstop → ~73 s); `pull '[*]` on
+the config row 148,504 reads / 5.9 s → 430 / 20 ms; `config/effective`
+84,664 reads → ~350. The decisive finding: threading alone was NOT
+sufficient — the registered `malli-form?` predicate resolves its own
+population (1,824 reads per attribute question even with the projection
+passed), so `ask-declarations` supplies BOTH halves through
+`call-with-forms`; and the per-operation population is a `delay` (eager
+resolution made a no-decode `q` 200× slower — the honest trap named).
+Also found AT HEAD and fixed: the write-side fix had broken EDN-backed
+attribute writes by handing encode a forms-only projection with no
+registry — `declaration-projection` is now the ONE place a population
+pairs with its registry, ambient duplicates deleted, round-trip test.
+The addendum landed: `(db/db)` names its missing connection honestly and
+an inner flat error reaches the boundary as-is. Marginal-honesty note:
+situation-totality stays ~55 s because its fixture supplies nothing at
+the WRITE seam per transaction — the environment erases that floor in
+Phase 2; masking it in the fixture was correctly refused. Shared-file
+note: `501d39648` (fallback lane) swept this lane's in-flight
+`schema.clj` addition — final state coherent and proven, but it is the
+known shared-index trap, logged here for the discipline record.
+
 ## Rollout — test-first, REPL-iterated, then farmed out
 
 Phase 0 — falsify the three load-bearing mechanics live (opus REPL lanes,
