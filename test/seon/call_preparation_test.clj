@@ -201,11 +201,18 @@
                      [:seon.schema/key :seon.db/database-value]
                      :seon.call-preparation/supplier
                      [:seon.fn/sym "sample/nowhere"]}])
-     (let [current (cp/snapshot @connection (projection))]
-       (is (= [:seon.call-preparation/incoherent-supplier]
-              (mapv :seon.error/kind
-                    (:seon.call-preparation/refusals current))))
-       (is (empty? (:seon.call-preparation/supplied-defaults current)))))))
+     (let [current (cp/snapshot @connection (projection))
+           refusal (first (filter #(= :sample/absent
+                                      (:seon.call-preparation/key
+                                       (:seon.error/data %)))
+                                  (:seon.call-preparation/refusals current)))]
+       (is (= :seon.call-preparation/incoherent-supplier
+              (:seon.error/kind refusal)))
+       (is (not (contains? (:seon.call-preparation/supplied-defaults current)
+                           :sample/absent)))
+       (testing "and the cluster's own shipped rows are unaffected"
+         (is (contains? (:seon.call-preparation/supplied-defaults current)
+                        :seon.db/db)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The basis boundary — no sleep, no listener
@@ -293,8 +300,10 @@
                                                   (projection))
                   plan-b (cp/plan state-b database-b snapshot-b
                                   "sample/target")]
-              (is (empty? (:seon.call-preparation/supplied-defaults
-                           snapshot-b)))
+              (is (not (contains? (:seon.call-preparation/supplied-defaults
+                                   snapshot-b)
+                                  :sample/marker))
+                  "B never acquired A's row")
               (is (true? (:seon.call-preparation/empty? plan-b))
                   "B compiled an empty plan from its own facts")
               (is (= [:sample/marker] (slot-keys plan-a 1))
