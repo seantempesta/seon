@@ -967,6 +967,15 @@ Machine: the owner's M-series Mac, same as the 2026-08-06 baseline.
 | Program-graph build, when a change exists | n/a | 7.4 s (`seon.fn/build-manifest` over `src` + `test`, 206 files); skipped entirely when nothing changed |
 | Runner load phase | 5.9 s | 8.0 s (116 namespaces; unchanged mechanism) |
 | Platform tier | n/a | 24.7–31 s over 12 namespaces |
+| **Green end-to-end bare run**, one changed file (`src/my/background.clj`) | same 965.9 s | **52.5 s wall, 0 failures**, and it recorded the new green basis: 69 platform tests + the 1 bulk test that reaches the change, 977 not reached |
+
+The green end-to-end run is the decisive one: 52.5 s from `bin/test` to
+verdict, where the same question previously cost roughly sixteen minutes.
+Within it, the manifest build was 5.6 s and the platform tier 28.4 s, so the
+platform tier is now the whole cost of an ordinary cycle — which is precisely
+where the next optimisation belongs (the seven consolidated moving-part
+regressions, small and structural, replacing today's cheap-but-real store,
+branch, publication, and fixture namespaces).
 
 The bulk tier's own runtime under the new default is NOT yet measured: the
 platform tier was red from foreign in-flight work throughout the measurement
@@ -1001,6 +1010,22 @@ backstop
 ([issue](../../../seon/issues/a-flow-test-hangs-when-run-without-its-namespace-siblings.md)).
 The durable fix is this specification's seven consolidated direct regressions,
 which are small and structural by construction.
+
+### The selector's one honest gap
+
+The selection is exactly as good as the `:seon.fn/calls` facts, and one shape
+records no edge: a test that exercises a MACRO only by `macroexpand-1` of a
+quoted form. `my.background-test` is the worked example — of its two tests,
+`poll-and-await-…` carries five call edges and is selected when
+`src/my/background.clj` changes, while `background-macro-expands-one-direct-call`
+carries none and is not.
+
+This is a missing FACT, not a flaw in the walk, and the fix belongs at the one
+index pass in `seon.fn` rather than in the selector: a quoted symbol resolving
+to a first-party macro in a test body is a real usage the analysis discards.
+Widening the selector by namespace name instead would be the banned naming
+convention. Until the fact exists, `--all` at checkpoints covers it, and the
+gap is bounded — editing the test file itself always selects that file's tests.
 
 ### Deliberately not done
 
