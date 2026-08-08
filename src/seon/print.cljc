@@ -223,17 +223,23 @@
 
 (defn- option-defaults
   []
-  (into {}
-        (keep
-         (fn [entry]
-           (when (vector? entry)
-             (let [attribute (first entry)
-                   properties
-                   (schema.form/attr-form-properties
-                    (schema/schema-definition attribute))]
-               (when (contains? properties ::default)
-                 [attribute (::default properties)])))))
-        (schema/schema-definition ::options)))
+  ;; Every emit resolves these defaults, so the declaration population is read
+  ;; ONCE here and each option read with `get`. Asking
+  ;; `schema/schema-definition` per option re-reads and re-merges every schema
+  ;; resource per option (measured 2026-08-07: 67.9 ms / 912 resource reads for
+  ;; one call with no projection supplied — issue
+  ;; packaged-forms-rereads-every-schema-resource-per-call).
+  (let [forms (schema/declaration-population)]
+    (into {}
+          (keep
+           (fn [entry]
+             (when (vector? entry)
+               (let [attribute (first entry)
+                     properties
+                     (schema.form/attr-form-properties (get forms attribute))]
+                 (when (contains? properties ::default)
+                   [attribute (::default properties)])))))
+          (get forms ::options))))
 
 (defn default-options
   "The complete shipped print options derived from their declarations."

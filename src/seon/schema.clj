@@ -598,6 +598,22 @@
         (:seon.schema.projection/forms *projection*)
         (packaged-forms))))
 
+(defn declaration-population
+  "THE declaration population in hand for this operation.
+
+   Resolve it ONCE per operation and pass it to every question that operation
+   asks; never ask a per-item function that resolves it again. With no
+   projection, projection state, or candidate overlay supplied, resolution
+   falls through to the packaged resources, which re-reads and re-merges every
+   schema resource on disk — so a `keep` over N keys that calls
+   [[schema-definition]] per key costs N complete resource merges (measured
+   2026-08-07: 1,036 ms and 12,616 resource reads for one
+   `seon.config/registration-defaults`). The population is an ordinary
+   immutable map of registry key -> schema form; read it with `get`."
+  {:malli/schema [:=> [:cat] :map]}
+  []
+  (candidate-forms))
+
 (defn call-with-forms
   "Call `f` with one immutable declaration population for this operation."
   {:malli/schema [:=> [:cat :map [:fn clojure.core/ifn?]] :any]}
@@ -656,20 +672,21 @@
                :seon.schema/registration-outside-delta
                :seon.error/kind :user-input}))))
 
-(defn- candidate-registry []
-  (let [defaults (mr/fast-registry (m/default-schemas))
-        forms (candidate-forms)
-        predicate-functions (core-predicate-functions)]
-    (reify
-      mr/Registry
-      (-schema [this type]
-        (or (mr/-schema defaults type)
-            (when-let [form (get forms type)]
-              (m/schema
-               (bind-predicates form predicate-functions)
-               {:registry this}))))
-      (-schemas [_]
-        (merge (mr/-schemas defaults) forms)))))
+(defn- candidate-registry
+  ([] (candidate-registry (candidate-forms)))
+  ([forms]
+   (let [defaults (mr/fast-registry (m/default-schemas))
+         predicate-functions (core-predicate-functions)]
+     (reify
+       mr/Registry
+       (-schema [this type]
+         (or (mr/-schema defaults type)
+             (when-let [form (get forms type)]
+               (m/schema
+                (bind-predicates form predicate-functions)
+                {:registry this}))))
+       (-schemas [_]
+         (merge (mr/-schemas defaults) forms))))))
 
 ;; THE one stable registry facade Seon installs as Malli's process-global
 ;; default. Once a projection is active it reads only that committed
@@ -905,10 +922,18 @@
    Covers the three identity shapes Seon uses
    (plain `:string`/`:keyword` with the prop, and the `:and` id wrap).
    PUBLIC: the single identity-attr predicate — callers reuse it rather than
-   re-deriving the props lookup."
-  {:malli/schema [:=> [:cat :keyword] :boolean]}
-  [attr-key]
-  (internal/identity-attr? (candidate-forms) attr-key))
+   re-deriving the props lookup. A caller asking about more than one key
+   supplies the population it already resolved (see [[declaration-population]]);
+   the one-argument arity resolves one per call, so asking it per key in a loop
+   costs one complete resource merge per key."
+  {:malli/schema
+   [:function
+    [:=> [:cat :keyword] :boolean]
+    [:=> [:cat :map :keyword] :boolean]]}
+  ([attr-key]
+   (internal/identity-attr? (candidate-forms) attr-key))
+  ([forms attr-key]
+   (internal/identity-attr? forms attr-key)))
 
 (defn enum-members
   "Members of a registered `:enum` attr schema, or an empty vector.
@@ -2348,23 +2373,40 @@
    Candidate declarations intentionally do not mutate Malli's process-global
    default registry before their database transaction commits. Boundaries
    validating a declaration and its first facts together use this function so
-   they see the complete candidate without publishing it early."
-  {:malli/schema [:=> [:catn [::registry-key ::registry-key]
-                             [::value ::value]]
-                  :boolean]}
-  [schema-key value]
-  (m/validate schema-key value {:registry (candidate-registry)}))
+   they see the complete candidate without publishing it early.
+
+   A caller validating more than one value supplies the population it already
+   resolved (see [[declaration-population]]); the two-argument arity resolves
+   one per call."
+  {:malli/schema
+   [:function
+    [:=> [:catn [::registry-key ::registry-key] [::value ::value]] :boolean]
+    [:=> [:catn [::forms :map]
+                [::registry-key ::registry-key]
+                [::value ::value]]
+     :boolean]]}
+  ([schema-key value]
+   (m/validate schema-key value {:registry (candidate-registry)}))
+  ([forms schema-key value]
+   (m/validate schema-key value {:registry (candidate-registry forms)})))
 
 (defn explain-candidate-value
   "Explain a value rejected by the current declaration candidate.
 
    Uses the same explicit candidate registry as `valid-candidate-value?`; nil
    means the value is valid."
-  {:malli/schema [:=> [:catn [::registry-key ::registry-key]
-                             [::value ::value]]
-                  [:maybe ::explanation]]}
-  [schema-key value]
-  (m/explain schema-key value {:registry (candidate-registry)}))
+  {:malli/schema
+   [:function
+    [:=> [:catn [::registry-key ::registry-key] [::value ::value]]
+     [:maybe ::explanation]]
+    [:=> [:catn [::forms :map]
+                [::registry-key ::registry-key]
+                [::value ::value]]
+     [:maybe ::explanation]]]}
+  ([schema-key value]
+   (m/explain schema-key value {:registry (candidate-registry)}))
+  ([forms schema-key value]
+   (m/explain schema-key value {:registry (candidate-registry forms)})))
 
 (def ^:const shape-candidate-limit
   "Maximum schema rows examined and returned for structural diagnostics."

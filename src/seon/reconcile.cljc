@@ -65,9 +65,15 @@
 
 (defn- identity-attributes
   []
-  (into #{}
-        (filter schema/identity-attr?)
-        (keys (schema/registered-schemas))))
+  ;; One resolution for the whole scan. `schema/identity-attr?`'s one-argument
+  ;; arity resolves the declaration population per call, which with no
+  ;; projection supplied re-reads and re-merges every schema resource per key
+  ;; — measured 2026-08-07 at 25,916 ms and 286,672 resource reads for this one
+  ;; function (issue packaged-forms-rereads-every-schema-resource-per-call).
+  (let [forms (schema/registered-schemas)]
+    (into #{}
+          (filter #(schema/identity-attr? forms %))
+          (keys forms))))
 
 (defn- desired-identity
   [identity-attrs desired]

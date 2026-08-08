@@ -56,6 +56,32 @@ The residual cost is visible in the suite: `seon.cluster.work-test`'s
 `situation-totality-property` takes ~60 s for 200 trials after the write-side
 fix, essentially all of it here.
 
+## Two suite wedges attributed here, 2026-08-07 evening
+
+Found by the write-side sibling lane while proving its own change; recorded
+here because this issue owns them. Both are the 300 s liveness backstop
+firing, and both dumps put `main` in `seon.db` read decoding with no frame
+from any function that lane changed:
+
+- `seon.reconcile-test/reconciliation-uses-current-provenance-without-history`
+  — `reconcile/plan` → `db/pull` → `decode-pull-entity` (`db.clj:528`) →
+  `edn-encoded-attr?` → the complete resource population, per pulled key. Its
+  `with-non-temporal-database` fixture is hand-built and supplies no
+  population — the same class (c) shape as `work-test`'s. Every other test in
+  that namespace finished in 0.5-1.5 s.
+- `seon.config-application-test/applied-values-shape-the-running-system`
+  (a `:seon.test/long` test, so a bare run does not reach it) — same stack,
+  same frame.
+
+Both are therefore reproducible acceptance tests for this repair: they should
+run to completion with no change to the test.
+
+A third, measured on a live cluster the same evening (isolated operator root,
+cluster `declpop2`): one `seon.config/effective` call performs **84,664
+schema resource reads**, every one of them inside `db/pull '[*]` decoding the
+65-key config row. The caller resolves its own population exactly once; all
+84,664 come from this issue.
+
 ## Owner
 
 `seon.db`, with `seon.schema.datahike` supplying the already-correct

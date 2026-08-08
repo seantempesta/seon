@@ -110,18 +110,26 @@
     effective
     (select-keys effective result-cap-attributes)))
 
+;;; Every function below asks the declaration population one question per
+;;; config key. The population is resolved ONCE per operation at that
+;;; operation's entry point and passed down; asking `schema/schema-definition`
+;;; per key re-reads and re-merges every schema resource per key (measured
+;;; 2026-08-07: 1,036 ms / 12,616 resource reads for one
+;;; `registration-defaults` — issue
+;;; packaged-forms-rereads-every-schema-resource-per-call).
+
 (defn- map-attributes
-  [schema-key]
+  [forms schema-key]
   (into #{}
         (comp (filter vector?) (map first))
-        (schema/schema-definition schema-key)))
+        (get forms schema-key)))
 
 (defn- dial-attributes
-  []
-  (map-attributes :seon.config/manifest))
+  [forms]
+  (map-attributes forms :seon.config/manifest))
 
 (defn- required-dial-attributes
-  []
+  [forms]
   (into #{}
         (comp
          (filter vector?)
@@ -130,24 +138,23 @@
             (when-not (and (map? (second entry))
                            (:optional (second entry)))
               (first entry)))))
-        (schema/schema-definition :seon.config/effective)))
+        (get forms :seon.config/effective)))
 
 (defn- registration-defaults
-  []
-  (let [required (required-dial-attributes)]
+  [forms]
+  (let [required (required-dial-attributes forms)]
     (into {}
           (keep
            (fn [attribute]
              (let [properties
-                   (schema.form/attr-form-properties
-                    (schema/schema-definition attribute))]
+                   (schema.form/attr-form-properties (get forms attribute))]
                (cond
                  (contains? properties :seon.config/default)
                  [attribute (:seon.config/default properties)]
 
                  (not (contains? required attribute))
                  [attribute absent])))
-          (dial-attributes)))))
+          (dial-attributes forms)))))
 
 (defn- refuse!
   [rule data cause]
@@ -177,8 +184,8 @@
       (refuse! ::manifest-unreadable {::path path} error))))
 
 (defn- validate-layer
-  [layer]
-  (let [dials (set (dial-attributes))
+  [forms layer]
+  (let [dials (set (dial-attributes forms))
         declared (select-keys layer dials)]
     (when (contains? layer initialization-key)
       (refuse! ::initialization-not-allowed
@@ -186,32 +193,28 @@
                nil))
     (doseq [[key value] declared]
       (when-not (or (= absent value)
-                    (schema/valid-candidate-value? key value))
+                    (schema/valid-candidate-value? forms key value))
         (refuse!
          ::invalid-value
          {::key key
-          ::explanation (schema/explain-candidate-value key value)}
+          ::explanation (schema/explain-candidate-value forms key value)}
          nil)))
     declared))
 
 (defn- row-identity
-  [row]
+  [forms row]
   (let [identities
         (into []
               (comp
-               (filter schema/identity-attr?)
+               (filter #(schema/identity-attr? forms %))
                (map (fn [attribute] [attribute (get row attribute)])))
               (keys row))]
     (when (= 1 (count identities))
       (first identities))))
 
-(defn- admit-initialization
-  [population]
-  (when-not (vector? population)
-    (refuse! ::invalid-initialization
-             {::explanation {:seon.config/expected :vector-of-maps}}
-             nil))
-  (let [database-attributes (set (schema/canonical-database-attributes))]
+(defn- admit-initialization-rows
+  [forms population]
+  (let [database-attributes (set (schema/canonical-database-attributes forms))]
     (mapv
      (fn [row]
        (when-not (map? row)
@@ -228,20 +231,36 @@
                     {::key attribute}
                     nil)
 
-           (not (schema/valid-candidate-value? attribute value))
+           (not (schema/valid-candidate-value? forms attribute value))
            (refuse! ::invalid-initialization-value
                     {::key attribute
                      ::explanation
-                     (schema/explain-candidate-value attribute value)}
+                     (schema/explain-candidate-value forms attribute value)}
                     nil)))
-       (when-not (row-identity row)
+       (when-not (row-identity forms row)
          (refuse! ::invalid-initialization-identity
                   {::explanation
                    {:seon.config/identity-attributes
-                    (into [] (filter schema/identity-attr?) (keys row))}}
+                    (into []
+                          (filter #(schema/identity-attr? forms %))
+                          (keys row))}}
                   nil))
        row)
      population)))
+
+(defn- admit-initialization
+  [forms population]
+  (when-not (vector? population)
+    (refuse! ::invalid-initialization
+             {::explanation {:seon.config/expected :vector-of-maps}}
+             nil))
+  ;; Admission reaches Malli predicates — `seon.schema/malli-form?` among them
+  ;; — that take only the value and therefore resolve the declaration
+  ;; population themselves. They cannot be handed the value, so the operation
+  ;; SUPPLIES it for the extent of the admission instead. Measured live on a
+  ;; booted cluster 2026-08-07: 82,992 resource reads / 6,495 ms without this,
+  ;; 0 reads / 11.6 ms with it, identical result.
+  (schema/call-with-forms forms #(admit-initialization-rows forms population)))
 
 (defn- default-document
   []
@@ -250,22 +269,23 @@
        default-manifest-path)))
 
 (defn- admitted-default-document
-  [document]
+  [forms document]
   {:seon.config/decisions (dissoc document initialization-key)
    :seon.config/initialization
-   (admit-initialization (get document initialization-key []))})
+   (admit-initialization forms (get document initialization-key []))})
 
 (defn default-population
   "Read and admit the shipped initialization entity rows."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
   (:seon.config/initialization
-   (admitted-default-document (default-document))))
+   (admitted-default-document (schema/declaration-population)
+                              (default-document))))
 
 (defn- validate-default-decisions
-  [document]
-  (let [dials (dial-attributes)
-        decisions (merge (registration-defaults)
+  [forms document]
+  (let [dials (dial-attributes forms)
+        decisions (merge (registration-defaults forms)
                          (select-keys document dials))
         missing (set/difference dials (set (keys decisions)))]
     (when (seq missing)
@@ -277,11 +297,11 @@
       (when-not (or (= absent decision)
                     (and (= key :seon.config.flow.compute/concurrency)
                          (= available-processors decision))
-                    (schema/valid-candidate-value? key decision))
+                    (schema/valid-candidate-value? forms key decision))
         (refuse!
          ::invalid-value
          {::key key
-          ::explanation (schema/explain-candidate-value key decision)}
+          ::explanation (schema/explain-candidate-value forms key decision)}
          nil)))
     decisions))
 
@@ -294,15 +314,17 @@
   absence decisions are resolved only by `compile-manifest`."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (validate-default-decisions
-   (:seon.config/decisions
-    (admitted-default-document (default-document)))))
+  (let [forms (schema/declaration-population)]
+    (validate-default-decisions
+     forms
+     (:seon.config/decisions
+      (admitted-default-document forms (default-document))))))
 
 (defn read-manifest
   "Read and validate one sparse plain-EDN overlay without compiling it."
   {:malli/schema [:=> [:cat :string] :seon.config/manifest]}
   [path]
-  (validate-layer (read-edn-map path)))
+  (validate-layer (schema/declaration-population) (read-edn-map path)))
 
 (defn- resolve-smart-decision
   [key decision]
@@ -320,14 +342,15 @@
   {:malli/schema
    [:=> [:cat :seon.config/compile-request] :seon.config/compiled]}
   [request]
-  (let [{:seon.config/keys [decisions initialization]}
-        (admitted-default-document (default-document))
-        manifest (validate-layer (or (:seon.config/manifest request) {}))
+  (let [forms (schema/declaration-population)
+        {:seon.config/keys [decisions initialization]}
+        (admitted-default-document forms (default-document))
+        manifest (validate-layer forms (or (:seon.config/manifest request) {}))
         environment
-        (validate-layer (or (:seon.config/environment request) {}))
-        defaults (validate-default-decisions decisions)
+        (validate-layer forms (or (:seon.config/environment request) {}))
+        defaults (validate-default-decisions forms decisions)
         decisions (merge defaults manifest environment)
-        required (required-dial-attributes)]
+        required (required-dial-attributes forms)]
     (doseq [[key decision] decisions]
       (when (and (= absent decision) (contains? required key))
         (refuse! ::required-absent {::key key} nil)))
@@ -340,12 +363,12 @@
                     [key (resolve-smart-decision key decision)])))
                 decisions)]
       (when-not (schema/valid-candidate-value?
-                 :seon.config/effective effective)
+                 forms :seon.config/effective effective)
         (refuse!
          ::invalid-value
          {::explanation
           (schema/explain-candidate-value
-           :seon.config/effective effective)}
+           forms :seon.config/effective effective)}
          nil))
       (let [digest
             (schema/sha-256
@@ -374,8 +397,8 @@
   (str "seon.config.initialization/" (pr-str identity)))
 
 (defn- population-transaction-data
-  [database desired]
-  (let [identities (mapv row-identity desired)
+  [forms database desired]
+  (let [identities (mapv #(row-identity forms %) desired)
         entity-ids
         (into {}
               (map
@@ -391,7 +414,7 @@
             value))]
     (mapv
      (fn [row]
-       (into {:db/id (get entity-ids (row-identity row))}
+       (into {:db/id (get entity-ids (row-identity forms row))}
              (map
               (fn [[attribute value]]
                 (let [attribute-schema (get-in database [:schema attribute])]
@@ -411,7 +434,8 @@
    [:=> [:cat :seon.db/connection :seon.config/compiled]
     :seon.reconcile/result]}
   [connection compiled]
-  (let [desired
+  (let [forms (schema/declaration-population)
+        desired
         (into [(:seon.config/desired-row compiled)]
               (:seon.config/initialization compiled))
         inherited-config-identities
@@ -423,7 +447,7 @@
                       [_ :seon.config/cluster ?cluster-name]]
                     @connection))
         identities (into inherited-config-identities
-                         (keep row-identity)
+                         (keep #(row-identity forms %))
                          desired)
         request
         {::reconcile/desired desired
@@ -439,7 +463,7 @@
                  connection
                  {:tx-data
                   (conj
-                   (population-transaction-data @connection desired)
+                   (population-transaction-data forms @connection desired)
                    [:db.fn/call #'reconcile/reconcile-call request])
                   :tx-meta
                   {:seon.db/process
@@ -482,9 +506,10 @@
    (effective db "default"))
   ([db cluster-name]
    (let [cluster-name (or cluster-name "default")
+         forms (schema/declaration-population)
          row (db/pull db '[*] [:seon.config/cluster cluster-name])
-         effective (select-keys row (dial-attributes))
-         missing (sort (set/difference (required-dial-attributes)
+         effective (select-keys row (dial-attributes forms))
+         missing (sort (set/difference (required-dial-attributes forms)
                                        (set (keys effective))))]
      (if (and row (empty? missing))
        effective
