@@ -415,6 +415,20 @@
              (::ordinal entry)
              (::id entry)])))
 
+(defn- entry-root
+  "The durable identity every value this entry renders is rooted at.
+
+  Derived from the entity's own declared unique identity attribute, so a new
+  transcript entry kind is rooted without a per-kind rule; the entity id is
+  the honest fallback when a pulled entity carries no identity attribute."
+  [identity-attrs entry]
+  (let [entity (::entity entry)]
+    (or (some (fn [attribute]
+                (when-some [identity-value (get entity attribute)]
+                  [attribute identity-value]))
+              identity-attrs)
+        [:db/id (:db/id entity)])))
+
 (defn- history
   [db run-id agent-id limit]
   (let [ids (candidate-entity-ids db agent-id limit)
@@ -422,6 +436,7 @@
         receipts (pulled-many db receipt-selector (:eval ids))
         inputs (pulled-many db form-selector (:input ids))
         identities (about-identities db messages)
+        identity-attrs (identity-attributes db)
         message-orders (message-order-facts db (:message ids))
         sources (form-sources db (:eval ids))]
     (->> (concat (map (partial message-entry db run-id agent-id
@@ -430,7 +445,9 @@
                  (map input-entry inputs)
                  (map (partial receipt-entry sources) receipts))
          (map (fn [entry]
-                (assoc entry ::pinned?
+                (assoc entry
+                       ::root (entry-root identity-attrs entry)
+                       ::pinned?
                        (and (contains? #{:eval :input} (::kind entry))
                             (= (bootstrap/run-id agent-id)
                                (::run-id entry))))))
@@ -548,20 +565,29 @@
     (str (prompted-source entry)
          (when (seq result) (str "\n" result)))))
 
+(defn- entry-name
+  [entry]
+  (keyword (str "seon.transcript." (name (::kind entry))) (::id entry)))
+
 (defn- projected-entry
   [unit entry detail]
-  {::kind (::kind entry)
-   ::id (::id entry)
-   ::at (::at entry)
-   ::ordinal (::ordinal entry)
-   ::run-id (::run-id entry)
-   ::run-opened-at (::run-opened-at entry)
-   ::detail detail
-   ::execution-error? (some? (::error entry))
-   ::text (case (::kind entry)
-            :message (message-text unit entry detail)
-            :input (input-text unit entry detail)
-            :eval (receipt-text unit entry detail))})
+  ;; Every value this entry renders through the floor is rooted at the entry's
+  ;; own durable identity, so `value/node-id` never refuses for a
+  ;; caller-supplied root the entry already has, and an elided value names a
+  ;; requery identity a reader can actually pull.
+  (let [unit (assoc unit :seon.render.value/root (::root entry))]
+    {::kind (::kind entry)
+     ::id (::id entry)
+     ::at (::at entry)
+     ::ordinal (::ordinal entry)
+     ::run-id (::run-id entry)
+     ::run-opened-at (::run-opened-at entry)
+     ::detail detail
+     ::execution-error? (some? (::error entry))
+     ::text (case (::kind entry)
+              :message (message-text unit entry detail)
+              :input (input-text unit entry detail)
+              :eval (receipt-text unit entry detail))}))
 
 (defn reasoning-disclosure
   "A collapsed, exact reasoning display shared by live and settled HTML."
@@ -604,10 +630,6 @@
            (sort-by entry-order)
            vec)
       [])))
-
-(defn- entry-name
-  [entry]
-  (keyword (str "seon.transcript." (name (::kind entry))) (::id entry)))
 
 (defn- marker-text
   [elided pinned?]
