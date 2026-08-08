@@ -14,6 +14,7 @@
             [datalog.parser.impl.proto :as parser]
             [datalog.parser.pull :as pull.parser]
             [clojure.test.check.generators :as gen]
+            [seon.env :as env]
             [seon.error.refusal :as error.refusal]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike])
@@ -613,6 +614,56 @@
    (if (error-value? connection)
      connection
      (resolve-database-value connection))))
+
+;;; ---------------------------------------------------------------------------
+;;; Suppliers — the two database values call preparation can supply
+;;; ---------------------------------------------------------------------------
+;;;
+;;; These are the functions the two `:seon.call-preparation` rows name. Each
+;;; takes exactly one argument — the environment the call is running in — and
+;;; returns its value or a flat error. They read NO dynamic var (seon-env PRD
+;;; ruling 2), so a closure handed to a virtual thread still resolves its own
+;;; cluster's custody: the environment travels with the code on the sci ctx,
+;;; and the hook hands it to the supplier.
+
+(defn- unsupplied-custody-error
+  [needed]
+  (error-value
+   ::unsupplied-custody
+   (str "This call's environment carries no cluster connection, so " needed
+        " cannot be supplied. Pass the database value or connection "
+        "explicitly, as in (db/pull db selector eid).")
+   {::needed needed}))
+
+(defn supplied-database-value
+  "This environment's CURRENT database value, derefed at call time.
+
+  Deriving rather than storing is the whole point of the current mode: a
+  database value kept on the environment would go stale silently, while
+  `(d/db connection)` at preparation time is always the latest committed
+  value. A caller that needs one consistent basis passes its own database
+  value and it wins — elide for current, pass for consistent."
+  {:malli/schema
+   [:=> [:cat :seon.env/environment]
+    [:or :seon.db/database-value :seon.error/value]]}
+  [environment]
+  (if-not (env/environment? environment)
+    (unsupplied-custody-error "a database value")
+    (let [connection (:seon.db/connection environment)]
+      (if (nil? connection)
+        (unsupplied-custody-error "a database value")
+        (resolve-database-value connection)))))
+
+(defn supplied-connection
+  "This environment's live branch connection."
+  {:malli/schema
+   [:=> [:cat :seon.env/environment]
+    [:or :seon.db/connection :seon.error/value]]}
+  [environment]
+  (if-not (env/environment? environment)
+    (unsupplied-custody-error "a connection")
+    (or (:seon.db/connection environment)
+        (unsupplied-custody-error "a connection"))))
 
 (defn- source-argument-error
   [source-bindings arguments]

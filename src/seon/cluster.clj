@@ -851,7 +851,13 @@
             (into []
                   (comp
                    (mapcat #(lookup-refs-in database %))
-                   distinct
+                   ;; `(distinct)` — the transducer. Bare `distinct` is the
+                   ;; one-argument COLLECTION arity, so composing it here
+                   ;; handed `comp` a LazySeq where a reducing function
+                   ;; belongs and the refusal threw a ClassCastException
+                   ;; instead of naming the unresolved lookups (found
+                   ;; 2026-08-08, the first time this branch ever ran).
+                   (distinct)
                    (map (fn [[attribute value]]
                           {:seon.activation/lookup-attribute attribute
                            :seon.activation/lookup-value value})))
@@ -1168,10 +1174,6 @@
                            {:seon.db/process
                             [:seon.db.process/id boot-process-identity]}})
             {:seon.boot/population :seon.bootstrap/rows})))
-       (report-source-progress! "initialization rows")
-       (let [rows (config/default-population)]
-         (when (seq rows)
-           (transact-initialization! connection rows)))
        (report-source-progress! "instruction rows")
        (let [rows (instruction-row-changes
                    @connection
@@ -1192,7 +1194,18 @@
           manifest (assoc :seon.fn/manifest manifest)
           (nil? manifest) (assoc :seon.fn/roots seon.fn/source-roots))
         report-source-progress!)
-       (report-source-progress! "program rows complete"))))
+       (report-source-progress! "program rows complete")
+       ;; Initialization rows come LAST because they may name a program row
+       ;; by lookup ref — the call-preparation suppliers do — and program
+       ;; rows are asserted by `index!` immediately above. Nothing earlier in
+       ;; this population reads a config fact (`seon.fn` and
+       ;; `seon.cluster.instruction` name no config attribute), so the move
+       ;; costs no dependency and removes an ordering hazard that would
+       ;; otherwise force every declared row to predate the program graph.
+       (report-source-progress! "initialization rows")
+       (let [rows (config/default-population)]
+         (when (seq rows)
+           (transact-initialization! connection rows))))))
   nil)
 
 ;;; ---------------------------------------------------------------------------

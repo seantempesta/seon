@@ -1,0 +1,173 @@
+;;; Call preparation — the declared supplied-default rows and the derived
+;;; invocation plan (P17 S1).
+;;;
+;;; "Call preparation" is sci's own name for the hook seam
+;;; (`:call-preparation-hook`, `reference-code/sci/src/sci/core.cljc:309`) and
+;;; the owner-ruled working name for this mechanism (seon-env PRD ruling 5,
+;;; 2026-08-07 evening — "ambient" is dead). A SUPPLIED DEFAULT is a value the
+;;; runtime hands to a call for an argument the callee's contract DECLARES and
+;;; the caller OMITTED. The contract is the whole request: there is no
+;;; function-side injection metadata.
+;;;
+;;; A SUPPLIER is the named function that produces one such value from the
+;;; calling environment. It is the role the ambient-injection r2 draft called a
+;;; "provider"; the word is avoided here because `provider descriptor row`
+;;; already names one hosted model provider's config row (AGENTS.md vocabulary
+;;; table) and the two are unrelated.
+#:seon.call-preparation
+{;; --- the declared row -----------------------------------------------------
+ ;; Three facts make a value suppliable. Adding a third supplied default is
+ ;; adding one row plus one ordinary contracted function — never editing a
+ ;; dispatch map, a case expression, or a naming convention.
+ :key [:qualified-keyword {:seon.db/identity true}],
+
+ ;; Ref to the registered `:seon.schema/key` row whose `:seon.schema/shape`
+ ;; IS the value contract. Joining through the shape (not the spelling) is
+ ;; what makes an equal inline declaration converge on the same P12
+ ;; content-addressed fingerprint.
+ :schema :seon.db/ref,
+
+ ;; Ref to the supplier's `:seon.fn/sym` row. The symbol is DATA: it is
+ ;; resolved live at preparation time so hot reload stays visible and a
+ ;; cached plan never captures a function root.
+ :supplier :seon.db/ref,
+
+ :row
+ [:map
+  #:seon.db{:entity true}
+  [:seon.call-preparation/key :seon.call-preparation/key]
+  [:seon.call-preparation/schema :seon.call-preparation/schema]
+  [:seon.call-preparation/supplier :seon.call-preparation/supplier]],
+
+ ;; --- the acquired snapshot ------------------------------------------------
+ :supplier-symbol :qualified-symbol,
+ :schema-key :qualified-keyword,
+ :shape :seon.source/digest,
+
+ :supplied-default
+ [:map
+  [:seon.call-preparation/key :seon.call-preparation/key]
+  [:seon.call-preparation/schema-key :seon.call-preparation/schema-key]
+  [:seon.call-preparation/shape :seon.call-preparation/shape]
+  [:seon.call-preparation/supplier-symbol
+   :seon.call-preparation/supplier-symbol]],
+
+ :supplied-defaults
+ [:map-of :seon.call-preparation/key :seon.call-preparation/supplied-default],
+
+ :validators
+ [:map-of :seon.call-preparation/key :seon.schema/compiled-validator],
+
+ :refusals [:vector :seon.error/value],
+
+ ;; The basis at which this snapshot was derived (`checked-through-t`) and the
+ ;; newest transaction that asserted or retracted any row fact (`basis-t`).
+ ;; Both are Datahike basis transactions read from a database value, never
+ ;; stored counters. `basis-t` is the third element of a plan cache key, so an
+ ;; unrelated transaction may force one conservative re-derivation of the
+ ;; snapshot without invalidating a single compiled plan.
+ :basis-t [:int {:min 0}],
+ :checked-through-t :int,
+
+ :snapshot
+ [:map
+  [:seon.call-preparation/supplied-defaults
+   :seon.call-preparation/supplied-defaults]
+  [:seon.call-preparation/validators :seon.call-preparation/validators]
+  [:seon.call-preparation/basis-t :seon.call-preparation/basis-t]
+  [:seon.call-preparation/checked-through-t
+   :seon.call-preparation/checked-through-t]
+  [:seon.call-preparation/refusals :seon.call-preparation/refusals]],
+
+ ;; --- the derived invocation plan ------------------------------------------
+ :entry-key :qualified-keyword,
+
+ :slot
+ [:map
+  [:seon.fn.argument/index :seon.fn.argument/index]
+  [:seon.call-preparation/key :seon.call-preparation/key]
+  [:seon.call-preparation/supplier-symbol
+   :seon.call-preparation/supplier-symbol]
+  [:seon.call-preparation/entry-key
+   {:optional true}
+   :seon.call-preparation/entry-key]],
+
+ :slots [:vector :seon.call-preparation/slot],
+
+ :variadic? :boolean,
+ :rest-slot? :boolean,
+ :ambiguous? :boolean,
+ :empty? :boolean,
+ :supplied-count :int,
+ :candidates [:vector [:vector :seon.fn.argument/index]],
+
+ :arity-plan
+ [:map
+  [:seon.fn.arity/order :seon.fn.arity/order]
+  [:seon.fn.arity/min :seon.fn.arity/min]
+  [:seon.fn.arity/argument-count :seon.fn.arity/argument-count]
+  [:seon.call-preparation/variadic? :seon.call-preparation/variadic?]
+  [:seon.call-preparation/rest-slot? :seon.call-preparation/rest-slot?]
+  [:seon.call-preparation/slots :seon.call-preparation/slots]
+  [:seon.call-preparation/entries :seon.call-preparation/slots]],
+
+ :arity-plans [:vector :seon.call-preparation/arity-plan],
+
+ ;; One entry per supplied-argument count the plan answers for. An exact
+ ;; full-arity call carries no inserts; a unique shorter expansion carries the
+ ;; slots to insert at their recorded indexes; a structurally ambiguous count
+ ;; carries `:seon.call-preparation/ambiguous? true` plus its candidate
+ ;; omitted-index sets and never guesses by arity order.
+ :preparation
+ [:map
+  [:seon.call-preparation/ambiguous? :seon.call-preparation/ambiguous?]
+  [:seon.fn.arity/order {:optional true} :seon.fn.arity/order]
+  [:seon.call-preparation/inserts
+   {:optional true}
+   :seon.call-preparation/slots]
+  [:seon.call-preparation/entries
+   {:optional true}
+   :seon.call-preparation/slots]
+  [:seon.call-preparation/candidates
+   {:optional true}
+   :seon.call-preparation/candidates]],
+
+ :by-supplied-count
+ [:map-of :seon.call-preparation/supplied-count
+  :seon.call-preparation/preparation],
+
+ ;; A variadic arity is INDEXED but never auto-filled: its rest tail cannot
+ ;; say how many repetitions to supply, so an elided call refuses rather than
+ ;; inventing a count. Its required argument-map entries are still recorded.
+ :variadic
+ [:map
+  [:seon.fn.arity/order :seon.fn.arity/order]
+  [:seon.fn.arity/min :seon.fn.arity/min]
+  [:seon.call-preparation/rest-slot? :seon.call-preparation/rest-slot?]
+  [:seon.call-preparation/entries :seon.call-preparation/slots]],
+
+ :contract-t [:int {:min 0}],
+
+ :plan
+ [:map
+  [:seon.fn/sym :seon.fn/sym]
+  [:seon.call-preparation/contract-t :seon.call-preparation/contract-t]
+  [:seon.call-preparation/basis-t :seon.call-preparation/basis-t]
+  [:seon.call-preparation/empty? :seon.call-preparation/empty?]
+  [:seon.call-preparation/arities :seon.call-preparation/arity-plans]
+  [:seon.call-preparation/by-supplied-count
+   :seon.call-preparation/by-supplied-count]
+  [:seon.call-preparation/variadic
+   {:optional true}
+   :seon.call-preparation/variadic]],
+
+ ;; --- the cluster-local state ----------------------------------------------
+ ;; One atom per acquired cluster context, adjacent to the program snapshot.
+ ;; It is never process-global across sovereign branches: two clusters
+ ;; compiling the same function identity compile from their own facts.
+ :state
+ [:fn
+  {:error/message
+   "must be a call-preparation state atom built by seon.call-preparation/state"
+   :gen/gen seon.call-preparation/state-generator}
+  seon.call-preparation/state?]}
