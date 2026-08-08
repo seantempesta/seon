@@ -1210,16 +1210,17 @@ reviewable paths into one asynchronous Gemini Flash review at most once per
 two-minute window; one PID-owned worker coalesces the window, provider failure
 silently drops that batch, and neither review nor tests delay edit feedback.
 
-Run affected tests explicitly at a coherent checkpoint through the retained
-changed-test selector:
+Run affected tests at a coherent checkpoint. `bin/test` bare already does
+this: it runs the platform moving-part regressions first, then only the tests
+reaching code changed since the last recorded GREEN basis. To select from
+paths you name instead of from the basis:
 
 ```bash
-bb --config bb.edn --deps-root . -e \
-  "(require 'seon.dev.changed-test) \
-   (prn (seon.dev.changed-test/run-changed! \
-         (seon.dev.changed-test/configuration \".\") \
-         [\"src/seon/cluster/run.clj\"]))"
+bin/test --changed src/seon/cluster/run.clj --changed src/seon/db.clj
 ```
+
+`seon.dev.changed-test/run-changed!` is the same thing from babashka — it
+names the paths and shells that gate. It owns no selector of its own.
 
 Do not discard type-checker output. clj-kondo `:type-mismatch` findings remain
 visible warning context in the hook/artifact, but its local inference is not a
@@ -1250,10 +1251,17 @@ the class dead.
 
 There are two testing surfaces:
 
-1. code correctness through `bin/test` — the one gate for the fresh system
-   (a bare run is the fast non-long tier; `bin/test --full` or
-   `SEON_TEST_FULL=1 bin/test` is the complete checkpoint suite; explicit
-   namespaces always run all their tests);
+1. code correctness through `bin/test` — the one gate for the fresh system,
+   tiered à la carte with smart defaults (owner ruling 2026-08-07 night).
+   Every tiered invocation runs the declared `:seon.test/platform`
+   moving-part regressions FIRST and stops there when they are red. A bare
+   run then adds only the tests reaching code changed since the last
+   recorded green basis, derived from `:seon.fn/calls` edges in the program
+   graph — never a modification time or a filename. `--all` adds every
+   non-long test, `--full` (or `SEON_TEST_FULL=1`) every test,
+   `--platform` the moving parts alone, `--changed PATH` an explicit
+   selection; explicit namespaces always run all their tests and skip the
+   tiers entirely;
 2. agent/model evaluation through `src-inspect-ai/`.
 
 Do not restore the gym, add bespoke drive scripts, or create another runner.
