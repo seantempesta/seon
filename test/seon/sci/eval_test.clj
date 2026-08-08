@@ -538,6 +538,25 @@
                resolved)
             "every public capability function in the graph resolves in the ctx")))))
 
+(deftest the-context-binds-only-the-graph-this-process-can-serve
+  ;; The other half of the same seam, and the one a test-runner JVM cannot
+  ;; see by accident: the program graph is indexed from BOTH source roots, so
+  ;; `test/` namespaces are ordinary core-provenanced rows, while a cluster
+  ;; JVM runs -M:dev with no test/ on its classpath. Requiring every graph row
+  ;; refused every cluster boot on 2026-08-08. Graph membership and PROCESS
+  ;; membership are two facts, and the classpath is the one that answers the
+  ;; second — a computed fact, never a path convention or a maintained list.
+  (let [locatable? (ns-resolve 'seon.sci.eval 'classpath-locatable?)
+        host-namespace! (ns-resolve 'seon.sci.eval 'host-namespace!)]
+    (is (true? (locatable? 'my.web))
+        "a capability namespace this process can serve is servable")
+    (is (false? (locatable? 'seon.sci.eval-test.absent-from-every-classpath)))
+    (is (nil? (host-namespace!
+               'seon.sci.eval-test.absent-from-every-classpath))
+        "a row this process cannot serve is nil, never a refused boot")
+    (is (some? (host-namespace! 'my.web))
+        "a row it can serve is loaded rather than skipped")))
+
 (deftest schema-and-contract-declarations-have-bounded-allocation
   (test-support/with-database
     (fn [connection]

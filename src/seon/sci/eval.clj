@@ -100,7 +100,9 @@
   indistinguishable, which is honest: the form's effect MAY have
   happened. Nothing re-executes."
   (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.main :as main]
+            [clojure.string :as str]
             [clojure.test]
             [clojure.test.check.generators :as gen]
             [my.background]
@@ -824,8 +826,31 @@
     (sci/new-var local-name host-var
                  (assoc host-meta :name local-name :ns sci-namespace))))
 
+(defn- classpath-locatable?
+  "Whether THIS process's classpath can serve one namespace's source.
+
+  Graph membership and PROCESS membership are two different facts, and
+  conflating them refused every cluster boot on 2026-08-08. The program graph
+  is indexed from both source roots (`seon.fn/source-roots` — `src` and
+  `test`), so `my.background-test` is an ordinary core-provenanced program
+  row; a cluster JVM runs `-M:dev`, whose classpath carries no `test/`, so
+  that row names source this process genuinely cannot load. Requiring it was
+  a correct refusal of a wrong premise.
+
+  Asking the classpath asks the process itself. It is a computed fact, not a
+  path convention and not a maintained list, so it stays true when the source
+  roots, the aliases, or the packaging change — and a namespace this process
+  CAN serve is still bound whether or not anything happened to load it."
+  [namespace-name]
+  (let [stem (-> (str namespace-name)
+                 (str/replace "-" "_")
+                 (str/replace "." "/"))]
+    (boolean
+     (some (fn [suffix] (io/resource (str stem suffix)))
+           [".clj" ".cljc" "__init.class"]))))
+
 (defn- host-namespace!
-  "The loaded host namespace for one core-provenanced program row.
+  "The loaded host namespace for one core-provenanced program row, or nil.
 
   Membership of the ctx must not depend on WHICH namespaces something else
   happened to load first. `my.web` was unreachable from agent code for exactly
@@ -839,11 +864,13 @@
   is the ordinary thing to do, and it makes the ctx's membership exactly the
   graph's.
 
-  A first-party namespace that cannot be loaded is a loud refusal naming the
-  namespace and the cause, never a quiet omission."
+  A namespace this process cannot serve at all is nil — it is not part of
+  this process's callable surface. A namespace that IS on the classpath and
+  still fails to load is a loud refusal naming the namespace and the cause,
+  never a quiet omission."
   [namespace-name]
   (or (find-ns namespace-name)
-      (do
+      (when (classpath-locatable? namespace-name)
         (try
           (require namespace-name)
           (catch Throwable failure
@@ -865,9 +892,10 @@
 (defn- install-first-party-namespaces!
   "Bind every first-party program namespace as its actual compiled JVM Vars.
 
-  Namespace membership is the core-provenanced program rows, LOADED here when
-  the JVM has not required them yet rather than intersected with whatever
-  happens to be loaded already. Existing public bindings remain
+  Namespace membership is the core-provenanced program rows THIS PROCESS CAN
+  SERVE, loaded here when the JVM has not required them yet rather than
+  intersected with whatever happens to be loaded already. Existing public
+  bindings remain
   available, and every indexed function Var is added regardless of its
   `:seon.fn/private?` attribute. Direct bindings retain those Vars; a target
   named by a declared refer becomes an SCI Var whose root is the real Var,
@@ -901,7 +929,8 @@
               (comp (map row-bindings) (mapcat (comp vals :refers)))
               namespace-rows)]
     (doseq [namespace-name (sort-by str first-party-names)
-            :let [host-namespace (host-namespace! namespace-name)]]
+            :let [host-namespace (host-namespace! namespace-name)]
+            :when host-namespace]
       (let [sci-namespace (sci/create-ns namespace-name)]
         (sci/add-namespace!
          ctx namespace-name
