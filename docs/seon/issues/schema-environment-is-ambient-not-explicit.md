@@ -65,6 +65,62 @@ the per-cluster acquired projection state on the cluster's SCI context
 `projection-validator`, `projection-explainer`). This is not a redesign; it is
 deleting the ambient half.
 
+## Status 2026-08-08 — two criteria closed; criterion 1 is blocked, with a cause
+
+Evidence:
+[schema-environment-explicit-2026-08-08.md](../../prds/sci-execution-runtime/research/schema-environment-explicit-2026-08-08.md).
+This issue STAYS OPEN for the one criterion that is not a `seon.schema`
+change.
+
+Closed at cause, one class regression each in `test/seon/schema_test.clj`:
+
+- **Predicate resolution** is now the Var a qualified symbol names
+  (`f2903354a`). A qualified symbol names exactly one Var, so it is
+  collision-free by construction, and the Var is retained rather than its
+  value, so it is reload-correct. `!predicate-functions`,
+  `core-predicate-functions`, `snapshot-state`, and `restore-state!` are
+  deleted. Regression:
+  `one-predicate-symbol-cannot-name-two-environments-callables`, whose
+  decisive arm is the probe's own second registration, now refused.
+- **Compiled state hangs off the projection** (`37700ec64`). Every projection
+  carries its own holder, installed fresh at construction and never
+  inherited. `!identity-only-generation`, `ensure-shape-generation-for!`, and
+  the validator/explainer halves of `!shape-generation` are deleted.
+  Regression: `two-projections-never-exchange-a-compiled-validator`.
+
+NOT closed — **the registry facade**. Restricting Malli's process-global
+default to the packaged bootstrap population was implemented, proven green on
+the schema suites and on `cohost-boot-test` (two real clusters, one JVM,
+instrumentation live), and then REVERTED on one measured failure:
+`malli.instrument/-collect!` registers a Var's `:malli/schema` through
+`m/-register-function-schema!`, which resolves against that default, and that
+is how `seon.instrument` sees contracts a cluster declared but the packaged
+resources do not. Instrumentation is a live consumer of the defect, and
+`seon.schema` cannot repair it — its only options are answering wrongly on a
+thread hop or refusing a caller with no other way to ask. Recorded on the owner's existing note,
+[instrumentation-compiles-under-one-clusters-projection](instrumentation-compiles-under-one-clusters-projection.md),
+which BLOCKS this criterion and should land before the Phase 3 sweep. The
+reverted change is recorded in the facade's own comment in
+`src/seon/schema.clj` so it can be re-applied as that issue's falsifier, and
+its thread-hop regression was measured non-vacuous before being held rather
+than left to pass emptily.
+
+The three graduated probe files are deleted; the registry class is carried by
+that issue's acceptance criteria.
+
+Also still open, and NOT a `seon.schema` change: the four projection dynamic vars
+(`*candidate-forms-overlay*`, `*projection*`, `*projection-state*`,
+`*packaged-forms*`). Their ~25 `call-with-*` call sites live in
+`seon.cluster`, `seon.sci.eval`, `seon.db`, `seon.config`, `seon.reconcile`,
+`seon.error`, `seon.schema.edn`, and the test bracket, and the mechanism that
+replaces them — the call-preparation hook — is landed but not yet consumed.
+`malli-form?` is the sharpest instance and is filed separately
+([malli-form-predicate-resolves-the-declaration-population-itself](malli-form-predicate-resolves-the-declaration-population-itself.md)):
+Malli invokes a registered predicate with one argument, so it cannot be
+handed a projection, and `*packaged-forms*` is load-bearing until the
+environment carries it. Owner: the Phase 3 production sweep, landing the
+deletion in the same change as the hook consumption.
+
 ## Acceptance criteria
 
 - Every schema operation takes the projection it compiles against; the

@@ -899,8 +899,6 @@
 
 (register-core-predicate! 'seon.schema/byte-array? byte-array?)
 
-(defn- active-forms [] (candidate-forms))
-
 (defn- update-candidate-forms! [f & args]
   (if *candidate-forms-overlay*
     (apply swap! *candidate-forms-overlay* f args)
@@ -950,6 +948,27 @@
 ;; generation; candidate validation passes [[candidate-registry]] explicitly.
 ;; Before first activation it reads module declarations so namespace loading
 ;; can bootstrap normally. Normal activation never repoints Malli's default.
+;;
+;; KNOWN DEFECT, and why it is still here (2026-08-07 parallel isolation
+;; audit, Defect I.1, `probe_registry_thread_fallback`): [[active-forms]]
+;; selects its population through thread-local dynamic bindings, so this
+;; PROCESS-GLOBAL default answers differently depending on which thread asks,
+;; and on a hop the bindings vanish and it falls back to the packaged
+;; population silently — correct bytes under one cluster, wrong bytes under
+;; two, never an error. Restricting it to the packaged population was
+;; implemented and REVERTED on 2026-08-08 against measured evidence: Malli's
+;; own `malli.instrument/-collect!` registers a Var's `:malli/schema` through
+;; `m/-register-function-schema!`, which resolves against THIS default, and
+;; that is how `seon.instrument` sees contracts a cluster declared but the
+;; packaged resources do not (`applying-uses-the-acquired-projection-without-
+;; publishing-it`). Instrumentation is therefore a live consumer of the
+;; cluster-selecting behavior, and the fix is not in this namespace: it is
+;; `seon.instrument` compiling against the acquired projection instead of
+;; Malli's global function-schema registry, which is itself a second
+;; process-global slot of the same class
+;; (`docs/prds/sci-execution-runtime/research/schema-environment-explicit-2026-08-08.md`).
+(defn- active-forms [] (candidate-forms))
+
 (defonce ^:private seon-registry
   (let [defaults (mr/composite-registry
                   (mr/fast-registry (m/default-schemas))
