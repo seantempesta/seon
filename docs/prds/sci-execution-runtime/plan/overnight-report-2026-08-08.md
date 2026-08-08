@@ -67,7 +67,17 @@ truth-checks, not gates.
    the parent command's root lock through the `-under-lock!`
    convention. Needs a design ruling, recorded with the deadlock
    analysis.
-5. (accumulating)
+5. **Does a component ref admit the component value?**
+   ([issue](../../../seon/issues/a-component-value-is-refused-by-its-own-ref-shape.md),
+   three options, recommendation marked) — `:seon.db/ref` admits
+   int/string/lookup-tuple but never the component value itself; all 46
+   `:seon.db/component true` declarations share the identical broken
+   shape, and it is THE remaining wall between an agent and defining a
+   contracted function (the admission-source half is fixed and
+   unconstructable-wrong at `4fd806a94`; `(ns … :as …)` is blocked by
+   the same class). A registry-wide contract decision — the lane
+   correctly stopped at the design gate rather than editing 46 sites.
+6. (accumulating)
 
 ## Landed overnight (chronological, with commits)
 
