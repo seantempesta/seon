@@ -36,8 +36,11 @@ and PROVEN; the full ruling + evidence ledger is
   ways: rendered accepts string+Hiccup, the selector still rejects a
   bare string); the pre-existing `:any` on `:seon.render.walk/lookup`
   that made the file uneditable was cleared with a proven-boundary
-  exemption. Reforking default to prove it live, then the
-  model-authoring re-drive is unblocked.
+  exemption. PROVEN LIVE: default reforked onto the fix, and the root
+  namespace debug page (`/ns/my.agents.root/debug`) now renders the
+  real agent context — the depth-2 walk, the REPL onboarding prose,
+  every unit — where it was a 931-char error before. The
+  model-authoring re-drive is unblocked (a fresh session's task).
 - NEXT after the milestone: the whole-system arc's remaining stages
   (canvas is UNBUILT — a target needing its own wave; agents need a
   taught route to declaring data attributes; disposition-less turns
