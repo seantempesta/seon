@@ -68,7 +68,7 @@ truth-checks, not gates.
    convention. Needs a design ruling, recorded with the deadlock
    analysis.
 5. **Does a component ref admit the component value?**
-   ([issue](../../../seon/issues/a-component-value-is-refused-by-its-own-ref-shape.md),
+   ([issue](../../../seon/issues/archive/a-component-value-is-refused-by-its-own-ref-shape.md),
    three options, recommendation marked) — `:seon.db/ref` admits
    int/string/lookup-tuple but never the component value itself; all 46
    `:seon.db/component true` declarations share the identical broken

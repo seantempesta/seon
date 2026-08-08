@@ -281,7 +281,7 @@ if the toolkit's own example shows a string, the model is copying it.
 
 ## New defect filed
 
-[Let an agent define a contracted function](../../../seon/issues/an-agent-cannot-define-a-contracted-function.md)
+[Let an agent define a contracted function](../../../seon/issues/archive/an-agent-cannot-define-a-contracted-function.md)
 — blocker. `seon.program/declaration-row` violates its own output contract the
 moment a `defn` carries a `:malli/schema`, so the agent cannot define anything
 durable and the next form fails unresolved. Three required keys are absent

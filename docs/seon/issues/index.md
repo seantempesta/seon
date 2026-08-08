@@ -16,13 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (30)
+## Blocker (28)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Stop a failed turn from waking itself through its own fault message](a-failed-turn-wakes-itself-through-its-own-fault-message.md) | blocker | live-drive context repair wave |
-| [Let an agent define a contracted function](an-agent-cannot-define-a-contracted-function.md) | blocker | live-drive context repair wave |
-| [Admit a component value under its own attribute's declared shape](a-component-value-is-refused-by-its-own-ref-shape.md) | blocker | owner ruling: component value shape |
 | [Settle a receipt for every recorded run form](a-runs-last-form-can-close-without-a-receipt.md) | blocker | live-drive context repair wave |
 | [Substitute the bootstrap plan's namespace placeholder before it is evaluated](bootstrap-plan-forms-ship-unsubstituted-namespace-placeholders.md) | blocker | live-drive context repair wave |
 | [Boot the co-hosted second cluster without a 63 s stall or a false failure](cohosted-second-boot-is-slow-and-trips-the-silence-backstop.md) | blocker | boot velocity incident (co-hosted second boot) |
@@ -49,12 +47,13 @@ See `README.md` for the convention.
 | [Stop a schema-resource edit from bricking value admission in running clusters](a-schema-resource-edit-bricks-value-admission-in-every-running-cluster.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Confirm the background `:io` connection fix with a real `my.shell` drive](every-background-capability-request-loses-its-connection.md) | blocker | tool-exercise lane re-run against `f3b8eabda` |
 
-## Friction (116)
+## Friction (117)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [May a run refine a schema key nothing depends on?](within-run-schema-key-refinement-needs-an-owner-ruling.md) | friction | owner design ruling (schema-key immutability vs the usage guard) |
 | [Make `clojure.pprint` available in the agent's REPL](agent-repl-cannot-require-clojure-pprint.md) | friction | live-drive context repair wave |
+| [Name the arity when an agent calls its own function with the wrong one](a-wrong-arity-call-reports-a-missing-namespace.md) | friction | live-drive context repair wave |
 | [Return `/data` without a five-second stall](data-page-takes-five-and-a-half-seconds-for-three-kilobytes.md) | friction | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Name the face when `semantic-value` cannot match one](an-unmatched-print-face-throws-no-matching-clause-and-names-nothing.md) | friction | error-face budget wave |
 | [Cut `my.background/poll`'s ~290 tokens per polled result](my-background-poll-costs-290-tokens-per-polled-result.md) | friction | capability surface repair wave |
@@ -70,7 +69,6 @@ See `README.md` for the convention.
 | [Give `malli-form?` its declarations from the environment](malli-form-predicate-resolves-the-declaration-population-itself.md) | friction | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Stop marker declarations from flooding the exact-reuse advisory](schema-exact-reuse-warnings-are-unreadable-at-volume.md) | friction | dev-tooling face hygiene |
 | [Name the stale clj-kondo cache entry that blocks correct code](stale-language-specific-kondo-cache-blocks-correct-code.md) | friction | dev-tooling face hygiene |
-| [Rule what bounds background work now that it is unarmed](the-effect-door-runs-capability-handlers-unarmed.md) | friction | owner ruling, morning (background bounds policy) |
 | [Stop two identity attributes from naming one string](one-identity-string-names-two-entities.md) | friction | config/cluster identity design gate |
 | [Give `seon.db` the branch and commit reads root needs](seon-db-has-no-branch-or-commit-reads.md) | friction | `my.branch` verb wave (W-C, [PRD](../../prds/sci-execution-runtime/plan/agent-desk-and-checkout-prd-2026-08-05.md)) |
 | [Pass the root :io executor to the work-launcher graph](flow-work-launcher-graph-omits-its-root-io-executor.md) | friction | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
