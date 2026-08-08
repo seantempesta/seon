@@ -456,6 +456,19 @@ usage facts, and the control-token reply leak.
   lock-wait during the fix was LOUD and named its holder — the
   2026-08-08 lock fix working as designed.
 
+- **Control-token reply leak CLOSED** (`099330d87`, `9fdbce385`): no
+  wire fix needed or used (the markup arrives inside `content` for
+  deepseek-v4-flash — no field boundary; no regex). Structural fix at
+  the reply boundary: a plan source always carries a reader event, so
+  an unsettleable form row is unrepresentable; a control-markup-only
+  reply is a loud `:seon.cluster.reply/no-forms` refusal carrying its
+  text. Caught in passing: all three declared reply error CLASSES were
+  UNPRODUCIBLE (marker never emitted → every refusal hit the generic
+  floor) — now the marker is passed explicitly. The deeper half
+  (delete `evaluable-source?` for ALL producers) correctly left to the
+  loop owner as a sealed-contract call, with bootstrap/eval.drive named
+  as the census targets.
+
 ## Pending milestones
 
 - stop-completion lands → reset → 08-06 drive-arc rerun with observer →
