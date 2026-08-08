@@ -49,6 +49,28 @@ and 6,495 ms become 0 and 11.6 ms, with an identical result. That is a
 containment at ONE caller, not a repair: any other operation that reaches this
 predicate without supplying a population pays the same cost silently.
 
+## The warning names an actionable caller again (2026-08-08)
+
+While consuming the fallback warning's yield, this predicate was the one
+instance whose warning line could not be acted on: with the caller derived as
+"nearest frame outside `seon.schema`", Malli's `-safe-pred` wrapper
+(`reference-code/malli/src/malli/core.cljc:209`) is that frame, so the line
+read `malli.core (core.cljc:209)` and the advice "resolve it once and pass it"
+pointed at a dependency.
+
+The derivation now names the nearest frame under a source root this project
+declared for itself (the Clojure CLI basis's `:classpath` entries without a
+`:lib-name`), so the same occurrence names the first-party caller underneath —
+`seon.schema.datahike (datahike.clj:220)` for the attribute-derivation path.
+That makes the instance visible and attributable; it does NOT fix it, because
+the predicate still cannot take a population argument. The acceptance criteria
+below are unchanged and remain Phase 1/Phase 3 work.
+
+Regression: `the-classpath-fallback-is-never-silent` in
+`test/seon/schema/declaration_population_test.clj` asserts that invoking
+`schema/malli-form?` warns and that the named caller is never a dependency
+frame.
+
 ## Owner
 
 `seon.schema`, resolved by the environment. Under the

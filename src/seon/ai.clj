@@ -295,11 +295,13 @@
 ;;; Contracts
 ;;; ---------------------------------------------------------------------------
 
+;; Both helpers REQUIRE the population, so a future caller cannot silently
+;; reintroduce the per-attribute shape these two derivations had.
 (defn- map-attributes
-  [schema-key]
+  [forms schema-key]
   (into #{}
         (comp (filter vector?) (map first))
-        (schema/schema-definition schema-key)))
+        (schema/schema-definition forms schema-key)))
 
 (defn settings
   "Resolved AI settings for one agent. Pure."
@@ -315,7 +317,8 @@
    [:=> [:cat :seon.db/database-value :seon.cluster.agent/id]
     :seon.config/agent-overlay]}
   [db agent-id]
-  (let [attributes (map-attributes :seon.config/agent-overlay)]
+  (let [attributes (map-attributes (schema/declaration-population)
+                                   :seon.config/agent-overlay)]
     (select-keys
      (or (db/pull db (vec attributes) [:seon.cluster.agent/id agent-id]) {})
      attributes)))
@@ -493,20 +496,26 @@
   {"type" (str/replace (name response-format) "-" "_")})
 
 (defn- config-registration-properties
-  [config-ident]
-  (schema.form/attr-form-properties (schema/schema-definition config-ident)))
+  [forms config-ident]
+  (schema.form/attr-form-properties
+   (schema/schema-definition forms config-ident)))
 
+;; ONE declaration population per derivation. Asking `schema-definition` per
+;; config attribute read and merged all 152 schema resources per question —
+;; ~66 complete classpath populations on EVERY model request, to answer a
+;; question about one map already in hand (2026-08-07).
 (defn- wire-setting-triples
   []
-  (->> (map-attributes :seon.config/effective)
-       (mapcat
-        (fn [config-ident]
-          (map (fn [[wire-key coercion]]
-                 [config-ident wire-key coercion])
-               (:seon.ai/wire
-                (config-registration-properties config-ident)))))
-       (sort-by (juxt (comp str first) second))
-       vec))
+  (let [forms (schema/declaration-population)]
+    (->> (map-attributes forms :seon.config/effective)
+         (mapcat
+          (fn [config-ident]
+            (map (fn [[wire-key coercion]]
+                   [config-ident wire-key coercion])
+                 (:seon.ai/wire
+                  (config-registration-properties forms config-ident)))))
+         (sort-by (juxt (comp str first) second))
+         vec)))
 
 (defn- coercion-function
   [coercion]
@@ -556,12 +565,13 @@
 
 (defn- extra-body-request-ident
   []
-  (some
-   (fn [config-ident]
-     (when (true? (:seon.ai/extra-body
-                   (config-registration-properties config-ident)))
-       (config-ai-ident->request-ident config-ident)))
-   (map-attributes :seon.config/effective)))
+  (let [forms (schema/declaration-population)]
+    (some
+     (fn [config-ident]
+       (when (true? (:seon.ai/extra-body
+                     (config-registration-properties forms config-ident)))
+         (config-ai-ident->request-ident config-ident)))
+     (map-attributes forms :seon.config/effective))))
 
 (defn- extra-body
   [request]

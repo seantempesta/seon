@@ -24,7 +24,8 @@
             [datahike.db.interface :as dbi]
             [seon.schema.form :as form]
             [seon.schema.internal :as internal]
-            [clojure.edn :as edn])
+            [clojure.edn :as edn]
+            [clojure.java.io :as io])
   (:import [java.security MessageDigest]))
 
 (defn- direct-references*
@@ -609,39 +610,130 @@
         separator (.indexOf demunged "/")]
     (if (neg? separator) demunged (subs demunged 0 separator))))
 
+;; The warning is only worth printing if its advice is ACTIONABLE, and the
+;; reader can only act on first-party code. Naming the nearest non-`clojure.`
+;; frame did not do that: `seon.schema/malli-form?` is a registered core
+;; predicate, so Malli invokes it through `-safe-pred` and the resolution
+;; escaped with `malli.core (core.cljc:209)` as its nearest outside frame —
+;; a dependency line nobody can thread a population through
+;; (`docs/seon/issues/malli-form-predicate-resolves-the-declaration-population-itself.md`).
+;;
+;; "First party" is DERIVED, never a namespace-prefix rule. The Clojure CLI
+;; already recorded the distinction in the basis it wrote for this process: a
+;; `:classpath` entry carrying a `:lib-name` belongs to a dependency, and an
+;; entry without one is a source root this project declared for itself. The
+;; only correction that judgement needs is dropping an entry that CONTAINS
+;; another entry — the repository root a test alias adds as `"."`, which also
+;; holds every vendored fork under `reference-code/`. A frame is actionable
+;; when its source file resolves on the classpath under one of the survivors.
+(def ^:private resolution-owner-namespaces #{"seon.schema" "seon.schema.edn"})
+
+(defn- canonical-directory
+  [path]
+  (str (.getCanonicalPath (java.io.File. ^String path)) java.io.File/separator))
+
+(def ^:private first-party-source-roots
+  (delay
+    (let [basis (try
+                  (some-> (System/getProperty "clojure.basis")
+                          slurp
+                          edn/read-string)
+                  (catch Throwable _ nil))
+          declared (into {}
+                         (keep (fn [[root descriptor]]
+                                 (when-not (:lib-name descriptor)
+                                   (try [root (canonical-directory root)]
+                                        (catch Throwable _ nil)))))
+                         (:classpath basis))]
+      (into #{}
+            (keep (fn [[root path]]
+                    (when-not (some (fn [[other other-path]]
+                                      (and (not= root other)
+                                           (.startsWith ^String other-path
+                                                        ^String path)))
+                                    declared)
+                      path)))
+            declared))))
+
+(defn- frame-source-path
+  "Where the frame's source file sits on the classpath, or nil.
+
+   The namespace-to-resource mapping is Clojure's own munging, not a Seon
+   convention: the loaded file is the frame's own file name inside the
+   namespace's directory."
+  [^StackTraceElement frame ^String frame-ns]
+  (when-let [file-name (.getFileName frame)]
+    (let [directory (.replace (.replace frame-ns "-" "_") \. \/)
+          package (subs directory 0 (inc (.lastIndexOf directory "/")))]
+      (when-let [url (io/resource (str package file-name))]
+        (when (= "file" (.getProtocol url))
+          (.getPath url))))))
+
+(defn- first-party-frame?
+  [^StackTraceElement frame ^String frame-ns]
+  (and (not (contains? resolution-owner-namespaces frame-ns))
+       (boolean
+        (when-let [path (frame-source-path frame frame-ns)]
+          (some #(.startsWith ^String path ^String %)
+                @first-party-source-roots)))))
+
+(defn- frame-description
+  [^StackTraceElement frame frame-ns]
+  (str frame-ns " (" (.getFileName frame) ":" (.getLineNumber frame) ")"))
+
 (defn- fallback-caller
-  "The nearest frame outside declaration resolution itself.
-   Stack introspection is a diagnostic and runs only on the fallback path."
+  "The nearest frame under a declared first-party source root.
+   Stack introspection is a diagnostic and runs only on the fallback path.
+
+   When no frame resolves to a declared source root — a bare REPL form, a
+   dynamically evaluated namespace, a host thread entry — the nearest frame
+   outside resolution is named instead and marked as a best-effort guess
+   rather than a place to go and edit."
   []
-  (or (some (fn [^StackTraceElement frame]
-              (let [frame-ns (frame-namespace frame)]
-                (when-not (or (#{"seon.schema" "seon.schema.edn"} frame-ns)
-                              (.startsWith ^String frame-ns "clojure.")
-                              (.startsWith ^String frame-ns "java."))
-                  (str frame-ns " (" (.getFileName frame) ":"
-                       (.getLineNumber frame) ")"))))
-            (.getStackTrace (Thread/currentThread)))
-      "an unidentified caller"))
+  (let [frames (.getStackTrace (Thread/currentThread))]
+    (or (some (fn [^StackTraceElement frame]
+                (let [frame-ns (frame-namespace frame)]
+                  (when (first-party-frame? frame frame-ns)
+                    (frame-description frame frame-ns))))
+              frames)
+        (some (fn [^StackTraceElement frame]
+                (let [frame-ns (frame-namespace frame)]
+                  (when-not (or (contains? resolution-owner-namespaces frame-ns)
+                                (.startsWith ^String frame-ns "clojure.")
+                                (.startsWith ^String frame-ns "java."))
+                    (str (frame-description frame frame-ns)
+                         " [no declared source root — nearest frame]"))))
+              frames)
+        "an unidentified caller")))
 
 (defn- decade?
   [n]
   (let [magnitude (Math/log10 (double n))]
     (== magnitude (Math/floor magnitude))))
 
+;; The explanation is printed ONCE per process; each occurrence after it is one
+;; short line. Repeating a 300-character sentence per caller per decade made
+;; the signal its own wall — 45% of `seon.cluster.boot-test`'s wrapped
+;; transcript on 2026-08-07 — and a diagnostic that buries the reader is the
+;; defect the ethos names, not a louder version of the right one.
 (defn- warn-classpath-fallback!
   []
   (let [caller (fallback-caller)
-        occurrence (get (swap! !fallback-counts update caller (fnil inc 0))
-                        caller)]
+        counts (swap! !fallback-counts update caller (fnil inc 0))
+        occurrence (get counts caller)]
     (when (decade? occurrence)
       (binding [*out* *err*]
-        (println (str "seon.schema: DECLARATION POPULATION FALLBACK — "
-                      caller
-                      " resolved the declaration population with none in hand,"
-                      " reading every schema resource on the classpath"
-                      " (occurrence " occurrence " for this caller)."
-                      " Resolve it ONCE with schema/declaration-population and"
-                      " pass it to every question the operation asks."))
+        (when (= 1 (count counts) occurrence)
+          (println
+           (str "seon.schema: resolving the declaration population with none"
+                " in hand reads every schema resource on the classpath (152"
+                " reads, ~14 ms). ONE per operation is the current floor; the"
+                " SAME caller repeating within one operation is the defect —"
+                " resolve it once with schema/declaration-population and pass"
+                " it to every question that operation asks. Each occurrence"
+                " below names its caller and its count for this process.")))
+        (println (str "seon.schema: DECLARATION POPULATION FALLBACK ×"
+                      occurrence " — " caller))
         (flush)))))
 
 (defn- packaged-forms []
@@ -2442,10 +2534,18 @@
   (contains? (candidate-forms) k))
 
 (defn schema-definition
-  "The raw definition for a registered schema, or nil if not registered."
-  {:malli/schema [:=> [:catn [::registry-key ::registry-key]] :any]}
-  [k]
-  (get (candidate-forms) k))
+  "The raw definition for a registered schema, or nil if not registered.
+
+   A caller asking about more than one key supplies the population it already
+   resolved (see [[declaration-population]]); the one-argument arity resolves
+   one per call, so `(map schema-definition keys)` is `(count keys)` complete
+   classpath populations."
+  {:malli/schema
+   [:function
+    [:=> [:catn [::registry-key ::registry-key]] :any]
+    [:=> [:catn [::forms :map] [::registry-key ::registry-key]] :any]]}
+  ([k] (get (candidate-forms) k))
+  ([forms k] (get forms k)))
 
 (defn valid-candidate-value?
   "True when `value` satisfies `schema-key` in the current candidate.

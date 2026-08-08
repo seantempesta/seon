@@ -76,15 +76,20 @@
 
 (defn- environment-overrides
   [effective]
-  (into {}
-        (keep
-         (fn [[config-key value]]
-           (when-let [environment-name
-                      (:seon.shell/environment
-                       (schema.form/attr-form-properties
-                        (schema/schema-definition config-key)))]
-             [environment-name value])))
-        effective))
+  ;; ONE declaration population for the whole effective config. Asking
+  ;; `schema/schema-definition` per key read and merged all 152 schema
+  ;; resources per key — 65 complete classpath populations, ~1 s, to answer a
+  ;; question about one map (2026-08-07).
+  (let [forms (schema/declaration-population)]
+    (into {}
+          (keep
+           (fn [[config-key value]]
+             (when-let [environment-name
+                        (:seon.shell/environment
+                         (schema.form/attr-form-properties
+                          (schema/schema-definition forms config-key)))]
+               [environment-name value])))
+          effective)))
 
 (defn- virtual-task
   [name f]

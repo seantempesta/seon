@@ -16,15 +16,21 @@
 
 (defn- result-projections
   [result]
-  (->> (schema/registered-schemas)
-       (keep (fn [[schema-key definition]]
-               (when-let [projection
-                          (:seon.maintenance/result-projection
-                           (schema.form/namespaced-properties definition))]
-                 (when (schema/valid-candidate-value? schema-key result)
-                   [schema-key projection]))))
-       (sort-by (comp str first))
-       vec))
+  ;; ONE declaration population for the whole scan. The population is already
+  ;; in hand from `registered-schemas`; asking `valid-candidate-value?` with
+  ;; the ambient arity threw it away and re-read all 152 schema resources per
+  ;; candidate key (2026-08-07).
+  (let [forms (schema/registered-schemas)]
+    (->> forms
+         (keep (fn [[schema-key definition]]
+                 (when-let [projection
+                            (:seon.maintenance/result-projection
+                             (schema.form/namespaced-properties definition))]
+                   (when (schema/valid-candidate-value?
+                          forms schema-key result)
+                     [schema-key projection]))))
+         (sort-by (comp str first))
+         vec)))
 
 (defn result-entity
   "Project an operation result through its declared persistence producer."

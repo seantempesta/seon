@@ -1,4 +1,6 @@
-(ns seon.schema.declaration-population-test
+(ns ^{:seon.test/platform
+       "Moving part: one declaration population per operation, write side."}
+    seon.schema.declaration-population-test
   "The class regression for per-item declaration resolution.
 
   With no projection, projection state, or candidate overlay supplied,
@@ -81,6 +83,30 @@
           nothing and was found only by thread dump")
       (is (str/includes? warning "seon.schema.declaration-population-test")
           "the warning must name the calling function, not the callee")))
+  (testing "the caller named is always FIRST-PARTY, never a dependency frame"
+    ;; `malli-form?` is a registered core predicate: Malli invokes it through
+    ;; `-safe-pred`, so the nearest non-`seon.schema` frame is `malli.core`,
+    ;; which no reader can thread a population through. The warning must skip
+    ;; it and name the first-party caller that can act.
+    (let [warning (fallback-warning #(schema/malli-form? [:string]))]
+      (is (not (str/blank? warning))
+          "malli-form? resolves the population itself and must warn")
+      (is (not (str/includes? warning "malli."))
+          "a dependency frame makes the advice unactionable")
+      (is (str/includes? warning "seon.schema.declaration-population-test")
+          "the nearest first-party frame is the actionable caller")))
+  (testing "each occurrence is one short line, not a repeated paragraph"
+    ;; A distinct call site, because the counter is per caller per process and
+    ;; only decade occurrences print.
+    (let [lines (->> (fallback-warning (fn [] (schema/registered-schemas)))
+                     str/split-lines
+                     (remove str/blank?)
+                     (filter #(str/includes? % "FALLBACK ×")))]
+      (is (seq lines) "an occurrence must print its caller and its count")
+      (is (every? #(< (count %) 140) lines)
+          "repeating the 300-character explanation per occurrence is how the
+           signal became its own wall — 45% of one suite's wrapped transcript
+           on 2026-08-07")))
   (testing "a population in hand says nothing"
     (let [forms (schema/declaration-population)]
       (is (= ""

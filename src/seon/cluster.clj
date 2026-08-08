@@ -442,15 +442,21 @@
                   {:seon.error/kind :seon.boot/refused
                    :seon.boot/offense offense})))
 
+;; REQUIRES the population: `resolve-bootstrap` asks two questions and each
+;; refusal arm asks a third, so the ambient arity made one bootstrap
+;; resolution two or three complete classpath re-reads (2026-08-07).
 (defn- require-candidate-value
-  [schema-key value message]
-  (if (schema/valid-candidate-value? schema-key value)
-    value
-    (refused! message
-              {:seon.boot/schema schema-key
-               :seon.boot/value value
-               :seon.boot/explanation
-               (schema/explain-candidate-value schema-key value)})))
+  ([schema-key value message]
+   (require-candidate-value (schema/declaration-population)
+                            schema-key value message))
+  ([forms schema-key value message]
+   (if (schema/valid-candidate-value? forms schema-key value)
+     value
+     (refused! message
+               {:seon.boot/schema schema-key
+                :seon.boot/value value
+                :seon.boot/explanation
+                (schema/explain-candidate-value forms schema-key value)}))))
 
 (declare cluster-paths)
 
@@ -467,27 +473,32 @@
   accretion."
   {:malli/schema [:=> [:cat :seon.boot/overrides] :seon.boot/config]}
   [overrides]
-  (require-candidate-value
-   :seon.boot/overrides
-   overrides
-   "The bootstrap overrides were refused.")
-  (let [defaults {:seon.boot/cluster-name "default"
-                  :seon.boot/root "data/clusters"
-                  :seon.boot/prepl-host "127.0.0.1"
-                  :seon.boot/prepl-port 0}
-        base (merge defaults overrides)
-        derived-store-dir
-        (str (io/file (:seon.boot/root base) "store"))
-        derived-log-dir
-        (:seon.boot/log-dir
-         (cluster-paths (:seon.boot/root base)
-                        (:seon.boot/cluster-name base)))]
+  ;; ONE declaration population for the whole resolution — it asks two
+  ;; questions and each refusal arm asks a third.
+  (let [forms (schema/declaration-population)]
     (require-candidate-value
-     :seon.boot/config
-     (merge {:seon.boot/log-dir derived-log-dir
-             :seon.boot/store-dir derived-store-dir}
-            base)
-     "The resolved bootstrap configuration was refused.")))
+     forms
+     :seon.boot/overrides
+     overrides
+     "The bootstrap overrides were refused.")
+    (let [defaults {:seon.boot/cluster-name "default"
+                    :seon.boot/root "data/clusters"
+                    :seon.boot/prepl-host "127.0.0.1"
+                    :seon.boot/prepl-port 0}
+          base (merge defaults overrides)
+          derived-store-dir
+          (str (io/file (:seon.boot/root base) "store"))
+          derived-log-dir
+          (:seon.boot/log-dir
+           (cluster-paths (:seon.boot/root base)
+                          (:seon.boot/cluster-name base)))]
+      (require-candidate-value
+       forms
+       :seon.boot/config
+       (merge {:seon.boot/log-dir derived-log-dir
+               :seon.boot/store-dir derived-store-dir}
+              base)
+       "The resolved bootstrap configuration was refused."))))
 
 (defn cluster-paths
   "Derive every per-cluster path from (root, cluster-name).
