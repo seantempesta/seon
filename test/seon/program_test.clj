@@ -553,6 +553,48 @@
                   (db/pull @connection [:seon.fn/source]
                            [:seon.fn/sym function-symbol])))))))))
 
+(deftest opening-basis-divergence-is-only-claimed-when-it-is-measurable
+  ;; The class: reading an UNMEASURED opening basis as an absent declaration
+  ;; and reporting that as a concurrent definition. A pull against a run that
+  ;; does not exist and a pull against a run that never declared the function
+  ;; both produce nil, so the old comparison could not tell "opened on
+  ;; nothing" from "opened on no such row" and refused a redeclaration that
+  ;; no concurrent run had touched.
+  (test-support/with-database
+    (fn [connection]
+      (let [function-symbol "sample/unmeasured"
+            spec [:=> [:cat :int] :int]
+            original
+            (merge {:seon.fn/sym function-symbol
+                    :seon.fn/ns [:seon.ns/name 'sample]
+                    :seon.fn/source
+                    "(defn unmeasured {:malli/schema [:=> [:cat :int] :int]} [x] x)"
+                    :seon.fn/arglists "([x])"
+                    :seon.fn/private? false
+                    :seon.fn/spec (pr-str spec)}
+                   (parsed-contract function-symbol spec {}))
+            changed
+            (assoc original :seon.fn/source
+                   "(defn unmeasured {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
+            row-tx (ns-resolve 'seon.cluster.run 'row-tx)]
+        (db/transact! connection [{:seon.ns/name 'sample
+                                   :seon.ns/source "(ns sample)"}])
+        (db/transact! connection (row-tx @connection {} original))
+        (testing "a request with no run opened on nothing and claims nothing"
+          (is (seq (row-tx @connection {} changed))))
+        (testing "a request naming a run with no opening basis says so"
+          (let [data (refusal-data
+                      #(row-tx @connection {:seon.cluster.run/id "absent"}
+                               changed))]
+            (is (= ::run/refused (:seon.error/kind data)))
+            (is (= ::run/run-opening-basis-unreadable (:seon.cluster.run/rule data))
+                "the refusal names the unreadable basis, not a concurrent definition")))
+        (is (= (:seon.fn/source original)
+               (:seon.fn/source
+                (db/pull @connection [:seon.fn/source]
+                         [:seon.fn/sym function-symbol])))
+            "neither derivation wrote anything")))))
+
 (deftest reader-events-have-one-canonical-declaration-row
   (let [cases
         [{:label "contracted function"

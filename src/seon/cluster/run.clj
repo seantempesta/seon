@@ -922,6 +922,29 @@
            [?run :seon.cluster.run/id ?run-id]]
          (db/history db) function-symbol run-id)))
 
+(defn- definition-diverged-since-open?
+  "True when the current declaration of `function-symbol` differs from the one
+  the request's run opened on and was not written by that run.
+
+  Divergence is a claim ABOUT AN OPENING BASIS, so it is only measurable when
+  the request names a run: a derivation with no run — a system-side or fixture
+  caller building transaction data outside any run — opened on nothing and has
+  no divergence to report. A request that DOES name a run whose opening
+  database value cannot be read refuses loudly naming that missing basis,
+  rather than reading the unreadable opening as an absent declaration and
+  reporting a concurrent definition it never measured."
+  [db request function-symbol existing]
+  (if-some [run-id (::id request)]
+    (let [opening-database (opening-db db run-id)]
+      (when (:seon.error/kind opening-database)
+        (refuse! `receipt-settle-call ::run-opening-basis-unreadable request))
+      (let [opening-existing
+            (db/pull opening-database '[*] [:seon.fn/sym function-symbol])]
+        (and (not= (declared-content db opening-existing)
+                   (declared-content db existing))
+             (not (definition-written-by-run? db function-symbol run-id)))))
+    false))
+
 (defn- row-tx
   "Validate and exact-upsert one reader-produced durable declaration."
   [db request row]
@@ -966,11 +989,7 @@
           [identity identity-value] (program/row-identity row)
           namespace-ref (or (:seon.fn/ns row)
                             (:seon.test/ns row))
-          existing (when identity (db/pull db '[*] [identity identity-value]))
-          opening-database (opening-db db (::id request))
-          opening-existing
-          (when (and identity (not (:seon.error/kind opening-database)))
-            (db/pull opening-database '[*] [identity identity-value]))]
+          existing (when identity (db/pull db '[*] [identity identity-value]))]
       (when (and namespace-ref
                  (not (:db/id (db/pull db [:db/id] namespace-ref))))
         (refuse! `receipt-settle-call ::program-namespace-missing request))
@@ -988,12 +1007,10 @@
             concurrent-definition?
             (and (= identity :seon.fn/sym)
                  existing
-                 (not= (declared-content db opening-existing)
-                       (declared-content db existing))
                  (not= (declared-content db existing)
                        (declared-content db row))
-                 (not (definition-written-by-run?
-                       db identity-value (::id request))))
+                 (definition-diverged-since-open?
+                  db request identity-value existing))
             _ (when concurrent-definition?
                 (refuse! `receipt-settle-call
                          ::program-row-changed-after-open request))
