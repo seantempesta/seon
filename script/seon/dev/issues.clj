@@ -115,8 +115,12 @@
             (for [title (sort duplicate-titles)]
               {::problem :duplicate-title ::actual title})))))
 
+;; The link text is matched non-greedily up to the first `](`, because a row's
+;; title may legitimately contain brackets — `Register the inline `[:fn]`
+;; predicate …` parsed as no row at all under `[^\]]+`, and the checker then
+;; reported the scheduled note as missing its row (2026-08-08).
 (def ^:private schedule-row-pattern
-  #"^\|\s+\[[^\]]+\]\(([^)]+\.md)\)\s+\|\s+([^|]+?)\s+\|\s+([^|]+?)\s+\|\s*$")
+  #"^\|\s+\[.+?\]\(([^)]+\.md)\)\s+\|\s+([^|]+?)\s+\|\s+([^|]+?)\s+\|\s*$")
 
 (defn- schedule-rows [content]
   (into []

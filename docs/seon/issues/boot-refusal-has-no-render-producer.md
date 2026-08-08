@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: medium
+severity: friction
 tags: [issue, render, boot, runtime]
 ---
 

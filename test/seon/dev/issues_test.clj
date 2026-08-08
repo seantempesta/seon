@@ -63,4 +63,15 @@
       (is (some #(= :duplicate-schedule-row (::issues/problem %))
                 (-> (try (issues/check! root)
                          (catch Exception error error))
-                    ex-data ::issues/errors))))))
+                    ex-data ::issues/errors))))
+
+    (testing "a row title containing brackets is still a row"
+      ;; A title naming a Clojure form — `Register the inline [:fn] predicate`
+      ;; — parsed as no row at all, so the checker reported a scheduled note as
+      ;; missing its row and no edit to the index could satisfy it (2026-08-08).
+      (write-file! root "docs/seon/issues/index.md"
+                   (index-with
+                    (str "| [Register the inline `[:fn]` predicate](one.md) "
+                         "| blocker | wave: a |\n"
+                         "| [Two](two.md) | friction | wave: c |\n")))
+      (is (= 2 (::issues/open-count (issues/check! root)))))))
