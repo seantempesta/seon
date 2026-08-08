@@ -20,7 +20,7 @@
             [clojure.test.check.properties :as prop]
             [sci.core :as sci]
             [seon.cluster.reply :as reply]
-            [seon.schema]
+            [seon.schema :as schema]
             [seon.sci.reader :as reader]))
 
 (defn- read-back
@@ -128,25 +128,22 @@
               "(my.run/complete \"counted 6\")"]
              (sources text)))))
 
-  (testing "pure prose is one recorded comment source, never a form"
+  (testing "pure prose is a refusal, never a form"
     (let [text "I explained what I had done. The result was fifty-five."
           result (sources text)]
-      (is (= ["; I explained what I had done. The result was fifty-five."]
-             result))
-      (is (empty?
-           (reader/read {:seon.sci.reader/text (first result)
-                         :seon.sci.reader/defer-auto-resolve? true}))
-          "a comment-only source records input and produces zero events")))
+      (is (error? result))
+      (is (= :seon.cluster.reply/no-forms (:seon.error/kind result)))
+      (is (str/includes? (:seon.error/message result) "prose")
+          "the refusal names what the reply carried instead of forms")))
 
-  (testing "mixed prose attaches to the next form and trailing prose survives"
+  (testing "mixed prose attaches to the next form and trailing prose trails"
     (let [text (str "First I will add the values.\n"
                     "(+ 1 2)\n"
                     "Then I will finish.\n"
                     "(my.run/complete \"3\")\n"
                     "That is all.")]
       (is (= ["; First I will add the values.\n(+ 1 2)"
-              "; Then I will finish.\n(my.run/complete \"3\")"
-              "; That is all."]
+              "; Then I will finish.\n(my.run/complete \"3\")\n; That is all."]
              (sources text)))))
 
   (testing "the live word-salad reply freezes one form, not its 22 prose tokens"
@@ -201,8 +198,9 @@
            (reply/sources
             "(ns my.gen.alpha)\nNow the function.\n(defn f [] 1)"))))
 
-  (testing "a trailing prose-only source is not a form and has no namespace"
-    (is (= {:seon.cluster.run.form/source "; That is all."}
+  (testing "trailing prose rides the form it follows, keeping that ns"
+    (is (= {:seon.cluster.run.form/source "(def a 1)\n; That is all."
+            :seon.ns/name 'my.gen.alpha}
            (last (reply/sources "(ns my.gen.alpha)\n(def a 1)\nThat is all."))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -232,15 +230,82 @@
     (is (= :seon.cluster.reply/no-forms
            (:seon.error/kind (sources "   \n\n  "))))))
 
+;;; A declared error class is recognised by its MARKER ATTRIBUTE — the one
+;;; required key besides `:seon.error/message` — so a refusal that omits it
+;;; matches no class and renders through the generic value floor. All three
+;;; reply classes were unproducible for exactly that reason; the recurring
+;;; error-class gate never caught it because it generates class values rather
+;;; than reading producers (`test/seon/error_class_schema_test.clj`).
+(deftest every-refusal-matches-its-declared-error-class
+  (let [projection (schema/build-projection (schema/registered-schemas))
+        classes (fn [text]
+                  (into #{}
+                        (map :seon.schema/key)
+                        (schema/matching-shapes-in projection
+                                                   (reply/sources text))))]
+    (is (contains? (classes "   \n\n  ")
+                   :seon.cluster.reply/no-forms-error))
+    (is (contains? (classes "I only explained myself.")
+                   :seon.cluster.reply/no-forms-error))
+    (is (contains? (classes "(defn f [x]")
+                   :seon.cluster.reply/unreadable-error))
+    (is (contains? (classes "#foo/bar [1 2]")
+                   :seon.cluster.reply/refused-tag-error))))
+
 (deftest a-fenced-reply-retains-surrounding-prose-as-comments
   (is (= ["; Sure — here is the plan.\n\n(def a 1)"
-          "(my.run/complete \"done\")"
-          "; Let me know if that works."]
+          "(my.run/complete \"done\")\n; Let me know if that works."]
          (sources
           (str "Sure — here is the plan.\n\n"
                "```clojure\n(def a 1)\n(my.run/complete \"done\")\n```\n\n"
                "Let me know if that works.")))))
 
 (deftest tilde-fences-have-the-same-presentation-semantics
-  (is (= ["; Here:\n(+ 1 2)" "; Done."]
+  (is (= ["; Here:\n(+ 1 2)\n; Done."]
          (sources "Here:\n~~~clojure\n(+ 1 2)\n~~~\nDone."))))
+
+;;; ---------------------------------------------------------------------------
+;;; The class: a plan source the reader finds no event in
+;;; ---------------------------------------------------------------------------
+
+;;; A comment-only plan source is a form row nothing can settle: the reader
+;;; produces zero events for it, so no receipt is ever written and the run
+;;; closes with an unsettled form of its own. The 2026-08-08 arc drive read
+;;; 105 forms / 102 receipts, and all three gaps were deepseek-v4-flash
+;;; chat-template control markup arriving verbatim in the completion's
+;;; `content` field and reading as prose
+;;; (`docs/seon/issues/a-runs-last-form-can-close-without-a-receipt.md`).
+;;; The class dies by construction: prose alone is never a plan source.
+(def ^:private leaked-control-markup
+  ["<assistant1>"
+   (str "<assistant1>I’m checking the facts before answering — first the "
+        "relevant schema and entity attributes.")
+   (str "<｜｜DSML｜｜AgentThoughts>We need respond to current instruction "
+        "about core fault. Need inspect. Let's gather data first."
+        "</｜｜DSML｜｜AgentThoughts>")])
+
+(deftest a-reply-of-provider-control-markup-refuses-instead-of-recording
+  (doseq [text leaked-control-markup]
+    (let [result (reply/sources text)]
+      (is (error? result)
+          (str "control markup must not become a plan form: " text))
+      (is (= :seon.cluster.reply/no-forms (:seon.error/kind result)))
+      (is (= text (:seon.cluster.reply/text (:seon.error/data result)))
+          "the refusal carries the leaked text so the leak stays visible"))))
+
+(deftest every-plan-source-carries-a-reader-event
+  (testing "so every recorded form can settle a receipt"
+    (doseq [text [";; a note\n(def a 1)\n(inc a)"
+                  "First I will add.\n(+ 1 2)\nThat is all."
+                  (str "<assistant1>\n(my.run/complete \"done\")\n"
+                       "That is everything I did.")
+                  "Here:\n```clojure\n(+ 1 2)\n```\nDone."
+                  "(ns my.gen.alpha)\n(def a 1)\nThat is all."]]
+      (let [forms (reply/sources text)]
+        (is (vector? forms) (str "expected forms for: " text))
+        (doseq [{source :seon.cluster.run.form/source} forms]
+          (is (seq (reader/read
+                    {:seon.sci.reader/text source
+                     :seon.sci.reader/defer-auto-resolve? true}))
+              (str "a plan source with no reader event settles no receipt: "
+                   (pr-str source))))))))

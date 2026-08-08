@@ -146,3 +146,80 @@ and now explained: the prose is provider markup, not the model's own comment.
 Acceptance is unchanged for this issue — every recorded form settles a receipt,
 including one whose source evaluates to nothing. The token leakage belongs to
 `seon.ai`'s request/response handling and is worth its own note.
+
+## Reply half fixed — 2026-08-08 repair lane
+
+The reply boundary now takes the "prose is never a form" branch this note
+offered, so the shape that produced every observed gap is unrepresentable.
+
+`src/seon/cluster/reply.clj` changed in one rule: **a plan source always
+carries a reader event.** Prose still attaches to the form it precedes; a
+TRAILING prose span now rides the form it FOLLOWS instead of becoming its own
+comment-only source; and a reply with no code at all is a loud
+`:seon.cluster.reply/no-forms` refusal whose message names that the text read
+as prose and whose `:seon.error/data` carries the text verbatim, so a leak
+stays visible rather than being filed as agent source. The refusal takes the
+run loop's existing reply-refusal path (`fail!` → `settle!` with no ordinal),
+which records `:seon.cluster.run/error`, commits a durable error fact, and
+closes the run — a recorded reason where there used to be silence.
+
+Verified live on cluster `default` against the three recorded gap sources: all
+three (`<assistant1>`, `<assistant1>I'm checking the facts…`, and the
+`<｜｜DSML｜｜AgentThoughts>…</…>` span) now refuse instead of recording a form.
+
+Regressions: `a-reply-of-provider-control-markup-refuses-instead-of-recording`
+and `every-plan-source-carries-a-reader-event` in
+`test/seon/cluster/reply-test`, plus
+`a-pure-prose-reply-refuses-and-records-no-unsettleable-form` in
+`test/seon/cluster/turn_test.clj`, which replaces
+`a-pure-prose-reply-records-input-without-a-failed-receipt` (that test pinned
+the deleted behavior) and asserts the form and receipt counts agree.
+
+### The token leakage has no wire fix, and needs none
+
+`seon.ai` was read end to end at both assembly seams and is already correct at
+the provider's own field boundary: `stream-event` (`src/seon/ai.clj:694-760`)
+builds `:seon.ai/text` only from `choices[0].delta.content`, and
+`completion-text`/`parsed-completion` (`src/seon/ai.clj:794-860`) only from
+`choices[0].message.content`; `reasoning_content` lands in its own
+`:seon.ai/reasoning-content` and is never concatenated into the text. The
+control markup therefore arrives INSIDE the `content` field — deepseek-v4-flash
+chat-template tokens emitted as ordinary completion bytes, with thinking
+disabled for that model (`config/default.edn:277-304`). There is no field
+boundary left to separate them on, and none is needed: the reply refusal makes
+the leak loud and named without any text matching. The markup is not ours —
+`assistant1` and `DSML` have zero occurrences across `src/`, `resources/`, and
+`config/`.
+
+### Found in passing, fixed in the same file
+
+All three declared reply error classes were UNPRODUCIBLE. A declared error
+class is recognised by its marker attribute — the one required key besides
+`:seon.error/message` (`test/seon/error_class_schema_test.clj`,
+`marker-attribute`) — and `seon.cluster.reply/refused` emitted only
+`:seon.error/kind`, `:seon.error/message`, and `:seon.error/data`, so
+`:seon.cluster.reply/no-forms-error`, `/unreadable-error`, and
+`/refused-tag-error` never matched and every reply refusal rendered through
+the generic value floor. The recurring gate did not catch it because it
+GENERATES class values rather than reading producers. `refused` now takes the
+marker explicitly (never derived from the kind's name, which would be a
+naming convention), and `every-refusal-matches-its-declared-error-class` in
+`test/seon/cluster/reply-test` claims the fact from the producer side.
+
+### What remains open
+
+- The ruled design in `src/seon/cluster/work.clj` ("Comment-only input has no
+  reader event and needs no receipt", `evaluable-source?` at
+  `src/seon/cluster/work.clj:90-94`) still stands and is now unreachable from
+  the model-reply path. Whether it should be deleted outright — making an
+  unsettleable form impossible for EVERY producer rather than only for replies
+  — is an owner call, because it is a sealed contract with a docstring
+  (2026-07-27 seal revision) and it belongs to the loop owner, not the reply
+  boundary.
+- Other producers of `:seon.cluster.run.form` rows — `seon.bootstrap`
+  (`src/seon/bootstrap.clj:217,301`) and `seon.eval.drive`
+  (`src/seon/eval/drive.clj:160`) — do not pass through the reply reader, so
+  the invariant is structural on the reply path only. Neither has been observed
+  producing a comment-only source; a census is the cheap falsifier.
+- Acceptance items 1–3 are therefore satisfied for model replies and unproven
+  for the other two producers. The issue stays open on that account.

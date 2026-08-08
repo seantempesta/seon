@@ -27,9 +27,22 @@
   occupies its own source line in a reply that also has structure.
   Everything else is coalesced back into its original prose span,
   prefixed with the agent-facing single-`;` comment grammar, and
-  attached to the next form. Trailing or pure prose becomes one
-  comment-only plan source. The reader produces zero events for it, so
-  the prose is recorded as input without an evaluation or receipt.
+  attached to a form: the one it precedes, or — for a trailing span —
+  the one it follows.
+
+  EVERY PLAN SOURCE CARRIES A READER EVENT, and that is the invariant
+  this namespace exists to keep. A comment-only plan source has no
+  event, so nothing evaluates it and nothing settles a receipt for it:
+  the run recorded a `:seon.cluster.run.form` row and closed with that
+  row unsettled, silently, detectable only by counting forms against
+  receipts. The 2026-08-08 arc drive read 105 forms / 102 receipts, and
+  all three gaps were comment-only sources produced by deepseek-v4-flash
+  chat-template control markup (`<assistant1>`,
+  `<｜｜DSML｜｜AgentThoughts>…`) arriving verbatim in the completion's
+  `content` field. A prose span therefore never becomes a plan source of
+  its own; a reply with no forms at all is a LOUD `::no-forms` refusal
+  carrying its text, not a row that settles nothing
+  (`docs/seon/issues/a-runs-last-form-can-close-without-a-receipt.md`).
 
   SOURCES, NOT FORMS. The return is a vector of plan forms, each one a
   SOURCE STRING plus the namespace it was written under. The evaluator
@@ -107,10 +120,11 @@
   "The ONE registered flat error value (`:seon.error/value`).
   Detail rides under `:seon.error/data` rather than beside the message,
   because the shape is closed and one owner (error.edn) decides it."
-  [kind message data]
-  {:seon.error/kind kind
-   :seon.error/message message
-   :seon.error/data data})
+  [kind marker message data]
+  (merge marker
+         {:seon.error/kind kind
+          :seon.error/message message
+          :seon.error/data data}))
 
 (defn- parsed-events
   "Read events for `source` from THE ONE reader, or its flat error value.
@@ -215,11 +229,15 @@
        (str/join "\n")))
 
 (defn- plan-sources
-  "Attach prose spans to the next form and retain trailing prose.
+  "Attach prose spans to the form they precede, or trail.
   Each plan form carries the reader's namespace-in-effect when the
   reader attributed one; a form the reader could not attribute simply
   has no `:seon.ns/name`, and absence is what routes its red receipt to
-  the run's author rather than to a guessed owner."
+  the run's author rather than to a guessed owner.
+
+  Returns EMPTY when the reply had no code at all — prose alone is
+  never a plan source, because a source the reader finds no event in
+  cannot settle a receipt."
   [source events]
   (let [code-indexes (code-event-indexes source events)
         code-events (keep-indexed (fn [index event]
@@ -238,10 +256,23 @@
                  (conj forms
                        (cond-> {:seon.cluster.run.form/source plan-source}
                          ns (assoc :seon.ns/name ns)))))
+        ;; TRAILING PROSE RIDES THE FORM IT FOLLOWS. It used to become its
+        ;; own comment-only plan source, which is the shape that recorded a
+        ;; form row no receipt could ever settle.
         (let [prose (comment-source (subs source cursor))]
           (cond-> forms
-            (not (str/blank? prose))
-            (conj {:seon.cluster.run.form/source prose})))))))
+            (and (seq forms) (not (str/blank? prose)))
+            (update (dec (count forms))
+                    update :seon.cluster.run.form/source str "\n" prose)))))))
+
+(defn- no-forms-message
+  "Name what the reply carried instead of forms."
+  [source]
+  (if (str/blank? (comment-source source))
+    "The reply carried no Clojure forms."
+    (str "The reply carried no Clojure forms — its whole text read as "
+         "prose. Prose runs nothing and settles nothing; write the "
+         "Clojure you want evaluated.")))
 
 (def ^:private prose-read-failure
   #"^Invalid (?:number|symbol|keyword|token)")
@@ -321,8 +352,11 @@
   - `::unreadable` — unbalanced or malformed input, carrying the
     reader's own position so the agent can see where;
   - `::refused-tag` — `#=` or an unknown reader tag, named;
-  - `::no-forms` — the reply was empty or whitespace only. Prose is a
-    successful comment source, not a refusal."
+  - `::no-forms` — the reply carried no code: it was empty, or its
+    whole text read as prose. Prose accompanying a form still rides
+    that form's source as comments; prose ALONE is a refusal, because a
+    plan source with no reader event settles no receipt and would close
+    the run with an unsettled form."
   {:malli/schema
    [:function
     [:=> [:cat :seon.cluster.reply/text]
@@ -337,16 +371,19 @@
        ; the reader refuses #= and unknown tags by itself — there is no
        ; blocklist here, and there must never be one
        (if (map? events)
-         (let [message (:seon.error/message events)]
+         (let [message (:seon.error/message events)
+               tag (:seon.sci.reader/tag (:seon.error/data events))]
            (if (= :seon.sci.reader/refused-tag (:seon.error/kind events))
-             (refused ::refused-tag message {::text text})
+             (refused ::refused-tag
+                      (cond-> {} tag (assoc ::refused-tag tag))
+                      message {::text text})
              (if-let [{recovered-source :source line :line}
                       (comment-prose-failure source events recovered-lines)]
                (recur recovered-source (conj recovered-lines line))
-               (refused ::unreadable message {::text text}))))
+               (refused ::unreadable {::unreadable text} message
+                        {::text text}))))
          (let [forms (plan-sources source events)]
            (if (seq forms)
              (vec forms)
-             (refused ::no-forms
-                      "The reply carried no Clojure forms or prose notes."
-                      {::text text}))))))))
+             (refused ::no-forms {::no-forms true}
+                      (no-forms-message source) {::text text}))))))))

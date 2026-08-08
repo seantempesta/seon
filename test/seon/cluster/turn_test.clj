@@ -1813,7 +1813,16 @@
             (testing "and the run is closed, so the agent is idle again"
               (is (nil? (work/next-agent-work @connection (request connection)))))))))))
 
-(deftest a-pure-prose-reply-records-input-without-a-failed-receipt
+;;; A prose-only reply used to record a comment-only form row that nothing
+;;; could ever settle: the reader finds no event in it, so no receipt was
+;;; written and the run closed with an unsettled form of its own — the
+;;; 105-forms/102-receipts accounting gap, whose three real instances were
+;;; deepseek-v4-flash chat-template control markup reading as prose
+;;; (`docs/seon/issues/a-runs-last-form-can-close-without-a-receipt.md`).
+;;; The class is dead by construction: the reply reader never makes a plan
+;;; source out of prose alone, so a form row that cannot settle is
+;;; unrepresentable, and the turn refuses LOUDLY instead.
+(deftest a-pure-prose-reply-refuses-and-records-no-unsettleable-form
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)]
@@ -1821,24 +1830,45 @@
                       (fn [_]
                         {:seon.ai/text
                          "I explained the result without another form."})]
-          (is (= [:open :call :close]
-                 (mapv :seon.cluster.work/situation (drive! cluster 10))))
-          (is (= ["; I explained the result without another form."]
-                 (db/q '[:find [?source ...]
-                        :where
-                        [?form :seon.cluster.run.form/source ?source]
-                        [?form :seon.cluster.run.form/run ?run]]
-                       @connection)))
+          (drive! cluster 10)
           (is (empty?
-               (db/q '[:find [?receipt ...]
+               (db/q '[:find [?source ...]
                       :where
-                      [?receipt :seon.cluster.eval/id _]]
-                     @connection)))
-          (is (empty?
-               (db/q '[:find [?receipt ...]
-                      :where
-                      [?receipt :seon.cluster.eval/error _]]
-                     @connection)))
+                      [?agent :seon.cluster.agent/id "agent-a"]
+                      [?run :seon.cluster.run/agent ?agent]
+                      [?form :seon.cluster.run.form/run ?run]
+                      [?form :seon.cluster.run.form/source ?source]]
+                     @connection))
+              "prose alone never becomes a recorded form")
+          (is (= (count (db/q '[:find [?form ...]
+                               :where
+                               [?agent :seon.cluster.agent/id "agent-a"]
+                               [?run :seon.cluster.run/agent ?agent]
+                               [?form :seon.cluster.run.form/run ?run]]
+                             @connection))
+                 (count (db/q '[:find [?receipt ...]
+                               :where
+                               [?agent :seon.cluster.agent/id "agent-a"]
+                               [?run :seon.cluster.run/agent ?agent]
+                               [?receipt :seon.cluster.eval/run ?run]]
+                             @connection)))
+              "forms and receipts agree, which is the whole invariant")
+          (let [error (db/q '[:find ?message .
+                             :where
+                             [?agent :seon.cluster.agent/id "agent-a"]
+                             [?run :seon.cluster.run/agent ?agent]
+                             [?run :seon.cluster.run/error ?message]]
+                           @connection)]
+            (is (string? error) "the run records WHY it settled nothing")
+            (is (str/includes? error "prose")
+                "and names what the reply carried instead of forms"))
+          (is (some? (db/q '[:find ?closed .
+                            :where
+                            [?agent :seon.cluster.agent/id "agent-a"]
+                            [?run :seon.cluster.run/agent ?agent]
+                            [?run :seon.cluster.run/closed-at ?closed]]
+                          @connection))
+              "the run still closes — loudly, with its reason recorded")
           (let [rendered
                 (transcript/render-ai
                  {:seon.db/db @connection
@@ -1848,11 +1878,10 @@
                   :seon.config/on-core-error :panic
                   :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
                   :seon.render.transcript/token-budget 100000})]
-            (is (str/includes?
-                 rendered
-                 "my.agents.agent-a=> ; I explained the result without another form."))
-            (is (not (str/includes? rendered "failed")))
-            (is (not (str/includes? rendered "nil")))))))))
+            (is (not (str/includes?
+                      rendered
+                      "my.agents.agent-a=> ; I explained the result"))
+                "the prose is no longer replayed as an evaluated REPL line")))))))
 
 (deftest a-completing-disposition-closes-in-the-terminal-transaction
   (with-cluster
