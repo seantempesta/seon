@@ -488,6 +488,28 @@ checkpoint's honest expectations. W1 CLOSED 2026-08-07 night; Phase 1 is
 complete. The checkpoint (complete bare run) waits only on the two
 dispatched repair lanes landing so the tree is coherent.
 
+**Declaration-population family, write side CLOSED; read side escalated**
+([research](../research/declaration-population-per-item-2026-08-07.md),
+commit `66679cf89`). Resolve-once-and-pass landed at `seon.schema` /
+`seon.config` / `seon.print`: reconcile identity scan 21–26 s → 11.4 ms
+(286,672 resource reads → 152), config registration 1,003 ms → 24.8 ms,
+print option-defaults 67.9 ms → 11.3 ms; a FOURTH instance threading
+cannot reach (the registered `malli-form?` predicate resolving per
+attribute — 82,992 reads inside config admission) contained at the one
+supply seam and
+[filed for the environment fix](../../../seon/issues/malli-form-predicate-resolves-the-declaration-population-itself.md).
+Class regression counts reads at the one seam: one population per
+operation. The READ side
+([db-read-decoding-resolves-declarations-per-attribute](../../../seon/issues/db-read-decoding-resolves-declarations-per-attribute.md))
+is ESCALATED from Phase 3 to immediate: it now wedges reconcile-test and
+config-application-test at the 300 s backstop (one `config/effective` =
+84,664 reads inside one `pull '[*]`) — lane dispatched on `seon.db`'s
+five walkers with the write-side fix as the model. Also from that lane's
+ugly-output list: the classpath fallback needs one loud dev-mode warning
+naming its caller (the 286k-read "map lookup" logged NOTHING — found
+only by thread dump), which is the ethos section's diagnostics rule
+applied to this exact seam.
+
 ## Rollout — test-first, REPL-iterated, then farmed out
 
 Phase 0 — falsify the three load-bearing mechanics live (opus REPL lanes,
