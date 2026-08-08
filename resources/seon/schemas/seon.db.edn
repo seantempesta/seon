@@ -33,20 +33,33 @@
             [:seon.db/read-operation [:enum :pull :pull-many]]
             [:seon.db/pull-arguments :seon.db/pull-arguments]]],
           :read-result :seon.schema/value,
+          ;; A read's source is identified exactly as Datahike identifies its
+          ;; own query-cache key (query.cljc:2658-2671): a committed raw DB by
+          ;; its cache context, an as-of view by the ORIGIN's context plus its
+          ;; fixed time point, and every remaining shape — since, history,
+          ;; filtered, speculative — by nothing at all, because those values
+          ;; carry no committed identity. The third arm states that absence
+          ;; instead of silently producing nils.
           :dependency-revision
           [:or
            [:map
             [:datahike.cache/connection-id :seon.db/connection-id]
             [:datahike.cache/generation :uuid]
+            [:datahike.read/time-point {:optional true} :int]
             [:datahike.read/attributes [:= :all]]
             [:datahike.read/revision :uuid]]
            [:map
             [:datahike.cache/connection-id :seon.db/connection-id]
             [:datahike.cache/generation :uuid]
+            [:datahike.read/time-point {:optional true} :int]
             [:datahike.read/attributes [:set :qualified-keyword]]
             [:datahike.cache/conservative-revision {:optional true} :uuid]
             [:datahike.cache/attribute-revisions
-             [:map-of :qualified-keyword :uuid]]]],
+             [:map-of :qualified-keyword :uuid]]]
+           [:map
+            [:datahike.read/attributes
+             :seon.db/read-dependency-attributes]
+            [:datahike.read/cache-eligible? [:= false]]]],
           :captured-read
           [:map
            [:seon.db/db :seon.db/database-value]

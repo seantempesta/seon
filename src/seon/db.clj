@@ -7,6 +7,8 @@
             [clojure.walk :as walk]
             [datahike.api :as d]
             [datahike.connector :as connector]
+            [datahike.constants :as const]
+            [datahike.db :as datahike.db]
             [datahike.db.interface :as dbi]
             [datahike.db.utils :as db.utils]
             [datahike.query :as query]
@@ -18,7 +20,8 @@
             [seon.error.refusal :as error.refusal]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike])
-  (:import [datalog.parser.type BindScalar Constant FindColl FindRel FindScalar
+  (:import [datahike.db AsOfDB]
+           [datalog.parser.type BindScalar Constant FindColl FindRel FindScalar
             FindTuple Pattern Variable]))
 
 ;;; ---------------------------------------------------------------------------
@@ -140,17 +143,30 @@
     {:datahike/connection-id (connection-id connection)}))
 
 (defn database-value-identity
-  "Plain-data identity of an immutable Datahike database value."
+  "Plain-data identity of a COMMITTED immutable Datahike database value.
+
+  Only a committed value has a commit id. An as-of, since, history, or
+  speculative value does not, and this returns a flat error value for it
+  rather than a map with a nil commit id — use `basis-t` when the question is
+  only the basis transaction, which every value shape answers."
   {:malli/schema
    [:=> [:cat [:or :seon.db/database-value :seon.error/value]]
     [:or :seon.db/database-value-identity :seon.error/value]]}
   [database]
   (if (error-value? database)
     database
-    (let [configuration (dbi/-config database)]
-      {:db-name (:branch configuration)
-       :t (dbi/-max-tx database)
-       :datahike/commit-id (d/commit-id database)})))
+    (let [configuration (dbi/-config database)
+          commit-id (d/commit-id database)]
+      (if (uuid? commit-id)
+        {:db-name (:branch configuration)
+         :t (dbi/-max-tx database)
+         :datahike/commit-id commit-id}
+        (error-value
+         ::uncommitted-database-value
+         (str "This database value has no commit id, so it has no committed "
+              "identity. Read its basis transaction with seon.db/basis-t.")
+         {:db-name (:branch configuration)
+          :t (dbi/-max-tx database)})))))
 
 (defn basis-t
   "The database value's basis transaction, through Datahike's interface.
@@ -253,27 +269,69 @@
                            :seon.db/pull-arguments arguments}
     :seon.db/read-result (stable-read-result result)}))
 
+;;; The committed identity a retained read's revision is keyed on. Datahike
+;;; derives its OWN query-cache key exactly this way
+;;; (`reference-code/datahike/src/datahike/query.cljc:2658-2671`):
+;;;
+;;; - a committed raw `datahike.db.DB` is identified by its `:cache-context`;
+;;; - an `AsOfDB` over a committed origin at a strictly-past integer time point
+;;;   is identified by the ORIGIN's context plus that fixed point, reached
+;;;   through `dbi/-origin` and `dbi/-time-point` (the `IHistory` interface,
+;;;   `reference-code/datahike/src/datahike/db/interface.cljc:118-120`);
+;;; - every other shape — since, history, filtered, speculative, detached —
+;;;   has no committed identity at all, which is precisely what datahike's
+;;;   `committed-value-identity` reports by returning nil.
+;;;
+;;; Reading `:cache-context` off a value that is not a raw `DB` was the class
+;;; defect this replaces, and it failed SILENTLY: `select-keys` over an
+;;; `AsOfDB` returns `{}` without a word, so the two required identity keys
+;;; vanished and the first complaint arrived frames later at `read-evidence`'s
+;;; output arm. The run loop renders each turn at its run's opening basis — an
+;;; as-of value — so on 2026-08-08 every agent prompt on the default cluster
+;;; collapsed to one 509-character contract error, and nine paid provider calls
+;;; answered it instead of the waiting human message.
+(defn- revision-source
+  [database]
+  (if (instance? AsOfDB database)
+    (let [origin (dbi/-origin database)
+          time-point (dbi/-time-point database)]
+      (when (and (some? (datahike.db/committed-value-identity origin))
+                 (integer? time-point)
+                 (<= const/tx0 (long time-point))
+                 (< (long time-point) (long (dbi/-max-tx origin))))
+        {::context (:cache-context origin)
+         ::fixed-point (long time-point)}))
+    (when (some? (datahike.db/committed-value-identity database))
+      {::context (:cache-context database)})))
+
 (defn- dependency-revision
   [database plan source-position]
-  (let [context (:cache-context database)
-        attributes (d/dependency-plan-attributes plan source-position)
-        source-identity (select-keys context
-                                     [:datahike.cache/connection-id
-                                      :datahike.cache/generation])]
-    (if (= :all attributes)
-      (assoc source-identity
-             :datahike.read/attributes :all
-             :datahike.read/revision
-             (:datahike.cache/commit-id context))
-      (cond->
-       (assoc source-identity
-              :datahike.read/attributes attributes
-              :datahike.cache/attribute-revisions
-              (select-keys (:datahike.cache/attribute-revisions context)
-                           attributes))
-        (:datahike.cache/conservative-revision context)
-        (assoc :datahike.cache/conservative-revision
-               (:datahike.cache/conservative-revision context))))))
+  (let [{context ::context fixed-point ::fixed-point} (revision-source database)
+        attributes (d/dependency-plan-attributes plan source-position)]
+    (if (nil? context)
+      ;; No committed identity, so no revision can ever prove a retained read
+      ;; current. The revision says so in the open, and
+      ;; `read-evidence-current?` replays the read rather than comparing.
+      {:datahike.read/attributes attributes
+       :datahike.read/cache-eligible? false}
+      (let [source-identity
+            (cond-> (select-keys context [:datahike.cache/connection-id
+                                          :datahike.cache/generation])
+              fixed-point (assoc :datahike.read/time-point fixed-point))]
+        (if (= :all attributes)
+          (assoc source-identity
+                 :datahike.read/attributes :all
+                 :datahike.read/revision
+                 (:datahike.cache/commit-id context))
+          (cond->
+           (assoc source-identity
+                  :datahike.read/attributes attributes
+                  :datahike.cache/attribute-revisions
+                  (select-keys (:datahike.cache/attribute-revisions context)
+                               attributes))
+            (:datahike.cache/conservative-revision context)
+            (assoc :datahike.cache/conservative-revision
+                   (:datahike.cache/conservative-revision context))))))))
 
 (defn read-evidence
   "Retain dependency revisions without retaining database values."
@@ -338,7 +396,8 @@
            plan :datahike.read/dependency-plan
            revision :datahike.read/revision
            :as evidence}]
-       (or (= revision (dependency-revision database plan source-position))
+       (or (and (not (false? (:datahike.read/cache-eligible? revision)))
+                (= revision (dependency-revision database plan source-position)))
            (when-let [request (:seon.db/read-request evidence)]
              (try
                (= (:seon.db/read-result evidence)
