@@ -487,6 +487,21 @@ usage facts, and the control-token reply leak.
   preparation, provider transport) are closed — a focused re-drive
   follows.**
 
+## NEXT: the model-authoring re-drive (gated on tree coherence)
+
+Both arc walls are closed, so a focused re-drive can now attempt the
+stage the arc could not reach: a REAL MODEL authoring a contracted
+function end to end (call preparation live) and committing data
+(transport fixed). The re-drive needs a refork onto the S2 pin
+(`6ee57c9`) — which needs a COHERENT TREE. As of this note the
+render-dogfood lane holds uncommitted `render.edn`/`transcript.clj` and
+the AI lane left `ai.clj` dirty; reforking into mid-edit state is the
+exact tree-wide-outage class this night taught. So the re-drive is
+GATED on the last running lane (render-dogfood) reporting and the tree
+going coherent. Watch item once it drives: the S4 `transact!`-shape
+blocker is latent at `cluster.clj:1978` and would bite a
+model-authored function that commits there.
+
 ## Pending milestones
 
 - stop-completion lands → reset → 08-06 drive-arc rerun with observer →
