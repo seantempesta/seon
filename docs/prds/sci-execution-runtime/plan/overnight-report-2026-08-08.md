@@ -213,6 +213,26 @@ as-of-reader CLASS (four-view total-reader regression owed and
 generalized), fix message-selection starvation, re-drive. Observer's
 independent report still incoming.
 
+**The observer's independent account
+([live-drive-observer-2026-08-08.md](../research/live-drive-observer-2026-08-08.md))
+— three plain disagreements, all evidence-backed:** "admission blocker
+CLOSED" was too strong (the dominant resolver MOVED to seon.print —
+9,665 resolutions/20 min at a measured 10.6 ms; only Phase 3's
+environment supply ends the class; the /data 5.5 s stall is PROVEN as
+556 of those calls, predicted-vs-measured within 8%); the warning wall
+still owns 70/87 boot lines; and the driver's "claiming recurred" is
+REFUTED — claiming was exactly-once at all 84 samples, the starvation
+is upstream in selection/wake. New blockers: the self-sustaining fault
+loop (nine PAID calls in 20 min, no stimulus — each failed turn's fault
+message wakes the next); 46 forms → 41 receipts (runs close leaving
+receiptless forms). The economics finding worth remembering: **a
+starved prompt costs more than a bloated one** — 2,025 prompt tokens
+became 66,591 completion tokens (32.9:1) of the model reasoning around
+missing context. Calibration: custody clean at all 84 samples (the
+08-06 custody failure is dead), provider integration sound, capture
+durable-and-exact is what made the diagnosis possible at all. All
+refinements relayed to the running fix-and-re-drive lane.
+
 ## The drive-arc launch record
 
 Default reforked from current-src at tonight's HEAD (commit `6a76b0c6…`)
