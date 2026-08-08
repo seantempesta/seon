@@ -81,6 +81,7 @@
    :seon.cluster.run/opening-commit-id
    :seon.cluster.run/opened-at
    :seon.cluster.run/closed-at
+   :seon.cluster.run/interrupted-at
    :seon.cluster.run/process
    :seon.cluster.run/plan-digest
    :seon.cluster.run/starting-ns
@@ -758,8 +759,11 @@
                  holder (get-in model [:runs run-id :process])]
              (cond-> model
                ;; TAKEOVER = RECOVERY, one shape: a dead holder's
-               ;; running receipts are stamped in the same transition
+               ;; running receipts AND its run are stamped in the same
+               ;; transition — a run with no receipt row still carries
+               ;; the evidence that a dead process's custody was cut
                (some? holder) (stamp-running-receipts run-id)
+               (some? holder) (assoc-in [:runs run-id :interrupted] true)
                true (assoc-in [:runs run-id :process] process)))
     :release (let [[run-id] args]
                (update-in model [:runs run-id] dissoc :process))
@@ -798,6 +802,8 @@
                             (update-in [:runs run-id]
                                        #(-> %
                                             (assoc :closed true)
+                                            ;; recovery marks what it cut
+                                            (assoc :interrupted true)
                                             (dissoc :process)))
                             (update :pointers dissoc agent-id))))))
                 model
@@ -918,6 +924,13 @@
          (= (:process entry) (::run/process entity))
          (= (boolean (:closed entry))
             (some? (::run/closed-at entity)))
+         ;; RECOVERY MARKS WHAT IT INTERRUPTED, and only that: a run a
+         ;; dead process's custody was recovered from carries
+         ;; `::interrupted-at`, a normally closed run never does. This
+         ;; is the only distinction for a run whose dead process left
+         ;; no receipt row to stamp
+         (= (boolean (:interrupted entry))
+            (some? (::run/interrupted-at entity)))
          ;; a closed run holds no custody
          (or (not (:closed entry))
              (nil? (::run/process entity)))
@@ -1121,6 +1134,69 @@
           "the interrupted run is ended")
       (is (nil? (agent-pointer connection "orderer"))
           "and the agent pointer is retracted"))))
+
+(deftest recovery-marks-a-run-that-settled-no-receipt
+  ;; THE CLASS: a run whose dead process settled no receipt row was
+  ;; indistinguishable by query from a run that closed normally, so
+  ;; "which runs did the last recovery interrupt?" was unanswerable
+  ;; from the database (whole-system-arc observer, 2026-08-08 —
+  ;; `945f3226`: one form, zero receipts, no error, no marker). The run
+  ;; stamp cannot be derived from receipts, because there are none.
+  (with-model-database
+    (fn [connection]
+      (db/transact! connection [{:seon.cluster.agent/id "cut"}
+                                {:seon.cluster.agent/id "clean"}])
+      ;; a run a dead process was holding, with no receipt at all
+      (db/transact! connection
+                    (run/open-tx {::run/id "cut-run"
+                                  ::run/agent [:seon.cluster.agent/id "cut"]
+                                  ::run/opened-at t0}))
+      (db/transact! connection
+                    (run/claim-tx {::run/id "cut-run"
+                                   ::run/process "dead-process"
+                                   ::run/live-processes #{"dead-process"}
+                                   ::run/now t0}))
+      ;; and a run that closes NORMALLY, the same shape otherwise
+      (db/transact! connection
+                    (run/open-tx {::run/id "clean-run"
+                                  ::run/agent [:seon.cluster.agent/id "clean"]
+                                  ::run/opened-at t0}))
+      (db/transact! connection
+                    (run/claim-tx {::run/id "clean-run"
+                                   ::run/process "live-process"
+                                   ::run/live-processes #{"live-process"}
+                                   ::run/now t0}))
+      (db/transact! connection
+                    (run/close-tx {::run/id "clean-run"
+                                   ::run/process "live-process"
+                                   ::run/closed-at t1}))
+      (db/transact! connection
+                    (run/recover-tx {::run/id "cut-run"
+                                     ::run/live-processes #{"live-process"}
+                                     ::run/now t2}))
+      (let [cut (run-entity connection "cut-run")
+            clean (run-entity connection "clean-run")]
+        (is (= t2 (::run/interrupted-at cut))
+            "recovery records the interruption it performed")
+        (is (some? (::run/closed-at cut)))
+        (is (nil? (::run/interrupted-at clean))
+            "a normal close stays unmarked — presence is the whole state")
+        (is (empty? (db/q '[:find [?r ...]
+                            :where [?r :seon.cluster.eval/id _]]
+                          @connection))
+            "and no receipt was invented for a form that never started"))
+      (is (= ["cut-run"]
+             (db/q '[:find [?id ...]
+                     :where
+                     [?run :seon.cluster.run/interrupted-at _]
+                     [?run :seon.cluster.run/id ?id]]
+                   @connection))
+          "\"which runs did recovery interrupt?\" is one query")
+      (is (str/includes?
+           (run/render-ai (assoc (run-entity connection "cut-run")
+                                 :seon.db/db @connection))
+           "It was interrupted at")
+          "and the run says so rather than reporting \"It completed.\""))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema admissibility — the model refuses what it must

@@ -5,6 +5,13 @@
                    :forms
                    [:set #:seon.db{:component true} :seon.db/ref],
                    :id [:string {:min 1, :seon.db/identity true}],
+                   ;; PRESENCE IS THE STATE: a run carries this exactly
+                   ;; when a dead process's custody of it was recovered.
+                   ;; The receipt-level twin says which FORM was cut; a
+                   ;; run whose dead process left no receipt row has no
+                   ;; form-level evidence at all, and this is the only
+                   ;; fact separating it from a normal close.
+                   :interrupted-at :inst,
                    :live-processes [:set :seon.cluster.run/process],
                    :missing-results [:int {:min 0}],
                    :opening-commit-id :uuid,
@@ -50,6 +57,9 @@
                     [:seon.cluster.run/closed-at
                      {:optional true}
                      :seon.cluster.run/closed-at]
+                    [:seon.cluster.run/interrupted-at
+                     {:optional true}
+                     :seon.cluster.run/interrupted-at]
                     [:seon.cluster.run/process
                      {:optional true}
                      :seon.cluster.run/process]

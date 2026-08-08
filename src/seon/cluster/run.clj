@@ -39,12 +39,16 @@
     supply it). The transition fences STATE; time is first-party input
     from core code — agents never reach this layer.
   - Crashes are rare and NOTHING re-executes: boot recovery asserts
+    `::interrupted-at` on the RUN and
     `:seon.cluster.eval/interrupted-at` on dangling receipts (those
     carrying no terminal fact), closes every open prior-process run,
     releases its custody, and retracts the agent pointer. Every settled
     receipt stays untouched. A form has AT MOST ONE settlement, ever.
-    The interrupted state surfaces as ONE derived warning, never
-    per-eval markers.
+    RECOVERY MARKS WHAT IT INTERRUPTED — the crash model's honesty
+    clause — so \"which runs did the last recovery cut?\" is a query
+    over `::interrupted-at` and never a process-local boot counter. The
+    run stamp is not derivable from the receipt stamps: a process that
+    died before its first receipt row existed leaves none.
 
   Crash walk: every transition here is ONE atomic transaction (a single
   `[:db.fn/call ...]`), so a kill at any instant leaves it either fully
@@ -333,12 +337,25 @@
        (remove terminal?)))
 
 (defn- interrupt-stamps
-  "One `interrupted-at` assertion per running receipt of `run-eid`."
+  "Everything a dead process's custody leaves behind, marked at `now`.
+
+  ONE `interrupted-at` per running receipt, AND ONE ON THE RUN. The run
+  stamp is not a summary of the receipt stamps and cannot be derived
+  from them: a process that died before its first form settled a
+  receipt row leaves NO receipt to stamp, and that run was
+  indistinguishable by query from a run that closed normally
+  (whole-system-arc observer, 2026-08-08 — `945f3226` closed by
+  recovery with one form, zero receipts, no error, and no marker
+  anywhere durable). The crash model's honesty clause is that recovery
+  marks what it interrupted, so recovery records the fact it alone
+  knows. Presence is the state; there is no status label and nothing
+  reads a boot counter to answer \"which runs did recovery cut?\"."
   [db run-eid now]
-  (mapv (fn [receipt]
-          [:db/add (:db/id receipt)
-           :seon.cluster.eval/interrupted-at now])
-        (running-receipts db run-eid)))
+  (conj (mapv (fn [receipt]
+                [:db/add (:db/id receipt)
+                 :seon.cluster.eval/interrupted-at now])
+              (running-receipts db run-eid))
+        [:db/add run-eid ::interrupted-at now]))
 
 ;; The *-tx wrappers reference their *-call VARS (#'f): datahike applies
 ;; the var, so redefining a transition against the running system updates
@@ -425,10 +442,13 @@
     live claim is not stealable; there is no second live claimant to
     steal for — the refusal is the model stating that);
   - held by a DEAD process (outside `::live-processes`) → TAKEOVER =
-    RECOVERY, one shape: stamp that custody's running receipts
-    `interrupted-at` at `::now`, then retract/assert `::process` — one
-    transaction, so the intermediate state never exists (custody
-    revision, Revision 3).
+    RECOVERY, one shape: stamp the run and that custody's running
+    receipts `interrupted-at` at `::now`, then retract/assert
+    `::process` — one transaction, so the intermediate state never
+    exists (custody revision, Revision 3). The run stamp is the same
+    one `recover-call` writes, from the same `interrupt-stamps`: both
+    paths recover a dead process's custody, so both leave the same
+    durable evidence that they did.
   There are no observed-* fields; the mid-transaction db is the only
   truth consulted."
   {:malli/schema [:=> [:cat :seon.db/database-value
@@ -1270,10 +1290,15 @@
 (defn recover-call
   "Settle and close one interrupted run during boot recovery.
   When the run's holder is NOT a live process — dead, or absent
-  entirely — every running receipt (one carrying NO terminal fact) gets
+  entirely — THE RUN gets `::interrupted-at` asserted at `::now`, every
+  running receipt (one carrying NO terminal fact) gets
   `:seon.cluster.eval/interrupted-at` asserted at `::now`, every open effect
   receipt gets `:seon.effect/interrupted-at`, dead custody is released, the
   run is CLOSED at `::now`, and the owning agent's run pointer is retracted.
+  The run stamp is what makes \"which runs did the last recovery cut?\" a
+  query instead of a process-local boot counter, and it is the ONLY
+  distinction available for a run whose dead process settled no receipt
+  row at all.
   EVERY settled receipt is left byte-untouched:
   the receipt read and the stamp share this one transaction, so a
   stale-basis recovery stamping a settled receipt is unrepresentable
@@ -1459,6 +1484,19 @@
                    " started — "
                    (::missing-results never-started)
                    " form(s) never ran, and nothing was retried.")
+
+              ;; THE FACT RECOVERY WROTE outranks every guess below it.
+              ;; Without it a run whose dead process left no receipt
+              ;; row read "It completed." — the render restating a
+              ;; database that could not tell the two apart. The two
+              ;; clauses above still say MORE (which form was cut), so
+              ;; they come first; this is what remains when the process
+              ;; died before any form-level evidence existed.
+              (and (::interrupted-at unit) (some? (::closed-at unit)))
+              (str "It was interrupted at "
+                   (pr-str (::interrupted-at unit))
+                   " — the process holding it died, recovery closed it, "
+                   "and nothing was retried.")
 
               (::error unit)
               (str "It did not run: " (::error unit)

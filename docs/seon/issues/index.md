@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (30)
+## Blocker (29)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -49,7 +49,6 @@ See `README.md` for the convention.
 | [Give the transcript's floor-rendered values a root identity](transcript-floor-renders-a-missing-root-identity-refusal.md) | blocker | render floor repair (found by the token-calibration lane) |
 | [Settle what arrived when a provider stream closes mid-body](a-mid-stream-provider-disconnect-discards-the-whole-turn.md) | blocker | whole-system arc repair wave |
 | [Install call preparation on the cluster's sci context](call-preparation-is-never-installed-on-the-cluster-sci-context.md) | blocker | whole-system arc repair wave |
-| [Mark the run a restart interrupted, so recovery is provable from facts](recovery-closes-an-interrupted-run-without-marking-it.md) | blocker | whole-system arc repair wave |
 
 ## Friction (121)
 

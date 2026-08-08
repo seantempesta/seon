@@ -24,6 +24,7 @@
             [seon.cluster.source :as source]
             [seon.cluster.process :as cluster.process]
             [seon.cluster.registry :as registry]
+            [seon.cluster.run :as run]
             [seon.cluster.store :as store]
             [seon.cluster.work :as work]
             [seon.config :as config]
@@ -1361,7 +1362,20 @@
             connection (:seon.boot/cluster-connection instance)
             now (java.util.Date.)]
         (await-bootstrap! connection "root")
-        (db/transact! connection [{:seon.cluster.agent/id "alice"}])
+        (db/transact! connection [{:seon.cluster.agent/id "alice"}
+                                  {:seon.cluster.agent/id "bob"}])
+        ;; the CONTROL, seeded in the same generation and identical
+        ;; except for how it ends: a run that closed the ordinary way.
+        ;; Without it, "recovery marked the run" proves nothing — the
+        ;; class this test kills is that a recovered run and a normal
+        ;; close were the SAME facts (whole-system-arc observer,
+        ;; 2026-08-08: `945f3226` closed by recovery with no marker
+        ;; anywhere durable, so the honesty claim died with its JVM)
+        (db/transact! connection
+                    [{:seon.cluster.run/id "run-clean"
+                      :seon.cluster.run/agent [:seon.cluster.agent/id "bob"]
+                      :seon.cluster.run/opened-at now
+                      :seon.cluster.run/closed-at now}])
         (db/transact! connection
                     [{:seon.cluster.run/id "run-crashed"
                       :seon.cluster.run/agent [:seon.cluster.agent/id "alice"]
@@ -1406,6 +1420,26 @@
             (is (some? (db/q (quote [:find ?d . :where
                                     [_ :seon.cluster.run/plan-digest ?d]])
                             @connection))))
+          (testing "RECOVERY MARKS WHAT IT INTERRUPTED, and only that —
+                    the run itself carries the fact, so the interrupted
+                    run is distinguishable by query from the clean one"
+            (is (= ["run-crashed"]
+                   (db/q '[:find [?id ...]
+                           :where
+                           [?run :seon.cluster.run/interrupted-at _]
+                           [?run :seon.cluster.run/id ?id]]
+                         @connection)))
+            (is (nil? (:seon.cluster.run/interrupted-at
+                       (db/pull @connection '[*]
+                                [:seon.cluster.run/id "run-clean"]))))
+            (is (str/includes?
+                 (run/render-ai
+                  (assoc (db/pull @connection '[*]
+                                  [:seon.cluster.run/id "run-crashed"])
+                         :seon.db/db @connection))
+                 "interrupted")
+                "and the run says so rather than restating a database
+                 that could not tell the two apart"))
           (testing "and the instance reports what recovery did"
             (is (= 1 (:seon.boot/recovered-runs instance)))
             (is (pos? (:seon.boot/recovery-operations instance))))

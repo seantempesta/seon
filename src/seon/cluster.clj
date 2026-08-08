@@ -1563,8 +1563,16 @@
   "Settle every run held by a dead process, before anything resumes.
   BY FACT, NEVER BY CLOCK: a run whose holder is not in the live set is
   closed immediately, its custody and agent pointer are retracted, and
-  its dangling receipts — those carrying no terminal fact — get
-  `interrupted-at` asserted (presence is the state; there is no status).
+  BOTH the run and its dangling receipts — those carrying no terminal
+  fact — get `interrupted-at` asserted (presence is the state; there is
+  no status).
+
+  The counts below are DIAGNOSTICS, never the answer. Recovery's own
+  evidence is durable: `:seon.cluster.run/interrupted-at` on every run
+  this pass cut, so a later process can still ask what the last one
+  interrupted. Reporting only the counts is what made the 2026-08-08
+  restart's honesty claim unfalsifiable — the interrupted run was
+  indistinguishable by query from a normal close.
   No clock is consulted at all: this process just started, so on this
   branch every other holder is provably gone (one connection per
   branch, one process per store).

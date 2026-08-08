@@ -58,7 +58,8 @@ Custody is the one `:seon.cluster.run/process` string:
 
 - absent → a process may claim it;
 - present and in the supplied live-process set → the claim is not stealable;
-- present but not live → takeover first stamps every dangling receipt
+- present but not live → takeover first stamps the run
+  `:seon.cluster.run/interrupted-at` and every dangling receipt
   `:seon.cluster.eval/interrupted-at`, then replaces custody in the same
   transaction.
 
@@ -251,12 +252,18 @@ Nothing re-executes after a process dies. Recovery scans open runs and compares
 their custody strings with the live-process set. For each run whose holder is
 absent or dead, one transaction:
 
-1. stamps every receipt with no terminal fact `/interrupted-at`;
-2. retracts dead custody when present;
-3. asserts the run's `/closed-at`; and
-4. retracts the owning agent's `/run` pointer when it still points there.
+1. stamps the run `:seon.cluster.run/interrupted-at`;
+2. stamps every receipt with no terminal fact `/interrupted-at`;
+3. retracts dead custody when present;
+4. asserts the run's `/closed-at`; and
+5. retracts the owning agent's `/run` pointer when it still points there.
 
-Settled receipts remain untouched. Recovery never reopens, replans, retries a
+Recovery marks what it interrupted, so "which runs did the last recovery cut?"
+is a query over `:seon.cluster.run/interrupted-at`, never a count on a
+process-local boot value. The run stamp is not a summary of the receipt
+stamps: a process that died before its first receipt row existed leaves no
+receipt to stamp, and without the run fact that run would be indistinguishable
+from a normal close. Settled receipts remain untouched. Recovery never reopens, replans, retries a
 provider call, or evaluates an unstarted plan suffix. The run and receipt
 renderers tell the next agent episode what may have happened and what did not
 run; the agent adapts from those facts.
