@@ -52,3 +52,12 @@ which is a design decision, not a rename.
   in the call, not encoded in a `-under-lock!` suffix a caller must know.
 - A regression drives one root's collection concurrently with another root's,
   and asserts neither waits on the other.
+
+## Owner ruling (2026-08-08 night)
+
+Keep serial, explicitly accepted: single-root operator work serializes on
+the installation lock, with an honest annotation at the `-under-lock!`
+sites naming this note. Revisit only when the parallel suite's
+four-worker load measures real contention here. The per-root redesign
+(lock-handle ownership transfer to children) is the recorded end state
+if that day comes.
