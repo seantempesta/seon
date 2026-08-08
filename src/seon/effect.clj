@@ -46,7 +46,7 @@
 (defn- payload-preview
   [payload]
   (let [width (:seon.print/width (print/default-options))
-        preview-tokens (max 1 (quot width tokens/chars-per-token))]
+        preview-tokens (max 1 (tokens/estimate-of-characters width))]
     (tokens/clip-str payload preview-tokens)))
 
 (defn- payload-face

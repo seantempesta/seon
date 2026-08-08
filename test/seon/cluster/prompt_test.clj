@@ -4,6 +4,7 @@
             [clojure.core.async.flow :as flow.core]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [seon.ai.tokens :as tokens]
             [seon.cluster :as cluster]
             [seon.config :as config]
             [seon.db :as db]
@@ -297,3 +298,78 @@
                                      :seon.render/distance])))
            (is (= 3 (get-in refusal [:seon.error/data
                                      :seon.config.ai/prompt-token-budget])))))))))
+
+(defn- recorded-usage-tx
+  "Facts one settled attempt already commits: the exact prompt characters
+  on the run's capture, and the provider's own count on the attempt."
+  [model ordinal characters provider-tokens]
+  (let [run-id (str "usage-run-" ordinal)]
+    [{:seon.cluster.run/id run-id
+      :seon.cluster.run/agent [:seon.cluster.agent/id "walker"]
+      :seon.cluster.run/opened-at (Date. (+ 1700000100000 (* 1000 ordinal)))}
+     {:seon.context.capture/id (str run-id "-context-1")
+      :seon.context.capture/run [:seon.cluster.run/id run-id]
+      :seon.context.capture/basis-t 1
+      :seon.context.capture/prompt (apply str (repeat characters "x"))
+      :seon.ai.tokens/characters characters}
+     {:seon.ai.attempt/id (str run-id "-0")
+      :seon.ai.attempt/run [:seon.cluster.run/id run-id]
+      :seon.ai.attempt/ordinal 0
+      :seon.ai.attempt/at (Date. (+ 1700000100000 (* 1000 ordinal)))
+      :seon.ai/endpoint "https://example.invalid/v1/chat/completions"
+      :seon.ai/model model
+      :seon.ai.attempt/usage-edn
+      (pr-str {"prompt_tokens" provider-tokens
+               "completion_tokens" 1
+               "total_tokens" (inc provider-tokens)})}]))
+
+(deftest a-prompt-the-provider-counts-over-budget-is-refused-not-sent
+  ;; THE CLASS: the guard was correct against a measurement that was
+  ;; not. `chars/4` ran ~23% low against DeepSeek, so prompts left the
+  ;; process up to 3,059 tokens over a declared 32,768 with no refusal
+  ;; (whole-system-arc observer, 2026-08-08). The budget now measures in
+  ;; the units the provider bills in, fitted to this model's own
+  ;; recorded usage.
+  (planted
+   (fn [connection context-channel]
+     (let [model (db/q '[:find ?model .
+                         :where [_ :seon.config.ai/model ?model]]
+                       @connection)]
+       (db/transact! connection
+                     [{:seon.cluster.agent/id "walker"
+                       :seon.config.ai/prompt-token-budget 100}])
+       (testing "with no recorded usage the honest fallback is named"
+         (let [calibration (prompt/model-calibration @connection model)]
+           (is (= :seon.ai.tokens/shipped-constant
+                  (:seon.ai.tokens/basis calibration)))
+           (is (zero? (:seon.ai.tokens/sample-count calibration)))))
+       ;; three settled attempts at a real 3.2 characters per token
+       (doseq [ordinal [1 2 3]]
+         (db/transact! connection
+                       (recorded-usage-tx model ordinal 32000 10000)))
+       (testing "the calibration is fitted to those committed facts"
+         (let [calibration (prompt/model-calibration @connection model)]
+           (is (= :seon.ai.tokens/observed
+                  (:seon.ai.tokens/basis calibration)))
+           (is (= 3 (:seon.ai.tokens/sample-count calibration)))
+           (is (= 3.2 (:seon.ai.tokens/chars-per-token calibration)))))
+       ;; 340 characters: chars/4 says 85 and fits the 100-token budget;
+       ;; the provider would count 106 and would not
+       (let [text (apply str (repeat 340 "x"))]
+         (with-redefs [render/acquire-context!
+                       (fn [_ render-request]
+                         {:seon.cluster.prompt/text text
+                          :seon.db/db (:seon.db/db render-request)})]
+           (let [refusal (prompt/prompt @connection
+                                        (request connection context-channel))]
+             (is (= 85 (tokens/estimate text))
+                 "the uncalibrated estimate is what silently admitted it")
+             (is (= :seon.cluster.prompt/budget-exceeded
+                    (:seon.error/kind refusal))
+                 "the calibrated estimate refuses it")
+             (is (= 106 (get-in refusal [:seon.error/data
+                                         :seon.ai.tokens/estimated])))
+             (is (= :seon.ai.tokens/observed
+                    (get-in refusal [:seon.error/data
+                                     :seon.ai.tokens/basis]))
+                 "the refusal names which basis measured it"))))))))

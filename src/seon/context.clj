@@ -125,7 +125,8 @@
      [:summary
       (str "Context capture at database basis "
            (:seon.context.capture/basis-t unit)
-           " — approximately " (tokens/estimate prompt) " tokens")]
+           " — approximately " (tokens/estimate prompt)
+           " tokens on the uncalibrated chars/4 basis")]
      [:pre {:class "seon-context-capture-prompt"} prompt]]))
 
 (defn- contribution-row
@@ -172,6 +173,15 @@
               :seon.context.capture/run [:seon.cluster.run/id run-id]
               :seon.context.capture/basis-t basis-t
               :seon.context.capture/prompt (:seon.cluster.prompt/text rendered)
+              ;; THE CALIBRATION JOIN'S OTHER HALF: the provider's own
+              ;; `prompt_tokens` lands on the attempt for this same run,
+              ;; and these characters are what produced it. Recorded as
+              ;; a scalar beside the string it counts so
+              ;; `seon.cluster.prompt/model-calibration` can fit a
+              ;; characters-per-token ratio without dragging every
+              ;; recorded prompt through a query.
+              :seon.ai.tokens/characters
+              (count (:seon.cluster.prompt/text rendered))
               :seon.context.capture/contributions
               (mapv (fn [record] (contribution-row capture-id record))
                     (:seon.context/contributions rendered))}

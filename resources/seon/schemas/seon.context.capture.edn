@@ -12,6 +12,14 @@
                          :seon.context.capture/basis-t]
                         [:seon.context.capture/prompt
                          :seon.context.capture/prompt]
+                        ;; the prompt's exact character count, recorded
+                        ;; beside the prompt in the same transaction so
+                        ;; token calibration can join it to the
+                        ;; provider's own count without loading every
+                        ;; recorded prompt string
+                        [:seon.ai.tokens/characters
+                         {:optional true}
+                         :seon.ai.tokens/characters]
                         [:seon.context.capture/contributions
                          :seon.context.capture/contributions]
                         [:seon.cluster.run/live-processes

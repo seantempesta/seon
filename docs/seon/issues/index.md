@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (32)
+## Blocker (30)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -45,8 +45,8 @@ See `README.md` for the convention.
 | [Register the inline `[:fn]` predicate that refuses every corpus projection](an-inline-fn-predicate-in-src-refuses-every-corpus-projection.md) | blocker | changed-test selector lane |
 | [Stop a schema-resource edit from bricking value admission in running clusters](a-schema-resource-edit-bricks-value-admission-in-every-running-cluster.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Confirm the background `:io` connection fix with a real `my.shell` drive](every-background-capability-request-loses-its-connection.md) | blocker | tool-exercise lane re-run against `f3b8eabda` |
-| [Bound the prompt by the provider's token count, not a chars/4 estimate](prompt-token-budget-is-checked-against-a-25-percent-low-estimate.md) | blocker | whole-system arc repair wave |
 | [Reuse one HttpClient so concurrent provider calls stop closing mid-read](concurrent-provider-calls-fail-with-a-closed-response-body.md) | blocker | whole-system arc repair wave |
+| [Give the transcript's floor-rendered values a root identity](transcript-floor-renders-a-missing-root-identity-refusal.md) | blocker | render floor repair (found by the token-calibration lane) |
 | [Settle what arrived when a provider stream closes mid-body](a-mid-stream-provider-disconnect-discards-the-whole-turn.md) | blocker | whole-system arc repair wave |
 | [Install call preparation on the cluster's sci context](call-preparation-is-never-installed-on-the-cluster-sci-context.md) | blocker | whole-system arc repair wave |
 | [Mark the run a restart interrupted, so recovery is provable from facts](recovery-closes-an-interrupted-run-without-marking-it.md) | blocker | whole-system arc repair wave |

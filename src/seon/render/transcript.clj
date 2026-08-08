@@ -758,9 +758,9 @@
 (defn- transcript-unit
   [unit]
   (assoc unit ::token-budget
-         (quot (long (get-in unit [:seon.sci.admit/caps
-                                   :seon.config.eval.result/max-string]))
-               tokens/chars-per-token)))
+         (tokens/estimate-of-characters
+          (long (get-in unit [:seon.sci.admit/caps
+                              :seon.config.eval.result/max-string])))))
 
 (defn render-session-ai
   "Render the schema-declared agent session while status survives slice 1."

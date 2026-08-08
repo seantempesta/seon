@@ -1,0 +1,55 @@
+#:seon.ai.tokens
+{;; how many characters one provider token costs — a ratio, never an
+ ;; integer, because it is fitted to recorded usage
+ :chars-per-token [:double {:min 0.1}]
+
+ ;; WHICH evidence produced an estimate. :observed is fitted to committed
+ ;; provider usage facts; :shipped-constant is the uncalibrated chars/4
+ ;; fallback used before any usage exists for that model.
+ :basis [:enum :seon.ai.tokens/observed :seon.ai.tokens/shipped-constant]
+
+ :sample-count [:int {:min 0}]
+
+ ;; the worst relative miss the fitted ratio makes across the same
+ ;; observations — the honest margin, absent when uncalibrated
+ :relative-error [:double {:min 0.0}]
+
+ :characters [:int {:min 0}]
+ :estimated [:int {:min 0}]
+ :upper-bound [:int {:min 0}]
+
+ :verdict [:enum :seon.ai.tokens/within
+           :seon.ai.tokens/near-limit
+           :seon.ai.tokens/over]
+
+ :observation
+ [:map
+  [:seon.ai.tokens/characters :seon.ai.tokens/characters]
+  [:seon.ai.usage/prompt-tokens :seon.ai.usage/prompt-tokens]]
+
+ :observations [:sequential :seon.ai.tokens/observation]
+
+ :calibration
+ [:map
+  [:seon.ai.tokens/chars-per-token :seon.ai.tokens/chars-per-token]
+  [:seon.ai.tokens/basis :seon.ai.tokens/basis]
+  [:seon.ai.tokens/sample-count :seon.ai.tokens/sample-count]
+  [:seon.ai.tokens/relative-error
+   {:optional true}
+   :seon.ai.tokens/relative-error]]
+
+ :budget-report
+ [:map
+  [:seon.ai.tokens/estimated :seon.ai.tokens/estimated]
+  [:seon.ai.tokens/verdict :seon.ai.tokens/verdict]
+  [:seon.ai.tokens/basis :seon.ai.tokens/basis]
+  [:seon.ai.tokens/chars-per-token :seon.ai.tokens/chars-per-token]
+  [:seon.ai.tokens/sample-count :seon.ai.tokens/sample-count]
+  [:seon.config.ai/prompt-token-budget
+   :seon.config.ai/prompt-token-budget]
+  [:seon.ai.tokens/relative-error
+   {:optional true}
+   :seon.ai.tokens/relative-error]
+  [:seon.ai.tokens/upper-bound
+   {:optional true}
+   :seon.ai.tokens/upper-bound]]}
