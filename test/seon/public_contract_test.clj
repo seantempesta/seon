@@ -8,6 +8,7 @@
             [datahike.api :as d]
             [seon.cluster :as cluster]
             [seon.cluster.store :as store]
+            [seon.flow :as flow]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]))
 
@@ -91,6 +92,52 @@
            [sci.eval/ctx? sci.eval/ctx-generator]]]
     (is (true? (predicate (gen/generate generator)))
         (str predicate " rejected the value from its own generator"))))
+
+(defn- release-sample!
+  [sample]
+  (cond
+    (instance? java.util.concurrent.ExecutorService sample)
+    (.shutdownNow ^java.util.concurrent.ExecutorService sample)
+
+    (instance? java.net.ServerSocket sample)
+    (.close ^java.net.ServerSocket sample)
+
+    :else nil))
+
+;;; The class: a generator backed by ONE shared process object is green
+;;; for the wrong reason — it satisfies its predicate once and then
+;;; hands every later check the sample a previous consumer already
+;;; mutated or closed. A generator that CONSTRUCTS its value cannot be
+;;; written that way. The SCI ctx and the render.web server/mult samples
+;;; are still shared and tracked in
+;;; docs/seon/issues/opaque-contract-generators-share-live-process-objects.md
+(deftest lifecycle-generators-make-a-fresh-sample-each-generation
+  (doseq [[label generator]
+          [[:seon.flow/executor flow/executor-generator]
+           [:seon.flow/atom-reference flow/atom-reference-generator]
+           [:seon.flow/java-future flow/java-future-generator]
+           [:seon.flow/proc-launcher flow/proc-launcher-generator]
+           [:seon.flow/graph flow/graph-generator]
+           [:seon.flow/channel flow/channel-generator]
+           [:seon.cluster/socket-server cluster/socket-server-generator]]]
+    (let [one (gen/generate generator)
+          two (gen/generate generator)]
+      (try
+        (is (not (identical? one two))
+            (str label " handed out the same sample twice"))
+        (finally
+          (release-sample! one)
+          (release-sample! two))))))
+
+(deftest an-invalidated-socket-sample-leaves-the-next-sample-usable
+  (let [closed (gen/generate cluster/socket-server-generator)]
+    (.close ^java.net.ServerSocket closed)
+    (let [next-socket (gen/generate cluster/socket-server-generator)]
+      (try
+        (is (cluster/socket-server? next-socket))
+        (is (not (.isClosed ^java.net.ServerSocket next-socket)))
+        (finally
+          (.close ^java.net.ServerSocket next-socket))))))
 
 (deftest mutable-runtime-generators-do-not-reuse-released-samples
   (let [connection (gen/generate store/connection-generator)]

@@ -123,6 +123,12 @@
              [:report-chan :seon.flow/channel]
              [:error-chan :seon.flow/channel]],
             :started! [:=> [:cat] :nil],
+            :step-var
+            [:fn
+             {:error/message
+              "must be a Var so a running graph hot reloads its step"
+              :gen/gen seon.flow/step-var-generator}
+             seon.flow/step-var?],
             :submission-id [:or :uuid :keyword :string],
             :submission-wait-ms [:int {:min 0}],
             :io-complete! [:=> [:cat :map] :seon.flow/callback-result],

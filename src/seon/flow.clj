@@ -47,37 +47,46 @@
   [value]
   (satisfies? async.impl/Channel value))
 
+(defn- step-var?
+  [value]
+  (var? value))
+
 (schema/register-core-predicate! 'seon.flow/executor? executor?)
 (schema/register-core-predicate! 'seon.flow/atom-reference? atom-reference?)
 (schema/register-core-predicate! 'seon.flow/java-future? java-future?)
 (schema/register-core-predicate! 'seon.flow/proc-launcher? proc-launcher?)
 (schema/register-core-predicate! 'seon.flow/graph? graph?)
 (schema/register-core-predicate! 'seon.flow/channel? channel?)
+(schema/register-core-predicate! 'seon.flow/step-var? step-var?)
 
-(defonce ^:private generator-values
-  (delay
-    {:executor (Executors/newSingleThreadExecutor)
-     :atom-reference (atom {})
-     :future (java.util.concurrent.FutureTask. (fn [] nil))
-     :proc-launcher
-     (reify flow.spi/ProcLauncher
-       (describe [_] {:params {} :ins {} :outs {}})
-       (start [_ _] nil))
-     :graph (flow/create-flow {:procs {} :conns []})
-     :channel (async/chan)}))
-
+;;; Every generation makes a FRESH sample. One shared delayed object
+;;; satisfied its predicate once but could never explore lifecycle or
+;;; freshness, and a consumer that mutated or closed it changed every
+;;; later sample. None of these constructors starts a thread, binds a
+;;; port, or runs a graph: an unsubmitted executor has no worker, an
+;;; uncalled FutureTask never runs, and `create-flow` builds without
+;;; starting.
 (def executor-generator
-  (gen/fmap (fn [_] (:executor @generator-values)) (gen/return nil)))
+  (gen/fmap (fn [_] (Executors/newSingleThreadExecutor)) (gen/return nil)))
 (def atom-reference-generator
-  (gen/fmap (fn [_] (:atom-reference @generator-values)) (gen/return nil)))
+  (gen/fmap (fn [_] (atom {})) (gen/return nil)))
 (def java-future-generator
-  (gen/fmap (fn [_] (:future @generator-values)) (gen/return nil)))
+  (gen/fmap (fn [_] (java.util.concurrent.FutureTask. (fn [] nil)))
+            (gen/return nil)))
 (def proc-launcher-generator
-  (gen/fmap (fn [_] (:proc-launcher @generator-values)) (gen/return nil)))
+  (gen/fmap (fn [_] (reify flow.spi/ProcLauncher
+                      (describe [_] {:params {} :ins {} :outs {}})
+                      (start [_ _] nil)))
+            (gen/return nil)))
 (def graph-generator
-  (gen/fmap (fn [_] (:graph @generator-values)) (gen/return nil)))
+  (gen/fmap (fn [_] (flow/create-flow {:procs {} :conns []}))
+            (gen/return nil)))
 (def channel-generator
-  (gen/fmap (fn [_] (:channel @generator-values)) (gen/return nil)))
+  (gen/fmap (fn [_] (async/chan)) (gen/return nil)))
+;;; A Var is a first-class handle, not a lifecycle resource, so varying
+;;; over real Vars is the honest domain.
+(def step-var-generator
+  (gen/elements [#'executor? #'java-future? #'channel?]))
 
 (schema.edn/load! {})
 
@@ -101,8 +110,8 @@
   stay pure data."
   {:malli/schema
    [:function
-    [:=> [:cat :any [:enum :io :compute] :map] ::launcher]
-    [:=> [:cat :any [:enum :io :compute] :map :map] ::launcher]]}
+    [:=> [:cat ::step-var [:enum :io :compute] :map] ::launcher]
+    [:=> [:cat ::step-var [:enum :io :compute] :map :map] ::launcher]]}
   ([step-var workload args]
    (var-process step-var workload args {}))
   ([step-var workload args options]
@@ -347,37 +356,41 @@
                     ::work
                     (dissoc work ::work-fn ::result ::status)))))))))
 
+;;; Settle one io submission exactly once. UNTRACKED settlement — a
+;;; refusal that never entered `active-work` and has no completion
+;;; channel — takes the three-argument arity, so there is no tracking
+;;; argument to supply wrongly and no mutable no-op to allocate.
 (defn- io-terminal!
-  [completion active-work submissions
-   {::keys [submission-id complete! status active?] :as work}
-   terminal]
-  (when (or (compare-and-set! status ::queued ::completed)
-            (compare-and-set! status ::running ::completed))
-    (try
-      ;; The terminal callback runs on whichever thread settled the work —
-      ;; the io task, the launcher proc, or a stopping caller — so it too
-      ;; receives its submission's environment as data, under its arm.
-      (kernel/adopt-arm
-       (carried-arm work)
-       #(complete! (env/carry terminal (env/of work))))
-      (finally
-        (swap! active-work dissoc submission-id)
-        (swap! submissions dissoc submission-id)
-        (when @active?
-          (async/offer!
-           completion
-           (assoc terminal
-                  ::submission-id submission-id
-                  ::workload :io
-                  ::work
-                  (dissoc work ::work-fn ::complete! ::status
-                          ::active? ::task))))))))
+  ([submissions work terminal]
+   (io-terminal! nil nil submissions work terminal))
+  ([completion active-work submissions
+    {::keys [submission-id complete! status active?] :as work}
+    terminal]
+   (when (or (compare-and-set! status ::queued ::completed)
+             (compare-and-set! status ::running ::completed))
+     (try
+       ;; The terminal callback runs on whichever thread settled the work —
+       ;; the io task, the launcher proc, or a stopping caller — so it too
+       ;; receives its submission's environment as data, under its arm.
+       (kernel/adopt-arm
+        (carried-arm work)
+        #(complete! (env/carry terminal (env/of work))))
+       (finally
+         (some-> active-work (swap! dissoc submission-id))
+         (swap! submissions dissoc submission-id)
+         (when @active?
+           (async/offer!
+            completion
+            (assoc terminal
+                   ::submission-id submission-id
+                   ::workload :io
+                   ::work
+                   (dissoc work ::work-fn ::complete! ::status
+                           ::active? ::task)))))))))
 
 (defn- refuse-io-submission!
   [submissions work]
   (io-terminal!
-   nil
-   (atom {})
    submissions
    work
    {::started-at (System/nanoTime)
@@ -694,7 +707,7 @@
             true)
           (do
             (io-terminal!
-             nil (atom {}) io-submissions work
+             io-submissions work
              {::started-at (System/nanoTime)
               ::value
               {:seon.error/kind ::launcher-stopped

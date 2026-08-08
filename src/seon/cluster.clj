@@ -103,11 +103,13 @@
 (schema/register-core-predicate! 'seon.cluster/socket-server?
                                  socket-server?)
 
-(defonce ^:private generator-server
-  (delay (java.net.ServerSocket. 0)))
-
+;;; Each generation makes a FRESH UNBOUND server socket. One shared
+;;; delayed socket bound a real process port that no cluster owned and
+;;; handed every later contract check the same object, so closing one
+;;; sample invalidated the next. The no-argument constructor binds no
+;;; port and opens no descriptor.
 (def socket-server-generator
-  (gen/fmap (fn [_] @generator-server) (gen/return nil)))
+  (gen/fmap (fn [_] (java.net.ServerSocket.)) (gen/return nil)))
 
 (defn- ref-identity
   [database ref attribute]
