@@ -534,6 +534,24 @@ note: `501d39648` (fallback lane) swept this lane's in-flight
 `schema.clj` addition — final state coherent and proven, but it is the
 known shared-index trap, logged here for the discipline record.
 
+**Refork red CLOSED — a real data-destruction defect, not test rot**
+(commit `8882c2b1c`; archived issue
+[refork-held-a-store-across-the-arm-that-released-it](../../../seon/issues/archive/refork-held-a-store-across-the-arm-that-released-it.md)).
+Two defects, one hiding the other: a SECOND refork path guessed its
+operator inputs and returned a flat error under a schema with no error
+arm (silent nil — the loud-failure scar par excellence), and behind it,
+`refork-under-lock!` held one operation store across both arms so
+`bin/seon init NAME --force` on the JVM's only cluster DESTROYED the old
+branch and failed to fork the new one. Duplicate path deleted; each arm
+acquires its own store; the regression drives the real composed operator
+verb; live destroy-and-refork proven with a marker confirmed gone.
+Follow-up dispatched: the fallback warning's yield is now a WALL
+(dominates transcripts; one instance names a malli.core frame where the
+advice is unactionable) — a lane is threading the named production
+sites, fixing caller derivation to skip dependency frames, and clearing
+the issues-index hygiene rot (`bin/issues-index --check` clean as its
+gate).
+
 ## Rollout — test-first, REPL-iterated, then farmed out
 
 Phase 0 — falsify the three load-bearing mechanics live (opus REPL lanes,
