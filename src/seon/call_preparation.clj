@@ -317,23 +317,43 @@
                                         environment-fingerprint
                                         error-fingerprint)])
                   candidates)
+            ;; Compiling the value validator is part of proving the row: a
+            ;; value schema the acquired projection cannot compile is an
+            ;; incoherent row, not an exception thrown at acquisition.
+            compiled
+            (mapv (fn [[candidate refusal]]
+                    (if refusal
+                      [candidate refusal nil]
+                      (let [schema-key
+                            (:seon.call-preparation/schema-key candidate)]
+                        (try
+                          [candidate nil
+                           (schema/projection-validator projection schema-key)]
+                          (catch Throwable cause
+                            [candidate
+                             (incoherent
+                              (:seon.call-preparation/key candidate)
+                              (str "this cluster's projection cannot compile "
+                                   "its value schema " schema-key ": "
+                                   (ex-message cause))
+                              {:seon.call-preparation/schema-key schema-key})
+                             nil])))))
+                  proved)
             admitted
             (into {}
                   (comp (remove second)
-                        (map (fn [[candidate _]]
+                        (map (fn [[candidate _ _]]
                                [(:seon.call-preparation/key candidate)
                                 candidate])))
-                  proved)]
+                  compiled)]
         {:seon.call-preparation/supplied-defaults admitted
          :seon.call-preparation/validators
          (into {}
-               (map (fn [[default-key candidate]]
-                      [default-key
-                       (schema/projection-validator
-                        projection
-                        (:seon.call-preparation/schema-key candidate))]))
-               admitted)
-         :seon.call-preparation/refusals (into [] (keep second) proved)
+               (comp (remove second)
+                     (map (fn [[candidate _ valid?]]
+                            [(:seon.call-preparation/key candidate) valid?])))
+               compiled)
+         :seon.call-preparation/refusals (into [] (keep second) compiled)
          :seon.call-preparation/basis-t
          (newest-row-transaction database (row-attributes))
          :seon.call-preparation/checked-through-t (db/basis-t database)}))))
