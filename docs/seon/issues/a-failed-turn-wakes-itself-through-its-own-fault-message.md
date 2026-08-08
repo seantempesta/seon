@@ -203,6 +203,21 @@ attempts.** The escalation half is proven at the settle boundary above; what is
 not yet claimed by a recurring surface is the full turn — reply refusal to
 attempt count. The two reader refusals below remain the fixtures for it.
 
+## Recurrence — unbounded on a broken-context boot (2026-08-08 re-drive)
+
+On cluster `default` pid 14148 the loop ran unbounded and paid-for. The context
+render was collapsing every prompt to a 931-char render-walk contract violation
+([every-agent-prompt-is-a-neighborhood-render-walk-contract-violation.md](every-agent-prompt-is-a-neighborhood-render-walk-contract-violation.md)),
+so each root turn produced only prose about the render error, closed with
+comment-only forms (no receipt), and its failure immediately re-opened the next
+run. Four post-bootstrap runs chained with no gap
+(`11:52:00 → 11:54:11 → 11:56:11 → 11:57:44`), each spending a ~14.5k-token
+completion (mostly reasoning) on a 336-token error prompt — four paid provider
+calls in six minutes, authoring nothing. The escalation guard proven above did
+not bound this because the trigger is a fresh fault each turn, not a re-delivery
+of the same one. Independent observer notes:
+[model-authoring-redrive-observer-2026-08-08.md](../../prds/sci-execution-runtime/research/model-authoring-redrive-observer-2026-08-08.md).
+
 ## Note for whoever fixes this
 
 The two reader refusals seen here are worth keeping as fixtures:
