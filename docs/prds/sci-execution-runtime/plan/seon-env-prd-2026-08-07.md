@@ -552,6 +552,27 @@ sites, fixing caller derivation to skip dependency frames, and clearing
 the issues-index hygiene rot (`bin/issues-index --check` clean as its
 gate).
 
+**render.web red MOSTLY CLOSED; one new blocker dispatched**
+(commit `ddfb47212`). The lane falsified its assignment's premise (not
+"all SSE reads timing out" at HEAD — three distinct causes measured) and
+fixed two at cause: a USER-VISIBLE reconnect defect (a fresh tab painted
+a pass derived before it connected — in-flight publication beat the join
+answer 3/6 trials; fixed by fact comparison, the connection's opening
+basis refuses earlier-derived packages until first paint, 6/6 after) and
+a test oracle treating a missed `flow/ping` as proc state (the render
+pass costs 10.5 s first / 1.9 s after — over the 1 s ping window every
+time; measurement recorded on the open package-proc cost issue). 36/226
+5-red → 38/271 1-red, honestly not green-washed: the remainder is a NEW
+liveness blocker —
+[the render proc never delivers its stop completion](../../../seon/issues/render-proc-never-delivers-its-stop-completion-after-a-settled-stream.md)
+— which also gates `disarm-agents!`' branch release; lane dispatched with
+the in-window dump as step one and the fresh join re-offer loop as the
+first suspect. ALSO CLOSED this beat: gen.loop (commit `0f67e6003` — the
+identity-collision defect that silently refused every problem-naming
+message since 2026-07-29; one owner now mints both derivations; second
+live instance filed by query:
+[one-identity-string-names-two-entities](../../../seon/issues/one-identity-string-names-two-entities.md)).
+
 ## Rollout — test-first, REPL-iterated, then farmed out
 
 Phase 0 — falsify the three load-bearing mechanics live (opus REPL lanes,
