@@ -500,7 +500,33 @@ into `d4ac2ba40` whose MESSAGE says `block/name` but whose CODE is the
 actually shipped. Tree now coherent (all core loads); reforking onto the
 S2 pin for the model-authoring re-drive.
 
-## NEXT: the model-authoring re-drive (reforking now)
+## MODEL-AUTHORING RE-DRIVE — observer's verdict: NOT reached (honest)
+
+The observer
+([model-authoring-redrive-observer-2026-08-08.md](../research/model-authoring-redrive-observer-2026-08-08.md),
+`830db6010`) FALSIFIED all four halves from live facts: no
+model-authored function exists; the 4 real DeepSeek calls authored
+nothing; every reply is prose debugging a render error. Root cause — a
+NEW BLOCKER and a REGRESSION from tonight's own render/walk churn:
+[every agent prompt IS a 931-char neighborhood render-walk
+`invalid-output` violation](../../../seon/issues/every-agent-prompt-is-a-neighborhood-render-walk-contract-violation.md)
+— producers hand the walk bare strings where the contract requires
+`{:seon.render/ai …}`-tagged items, the whole neighborhood collapses,
+and the human instruction never reaches the model (which then burns
+~14.5k-token completions on the 336-token error prompt — the fault loop
+re-waking, evidence appended to its issue). The token calibration held
+STRUCTURALLY (over-estimates now, the 23%-low class addressed) but is
+n=1 on the broken prompt — contaminated until real prompts flow. The
+c:p ~43 pathology is present and is the CORRECT signal. Driver still
+running (render/walk is unowned — it may be attempting the hot-reload
+fix); fix dispatch held to avoid collision until it reports. This is
+the night's honest edge: the platform supplies agents their world at
+call time, but a render regression from the same night's work is
+starving their context — one more instance of the fixture-vs-live and
+shared-render-churn classes, caught by the pair, filed with the exact
+producer contract to repair.
+
+## Earlier re-drive note (reforking)
 
 Both arc walls are closed, so a focused re-drive can now attempt the
 stage the arc could not reach: a REAL MODEL authoring a contracted
