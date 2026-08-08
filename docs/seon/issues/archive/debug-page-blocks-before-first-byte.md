@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, web, render, performance, live-drive]
 ---
@@ -43,3 +43,15 @@ bytes that should serve the debug surface.
 - The left pane still satisfies the separate exact-capture requirement.
 - A recurring live measurement records time to first byte and response size
   for a context at least as large as this one.
+
+## Resolved — verified 2026-08-08 live drive
+
+`GET /ns/my.agents.root/debug` against cluster `default` (pid 79576) returns
+**HTTP 200**, 2,581 bytes, in **24 ms**. The five-second no-first-byte
+condition is gone.
+
+The left pane is also now the exact captured prompt bytes rather than a
+rerender — `<section class="seon-debug-body-ai">` contained verbatim the same
+509-character string committed as context capture
+`a7e24a23-…-context-536870998`. That the prompt itself is an error is
+[a different blocker](walk-refuses-an-as-of-database-value-and-empties-the-agent-context.md).

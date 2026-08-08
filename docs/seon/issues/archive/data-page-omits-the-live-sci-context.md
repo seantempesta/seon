@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, web, render, sci, live-drive]
 ---
@@ -40,3 +40,15 @@ owns the live cluster SCI context.
 - Recursive rendering uses the selected cluster's live context and schema
   projection; no route-local substitute projection exists.
 - A route regression asserts both status and a rendered structural value.
+
+## Resolved — verified 2026-08-08 live drive
+
+`GET /data` against cluster `default` (pid 79576) returns **HTTP 200**,
+3,168 bytes, in 5.88 s. The deterministic 500 and the
+`seon.sci.kernel/context-projection violated its contract` body are gone.
+
+Remaining, recorded here rather than reopening: 5.88 s is a slow first byte for
+a 3 KB response, and the body served is the agent shell with the value pane
+filled over the feed rather than in the initial response. If that latency is a
+defect it belongs to a render-cost note, not to the missing-context defect this
+issue named.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: resolved
+status: open
 severity: blocker
 tags: [issue, context, messaging, runtime, honesty, live-drive]
 ---
@@ -83,3 +83,48 @@ unchanged.
 - Two messages committed around run opening produce two causally correct
   outcomes under an event-controlled regression, with no message lost or
   charged to the wrong run.
+
+## REOPENED — 2026-08-08 live drive (recurrence, second half)
+
+The first half holds: the run's prompt no longer contains a message committed
+after opening. The SECOND half does not. Live on cluster `default` (pid 79576)
+the drive committed two human messages through `POST /agent/root/message`,
+both HTTP 204, both admitted and queryable:
+
+- `inbound-536870994-0` at `2026-08-08T04:35:02Z`
+- `inbound-536870997-0` at `2026-08-08T04:38:02Z`
+
+Neither ever became a run's trigger. Every run on the cluster at
+2026-08-08T04:42Z is triggered by a system error message or by nothing:
+
+| run | opened | closed | trigger |
+|---|---|---|---|
+| `bootstrap:root` | 04:31:05 | 04:31:10 | (none) |
+| `a7e24a23-…` | 04:31:13 | 04:39:47 | `maintenance-error/…/compact…-your-run` |
+| `cf7cc2f1-…` | 04:39:47 | 04:39:47 | `maintenance-error/…/process-census…-your-run` |
+| `20768b1f-…` | 04:41:32 | (open) | `db9b5b2a-…-your-run` |
+
+Root is instead working through its own error backlog, and that backlog feeds
+itself: the turn's contract violation committed error message
+`db9b5b2a-…-your-run`, which opened run `20768b1f`. A human message queued
+behind an error queue is never selected.
+
+The acceptance clause "after A settles, `next-agent-work` derives `:open` for
+B and B's own paid-call prompt contains B as the current run instruction" is
+therefore NOT satisfied on the live path. A settles (`a7e24a23` closed at
+04:39:47) and the next run selected another error message, not the waiting
+human message.
+
+Note the `opening-db` mechanism that closed the first half is also the direct
+cause of two new blockers, because an as-of database value is not a total
+input to the code that reads it:
+[the walk refuses it](walk-refuses-an-as-of-database-value-and-empties-the-agent-context.md)
+and the capture basis read it through the wrong reader (fixed in the same
+drive, `src/seon/context.clj`).
+
+### Added acceptance
+
+- With an error-message backlog present, a newly committed human message is
+  selected by `next-agent-work` before or fairly among the system messages;
+  the live drive's exact sequence is the regression.
+- A run's own failure message cannot starve the human queue.

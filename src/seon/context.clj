@@ -163,8 +163,10 @@
          live :seon.cluster.run/live-processes} request
         db (:seon.db/db rendered)
         ; the database interface, not a map key: an as-of/history value
-        ; carries no top-level :max-tx entry
-        basis-t (long (:t (db/database-value-identity db)))
+        ; carries no top-level :max-tx entry. `basis-t` is the reader for
+        ; every value shape; `database-value-identity` is not — its output
+        ; contract requires a commit id, which an as-of value does not have.
+        basis-t (long (db/basis-t db))
         capture-id (str run-id "-context-" basis-t)]
     [(cond-> {:seon.context.capture/id capture-id
               :seon.context.capture/run [:seon.cluster.run/id run-id]
