@@ -965,6 +965,40 @@
      (into (activation-missing database closure lookup-rows)
            requested-missing)}))
 
+(def ^:private activation-closure-set-attributes
+  "The closure attributes `:seon.activation/closure` declares as sets.
+
+  Datahike projects a cardinality-many attribute as a VECTOR and omits it
+  entirely when the entity holds no datom for it, so a pulled closure carries
+  neither the declared type nor the declared key. `derive-activation` builds
+  the same shape from real sets; this vector is the one declaration both the
+  pull pattern and the read boundary below are built from, so the two cannot
+  drift apart."
+  [:seon.activation/schema-keys
+   :seon.activation/required-attributes
+   :seon.activation/config-defaults
+   :seon.activation/config-required
+   :seon.activation/executable-symbols])
+
+(def ^:private activation-closure-pattern
+  (-> [:seon.activation/source-digest]
+      (into activation-closure-set-attributes)
+      (conj {:seon.activation/lookup-refs
+             [:seon.activation.lookup/id
+              :seon.activation.lookup/attribute
+              :seon.activation.lookup/value]})))
+
+(defn- pulled-closure
+  "Restore the declared `:seon.activation/closure` value from a pull projection.
+
+  Absent IS the empty set: a cardinality-many attribute with no members has no
+  datoms, so `(set nil)` is the faithful reading, not a substituted default."
+  [closure]
+  (reduce (fn [closure attribute]
+            (assoc closure attribute (set (get closure attribute))))
+          closure
+          activation-closure-set-attributes))
+
 (defn- stored-activation
   [database]
   (when-let [source
@@ -976,18 +1010,10 @@
     (let [source-row
           (db/pull database
                    [{:seon.source/activation-closure
-                     [:seon.activation/source-digest
-                      :seon.activation/schema-keys
-                      :seon.activation/required-attributes
-                      :seon.activation/config-defaults
-                      :seon.activation/config-required
-                      :seon.activation/executable-symbols
-                      {:seon.activation/lookup-refs
-                       [:seon.activation.lookup/id
-                        :seon.activation.lookup/attribute
-                        :seon.activation.lookup/value]}]}]
+                     activation-closure-pattern}]
                    source)
-          closure (:seon.source/activation-closure source-row)
+          closure (pulled-closure
+                   (:seon.source/activation-closure source-row))
           lookup-rows (vec (:seon.activation/lookup-refs closure))]
       {:seon.activation/closure
        (update closure :seon.activation/lookup-refs
