@@ -365,11 +365,11 @@
         admission {:seon.schema.admission/source :agent}
         binding-walks (atom 0)
         population-compilations (atom 0)
-        original-bind schema/bind-predicates
+        original-bind schema/compilable-form
         original-compile schema.internal/assert-compilable-schema!
         [schema-candidate function-candidate]
         (with-redefs
-          [schema/bind-predicates
+          [schema/compilable-form
            (fn [& args]
              (swap! binding-walks inc)
              (apply original-bind args))
@@ -395,3 +395,76 @@
            (get-in function-candidate
                    [:seon.schema.projection/function-contracts
                     'seon.schema-test.incremental/accept])))))
+
+(deftest a-component-bearing-row-validates-its-own-declared-shape
+  ;; CLASS: every component attribute declares `[<collection>
+  ;; {:seon.db/component true} :seon.db/ref]`, and `:seon.db/ref` admits an
+  ;; entity id, a string, or a lookup ref — never the component's OWN entity
+  ;; map, which is what the producer of that row actually builds and what
+  ;; Datahike's transaction-data grammar expects. So a row that carried its
+  ;; components was refused by its own declared shape, and an agent's first
+  ;; `defn` died at `seon.program/with-contract-facts`
+  ;; (docs/seon/issues/a-component-value-is-refused-by-its-own-ref-shape.md).
+  ;;
+  ;; The construction that kills it: the registry DERIVES the second arm from
+  ;; the `:seon.db/component true` property the form already declares, so a
+  ;; component attribute added tomorrow is admissible with no edit anywhere.
+  ;; This test therefore derives its subjects from the population rather than
+  ;; listing them: a new component attribute joins it automatically.
+  (let [forms (schema/declaration-population)
+        component-attrs
+        (into (sorted-map)
+              (keep (fn [[schema-key form]]
+                      (when (and (vector? form)
+                                 (map? (second form))
+                                 (true? (:seon.db/component (second form))))
+                        [schema-key (first form)])))
+              forms)
+        entity {:seon.fn.arity/order 0}
+        carried (fn [collection-kind]
+                  (case collection-kind
+                    :vector [entity]
+                    :set #{entity}
+                    :and entity))
+        kinds (into (sorted-set) (vals component-attrs))]
+    (is (seq component-attrs) "the population declares component attributes")
+    (is (= #{:and :set :vector} kinds)
+        "every collection kind a component attribute is declared with")
+    (doseq [[schema-key collection-kind] component-attrs]
+      (is (schema/valid-candidate-value?
+           forms schema-key (carried collection-kind))
+          (str schema-key " admits the component's own entity")))
+    (testing "a persisted ref is still admissible in the same position"
+      (doseq [[schema-key collection-kind] component-attrs]
+        (is (schema/valid-candidate-value?
+             forms schema-key
+             (case collection-kind :vector [17] :set #{17} :and 17)))))
+    (testing "the widening is confined to component positions"
+      (is (false? (schema/valid-candidate-value? forms :seon.db/ref entity))
+          ":seon.db/ref itself still admits no entity map")
+      (is (false? (schema/valid-candidate-value?
+                   forms :seon.fn.arity/input entity))
+          "a non-component ref attribute still admits no entity map")
+      (is (false? (schema/valid-candidate-value? forms :seon.fn/arities [{}]))
+          "an empty map is not a component entity"))
+    (testing "the row an agent's contracted defn builds validates"
+      (is (schema/valid-candidate-value?
+           forms :seon.fn/fn
+           {:seon.fn/sym "my.agents.probe/probe-fn"
+            :seon.schema.admission/source :agent
+            :seon.fn/ns [:seon.ns/name 'my.agents.probe]
+            :seon.fn/source "(defn probe-fn [x] x)"
+            :seon.fn/arities [{:seon.fn.arity/order 0}]})))
+    (testing "shape selection still picks each row's own family"
+      (let [projection (schema/build-projection forms)
+            matches (fn [value]
+                      (set (map :seon.schema/key
+                                (schema/matching-shapes-in projection value))))]
+        (is (contains? (matches {:seon.ns/name 'probe.alias
+                                 :seon.schema.admission/source :agent
+                                 :seon.ns/aliases
+                                 #{{:seon.ns.alias/local 'set
+                                    :seon.ns.alias/target-ns 'clojure.set}}})
+                       :seon.ns/ns))
+        (is (empty? (matches {:seon.fn.arity/order 0}))
+            "a bare component entity matches no top-level family")))))

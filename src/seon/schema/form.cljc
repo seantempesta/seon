@@ -1,5 +1,6 @@
 (ns seon.schema.form
-  "Reusable inspection of authored Malli schema forms.")
+  "Reusable inspection of authored Malli schema forms."
+  (:require [clojure.walk :as walk]))
 
 (def primitive-schema-forms
   "Seon's canonical primitive aliases missing from Malli's built-in registry."
@@ -91,6 +92,49 @@
         #{})
        (sort-by str)
        vec))
+
+(def component-entity-key
+  "The registry key for one component's own entity map as transaction data."
+  :seon.db/component-entity)
+
+(defn- widened-component-child
+  "One child position of a component attribute, as ref OR the component."
+  [child]
+  (if (and (vector? child)
+           (= :or (first child))
+           (some #{component-entity-key} child))
+    child
+    [:or child component-entity-key]))
+
+(defn widen-component-children
+  "Compile a component attribute's child as a ref OR the component's entity.
+
+   A component attribute declares `[<collection> {:seon.db/component true}
+   :seon.db/ref]`, and `:seon.db/ref` admits an entity id, a string, or a
+   lookup ref — none of which is the value a producer of that row actually
+   builds. Datahike's transaction-data grammar accepts a component's OWN
+   entity map wherever it accepts a ref, so a row carrying its components was
+   refused by its own declared shape
+   (`docs/seon/issues/a-component-value-is-refused-by-its-own-ref-shape.md`,
+   owner ruling 2026-08-08, option 1).
+
+   The widening is DERIVED from the `:seon.db/component true` property the
+   form already declares, at compilation only: the authored declaration, the
+   canonical EDN, and the Datahike bridge all keep reading the narrow form,
+   and a component attribute declared tomorrow is widened without an edit.
+   Idempotent, so a form may pass through more than once."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [form]
+  (walk/postwalk
+   (fn [value]
+     (if (and (vector? value)
+              (map? (second value))
+              (true? (:seon.db/component (second value))))
+       (into [(first value) (second value)]
+             (map widened-component-child)
+             (drop 2 value))
+       value))
+   form))
 
 (defn enum-members
   "Members of an `:enum` form after its optional properties map, or []."

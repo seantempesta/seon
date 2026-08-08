@@ -147,13 +147,25 @@
     (some-> (find-ns (symbol (namespace predicate)))
             (ns-resolve (symbol (name predicate))))))
 
-(defn bind-predicates
-  "Replace every predicate symbol before Malli compilation.
+(defn compilable-form
+  "Prepare one authored declaration for Malli compilation.
 
-   Malli evaluates symbol/string/list predicate code by constructing its own
-   SCI context. Seon admits only named predicates and supplies their already
-   materialized callables from the corpus environment, so unresolved code
-   fails closed here instead of opening that second evaluator.
+   THE choke point every compile path goes through, so a preparation added
+   here cannot be forgotten by a new one. Two preparations live here:
+
+   Predicate symbols are replaced by their callables. Malli evaluates
+   symbol/string/list predicate code by constructing its own SCI context.
+   Seon admits only named predicates and supplies their already materialized
+   callables from the corpus environment, so unresolved code fails closed
+   here instead of opening that second evaluator.
+
+   Component child positions are widened by
+   [[seon.schema.form/widen-component-children]] — derived from the
+   `:seon.db/component true` property the form already declares, so a row
+   that carries its component entities validates as the transaction data it
+   is (owner ruling 2026-08-08). Only the COMPILED shape widens; the authored
+   declaration, its canonical EDN, and the Datahike bridge keep reading the
+   narrow form.
 
    `predicate-functions` is the caller's explicit override — a preprocessed
    projection carries its own callables. Anything absent from it resolves
@@ -199,7 +211,7 @@
               :seon.error/kind :user-input}))))
 
        :else value))
-   form))
+   (form/widen-component-children form)))
 
 (defn- with-compiled-cache
   "Give one projection its own holder for state compiled FROM it.
@@ -235,7 +247,7 @@
   (:seon.schema.projection/compiled projection))
 
 (defn- bound-forms [forms predicate-functions]
-  (update-vals forms #(bind-predicates % predicate-functions)))
+  (update-vals forms #(compilable-form % predicate-functions)))
 
 (defn- projection-registry
   "Registry over immutable forms that binds only the requested declaration."
@@ -247,7 +259,7 @@
       (-schema [this type]
         (or (mr/-schema defaults type)
             (when-let [definition (get forms type)]
-              (m/schema (bind-predicates definition predicate-functions)
+              (m/schema (compilable-form definition predicate-functions)
                         {:registry this}))))
       (-schemas [_]
         @all-schemas))))
@@ -256,7 +268,7 @@
   "Return one Malli definition as durable EDN.
 
    Evaluating Clojure metadata resolves predicate symbols to callable roots.
-   This is the inverse of `bind-predicates`: a bound predicate IS the Var its
+   This is the inverse of `compilable-form`: a bound predicate IS the Var its
    qualified symbol names, and a Var carries that symbol, so the inverse is
    reading the name back off the Var — no process-global table of callables
    is scanned, and no second environment's registration can supply a
@@ -392,7 +404,7 @@
          (try
            (direct-references*
             (m/schema
-             (bind-predicates definition predicate-functions)
+             (compilable-form definition predicate-functions)
              options)
             canonical-keys)
            (catch Exception _
@@ -407,7 +419,7 @@
   (let [registry-for-references
         (reference-registry canonical-keys fallback)]
     (direct-references*
-     (m/schema (bind-predicates definition predicate-functions)
+     (m/schema (compilable-form definition predicate-functions)
                {:registry registry-for-references})
      canonical-keys)))
 
@@ -540,7 +552,7 @@
             {:registry registry})
         compiled
         (m/schema
-         (bind-predicates
+         (compilable-form
           form
           (:seon.schema.projection/predicate-functions projection))
          compile-options)]
@@ -918,7 +930,7 @@
          (or (mr/-schema defaults type)
              (when-let [form (get forms type)]
                (m/schema
-                (bind-predicates form {})
+                (compilable-form form {})
                 {:registry this}))))
        (-schemas [_]
          (merge (mr/-schemas defaults) forms))))))
@@ -979,7 +991,7 @@
         (or (mr/-schema defaults type)
             (when-let [form (get (active-forms) type)]
               (m/schema
-               (bind-predicates form {})
+               (compilable-form form {})
                {:registry this}))))
       (-schemas [_]
         (merge (mr/-schemas defaults) (active-forms))))))
@@ -1008,7 +1020,7 @@
           decoded (edn/read-string encoded)]
       (and (= value decoded)
            (some? (m/schema
-                   (bind-predicates decoded {})
+                   (compilable-form decoded {})
                    {:registry (candidate-registry)}))))
     (catch Exception _
       false)))
@@ -1071,7 +1083,7 @@
                            (bound-forms forms predicate-functions))
         compiled-definition
         (or compiled-definition
-            (bind-predicates definition predicate-functions))
+            (compilable-form definition predicate-functions))
         _ (when (= :agent (:seon.schema.admission/source
                            (or admission
                                {:seon.schema.admission/source :agent})))
@@ -1136,7 +1148,7 @@
                                 (or (get compiled-schemas reference)
                                     (m/schema
                                      (or (get compiled-forms reference)
-                                         (bind-predicates
+                                         (compilable-form
                                           reference-form
                                           predicate-functions))
                                      compile-options))
@@ -1906,7 +1918,7 @@
         (:seon.schema.projection/predicate-functions projection)
         compile-options
         (:seon.schema.projection/compile-options projection)
-        bound (bind-predicates definition predicate-functions)
+        bound (compilable-form definition predicate-functions)
         function? (qualified-symbol? identity)
         compiled ((if function? m/function-schema m/schema)
                   bound compile-options)]
@@ -2223,7 +2235,7 @@
                schema-key direct-dependencies)
         _ (assert-acyclic-references!
            forms [schema-key] schema-dependencies)
-        compiled (m/schema (bind-predicates definition predicate-functions)
+        compiled (m/schema (compilable-form definition predicate-functions)
                            compile-options)
         reverse-schema-dependencies
         (replace-reverse-dependencies
@@ -2347,7 +2359,7 @@
         compile-options {:registry registry}
         compiled
         (m/function-schema
-         (bind-predicates definition predicate-functions)
+         (compilable-form definition predicate-functions)
          compile-options)
         canonical-keys
         (or (:seon.schema.projection/canonical-keys projection)

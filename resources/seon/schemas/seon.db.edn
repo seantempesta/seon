@@ -2,6 +2,19 @@
           :lookup-ref-value [:or :string :uuid :keyword :symbol :int],
           :ref [:or :int :string [:tuple :keyword :seon.db/lookup-ref-value]],
           :component :boolean,
+          ;; One component's OWN entity map, as Datahike's transaction-data
+          ;; grammar accepts it in the place of a ref. Nothing declares this
+          ;; key at a call site: the registry derives it as the second arm of
+          ;; every child position whose enclosing form declares
+          ;; `:seon.db/component true`, so a component-bearing row validates
+          ;; as the transaction data it is.
+          :component-entity
+          [:map-of
+           {:min 1
+            :error/message
+            "must be a component's own entity map of qualified attributes"}
+           :qualified-keyword
+           :seon.schema/value],
           :db :seon.db/database-value,
           :read-evidence-sink
           [:fn

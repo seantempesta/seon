@@ -579,7 +579,7 @@
     reader-namespace :seon.program/reader-namespace
     reader-aliases :seon.program/reader-aliases}]
   (let [compiled (m/function-schema
-                  (schema/bind-predicates (read-edn spec)
+                  (schema/compilable-form (read-edn spec)
                                           predicate-functions)
                   compile-options)
         arities (m/-function-schema-arities compiled)

@@ -44,7 +44,7 @@
       (is (contains? definition-values predicate-symbol))
       (let [compiled
             (m/schema
-             (schema/bind-predicates
+             (schema/compilable-form
               [:fn {:gen/gen generator-symbol} predicate-symbol]
               {predicate-symbol @(requiring-resolve predicate-symbol)}))
             generated (mg/sample compiled {:seed 2026080604 :size 20})]
