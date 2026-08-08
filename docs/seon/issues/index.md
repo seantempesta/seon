@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (23)
+## Blocker (24)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -38,6 +38,7 @@ See `README.md` for the convention.
 | [Isolate session deltas from other runs' context mutations](shared-context-session-delta-crosses-run-attribution.md) | blocker | per-run fork context wave |
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 | [Arm the time limit on the thread that runs the work](interrupt-arm-does-not-cross-a-thread-hop.md) | blocker | seon.env Phase 1 constructor wave |
+| [Deliver the render proc's stop completion after a settled stream](render-proc-never-delivers-its-stop-completion-after-a-settled-stream.md) | blocker | render shutdown repair wave |
 
 ## Friction (104)
 

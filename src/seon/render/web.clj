@@ -1035,52 +1035,78 @@
         ;; proc-owned keyframe is observed rather than missed
         (register-tab! registration registration-key)
         (async/tap pages-mult tap)
-        (.start
-         (Thread/ofVirtual)
-         (fn []
-           (try
-             (let [initial (fresh-fact-package connection latest-packages
-                                               registration-key)
-                   delivered-revision
-                   (if initial
-                     (do
-                       (write-package!
-                        channel generator
-                        (:seon.render.package/keyframe-bytes initial))
-                       (:seon.render.package/revision initial))
-                     (do (async/offer! render-channel {::join true}) 0))]
-               (loop [delivered-revision delivered-revision]
+        (let [opening-basis (long (db/basis-t @connection))]
+          (.start
+           (Thread/ofVirtual)
+           (fn []
+             (try
+               (let [initial (fresh-fact-package connection latest-packages
+                                                 registration-key)
+                     delivered-revision
+                     (if initial
+                       (do
+                         (write-package!
+                          channel generator
+                          (:seon.render.package/keyframe-bytes initial))
+                         (:seon.render.package/revision initial))
+                       (do (async/offer! render-channel {::join true}) 0))]
+                 (loop [delivered-revision delivered-revision
+                        painted? (some? initial)]
                    (when @painting
                      (when-let [packages (async/<!! tap)]
                        (if-let [package (some-> (get packages registration-key)
                                                 join-package)]
                          (let [revision
                                (:seon.render.package/revision package)]
-                           (if (<= (long revision) delivered-revision)
-                             (recur delivered-revision)
+                           (cond
+                             ;; THE INITIAL PAINT MUST BE CURRENT. A pass
+                             ;; already in flight when this tab tapped was
+                             ;; derived at an EARLIER database value, and
+                             ;; its publication reaches the fresh tap
+                             ;; before the answer to this tab's own join
+                             ;; request. Painting it leaves a reconnect
+                             ;; showing a superseded page until the next
+                             ;; change — measured on 3 of 6 reconnects,
+                             ;; 2026-08-07. The package already carries
+                             ;; the fact that settles it, so compare
+                             ;; database bases rather than wait on a
+                             ;; clock, and ask the proc again for one
+                             ;; derived at or after the basis this tab
+                             ;; connected at.
+                             (and (not painted?)
+                                  (< (long (:seon.render.package/basis-transaction
+                                            package))
+                                     opening-basis))
+                             (do (async/offer! render-channel {::join true})
+                                 (recur delivered-revision painted?))
+
+                             (<= (long revision) delivered-revision)
+                             (recur delivered-revision painted?)
+
+                             :else
                              (when (write-package!
                                     channel generator
                                     (package-patches
                                      delivered-revision package))
-                               (recur revision))))
-                         (recur delivered-revision))))))
-             (catch Throwable failure
-               (async/offer!
-                fault-channel
-                {:clojure.core.async.flow/pid :seon.render.web/feed
-                 :seon.cluster.agent/id id
-                 :clojure.core.async.flow/ex
-                 (ex-info
-                  "The browser feed writer failed."
-                  {:seon.render.web/tab-id tab-id
-                   :seon.render.web/page registration-key
-                   :seon.render/output :seon.render/html}
-                  failure)}))
-             (finally
-               ;; A writer exception or channel shutdown must not leave
-               ;; the socket and its tap alive. Idempotent after a real
-               ;; client close or the false-write path above.
-               (datastar/close-sse! generator))))))
+                               (recur revision true))))
+                         (recur delivered-revision painted?))))))
+               (catch Throwable failure
+                 (async/offer!
+                  fault-channel
+                  {:clojure.core.async.flow/pid :seon.render.web/feed
+                   :seon.cluster.agent/id id
+                   :clojure.core.async.flow/ex
+                   (ex-info
+                    "The browser feed writer failed."
+                    {:seon.render.web/tab-id tab-id
+                     :seon.render.web/page registration-key
+                     :seon.render/output :seon.render/html}
+                    failure)}))
+               (finally
+                 ;; A writer exception or channel shutdown must not leave
+                 ;; the socket and its tap alive. Idempotent after a real
+                 ;; client close or the false-write path above.
+                 (datastar/close-sse! generator)))))))
 
       datastar.http-kit/on-close
       (fn [_generator _status]

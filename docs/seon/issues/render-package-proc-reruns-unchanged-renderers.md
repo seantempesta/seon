@@ -27,6 +27,35 @@ reused afterward.
   evidence. The comparison can suppress `surface-html`, but it cannot suppress
   renderer execution that has already happened.
 
+### Measured cost, 2026-08-07
+
+The same construction, timed end to end through the proc's own settlement
+fence (one watched agent, the canonical test population, no debug tab):
+
+```text
+pass 0 -> elapsed-ms= 10485      ; first derivation
+pass 1 -> elapsed-ms=  1930      ; one namespace source fact changed
+pass 2 -> elapsed-ms=  1909
+pass 3 -> elapsed-ms=  1873
+pass 4 -> elapsed-ms=  1844
+pass 5 -> elapsed-ms=  1904
+```
+
+So a one-block change costs ~1.9 s of whole-walk derivation, and the first
+pass costs ~10.5 s. Two consequences beyond the wasted work:
+
+- every pass outlasts `flow/ping`'s 1000 ms reply window by about 2x, so the
+  proc is routinely absent from a ping result (this produced two
+  NullPointerExceptions in `seon.render.web-test`, now dead at the oracle —
+  `archive/render-web-tests-read-a-missed-flow-ping-as-state.md`); and
+- `seon.render.web-test` chains several passes per test against the shared
+  20 s `test-support/event-backstop-seconds`, so tests in that namespace blow
+  the backstop intermittently under ordinary machine load. Two of three
+  focused runs on 2026-08-07 lost a different test to that timeout
+  (`thinking-stream-morphs-into-the-settled-session-transcript`,
+  `the-namespace-page-is-the-html-walk`-adjacent waits). The instability is a
+  symptom of this cost, not of the tests.
+
 ## Owner
 
 `seon.render.web/page-result` and the render walk's fact-derived evidence

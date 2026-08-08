@@ -42,12 +42,14 @@
             [seon.render :as render]
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
+            [seon.render.walk :as render.walk]
             [seon.render.web :as web]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as sci.kernel]
             [seon.test-support :as support])
-  (:import [java.net BindException URI URLEncoder]
+  (:import [java.util.concurrent CountDownLatch]
+           [java.net BindException URI URLEncoder]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
             HttpResponse$BodyHandlers]))
 
@@ -100,6 +102,7 @@
             completion (async/promise-chan)
             fault-channel (async/chan (async/dropping-buffer 8))
             stream-channel (async/chan (async/sliding-buffer 1))
+            graph-errors (atom [])
             view {:seon.render.web/render-channel render-channel
                   :seon.render/context-channel context-channel
                   :seon.render.web/pages-channel pages-channel
@@ -133,9 +136,16 @@
             pages-mult (async/mult pages-channel)
             {:keys [report-chan error-chan]} (flow.core/start graph)]
         ;; nothing asserts on reports here, but an unread report or
-        ;; error channel would eventually park the graph's own plumbing
+        ;; error channel would eventually park the graph's own plumbing.
+        ;; THE ERRORS ARE KEPT, NOT DISCARDED: a proc that throws stops
+        ;; taking, so the symptom every later assertion sees is a
+        ;; timeout, and draining the error channel into the void hid
+        ;; the one value that names the cause.
         (async/go-loop [] (when (async/<! report-chan) (recur)))
-        (async/go-loop [] (when (async/<! error-chan) (recur)))
+        (async/go-loop []
+          (when-let [failure (async/<! error-chan)]
+            (swap! graph-errors conj failure)
+            (recur)))
         (try
           (flow.core/resume graph)
           (wake/route! {:seon.cluster.wake/connection connection
@@ -176,6 +186,13 @@
             (wake/unlisten! {:seon.cluster.wake/connection connection
                              :seon.cluster.wake/key ::route})
             (flow.core/stop graph)
+            ;; NAME THE CAUSE BEFORE THE SYMPTOM. A thrown transform
+            ;; leaves the proc unable to take, so the completion below
+            ;; never arrives and every reading times out; report what
+            ;; the graph actually said first.
+            (is (= [] (mapv #(ex-message (:clojure.core.async.flow/ex %))
+                            @graph-errors))
+                "the render graph reported no proc error")
             ;; the proc's OWN completion, under the shared loud
             ;; backstop: a wedged proc must fail this suite noisily
             ;; rather than hang the runner forever
@@ -187,11 +204,31 @@
 
 (defn- ping-state
   "The render proc's own ping state — passes, watched agents, taps and
-  streaming agents, exposed by its `:ping-map-fn`."
+  streaming agents, exposed by its `:ping-map-fn`.
+
+  A MISSED PING IS \"BUSY\", NEVER \"NO STATE\". `flow/ping` returns a
+  map only \"for those procs that reply within timeout-ms (default
+  1000)\"
+  (`reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:136-142`),
+  and it answers on the proc's own transform loop
+  (`.../flow/impl.clj:76-86,205`). This proc is `:io`, one derivation
+  serializes the whole walk, and it honours the coalescing floor INSIDE
+  the transform — so a pass routinely outlasts that window and flow
+  reports nothing for this pid. Every oracle below then read `nil` as a
+  state map: `(zero? nil)` and `(- nil before)` both threw
+  NullPointerException in one run of 2026-08-07. So observe the proc's
+  answer instead of sampling for it: retry until it replies, paced by
+  ping's own window, under the shared loud backstop that turns a
+  genuinely wedged proc into a failure rather than a hang."
   [context]
-  (-> (flow.core/ping (:graph context))
-      (get :seon.render.web/render)
-      (get :clojure.core.async.flow/state)))
+  (support/await-event!
+   (future
+     (loop []
+       (or (-> (flow.core/ping (:graph context))
+               (get :seon.render.web/render)
+               (get :clojure.core.async.flow/state))
+           (recur))))
+   [:render-proc-ping]))
 
 (defn- derivations
   "The render proc's pass count — the oracle for ONE derivation per
@@ -722,6 +759,56 @@
             (async/close! render-channel)
             (async/close! fault-channel)))))))
 
+(deftest a-reconnect-refuses-a-pass-derived-before-it-connected
+  ;; THE CLASS: a tab taps the mult and then paints the FIRST package it
+  ;; sees. A pass already in flight when it tapped was derived at an
+  ;; EARLIER database value, and its publication reaches the fresh tap
+  ;; before the answer to this tab's own join request — so reconnect
+  ;; painted a superseded page and stayed there until the next change.
+  ;; It failed 3 of 6 scripted reconnects on 2026-08-07, and it is what
+  ;; made `reconnect-is-repaint` and its wire twin red at random.
+  ;;
+  ;; The construction is deterministic rather than hopeful: the pass is
+  ;; HELD inside its own serialization while a newer fact commits, so
+  ;; the stale publication is guaranteed to be what arrives first.
+  (with-server
+    (fn [connection server _context]
+      ;; one tab already watching, so a commit always costs a real pass
+      (let [watching (open-feed server (str "/feed/" agent-id))]
+        (try
+          (read-complete-paint! watching connection)
+          (let [entered (CountDownLatch. 1)
+                holding (CountDownLatch. 1)
+                first-pass (atom true)
+                walk render.walk/neighborhood]
+            (with-redefs [render.walk/neighborhood
+                          (fn [request]
+                            (when (compare-and-set! first-pass true false)
+                              (.countDown entered)
+                              (.await holding))
+                            (walk request))]
+              (db/transact! connection
+                            [{:seon.ns/name 'my.agents.root
+                              :seon.ns/source
+                              "(ns my.agents.root)\n(def superseded true)"}])
+              (support/await-event! entered [:pass-held-mid-derivation])
+              ;; the held pass can no longer describe the facts
+              (db/transact! connection
+                            [{:seon.ns/name 'my.agents.root
+                              :seon.ns/source
+                              "(ns my.agents.root)\n(def connected true)"}])
+              (let [fresh (open-feed server (str "/feed/" agent-id))]
+                (try
+                  (.countDown holding)
+                  (let [paint (read-complete-paint! fresh connection)]
+                    (is (str/includes? paint "def connected true")
+                        "the initial paint is derived at or after the basis
+                         this tab connected at")
+                    (is (not (str/includes? paint "def superseded true"))
+                        "the in-flight pass that published first was refused"))
+                  (finally (.close fresh))))))
+          (finally (.close watching)))))))
+
 ;;; 4. reconnect-is-repaint-wire-test — seed 2026072824
 
 (deftest reconnect-is-repaint-wire-test
@@ -994,6 +1081,38 @@
               (is (< passes m)
                   (str "the floor coalesced " m " commits into " passes
                        " derivations for the whole cluster"))))
+          (finally (.close tab)))))))
+
+(deftest the-pass-oracle-observes-a-derivation-longer-than-flows-ping-window
+  ;; THE CLASS: `flow/ping` replies only for procs that answer inside
+  ;; its 1000 ms window, and it answers on the proc's own transform
+  ;; loop. A proc that is mid-derivation is simply absent from the
+  ;; result — which every oracle in this namespace used to read as a
+  ;; state map, throwing NullPointerException on `(zero? nil)` and
+  ;; `(- nil before)` (two errors in one run, 2026-08-07). The wanted
+  ;; behavior is that the oracle OBSERVES the proc's answer.
+  ;;
+  ;; The busy window is produced by the production dial, not by a
+  ;; redefinition: the proc waits out the coalescing floor INSIDE its
+  ;; transform, so a floor above flow's window makes the missed ping
+  ;; certain rather than load-dependent.
+  (with-server
+    (fn [connection server context]
+      (let [tab (open-feed server (str "/feed/" agent-id))]
+        (try
+          (read-complete-paint! tab connection)
+          (db/transact! connection [{:seon.config/cluster "web-test"
+                                     :seon.config.render/coalesce-ms 1500}])
+          (let [before (derivations context)]
+            (is (number? before)
+                "the pass count is the proc's own answer, never a missed ping")
+            (db/transact! connection
+                          [{:seon.ns/name 'my.agents.root
+                            :seon.ns/source
+                            "(ns my.agents.root)\n(def floored true)"}])
+            (read-until! tab "def floored true")
+            (is (< (long before) (long (derivations context)))
+                "and it counts the pass the floor held past that window"))
           (finally (.close tab)))))))
 
 ;;; ---------------------------------------------------------------------------
