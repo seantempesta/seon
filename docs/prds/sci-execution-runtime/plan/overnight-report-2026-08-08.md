@@ -193,7 +193,27 @@ bound-fn* deletion) · schema-environment (Defect I root owner).
 - MCP envelope echoes the submitted form in every event (5× duplication;
   queued).
 
-## THE DRIVE IS RUNNING
+## THE DRIVE RAN — first settled run ever, honest mixed verdict
+
+([live-drive-2026-08-08.md](../research/live-drive-2026-08-08.md)). The
+platform completed its FIRST settled run: real context capture, a real
+DeepSeek attempt, 13 receipts, clean close — but triggered by a system
+error message, not the human's, with a 509-character context (the render
+walk refuses as-of values — the pinned-temporality class biting a second
+time; the driver fixed the first instance live with the authorized
+one-line exception). Six-blocker scorecard vs 08-06: 2 fixed (problems
+projection, /data — plus debug page and transcript pull-many), 2
+transformed, 1 recurred WORSE (message selection starves human messages
+while fault messages self-feed), 1 unmeasurable until the context is
+real. Token sentinel: an INVERSE explosion — 225-token prompt → 10,502
+completion tokens of the model rationally debugging its own empty
+context; and one error's data-edn is 4.25M chars. Fix-and-re-drive lane
+dispatched on the driver's single-seam recommendation: kill the
+as-of-reader CLASS (four-view total-reader regression owed and
+generalized), fix message-selection starvation, re-drive. Observer's
+independent report still incoming.
+
+## The drive-arc launch record
 
 Default reforked from current-src at tonight's HEAD (commit `6a76b0c6…`)
 and standing at `http://127.0.0.1:7994`. Driver + independent observer
