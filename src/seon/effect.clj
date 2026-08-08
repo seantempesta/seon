@@ -471,6 +471,44 @@
      (settle-value! connection dials effect-id opened-at threshold
                     (::flow/value terminal)))))
 
+(defn- background-time-limit
+  "The milliseconds bounding ONE detached capability request.
+
+  Config supplies the default and the submitting form's explicit
+  `:seon.effect/time-limit-ms` WINS — the ordinary elide-for-default,
+  pass-to-override rule, in either direction and with no clamp: an agent
+  that knows its download needs an hour says so, and one that wants a probe
+  cut in two seconds says that. Owner ruling 2026-08-08 night: \"config
+  defaults and the agent can supply optional args for tighter or more open
+  limits. Great defaults and easy and intuitive overrides.\"
+
+  There is no third answer. Absence of both is a loud refusal rather than
+  unbounded work, so a detached request that runs forever cannot be
+  expressed — the state the ruling exists to make unrepresentable."
+  [execution effective]
+  (let [supplied (:seon.effect/time-limit-ms execution)
+        configured (:seon.config.effect.background/time-limit-ms effective)]
+    (cond
+      (some? supplied)
+      (if (and (int? supplied) (pos? supplied))
+        supplied
+        (flat-error
+         :seon.effect/invalid-time-limit
+         "A background time limit must be a positive number of milliseconds."
+         {:seon.effect/time-limit-ms supplied}))
+
+      (and (int? configured) (pos? configured))
+      configured
+
+      :else
+      (flat-error
+       :seon.effect/missing-background-time-limit
+       (str "This cluster declares no "
+            ":seon.config.effect.background/time-limit-ms, so a detached "
+            "request cannot be bounded. Apply the config fact or pass "
+            ":seon.effect/time-limit-ms.")
+       {:seon.config.effect.background/time-limit-ms configured}))))
+
 (defn- request*
   [owner request execution]
   (let [owner-sym (owner-symbol owner)]
@@ -502,7 +540,16 @@
                        :seon.effect/capability]
                       [:seon.fn/sym (str owner-sym)])
              handler-symbol (:seon.effect/capability owner-row)
-             handler (some-> handler-symbol requiring-resolve deref)]
+             handler (some-> handler-symbol requiring-resolve deref)
+             effective
+             (config/effective
+              database (:seon.boot/cluster-name *request-context*))
+             threshold (:seon.config.eval.result/blob-threshold effective)
+             background? (:seon.effect/background? execution)
+             ;; Resolved BEFORE the receipt is opened, so an unbounded
+             ;; detached request is refused rather than recorded.
+             background-limit
+             (when background? (background-time-limit execution effective))]
          (cond
            (nil? handler-symbol)
            (flat-error
@@ -522,6 +569,9 @@
             "The capability request does not satisfy its owner contract."
             {:seon.fn/sym (str owner-sym)})
 
+           (:seon.error/kind background-limit)
+           background-limit
+
            :else
            (let [projected-request (admitted-value dials request)]
              (if (:seon.sci.admit/capped? projected-request)
@@ -529,8 +579,7 @@
                 :seon.effect/request-too-large
                 "The capability request exceeds the configured value bounds."
                 {:seon.fn/sym (str owner-sym)})
-               (let [background? (:seon.effect/background? execution)
-                     effect-id
+               (let [effect-id
                      (pr-str [(:seon.cluster.run/id *request-context*)
                               (:seon.cluster.run.form/ordinal *request-context*)
                               effect-ordinal])
@@ -560,17 +609,25 @@
                       [[:db.fn/call #'open-call open-request]])]
                  (if (:seon.error/kind opened)
                    opened
-                   (let [effective
-                         (config/effective
-                          @connection (:seon.boot/cluster-name *request-context*))
-                         threshold
-                         (:seon.config.eval.result/blob-threshold effective)]
+                   (letfn [(settled [outcome]
+                             (if (:seon.error/kind
+                                  (:seon.effect/transaction outcome))
+                               (:seon.effect/transaction outcome)
+                               (:seon.effect/value outcome)))]
                      (if background?
-                       (do
+                       ;; A FRESH arm, armed here at the submission. Detached
+                       ;; work must not inherit the turn's deadline (that is
+                       ;; what `my.background` is for), and it must not be
+                       ;; unbounded either — so it carries its own limit, the
+                       ;; config default unless this form named another.
+                       (let [detached (kernel/detached-arm background-limit)]
                          (flow/submit!
                           (:seon.flow/work-launcher *request-context*)
                           {:seon.env/environment
-                           (:seon.env/environment *request-context*)
+                           (env/refuse-incomplete-environment!
+                            (env/scope
+                             (:seon.env/environment *request-context*)
+                             {:seon.sci.kernel/arm detached}))
                            ::flow/submission-id effect-id
                            ::flow/workload :io
                            ::flow/work-fn
@@ -582,6 +639,7 @@
                                  effective)))
                            ::flow/complete!
                            (fn [terminal]
+                             (kernel/release-arm! detached)
                              (settle-background-terminal!
                               connection dials effect-id owner-sym opened-at
                               threshold terminal))})
@@ -613,10 +671,7 @@
                                  (settle-value!
                                   connection dials effect-id opened-at
                                   threshold (handler-failure owner-sym))))]
-                         (if (:seon.error/kind
-                              (:seon.effect/transaction outcome))
-                           (:seon.effect/transaction outcome)
-                           (:seon.effect/value outcome))))))))))))))
+                         (settled outcome)))))))))))))
 
 (defn request!
   "Validate, record, dispatch, bound, and settle one capability request."

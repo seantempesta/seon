@@ -6,7 +6,11 @@
               [:map
                [:seon.effect/background?
                 {:optional true}
-                :seon.effect/background?]],
+                :seon.effect/background?]
+               [:seon.effect/time-limit-ms
+                {:optional true}
+                :seon.effect/time-limit-ms]],
+              :time-limit-ms [:int {:min 1}],
               :form-ordinal [:int {:min 0}],
               :duration-ms [:int {:min 0}],
               :id [:string {:min 1, :seon.db/identity true}],

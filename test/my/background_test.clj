@@ -14,7 +14,18 @@
             (my.example/call {:my.example/id 1})))))
   (is (= :my.background/invalid-call
          (:seon.error/kind
-          (macroexpand-1 '(my.background/background (+ 1 2 3)))))))
+          (macroexpand-1 '(my.background/background (+ 1 2 3))))))
+  ;; The agent's own limit is ordinary execution data on the same call: the
+  ;; config fact is the default, this wins over it in either direction.
+  (is (= '(seon.effect/request!
+           (var my.example/call)
+           {:my.example/id 1}
+           (merge {:seon.effect/background? true}
+                  {:seon.effect/time-limit-ms 3600000}))
+         (macroexpand-1
+          '(my.background/background
+            {:seon.effect/time-limit-ms 3600000}
+            (my.example/call {:my.example/id 1}))))))
 
 (deftest poll-and-await-derive-terminal-presence-without-acknowledging
   (test-support/with-database

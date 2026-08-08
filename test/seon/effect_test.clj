@@ -71,6 +71,10 @@
                unbounded-loop
                bounded-loop)]
     {:seon.effect-test/armed? (some? (kernel/current-arm))
+     ;; Which arm, not merely whether one: a detached submission runs under
+     ;; a FRESH arm whose deadline is its own, so the remaining milliseconds
+     ;; here separate "bounded by my own limit" from "bounded by the turn's".
+     :seon.effect-test/deadline-remaining-ms (kernel/deadline-remaining-ms)
      ;; The connection every capability handler needs. Background handlers
      ;; got nil here until the far side rebuilt its context from data, and
      ;; every `my.shell/run` submitted in the background failed on it.
@@ -127,6 +131,18 @@
        (symbol (str (ns-name (:ns handler-meta)))
                (str (:name handler-meta)))}])))
 
+(defn- cluster-config
+  "A COMPLETE effective-config row, because a partial one is not readable.
+
+  `config/effective` answers with its missing-facts error the moment one
+  required dial is absent, so a test that needs a real dial value — here the
+  background time limit — transacts the shipped defaults with that one dial
+  overridden rather than a two-key stub."
+  [background-limit-ms]
+  (assoc (config/defaults)
+         :seon.config/cluster "default"
+         :seon.config.effect.background/time-limit-ms background-limit-ms))
+
 (defn- request-context
   ([connection]
    (request-context connection nil))
@@ -147,7 +163,7 @@
     (fn [connection]
       (db/transact!
        connection
-       [{:seon.config/cluster "default"}
+       [(cluster-config 60000)
         {:seon.cluster.agent/id "effect-agent"}
         {:seon.cluster.run/id "effect-run"
          :seon.cluster.run/agent
@@ -261,7 +277,7 @@
     (fn [connection]
       (db/transact!
        connection
-       [{:seon.config/cluster "default"}
+       [(cluster-config 60000)
         {:seon.cluster.agent/id "effect-agent"}
         {:seon.cluster.run/id "effect-run"
          :seon.cluster.run/agent [:seon.cluster.agent/id "effect-agent"]}])
@@ -317,8 +333,13 @@
                    (:seon.effect-test/outcome settled))
                 (str "background work must survive the deadline of the turn "
                      "that submitted it; got " result-edn))
-            (is (false? (:seon.effect-test/armed? settled))
-                "and it must not be running under that turn's arm at all")
+            (is (true? (:seon.effect-test/armed? settled))
+                (str "and it must run under an arm of its own — unarmed was "
+                     "the interim state before the config dial was ruled"))
+            (is (< 30000 (:seon.effect-test/deadline-remaining-ms settled))
+                (str "that arm's deadline must be the detached limit (60 s "
+                     "here), not the submitting turn's 150 ms, which had "
+                     "demonstrably already latched"))
             (is (true? (:seon.effect-test/connection? settled))
                 (str "a background handler must still receive its cluster's "
                      "connection: every my.shell/run submitted in the "
@@ -329,6 +350,187 @@
             (datahike/unlisten! connection listener-key)
             (async/close! events)
             (flow/stop-work-launcher! launcher)))))))
+
+(defn- settled-background-value
+  "Submit ONE detached arm-probe request and return the value it settled with.
+
+  `config-limit-ms` is the cluster's declared background bound; `execution`
+  is whatever the submitting form named on top of `:seon.effect/background?`;
+  `before-release` runs after the submission and before a gated handler is
+  let into interpreted code, which is where a scenario waits on the deadline
+  it wants to have passed."
+  [config-limit-ms submit! before-release]
+  (let [captured (promise)]
+    (test-support/with-database
+      (fn [connection]
+        (db/transact!
+         connection
+         [(cluster-config config-limit-ms)
+          {:seon.cluster.agent/id "effect-agent"}
+          {:seon.cluster.run/id "effect-run"
+           :seon.cluster.run/agent [:seon.cluster.agent/id "effect-agent"]}])
+        (install-arm-probe! connection)
+        (let [events (async/chan 4)
+              listener-key (random-uuid)
+              _ (datahike/listen! connection listener-key
+                                  #(async/put! events %))
+              launcher
+              (flow/start-work-launcher!
+               {:seon.env/environment @test-environment
+                ::flow/configuration
+                {:seon.config.flow.compute/queue-depth 1
+                 :seon.config.flow.compute/concurrency 1
+                 :seon.config.flow.io/queue-depth 1
+                 :seon.config.flow.io/concurrency 1}})
+              effect-id (pr-str ["effect-run" 3 0])
+              gate (promise)]
+          (reset! handler-gate gate)
+          (try
+            (submit! (request-context connection launcher))
+            (before-release)
+            (deliver gate ::released)
+            (test-support/await-event!
+             events
+             ::background-effect-settled
+             #(:seon.effect/result-edn
+               (db/pull (:db-after %) [:seon.effect/result-edn]
+                        [:seon.effect/id effect-id])))
+            (deliver captured
+                     (read-string
+                      (:seon.effect/result-edn
+                       (db/pull @connection [:seon.effect/result-edn]
+                                [:seon.effect/id effect-id]))))
+            (finally
+              (reset! handler-gate nil)
+              (deliver gate ::released)
+              (datahike/unlisten! connection listener-key)
+              (async/close! events)
+              (flow/stop-work-launcher! launcher))))))
+    @captured))
+
+(defn- await-deadline!
+  "Block until a fresh `limit-ms` deadline has demonstrably latched.
+
+  A scenario that needs \"the limit that would have applied has passed\"
+  waits on a real arm's own latch rather than sleeping a guessed interval."
+  [limit-ms]
+  (let [armed (kernel/detached-arm limit-ms)]
+    (test-support/await-event!
+     (future
+       (while (not (.get ^AtomicBoolean (:seon.sci.kernel/reached armed)))
+         (Thread/sleep 5))
+       ::deadline-reached)
+     ::detached-deadline-reached)
+    (kernel/release-arm! armed)))
+
+(deftest detached-work-is-bounded-by-its-own-limit-config-then-the-form
+  ;; THE CLASS: work with no bound at all. Background work correctly refuses
+  ;; the submitting turn's deadline, and the interim state after that repair
+  ;; was an UNARMED submission — bounded by nothing but whatever the
+  ;; capability happened to bound itself with. The owner's ruling
+  ;; (2026-08-08 night) makes unbounded unrepresentable: a config fact is the
+  ;; default and the submitting form's explicit limit wins in either
+  ;; direction. All three arms of that rule are asserted here, and none can
+  ;; pass vacuously — the interrupted cases run a genuinely unbounded
+  ;; interpreted loop that only a real deadline can end, and the looser case
+  ;; enters interpreted code only AFTER the config limit has demonstrably
+  ;; latched, so a config win would cut it at its first entrance.
+  (testing "with no explicit limit, the config fact bounds the work"
+    (let [started (System/nanoTime)
+          settled (settled-background-value
+                   300
+                   (fn [context]
+                     (binding [effect/*request-context* context]
+                       (effect/request!
+                        #'arm-probe-owner
+                        {:seon.effect-test/iterations -1
+                         :seon.effect-test/gated? true}
+                        {:seon.effect/background? true})))
+                   (fn []))
+          elapsed-ms (quot (- (System/nanoTime) started) 1000000)]
+      (is (= :seon.effect-test/interrupted
+             (:seon.effect-test/outcome settled))
+          (str "an unbounded detached handler must be cut by the cluster's "
+               "background limit; got " (pr-str settled)))
+      (is (< elapsed-ms 15000)
+          (str "and cut at ~300ms, not left running; elapsed " elapsed-ms))))
+
+  (testing "an explicit TIGHTER limit wins over a generous config fact"
+    (let [started (System/nanoTime)
+          settled (settled-background-value
+                   60000
+                   (fn [context]
+                     (binding [effect/*request-context* context]
+                       (effect/request!
+                        #'arm-probe-owner
+                        {:seon.effect-test/iterations -1
+                         :seon.effect-test/gated? true}
+                        {:seon.effect/background? true
+                         :seon.effect/time-limit-ms 300})))
+                   (fn []))
+          elapsed-ms (quot (- (System/nanoTime) started) 1000000)]
+      (is (= :seon.effect-test/interrupted
+             (:seon.effect-test/outcome settled)))
+      (is (< elapsed-ms 15000)
+          (str "the form's 300ms must govern, not the cluster's 60s; "
+               "elapsed " elapsed-ms))))
+
+  (testing "an explicit LOOSER limit wins over a strict config fact"
+    (let [settled (settled-background-value
+                   200
+                   (fn [context]
+                     (binding [effect/*request-context* context]
+                       (effect/request!
+                        #'arm-probe-owner
+                        {:seon.effect-test/iterations 20000
+                         :seon.effect-test/gated? true}
+                        {:seon.effect/background? true
+                         :seon.effect/time-limit-ms 60000})))
+                   #(await-deadline! 200))]
+      (is (= :seon.effect-test/completed
+             (:seon.effect-test/outcome settled))
+          (str "the form's 60s must govern after the cluster's 200ms would "
+               "have latched; got " (pr-str settled)))
+      (is (< 30000 (:seon.effect-test/deadline-remaining-ms settled))
+          "and the arm the work ran under must carry that 60s deadline")))
+
+  (testing "a cluster with no background limit refuses the submission"
+    (test-support/with-database
+      (fn [connection]
+        (db/transact! connection [{:seon.config/cluster "default"}
+                                  {:seon.cluster.agent/id "effect-agent"}
+                                  {:seon.cluster.run/id "effect-run"}])
+        (install-arm-probe! connection)
+        (let [result
+              (binding [effect/*request-context*
+                        (request-context connection)]
+                (effect/request! #'arm-probe-owner
+                                 {:seon.effect-test/iterations 1}
+                                 {:seon.effect/background? true}))]
+          (is (= :seon.effect/missing-background-time-limit
+                 (:seon.error/kind result))
+              (str "unbounded detached work must be refused loudly; got "
+                   (pr-str result)))
+          (is (nil? (db/pull @connection [:seon.effect/id]
+                             [:seon.effect/id (pr-str ["effect-run" 3 0])]))
+              "and refused before any receipt is opened")))))
+
+  (testing "a nonsense explicit limit is refused, never treated as absent"
+    (test-support/with-database
+      (fn [connection]
+        (db/transact! connection [(cluster-config 60000)
+                                  {:seon.cluster.agent/id "effect-agent"}
+                                  {:seon.cluster.run/id "effect-run"}])
+        (install-arm-probe! connection)
+        (let [result
+              (binding [effect/*request-context*
+                        (request-context connection)]
+                (effect/request! #'arm-probe-owner
+                                 {:seon.effect-test/iterations 1}
+                                 {:seon.effect/background? true
+                                  :seon.effect/time-limit-ms 0}))]
+          (is (= :seon.effect/invalid-time-limit
+                 (:seon.error/kind result))))))))
 
 (deftest capability-reachability-is-a-database-query
   (test-support/with-database

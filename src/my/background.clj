@@ -11,7 +11,7 @@
   []
   {:seon.error/kind ::invalid-call
    :seon.error/message
-   "background needs exactly one direct capability call with one request value."
+   "background needs exactly one direct capability call with one request value, optionally preceded by an options map."
    :seon.error/data {}})
 
 (defmacro background
@@ -21,15 +21,24 @@
   `:seon.effect/id` lookup ref. Use it for work that can finish after the
   current run.
 
-  Background work is NOT bounded by the run that started it. It carries no
-  interrupt arm, so the submitting turn's time limit does not cut it — that
-  is the whole point of the surface, and a turn ending never cancels work
-  already in flight. What bounds it instead is an open owner question; until
-  it is ruled, prefer capability calls that bound themselves (a shell time
-  limit, a web timeout)."
-  [& calls]
-  (let [call (first calls)]
-    (if (and (= 1 (count calls))
+      (background (my.shell/run {:my.shell/command [\"make\" \"build\"]}))
+
+  Background work is NOT bounded by the run that started it: it never
+  inherits the submitting turn's arm, so the turn's time limit does not cut
+  it and a turn ending never cancels work already in flight. It is bounded
+  by its OWN limit instead. The default is the cluster's
+  `:seon.config.effect.background/time-limit-ms` fact, and this form may
+  name its own to go either way — tighter for a probe, longer for a slow
+  build — with no clamp:
+
+      (background {:seon.effect/time-limit-ms 3600000}
+                  (my.web/fetch {:my.web/url url}))
+
+  Reaching that limit interrupts the work and settles the receipt; poll or
+  await the returned ref either way."
+  [& forms]
+  (let [[execution call] (if (= 2 (count forms)) forms [nil (first forms)])]
+    (if (and (<= 1 (count forms) 2)
              (seq? call)
              (= 2 (count call))
              (symbol? (first call)))
@@ -37,7 +46,9 @@
         (list 'seon.effect/request!
               (list 'var owner)
               request
-              {:seon.effect/background? true}))
+              (if execution
+                (list 'merge {:seon.effect/background? true} execution)
+                {:seon.effect/background? true})))
       (invalid-call))))
 
 (defn poll

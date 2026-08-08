@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, effect, sci, runtime, concurrency]
 ---
@@ -120,7 +120,71 @@ the background failed on a nil connection
 ([issue](every-background-capability-request-loses-its-connection.md)). The
 far side now rebuilds that frame from the value its submission carried.
 
-## OWNER RULING NEEDED, morning — what SHOULD bound background work?
+## OWNER RULING, 2026-08-08 night — config default, agent override, no clamp
+
+Verbatim: **"config defaults and the agent can supply optional args for
+tighter or more open limits. Great defaults and easy and intuitive
+overrides."**
+
+That is option 1's mechanism plus an agent-suppliable override that may go in
+EITHER direction, with no clamp — trusted collaborators, per the no-hobbling
+ruling. Implemented and proved the same night:
+
+- **The dial.** `:seon.config.effect.background/time-limit-ms`
+  (`resources/seon/schemas/seon.config.effect.background.edn`), shipped at
+  600000 in `config/default.edn`. Ten minutes is an order of magnitude above
+  the longest foreground capability bound (shell and web are 30 s), so a
+  build, a large download, or a slow model call finishes on the default while
+  a handler that never returns cannot hold one of the 64 io slots for the
+  life of the process.
+- **The override.** `my.background/background` takes an optional leading
+  options map, so the surface reads
+  `(background {:seon.effect/time-limit-ms 3600000} (my.web/fetch …))`. It
+  merges into the same `:seon.effect/execution-options` the door already
+  takes; the caller's value simply WINS, tighter or looser, exactly the
+  elide-for-default/pass-to-override idiom the environment PRD names.
+- **The arm.** `seon.sci.kernel/detached-arm` builds a FRESH arm at that
+  limit — its own deadline, counters, and latch, travelled from birth,
+  keeping only the submitting thread's SCI context so a nested evaluation
+  inherits rather than being refused. `seon.effect/request*` puts it on the
+  submission's environment under `:seon.sci.kernel/arm`, so flow's EXISTING
+  `adopt-arm` carriage runs the work under it; `kernel/release-arm!` cancels
+  the deadline task when the work settles early. No second limiting
+  mechanism was added.
+- **Unbounded is unrepresentable.** Absence of the config fact is a loud
+  `:seon.effect/missing-background-time-limit` refusal before any receipt
+  opens, and a non-positive explicit limit is
+  `:seon.effect/invalid-time-limit`. There is no "no arm" path left.
+
+**One class regression**,
+`seon.effect-test/detached-work-is-bounded-by-its-own-limit-config-then-the-form`:
+the config fact cuts an unbounded detached loop; an explicit tighter limit
+wins over a generous config fact; an explicit looser limit wins over a strict
+one (the handler enters interpreted code only after the config limit has
+demonstrably latched, so a config win would cut it at its first entrance);
+and both refusals are asserted. The pre-existing
+`background-work-outlives-the-deadline-of-the-turn-that-started-it` still
+holds the other half — the turn's deadline never applies — now asserting that
+the work runs under an arm whose remaining deadline is its own.
+
+Not vacuous (`tmp/background-bounds/liveness.clj`, one run): with the
+mechanism, 9 of 9 assertions pass; with `detached-arm` neutered to return nil
+the unbounded detached loop never settles and the test errors at its event
+backstop.
+
+**Live proof**, cluster `bounds` in the isolated root `tmp/bounds-root`,
+2026-08-08:
+
+- `(sleep 20)` submitted detached with `:seon.effect/time-limit-ms 2000`
+  settled at `:seon.effect/duration-ms 2172` with `:my.shell/time-limit` —
+  "the foreign process was terminated when its evaluation reached its time
+  limit". Before this change the submission carried no arm at all, so
+  `kernel/deadline-remaining-ms` was nil in the shell handler and the child
+  would have run to the shell's own 30 s bound.
+- `(sleep 3)` submitted detached with NO explicit limit settled normally,
+  exit 0 at 3126 ms, under the cluster's 600000 ms default.
+
+## Superseded question — what SHOULD bound background work?
 
 Deliberately not invented here. Background work is now unarmed, which is
 correct about what it must NOT inherit and silent about what it must obey.

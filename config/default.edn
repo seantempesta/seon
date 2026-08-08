@@ -26,6 +26,19 @@
  ; recommends explicit background execution on a later call.
  :seon.config.effect/long-call-ms 2000
 
+ ; Unit: milliseconds a DETACHED capability request may run before its own
+ ; interrupt arm cuts it. Background work deliberately does not inherit the
+ ; submitting turn's deadline (that is what `my.background` is for), so this
+ ; dial is what makes "unbounded" unrepresentable: every submission arms a
+ ; FRESH arm at this limit, and the submitting form may name its own
+ ; `:seon.effect/time-limit-ms` to go tighter or looser with no clamp.
+ ; Provenance: owner ruling 2026-08-08 night. Ten minutes is an order of
+ ; magnitude above the longest foreground capability bound (shell and web
+ ; are 30 s), so ordinary long work — a build, a large download, a slow
+ ; model call — finishes on the default, while a handler that never returns
+ ; cannot hold one of the 64 io slots for the life of the process.
+ :seon.config.effect.background/time-limit-ms 600000
+
  ; Unit: milliseconds allowed for one Flow ping response. Provenance: F1
  ; measured parked mailbox and turn replies in microseconds; 20 ms leaves
  ; orders of magnitude of scheduling room. A missing reply is reported as

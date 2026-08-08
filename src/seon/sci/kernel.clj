@@ -359,6 +359,56 @@
       (.set ^AtomicBoolean (::travelled armed) true)
       armed)))
 
+(defn detached-arm
+  "A FRESH arm bounding work that must outlive the evaluation submitting it.
+
+  `current-arm` is for work the submitter's limit should govern. This is for
+  the other case — `my.background`, whose whole reason to exist is work that
+  finishes after its turn — where inheriting the submitter's deadline latch
+  would cut the work at the turn's end. The arm returned here shares nothing
+  with the submitting arm: its own deadline, its own counters, its own latch,
+  starting now. Hand it to the crossing under `:seon.sci.kernel/arm` exactly
+  as a captured arm rides, and the thread that runs the work adopts it.
+
+  It keeps the submitting thread's SCI CONTEXT when there is one, so an
+  evaluation nested inside the detached work INHERITS this arm through `arm`
+  rather than being refused as a second context on an armed thread. The
+  context is the only thing carried over; nothing about the submitter's
+  limit or accounting is.
+
+  Because nothing owns the returned arm on a thread, nothing calls `stop!`
+  for it: `release-arm!` cancels its deadline task when the work settles
+  early. Absence of a release only leaves one scheduled task pending until
+  the limit — never an unbounded evaluation."
+  {:malli/schema [:=> [:cat :seon.sci.eval/time-limit-ms]
+                  :seon.sci.kernel/arm]}
+  [time-limit-ms]
+  (let [^ThreadLocal thread-arm (::thread-arm @process-guard)
+        base (new-armed (some-> (.get thread-arm) ::ctx))
+        armed (assoc base
+                     ::deadline-nanos
+                     (+ (::started-at base) (* (long time-limit-ms) 1000000)))]
+    ;; It exists only to be carried, so it is travelled from birth.
+    (.set ^AtomicBoolean (::travelled armed) true)
+    (assoc armed
+           ::deadline-task
+           (.schedule deadline-timer
+                      ^Runnable #(.set ^AtomicBoolean (::reached armed) true)
+                      (long time-limit-ms)
+                      TimeUnit/MILLISECONDS))))
+
+(defn release-arm!
+  "Cancel the deadline of an arm whose work has settled.
+
+  Only a `detached-arm` carries its own task; every other arm is stopped by
+  the evaluation that owns it. Releasing an arm without one is a no-op, so a
+  caller never has to ask which kind it holds."
+  {:malli/schema [:=> [:cat [:or :nil :seon.sci.kernel/arm]] :nil]}
+  [armed]
+  (when-let [^Future task (::deadline-task armed)]
+    (.cancel task false))
+  nil)
+
 (defn adopt-arm
   "Run `work` on this thread governed by `carried-arm`, then restore.
 
