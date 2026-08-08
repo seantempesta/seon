@@ -607,7 +607,8 @@
            "(defn ^{:malli/schema [:=> [:cat :int] :int]} plus-one [x] (inc x))"
            :seon.fn/arglists "([x])"
            :seon.fn/private? false
-           :seon.fn/spec "[:=> [:cat :int] :int]"}}
+           :seon.fn/spec "[:=> [:cat :int] :int]"
+           :seon.schema.admission/source :agent}}
          {:label "private uncontracted function"
           :source "(defn- helper [x] x)"
           :expected
@@ -615,29 +616,70 @@
            :seon.fn/ns [:seon.ns/name 'sample]
            :seon.fn/source "(defn- helper [x] x)"
            :seon.fn/arglists "([x])"
-           :seon.fn/private? true}}
+           :seon.fn/private? true
+           :seon.schema.admission/source :agent}}
          {:label "schema"
           :source "(seon.schema/register! ::amount [:int {:min 0}])"
           :expected
           {:seon.schema/key :sample/amount
-           :seon.schema/form "[:int {:min 0}]"}}
+           :seon.schema/form "[:int {:min 0}]"
+           :seon.schema.admission/source :agent}}
          {:label "test"
           :source "(clojure.test/deftest smoke (clojure.test/is true))"
           :expected
           {:seon.test/sym "sample/smoke"
            :seon.test/ns [:seon.ns/name 'sample]
            :seon.test/source
-           "(clojure.test/deftest smoke (clojure.test/is true))"}}]]
+           "(clojure.test/deftest smoke (clojure.test/is true))"
+           :seon.schema.admission/source :agent}}]]
     (doseq [{:keys [label source expected]} cases]
       (testing label
         (let [event (one-event source)]
           ;; Expected data is literal. It is not produced by another path that
           ;; shares `seon.program`'s canonicalizer.
-          (is (= expected (program/declaration-row event :all)))
+          (is (= expected (program/declaration-row event :all :agent)))
           (if (= "private uncontracted function" label)
-            (is (nil? (program/declaration-row event :contracted)))
+            (is (nil? (program/declaration-row event :contracted :agent)))
             (is (= expected
-                   (program/declaration-row event :contracted)))))))))
+                   (program/declaration-row event :contracted :agent)))))))))
+
+(deftest every-declaration-row-satisfies-its-own-output-contract
+  ;; The class: `declaration-row` emitting a row its own declared output
+  ;; refuses. Every family REQUIRES `:seon.schema.admission/source`, and
+  ;; while it was an event key a caller had to remember, three of the four
+  ;; live callers forgot it — invisible until instrumentation was armed on a
+  ;; cluster, where an agent's first `defn` died on an `[:or]` complaint that
+  ;; named the other families' missing keys instead of the one real absence.
+  ;; It is an argument now, so a row with no admission source is not
+  ;; constructable and this test cannot regress by anyone forgetting a key.
+  ;;
+  ;; The namespace case also pins the reader's own shape becoming the
+  ;; persisted one: a reader event names required namespaces as bare symbols
+  ;; in a vector, and `:seon.ns/ns` declares a set of lookup refs. An `:as`
+  ;; alias is deliberately absent here and is proven in
+  ;; `docs/seon/issues/a-component-value-is-refused-by-its-own-ref-shape.md`
+  ;; instead: component collections declare `:seon.db/ref`, which admits no
+  ;; component entity, so that is a different class at a different owner.
+  (doseq [source ["(defn ^{:malli/schema [:=> [:cat :int] :int]} f [x] x)"
+                  "(defn- helper [x] x)"
+                  "(seon.schema/register! ::amount [:int {:min 0}])"
+                  "(clojure.test/deftest smoke (clojure.test/is true))"
+                  "(ns sample (:require clojure.set))"]
+          policy [:all :contracted]
+          admission-source [:core :agent]]
+    (testing (str source " " policy " " admission-source)
+      (when-let [row (program/declaration-row (one-event source) policy
+                                              admission-source)]
+        (is (= admission-source (:seon.schema.admission/source row))
+            "the row records who admitted it")
+        (is (schema/valid-candidate-value? :seon.program/declaration-row row)
+            (str "row refused by its own output contract: " (pr-str row))))))
+  (testing "a reader event's bare required symbols become lookup refs"
+    (is (= #{[:seon.ns/name 'clojure.set]}
+           (:seon.ns/requires
+            (program/declaration-row
+             (one-event "(ns sample (:require clojure.set))")
+             :contracted :agent))))))
 
 (deftest declaration-admission-refuses-ambiguous-or-incomplete-rows
   (testing "one event cannot claim two declaration identity families"
@@ -660,7 +702,7 @@
     (doseq [event [{:seon.schema/key :sample/missing-form}
                    {:seon.test/sym "sample/missing-source"
                     :seon.test/ns [:seon.ns/name 'sample]}]]
-      (let [data (refusal-data #(program/declaration-row event :all))]
+      (let [data (refusal-data #(program/declaration-row event :all :agent))]
         (is (= :seon.program/declaration-refused
                (:seon.error/kind data)))
         (is (= [(program/row-identity event)]
@@ -711,9 +753,7 @@
 (deftest runtime-schema-declarations-project-namespaced-properties
   (let [event (one-event
                "(seon.schema/register! ::error [:map {:seon.error/class true :seon.render/ai sample/render-ai} [:seon.error/message :seon.error/message]])")
-        row (program/declaration-row
-             (assoc event :seon.schema.admission/source :agent)
-             :contracted)]
+        row (program/declaration-row event :contracted :agent)]
     (is (= true (:seon.error/class row)))
     (is (= 'sample/render-ai (:seon.render/ai row)))
     (is (= :agent (:seon.schema.admission/source row)))))

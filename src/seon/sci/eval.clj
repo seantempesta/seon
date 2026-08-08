@@ -314,7 +314,7 @@
   (or
    (let [deletion (program/deletion-row event)]
      (when (deleted-schema-key deletion) deletion))
-   (let [row (program/declaration-row event :contracted)]
+   (let [row (program/declaration-row event :contracted :agent)]
      (cond
        (:seon.fn/sym row)
        (let [function-symbol (symbol (:seon.fn/sym row))
@@ -637,7 +637,7 @@
       {:seon.ns/name namespace-name
        :seon.ns/source source}
       (binding-rows after))
-     :contracted)))
+     :contracted :agent)))
 
 (defn- context-projection
   "The latest schema projection held by one live cluster context."

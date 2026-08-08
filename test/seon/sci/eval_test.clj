@@ -27,7 +27,7 @@
             [sci.addons.future :as sci.future]
             [sci.core :as sci]
             [seon.render :as render]
-            [seon.schema]
+            [seon.schema :as schema]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]
             [seon.test-support :as test-support]))
@@ -483,7 +483,20 @@
                       :seon.fn/arglists-override?]]
         (is (= "parity/same-facts" (:seon.fn/sym runtime-row)))
         (is (= (select-keys static-row p12-keys)
-               (select-keys runtime-row p12-keys))))
+               (select-keys runtime-row p12-keys)))
+        ;; Identical publication includes the attributes every declaration
+        ;; row REQUIRES, not only the P12 contract facts. The runtime path
+        ;; published rows with no admission source for as long as this test
+        ;; compared only the keys it named.
+        (is (= :core (:seon.schema.admission/source static-row)))
+        (is (= :agent (:seon.schema.admission/source runtime-row)))
+        ;; Whole-row contract validation is NOT asserted here yet: both rows
+        ;; carry `:seon.fn/arities` and `:seon.fn/ast` component entities,
+        ;; and `:seon.db/ref` admits no component value, so both are refused
+        ;; by `:seon.program/declaration-row`. That is a different class at a
+        ;; different owner and its regression belongs to it —
+        ;; docs/seon/issues/a-component-value-is-refused-by-its-own-ref-shape.md
+        )
       (finally
         (test-support/delete-recursively! (str root))))))
 
@@ -796,7 +809,8 @@
           :seon.schema/projection projection})]
     (is (= 1 @calls))
     (is (= {:seon.schema/key :user/direct-schema
-            :seon.schema/form "[:int {:min 0}]"}
+            :seon.schema/form "[:int {:min 0}]"
+            :seon.schema.admission/source :agent}
            (:seon.sci.eval/base-declared-row result)))
     (is (= :user/direct-schema (:seon.sci.eval/schema-value result)))
     (is (false? (:seon.sci.eval/live-declaration? result)))

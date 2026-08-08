@@ -16,12 +16,13 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (29)
+## Blocker (30)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Stop a failed turn from waking itself through its own fault message](a-failed-turn-wakes-itself-through-its-own-fault-message.md) | blocker | live-drive context repair wave |
 | [Let an agent define a contracted function](an-agent-cannot-define-a-contracted-function.md) | blocker | live-drive context repair wave |
+| [Admit a component value under its own attribute's declared shape](a-component-value-is-refused-by-its-own-ref-shape.md) | blocker | owner ruling: component value shape |
 | [Settle a receipt for every recorded run form](a-runs-last-form-can-close-without-a-receipt.md) | blocker | live-drive context repair wave |
 | [Substitute the bootstrap plan's namespace placeholder before it is evaluated](bootstrap-plan-forms-ship-unsubstituted-namespace-placeholders.md) | blocker | live-drive context repair wave |
 | [Boot the co-hosted second cluster without a 63 s stall or a false failure](cohosted-second-boot-is-slow-and-trips-the-silence-backstop.md) | blocker | boot velocity incident (co-hosted second boot) |

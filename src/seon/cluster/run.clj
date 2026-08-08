@@ -986,9 +986,7 @@
             (map (fn [declaration]
                    [:db/retractEntity (:db/id declaration)]))
             declarations))
-    (let [row (or (program/declaration-row
-                   (assoc row :seon.schema.admission/source :agent)
-                   :contracted)
+    (let [row (or (program/declaration-row row :contracted :agent)
                   (refuse! `receipt-settle-call
                            ::row-not-admitted request))
           [identity identity-value] (program/row-identity row)

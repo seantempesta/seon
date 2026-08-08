@@ -49,7 +49,7 @@
         (program/declaration-row
          {:seon.schema/key :sample/value
           :seon.schema/form ":string"}
-         :contracted)
+         :contracted :core)
         deletion
         {:seon.program/delete-identities [[:seon.fn/sym "sample/f"]]
          :seon.program/source "(ns-unmap 'sample 'f)"}
@@ -65,7 +65,8 @@
          :seon.fn.manifest/identities [[:seon.fn/sym "sample/f"]]}]
     (is (schema/valid-candidate-value? :seon.program/row declaration))
     (is (= {:seon.schema/key :sample/value
-            :seon.schema/form ":string"}
+            :seon.schema/form ":string"
+            :seon.schema.admission/source :core}
            schema-declaration))
     (is (schema/valid-candidate-value? :seon.program/row
                                        schema-declaration))

@@ -690,6 +690,28 @@
                                  (empty? value)))))
               (select-keys row owned-attributes))))))
 
+(defn- canonical-namespace-components
+  "Namespace components in the one shape `:seon.ns/ns` declares.
+
+  A reader event names required namespaces as bare symbols in reading order
+  and carries its component collections as vectors; the persisted row holds
+  the same facts as sets, with each requirement a `:seon.ns/name` lookup ref.
+  The evaluator also builds these components directly from SCI's namespace
+  table, so this is idempotent over an already canonical row."
+  [row]
+  (cond-> row
+    (:seon.ns/requires row)
+    (assoc :seon.ns/requires
+           (into #{}
+                 (map (fn [required]
+                        (if (symbol? required)
+                          [:seon.ns/name required]
+                          required)))
+                 (:seon.ns/requires row)))
+    (:seon.ns/aliases row) (update :seon.ns/aliases set)
+    (:seon.ns/imports row) (update :seon.ns/imports set)
+    (:seon.ns/refers row) (update :seon.ns/refers set)))
+
 (def ^:private declaration-required-attributes
   {:seon.ns/name [:seon.ns/source]
    :seon.fn/sym [:seon.fn/ns :seon.fn/source :seon.fn/arglists
@@ -702,12 +724,19 @@
 
   `:all` indexes every directly read top-level build function as future graph
   input;
-  `:contracted` admits only runtime functions carrying a complete contract."
+  `:contracted` admits only runtime functions carrying a complete contract.
+
+  `admission-source` is who admitted the declaration, and this function
+  stamps it. Every declaration row family REQUIRES it, so it is an argument
+  rather than an event key a caller can forget: a row with no admission
+  source is not constructable here."
   {:malli/schema
-   [:=> [:cat :map [:enum :all :contracted]]
+   [:=> [:cat :map [:enum :all :contracted]
+         :seon.schema.admission/source]
     [:maybe :seon.program/declaration-row]]}
-  [event function-policy]
-  (let [candidate
+  [event function-policy admission-source]
+  (let [event (assoc event :seon.schema.admission/source admission-source)
+        candidate
         (cond
           (:seon.ns/name event) event
           (and (:seon.fn/sym event)
@@ -719,8 +748,12 @@
           (:seon.test/sym event) event
           :else nil)
         candidate
-        (if (and (:seon.schema/key candidate)
-                 (:seon.schema/form candidate))
+        (cond
+          (:seon.ns/name candidate)
+          (canonical-namespace-components candidate)
+
+          (and (:seon.schema/key candidate)
+               (:seon.schema/form candidate))
           (let [schema-key (:seon.schema/key candidate)
                 definition (read-edn (:seon.schema/form candidate))
                 row (some #(when (= schema-key (:seon.schema/key %)) %)
@@ -730,7 +763,8 @@
             (assoc row
                    :seon.schema.admission/source
                    (:seon.schema.admission/source candidate)))
-          candidate)
+
+          :else candidate)
         row (canonical-row candidate)]
     (when row
       (let [[identity-attribute _ :as program-identity] (row-identity row)
