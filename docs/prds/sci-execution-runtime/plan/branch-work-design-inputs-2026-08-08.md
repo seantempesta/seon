@@ -79,6 +79,33 @@ let them define the eventual design's vocabulary.
    "this will not merge because…" blocks computed from ingredient 5,
    omitted when clean (the reactive-context rule; nothing stored).
 
+## Build discipline (owner-directed 2026-08-08, second pass)
+
+*"Don't build a bunch of infrastructure we'll have to maintain if it's
+not used."* The test for building an ingredient NOW is: something that
+exists today already needs it. Sorted:
+
+**Build when their existing owner reaches them (no new mandate):**
+
+- my.branch verbs + branch/commit reads — owed to root/operations (W-C)
+  regardless of this idea;
+- the replay proof — owed to session curation's ruled design;
+- branch lifecycle hardening — owed to the test-infrastructure fork
+  constructor and the filed roster-race issue;
+- standards-as-queries — plain Datalog with present consumers (quality
+  dashboards, test tiers); no stored state, nothing to maintain;
+- reaching-tests-at-basis — mostly landed with the tiering.
+
+**DEFERRED until a sealed design consumes them (do not build):**
+
+- fact classification property (system vs work-product) — cheap to add
+  the day a sync policy exists; meaningless before;
+- explicit commit destination at the effect door — only the carve
+  needs it;
+- merge-impact queries beyond the standards pair — the basis-pair data
+  invalidation and the warnings-as-renders blocks wait for the design;
+- any merge verb, branch-per-agent default, or sync machinery.
+
 ## Non-goals until the owner seals a design
 
 No default-on branching, no merge verb exposed to agents, no
