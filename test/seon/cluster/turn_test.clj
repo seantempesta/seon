@@ -59,8 +59,21 @@
 (def ^:private now (Date. 1700000000000))
 
 ;;; the injected evaluator: whatever the current fixture wants the form
-;;; to evaluate to, without a sci context
-(def ^:dynamic *evaluation*
+;;; to evaluate to, without a sci context.
+;;;
+;;; DELIBERATELY NOT DYNAMIC, and the reason is load-bearing. The run
+;;; loop submits every evaluation across `seon.flow/submit!!` onto a
+;;; compute thread (`seon.cluster.loop/submit-evaluation!!`), and flow
+;;; conveys NOTHING across that crossing but the submission's own data.
+;;; A thread-local carrier therefore reaches the SUBMITTING thread only:
+;;; the evaluator running the work reads this Var's root value, so the
+;;; fixture's chosen evaluation is silently replaced by the default and
+;;; every assertion downstream of it fails somewhere else. Tests inject
+;;; with `with-redefs`, which alters the root and is therefore visible
+;;; from the compute thread. Omitting `^:dynamic` makes `binding` on
+;;; this Var a compile error, so the thread-local shape cannot be
+;;; written back in.
+(def injected-evaluation
   ;; presence is the state: a clean evaluation is result-edn with no
   ;; error and no interrupted-at — there is no status key
   {:seon.cluster.eval/result-edn "1"
@@ -69,7 +82,7 @@
 (defn fake-evaluate
   "The stand-in evaluator, for the cases that pin an exact value."
   [_request]
-  *evaluation*)
+  injected-evaluation)
 
 (defn- semantic-result
   [result-edn]
@@ -1597,7 +1610,7 @@
         ;; the loop's own pass settles it before deriving anything
         (with-redefs [ai/complete
                       (fn [_] {:seon.ai/text "(my.run/complete \"answered\")"})]
-          (binding [*evaluation* {:seon.cluster.eval/result-edn
+          (with-redefs [injected-evaluation {:seon.cluster.eval/result-edn
                                   (pr-str (my.run/complete "answered"))
                                   :seon.sci.admit/value (my.run/complete "answered")}]
             (drive-passes! cluster 8)))
@@ -1784,7 +1797,7 @@
       (with-redefs [ai/complete
                     (fn [_] {:seon.ai/text
                              "(+ 1 1)\n(my.run/complete \"two widgets\")"})]
-        (binding [*evaluation* {:seon.cluster.eval/result-edn "2"
+        (with-redefs [injected-evaluation {:seon.cluster.eval/result-edn "2"
                                :seon.sci.admit/value 2}]
           (let [connection (:seon.db/connection cluster)
                 reports (drive! cluster 10)]
@@ -1846,7 +1859,7 @@
     (fn [cluster]
       (with-redefs [ai/complete
                     (fn [_] {:seon.ai/text "(my.run/complete \"done\")"})]
-        (binding [*evaluation* {:seon.cluster.eval/result-edn
+        (with-redefs [injected-evaluation {:seon.cluster.eval/result-edn
                                (pr-str (my.run/complete "done"))
                                :seon.sci.admit/value (my.run/complete "done")}]
           (let [connection (:seon.db/connection cluster)
@@ -1880,7 +1893,7 @@
                       sci.eval/install-row!
                       (fn [request]
                         (swap! installed conj request))]
-          (binding [*evaluation*
+          (with-redefs [injected-evaluation
                     {:seon.sci.admit/value result
                      :seon.cluster.eval/result-edn result-edn
                      :seon.cluster.eval/result-blob result-blob
@@ -1951,7 +1964,7 @@
     (fn [cluster]
       (with-redefs [ai/complete
                     (fn [_] {:seon.ai/text "(my.run/wait \"need input\")"})]
-        (binding [*evaluation* {:seon.cluster.eval/result-edn
+        (with-redefs [injected-evaluation {:seon.cluster.eval/result-edn
                                (pr-str (my.run/wait "need input"))
                                :seon.sci.admit/value (my.run/wait "need input")}]
           (let [connection (:seon.db/connection cluster)
@@ -2084,7 +2097,7 @@
                       (recording-completer
                        requests
                        [{:seon.ai/text "(my.run/complete \"one\")"}])]
-          (binding [*evaluation* {:seon.cluster.eval/result-edn
+          (with-redefs [injected-evaluation {:seon.cluster.eval/result-edn
                                   (pr-str (my.run/complete "one"))
                                   :seon.sci.admit/value (my.run/complete "one")}]
             (drive! cluster 10)))
@@ -2122,7 +2135,7 @@
                          :seon.ai/reasoning-content "private reasoning"
                          :seon.ai/usage usage
                          :seon.ai/finish-reason "stop"}])]
-          (binding [*evaluation* {:seon.cluster.eval/result-edn
+          (with-redefs [injected-evaluation {:seon.cluster.eval/result-edn
                                   (pr-str (my.run/complete "one"))
                                   :seon.sci.admit/value (my.run/complete "one")}]
             (drive! cluster 10)))
@@ -2185,7 +2198,7 @@
                       (recording-completer
                        requests
                        [unpaid {:seon.ai/text "(my.run/complete \"backed up\")"}])]
-          (binding [*evaluation*
+          (with-redefs [injected-evaluation
                     {:seon.cluster.eval/result-edn
                      (pr-str (my.run/complete "backed up"))
                      :seon.sci.admit/value (my.run/complete "backed up")}]
@@ -2403,7 +2416,7 @@
                    :seon.config.ai.backup/timeout-ms
                    (:seon.ai/timeout-ms backup-target)))])
         (with-redefs [ai/complete complete!]
-          (binding [*evaluation*
+          (with-redefs [injected-evaluation
                     {:seon.cluster.eval/result-edn
                      (pr-str (my.run/complete "generated"))
                      :seon.sci.admit/value
@@ -2530,7 +2543,7 @@
         (with-redefs [ai/complete
                       (fn [_]
                         {:seon.ai/text "[:delivery-characterization]"})]
-          (binding [*evaluation* {:seon.sci.admit/value asked
+          (with-redefs [injected-evaluation {:seon.sci.admit/value asked
                                   :seon.cluster.eval/result-edn
                                   (pr-str asked)}]
             (is (= [:open :call :resume :close]
@@ -2635,7 +2648,7 @@
                       (recording-completer
                        requests
                        [{:seon.ai/text "(my.run/complete \"one\")"}])]
-          (binding [*evaluation* {:seon.cluster.eval/result-edn
+          (with-redefs [injected-evaluation {:seon.cluster.eval/result-edn
                                   (pr-str (my.run/complete "one"))
                                   :seon.sci.admit/value
                                   (my.run/complete "one")}]
@@ -2904,7 +2917,7 @@
             (is (not (str/includes? prompt-a "message B"))
                 "a message committed after run A opened is absent by
                  construction from A's opening database value"))
-          (binding [*evaluation*
+          (with-redefs [injected-evaluation
                     {:seon.cluster.eval/result-edn
                      (pr-str (my.run/complete "A settled"))
                      :seon.sci.admit/value (my.run/complete "A settled")}]
