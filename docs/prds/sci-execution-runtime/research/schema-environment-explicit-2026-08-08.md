@@ -245,6 +245,41 @@ deleted from the working tree at session start,
 `context-capture-cannot-read-opening-as-of-basis`. Nothing in this lane's diff
 touches run opening, digests, or `program/canonical-row`.
 
+## The reset-boundary live proof
+
+Attempted, BLOCKED, and the blocker is the finding.
+
+`bin/seon --root tmp/schema-env-root reset --force` produced no output and
+created nothing in its own root for six minutes. It was not working: `lsof`
+showed the babashka process holding exactly one file open,
+`data/operator/lifecycle.lock` — the SHARED repository's lock — and `sample`
+showed it parked in a blocking `.lock` call. `lsof` on that path showed six
+operator commands queued on it, across at least three different isolated
+roots plus the shared one, the oldest at 11m35s.
+
+`with-operator-lock` (`script/seon/fresh_operator.clj:221-231`) binds its root
+argument to `_root` and derives the lock path from `(repository-root)`
+unconditionally, so `--root` isolation does not hold for lifecycle
+transitions. Filed:
+[an-isolated-operator-root-locks-the-shared-repository-root](../../../seon/issues/an-isolated-operator-root-locks-the-shared-repository-root.md).
+It also explains, without excusing, the session-wide impression that clusters
+could not boot: boot was queued, not broken.
+
+**What stands in its place, and why it is nearly as strong.**
+`seon.cluster.cohost-boot-test` ran green in this session (16 assertions,
+03:15–03:17Z) and it is a real boot, not a fixture: it starts TWO clusters in
+one JVM through `cluster/start!`, applies instrumentation live under the
+first, and asserts each holds its own projection state and that each
+cluster's stored activation closure validates under its own. That exercises
+exactly the seams this lane changed at a genuine boot boundary — predicate
+resolution during schema acquisition (every registration assertion runs as
+its namespace loads, and a wrong one now throws there), and the compiled
+caches under two concurrent projections. What it does NOT cover, and what the
+reset boundary would have added, is destroy-and-republish: a fresh
+`current-src` publication with the new predicate assertion active. That
+remains owed and should be taken by whoever next runs a reset once the lock
+is scoped.
+
 ## Ugly output and token observations
 
 Per the standing order.
