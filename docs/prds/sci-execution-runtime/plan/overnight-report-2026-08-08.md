@@ -73,6 +73,24 @@ truth-checks, not gates.
   (needs a lane once the tree is coherent); `seon.fn-test`/`program-test`
   errors to re-verify after the selection.clj fix settles.
 
+- **Tool exercise (`a4f6f31d1`) — six blockers on never-driven paths.**
+  The big one: EVERY background capability request loses its connection
+  on the `:io` hop (8/8 failed; foreground identical command staged
+  40 MB correctly) — Defect I failing outright, relayed to the
+  carriage-finish lane as acceptance evidence. Also: `my.fs` windowed
+  reads refuse on whole-file size; `my.web` is unreachable from agent
+  code (the only two unresolvable `my.*` fns); an interrupted
+  `my.shell/run` orphans its child AND its receipt (recorder throws
+  too); `next-agent-work` requires a `now` it never reads (all curation
+  proofs fail); a schema-resource edit bricks value admission in every
+  RUNNING cluster (live urgency evidence for the sentinel deletion).
+  Sound under exercise: effect identity/provenance across 22 receipts
+  incl. 8 concurrent, transport law at 40 MB (blob tier, 211 ms), fs
+  symlink discipline. Velocity finding: ~2.4 s per-form turn overhead.
+  Token findings: ~290 tokens per poll result; a six-word error
+  rendering as 2,154 chars. Tool-repairs lane dispatched on the four
+  agent-facing defects.
+
 ## In flight at last update
 
 stop-completion (render proc liveness) · suite-speed (tiers +
