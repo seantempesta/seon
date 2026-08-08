@@ -375,6 +375,30 @@ moment default stands.
   to friction with its fixtures named). All three 2026-08-08 ruling
   lanes are now landed; the whole-system arc launches next.
 
+## THE WHOLE-SYSTEM ARC — driver's account (observer pending)
+
+([whole-system-arc-drive-2026-08-08.md](../research/whole-system-arc-drive-2026-08-08.md)).
+PROVEN: **four agents in concurrent live turns, one cluster** (four runs
+open simultaneously, one holder each, zero custody faults); the
+stage-3 restart WITH A RUN IN FLIGHT (receipts unchanged at 102,
+nothing re-executed, custody shed, the unconsumed message re-drove root
+5 s after boot); every web item (27 SSE morphs / 7.2 MB live; mid-turn
+reconnect → one current keyframe; debug pane exact prompt bytes in
+31 ms; /data answers). BLOCKED: call preparation is NEVER INSTALLED in
+production (suite green on a dead mechanism — the fixture-vs-boot class
+again; S2 dispatch is the fix, one-line arming correctly refused);
+mid-stream provider disconnects discard whole turns (7 consecutive —
+what actually blocked model-authored functions). SOLVED: the receipt
+gap = DeepSeek control tokens leaking into reply text (comment-only
+forms). DECISIONS RAISED: canvas is UNBUILT (vocab says it is THE
+surface; rg finds nothing — target never built in the fresh tree);
+disposition-less turns close while the docstring says stay open (one is
+wrong); agents have no taught route to declaring data attributes;
+root's prompt grows to 36k across turns without completion (resets at
+completion — the ceiling is turns-since-completion) with poor cache
+hits. Driver's own errors recorded honestly (operator-side agent
+creation, one false teaching, undeclared attributes refused correctly).
+
 ## Pending milestones
 
 - stop-completion lands → reset → 08-06 drive-arc rerun with observer →
