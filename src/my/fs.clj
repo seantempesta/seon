@@ -63,11 +63,15 @@
 (schema.edn/load! {})
 
 (defn read
-  "Read a bounded window of one file.
+  "Read a bounded window of one file, whatever the file's size.
 
-  Takes a path plus optional byte offset, byte limit, and encoding. Returns
-  bytes or text with the file digest and window metadata, or a flat error. Use
-  it before editing or when a whole file may be too large."
+  Takes `:my.fs/path` plus optional `:my.fs/byte-offset`, `:my.fs/max-bytes`,
+  and `:my.fs/encoding` (`:utf-8` or `:bytes`). Returns `:my.fs/text` or
+  `:my.fs/bytes` with `:my.fs/window-digest`, `:my.fs/file-bytes`,
+  `:my.fs/bytes-read`, and `:my.fs/eof?`, or a flat error. The whole-file
+  `:my.fs/digest` is present only when the window WAS the whole file. The
+  window is what is read, so the cost and the bound are the window: use it
+  before editing, or to page through a file too large to take whole."
   {:malli/schema
    [:=> [:cat :my.fs/read-request]
     [:or :my.fs/read-result :seon.error/value]]

@@ -79,6 +79,74 @@
         (is (true? (:my.fs/eof? result)))
         (is (not (contains? result :my.fs/text)))))))
 
+(deftest a-window-is-bounded-by-the-window-not-by-the-file
+  ;; The class: a bound measured against something other than what it bounds.
+  ;; The read ceiling used to be compared against the WHOLE file even when the
+  ;; request named a window, so the affordance that exists for large files was
+  ;; the one large files could not use. There is now no file-sized quantity in
+  ;; the windowed path to compare a window against.
+  (with-temp-tree
+    (fn [root]
+      (let [path (.resolve root "large.bin")
+            file-bytes (* 3 1024 1024)
+            octets (byte-array file-bytes)
+            _ (dotimes [index file-bytes]
+                (aset-byte octets index (unchecked-byte (mod index 251))))
+            _ (write-octets! path (vec octets))
+            ;; a ceiling far BELOW the file, so a file-sized comparison
+            ;; would refuse every one of these reads
+            settings (assoc (policy root)
+                            :seon.config.fs/max-read-bytes 65536
+                            :seon.config.fs/max-inline-bytes 8192)
+            tail-offset (- file-bytes 4096)
+            tail ((handler 'read)
+                  {:my.fs/path "large.bin"
+                   :my.fs/byte-offset tail-offset
+                   :my.fs/max-bytes 4096
+                   :my.fs/encoding :bytes}
+                  settings)
+            head ((handler 'read)
+                  {:my.fs/path "large.bin"
+                   :my.fs/byte-offset 1048576
+                   :my.fs/max-bytes 64
+                   :my.fs/encoding :bytes}
+                  settings)]
+        (is (nil? (:seon.error/kind tail))
+            "a tail window of an over-ceiling file is an ordinary read")
+        (is (= 4096 (:my.fs/bytes-read tail)))
+        (is (= (mapv #(bit-and 0xff %)
+                     (java.util.Arrays/copyOfRange octets
+                                                   (int tail-offset)
+                                                   (int file-bytes)))
+               (:my.fs/bytes tail)))
+        (is (= file-bytes (:my.fs/file-bytes tail))
+            "the window still reports the size of the file it came from")
+        (is (true? (:my.fs/eof? tail)))
+        (is (= 64 (:my.fs/bytes-read head)))
+        (is (false? (:my.fs/eof? head)))
+        (is (not (contains? head :my.fs/digest))
+            "a partial window makes no whole-file claim")
+        (is (= (sha-256 (java.util.Arrays/copyOfRange octets
+                                                      1048576
+                                                      (+ 1048576 64)))
+               (:my.fs/window-digest head))
+            "the window digests exactly what it returned")
+        (let [refusal ((handler 'read-complete)
+                       {:my.fs/path "large.bin"} settings)]
+          (is (= :my.fs/read-limit (:seon.error/kind refusal))
+              "only a read that demands the WHOLE file refuses for its size")
+          (is (= "large.bin" (get-in refusal [:seon.error/data :my.fs/path]))
+              "the refusal names the path")
+          (is (= file-bytes
+                 (get-in refusal [:seon.error/data :my.fs/file-bytes]))
+              "the refusal names the size observed")
+          (is (= 65536
+                 (get-in refusal
+                         [:seon.error/data
+                          :seon.config.fs/max-read-bytes])))
+          (is (str/includes? (:seon.error/message refusal) ":my.fs/max-bytes")
+              "the refusal names the key that reads a window instead"))))))
+
 (deftest utf8-windows-refuse-split-multibyte-characters
   (with-temp-tree
     (fn [root]
@@ -104,7 +172,7 @@
     (fn [root]
       (let [path (.resolve root "moving.txt")
             _ (write-octets! path (repeat 4096 65))
-            read-pass-var (ns-resolve 'seon.fs.jvm 'read-pass)
+            read-pass-var (ns-resolve 'seon.fs.jvm 'window-pass)
             original (var-get read-pass-var)
             result
             (with-redefs-fn

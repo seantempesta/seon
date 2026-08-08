@@ -64,7 +64,8 @@
         :read-result
         [:map
          [:my.fs/path :my.fs/path]
-         [:my.fs/digest :my.fs/digest]
+         [:my.fs/window-digest :my.fs/digest]
+         [:my.fs/digest {:optional true} :my.fs/digest]
          [:my.fs/file-bytes :my.fs/file-bytes]
          [:my.fs/byte-offset :my.fs/byte-offset]
          [:my.fs/bytes-read :my.fs/bytes-read]
@@ -85,6 +86,7 @@
          [:my.fs/modified-at {:optional true} :my.fs/modified-at]]
         :symbolic-link? :boolean
         :text :string
+        :window-digest :my.fs/digest
         :write-precondition
         [:and
          [:map
@@ -129,8 +131,8 @@
  :read-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose read failed"} [:my.fs/read-failed :my.fs/read-failed] [:seon.error/message :seon.error/message]]
  :write-failed [:= true]
  :write-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose write failed"} [:my.fs/write-failed :my.fs/write-failed] [:seon.error/message :seon.error/message]]
- :read-limit :seon.config.fs/max-read-bytes
- :read-limit-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose read exceeded its limit"} [:my.fs/read-limit :my.fs/read-limit] [:seon.error/message :seon.error/message]]
+ :read-limit :my.fs/path
+ :read-limit-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose read exceeded its limit, the size observed, and the ceiling"} [:my.fs/read-limit :my.fs/read-limit] [:my.fs/file-bytes :my.fs/file-bytes] [:seon.config.fs/max-read-bytes :seon.config.fs/max-read-bytes] [:seon.error/message :seon.error/message]]
  :write-limit :seon.config.fs/max-write-bytes
  :write-limit-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the path whose write exceeded its limit"} [:my.fs/write-limit :my.fs/write-limit] [:seon.error/message :seon.error/message]]
  :stale-digest :my.fs/path

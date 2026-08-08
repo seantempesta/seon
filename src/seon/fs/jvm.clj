@@ -236,23 +236,78 @@
               (assoc :seon.fs.jvm/directory child)
               (update :seon.fs.jvm/streams conj child)))))))
 
-(defn- read-pass
-  [^SeekableByteChannel channel byte-offset window-limit read-limit]
+(defn- read-limit-refusal!
+  [path observed-bytes read-limit]
+  (refuse! :my.fs/read-limit
+           (str "The whole file exceeds the configured read ceiling; read a "
+                "bounded window with :my.fs/max-bytes instead.")
+           {:my.fs/path path
+            :my.fs/file-bytes observed-bytes
+            :seon.config.fs/max-read-bytes read-limit}))
+
+(defn- window-pass
+  "Read exactly the requested window and digest exactly what is returned.
+
+  The bound and the read are the SAME quantity here, which is the whole point:
+  this pass takes no whole-file ceiling because it cannot read more than it
+  returns. Seeking to `byte-offset` and stopping after `window-limit` bytes
+  makes a windowed `my.fs/read` cost the window rather than the file, so a
+  window of an arbitrarily large file is an ordinary read.
+
+  The class this kills is a bound measured against something other than the
+  thing it bounds. The pass this replaced streamed the WHOLE file so it could
+  promise a whole-file digest, and refused as soon as that running total
+  crossed the ceiling — so `:my.fs/byte-offset` and `:my.fs/max-bytes` only
+  selected bytes out of a stream they never bounded, and the affordance that
+  exists FOR large files was the one large files could not use. There is no
+  ceiling parameter here to compare against the wrong quantity."
+  [^SeekableByteChannel channel byte-offset window-limit]
+  (let [octets (byte-array (int window-limit))
+        ^ByteBuffer buffer (ByteBuffer/wrap octets)
+        digest (MessageDigest/getInstance "SHA-256")]
+    (when (pos? byte-offset)
+      (.position channel (long byte-offset)))
+    (loop []
+      (when (.hasRemaining buffer)
+        (let [read-count (.read channel buffer)]
+          (cond
+            (neg? read-count) nil
+
+            (zero? read-count)
+            (refuse! :my.fs/read-failed
+                     "The file read made no progress."
+                     {})
+
+            :else (recur)))))
+    (let [bytes-read (.position buffer)]
+      (.update digest octets 0 bytes-read)
+      {:seon.fs.jvm/digest (digest-string digest)
+       :seon.fs.jvm/window (Arrays/copyOf octets (int bytes-read))})))
+
+(defn- whole-file-pass
+  "Stream one COMPLETE file for its whole-file digest, bounded by the ceiling.
+
+  The two operations whose result genuinely IS the whole file — a complete
+  read and a write precondition's digest — come through here, and only here is
+  the ceiling honest, because the whole file is what is being read. A windowed
+  read never reaches this pass. The refusal names the path and the observed
+  size next to the ceiling, and names the key that reads a window instead, so
+  it says what to do rather than only which wall it hit."
+  [^SeekableByteChannel channel path observed-bytes read-limit]
+  (when (> observed-bytes read-limit)
+    (read-limit-refusal! path observed-bytes read-limit))
   (let [buffer (ByteBuffer/allocate
                 (int (min io-buffer-bytes (max 1 read-limit))))
-        octets (byte-array (int window-limit))
-        window-end (+ byte-offset window-limit)
+        octets (byte-array (int (min observed-bytes read-limit)))
         digest (MessageDigest/getInstance "SHA-256")]
     (loop [total 0]
       (.clear buffer)
       (let [read-count (.read channel buffer)]
         (cond
           (neg? read-count)
-          (let [bytes-read (long (max 0 (min window-limit
-                                                (- total byte-offset))))]
-            {:seon.fs.jvm/digest (digest-string digest)
-             :seon.fs.jvm/file-bytes (long total)
-             :seon.fs.jvm/window (Arrays/copyOf octets (int bytes-read))})
+          {:seon.fs.jvm/digest (digest-string digest)
+           :seon.fs.jvm/file-bytes (long total)
+           :seon.fs.jvm/window (Arrays/copyOf octets (int total))}
 
           (zero? read-count)
           (refuse! :my.fs/read-failed
@@ -260,24 +315,13 @@
                    {})
 
           (> (+ total read-count) read-limit)
-          (refuse! :my.fs/read-limit
-                   "The file exceeds the configured read ceiling."
-                   {:seon.config.fs/max-read-bytes read-limit})
+          (read-limit-refusal! path (+ total read-count) read-limit)
 
           :else
-          (let [buffer-octets (.array buffer)
-                chunk-start total
-                chunk-end (+ total read-count)
-                copy-start (max byte-offset chunk-start)
-                copy-end (min window-end chunk-end)]
+          (let [buffer-octets (.array buffer)]
             (.update digest buffer-octets 0 read-count)
-            (when (< copy-start copy-end)
-              (System/arraycopy buffer-octets
-                                (int (- copy-start chunk-start))
-                                octets
-                                (int (- copy-start byte-offset))
-                                (int (- copy-end copy-start))))
-            (recur chunk-end)))))))
+            (System/arraycopy buffer-octets 0 octets (int total) read-count)
+            (recur (+ total read-count))))))))
 
 (defn- open-read-channel
   [^SecureDirectoryStream directory ^Path entry-name]
@@ -286,16 +330,17 @@
                    no-file-attributes))
 
 (defn- same-observation?
-  [before after pass]
+  "Whether the file is the same file, unchanged, across the read."
+  [before after]
   (and after
        (= (:seon.fs.jvm/file-key before) (:seon.fs.jvm/file-key after))
        (= (:seon.fs.jvm/size before) (:seon.fs.jvm/size after))
        (= (:seon.fs.jvm/modified-at before) (:seon.fs.jvm/modified-at after))
-       (= (:seon.fs.jvm/created-at before) (:seon.fs.jvm/created-at after))
-       (= (:seon.fs.jvm/size before) (:seon.fs.jvm/file-bytes pass))))
+       (= (:seon.fs.jvm/created-at before) (:seon.fs.jvm/created-at after))))
 
-(defn- current-file
-  [^SecureDirectoryStream directory ^Path entry-name path read-limit]
+(defn- readable-file
+  "The observation of a regular, non-symlink file, or the refusal naming why."
+  [^SecureDirectoryStream directory ^Path entry-name path]
   (let [before (relative-observation directory entry-name)]
     (when-not before
       (refuse! :my.fs/not-found "The file does not exist."
@@ -308,11 +353,19 @@
       (refuse! :my.fs/not-regular-file
                "The filesystem path is not a regular file."
                {:my.fs/path path}))
+    before))
+
+(defn- current-file
+  [^SecureDirectoryStream directory ^Path entry-name path read-limit]
+  (let [before (readable-file directory entry-name path)]
     (with-open [^SeekableByteChannel channel
                 (open-read-channel directory entry-name)]
-      (let [pass (read-pass channel 0 0 read-limit)
+      (let [pass (whole-file-pass channel path (:seon.fs.jvm/size before)
+                                  read-limit)
             after (relative-observation directory entry-name)]
-        (when-not (same-observation? before after pass)
+        (when-not (and (same-observation? before after)
+                       (= (:seon.fs.jvm/size before)
+                          (:seon.fs.jvm/file-bytes pass)))
           (refuse! :my.fs/changed-during-read
                    "The file changed while its digest was read."
                    {:my.fs/path path}))
@@ -330,40 +383,50 @@
   (mapv #(bit-and 0xff %) ^bytes octets))
 
 (defn- read-opened
-  [request effective directory entry-name window-limit]
+  "One read result, from the pass its completeness demands.
+
+  `complete?` is what separates the two passes, and it is the request's own
+  semantics rather than a size test: a complete read promises the whole file,
+  so it pays the whole file and may refuse at the ceiling; a windowed read
+  promises the window, so it reads the window and can never refuse for the
+  size of the surrounding file.
+
+  `:my.fs/digest` keeps its one meaning — the digest of the WHOLE file — and
+  is therefore present only when the returned bytes are the whole file.
+  `:my.fs/window-digest` is always the digest of what was returned. Two names
+  for two facts, so neither can quietly become the other."
+  [request effective directory entry-name window-limit complete?]
   (let [path (:my.fs/path request)
-        before (relative-observation directory entry-name)
         read-limit (:seon.config.fs/max-read-bytes effective)
-        byte-offset (long (or (:my.fs/byte-offset request) 0))]
-    (when-not before
-      (refuse! :my.fs/not-found "The file does not exist."
-               {:my.fs/path path}))
-    (when (:seon.fs.jvm/symbolic-link? before)
-      (refuse! :my.fs/path-refused
-               "The final filesystem path is a symbolic link."
-               {:my.fs/path path}))
-    (when-not (:seon.fs.jvm/regular-file? before)
-      (refuse! :my.fs/not-regular-file
-               "The filesystem path is not a regular file."
-               {:my.fs/path path}))
+        byte-offset (long (or (:my.fs/byte-offset request) 0))
+        before (readable-file directory entry-name path)]
     (with-open [^SeekableByteChannel channel
                 (open-read-channel directory entry-name)]
-      (let [pass (read-pass channel byte-offset window-limit read-limit)
+      (let [pass (if complete?
+                   (whole-file-pass channel path (:seon.fs.jvm/size before)
+                                    read-limit)
+                   (window-pass channel byte-offset window-limit))
             after (relative-observation directory entry-name)]
-        (when-not (same-observation? before after pass)
+        (when-not (same-observation? before after)
           (refuse! :my.fs/changed-during-read
                    "The file changed while it was read."
                    {:my.fs/path path}))
         (let [window (:seon.fs.jvm/window pass)
+              bytes-read (long (alength ^bytes window))
+              file-bytes (if complete?
+                           (:seon.fs.jvm/file-bytes pass)
+                           (long (:seon.fs.jvm/size before)))
+              whole-file? (and (zero? byte-offset) (= bytes-read file-bytes))
               encoding (or (:my.fs/encoding request) :utf-8)
-              base {:my.fs/path path
-                    :my.fs/digest (:seon.fs.jvm/digest pass)
-                    :my.fs/file-bytes (:seon.fs.jvm/file-bytes pass)
-                    :my.fs/byte-offset byte-offset
-                    :my.fs/bytes-read (long (alength ^bytes window))
-                    :my.fs/eof?
-                    (>= (+ byte-offset (alength ^bytes window))
-                        (:seon.fs.jvm/file-bytes pass))}]
+              base (cond-> {:my.fs/path path
+                            :my.fs/window-digest (:seon.fs.jvm/digest pass)
+                            :my.fs/file-bytes file-bytes
+                            :my.fs/byte-offset byte-offset
+                            :my.fs/bytes-read bytes-read
+                            :my.fs/eof? (>= (+ byte-offset bytes-read)
+                                            file-bytes)}
+                     whole-file?
+                     (assoc :my.fs/digest (:seon.fs.jvm/digest pass)))]
           (if (= :bytes encoding)
             (assoc base :my.fs/bytes (octet-values window))
             (try
@@ -374,11 +437,10 @@
                               "UTF-8; read it as :bytes instead.")
                          {:my.fs/path path
                           :my.fs/byte-offset byte-offset
-                          :my.fs/bytes-read
-                          (long (alength ^bytes window))})))))))))
+                          :my.fs/bytes-read bytes-read})))))))))
 
 (defn- read-window
-  [request effective window-limit]
+  [request effective window-limit complete?]
   (let [path (:my.fs/path request)]
     (try
       (let [{directory :seon.fs.jvm/directory
@@ -386,7 +448,8 @@
              streams :seon.fs.jvm/streams}
             (parent-access path effective)]
         (try
-          (read-opened request effective directory entry-name window-limit)
+          (read-opened request effective directory entry-name window-limit
+                       complete?)
           (finally
             (close-streams! streams))))
       (catch Throwable error
@@ -394,6 +457,12 @@
                      {:my.fs/path path})))))
 
 (defn- read
+  "The agent-facing WINDOW read: bounded by the window, never by the file.
+
+  The window this returns is `:my.fs/max-bytes` capped by the inline ceiling,
+  and that is also the entire cost — no size of surrounding file can refuse
+  it. That is the affordance the docstring promises for a file too large to
+  take whole, and it now works on a file of any size."
   {:malli/schema
    [:=> [:cat :my.fs/read-request :seon.config/effective]
     [:or :my.fs/read-result :seon.error/value]]}
@@ -401,16 +470,21 @@
   (read-window
    request effective
    (long (min (:seon.config.fs/max-inline-bytes effective)
-              (or (:my.fs/max-bytes request) Long/MAX_VALUE)))))
+              (or (:my.fs/max-bytes request) Long/MAX_VALUE)))
+   false))
 
 (defn- read-complete
-  "Read one complete UTF-8 file for a higher-level conditional operation."
+  "Read one complete UTF-8 file for a higher-level conditional operation.
+
+  This one genuinely wants the whole file, so it is the arm the read ceiling
+  bounds, and it is the only read that can refuse for a file's size."
   {:malli/schema
    [:=> [:cat :my.fs/read-request :seon.config/effective]
     [:or :my.fs/read-result :seon.error/value]]}
   [request effective]
   (read-window request effective
-               (long (:seon.config.fs/max-read-bytes effective))))
+               (long (:seon.config.fs/max-read-bytes effective))
+               true))
 
 (defn- array-content
   [content write-limit]

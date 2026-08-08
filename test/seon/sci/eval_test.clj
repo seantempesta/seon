@@ -859,7 +859,7 @@
                        "  in:  :my.fs/read-request"
                        "[:my.fs/path :my.fs/path]"
                        "  out: :my.fs/read-result"
-                       "[:my.fs/digest :my.fs/digest]"
+                       "[:my.fs/window-digest :my.fs/digest]"
                        "       :seon.error/value"])
               read-output)
           (is (= ["       :seon.error/value"]
