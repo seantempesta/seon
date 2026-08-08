@@ -42,7 +42,6 @@ See `README.md` for the convention.
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 | [Attribute and cut the ~2.4 s a run pays between every form](a-run-pays-two-and-a-half-seconds-between-every-form.md) | blocker | development-velocity incident (run loop per-form cost) |
 | [Register the inline `[:fn]` predicate that refuses every corpus projection](an-inline-fn-predicate-in-src-refuses-every-corpus-projection.md) | blocker | changed-test selector lane |
-| [`init NAME --force` destroys the branch, then refuses its own second store open](init-force-destroys-the-branch-then-refuses-its-own-second-store-open.md) | blocker | operator launch-concurrency wave |
 | [Stop a schema-resource edit from bricking value admission in running clusters](a-schema-resource-edit-bricks-value-admission-in-every-running-cluster.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Confirm the background `:io` connection fix with a real `my.shell` drive](every-background-capability-request-loses-its-connection.md) | blocker | tool-exercise lane re-run against `f3b8eabda` |
 

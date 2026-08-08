@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, operator, store]
 ---
@@ -107,3 +107,60 @@ rather than as a bug in the command.
   restore it so this path is covered too).
 - After any failed `--force`, the named branch still exists.
 - `down` and `init` never disagree about whether the store is held.
+
+## Resolution (2026-08-08)
+
+Two causes, both fixed in `e83fd4bae`.
+
+1. **The composition discarded the store it was handed.** After the
+   destructive arm, `refork-under-lock!` called
+   `(acquire-operation-store! managed-root nil)`. That `nil` left the fork
+   arm consulting only `runtime/root-store-holder`, the RUNNING-INSTANCE
+   table — and `init NAME --force` has no running instance, because its
+   child JVM opens the store itself
+   (`script/seon/fresh_operator.clj`, `named-init-form`). So the fork
+   opened a second descriptor on a store the process still held. It now
+   re-asks with the supplied store in hand. The archived reason for not
+   reusing it — cleanup can release it — is answered by the fact that
+   already decides this everywhere else: `release-store!`'s own comment
+   says "the flock's validity IS the released? fact", and `valid-store?`
+   reads exactly that. A released store fails it and the fork opens
+   fresh; a live one is reused instead of collided with.
+
+   This is why the sibling regression never caught it: it supplies a
+   running instance's store, which the holder table also knows, so the
+   `nil` was harmless there. The new regression uses the operator's own
+   shape.
+
+2. **The refusal was a false statement.** `open-store!` reported
+   `::held-elsewhere` when the holder was this very process.
+   `acquire-flock!` already knows the difference — `held-flocks` is the
+   process's own holdings, and `OverlappingFileLockException` is the JVM
+   saying "you hold this" — so it now returns `::held-by-this-process`
+   and `open-store!` refuses with that rule, naming this pid.
+   `::held-elsewhere` is reserved for another live process.
+
+### The census was not lying
+
+The "operator census that contradicts itself" section above is refuted:
+`down --force` was CORRECT that the flock was free, and one second later
+`init` was also correct that it was held — by the very command printing
+the message. Nothing external ever held it and the two commands never
+disagreed about the same instant. The reader was misled by the refusal's
+wording, not by the census, which is why fix 2 is the whole repair here.
+No census change was needed.
+
+### Proof
+
+- `refork-does-not-collide-with-the-store-its-caller-already-holds`
+  (`test/seon/cluster/boot_test.clj`) drives the composed verb with a
+  directly-opened store and no running instance, and asserts the branch
+  exists afterwards. `a-second-store-open-in-this-process-says-so` pins
+  the honest refusal rule. The sibling
+  `explicit-refork-destroys-the-old-branch-and-forks-current-source`
+  still passes: 76 assertions, 0 failures.
+- Live, isolated root `tmp/refork-fix-root`: `init`, then `init tools`
+  (`● tools forked :cluster-tools`), then the reproduction —
+  `bin/seon --root tmp/refork-fix-root init tools --force` →
+  `● tools reforked :cluster-tools from :current-src commit 6a76b130-…`.
+  The root was removed afterwards.
