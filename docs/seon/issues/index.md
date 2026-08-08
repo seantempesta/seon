@@ -16,10 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (28)
+## Blocker (29)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Schema-key immutability refuses before the usage guard can answer](schema-key-immutability-swallows-the-usage-guard.md) | blocker | gate-red triage (bin/test seon.schema-usage-guard-test) |
 | [Boot the co-hosted second cluster without a 63 s stall or a false failure](cohosted-second-boot-is-slow-and-trips-the-silence-backstop.md) | blocker | boot velocity incident (co-hosted second boot) |
 | [Instrument each cluster under its own projection, not the anchor's](instrumentation-compiles-under-one-clusters-projection.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Scope the operator lifecycle lock to its own root](an-isolated-operator-root-locks-the-shared-repository-root.md) | blocker | development-velocity repair wave |
