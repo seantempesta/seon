@@ -351,6 +351,79 @@
          (is (not (db/read-evidence-current? @connection evidence))
              "a depended attribute revision makes the retained read stale"))))))
 
+;;; THE class regression for "a database value read through a reader that is
+;;; not total over its shapes" (2026-08-08 live drive, two instances). Datahike
+;;; has exactly four value shapes a caller can hold, and the run loop holds a
+;;; non-current one on every turn — it renders at its run's opening basis,
+;;; which is an as-of value. A reader that only answers for the current shape
+;;; therefore breaks the whole agent, and it breaks it SILENTLY: reading
+;;; `:cache-context` as a map key off an AsOfDB yields nil, `select-keys`
+;;; yields {}, and the first complaint arrives frames later at an output
+;;; contract. Both instances — `read-evidence` and `database-value-identity` —
+;;; are covered here by asserting the WANTED behavior for all four shapes at
+;;; once, so a fifth reader with the same defect fails this table rather than
+;;; an agent's prompt.
+(defn- four-view-table
+  [database]
+  {:current database
+   :as-of (db/as-of database (dec (long (db/basis-t database))))
+   :since (db/since database 0)
+   :history (db/history database)})
+
+(deftest every-database-value-reader-answers-for-all-four-view-shapes
+  (test-support/with-database
+   (fn [connection]
+     (db/transact! connection [{:seon.cluster/name "four-view"}])
+     (let [views (four-view-table @connection)]
+       (is (= #{:current :as-of :since :history} (set (keys views))))
+       (doseq [[view database] views]
+         (testing (clojure.core/name view)
+           (testing "basis-t answers with a transaction number"
+             (is (int? (db/basis-t database))))
+           (testing "database-value-identity answers, never throws"
+             (let [answer (db/database-value-identity database)]
+               (is (or (schema/valid-candidate-value?
+                        :seon.db/database-value-identity answer)
+                       (= :seon.db/uncommitted-database-value
+                          (:seon.error/kind answer)))
+                   "a committed identity or a flat error value")))
+           (testing "read-evidence produces a well-formed dependency revision"
+             (let [captured (atom [])]
+               (binding [db/*read-evidence-sink* captured]
+                 (db/q '[:find [?name ...]
+                         :where [_ :seon.cluster/name ?name]]
+                       database))
+               (let [evidence (db/read-evidence @captured)]
+                 (is (seq evidence) "the read was captured")
+                 (is (every? #(schema/valid-candidate-value?
+                               :seon.db/read-evidence %)
+                             evidence)
+                     "no view shape may violate read-evidence's contract")
+                 (is (true? (db/read-evidence-current? database evidence))
+                     "the very value that produced the evidence is current"))))))))))
+
+(deftest an-as-of-view-is-keyed-on-its-own-fixed-point
+  (test-support/with-database
+   (fn [connection]
+     (db/transact! connection [{:seon.cluster/name "fixed-point-a"}])
+     (let [database @connection
+           earlier (db/as-of database (dec (long (db/basis-t database))))
+           revision (fn [value]
+                      (let [captured (atom [])]
+                        (binding [db/*read-evidence-sink* captured]
+                          (db/q '[:find [?name ...]
+                                  :where [_ :seon.cluster/name ?name]]
+                                value))
+                        (-> (db/read-evidence @captured)
+                            first
+                            :datahike.read/revision)))]
+       (is (not= (revision database) (revision earlier))
+           "two views of one origin never share a revision")
+       (is (= (revision earlier)
+              (revision (db/as-of database
+                                  (dec (long (db/basis-t database))))))
+           "the same fixed point derives the same revision")))))
+
 (deftest pull-many-preserves-input-alignment-with-one-shared-plan
   (test-support/with-database
    (fn [connection]
