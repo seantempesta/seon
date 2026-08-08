@@ -503,6 +503,41 @@
     (is (= 'user/rendered-declaration
            (symbol (:seon.print/name defn-node))))))
 
+(deftest every-public-capability-function-in-the-graph-resolves-in-the-ctx
+  ;; The class: ctx membership derived from what something else HAPPENED to
+  ;; load. `my.fs`, `my.shell`, and `my.edit` are loaded as a side effect of
+  ;; resolving the core predicates they register; `my.web` registers none, so
+  ;; it was never in `all-ns` when the install ran and the install silently
+  ;; skipped it. `my.web/fetch` and `my.web/search` were public, contracted,
+  ;; in the program graph, and unreachable from agent code. Membership is now
+  ;; the graph's, so a namespace cannot fall off by registering no predicate.
+  (test-support/with-database
+    (fn [connection]
+      (let [ctx (eval/cluster-ctx @connection connection)
+            capability-symbols
+            (sort
+             (db/q '[:find [?sym ...]
+                     :where
+                     [?fn :seon.fn/sym ?sym]
+                     [?fn :seon.fn/private? false]
+                     [?fn :seon.effect/capability _]]
+                   @connection))
+            resolved
+            (:seon.sci.admit/value
+             (run-in ctx
+                     (pr-str (list 'mapv
+                                   '(fn [s] [s (some? (resolve s))])
+                                   (list 'quote
+                                         (mapv symbol capability-symbols))))
+                     10000))]
+        (is (seq capability-symbols)
+            "the fixture graph carries the capability surface")
+        (is (contains? (set capability-symbols) "my.web/fetch")
+            "my.web is in the program graph")
+        (is (= (mapv (fn [s] [(symbol s) true]) capability-symbols)
+               resolved)
+            "every public capability function in the graph resolves in the ctx")))))
+
 (deftest schema-and-contract-declarations-have-bounded-allocation
   (test-support/with-database
     (fn [connection]

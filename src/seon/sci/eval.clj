@@ -824,11 +824,50 @@
     (sci/new-var local-name host-var
                  (assoc host-meta :name local-name :ns sci-namespace))))
 
-(defn- install-loaded-first-party-namespaces!
-  "Bind loaded first-party namespaces as their actual compiled JVM Vars.
+(defn- host-namespace!
+  "The loaded host namespace for one core-provenanced program row.
 
-  Namespace membership is the intersection of core-provenanced program rows
-  and Clojure's loaded namespace set. Existing public bindings remain
+  Membership of the ctx must not depend on WHICH namespaces something else
+  happened to load first. `my.web` was unreachable from agent code for exactly
+  that reason: `my.fs`, `my.shell`, and `my.edit` are loaded as a side effect
+  of `requiring-resolve` on the core predicates they register, `my.web`
+  registers none, and the install silently skipped every graph namespace it
+  did not already find in `all-ns`. A capability namespace that is public,
+  contracted, in the program graph, and absent from the ctx is the
+  silent-fallback shape the ethos names — right until the second namespace,
+  then a lie. A core-provenanced row IS first-party source, so loading it here
+  is the ordinary thing to do, and it makes the ctx's membership exactly the
+  graph's.
+
+  A first-party namespace that cannot be loaded is a loud refusal naming the
+  namespace and the cause, never a quiet omission."
+  [namespace-name]
+  (or (find-ns namespace-name)
+      (do
+        (try
+          (require namespace-name)
+          (catch Throwable failure
+            (throw
+             (ex-info
+              (str "First-party program namespace " namespace-name
+                   " could not be loaded for the evaluation context.")
+              {:seon.error/kind ::namespace-unloadable
+               :seon.ns/name namespace-name}
+              failure))))
+        (or (find-ns namespace-name)
+            (throw
+             (ex-info
+              (str "First-party program namespace " namespace-name
+                   " loaded without defining a namespace.")
+              {:seon.error/kind ::namespace-unloadable
+               :seon.ns/name namespace-name}))))))
+
+(defn- install-first-party-namespaces!
+  "Bind every first-party program namespace as its actual compiled JVM Vars.
+
+  Namespace membership is the core-provenanced program rows, LOADED here when
+  the JVM has not required them yet rather than intersected with whatever
+  happens to be loaded already. Existing public bindings remain
   available, and every indexed function Var is added regardless of its
   `:seon.fn/private?` attribute. Direct bindings retain those Vars; a target
   named by a declared refer becomes an SCI Var whose root is the real Var,
@@ -850,7 +889,6 @@
                          (= :core (source-for-transaction source-tx))))
                (map first))
               namespace-assertions)
-        loaded-by-name (into {} (map (juxt ns-name identity)) (all-ns))
         indexed-function-names
         (reduce (fn [by-namespace [function-symbol _source namespace-name
                                   _source-tx _private?]]
@@ -863,8 +901,7 @@
               (comp (map row-bindings) (mapcat (comp vals :refers)))
               namespace-rows)]
     (doseq [namespace-name (sort-by str first-party-names)
-            :let [host-namespace (get loaded-by-name namespace-name)]
-            :when host-namespace]
+            :let [host-namespace (host-namespace! namespace-name)]]
       (let [sci-namespace (sci/create-ns namespace-name)]
         (sci/add-namespace!
          ctx namespace-name
@@ -1248,7 +1285,7 @@
     ;; Namespace declarations establish aliases/imports first; compiled host
     ;; bindings then populate the same SCI namespaces without being erased by
     ;; that declaration install. Selected definitions overwrite only their Vars.
-    (install-loaded-first-party-namespaces!
+    (install-first-party-namespaces!
      ctx namespace-assertions source-for-transaction all-namespace-rows
      all-function-rows)
     (let [functions-installed
@@ -1626,6 +1663,44 @@
     (or (seq output-prefix) (seq (str printed)))
     (assoc :seon.cluster.eval/output
            (evaluation-output output-prefix printed caps))))
+
+(defn unrun-evaluation
+  "The evaluation value for a form the runtime settled WITHOUT running it.
+
+  There is exactly ONE shape of `:seon.sci.eval/evaluation`, so every arm that
+  produces one comes through a constructor that fills its required keys. The
+  arm this replaced hand-built four keys of that value inside the loop, so the
+  submission backstop's own report — a run cut when its evaluation reached its
+  time limit — arrived at `seon.problems/form-problem` missing
+  `:seon.cluster.eval/ns`, `:seon.sci.eval/ending-ns`, `:seon.print/options`,
+  and `:seon.sci.admit/capped?`. The durable evidence of the interruption
+  became a contract violation from the recorder: the diagnostic lied about
+  what happened, which is the one thing a diagnostic may never do.
+
+  An arm that does not name the value's keys cannot omit them. The namespace
+  is the form's own `:seon.cluster.run.form/ns` reference, so nothing here has
+  to guess where the form was going to run."
+  {:malli/schema [:=> [:cat :seon.sci.eval/unrun-request]
+                  :seon.sci.eval/evaluation]}
+  [{value :seon.sci.admit/value
+    namespace-ref :seon.cluster.run.form/ns
+    duration-ms :seon.eval/duration-ms
+    interrupted-at :seon.cluster.eval/interrupted-at
+    :as request}]
+  (let [interrupted? (contains? request :seon.cluster.eval/interrupted-at)
+        record (cond-> (kernel/unarmed-record (System/nanoTime))
+                 (int? duration-ms)
+                 (assoc :seon.eval/duration-ms duration-ms)
+                 interrupted? (assoc :seon.eval/outcome :time))]
+    (cond-> {:seon.sci.admit/value value
+             :seon.cluster.eval/result-edn (pr-str value)
+             :seon.cluster.eval/error (:seon.error/message value)
+             :seon.cluster.eval/ns namespace-ref
+             :seon.sci.eval/ending-ns (symbol (str (second namespace-ref)))
+             :seon.print/options {}
+             :seon.sci.admit/capped? false
+             :seon.sci.admit/record record}
+      interrupted? (assoc :seon.cluster.eval/interrupted-at interrupted-at))))
 
 (defn evaluate
   "Evaluate one form source and return what may leave the boundary.

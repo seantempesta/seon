@@ -45,6 +45,14 @@
                  [:seon.print/options :seon.print/options]
                  [:seon.sci.admit/capped? :seon.sci.admit/capped?]
                  [:seon.sci.admit/record :seon.sci.admit/record]],
+                :unrun-request
+                [:map
+                 [:seon.sci.admit/value :seon.error/value]
+                 [:seon.cluster.run.form/ns :seon.db/ref]
+                 [:seon.eval/duration-ms {:optional true} :int]
+                 [:seon.cluster.eval/interrupted-at
+                  {:optional true}
+                  :seon.cluster.eval/interrupted-at]],
                 :impure-calls [:set :symbol],
                 :install-request
                 [:map
