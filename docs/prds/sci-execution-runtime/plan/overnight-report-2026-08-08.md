@@ -69,6 +69,17 @@ bound-fn* deletion) · schema-environment (Defect I root owner).
 - stop-completion lands → reset → 08-06 drive-arc rerun with observer →
   extend to planning+memory → messaging wave + dogfood lanes.
 - Rename waves at natural drain points (owner-approved list in the PRD).
-- Machine degradation point: not yet reached at 8 concurrent lanes
-  (observations to date: measurement noise ~40% under load; no failures
-  attributable to load itself).
+- **Degradation point FOUND at 8 concurrent lanes — and it is not the
+  machine.** CPU/memory hold; measurement noise ~40% under load is the
+  only compute cost. The binding constraint is SHARED-TREE COHERENCE:
+  three fixture outages in one stretch, all one shape — a lane's
+  mid-edit state (P17-S1's config rows referencing unpublished
+  suppliers; a parse error in schema_test.clj; an unclaimed diagnostic
+  hunk) turning every sibling's proofs red until it lands. The gates
+  refuse loudly and attribution takes minutes (twice the flagged lane
+  refuted correctly and the real owner was found by diff), but each
+  incident stalls the fleet. Mitigation applied: aggressive
+  commit-small-slices enforcement via direct pings; NOT adopting
+  worktrees (standing ruling: shared checkout is the model). The honest
+  ceiling at current discipline: ~6-8 heavy lanes when several own hot
+  files; more is fine when file ownership is disjoint and cold.
