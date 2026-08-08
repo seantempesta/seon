@@ -363,6 +363,18 @@ moment default stands.
   roots run concurrent lifecycle commands in 0.092 s against a held
   foreign lock.
 
+- **Escalation single-owner LANDED** (`c3f526cb3`): the hand-rolled
+  unbounded escalation deleted with its guard (structurally unnecessary
+  — a phase failure is a value, the self-mail arm cannot fire); one
+  honest port (failure message text into the notice prose,
+  omit-when-absent); escalation is one message per signature per
+  process, cross-agent storms die with the same cut; live probe of the
+  exact fault-storm conditions: zero new messages, zero provider calls.
+  The self-wake issue honestly NARROWED not closed (one acceptance
+  clause — reply-refusal-to-attempt-count — still unclaimed, downgraded
+  to friction with its fixtures named). All three 2026-08-08 ruling
+  lanes are now landed; the whole-system arc launches next.
+
 ## Pending milestones
 
 - stop-completion lands → reset → 08-06 drive-arc rerun with observer →
