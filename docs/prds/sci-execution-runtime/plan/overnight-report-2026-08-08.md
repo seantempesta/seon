@@ -193,6 +193,23 @@ quiet launch window. Interim policy: no staging deletions while lanes
 launch JVMs; single clean start at quiescence. The drive runs the
 moment default stands.
 
+## Late-night additions to the stall chain (all owned, all loud)
+
+- **Boot broken at HEAD by a repair**: the my.web fix (2db8a4be4)
+  eagerly requires the whole program graph including test-provenanced
+  namespaces the boot JVM cannot load — no cluster boots; owning lane
+  flagged with the fix shape (bind the servable slice, provenance is a
+  declared fact, never a path rule).
+- **The refork class RECURRED in a second shape**: init --force
+  destroyed a real cluster branch then failed its own second store open
+  (process's own retained holder) — routed to the operator-lock lane
+  with the census-contradiction observation ("flock free" one second
+  before "held by a live process").
+- The background-connection verdict stays honestly OPEN — the
+  re-verification could not run behind these; it read f3b8eabda and
+  judges it right-shaped but unproven. Ten minutes of work once boot
+  stands.
+
 ## Pending milestones
 
 - stop-completion lands → reset → 08-06 drive-arc rerun with observer →
