@@ -91,6 +91,20 @@ truth-checks, not gates.
   rendering as 2,154 chars. Tool-repairs lane dispatched on the four
   agent-facing defects.
 
+- **Admission blocker CLOSED** (`9d5c986eb`/`45a87196a`/`114dc6aa7`):
+  one declarations delay in the walk state — an identity question went
+  15.263 ms → 0.012 ms; a realistic 121-node admission ~120 populations
+  → 1 (374 ms → 24 ms); the test-side hoist alone took admit-test
+  259 s → 13 s. Class regression counts one resolution per admission,
+  zero for scalars, zero when supplied. Remainders recorded in the
+  issue for their owners (per-EVAL projection rebuild in eval.clj is
+  the notable one). The fallback warning's per-caller counter did the
+  finding work — the diagnostics flywheel, again.
+- **Coherence incident #4, escalated:** P17-S1's uncommitted state
+  still blocks every cluster boot tree-wide (config rows referencing
+  unpublished supplied-* fns). Second, urgent notice sent with exact
+  restore steps and a stop-and-hand-over option.
+
 ## In flight at last update
 
 stop-completion (render proc liveness) · suite-speed (tiers +
