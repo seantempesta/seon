@@ -176,6 +176,23 @@ bound-fn* deletion) · schema-environment (Defect I root owner).
 - MCP envelope echoes the submitted form in every event (5× duplication;
   queued).
 
+## The drive-arc is NOT yet run — honest state
+
+The reset stalled on a chain of three real platform defects the stress
+load exposed in sequence, each filed: the operator lifecycle lock
+ignores `--root` (fix lane running); the shared store flock was held by
+queued/zombie operators; and the dependency class-cache prepare races
+concurrent JVM launches (issue
+[dependency-class-cache-prepare-races-concurrent-jvm-launches](../../../seon/issues/dependency-class-cache-prepare-races-concurrent-jvm-launches.md),
+with a second failure mode appended by the tool-exercise lane — and my
+own rm-per-attempt retry loop was an instance of that second mode,
+caught by rotation and stopped). Plus one true refusal: the sovereign
+old default branch correctly refused new config rows referencing
+functions its fork predates — the refork is the remedy and awaits a
+quiet launch window. Interim policy: no staging deletions while lanes
+launch JVMs; single clean start at quiescence. The drive runs the
+moment default stands.
+
 ## Pending milestones
 
 - stop-completion lands → reset → 08-06 drive-arc rerun with observer →
