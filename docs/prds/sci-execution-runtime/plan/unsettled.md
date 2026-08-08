@@ -29,15 +29,15 @@ and PROVEN; the full ruling + evidence ledger is
   client, honest truncation, no retries); token estimation calibrated
   from recorded usage; the control-token reply leak closed; the suite
   tiered (965 s→43 s changed-only default); ~30 defect classes killed.
-- THE ONE OPEN BLOCKER on the model-authoring milestone:
-  [every agent prompt is a neighborhood render-walk contract violation](../../../seon/issues/every-agent-prompt-is-a-neighborhood-render-walk-contract-violation.md)
-  — a regression from this night's own render work (`102fdeac3`
-  retyped the SHARED key `:seon.render/output`, which serves BOTH the
-  request selector AND the walk unit's rendered-value field; the enum
-  now rejects every rendered value). Accretion-correct fix = SPLIT the
-  overloaded key (selector stays the enum; the unit field gets its own
-  string-or-Hiccup type). A fix lane is running; after it lands: refork
-  default → re-drive the model-authoring proof.
+- THE RENDER BLOCKER IS FIXED (`80ae69ad1`): the overloaded
+  `:seon.render/output` is split — the walk unit's rendered-output field
+  now points at the new `:seon.render/rendered [:or :string
+  :seon.render/hiccup]`, the selector keeps the enum (falsified both
+  ways: rendered accepts string+Hiccup, the selector still rejects a
+  bare string); the pre-existing `:any` on `:seon.render.walk/lookup`
+  that made the file uneditable was cleared with a proven-boundary
+  exemption. Reforking default to prove it live, then the
+  model-authoring re-drive is unblocked.
 - NEXT after the milestone: the whole-system arc's remaining stages
   (canvas is UNBUILT — a target needing its own wave; agents need a
   taught route to declaring data attributes; disposition-less turns
