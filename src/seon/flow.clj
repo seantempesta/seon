@@ -215,7 +215,9 @@
   that started it (`my.background`) — so inheriting the submitting turn's
   deadline latch would kill background work at the turn's limit, which
   inverts the surface's meaning. A detached submission therefore carries
-  only the arm its own data names, and today that is none."
+  only the arm its own data names — and since the 2026-08-08 background
+  bounds ruling that is a FRESH arm the submitter builds at its own limit
+  (`seon.effect/request*` via `kernel/detached-arm`), never this capture."
   [submission]
   (if-let [armed (kernel/current-arm)]
     (assoc submission :seon.env/environment
