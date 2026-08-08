@@ -517,9 +517,16 @@ and the human instruction never reaches the model (which then burns
 re-waking, evidence appended to its issue). The token calibration held
 STRUCTURALLY (over-estimates now, the 23%-low class addressed) but is
 n=1 on the broken prompt — contaminated until real prompts flow. The
-c:p ~43 pathology is present and is the CORRECT signal. Driver still
-running (render/walk is unowned — it may be attempting the hot-reload
-fix); fix dispatch held to avoid collision until it reports. This is
+c:p ~43 pathology is present and is the CORRECT signal. The DRIVER
+then refined the cause and REFUTED the observer's proposed fix (tagging
+items fails the enum identically): commit `102fdeac3` retyped the SHARED
+key `:seon.render/output` to the selector enum, but the walk UNIT's
+rendered-output field reuses that same key for actual strings/Hiccup —
+one key, two meanings, the `:any` was hiding it. The accretion-correct
+fix is a KEY SPLIT (selector stays the enum; the unit output field gets
+its own string-or-Hiccup rendered-value type), a schema change, not
+hot-reloadable — dispatched as a fix lane (render/walk unowned; driver
+did NOT touch the cluster). After it lands: refork default, re-drive. This is
 the night's honest edge: the platform supplies agents their world at
 call time, but a render regression from the same night's work is
 starving their context — one more instance of the fixture-vs-live and
