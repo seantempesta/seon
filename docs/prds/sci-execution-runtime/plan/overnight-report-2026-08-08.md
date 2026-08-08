@@ -46,6 +46,24 @@ truth-checks, not gates.
   new `:seon.render/rendering` key works via open maps but cannot be
   declared until that file is repaired (queued).
 
+- Cleanup lane (7 commits, `7706a4279`..`b0900b28a`) — all 10
+  plain-accumulator census items converted to immutable returns; opaque
+  generators construct fresh samples; two dummy atoms deleted via an
+  honest untracked arity; `var-process` sheds an `:any`. HONEST DELTA:
+  **+148 lines net** (threading costs characters; the regression + shape
+  comments are most of it) — what shrank is 12 mutable constructors and
+  the shared-sample class, not lines. Deferred rows recorded (files
+  owned by running lanes). Dead-code sweep found NOTHING deletable —
+  the 5 kondo unused-private warnings in fs/jvm.clj are false (reached
+  via capability symbols; kondo cannot see that edge).
+- Suite tiering SHIPPED (test-infrastructure spec addendum records what
+  landed vs what remains — the fork constructor is still unbuilt; the
+  spec's perf numbers describe the pre-tiering serial gate).
+- New loose ends queued: `settle!` has no `:malli/schema` (contract
+  census catch, W1 wave); `seon.render.transcript-test` 28 failures
+  (needs a lane once the tree is coherent); `seon.fn-test`/`program-test`
+  errors to re-verify after the selection.clj fix settles.
+
 ## In flight at last update
 
 stop-completion (render proc liveness) · suite-speed (tiers +
