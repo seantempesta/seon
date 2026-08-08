@@ -145,11 +145,25 @@
     {:nodes @nodes :depth @deepest :widest @widest
      :longest @longest}))
 
+;; ONE compiled node schema for the whole namespace. It was compiled per
+;; generated case, and `schema/current-projection` is nil outside a delta, so
+;; every case fell through Malli's default registry to a complete classpath
+;; declaration population — 152 resource reads, ~14 ms, thousands of times
+;; per run. Resolving the projection once here is the same repair the
+;; admission seam itself received
+;; (`docs/seon/issues/value-admission-resolves-the-declaration-population-per-node.md`);
+;; the schema does not vary by case, so compiling it per case measured
+;; nothing but the resource merge.
+(def ^:private compiled-node-schema*
+  (delay
+    (let [registry (:seon.schema.projection/registry
+                    (or (schema/current-projection)
+                        (schema/declaration-projection)))]
+      (m/schema :seon.print/node {:registry registry}))))
+
 (defn- compiled-node-schema
   []
-  (let [registry (:seon.schema.projection/registry
-                  (schema/current-projection))]
-    (m/schema :seon.print/node {:registry registry})))
+  @compiled-node-schema*)
 
 (deftest one-print-node-owns-semantic-value-and-result-edn
   (binding [*print-length* 0

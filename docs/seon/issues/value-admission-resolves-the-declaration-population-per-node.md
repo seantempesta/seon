@@ -175,6 +175,27 @@ construction and by observation: reverting `identity-only-node` to the ambient
 ask fails five of its six node-count cases with the read counts in the table
 above.
 
+### The same class in the admission test, and a 20x gate
+
+`compiled-node-schema` (`test/seon/sci/admit_test.clj`) compiled
+`:seon.print/node` once per GENERATED CASE, and `schema/current-projection`
+is nil outside a delta, so every case fell through Malli's default registry
+to a complete classpath population — the fallback counter reached ×1000 from
+three lines of that file in one run. The schema does not vary by case;
+compiling it per case measured nothing but the resource merge. Hoisted to one
+delay over one resolved projection:
+
+| `bin/test seon.sci.admit-test` | Before | After |
+|---|---|---|
+| namespace wall time | **259.1 s** | **13.2 s** |
+| test-side fallbacks | ×1000 from three lines | one each, from two |
+
+Both runs already carried the `admit.clj` repair, so the 20x is entirely the
+test-side hoist. 7 tests / 30 assertions / 0 failures. The surviving volume is
+`admit.clj:163` at ×100 — one per admission across hundreds of generated
+admissions, which is correct per-operation behaviour and disappears when a
+projection is supplied.
+
 ### Remainders (why this issue stays open)
 
 1. **The identity-only descriptor cache is still a process atom.**
