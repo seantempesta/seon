@@ -190,6 +190,15 @@ above.
    (`src/seon/cluster.clj:292,298,299,371`). One
    `schema/call-with-projection` around the whole projection pass closes it;
    `seon.cluster` was not this lane's owned path.
+3. **`seon.sci.eval/evaluation-projection` resolves one per evaluation when
+   the ctx carries no projection** (`src/seon/sci/eval.clj:648-651`) — it
+   falls back to `(schema/build-projection (schema/registered-schemas))`,
+   which is a complete population AND a complete projection build. A live
+   cluster's ctx holds projection state so this is the test path, but it is
+   the same class: `bin/test seon.sci.eval-test` logged it reaching 100
+   occurrences (2026-08-08), alongside `seon.schema/valid-candidate-value?`
+   asked per generated evaluation at `test/seon/sci/eval_test.clj:1331`.
+   Neither is this lane's owned path.
 
 Root repair (the one that makes the class unwritable rather than merely
 cheaper) is the seon.env Phase 3 sweep: admission receives
