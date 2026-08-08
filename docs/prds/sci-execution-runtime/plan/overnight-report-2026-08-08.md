@@ -189,7 +189,7 @@ bound-fn* deletion) · schema-environment (Defect I root owner).
 ## THE DRIVE IS RUNNING
 
 Default reforked from current-src at tonight's HEAD (commit `6a76b0c6…`)
-and standing at http://127.0.0.1:7994. Driver + independent observer
+and standing at `http://127.0.0.1:7994`. Driver + independent observer
 launched: the 08-06 arc rerun first (explicit fixed/present/transformed
 verdict per old blocker), then the planning+memory extension; token
 sentinels armed on every prompt and render; the observer trusts nothing
