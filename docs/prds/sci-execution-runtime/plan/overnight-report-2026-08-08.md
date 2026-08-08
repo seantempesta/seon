@@ -186,7 +186,17 @@ bound-fn* deletion) · schema-environment (Defect I root owner).
 - MCP envelope echoes the submitted form in every event (5× duplication;
   queued).
 
-## The drive-arc is NOT yet run — honest state
+## THE DRIVE IS RUNNING
+
+Default reforked from current-src at tonight's HEAD (commit `6a76b0c6…`)
+and standing at http://127.0.0.1:7994. Driver + independent observer
+launched: the 08-06 arc rerun first (explicit fixed/present/transformed
+verdict per old blocker), then the planning+memory extension; token
+sentinels armed on every prompt and render; the observer trusts nothing
+the driver says. Results land in
+`research/live-drive-2026-08-08.md` + `live-drive-observer-2026-08-08.md`.
+
+## The earlier drive-arc stall — resolved, kept for the record
 
 The reset stalled on a chain of three real platform defects the stress
 load exposed in sequence, each filed: the operator lifecycle lock
