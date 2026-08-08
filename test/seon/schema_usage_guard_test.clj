@@ -40,8 +40,8 @@
       {:error (deepest-ex-data error)})))
 
 (defn- row-tx
-  [row]
-  [[:db.fn/call #'run/row-tx {} row]])
+  ([row] (row-tx {} row))
+  ([request row] [[:db.fn/call #'run/row-tx request row]]))
 
 (defn- schema-row
   [schema-key definition]
@@ -222,6 +222,80 @@
               "schema replacement does not purge historical data")
           (is (not (contains? (:schema @connection) unrelated-key))
               "replacement does not install unrelated absent attributes"))))))
+
+(deftest one-decision-path-answers-every-schema-form-change
+  ;; The class: two rules claiming one decision. `c55879b73` added an
+  ;; unconditional immutability refusal ahead of the usage guard, so the
+  ;; guard's typed answer never reached the caller and a change the guard
+  ;; allows was refused anyway. There is now ONE decision path, and this
+  ;; regression walks all three of its answers against one run so the coarse
+  ;; rule cannot be reintroduced without failing here.
+  (test-support/with-database
+    (fn [connection]
+      (let [run-id "schema-usage-guard-run"
+            agent-id "schema-usage-guard-agent"
+            namespace-name 'my.agents.schema-usage-guard
+            request {:seon.cluster.run/id run-id}]
+        (install-forms! connection {base-key (get forms base-key)
+                                    unrelated-key [:int {:seon.db/index true}]})
+        (db/transact! connection [{:seon.ns/name namespace-name
+                                   :seon.ns/source "(ns my.agents.schema-usage-guard)"}
+                                  {:seon.cluster.agent/id agent-id
+                                   :seon.cluster.agent/namespace
+                                   [:seon.ns/name namespace-name]}])
+        (db/transact! connection [{base-key 7}])
+        (db/transact!
+         connection
+         (run/open-tx {:seon.cluster.run/id run-id
+                       :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+                       :seon.cluster.run/opened-at (java.util.Date.)}))
+        (testing "current data answers with the guard's typed refusal"
+          (let [refusal
+                (transact-result
+                 connection
+                 (row-tx request
+                         (schema-row base-key [:string {:seon.db/index true}])))]
+            (is (= :seon.schema/current-data-blocks-change
+                   (get-in refusal [:error :seon.schema/error]))
+                "the finer instrument's answer reaches the caller")
+            (is (= [base-key]
+                   (get-in refusal [:error :seon.schema/data-attributes]))
+                "and it names the attributes that blocked the change")))
+        (testing "retraction clears the block and the same change succeeds"
+          (let [entity (db/q '[:find ?entity .
+                               :in $ ?attribute
+                               :where [?entity ?attribute _]]
+                             @connection base-key)]
+            (db/transact! connection [[:db/retract entity base-key]])
+            (is (nil? (:error
+                       (transact-result
+                        connection
+                        (row-tx request
+                                (schema-row base-key
+                                            [:string {:seon.db/index true}])))))))
+          (is (= (pr-str [:string {:seon.db/index true}])
+                 (:seon.schema/form
+                  (db/pull @connection [:seon.schema/form]
+                           [:seon.schema/key base-key])))))
+        (testing "a form another writer changed since the run opened refuses"
+          (db/transact! connection [{:seon.schema/key unrelated-key
+                                     :seon.schema/form
+                                     (pr-str [:string {:seon.db/index true}])}])
+          (let [refusal
+                (transact-result
+                 connection
+                 (row-tx request
+                         (schema-row unrelated-key
+                                     [:boolean {:seon.db/index true}])))]
+            (is (= :seon.cluster.run/refused
+                   (get-in refusal [:error :seon.error/kind])))
+            (is (= :seon.cluster.run/program-row-changed-after-open
+                   (get-in refusal [:error :seon.cluster.run/rule]))
+                "divergence from the opening basis is named as divergence")
+            (is (= (pr-str [:string {:seon.db/index true}])
+                   (:seon.schema/form
+                    (db/pull @connection [:seon.schema/form]
+                             [:seon.schema/key unrelated-key]))))))))))
 
 (deftest entity-child-data-blocks-entity-schema-change
   (test-support/with-database

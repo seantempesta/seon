@@ -1031,23 +1031,31 @@
                           @connection persistent-key))
                   "the committed attribute accepts a fact immediately"))))))))
 
-(deftest runtime-schema-keys-are-immutable-at-terminal-admission
+(deftest runtime-schema-key-changes-pass-the-one-usage-guarded-decision
+  ;; ONE rule decides whether a schema form may change, and it is the usage
+  ;; guard: a key nothing depends on is an ordinary declaration, and a key
+  ;; current data depends on refuses naming those attributes. `c55879b73`
+  ;; briefly layered an unconditional immutability refusal ahead of that
+  ;; guard, which swallowed the guard's typed answer; the guard's own suite
+  ;; (`seon.schema-usage-guard-test`) owns the refusal and divergence faces,
+  ;; and this test owns the live-loop shape: a run may refine a key it owns,
+  ;; and the run stays open through it.
   (with-cluster
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
             connection (:seon.db/connection cluster)
-            schema-key :shared.runtime/immutable]
+            schema-key :shared.runtime/refined]
         (with-redefs
           [ai/complete
            (fn [_]
              {:seon.ai/text
               (str
                "(require '[seon.schema :as schema])\n"
-               "(schema/register! :shared.runtime/immutable :string)\n"
-               "(schema/register! :shared.runtime/immutable :string)\n"
-               "(schema/register! :shared.runtime/immutable :int)\n"
-               "(my.run/complete \"unreachable\")")})]
+               "(schema/register! :shared.runtime/refined :string)\n"
+               "(schema/register! :shared.runtime/refined :string)\n"
+               "(schema/register! :shared.runtime/refined :int)\n"
+               "(my.run/complete \"refined\")")})]
           (drive! cluster 10)
           (let [database @connection
                 row (db/pull database '[*] [:seon.schema/key schema-key])
@@ -1069,25 +1077,20 @@
                                            :seon.error/kind]) ...]
                               :where
                               [?receipt :seon.cluster.eval/result-edn _]]
-                            database))
-                refusal (get-in receipts [3 :result])
-                refusal-fact
-                (db/pull database
-                         [:seon.error/data-edn]
-                         [:seon.error/id
-                          (get-in refusal [:seon.error/data :seon.error/id])])
-                refused-source
-                (semantic-result (:seon.error/data-edn refusal-fact))]
-            (is (= ":string" (:seon.schema/form row)))
+                            database))]
+            (is (= ":int" (:seon.schema/form row))
+                "the run's own unconsumed key refines to its latest form")
             (is (= schema-key (get-in receipts [1 :result])))
             (is (= schema-key (get-in receipts [2 :result]))
                 "identical registration is an ordinary idempotent success")
-            (is (= :seon.cluster.run/refused
-                   (get-in receipts [3 :error-kind])))
-            (is (= ::run/schema-key-immutable
-                   (::run/rule refused-source)))
-            (is (nil? (get receipts 4))
-                "the divergent declaration closes the run before later forms")))))))
+            (is (= schema-key (get-in receipts [3 :result]))
+                "and so is a change nothing currently depends on")
+            (is (empty? (into #{}
+                              (keep #(:error-kind (val %)))
+                              receipts))
+                "no form was refused")
+            (is (= (my.run/complete "refined") (get-in receipts [4 :result]))
+                "the run stayed open through the change and completed")))))))
 
 (deftest runtime-schema-unregister-removes-one-unused-global-schema
   (with-cluster

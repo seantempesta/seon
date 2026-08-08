@@ -907,24 +907,28 @@
   (when-some [canonical (program/canonical-row value)]
     (declared-map db (dissoc canonical :seon.fn/arities :seon.fn/ast))))
 
-(defn- definition-written-by-run?
-  "True when the current function source and one receipt of `run-id` were
-  asserted by the same terminal transaction."
-  [db function-symbol run-id]
+(defn- declaration-written-by-run?
+  "True when the declaration identified by `identity-attribute`/`identity-value`
+  and one receipt of `run-id` were asserted by the same terminal transaction.
+
+  A run's own write is never a concurrent change, whichever declaration family
+  it belongs to. The question is asked of the transaction rather than of one
+  family's content attribute, so there is no per-family attribute to forget."
+  [db identity-attribute identity-value run-id]
   (boolean
    (db/q '[:find ?receipt .
-           :in $ ?function-symbol ?run-id
+           :in $ ?identity-attribute ?identity-value ?run-id
            :where
-           [?function :seon.fn/sym ?function-symbol]
-           [?function :seon.fn/source _ ?tx]
+           [?declaration ?identity-attribute ?identity-value]
+           [?declaration _ _ ?tx true]
            [?receipt :seon.cluster.eval/result-edn _ ?tx]
            [?receipt :seon.cluster.eval/run ?run]
            [?run :seon.cluster.run/id ?run-id]]
-         (db/history db) function-symbol run-id)))
+         (db/history db) identity-attribute identity-value run-id)))
 
-(defn- definition-diverged-since-open?
-  "True when the current declaration of `function-symbol` differs from the one
-  the request's run opened on and was not written by that run.
+(defn- declaration-diverged-since-open?
+  "True when the current declaration differs from the one the request's run
+  opened on and was not written by that run.
 
   Divergence is a claim ABOUT AN OPENING BASIS, so it is only measurable when
   the request names a run: a derivation with no run — a system-side or fixture
@@ -933,16 +937,17 @@
   database value cannot be read refuses loudly naming that missing basis,
   rather than reading the unreadable opening as an absent declaration and
   reporting a concurrent definition it never measured."
-  [db request function-symbol existing]
+  [db request identity-attribute identity-value existing]
   (if-some [run-id (::id request)]
     (let [opening-database (opening-db db run-id)]
       (when (:seon.error/kind opening-database)
         (refuse! `receipt-settle-call ::run-opening-basis-unreadable request))
       (let [opening-existing
-            (db/pull opening-database '[*] [:seon.fn/sym function-symbol])]
+            (db/pull opening-database '[*] [identity-attribute identity-value])]
         (and (not= (declared-content db opening-existing)
                    (declared-content db existing))
-             (not (definition-written-by-run? db function-symbol run-id)))))
+             (not (declaration-written-by-run?
+                   db identity-attribute identity-value run-id)))))
     false))
 
 (defn- row-tx
@@ -1001,19 +1006,25 @@
                  existing
                  (not= (:seon.schema/form existing)
                        (:seon.schema/form row)))
-            _ (when schema-redefinition?
-                (refuse! `receipt-settle-call
-                         ::schema-key-immutable request))
-            concurrent-definition?
-            (and (= identity :seon.fn/sym)
+            ;; ONE decision path owns "may this declaration change". The
+            ;; concurrency question — did the installed row diverge from the
+            ;; basis this run opened on — is measured identically for every
+            ;; declaration family. What differs is only what a legal change
+            ;; then costs, and for a schema key that cost is answered by the
+            ;; usage guard, which names the attributes current data blocks on.
+            concurrent-declaration?
+            (and (#{:seon.fn/sym :seon.schema/key} identity)
                  existing
                  (not= (declared-content db existing)
                        (declared-content db row))
-                 (definition-diverged-since-open?
-                  db request identity-value existing))
-            _ (when concurrent-definition?
+                 (declaration-diverged-since-open?
+                  db request identity identity-value existing))
+            _ (when concurrent-declaration?
                 (refuse! `receipt-settle-call
                          ::program-row-changed-after-open request))
+            _ (when schema-redefinition?
+                (assert-schema-data-unused!
+                 db current-projection #{identity-value}))
             candidate-projection
             (case identity
               :seon.schema/key
@@ -1031,20 +1042,23 @@
               nil)
             schema-declarations
             (if (= identity :seon.schema/key)
-              (let [current-attributes
-                    (schema.datahike/database-attributes-in
-                     current-projection)
-                    candidate-attributes
-                    (schema.datahike/database-attributes-in
-                     candidate-projection)
-                    required
-                    (into []
-                          (comp
-                           (remove (set current-attributes))
-                           (remove #(contains? (:schema db) %)))
-                          (sort candidate-attributes))]
-                (schema.datahike/malli->datahike-schema-in
-                 candidate-projection required))
+              (if schema-redefinition?
+                (schema-attribute-change-tx
+                 db current-projection candidate-projection)
+                (let [current-attributes
+                      (schema.datahike/database-attributes-in
+                       current-projection)
+                      candidate-attributes
+                      (schema.datahike/database-attributes-in
+                       candidate-projection)
+                      required
+                      (into []
+                            (comp
+                             (remove (set current-attributes))
+                             (remove #(contains? (:schema db) %)))
+                            (sort candidate-attributes))]
+                  (schema.datahike/malli->datahike-schema-in
+                   candidate-projection required)))
               [])]
         (into
          schema-declarations

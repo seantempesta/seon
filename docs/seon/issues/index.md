@@ -16,11 +16,10 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (31)
+## Blocker (30)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [Schema-key immutability refuses before the usage guard can answer](schema-key-immutability-swallows-the-usage-guard.md) | blocker | gate-red triage (bin/test seon.schema-usage-guard-test) |
 | [Boot the co-hosted second cluster without a 63 s stall or a false failure](cohosted-second-boot-is-slow-and-trips-the-silence-backstop.md) | blocker | boot velocity incident (co-hosted second boot) |
 | [Instrument each cluster under its own projection, not the anchor's](instrumentation-compiles-under-one-clusters-projection.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Resolve the declaration population once per admission, not once per node](value-admission-resolves-the-declaration-population-per-node.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
@@ -51,10 +50,11 @@ See `README.md` for the convention.
 | [Make `my.web` resolvable in every cluster's SCI context](my-web-is-unreachable-from-agent-code.md) | blocker | capability surface repair wave |
 | [Reap the child and settle the receipt when an eval is interrupted](an-interrupted-my-shell-run-orphans-its-child-and-its-receipt.md) | blocker | capability surface repair wave |
 
-## Friction (111)
+## Friction (112)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [May a run refine a schema key nothing depends on?](within-run-schema-key-refinement-needs-an-owner-ruling.md) | friction | owner design ruling (schema-key immutability vs the usage guard) |
 | [Unwedge the flow test that hangs without its namespace siblings](a-flow-test-hangs-when-run-without-its-namespace-siblings.md) | friction | suite-speed tiering (platform tier granularity) |
 | [Scope the JVM operator's per-root work off the installation lock](jvm-operator-work-takes-the-installation-lock-for-one-root.md) | friction | operator lock-scope follow-up |
 | [Record the activation closure's schema keys and required attributes](activation-closure-records-no-schema-keys.md) | friction | boot velocity incident (co-hosted second boot) |
