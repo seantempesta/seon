@@ -96,13 +96,19 @@ reviewing"):
 
 1. In flight: render-proc stop-completion blocker; warning-yield sweep
    (+ issues-index clean).
-2. Both land → INTEGRATION CHECKPOINT: complete bare `bin/test` at a
-   coherent tree (expectation: zero known reds — all three pre-existing
-   reds closed as real defects).
-3. Checkpoint green → `bin/seon reset --force` → DRIVE-ARC RERUN (the
-   first-turn proof; DeepSeek drives pre-authorized) with a dedicated
-   observer lane. Message delivery works again (identity-collision fix),
-   so odds materially better than 08-06.
+2. OWNER AMENDMENT (pre-sleep answers): the complete bare run is NOT a
+   gate — "fix the test suite so it runs faster before you start gating
+   things on it passing." A SUITE-SPEED lane launches immediately:
+   implement the ruled tiers (platform-first fail-fast; changed-only
+   default via tests-reaching) and attack the measured hot spots
+   (situation-totality's ~55 s write-seam floor, the 1.9 s render pass,
+   per-test JVM load). Targeted namespaces remain the working proof;
+   complete runs become background truth-checks.
+3. Both in-flight lanes land → `bin/seon reset --force` → DRIVE-ARC
+   RERUN with a dedicated observer. Owner: UNLIMITED deepseek-flash
+   drives, fix-and-re-drive loop; WATCH TOKEN SIZES — an exploding
+   context is a high-priority bug filed with the offending producer
+   named; every lane reports bad output flowing into agent context.
 4. Class-dissolver lanes (the prize), dependency-ready, sealed designs
    only: (a) the audit blocker
    [schema-environment-is-ambient-not-explicit](../../../seon/issues/schema-environment-is-ambient-not-explicit.md)
@@ -111,8 +117,19 @@ reviewing"):
    amended by PRD ruling 2). Queued behind them: activation-closure
    vacuity, one-identity-string second instance, cohosted-boot 11×,
    refused-messages render producer, shadowed-var wall.
-5. Owner-input items PARKED for morning: Phase 2 design iteration
-   judgments, seon.db surviving call spellings, docs-as-facts design.
+5. PRE-SLEEP AMENDMENTS (owner answers, 2026-08-07 late): RUN HOT until
+   morning, no wind-down; parallelism UNCAPPED until empirical
+   degradation is measured (load is a deliberate stress test — find
+   more bugs); after clean drives run messaging wave AND dogfood AND
+   audits AND the approved renaming/cleanup — "the codebase should
+   likely be smaller in the morning"; SUCCESS IS MULTIVARIATE: fewer
+   bugs, faster perf, fewer lines, and TASTE — judge agent context
+   quality and capability directly; keep ADVERSARIAL SOCRATIC CHECKS
+   verifying every lane's work (standing post-wave audit cadence is due
+   now); drives = 08-06 arc first for before/after, then extend into
+   planning+memory; watch token sizes, exploding context = high-priority
+   bug. Owner-input items still parked: Phase 2 design judgments,
+   seon.db surviving spellings, docs-as-facts design.
 THEN: reset → drive-arc
 rerun (the first-turn proof) → step 5 R6 singles → step 6 recurring
 deterministic drive in bin/test (graduation gate) → messaging wave
