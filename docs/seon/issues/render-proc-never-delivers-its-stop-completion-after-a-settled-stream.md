@@ -9,58 +9,100 @@ tags: [issue, render, web, flow]
 
 ## Problem
 
-`seon.render.web/render-step`'s transition arity puts `::stopped` on the
-proc's own completion when flow delivers `::flow/stop`
-(`src/seon/render/web.clj:875-881`). After
-`seon.render.web-test/thinking-stream-morphs-into-the-settled-session-transcript`
-that put never happens: `flow.core/stop` returns, and the completion is still
-empty 20 s later.
+**Cause found 2026-08-07.** The proc's stop path was never at fault. The
+transform NEVER RETURNED, so flow never reached the `::flow/stop` transition
+that puts `::stopped` on the proc's completion
+(`src/seon/render/web.clj:875-881`), and `disarm-agents!` — which joins both
+cluster-graph procs on that completion before releasing the branch connection —
+would have waited forever on a real shutdown.
 
-This matters beyond the test. `disarm-agents!` joins both cluster-graph procs'
-active transforms on that same completion before releasing the branch
-connection, so a stop transition that never runs is a shutdown that never
-finishes.
+The transform did not return because **a declared producer that renders its own
+value THROUGH another producer re-selected itself, forever.**
+`seon.ai/attempt-html` hands the attempt, minus reasoning, to the value floor
+`seon.render.value/render-html` (`src/seon/ai.clj:105-115`). The floor's
+`prepare` projects that value through `seon.render/project-node`
+(`src/seon/render/value.clj:240-246`), selection matches
+`:seon.ai/attempt` again (`resources/seon/schemas/seon.ai.edn:4-8`), and the
+chain is:
+
+```text
+project-node → attempt-html → prepare → project-node → attempt-html → …
+```
+
+`project-node`'s docstring claimed "a selected producer's output is terminal
+projection data: it is never fed back into selection" — true of its OUTPUT,
+and irrelevant to its INPUT, which is exactly what recursed.
 
 ## Evidence
 
-Found 2026-08-07 repairing `seon.render.web-test`. It is DETERMINISTIC, not
-load-dependent: three consecutive isolated runs of that one var through
-`clojure.test/test-vars` (no `bin/test`, no other namespace) all failed the
-same way, and it was the only red left in the namespace after the reconnect
-and ping-oracle repairs (`bin/test seon.render.web-test`: 38 tests, 238
-assertions, 0 failures, 1 error).
+The filer's next step was the right one. A virtual-thread-aware
+`jcmd Thread.dump_to_file` taken INSIDE the 20 s window (a daemon thread
+dumping every 4 s through `seon.test.runner/persist-virtual-thread-dump!`,
+`tmp/render-stop-wedge.clj`) shows exactly one working thread in the JVM:
 
-The failure is `[:render-proc-stopped]` in `with-server`'s `finally`
-(`test/seon/render/web_test.clj`), which is the shared loud backstop doing
-exactly its job.
+- an unnamed VIRTUAL thread (the `:io` proc), stack **truncated at the dump's
+  1024-frame cap**, every frame a repetition of
+  `seon.render$project_node → seon.sci.kernel$invoke →
+  seon.render.value$render_html → seon.render.value$prepare →
+  seon.render$project_node`;
+- `main` parked in `with-server`'s `await-event!` on the completion
+  (`test/seon/render/web_test.clj:199`);
+- everything else parked.
 
-Ruled out so far:
+A depth probe wrapping `seon.sci.kernel/invoke` (`tmp/render-recursion-probe.clj`)
+named the producer and its argument at depth 13:
 
-- **Not a thrown transform.** The fixture now KEEPS everything flow puts on
-  `error-chan` and asserts it is empty before waiting on the completion. That
-  assertion passes: the graph reported no proc error.
-- **Not a failing test body.** Every assertion in the test itself passes; only
-  the fixture's shutdown wait fails.
-- **Not the derivation cost alone.** A pass measures ~1.9 s after the first
-  (`render-package-proc-reruns-unchanged-renderers.md`), so 20 s is roughly
-  ten passes of headroom, and no other test in the namespace loses its stop.
+```text
+producer: seon.ai/attempt-html
+value keys: (:db/id :seon.ai.attempt/at :seon.ai.attempt/id
+             :seon.ai.attempt/ordinal :seon.ai.attempt/run
+             :seon.ai.attempt/settings-edn :seon.ai/endpoint :seon.ai/model)
+```
 
-What is distinctive about this test: it is the only one that drives the
-`::stream` in-port through a reasoning partial AND then commits the settling
-attempt/form/eval/plan-digest facts, so the proc's last work before stop is a
-terminal-fact pass that empties `::streams`.
+That is why the failure was deterministic and confined to one test: it is the
+only test in the namespace that commits an attempt fact into the walked page.
+
+## Fix
+
+`src/seon/render.clj`. `invoke-selected` records the producer it is running in
+`:seon.render/rendering` (carried through `render-argument`'s context, so it
+travels into the producer's own walk), and `project-node*` refuses to select a
+producer already on that chain — the node falls through to its children, which
+is what the delegating producer asked for. The cycle is unconstructable rather
+than depth-capped, and mutual delegation is covered by the same set.
+
+`:seon.render/rendering` is NOT yet declared in
+`resources/seon/schemas/seon.render.edn`: the admission gate refuses every edit
+to that file for five PRE-EXISTING `:any` declarations
+(`:seon.render/call-request`, `candidate-request`, `output`, `unit`, `value`)
+that lack the recorded polymorphic-boundary exemption. Maps are open, so the
+key works undeclared, but the declaration is owed and that file's `:any` debt
+is what blocks it.
+
+## Remaining
+
+Verification of the final guard is blocked by a FOREIGN break, not by this
+change: `src/seon/test/selection.clj` (appeared 22:22:17) declares an
+unregistered `(partial instance? File)` predicate, and
+`seon.schema/bind-predicates` therefore refuses every corpus projection in the
+tree — see
+[[an-inline-fn-predicate-in-src-refuses-every-corpus-projection]]. Before that
+file landed, an earlier form of this fix took
+`bin/test seon.render.web-test` from 38 tests / **1 error** to 38 tests /
+**0 errors**, and the isolated `test-vars` run of
+`thinking-stream-morphs-into-the-settled-session-transcript` completed in
+~30 s instead of hanging.
 
 ## Owner
 
-`seon.render.web/render-step`'s transition arity and the flow graph's stop
-path (`reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj`).
+`seon.render/project-node` and `seon.render/invoke-selected`
+(`src/seon/render.clj`).
 
 ## Acceptance
 
-`clojure.test/test-vars` on
-`thinking-stream-morphs-into-the-settled-session-transcript` is green three
-times in a row, with the cause named rather than the wait lengthened — a
-larger backstop would hide the shutdown defect that `disarm-agents!` depends
-on. A virtual-thread-aware `jcmd Thread.dump_to_file` taken inside the 20 s
-window is the next step; two attempts on 2026-08-07 missed the window because
-the JVM had already exited.
+`bin/test seon.render.web-test` green three times in a row once the foreign
+predicate refusal is cleared, plus
+`bin/test seon.render-coverage-test`, whose
+`a-producer-that-delegates-its-own-value-is-never-re-entered` is the class
+regression: the unguarded code does not fail there, it never returns, so the
+oracle is the shared loud backstop around the render.

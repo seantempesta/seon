@@ -90,7 +90,12 @@
                               :seon.render.data/total
                               :seon.render/distance
                               :seon.cluster.run/live-processes
-                              :seon.ai/partial])
+                              :seon.ai/partial
+                              ;; the producers already rendering this
+                              ;; chain — carried so a producer that
+                              ;; delegates its own value onward cannot
+                              ;; be selected for it a second time
+                              :seon.render/rendering])
         profile (request-profile request)
         value (render-value request)
         context (cond-> context
@@ -237,19 +242,27 @@
     on-core-error :seon.config/on-core-error
     :as request}
    selected]
-  (:seon.sci.admit/value
-   (sci.kernel/invoke
-    (cond->
-     {:seon.sci.eval/ctx ctx
-      :seon.db/db (:seon.db/db request)
-      :seon.fn/sym (str selected)
-      :seon.sci.eval/args [(render-argument request)]
-      :seon.sci.eval/time-limit-ms time-limit-ms
-      :seon.sci.admit/caps caps
-      :seon.config/on-core-error on-core-error}
-      (:seon.render.call/captured-reads request)
-      (assoc :seon.db/read-evidence-sink
-             (:seon.render.call/captured-reads request))))))
+  (let [;; RECORD WHAT IS RENDERING. A producer may hand its own value
+        ;; to another producer — the value floor is the common case —
+        ;; so the producers already on this chain travel with the
+        ;; argument. `project-node*` refuses to select one that is
+        ;; already there, which makes self-re-entrance unconstructable
+        ;; rather than merely unlikely.
+        request (update request :seon.render/rendering
+                        (fnil conj #{}) selected)]
+    (:seon.sci.admit/value
+     (sci.kernel/invoke
+      (cond->
+       {:seon.sci.eval/ctx ctx
+        :seon.db/db (:seon.db/db request)
+        :seon.fn/sym (str selected)
+        :seon.sci.eval/args [(render-argument request)]
+        :seon.sci.eval/time-limit-ms time-limit-ms
+        :seon.sci.admit/caps caps
+        :seon.config/on-core-error on-core-error}
+        (:seon.render.call/captured-reads request)
+        (assoc :seon.db/read-evidence-sink
+               (:seon.render.call/captured-reads request)))))))
 
 (defn- valid-projection?
   [output value]
@@ -282,9 +295,26 @@
   [request output path node value]
   (let [projection (sci.kernel/context-projection
                     (:seon.sci.eval/ctx request))
+        ;; A PRODUCER IS NEVER RE-ENTERED INSIDE ITS OWN WALK. A
+        ;; producer that renders its value THROUGH the floor —
+        ;; `seon.ai/attempt-html` calls `render.value/render-html` for
+        ;; an attempt's ordinary facts — hands the floor the very value
+        ;; whose schema selected it. The floor's `prepare` projects that
+        ;; value, selection answers `seon.ai/attempt-html` again, and
+        ;; the chain never returns. Measured 2026-08-07: the render
+        ;; proc's virtual thread past 1024 frames of
+        ;; project-node → attempt-html → prepare → project-node, so its
+        ;; transform never ended, its `::flow/stop` transition never
+        ;; ran, and the completion `disarm-agents!` joins never arrived.
+        ;; `invoke-selected` records what it is running, so the cycle is
+        ;; unconstructable rather than depth-capped; a refused node
+        ;; falls through to its children, which is what the delegating
+        ;; producer asked for.
+        rendering (:seon.render/rendering request #{})
         selected (when (map? value)
                    (or (get value output)
-                       (schema-producer projection value output)))]
+                       (schema-producer projection value output)))
+        selected (when-not (contains? rendering selected) selected)]
     (cond
       (:seon.error/kind selected) node
 

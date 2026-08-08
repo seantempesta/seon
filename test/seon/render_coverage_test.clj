@@ -281,3 +281,58 @@
                face (walk-output-by-attribute units :seon.effect/run)]
            (is (some? face))
            (is (str/includes? (str face) owner-symbol))))))))
+
+;;; ---------------------------------------------------------------------------
+;;; A producer that delegates its own value never re-selects itself
+;;; ---------------------------------------------------------------------------
+
+(deftest a-producer-that-delegates-its-own-value-is-never-re-entered
+  ;; THE CLASS: a declared producer may render its value THROUGH another
+  ;; producer — `seon.ai/attempt-html` hands the attempt, minus reasoning,
+  ;; to the value floor `seon.render.value/render-html`. The floor projects
+  ;; that value, selection answers `seon.ai/attempt-html` again, and the
+  ;; chain never returns. Measured 2026-08-07 in
+  ;; `seon.render.web-test/thinking-stream-morphs-into-the-settled-session-transcript`:
+  ;; the render proc's virtual thread sat past 1024 frames of
+  ;; project-node → attempt-html → prepare → project-node, so its transform
+  ;; never ended, its `::flow/stop` transition never ran, and the completion
+  ;; `disarm-agents!` joins before releasing the branch connection never
+  ;; arrived. `invoke-selected` now records what it is running and
+  ;; `project-node` refuses a producer already on the chain, so the cycle
+  ;; cannot be built.
+  ;;
+  ;; The unguarded code does not fail here, it never returns — so the
+  ;; oracle is the shared loud backstop around the render, and the
+  ;; assertions read the value the walk did produce.
+  (support/with-database
+   (fn [connection]
+     (seed-entities! connection)
+     (db/transact!
+      connection
+      [{:seon.ai.attempt/id "re-entrance-attempt"
+        :seon.ai.attempt/run [:seon.cluster.run/id run-id]
+        :seon.ai.attempt/ordinal 0
+        :seon.ai.attempt/at opened-at
+        :seon.ai/endpoint "https://provider.invalid"
+        :seon.ai/model "fixture-attempt"
+        :seon.ai.attempt/settings-edn "{}"
+        :seon.ai.attempt/reasoning "private provider reasoning"}])
+     (let [database @connection
+           ctx (sci.eval/cluster-ctx database connection)
+           attempt (pulled database [:seon.ai.attempt/id "re-entrance-attempt"])
+           request (render-request database ctx attempt)
+           html (support/await-event!
+                 (future (render/render-html request))
+                 [:attempt-html-returns])
+           ai (support/await-event!
+               (future (render/render-ai request))
+               [:attempt-ai-returns])]
+       (is (hiccup/hiccup? html)
+           "the delegating producer returns hiccup rather than recursing")
+       (is (string? ai))
+       (is (str/includes? (hiccup/->string html) "fixture-attempt")
+           "the attempt's ordinary facts still reach the page")
+       (is (not (str/includes? (hiccup/->string html)
+                               "private provider reasoning"))
+           "reasoning keeps its own disclosure")
+       (is (not (str/includes? ai "private provider reasoning")))))))
