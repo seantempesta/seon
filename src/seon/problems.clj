@@ -227,7 +227,7 @@
                         "The admitted result contains an unbound var.")
                       "The evaluation was interrupted.")]
         {:seon.problems/id (work/problem-id id ordinal)
-         :seon.cluster.eval/id (pr-str [id ordinal])
+         :seon.cluster.eval/id (work/problem-id id ordinal)
          :seon.cluster.run/id id
          :seon.cluster.run.form/ordinal ordinal
          :seon.cluster.run.form/source

@@ -362,6 +362,61 @@
                    :seon.cluster.work/form-state))
         (:seon.cluster.work/forms (work/plan-settlement db run-id))))
 
+(defn- ambiguous-identities
+  "Identity strings this database gives to more than one entity.
+
+  Exactly the derivation `seon.cluster.message/resolve-about` performs on
+  an agent's `about`: an agent holds an ordinary string, so it resolves
+  against EVERY installed `:db.unique/identity` attribute and refuses a
+  tie rather than guessing. Two families minting one string therefore
+  does not merely look untidy — it makes every message naming that
+  string undeliverable, and the refusal lands as an error fact nobody's
+  assertion was reading.
+
+  Returns `{identity #{attribute …}}` for every colliding string, so a
+  failure names the two families instead of only a count."
+  [db]
+  (->> (db/q '[:find ?value ?entity ?attribute
+              :where
+              [?entity ?attribute ?value]
+              [(string? ?value)]]
+            db)
+       (filter (fn [[_ _ attribute]]
+                 (= :db.unique/identity
+                    (get-in db [:schema attribute :db/unique]))))
+       (group-by first)
+       (into {}
+             (keep (fn [[value rows]]
+                     (when (< 1 (count (into #{} (map second) rows)))
+                       [value (into #{} (map #(nth % 2)) rows)]))))))
+
+(defn- run-identity-collisions
+  "Colliding identities among the strings ONE run's own entities mint.
+
+  Scoped to this run's forms and receipts by QUERY, not by an exception
+  list: any family — declared today or added tomorrow — that mints a
+  string a run already minted appears here, while a collision in an
+  unrelated family stays that family's own defect.
+
+  `seon.gen.loop-test` currently observes one such foreign collision, a
+  cluster's name held by both `:seon.cluster/name` and
+  `:seon.config/cluster`; it is filed as
+  `docs/seon/issues/one-identity-string-names-two-entities.md` and is not
+  fixable inside this namespace's owner."
+  [db run-id]
+  (let [minted
+        (db/q '[:find [?value ...]
+               :in $ ?run-id
+               :where
+               [?run :seon.cluster.run/id ?run-id]
+               (or-join [?run ?value]
+                        (and [?form :seon.cluster.run.form/run ?run]
+                             [?form :seon.cluster.run.form/id ?value])
+                        (and [?receipt :seon.cluster.eval/run ?run]
+                             [?receipt :seon.cluster.eval/id ?value]))]
+             db run-id)]
+    (select-keys (ambiguous-identities db) (vec minted))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The loop
 ;;; ---------------------------------------------------------------------------
@@ -466,6 +521,26 @@
                          db assignment-tx))
                  "no window in which an assignment exists and the red
                   receipt explaining it does not")))
+
+         ;; THE CLASS, not the instance. Before 2026-08-07 the frozen
+         ;; form and its receipt both minted `(pr-str [run-id ordinal])`
+         ;; into two `:db.unique/identity` attributes, so EVERY problem
+         ;; identity an agent could name resolved to two entities and
+         ;; every `my.message/decline` about one was refused
+         ;; `:seon.cluster.message/ambiguous-about` — loudly, into an
+         ;; error fact, which no assertion here was reading. The form
+         ;; identity is now qualified by its own attribute
+         ;; (`seon.cluster.run/form-identity`), and this is the standing
+         ;; proof that no OTHER family reintroduces the class: it runs
+         ;; the resolver's own derivation over a real production drive
+         ;; and scopes it BY QUERY to the strings this run minted, so a
+         ;; new colliding family fails automatically — it is not a check
+         ;; for the one pair that broke.
+         (testing "no identity this run minted names two entities"
+           (is (= {} (run-identity-collisions db run-id))
+               "an agent holds an ordinary string, so a string held by
+                two identity attributes makes every message naming it
+                undeliverable"))
 
          (testing "an owner sees the problem through the ordinary transcript
                    renderer and may make a real declination join"

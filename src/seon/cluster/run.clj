@@ -523,6 +523,45 @@
   [request]
   [[:db.fn/call #'plan-call request]])
 
+;;; ---------------------------------------------------------------------------
+;;; The two identities a (run, ordinal) pair mints
+;;; ---------------------------------------------------------------------------
+
+;;; ONE (run, ordinal) PAIR NAMES TWO ENTITIES — the frozen form and its
+;;; receipt — AND BOTH IDENTITY ATTRIBUTES ARE `:db.unique/identity`. An
+;;; agent holds only the ordinary string, so
+;;; `seon.cluster.message/resolve-about` resolves it against EVERY
+;;; installed identity attribute and makes a tie a refusal rather than a
+;;; guess. Minting the same string for both families therefore made
+;;; `my.message/decline` (and any `my.message/send` naming a problem)
+;;; refuse `:seon.cluster.message/ambiguous-about` for every problem that
+;;; ever existed — the form freeze always commits the twin.
+;;;
+;;; The receipt's bare pair is the AGENT-FACING name: it is what
+;;; `seon.cluster.work/problem-id` returns and what the assignment
+;;; message asks an owner to repair. The form entity is internal, so the
+;;; form is the one that qualifies its string with its own attribute.
+;;; The law both derivations keep: a derived identity string names at
+;;; most one entity across all identity attributes.
+
+(defn receipt-identity
+  "The `:seon.cluster.eval/id` of the attempt at one run's ordinal.
+  Agent-facing: this is the problem identity an owner is asked to repair,
+  and the one `seon.cluster.work/problem-id` returns."
+  {:malli/schema [:=> [:cat ::id :seon.cluster.eval/ordinal]
+                  :seon.cluster.eval/id]}
+  [run-id ordinal]
+  (pr-str [run-id ordinal]))
+
+(defn form-identity
+  "The `:seon.cluster.run.form/id` of one run's frozen ordinal.
+  Qualified by its own attribute so it can never collide with the
+  receipt identity the same pair mints."
+  {:malli/schema [:=> [:cat ::id :seon.cluster.run.form/ordinal]
+                  :seon.cluster.run.form/id]}
+  [run-id ordinal]
+  (pr-str [:seon.cluster.run.form/id run-id ordinal]))
+
 (defn plan-call
   "Freeze the plan, inside the transaction.
   Assert the digest and the
@@ -580,7 +619,7 @@
           forms (into []
                       (map-indexed
                        (fn [ordinal form]
-                         (let [form-id (pr-str [id ordinal])
+                         (let [form-id (form-identity id ordinal)
                                namespace-name (or (:seon.ns/name form)
                                                   starting-namespace)]
                            (cond-> {:db/id form-id
@@ -657,7 +696,7 @@
   change is unrepresentable, strictly stronger than the epoch this
   replaced (custody revision 2026-07-28)."
   [db id ordinal]
-  (db/pull db '[*] [:seon.cluster.eval/id (pr-str [id ordinal])]))
+  (db/pull db '[*] [:seon.cluster.eval/id (receipt-identity id ordinal)]))
 
 (defn- receipt-run
   "The open run of a receipt request, or refuse."
@@ -697,7 +736,7 @@
   (let [{::keys [id]
          :seon.cluster.eval/keys [ordinal at]} request
         run (receipt-run db `receipt-start-call request)
-        receipt-id (pr-str [id ordinal])]
+        receipt-id (receipt-identity id ordinal)]
     (when (some? (current-receipt db id ordinal))
       (refuse! `receipt-start-call ::receipt-exists request))
     [{:seon.cluster.eval/id receipt-id

@@ -156,7 +156,7 @@
                        :seon.cluster.run.form/ordinal]
                   :seon.problems/id]}
   [run-id ordinal]
-  (pr-str [run-id ordinal]))
+  (run/receipt-identity run-id ordinal))
 
 (defn planner-scoped-attempt?
   "True when `run-id` belongs to a goal's caused-by message chain.
