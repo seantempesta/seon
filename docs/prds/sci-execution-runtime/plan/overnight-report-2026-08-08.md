@@ -399,6 +399,26 @@ completion — the ceiling is turns-since-completion) with poor cache
 hits. Driver's own errors recorded honestly (operator-side agent
 creation, one false teaching, undeclared attributes refused correctly).
 
+**The observer's arc account
+([whole-system-arc-observer-2026-08-08.md](../research/whole-system-arc-observer-2026-08-08.md))
+— the concurrency headline CONFIRMED by measurement** (20–30 s pairwise
+turn overlaps from opened-at/closed-at; custody clean; claiming
+exactly-once; ZERO cross-agent prompt leakage counted mention by
+mention; the empty-context blocker genuinely dead). Moved claims: the
+restart hid that recovery closes interrupted runs UNMARKED (zero
+interrupted-at datoms cluster-wide — the crash model's honesty clause
+undemonstrated); `tokens/estimate` runs 23–26% below DeepSeek (a 35.8k
+prompt passed a 32.7k budget); the provider failures are
+concurrency-correlated with the per-request HttpClient at ai.clj:1069 —
+plausibly ONE transport cause behind both lanes' symptoms. Its method
+section records four new vacuous-probe traps caught (the
+`d/datoms :avet` non-indexed silence is the one every future observer
+must know). POST-ARC WAVE DISPATCHED, five file-disjoint lanes: P17-S2
+(call preparation into production — the arc's exact failing call as
+live proof), provider transport (shared client + honest truncation, no
+retries), recovery-marks-interrupted, token calibration from recorded
+usage facts, and the control-token reply leak.
+
 ## Pending milestones
 
 - stop-completion lands → reset → 08-06 drive-arc rerun with observer →
