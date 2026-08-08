@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (29)
+## Blocker (30)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -43,14 +43,16 @@ See `README.md` for the convention.
 | [Isolate session deltas from other runs' context mutations](shared-context-session-delta-crosses-run-attribution.md) | blocker | per-run fork context wave |
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 | [Register the inline `[:fn]` predicate that refuses every corpus projection](an-inline-fn-predicate-in-src-refuses-every-corpus-projection.md) | blocker | changed-test selector lane |
+| [`init NAME --force` destroys the branch, then refuses its own second store open](init-force-destroys-the-branch-then-refuses-its-own-second-store-open.md) | blocker | operator launch-concurrency wave |
 | [Stop a schema-resource edit from bricking value admission in running clusters](a-schema-resource-edit-bricks-value-admission-in-every-running-cluster.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Read a bounded window of a file larger than the read ceiling](my-fs-read-refuses-a-bounded-window-of-a-large-file.md) | blocker | capability surface repair wave |
 | [Delete the `now` that `next-agent-work` never reads, and unbreak `curate/prove!`](next-agent-work-requires-a-now-it-never-reads.md) | blocker | session-curation proof repair |
 | [Confirm the background `:io` connection fix with a real `my.shell` drive](every-background-capability-request-loses-its-connection.md) | blocker | tool-exercise lane re-run against `f3b8eabda` |
 | [Make `my.web` resolvable in every cluster's SCI context](my-web-is-unreachable-from-agent-code.md) | blocker | capability surface repair wave |
 | [Reap the child and settle the receipt when an eval is interrupted](an-interrupted-my-shell-run-orphans-its-child-and-its-receipt.md) | blocker | capability surface repair wave |
+| [Stop `init NAME --force` from destroying a branch it then cannot refork](init-force-destroys-the-branch-then-refuses-its-own-second-store-open.md) | blocker | operator refork repair |
 
-## Friction (109)
+## Friction (110)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -67,6 +69,7 @@ See `README.md` for the convention.
 | [Give `seon.db` the branch and commit reads root needs](seon-db-has-no-branch-or-commit-reads.md) | friction | `my.branch` verb wave (W-C, [PRD](../../prds/sci-execution-runtime/plan/agent-desk-and-checkout-prd-2026-08-05.md)) |
 | [Pass the root :io executor to the work-launcher graph](flow-work-launcher-graph-omits-its-root-io-executor.md) | friction | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Hyperlith pin is 23 commits behind the upstream lockstep rework](hyperlith-pin-behind-lockstep-rework.md) | friction | upstream-delta sweep after seon.env Phase 0 |
+| [The dependency class-cache prepare races concurrent JVM launches](dependency-class-cache-prepare-races-concurrent-jvm-launches.md) | friction | operator launch-concurrency wave (found by overnight stress load) |
 | [Give system-generated messages arrival ordinals](system-generated-messages-omit-arrival-ordinals.md) | friction | message transaction-data repair |
 | [Attribute and fix the ~70 s complete publication](complete-publication-takes-seventy-seconds.md) | friction | publication velocity incident |
 | [Lead a failed init with its cause, not the event history](init-failure-dumps-entire-prepl-event-history.md) | friction | operator status-face hygiene |
