@@ -39,7 +39,8 @@ truth-checks, not gates.
 
 1. ~~Background work bounds~~ **RULED AND LANDED** (`aeb17ec7f`):
    config default 600 s (`:seon.config.effect.background/time-limit-ms`)
-   + optional per-call override winning in either direction, no clamp —
+   plus an optional per-call override winning in either direction, no
+   clamp —
    the owner's "great defaults and easy and intuitive overrides"
    verbatim; a fresh detached arm makes unbounded unrepresentable;
    proven live both directions
