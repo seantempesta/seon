@@ -307,12 +307,14 @@
     output :seon.render/output
     :seon.render.walk/keys [lookup]
     :as request}]
-  (let [remaining (volatile! (long (:seon.config.eval.result/max-nodes caps)))
-        rendered-eids (volatile! #{})
-        hops (long (get request :seon.render/distance 1))
+  (let [hops (long (get request :seon.render/distance 1))
         root-eid (eid-of db lookup)
         root-namespace-eid (when root-eid
                              (assigned-namespace-eid db root-eid))]
+    ;; The remaining node budget and the rendered-entity set are the
+    ;; walk's RETURN state: every node and child hands `[node state]`
+    ;; back to its parent, so the budget cannot be consumed by a branch
+    ;; the caller never received.
     (letfn [(elision-node [lookup attribute hops failure]
               (let [message (:seon.error/message failure)]
                 (cond-> {:seon.render.walk/lookup lookup
@@ -335,55 +337,72 @@
                          :seon.render.walk/changed-at 0
                          :seon.error/value failure}
                   attribute (assoc :seon.render.walk/attribute attribute))))
-            (child [connection hops]
+            (child [state connection hops]
               (let [{:seon.render.walk/keys [attribute target lookup]
                      failure :seon.error/value} connection]
                 (cond
-                  failure (marker (or lookup attribute) attribute hops failure)
-                  target (node (entity-lookup db target)
-                               target attribute hops)
-                  lookup (node lookup (eid-of db lookup) attribute hops)
+                  failure
+                  [(marker (or lookup attribute) attribute hops failure) state]
+
+                  target
+                  (node state (entity-lookup db target) target attribute hops)
+
+                  lookup
+                  (node state lookup (eid-of db lookup) attribute hops)
+
                   :else
-                  (marker attribute attribute hops
-                          {:seon.error/kind ::no-such-entity
-                           :seon.error/message
-                           "A derived connection had no target."}))))
-            (node [lookup eid attribute hops]
+                  [(marker attribute attribute hops
+                           {:seon.error/kind ::no-such-entity
+                            :seon.error/message
+                            "A derived connection had no target."})
+                   state])))
+            (children [state connections hops]
+              (reduce
+               (fn [[nodes state] connection]
+                 (let [[child-node state] (child state connection hops)]
+                   [(conj nodes child-node) state]))
+               [[] state]
+               connections))
+            (node [state lookup eid attribute hops]
               (let [base (cond-> {:seon.render.walk/lookup lookup
                                   :seon.render/distance hops
                                   :seon.render.walk/changed-at
                                   (entity-last-changed db eid)}
                            attribute
-                           (assoc :seon.render.walk/attribute attribute))]
+                           (assoc :seon.render.walk/attribute attribute))
+                    state (update state ::remaining dec)]
                 (cond
-                  (neg? (vswap! remaining dec))
-                  (elision-node lookup attribute hops
-                                {:seon.error/kind ::elided
-                                 :seon.error/message
-                                 (str "elided — this neighbourhood is larger "
-                                      "than the configured node cap")})
+                  (neg? (long (::remaining state)))
+                  [(elision-node lookup attribute hops
+                                 {:seon.error/kind ::elided
+                                  :seon.error/message
+                                  (str "elided — this neighbourhood is larger "
+                                       "than the configured node cap")})
+                   state]
 
                   (nil? eid)
-                  (assoc base :seon.error/value
-                         {:seon.error/kind ::no-such-entity
-                          :seon.error/message
-                          (str "Nothing in the database answers to "
-                               (pr-str lookup) ".")})
+                  [(assoc base :seon.error/value
+                          {:seon.error/kind ::no-such-entity
+                           :seon.error/message
+                           (str "Nothing in the database answers to "
+                                (pr-str lookup) ".")})
+                   state]
 
-                  (contains? @rendered-eids eid)
-                  (assoc base :seon.render.walk/back-reference? true)
+                  (contains? (::rendered state) eid)
+                  [(assoc base :seon.render.walk/back-reference? true) state]
 
                   :else
-                  (let [_ (vswap! rendered-eids conj eid)
+                  (let [state (update state ::rendered conj eid)
                         pulled (try
                                  (concrete-entity db eid)
                                  (catch Throwable _ nil))]
                     (if (or (nil? pulled) (nil? (:db/id pulled)))
-                      (assoc base :seon.error/value
-                             {:seon.error/kind ::no-such-entity
-                              :seon.error/message
-                              (str "Nothing in the database answers to "
-                                   (pr-str lookup) ".")})
+                      [(assoc base :seon.error/value
+                              {:seon.error/kind ::no-such-entity
+                               :seon.error/message
+                               (str "Nothing in the database answers to "
+                                    (pr-str lookup) ".")})
+                       state]
                       (let [render-distance
                             (namespace-render-distance
                              root-namespace-eid eid pulled hops)
@@ -443,21 +462,29 @@
                               (assoc :seon.render/output rendered-output))]
                         (cond
                           (pos? hops)
-                          (assoc with-render :seon.render.walk/neighbours
-                                 (mapv #(child % (dec hops)) connections))
+                          (let [[neighbours state]
+                                (children state connections (dec hops))]
+                            [(assoc with-render
+                                    :seon.render.walk/neighbours neighbours)
+                             state])
 
                           (seq connections)
-                          (assoc with-render :seon.render.walk/neighbours
-                                 [(marker
-                                   lookup nil hops
-                                   {:seon.error/kind ::elided
-                                    :seon.error/message
-                                    "elided connections at the requested distance cap"})])
+                          [(assoc with-render :seon.render.walk/neighbours
+                                  [(marker
+                                    lookup nil hops
+                                    {:seon.error/kind ::elided
+                                     :seon.error/message
+                                     "elided connections at the requested distance cap"})])
+                           state]
 
-                          :else with-render)))))))]
+                          :else [with-render state])))))))]
       (let [tree
             (if root-eid
-              (node lookup root-eid nil hops)
+              (first
+               (node {::remaining
+                      (long (:seon.config.eval.result/max-nodes caps))
+                      ::rendered #{}}
+                     lookup root-eid nil hops))
               {:seon.render.walk/lookup lookup
                :seon.render/distance hops
                :seon.render.walk/changed-at 0
