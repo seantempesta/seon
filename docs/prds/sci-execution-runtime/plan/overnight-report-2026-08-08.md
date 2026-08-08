@@ -469,6 +469,24 @@ usage facts, and the control-token reply leak.
   loop owner as a sealed-contract call, with bootstrap/eval.drive named
   as the census targets.
 
+- **P17-S2 LANDED — call preparation LIVE IN PRODUCTION**
+  (`1029a4de7`..`1d5b884a2`, sci pin `6ee57c9` reviewed + approved).
+  The blocker had a second half: first-party functions are raw
+  `clojure.lang.Var`, not `sci.lang.Var`, so the hook gate silently
+  opted them out — fixed at the fork (`identity-bearing-var?`, gate
+  suite green). Ruling-2 all-or-nothing derivation replaces S1's
+  overruled subset combinatorics; ruling #41's leave-off-the-database
+  shortcut survives; hot-path gated by `prepared-symbols` (243 ns
+  empty-plan, benchmark committed). LIVE: an agent's 2-arg
+  `ensure-entity!` received its supplied connection and committed — the
+  first production call preparation ever. Found + filed: `transact!`
+  returns a different shape depending on a dynamic var (new blocker →
+  S4; repaired at the one live site, one latent at cluster.clj:1978);
+  the supplied-connection custody test was red since S1 (namespace-only
+  runs hid it) — now admitted. **Both of the arc's hard walls (call
+  preparation, provider transport) are closed — a focused re-drive
+  follows.**
+
 ## Pending milestones
 
 - stop-completion lands → reset → 08-06 drive-arc rerun with observer →
