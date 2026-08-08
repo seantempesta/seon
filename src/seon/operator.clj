@@ -766,18 +766,29 @@
 (defn- refork-under-lock!
   [{managed-root :seon.operator/managed-root
     source-commit :seon.source/commit-id
+    supplied-store :seon.store/store
     :as request}]
   ;; No store is held ACROSS the destructive arm. Cleanup stops the live
   ;; instance, and the last instance out releases the process-root store
   ;; with its flock (`seon.cluster/release-root-store!`), so a store
-  ;; captured before cleanup is a released connection by the time the
+  ;; captured before cleanup can be a released connection by the time the
   ;; fork needs it — the whole refork then failed with
   ;; `:connection-has-been-released` after the old branch was already
-  ;; destroyed. Each arm acquires its own; cleanup validates the supplied
-  ;; store after its stop, and the fork acquires fresh afterwards.
+  ;; destroyed.
+  ;;
+  ;; So the fork RE-ASKS after the destructive arm rather than reusing a
+  ;; captured value, and `acquire-operation-store!` answers from the one
+  ;; fact that says whether a store is live: its flock's validity. A
+  ;; supplied store that cleanup released fails that test and the fork
+  ;; opens a fresh one; a supplied store cleanup left alone passes it and
+  ;; is reused. Passing `nil` here instead lost the second case, and
+  ;; `bin/seon init NAME --force` — whose child JVM opens the store
+  ;; itself, outside the running-instance holder table — destroyed the
+  ;; branch and then refused its own second open of a store it still
+  ;; held.
   (cleanup-cluster-under-lock! request)
   (let [[operation-store release?]
-        (acquire-operation-store! managed-root nil)]
+        (acquire-operation-store! managed-root supplied-store)]
     (try
       (registry/ensure-cluster!
        {:seon.store/store operation-store

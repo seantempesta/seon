@@ -196,10 +196,18 @@
 ;;; parent refuses its own second open, child JVM then ACQUIRES). This
 ;;; table is the process's own holdings; it is not a second fence.
 (defn- acquire-flock!
-  "Acquire the exclusive flock on `lock-path`, or nil when it is held."
+  "Acquire the exclusive flock on `lock-path`.
+
+  Returns the lock, `::held-by-this-process` when THIS JVM already holds
+  it, or nil when another live process does. Those are different facts
+  and the caller must not conflate them: reporting a self-collision as a
+  foreign holder sends the reader hunting for an orphan process that
+  does not exist, which is exactly what `init NAME --force` did after it
+  had already destroyed the branch."
   [lock-path]
   (locking held-flocks
-    (when-not (contains? @held-flocks lock-path)
+    (if (contains? @held-flocks lock-path)
+      ::held-by-this-process
       (let [file (io/file lock-path)
             _ (some-> (.getParentFile file) (.mkdirs))
             channel (FileChannel/open
@@ -213,12 +221,12 @@
                      ; if it ever happens some other code in this JVM
                      ; holds the file, so LEAK the descriptor rather
                      ; than close it and drop the process's fence
-                     ::foreign-channel-in-this-jvm)
+                     ::held-by-this-process)
                    (catch Throwable failure
                      (.close channel)
                      (throw failure)))]
         (cond
-          (keyword? lock) nil
+          (keyword? lock) lock
           lock (do (swap! held-flocks assoc lock-path lock) lock)
           ; no lock of ours on this file, so closing drops nothing
           :else (do (.close channel) nil))))))
@@ -274,9 +282,11 @@
   under branch-per-cluster the store is PER PROCESS ROOT and every
   cluster is a branch of it.
   Order is the contract: acquire the non-blocking exclusive flock on
-  `(lock-file store-dir)` FIRST — a held lock refuses immediately
-  ({::rule ::held-elsewhere}, including a second open in this same
-  process) — then existence-check, then create or verify: a store whose
+  `(lock-file store-dir)` FIRST — a held lock refuses immediately, and
+  the refusal says WHOSE hold it is: `{::rule ::held-elsewhere}` when
+  another live process holds it, `{::rule ::held-by-this-process}` when
+  this JVM already opened it and has not released it — then
+  existence-check, then create or verify: a store whose
   genesis is incomplete (`:db` present, `:branches` missing — the
   first-create kill window) is deleted and recreated; a complete store
   is connected and its main branch verified readable. Returns the store
@@ -293,11 +303,23 @@
   ; id, the genesis probe, and the returned value all name one directory
   (let [dir (canonical-path store-dir)
         lock-path (lock-file dir)
-        lock (or (acquire-flock! lock-path)
-                 (refuse! ::held-elsewhere
-                          (str "the store at " dir
-                               " is held by a live process")
-                          {::dir dir ::lock-file lock-path}))]
+        held (acquire-flock! lock-path)
+        lock (cond
+               (= ::held-by-this-process held)
+               (refuse! ::held-by-this-process
+                        (str "the store at " dir
+                             " is already open in this process (pid "
+                             (.pid (java.lang.ProcessHandle/current))
+                             "); release it before opening it again")
+                        {::dir dir ::lock-file lock-path})
+
+               (nil? held)
+               (refuse! ::held-elsewhere
+                        (str "the store at " dir
+                             " is held by another live process")
+                        {::dir dir ::lock-file lock-path})
+
+               :else held)]
     (try
       (let [probe-configuration (datahike-configuration dir)
             exists? (d/database-exists? probe-configuration)

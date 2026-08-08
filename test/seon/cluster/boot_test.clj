@@ -1266,6 +1266,79 @@
       (finally
         (delete-recursively! repository-root)))))
 
+(deftest ^{:seon.test/long "Reforks through the operator's own child-JVM shape on a real store."}
+  refork-does-not-collide-with-the-store-its-caller-already-holds
+  ;; The second shape of the same class. The sibling test above supplies a
+  ;; RUNNING instance's store, which the fork arm could also find in the
+  ;; running-instance holder table, so the collision stayed hidden. The
+  ;; operator's own `init NAME --force` has no running instance: its child
+  ;; JVM opens the store directly (`script/seon/fresh_operator.clj`,
+  ;; `named-init-form`) and hands it to the composed verb. The fork arm
+  ;; then asked for a store while ignoring the one it was given, opened a
+  ;; second one, and the flock refused the command's collision with
+  ;; ITSELF — after the destroy arm had already retired the branch. The
+  ;; class is "an arm re-opens a resource its own caller still holds"; the
+  ;; branch existing afterwards is what proves it dead.
+  (let [repository-root (.getCanonicalPath (io/file (bare-root)))
+        managed-root (.getCanonicalPath (io/file repository-root "managed"))
+        cluster-root (str (io/file managed-root "data" "clusters"))
+        cluster-name "refork-selfheld"]
+    (try
+      (.mkdirs (io/file cluster-root))
+      (let [published (cluster/refresh-source! cluster-root)]
+        (operator/claim-root!
+         {:seon.operator/repository-root repository-root
+          :seon.operator/managed-root managed-root
+          :seon.boot/cluster-name cluster-name})
+        (let [opened (store/open-store!
+                      {:seon.store/dir (str (io/file cluster-root "store"))})]
+          (try
+            (registry/ensure-cluster!
+             {:seon.store/store opened
+              :seon.boot/cluster-name cluster-name
+              :seon.source/commit-id (:seon.source/commit-id published)})
+            (is (contains? (registry/roster opened)
+                           (registry/cluster-branch cluster-name)))
+            (let [result (operator/refork!
+                          {:seon.operator/repository-root repository-root
+                           :seon.operator/managed-root managed-root
+                           :seon.boot/cluster-name cluster-name
+                           :seon.source/commit-id
+                           (:seon.source/commit-id published)
+                           :seon.store/store opened})]
+              (is (true? (:seon.cluster/created? result))
+                  (str "the refork must not refuse its caller's own store: "
+                       (pr-str result)))
+              (is (contains? (registry/roster opened)
+                             (registry/cluster-branch cluster-name))
+                  "the branch must exist after the forced refork"))
+            (finally
+              (store/release-store! opened)))))
+      (finally
+        (delete-recursively! repository-root)))))
+
+(deftest a-second-store-open-in-this-process-says-so
+  ;; `::held-elsewhere` was a false statement whenever the holder was us,
+  ;; and it is the reason the refork above read as environment churn: the
+  ;; reader goes looking for an orphan process that does not exist. The
+  ;; process's own holdings are a fact this namespace already records.
+  (let [root (bare-root)
+        dir (str (io/file root "store"))
+        opened (store/open-store! {:seon.store/dir dir})]
+    (try
+      (let [refusal (try
+                      (store/open-store! {:seon.store/dir dir})
+                      (catch clojure.lang.ExceptionInfo error
+                        (ex-data error)))]
+        (is (= :seon.cluster.store/held-by-this-process
+               (:seon.cluster.store/rule refusal))
+            (pr-str refusal))
+        (is (str/includes? (str (:seon.cluster.store/dir refusal)) "store")
+            (pr-str refusal)))
+      (finally
+        (store/release-store! opened)
+        (delete-recursively! root)))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Boot recovery — a dead holder's wreckage is settled before anything resumes
 ;;; ---------------------------------------------------------------------------
