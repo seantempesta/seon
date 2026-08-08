@@ -12,7 +12,7 @@
                [:seon.render/namespace
                 {:optional true}
                 :seon.render/namespace]
-               [:seon.render/value :any]
+               [:seon.render/value :seon.render/value]
                [:seon.sci.admit/caps :seon.sci.admit/caps]
                [:seon.sci.eval/time-limit-ms
                 :seon.sci.eval/time-limit-ms]
@@ -26,7 +26,7 @@
                [:seon.render/namespace
                 {:optional true}
                 :seon.render/namespace]
-               [:seon.render/value :any]
+               [:seon.render/value :seon.render/value]
                [:seon.render/output-schema
                 :seon.render/output-schema]],
               :candidates [:vector :seon.fn/sym],
@@ -49,7 +49,7 @@
                seon.render.hiccup/hiccup?],
               :html [:or :qualified-symbol :seon.render/hiccup],
               :namespace :symbol,
-              :output :any,
+              :output [:enum :seon.render/ai :seon.render/html],
               :profile :seon.render.profile/profile,
               :output-schema :qualified-keyword,
               :package
@@ -76,8 +76,22 @@
                 :seon.render.package/size]],
               :page [:vector :seon.render/hiccup],
               :surface-id [:string {:min 9}],
-              :unit [:map-of :qualified-keyword :any],
-              :value :any,
+              :unit
+              [:map-of :qualified-keyword
+               [:any
+                {:seon.schema.admission/exemption
+                 :seon.schema.admission/polymorphic-boundary
+                 :seon.schema.admission/reason
+                 "A render unit is an open map from render keys to their own declared values; each key is bounded by its own schema, so the map-of value is genuinely heterogeneous here."
+                 :gen/return nil}]],
+              :value
+              [:any
+               {:seon.schema.admission/exemption
+                :seon.schema.admission/polymorphic-boundary
+                :seon.schema.admission/reason
+                "A rendered value is any admitted Clojure value; the value floor bounds what prints, not this schema."
+                :gen/elements [nil true 0 "" :k [] {} #{}]}],
+              :rendering [:set :qualified-symbol],
               :would-fall-to-floor? :boolean,
               :ambiguous [:= true]
               :ambiguous-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a value matching more than one declared render producer"} [:seon.render/ambiguous :seon.render/ambiguous] [:seon.error/message :seon.error/message]]
