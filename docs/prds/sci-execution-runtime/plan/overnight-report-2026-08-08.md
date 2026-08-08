@@ -70,7 +70,17 @@ truth-checks, not gates.
    the parent command's root lock through the `-under-lock!`
    convention. Needs a design ruling, recorded with the deadlock
    analysis.
-5. **Does a component ref admit the component value?**
+5. ~~Component ref~~ **RULED (option 1) AND LANDED** (`e7bafc957`):
+   the widening derives from the declared `:seon.db/component true`
+   property at ONE choke point (`compilable-form` — every compile path
+   passes it; a new site cannot forget it); compiled shapes widen,
+   persisted forms untouched; shape-selection risk discharged by probe.
+   LIVE: the first agent-authored contracted function through the full
+   production path — defined, called (receipt `{:label "b" :amount 9}`),
+   contract queried back — bootstrap-authored forms (no model key in
+   the lane; model authorship lands with the arc). Both issues archived.
+   (Original decision text follows for the record.)
+   **Does a component ref admit the component value?**
    ([issue](../../../seon/issues/archive/a-component-value-is-refused-by-its-own-ref-shape.md),
    three options, recommendation marked) — `:seon.db/ref` admits
    int/string/lookup-tuple but never the component value itself; all 46
