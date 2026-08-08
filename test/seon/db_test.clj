@@ -422,7 +422,17 @@
        (is (= (revision earlier)
               (revision (db/as-of database
                                   (dec (long (db/basis-t database))))))
-           "the same fixed point derives the same revision")))))
+           "the same fixed point derives the same revision")
+       ;; A run renders at the instant it opens, when its opening transaction
+       ;; IS the origin's max-tx. Datahike's own cache-key guard is strictly
+       ;; past and excludes exactly that value; taking it literally sent the
+       ;; 2026-08-08 re-drive's prompt back to the 509-character error on its
+       ;; first turn. An as-of at any committed point is a fixed point.
+       (is (false?
+            (boolean
+             (:datahike.read/cache-eligible?
+              (revision (db/as-of database (long (db/basis-t database)))))))
+           "an as-of at the origin's own max-tx still has an identity")))))
 
 (deftest pull-many-preserves-input-alignment-with-one-shared-plan
   (test-support/with-database

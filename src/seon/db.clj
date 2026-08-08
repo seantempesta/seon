@@ -295,10 +295,19 @@
   (if (instance? AsOfDB database)
     (let [origin (dbi/-origin database)
           time-point (dbi/-time-point database)]
+      ;; The upper bound is `<=`, where datahike's own `db-cache-key` uses
+      ;; `<`. An as-of value is a fixed point at ANY committed time point —
+      ;; its content is the datoms with tx <= that point and the origin
+      ;; advancing never changes them — and the revision already carries the
+      ;; origin's commit id, so nothing is claimed fresh that is not.
+      ;; Datahike's stricter bound is its own cache-admission policy; taking
+      ;; it literally cost the 2026-08-08 re-drive its context a second time,
+      ;; because a run renders at the instant it opens, when its opening
+      ;; transaction IS the origin's max-tx and no as-of is yet strictly past.
       (when (and (some? (datahike.db/committed-value-identity origin))
                  (integer? time-point)
                  (<= const/tx0 (long time-point))
-                 (< (long time-point) (long (dbi/-max-tx origin))))
+                 (<= (long time-point) (long (dbi/-max-tx origin))))
         {::context (:cache-context origin)
          ::fixed-point (long time-point)}))
     (when (some? (datahike.db/committed-value-identity database))
