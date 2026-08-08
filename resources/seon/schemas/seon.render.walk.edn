@@ -16,7 +16,13 @@
                      {:optional true}
                      :seon.error/value]],
                    :found-depth [:int {:min 0}],
-                   :lookup :any,
+                   :lookup
+                   [:any
+                    {:seon.schema.admission/exemption
+                     :seon.schema.admission/polymorphic-boundary
+                     :seon.schema.admission/reason
+                     "A walk lookup names an entity by any identity: an eid, a keyword/string/uuid identity value, or a [attribute value] lookup-ref tuple."
+                     :gen/elements [1 :k "id" [:seon.db/id 1]]}],
                    :path [:vector [:or :keyword :int]],
                    :request
                    [:map
@@ -54,7 +60,7 @@
                      :seon.render.walk/branch]
                     [:seon.render/output
                      {:optional true}
-                     :seon.render/output]
+                     :seon.render/rendered]
                     [:seon.error/value
                      {:optional true}
                      :seon.error/value]
