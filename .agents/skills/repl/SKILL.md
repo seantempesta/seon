@@ -85,17 +85,27 @@ tracks the namespace in effect while reading
 - A bare symbol is a plan form only when it occupies its own source line and
   the reply also contains structured code. This includes a trailing standalone
   symbol that a human might have intended as prose.
-- Other text becomes single-`;` source comments attached to the next form;
-  trailing or pure prose becomes a comment-only source. This is an internal
+- Other text becomes single-`;` source comments attached to a form — the one
+  it precedes, or for a trailing span the one it follows. This is an internal
   parser representation of agent-written input, never a displayed result.
 - Markdown fence lines are stripped before reading because backticks otherwise
   read as plausible symbols.
 
+EVERY PLAN SOURCE CARRIES A READER EVENT. Prose alone is never a plan source:
+a comment-only source has no event, so nothing evaluates it and no
+`:seon.cluster.eval` receipt is ever written, and the run closes with an
+unsettled form of its own — the 105-forms/102-receipts gap of 2026-08-08,
+whose three instances were deepseek-v4-flash chat-template control markup
+(`<assistant1>`, `<｜｜DSML｜｜AgentThoughts>…`) arriving in the completion's
+`content` field and reading as prose
+(`docs/seon/issues/a-runs-last-form-can-close-without-a-receipt.md`).
+
 Those classifications and the exact-source return contract are current at
-`src/seon/cluster/reply.clj:20-48,143-244,310-355`. There is no delimiter
+`src/seon/cluster/reply.clj:20-60,155-268,330-390`. There is no delimiter
 auto-repair in this path. Unbalanced or malformed code returns
-`:seon.cluster.reply/unreadable`; an empty reply returns
-`:seon.cluster.reply/no-forms` (`src/seon/cluster/reply.clj:310-355`).
+`:seon.cluster.reply/unreadable`; a reply with no code — empty, or whole-text
+prose — returns `:seon.cluster.reply/no-forms` carrying that text
+(`src/seon/cluster/reply.clj:330-390`).
 
 Practical rule: write code as ordinary balanced Clojure. Agent-written source
 may use comments for thinking preserved beside a form. **[TARGET — owner
