@@ -51,11 +51,12 @@ See `README.md` for the convention.
 | [Reap the child and settle the receipt when an eval is interrupted](an-interrupted-my-shell-run-orphans-its-child-and-its-receipt.md) | blocker | capability surface repair wave |
 | [Stop `init NAME --force` from destroying a branch it then cannot refork](init-force-destroys-the-branch-then-refuses-its-own-second-store-open.md) | blocker | operator refork repair |
 
-## Friction (110)
+## Friction (111)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Unwedge the flow test that hangs without its namespace siblings](a-flow-test-hangs-when-run-without-its-namespace-siblings.md) | friction | suite-speed tiering (platform tier granularity) |
+| [Scope the JVM operator's per-root work off the installation lock](jvm-operator-work-takes-the-installation-lock-for-one-root.md) | friction | operator lock-scope follow-up |
 | [Record the activation closure's schema keys and required attributes](activation-closure-records-no-schema-keys.md) | friction | boot velocity incident (co-hosted second boot) |
 | [Lead a boot refusal with the layer that refused and why](boot-refusal-has-no-render-producer.md) | friction | operator status-face hygiene |
 | [Make `my.fs/write` and `my.shell/run` docstrings teach the shapes they accept](my-fs-write-docstring-hides-its-own-request-shape.md) | friction | capability surface repair wave |
