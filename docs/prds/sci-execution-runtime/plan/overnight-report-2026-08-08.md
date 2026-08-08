@@ -38,7 +38,14 @@ truth-checks, not gates.
    rule: the unified decision path's two refusals have mismatched faces
    (flat typed value vs ex-info surfacing as a Datahike write-rejected
    prose string).
-4. (accumulating)
+4. **Installation-lock scope for single-root operator work**
+   ([issue](../../../seon/issues/jvm-operator-work-takes-the-installation-lock-for-one-root.md))
+   — cleanup/collect/refork still serialize on the installation lock;
+   the obvious per-root change DEADLOCKS because a child JVM inherits
+   the parent command's root lock through the `-under-lock!`
+   convention. Needs a design ruling, recorded with the deadlock
+   analysis.
+5. (accumulating)
 
 ## Landed overnight (chronological, with commits)
 
@@ -255,6 +262,21 @@ moment default stands.
   unrepresentable, not just fixed. Zero production change; 49/339 green
   ×3; platform tier clean. One new ugly-output issue: a bare `case`
   over print faces throws "No matching clause: " naming nothing.
+
+- **Operator reliability landing COMPLETE** (`912199d73`..`e83fd4bae`):
+  lifecycle locks scoped per root (locking a foreign root
+  unconstructable; waiting loud with holder pid/command/duration; 15-min
+  backstop refusing with flat facts); the recurred refork class fixed at
+  BOTH causes (the composition discarded the store it was handed; the
+  refusal said held-elsewhere about the process's OWN hold — now
+  held-by-this-process naming the pid, and the orchestrator's
+  census-contradiction hypothesis is REFUTED: the wording lied, the
+  census never did); a real POSIX descriptor hazard caught by the
+  lane's own regression before shipping (closing any descriptor drops
+  the process's lock — threads now claim in-process first). Live proof:
+  the exact destructive reproduction now reforks cleanly; isolated
+  roots run concurrent lifecycle commands in 0.092 s against a held
+  foreign lock.
 
 ## Pending milestones
 
