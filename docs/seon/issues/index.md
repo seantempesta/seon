@@ -16,10 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (25)
+## Blocker (26)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Resolve the declaration population once per admission, not once per node](value-admission-resolves-the-declaration-population-per-node.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Re-root the foreign-write custody fence on the environment](foreign-write-fence-reads-only-the-dynamic-var.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Commit every dropped core-fault observation](dropped-core-fault-count-is-not-durable.md) | blocker | fault-committer durability wave |
 | [Make the schema environment an explicit argument, not an ambient binding](schema-environment-is-ambient-not-explicit.md) | blocker | environment-as-a-value design session |
@@ -41,10 +42,12 @@ See `README.md` for the convention.
 | [Deliver the render proc's stop completion after a settled stream](render-proc-never-delivers-its-stop-completion-after-a-settled-stream.md) | blocker | render shutdown repair wave |
 | [Register the inline `[:fn]` predicate that refuses every corpus projection](an-inline-fn-predicate-in-src-refuses-every-corpus-projection.md) | blocker | changed-test selector lane |
 
-## Friction (104)
+## Friction (106)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Delete flow's binding conveyance so the environment refusal is load-bearing](flow-binding-conveyance-outlives-the-environment-refusal.md) | friction | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
+| [Carry the arm across the effect door, and rule on the background arm](the-effect-door-runs-capability-handlers-unarmed.md) | friction | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Stop two identity attributes from naming one string](one-identity-string-names-two-entities.md) | friction | config/cluster identity design gate |
 | [Give `seon.db` the branch and commit reads root needs](seon-db-has-no-branch-or-commit-reads.md) | friction | `my.branch` verb wave (W-C, [PRD](../../prds/sci-execution-runtime/plan/agent-desk-and-checkout-prd-2026-08-05.md)) |
 | [Carry the submitting environment across the IO half of the work launcher](flow-io-work-does-not-carry-its-environment.md) | friction | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |

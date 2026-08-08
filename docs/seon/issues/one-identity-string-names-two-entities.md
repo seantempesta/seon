@@ -94,3 +94,49 @@ The run-family half of that invariant is already a standing regression:
 "no identity this run minted names two entities", which runs the same
 derivation and scopes it by query to one run's own minted strings — so a
 new family colliding with a run identity fails automatically.
+
+## Third instance, found 2026-08-08 by the wave audit — a source digest
+
+The scoping that makes the run regression cheap is also what keeps it blind:
+it only sees strings ONE RUN minted, so a collision between two families
+that never involve a run identity is invisible to it. Running the
+acceptance query above unscoped over the live `default` cluster found one:
+
+```clojure
+{:value "3e4395b400fb588cdb5d83d57f1c32afd40ab5e646c779019b739b88f3fb"
+ :attributes [:seon.activation/source-digest :seon.source/digest]
+ :entities [24028 24029]}
+```
+
+Unlike the two earlier instances this one is DECLARED, so it recurs in every
+fresh cluster rather than being data rot:
+`:seon.activation/source-digest` is
+`[:and {:seon.db/identity true} :seon.source/digest]`
+(`resources/seon/schemas/seon.activation.edn:1-2`) — an identity attribute
+built by construction from another identity attribute's value. The activation
+closure and the source it was derived from therefore always hold the same
+digest string under two identity attributes.
+
+A fourth family has the same declared shape and will collide the moment the
+values coincide: `:seon.schema.shape/fingerprint`,
+`[:and {:seon.db/identity true} :seon.source/digest]`
+(`resources/seon/schemas/seon.schema.shape.edn:1-2`).
+
+The same probe re-confirmed the cluster-name instance
+(`"default"` under `:seon.cluster/name` and `:seon.config/cluster`) and
+showed the run/form instance still present in that store's PRE-FIX data —
+that JVM was started before `0f67e6003` (`seon.cluster.run/form-identity`
+does not resolve in it), so those rows are history, not a regression.
+
+Probe, read-only, 2026-08-08 (40 identity attributes, 10,773 identified
+rows): derive every `:db.unique/identity` attribute by query, pull every
+`[?e ?a ?v]` for each, group by value, keep the values held under more than
+one attribute.
+
+### Added acceptance criterion
+
+The class regression must be UNSCOPED to be a class regression: one
+recurring test derives the identity attributes by query and asserts no value
+is held by two of them across the whole database, so a newly declared
+derived identity attribute fails on the day it is declared. The run-scoped
+assertion in `seon.gen.loop-test` stays as the fast in-drive check.
