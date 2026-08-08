@@ -88,10 +88,32 @@ in-run (n-agent 16.5 s; situation-totality 114 s). Owner-directed
 amendment to ruling 7's gate: Phase 1 launches on this evidence; the
 COMPLETE bare run moves to the Phase 1 integration checkpoint. Full-suite
 runs are held until then — lanes use focused/changed selectors only.
-seon.env PHASE 1 LAUNCHED ([specs](seon-env-phase1-specs-2026-08-07.md):
-W1 env+constructor, W2 interrupt arm, W3 hook→fork pin, W4 per-fork
-install measurement). THEN: integration checkpoint (complete bare run) →
-reset → drive-arc
+seon.env PHASE 1 LANDED (all four lanes; PRD findings log is the
+record). OVERNIGHT AUTONOMOUS PLAN (owner-directed 2026-08-07 night:
+"keep chasing bugs… but keep your eye on the prize… higher level fixes
+that dissolve other classes… run autonomously; always be planning and
+reviewing"):
+
+1. In flight: render-proc stop-completion blocker; warning-yield sweep
+   (+ issues-index clean).
+2. Both land → INTEGRATION CHECKPOINT: complete bare `bin/test` at a
+   coherent tree (expectation: zero known reds — all three pre-existing
+   reds closed as real defects).
+3. Checkpoint green → `bin/seon reset --force` → DRIVE-ARC RERUN (the
+   first-turn proof; DeepSeek drives pre-authorized) with a dedicated
+   observer lane. Message delivery works again (identity-collision fix),
+   so odds materially better than 08-06.
+4. Class-dissolver lanes (the prize), dependency-ready, sealed designs
+   only: (a) the audit blocker
+   [schema-environment-is-ambient-not-explicit](../../../seon/issues/schema-environment-is-ambient-not-explicit.md)
+   — Defect I at its root owner, per the sealed env design; (b) P17-S1
+   provider rows + plan derivation against the LANDED hook (r2 as
+   amended by PRD ruling 2). Queued behind them: activation-closure
+   vacuity, one-identity-string second instance, cohosted-boot 11×,
+   refused-messages render producer, shadowed-var wall.
+5. Owner-input items PARKED for morning: Phase 2 design iteration
+   judgments, seon.db surviving call spellings, docs-as-facts design.
+THEN: reset → drive-arc
 rerun (the first-turn proof) → step 5 R6 singles → step 6 recurring
 deterministic drive in bin/test (graduation gate) → messaging wave
 (spec ready, result/eid-N ruled).
