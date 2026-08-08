@@ -532,6 +532,26 @@
      :seon.blob/staged-writes settlement-stages
      :seon.db/tx-data tx-data}))
 
+;;; AN ESCALATION GOES TO SOMEONE ELSE. Escalating a refused phase to the very
+;;; agent whose run was refused is not a notification — the run's own facts
+;;; already say what happened and the agent reads them in its next prompt — but
+;;; it IS a wake, because delivery is the wake attribute
+;;; (`wake-attributes` is `#{:seon.cluster.message/to}`). So the failing agent
+;;; mails itself, wakes on its own message, meets the same unfixed cause, and
+;;; mails itself again. `seon.error/commit-tx`'s docstring names that exact
+;;; cycle — error -> message -> wake -> turn -> error — and already skips a
+;;; recurrence escalation to the attributed agent for this reason; this site
+;;; simply never asked.
+;;;
+;;; Measured on cluster `default`, 2026-08-08: `:seon.config.error/escalate-to`
+;;; names root and root is the only agent, so every refused phase of root's
+;;; woke root about root — nine paid provider calls in twenty minutes with no
+;;; external stimulus, 66,591 completion tokens, each lap re-reading the same
+;;; broken 509-character context and committing the message that started the
+;;; next lap.
+;;;
+;;; A cross-agent escalation is unchanged: a supervisor still hears about a
+;;; worker's refused phase, which is the whole point of the dial.
 (defn- refusal-terminal-data
   [cluster database now agent-id run-id process ordinal receipt source]
   (let [escalate-to (:seon.config.error/escalate-to cluster)
@@ -544,6 +564,7 @@
         value (error/value (first recording))
         escalation
         (when (and escalate-to
+                   (not= escalate-to agent-id)
                    (db/q '[:find ?agent .
                            :in $ ?agent-id
                            :where [?agent :seon.cluster.agent/id ?agent-id]]

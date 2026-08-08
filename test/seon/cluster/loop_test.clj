@@ -817,6 +817,54 @@
                         (edn/read-string
                          (:seon.ai.attempt/settings-edn last-row))))))))))))))
 
+;;; THE class regression for the self-feeding fault loop (2026-08-08 live
+;;; drive). Delivery is the wake attribute, so any message a refused phase
+;;; commits to the failing agent is a wake, and the woken turn meets the same
+;;; unfixed cause. On cluster `default` that cycle made nine paid provider
+;;; calls in twenty minutes with no external stimulus, because
+;;; `:seon.config.error/escalate-to` names root and root was the only agent.
+;;;
+;;; The wanted behavior is stated once, over both directions of the same
+;;; derivation: a refused phase escalates to ANOTHER agent and never to the
+;;; agent whose run was refused. Asserting only the self case would leave the
+;;; fix indistinguishable from switching escalation off.
+(defn- escalation-recipients
+  [connection escalate-to agent-id]
+  (let [refusal-terminal-data (private-loop-fn 'refusal-terminal-data)
+        prepared
+        (refusal-terminal-data
+         {:seon.config.error/escalate-to escalate-to
+          :seon.cluster.run/process process
+          :seon.config.error/recurrence-limit 3
+          :seon.sci.admit/caps (config/result-caps (config/defaults))}
+         @connection now agent-id nil process nil nil
+         {:seon.error/kind :seon.cluster.loop.phase/prompt
+          :seon.error/message "injected prompt failure"
+          :seon.error/data {:seon.cluster.loop/phase :prompt}})]
+    (into #{}
+          (keep #(second (:seon.cluster.message/to %)))
+          (filter :seon.cluster.message/id (:seon.db/tx-data prepared)))))
+
+(deftest a-refused-phase-never-escalates-to-the-agent-whose-run-was-refused
+  (test-support/with-database
+   (fn [connection]
+     (db/transact! connection
+                   [{:seon.cluster.agent/id "worker"}
+                    {:seon.cluster.agent/id "supervisor"}])
+     (testing "a supervisor still hears about a worker's refused phase"
+       (is (= #{"supervisor"}
+              (escalation-recipients connection "supervisor" "worker"))))
+     (testing "the failing agent is never mailed its own refusal"
+       (is (empty? (escalation-recipients connection "worker" "worker"))
+           "escalating to yourself is not a notification, it is a wake, and
+            the woken turn meets the same unfixed cause"))
+     (testing "repeating the same refusal cannot accumulate self-wakes"
+       (is (empty? (into #{}
+                         (mapcat (fn [_]
+                                   (escalation-recipients
+                                    connection "worker" "worker")))
+                         (range 5))))))))
+
 (deftest the-committed-set-is-computed-and-covers-what-the-loop-writes
   (let [committed (cluster.loop/committed-attributes)]
     (is (set? committed))
