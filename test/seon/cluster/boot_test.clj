@@ -30,6 +30,7 @@
             [seon.db :as db]
             [seon.fn :as seon.fn]
             [seon.flow :as seon.flow]
+            [seon.operator :as operator]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -1192,45 +1193,78 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/long "Starts and reforks a real cluster branch."}
+(deftest ^{:seon.test/long "Publishes, starts, and reforks a real cluster through the composed operator verb."}
   explicit-refork-destroys-the-old-branch-and-forks-current-source
-  (let [root (published-root)
-        cluster-name "refork-program"
-        instance (cluster/start! {:seon.boot/cluster-name cluster-name
-                                  :seon.boot/root root})
-        connection (:seon.boot/cluster-connection instance)]
+  ;; The COMPOSED verb, on a real store, in the operator's OWN layout:
+  ;; `bin/seon init NAME --force` is exactly this call
+  ;; (`script/seon/fresh_operator.clj:1941`), so the claim, the managed
+  ;; root, and the published commit are supplied the way the operator
+  ;; supplies them.
+  ;;
+  ;; The earlier form called `seon.cluster/refork!` — a second path that
+  ;; GUESSED the managed root two parents up from the cluster root. That
+  ;; guess named an unrelated directory for any root not shaped like the
+  ;; operator's, so cleanup found no claim, the composed refork never
+  ;; ran, and the flat error value read back through a keyword lookup as
+  ;; `nil`. The guessing duplicate is deleted; the class is "a second
+  ;; path derives a required input instead of receiving it", and a
+  ;; refusal is asserted loudly here with the returned value in hand.
+  (let [repository-root (.getCanonicalPath (io/file (bare-root)))
+        managed-root (.getCanonicalPath (io/file repository-root "managed"))
+        cluster-root (str (io/file managed-root "data" "clusters"))
+        cluster-name "refork-program"]
     (try
-      (db/transact! connection
-                  [{:seon.cluster.message/id "history-refork-destroys"}])
-      (let [result (cluster/refork! instance)
-            ;; refork! owns database branch replacement; stopping the old
-            ;; runtime remains an explicit, observable lifecycle operation.
-            _ (cluster/stop! instance)
-            replacement
-            (cluster/start! {:seon.boot/cluster-name cluster-name
-                             :seon.boot/root root})]
+      (.mkdirs (io/file cluster-root))
+      (let [published (cluster/refresh-source! cluster-root)
+            claim (operator/claim-root!
+                   {:seon.operator/repository-root repository-root
+                    :seon.operator/managed-root managed-root
+                    :seon.boot/cluster-name cluster-name})
+            instance (cluster/start! {:seon.boot/cluster-name cluster-name
+                                      :seon.boot/root cluster-root})]
+        (is (contains? (:seon.operator.claim/clusters claim) cluster-name)
+            (str "the refork target must be exactly claimed: "
+                 (pr-str claim)))
         (try
-          (testing "the old branch was replaced from current-src"
-            (is (:seon.cluster/created? result))
-            (is (nil?
-                 (db/q '[:find ?message .
-                        :where
-                        [?message :seon.cluster.message/id
-                         "history-refork-destroys"]]
-                      @(:seon.boot/cluster-connection replacement))))
-            (is (pos?
-                 (or
-                  (db/q '[:find (count ?function) .
-                         :where [?function :seon.fn/sym]]
-                       @(:seon.boot/cluster-connection replacement))
-                  0))))
+          (db/transact! (:seon.boot/cluster-connection instance)
+                        [{:seon.cluster.message/id "history-refork-destroys"}])
+          (let [result (operator/refork!
+                        {:seon.operator/repository-root repository-root
+                         :seon.operator/managed-root managed-root
+                         :seon.boot/cluster-name cluster-name
+                         :seon.source/commit-id
+                         (:seon.source/commit-id published)
+                         :seon.store/store (:seon.store/store instance)})
+                replacement
+                (cluster/start! {:seon.boot/cluster-name cluster-name
+                                 :seon.boot/root cluster-root})]
+            (try
+              (testing "the old branch was replaced from current-src"
+                (is (true? (:seon.cluster/created? result))
+                    (str "the composed refork must create the branch: "
+                         (pr-str result)))
+                (is (nil?
+                     (db/q '[:find ?message .
+                             :where
+                             [?message :seon.cluster.message/id
+                              "history-refork-destroys"]]
+                           @(:seon.boot/cluster-connection replacement)))
+                    "the destroyed branch's data must not survive")
+                (is (pos?
+                     (or
+                      (db/q '[:find (count ?function) .
+                              :where [?function :seon.fn/sym]]
+                            @(:seon.boot/cluster-connection replacement))
+                      0))
+                    "the replacement carries the published program graph"))
+              (finally
+                (cluster/stop! replacement))))
           (finally
-            (cluster/stop! replacement))))
+            ;; the composed refork stops it. Idempotent cleanup for a
+            ;; failure before that boundary.
+            (cluster/stop! instance))))
       (finally
-        ;; `refork!` normally stopped it. This is deliberately idempotent
-        ;; cleanup for a failure before that boundary.
-        (cluster/stop! instance)
-        (delete-recursively! root)))))
+        (delete-recursively! repository-root)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Boot recovery — a dead holder's wreckage is settled before anything resumes

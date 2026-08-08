@@ -2769,27 +2769,6 @@
           (throw failure)))))
   nil)
 
-(defn refork!
-  "Delegate destructive refork composition to the public operator owner."
-  {:malli/schema
-   [:=> [:cat :seon.boot/instance]
-    :seon.cluster.registry/branch-result]}
-  [instance]
-  (let [config (:seon.boot/config instance)
-        cluster-name (:seon.boot/cluster-name config)
-        cluster-root (.getCanonicalFile (io/file (:seon.boot/root config)))
-        managed-root (some-> cluster-root .getParentFile .getParentFile)
-        operation-store (:seon.store/store instance)
-        published (source/current operation-store)]
-    ((requiring-resolve 'seon.operator/refork!)
-     {:seon.operator/repository-root
-      (or (System/getProperty "seon.repository.root")
-          (System/getProperty "user.dir"))
-      :seon.operator/managed-root (.getCanonicalPath managed-root)
-      :seon.boot/cluster-name cluster-name
-      :seon.source/commit-id (:seon.source/commit-id published)
-      :seon.store/store operation-store})))
-
 (defn read-advertisement
   "Read and validate one cluster's advertisement, or nil.
   Returns the advertisement map only when the file exists, parses,

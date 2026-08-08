@@ -767,11 +767,18 @@
   [{managed-root :seon.operator/managed-root
     source-commit :seon.source/commit-id
     :as request}]
+  ;; No store is held ACROSS the destructive arm. Cleanup stops the live
+  ;; instance, and the last instance out releases the process-root store
+  ;; with its flock (`seon.cluster/release-root-store!`), so a store
+  ;; captured before cleanup is a released connection by the time the
+  ;; fork needs it — the whole refork then failed with
+  ;; `:connection-has-been-released` after the old branch was already
+  ;; destroyed. Each arm acquires its own; cleanup validates the supplied
+  ;; store after its stop, and the fork acquires fresh afterwards.
+  (cleanup-cluster-under-lock! request)
   (let [[operation-store release?]
-        (acquire-operation-store! managed-root (:seon.store/store request))]
+        (acquire-operation-store! managed-root nil)]
     (try
-      (cleanup-cluster-under-lock!
-       (assoc request :seon.store/store operation-store))
       (registry/ensure-cluster!
        {:seon.store/store operation-store
         :seon.boot/cluster-name (:seon.boot/cluster-name request)
