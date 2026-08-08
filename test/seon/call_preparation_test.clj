@@ -1,13 +1,15 @@
 (ns seon.call-preparation-test
   "Recurring proof for P17 S1: declared supplied defaults, the plan derived
   from program facts, and the cluster-local cache's basis boundary."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [sci.core :as sci]
             [seon.call-preparation :as cp]
             [seon.db :as db]
             [seon.env :as env]
             [seon.program :as program]
             [seon.schema :as schema]
+            [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support]))
 
 ;;; ---------------------------------------------------------------------------
@@ -19,10 +21,19 @@
 ;;; point — call preparation reads their declared contract and nothing else.
 ;;; ---------------------------------------------------------------------------
 
+(def entered
+  "How many times a probe body has been entered.
+
+  The unavailable face's proof is not only the returned value: preparation
+  must refuse BEFORE the callee runs, and a counter is the only way to say
+  that without trusting the value."
+  (atom 0))
+
 (defn probe-received-database?
   "True when this call received a database value at its second slot."
   {:malli/schema [:=> [:cat :string :seon.db/database-value] :boolean]}
   [_label database]
+  (swap! entered inc)
   (db/database-value? database))
 
 (defn probe-received-connection?
@@ -30,7 +41,65 @@
   {:malli/schema
    [:=> [:cat [:map [:seon.db/connection :seon.db/connection]]] :boolean]}
   [request]
+  (swap! entered inc)
   (db/connection? (:seon.db/connection request)))
+
+(defn probe-received-both
+  "Both database values of a two-slot arity, for the all-or-nothing proof."
+  {:malli/schema
+   [:=> [:cat :seon.db/connection :string :seon.db/database-value]
+    [:vector :boolean]]}
+  [connection _label database]
+  (swap! entered inc)
+  [(db/connection? connection) (db/database-value? database)])
+
+(defn probe-nilable-second
+  "Whether an explicitly supplied second argument was preserved as nil."
+  {:malli/schema
+   [:=> [:cat :string [:or :seon.db/database-value :nil]] :boolean]}
+  [_label database]
+  (swap! entered inc)
+  (nil? database))
+
+(defn probe-untouched
+  "A contracted probe declaring nothing suppliable."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [label]
+  (swap! entered inc)
+  label)
+
+(defn probe-current-database
+  "The database value this call was supplied, for use as another call's
+  explicit argument."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.db/database-value]}
+  [database]
+  database)
+
+(defn probe-shortcut
+  "The `pull` shape: a declared arity whose count collides with the shorter
+  shape another arity derives.
+
+  Two supplied arguments could mean either `[database label]` — the
+  declared two-arity, database explicit — or `[label label]` with the
+  three-arity's leading database elided. Ruling #41's shortcut survives
+  because the leading slot's own value schema decides."
+  {:malli/schema
+   [:function
+    [:=> [:cat [:or :seon.db/database-value :string] :string] :keyword]
+    [:=> [:cat :seon.db/database-value :string :string] :keyword]]}
+  ([leading _label]
+   (if (db/database-value? leading) :explicit-database :two-labels))
+  ([database _first _second]
+   (if (db/database-value? database) :supplied-database :wrong-value)))
+
+(defn probe-connection-name
+  "The identity of the connection this call was supplied.
+
+  Two sovereign clusters must answer differently, which a boolean could
+  never show."
+  {:malli/schema [:=> [:cat :seon.db/connection] :string]}
+  [connection]
+  (pr-str (db/connection-identity connection)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Fixture helpers
@@ -337,45 +406,202 @@
 (defn- probe-ctx
   "A scratch ctx binding this namespace's probes the way a cluster does.
 
-  Compiled first-party functions reach agent code as `sci/new-var`
-  forwarders over the real JVM Var
-  (`seon.sci.eval/forwarding-host-var`), and that matters here rather
-  than being incidental: sci's hook fires only when the resolved callee
-  is a `sci.lang.Var` (`sci.impl.utils/var?`), so a raw JVM Var placed
-  straight into `:namespaces` is never prepared. Mirroring production is
-  what makes this probe honest."
+  RAW host Vars, deliberately. `seon.sci.eval/bind-first-party-namespaces!`
+  installs a compiled first-party function as its real `clojure.lang.Var`
+  unless some namespace row REFERS it, so a raw host Var in a callee
+  position is the ordinary production shape rather than an exotic one.
+  Binding `sci/new-var` forwarders here instead would have made every
+  assertion below pass while every real first-party call stayed
+  unprepared — which is exactly the defect this slice exists to kill."
   [connection]
-  (let [environment (environment-for connection)
-        sci-namespace (sci/create-ns 'seon.call-preparation-test nil)
-        forward (fn [host-var]
-                  (let [host-meta (meta host-var)]
-                    (sci/new-var (:name host-meta) host-var
-                                 (assoc host-meta :ns sci-namespace))))]
-    (-> (sci/init
-         {:namespaces
-          {'seon.call-preparation-test
-           {'probe-received-database? (forward #'probe-received-database?)
-            'probe-received-connection? (forward #'probe-received-connection?)}}
-          :call-preparation-hook cp/hook})
-        (assoc :seon.schema/projection (projection))
-        (env/carry environment)
-        (cp/install))))
+  (-> (sci/init
+       {:namespaces
+        {'seon.call-preparation-test
+         {'probe-received-database? #'probe-received-database?
+          'probe-received-connection? #'probe-received-connection?
+          'probe-received-both #'probe-received-both
+          'probe-nilable-second #'probe-nilable-second
+          'probe-untouched #'probe-untouched
+          'probe-current-database #'probe-current-database
+          'probe-shortcut #'probe-shortcut
+          'probe-connection-name #'probe-connection-name}}
+        :call-preparation-hook cp/hook})
+      (assoc :seon.schema/projection (projection))
+      (env/carry (environment-for connection))
+      (cp/install)))
 
-(deftest a-plan-the-suppliers-and-the-sci-hook-compose
-  (testing "the S1 composition probe: an elided positional slot and an absent
-            required map key are both supplied through the runtime ctx"
+(defn- probe
+  [ctx source]
+  (sci/eval-string* ctx (str "(seon.call-preparation-test/" source ")")))
+
+(deftest a-compiled-first-party-call-is-prepared
+  (testing "positional, map-key, caller-wins, supplied-nil, undeclared and
+            nested — every one of them through a RAW compiled host Var"
     (test-support/with-database
      (fn [connection]
        (db/transact! connection database-rows)
        (let [ctx (probe-ctx connection)]
-         (is (true? (sci/eval-string* ctx "(seon.call-preparation-test/probe-received-database? \"a\")"))
-             "the elided database value arrived at index 1")
-         (is (true? (sci/eval-string* ctx "(seon.call-preparation-test/probe-received-connection? {})"))
-             "the absent required map key was filled")
-         (testing "an explicit caller value always wins"
-           (is (false? (sci/eval-string*
-                        ctx "(seon.call-preparation-test/probe-received-connection? {:seon.db/connection 1})"))
+         (testing "positional: the elided slot arrives at its recorded index"
+           (is (true? (probe ctx "probe-received-database? \"a\""))))
+         (testing "map key: an absent REQUIRED key is filled"
+           (is (true? (probe ctx "probe-received-connection? {}"))))
+         (testing "explicit caller wins, at a map key"
+           (is (false? (probe ctx
+                              "probe-received-connection? {:seon.db/connection 1}"))
                "the caller's 1 reached the body unreplaced"))
-         (testing "an exact full call is untouched"
-           (is (false? (sci/eval-string*
-                        ctx "(seon.call-preparation-test/probe-received-database? \"a\" 1)")))))))))
+         (testing "explicit caller wins, at an exact full arity"
+           (is (false? (probe ctx "probe-received-database? \"a\" 1"))))
+         (testing "supplied nil is a supplied value, never an absence"
+           (is (true? (probe ctx "probe-nilable-second \"a\" nil"))
+               "nil occupied the slot, so nothing was supplied over it"))
+         (testing "an undeclared function is untouched"
+           (is (= "a" (probe ctx "probe-untouched \"a\""))))
+         (testing "nested: an interpreted caller's direct call is prepared too"
+           (is (true? (sci/eval-string*
+                       ctx
+                       (str "(do (defn outer [q] "
+                            "(seon.call-preparation-test/probe-received-database?"
+                            " q)) (outer \"a\"))")))
+               "which falsifies any design preparing at one named entrance")))))))
+
+(deftest a-two-slot-arity-derives-one-shorter-shape
+  (testing "ruling 2's all-or-nothing model: the arity minus ALL its slots,
+            never a subset of them"
+    (test-support/with-database
+     (fn [connection]
+       (db/transact! connection database-rows)
+       (let [ctx (probe-ctx connection)
+             current (cp/snapshot @connection (projection))
+             plan (cp/plan (cp/state) @connection current
+                           "seon.call-preparation-test/probe-received-both")]
+         (is (= #{1 3} (set (keys (:seon.call-preparation/by-supplied-count
+                                   plan))))
+             "3 is the declared arity and 1 its one derived shape; 2 — a
+              single-slot omission — is deliberately not a call shape")
+         (is (= [true true] (probe ctx "probe-received-both \"a\""))
+             "and the one-argument call receives both declared values"))))))
+
+(deftest the-leave-off-the-database-shortcut-survives-the-general-planner
+  (testing "ruling #41's positional shortcut, decided by the leading slot's
+            own declared value schema rather than by arity order"
+    (test-support/with-database
+     (fn [connection]
+       (db/transact! connection database-rows)
+       (let [ctx (probe-ctx connection)]
+         (is (= :supplied-database (probe ctx "probe-shortcut \"a\" \"b\""))
+             "two non-database arguments mean the three-arity with its
+              leading database elided")
+         (is (= :explicit-database
+                (sci/eval-string*
+                 ctx
+                 (str "(seon.call-preparation-test/probe-shortcut "
+                      "(seon.call-preparation-test/probe-current-database)"
+                      " \"b\")")))
+             "an explicit database value at the same count keeps the DECLARED
+              two-arity — the caller always wins")
+         (is (= :supplied-database
+                (sci/eval-string*
+                 ctx
+                 (str "(seon.call-preparation-test/probe-shortcut "
+                      "(seon.call-preparation-test/probe-current-database)"
+                      " \"a\" \"b\")")))
+             "and the exact declared three-arity is untouched"))))))
+
+(deftest an-unavailable-supplier-refuses-before-the-body
+  (testing "the unavailable face: a flat value naming the target, the key and
+            the exact address, with the callee never entered"
+    (test-support/with-database
+     (fn [connection]
+       (db/transact! connection database-rows)
+       (let [current (cp/snapshot @connection (projection))
+             environment (environment-for connection)
+             slot {:seon.fn.argument/index 1
+                   :seon.call-preparation/key :seon.db/db
+                   :seon.call-preparation/supplier-symbol
+                   'sample/nowhere-at-all}
+             refusal (cp/supply current environment slot "sample/target")]
+         (is (= :seon.call-preparation/unavailable (:seon.error/kind refusal)))
+         (is (= "sample/target" (:seon.fn/sym (:seon.error/data refusal))))
+         (is (= :seon.db/db
+                (:seon.call-preparation/key (:seon.error/data refusal))))
+         (is (= 1 (:seon.fn.argument/index (:seon.error/data refusal)))
+             "the exact positional address, not merely the target")
+         (is (not (str/includes? (:seon.error/message refusal) "*conn*"))
+             "the face names the target and the key, never a dynamic var")
+         (testing "and a refusing supplier short-circuits the whole call"
+           (reset! entered 0)
+           (let [result
+                 (cp/prepare
+                  current environment
+                  {:seon.fn/sym
+                   "seon.call-preparation-test/probe-untouched"
+                   :seon.call-preparation/empty? false
+                   :seon.call-preparation/by-supplied-count
+                   {0 {:seon.call-preparation/ambiguous? false
+                       :seon.call-preparation/inserts [slot]
+                       :seon.call-preparation/entries []}}}
+                  [])]
+             (is (= :seon.call-preparation/unavailable
+                    (:seon.error/kind result)))
+             (is (zero? @entered) "the target body was never entered"))))))))
+
+(deftest two-clusters-supply-their-own-custody
+  (testing "two sovereign contexts live in one JVM; each call is supplied the
+            connection of the context it ran under, and neither shares the
+            other's plan cache"
+    (test-support/with-database
+     (fn [connection-a]
+       (db/transact! connection-a database-rows)
+       (test-support/with-database
+        (fn [connection-b]
+          (db/transact! connection-b database-rows)
+          (let [ctx-a (probe-ctx connection-a)
+                ctx-b (probe-ctx connection-b)
+                name-a (probe ctx-a "probe-connection-name")
+                name-b (probe ctx-b "probe-connection-name")]
+            (is (string? name-a))
+            (is (not= name-a name-b)
+                "each context supplied its OWN cluster's connection")
+            (is (not (identical? (get ctx-a cp/carrier)
+                                 (get ctx-b cp/carrier)))
+                "and the plan caches are separate state"))))))))
+
+;;; ---------------------------------------------------------------------------
+;;; The class this slice kills: a mechanism green on a scratch ctx and inert
+;;; in production. Every assertion below goes through the ACQUIRED cluster
+;;; context — `seon.sci.eval/cluster-ctx`, the one boot and recovery call —
+;;; because a scratch ctx built by a test is precisely what let the previous
+;;; version ship dead.
+;;; ---------------------------------------------------------------------------
+
+(deftest an-acquired-cluster-context-prepares-its-calls
+  (testing "the production installation path, not a ctx this test built"
+    (test-support/with-database
+     (fn [connection]
+       (db/transact! connection database-rows)
+       (let [ctx (sci.eval/cluster-ctx @connection connection)
+             acquired-projection (:seon.schema/projection ctx)
+             environment
+             (env/refuse-incomplete-environment!
+              (env/environment {:seon.boot/cluster-name "acquired"
+                                :seon.db/connection connection
+                                :seon.schema/projection acquired-projection}))
+             live (env/carry ctx environment)]
+         (is (cp/state? (get ctx cp/carrier))
+             "acquisition installs the call-preparation state; without this
+              the hook reads nil and is silently inert at every call site")
+         (is (some? (:call-preparation-hook ctx))
+             "and the acquired context carries the hook itself")
+         (testing "a contracted first-party function outside seon.db, called
+                   with its declared connection elided, receives it"
+           (is (true?
+                (sci/eval-string*
+                 live
+                 (str "(seon.call-preparation-test/probe-received-connection?"
+                      " {})")))))
+         (testing "and an elided positional database value arrives too"
+           (is (true?
+                (sci/eval-string*
+                 live
+                 (str "(seon.call-preparation-test/probe-received-database?"
+                      " \"a\")"))))))))))

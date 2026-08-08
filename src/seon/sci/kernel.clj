@@ -18,6 +18,7 @@
             [sci.core :as sci]
             [sci.impl.utils :as sci.utils]
             [sci.interrupt :as sci.interrupt]
+            [seon.call-preparation :as call-preparation]
             [seon.db :as db]
             [seon.error.refusal :as error.refusal]
             [seon.schema :as schema]
@@ -537,7 +538,19 @@
                (ex-info (str function-symbol " is not an installed SCI Var.")
                         {:seon.error/kind ::unresolved-invocation
                          :seon.fn/sym function-symbol-string})))
-            (let [value (apply sci-var arguments)
+            (let [;; The SECOND of the two ruled call-preparation
+                  ;; entrances. SCI's analyzed call path hooks itself; a
+                  ;; named invocation applies the Var directly, so it
+                  ;; consults the same hook here rather than growing a
+                  ;; second preparation implementation. A `reduced`
+                  ;; return is preparation refusing — the callee body is
+                  ;; never entered and the flat value is the result,
+                  ;; admitted like any other.
+                  prepared (call-preparation/hook ctx sci-var
+                                                  (vec arguments))
+                  value (if (reduced? prepared)
+                          (deref prepared)
+                          (apply sci-var prepared))
                   invocation-record (record-fn :ok)]
               (admit/admit-value
                {:seon.sci.admit/value value

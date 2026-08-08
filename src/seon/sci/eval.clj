@@ -114,6 +114,7 @@
             [sci.interrupt :as sci.interrupt]
             [seon.blob :as blob]
             [seon.bootstrap :as bootstrap]
+            [seon.call-preparation :as call-preparation]
             [seon.config :as config]
             [seon.db :as db]
             [seon.effect :as effect]
@@ -192,6 +193,12 @@
         {:interrupt-fn (:interrupt-fn kernel-options)
          :host-interop-observer (:host-interop-observer kernel-options)
          :built-in-call-observer (:built-in-call-observer kernel-options)
+         ;; The one call-preparation seam. It is installed on EVERY
+         ;; context, base and cluster alike, and stays inert until a ctx
+         ;; also carries `seon.call-preparation/install`'s state plus an
+         ;; environment — so a scratch base ctx behaves exactly as it did
+         ;; before, and a cluster ctx prepares every direct Var call.
+         :call-preparation-hook call-preparation/hook
          ;; the interrupt-aware core: a lazy sequence built by NATIVE
          ;; clojure.core enters no interpreted body, so `(range)` inside
          ;; `reduce` would never hit the interrupt-fn. Sci ships drop-in
@@ -1523,10 +1530,18 @@
          projection (:seon.schema/projection acquired)
          projection-state (or supplied-projection-state
                               (projection-state db projection))
-         ctx (assoc ctx
-                    :seon.schema/projection projection
-                    ::projection-state
-                    projection-state)]
+         ctx (call-preparation/install
+              (assoc ctx
+                     :seon.schema/projection projection
+                     ::projection-state
+                     projection-state))]
+     ;; The listener is the optimizer, never the correctness boundary —
+     ;; an idle cluster notices a new supplied-default row without
+     ;; waiting for the next call's basis comparison. It needs the live
+     ;; connection, so a connectionless context simply has none.
+     (when connection
+       (call-preparation/watch!
+        (get ctx call-preparation/carrier) connection projection))
      ctx)))
 
 (defn- declared-row

@@ -62,6 +62,7 @@
 
 (def ^:private empty-snapshot
   {:seon.call-preparation/supplied-defaults {}
+   :seon.call-preparation/prepared-symbols #{}
    :seon.call-preparation/validators {}
    :seon.call-preparation/refusals []
    :seon.call-preparation/basis-t 0
@@ -89,8 +90,13 @@
 (defn install
   "Attach fresh call-preparation state to a cluster's sci ctx.
 
-  S2 calls this in `seon.sci.eval/cluster-ctx` beside the projection
-  state; until then a probe or test attaches it to a scratch ctx."
+  `seon.sci.eval/cluster-ctx` calls this beside the projection state, so
+  every acquired cluster context carries it and every per-turn
+  `sci/fork` inherits it. The hook reads exactly this key: a ctx without
+  it is a ctx where call preparation is inert, which is the correct
+  behaviour for a scratch or non-Seon context and the WRONG behaviour for
+  a cluster — an installed hook with no state was silently inert at every
+  live call site until this call landed."
   {:malli/schema [:=> [:cat :map] :map]}
   [ctx]
   (assoc ctx carrier (state)))
@@ -284,6 +290,66 @@
               (when (number? current) current)
               0))))
 
+(defn- by-fingerprint
+  [supplied-defaults]
+  (into {}
+        (map (fn [[_ candidate]]
+               [(:seon.call-preparation/shape candidate) candidate]))
+        supplied-defaults))
+
+(def ^:private prepared-positional-query
+  '[:find [?sym ...]
+    :in $ [?fingerprint ...]
+    :where
+    [?shape :seon.schema.shape/fingerprint ?fingerprint]
+    [?argument :seon.fn.argument/schema ?shape]
+    [?arity :seon.fn.arity/arguments ?argument]
+    [?function :seon.fn/arities ?arity]
+    [?function :seon.fn/sym ?sym]])
+
+(def ^:private prepared-entry-query
+  '[:find ?sym ?entry-key ?fingerprint
+    :in $ [?fingerprint ...]
+    :where
+    [?value-shape :seon.schema.shape/fingerprint ?fingerprint]
+    [?entry :seon.schema.shape.entry/schema ?value-shape]
+    [?entry :seon.schema.shape.entry/optional? false]
+    [?entry :seon.schema.map-entry/key-keyword ?entry-key]
+    [?argument-shape :seon.schema.shape/entries ?entry]
+    [?argument :seon.fn.argument/schema ?argument-shape]
+    [?arity :seon.fn.arity/arguments ?argument]
+    [?function :seon.fn/arities ?arity]
+    [?function :seon.fn/sym ?sym]])
+
+(defn- prepared-symbols
+  "Every identity in this cluster whose contract could be prepared.
+
+  THE HOT-PATH GATE, and a query rather than a list: an identity absent
+  here provably declares no suppliable positional slot and no suppliable
+  required map key, so the hook returns its arguments after one set
+  lookup — no plan compilation, no Datalog, no supplier call. Derived
+  once per snapshot from the same database value the snapshot is derived
+  from, so a newly published function is gated in at the same basis the
+  row is.
+
+  Deliberately a conservative SUPERSET: a required map key whose value
+  shape matches while its keyword does not is admitted here and rejected
+  by the plan's own two-part join. Over-including costs one cached empty
+  plan; under-including would silently skip preparation."
+  [database index]
+  (let [fingerprints (vec (keys index))]
+    (if (empty? fingerprints)
+      #{}
+      (let [positional (db/q database prepared-positional-query fingerprints)
+            entries (db/q database prepared-entry-query fingerprints)]
+        (into (if (error-value? positional) #{} (set positional))
+              (comp (filter (fn [[_ entry-key fingerprint]]
+                              (= entry-key
+                                 (:seon.call-preparation/key
+                                  (get index fingerprint)))))
+                    (map first))
+              (when-not (error-value? entries) entries))))))
+
 (defn snapshot
   "Derive the complete supplied-default snapshot from one database value.
 
@@ -291,7 +357,8 @@
   become refusals and are NOT installed. The returned value carries its
   own two transactions: `checked-through-t` is the database value this was
   derived from, and `basis-t` is the newest transaction touching any row
-  fact — the third element of every plan cache key."
+  fact — the third element of every plan cache key. It also carries the
+  hot-path gate: the set of identities that could be prepared at all."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.schema/projection]
     [:or :seon.call-preparation/snapshot :seon.error/value]]}
@@ -345,8 +412,15 @@
                         (map (fn [[candidate _ _]]
                                [(:seon.call-preparation/key candidate)
                                 candidate])))
-                  compiled)]
+                  compiled)
+            fingerprint-index
+            (into {}
+                  (map (fn [[_ candidate]]
+                         [(:seon.call-preparation/shape candidate) candidate]))
+                  admitted)]
         {:seon.call-preparation/supplied-defaults admitted
+         :seon.call-preparation/prepared-symbols
+         (prepared-symbols database fingerprint-index)
          :seon.call-preparation/validators
          (into {}
                (comp (remove second)
@@ -487,48 +561,67 @@
     [?entry :seon.schema.shape.entry/schema ?value-shape]
     [?value-shape :seon.schema.shape/fingerprint ?fingerprint]])
 
-(defn- by-fingerprint
-  [supplied-defaults]
-  (into {}
-        (map (fn [[_ candidate]]
-               [(:seon.call-preparation/shape candidate) candidate]))
-        supplied-defaults))
+(defn- candidate-indexes
+  [candidates]
+  (mapv (fn [candidate]
+          (mapv :seon.fn.argument/index
+                (:seon.call-preparation/inserts candidate)))
+        candidates))
 
-(defn- subsets-of-size
-  [items size]
-  (cond
-    (zero? size) [[]]
-    (> size (count items)) []
-    :else (let [head (first items)
-                tail (vec (rest items))]
-            (into (mapv #(into [head] %) (subsets-of-size tail (dec size)))
-                  (subsets-of-size tail size)))))
+(defn- dispatchable
+  "The predicate dispatch for one declared arity colliding with one derived
+  shape at the same supplied count, or nil when the collision cannot be
+  decided from the first argument.
+
+  This is ruling 2's `db?`/`connection?` disambiguation, and the predicate
+  is not a hand-written one: it is the row's OWN declared value schema,
+  compiled once per acquisition into `:seon.call-preparation/validators`.
+  A first argument that satisfies the omitted slot's value schema was
+  supplied by the caller, so the DECLARED arity runs unchanged; anything
+  else means the caller wrote the shorter shape and the slot is filled.
+
+  Only a LEADING omitted slot is decidable — the ruling says \"the
+  predicate on the first argument\" — and only when the call has a first
+  argument at all. Every other collision falls through to the declared
+  arity, which always wins."
+  [exact derived]
+  (let [leading (first (:seon.call-preparation/inserts derived))]
+    (when (and leading (zero? (long (:seon.fn.argument/index leading))))
+      {:seon.call-preparation/key (:seon.call-preparation/key leading)
+       :seon.call-preparation/supplied exact
+       :seon.call-preparation/omitted derived})))
 
 (defn- resolve-count
-  "One supplied-argument count's unique preparation, or its refusal.
+  "One supplied-argument count's preparation, or its refusal.
 
-  Exact full-arity precedence first: a call whose count matches a declared
-  arity invokes that arity unchanged, and only its argument-map entries are
-  filled. Otherwise exactly one arity and one omitted-slot subset may fit;
-  more than one is a structural ambiguity that refuses rather than guessing
-  by arity order."
-  [exact expansions]
+  A hand-declared arity always wins: a call whose count matches one
+  declared arity invokes it unchanged, and only its argument-map entries
+  are filled. Each fixed arity derives AT MOST ONE shorter shape — the
+  arity minus ALL its suppliable slots (ruling 2's all-or-nothing model,
+  superseding the r2 draft's omitted-subset combinatorics). When a
+  declared arity and a derived shape land on the same count, the leading
+  slot's own value schema decides at call time; when two derived shapes
+  land on one count, the plan refuses rather than guessing by arity
+  order."
+  [exact derived]
   (cond
+    (> (count exact) 1)
+    {:seon.call-preparation/ambiguous? true
+     :seon.call-preparation/candidates (candidate-indexes exact)}
+
+    (and (= 1 (count exact)) (= 1 (count derived)))
+    (if-let [dispatch (dispatchable (first exact) (first derived))]
+      {:seon.call-preparation/ambiguous? false
+       :seon.call-preparation/dispatch dispatch}
+      (first exact))
+
     (= 1 (count exact)) (first exact)
 
-    (seq exact)
-    {:seon.call-preparation/ambiguous? true
-     :seon.call-preparation/candidates (mapv (constantly []) exact)}
+    (= 1 (count derived)) (first derived)
 
-    (= 1 (count expansions)) (first expansions)
-
-    (seq expansions)
+    (seq derived)
     {:seon.call-preparation/ambiguous? true
-     :seon.call-preparation/candidates
-     (mapv (fn [candidate]
-             (mapv :seon.fn.argument/index
-                   (:seon.call-preparation/inserts candidate)))
-           expansions)}))
+     :seon.call-preparation/candidates (candidate-indexes derived)}))
 
 (defn- slot-of
   [candidate position]
@@ -618,23 +711,24 @@
                                (:seon.call-preparation/entries arity)}))
                     {}
                     fixed)
-            expansions-by-count
+            ;; ONE derived shape per fixed arity: the arity minus ALL its
+            ;; suppliable slots. No middle-omission combinatorics — a
+            ;; caller either writes the declared shape or the one shorter
+            ;; shape, and nothing in between has a meaning to guess at.
+            derived-by-count
             (reduce
              (fn [acc arity]
-               (let [slots (:seon.call-preparation/slots arity)
-                     total (:seon.fn.arity/argument-count arity)]
-                 (reduce
-                  (fn [acc omitted]
-                    (update acc (- total (count omitted))
-                            (fnil conj [])
-                            {:seon.call-preparation/ambiguous? false
-                             :seon.fn.arity/order (:seon.fn.arity/order arity)
-                             :seon.call-preparation/inserts (vec omitted)
-                             :seon.call-preparation/entries
-                             (:seon.call-preparation/entries arity)}))
-                  acc
-                  (mapcat #(subsets-of-size slots %)
-                          (range 1 (inc (count slots)))))))
+               (let [slots (:seon.call-preparation/slots arity)]
+                 (if (empty? slots)
+                   acc
+                   (update acc (- (:seon.fn.arity/argument-count arity)
+                                  (count slots))
+                           (fnil conj [])
+                           {:seon.call-preparation/ambiguous? false
+                            :seon.fn.arity/order (:seon.fn.arity/order arity)
+                            :seon.call-preparation/inserts slots
+                            :seon.call-preparation/entries
+                            (:seon.call-preparation/entries arity)}))))
              {}
              fixed)
             by-supplied-count
@@ -643,10 +737,10 @@
                           (when-let [answer
                                      (resolve-count
                                       (get exact-by-count supplied)
-                                      (get expansions-by-count supplied))]
+                                      (get derived-by-count supplied))]
                             [supplied answer])))
                   (into (set (keys exact-by-count))
-                        (keys expansions-by-count)))
+                        (keys derived-by-count)))
             variadic (first (filter :seon.call-preparation/variadic?
                                     arity-plans))]
         (cond-> {:seon.fn/sym sym
@@ -676,25 +770,45 @@
 
   Cache key is `[function-identity contract-t supplied-default-basis-t]`,
   held one entry per identity so a redefinition REPLACES its plan rather
-  than accumulating generations. A newly acquired context starts empty."
+  than accumulating generations. A newly acquired context starts empty.
+
+  The contract transaction is re-read at most ONCE PER BASIS, not once
+  per call: a redefinition necessarily commits, so a database value whose
+  basis this entry was already verified against cannot be hiding a newer
+  contract. Without that fence the warm path ran an aggregating Datalog
+  query on every single prepared call."
   {:malli/schema
    [:=> [:cat :seon.call-preparation/state :seon.db/database-value
          :seon.call-preparation/snapshot :seon.fn/sym]
     [:or :seon.call-preparation/plan :seon.error/value :nil]]}
   [call-state database current sym]
   (let [held (get-in @call-state [:seon.call-preparation/plans sym])
-        basis (long (:seon.call-preparation/basis-t current))]
-    (if (and held
-             (= basis (:seon.call-preparation/basis-t
-                       (:seon.call-preparation/plan held)))
-             (= (:seon.call-preparation/contract-t held)
-                (db/q database contract-transaction-query sym)))
+        basis (long (:seon.call-preparation/basis-t current))
+        through (long (:seon.call-preparation/checked-through-t current))
+        usable? (and held
+                     (= basis (:seon.call-preparation/basis-t
+                               (:seon.call-preparation/plan held))))]
+    (cond
+      (and usable?
+           (= through (:seon.call-preparation/verified-through-t held)))
       (:seon.call-preparation/plan held)
+
+      (and usable?
+           (= (:seon.call-preparation/contract-t held)
+              (db/q database contract-transaction-query sym)))
+      (do (swap! call-state assoc-in
+                 [:seon.call-preparation/plans sym
+                  :seon.call-preparation/verified-through-t]
+                 through)
+          (:seon.call-preparation/plan held))
+
+      :else
       (let [compiled (plan-for database current sym)]
         (when (and compiled (not (error-value? compiled)))
           (swap! call-state assoc-in [:seon.call-preparation/plans sym]
                  {:seon.call-preparation/contract-t
                   (:seon.call-preparation/contract-t compiled)
+                  :seon.call-preparation/verified-through-t through
                   :seon.call-preparation/plan compiled}))
         compiled))))
 
@@ -775,29 +889,49 @@
 ;;; The consumer seam
 ;;; ---------------------------------------------------------------------------
 
-(defn var-symbol
+(defn callee-identity
   "The program identity of a resolved callee, or nil when it has none.
 
-  Both `clojure.lang.Var` and `sci.lang.Var` carry `:ns`/`:name` metadata;
+  The database's own `:seon.fn/sym` spelling, because that is what every
+  plan and every gate is keyed by; deriving a symbol here and stringifying
+  it at each use would be two spellings of one identity. Both
+  `clojure.lang.Var` and `sci.lang.Var` carry `:ns`/`:name` metadata;
   anything else — a closure, a computed callee — has no provable identity
   and is left untouched."
-  {:malli/schema [:=> [:cat :seon.schema/value] [:maybe :qualified-symbol]]}
+  {:malli/schema [:=> [:cat :seon.schema/value] [:maybe :seon.fn/sym]]}
   [callee]
   (let [{ns-value :ns name-value :name} (meta callee)]
     (when (and ns-value name-value)
-      (symbol (str ns-value) (str name-value)))))
+      (str ns-value "/" name-value))))
+
+(defn- decided
+  "Resolve a predicate dispatch against the call's actual first argument.
+
+  Ruling 2's disambiguation, evaluated at call time because it depends on
+  a value: the leading omitted slot's OWN declared value schema decides
+  whether the caller supplied that value or wrote the shorter shape."
+  [current answer arguments]
+  (if-let [dispatch (:seon.call-preparation/dispatch answer)]
+    (let [valid? (get (:seon.call-preparation/validators current)
+                      (:seon.call-preparation/key dispatch))]
+      (if (and valid? (valid? (nth arguments 0 nil)))
+        (:seon.call-preparation/supplied dispatch)
+        (:seon.call-preparation/omitted dispatch)))
+    answer))
 
 (defn prepare
   "Prepare one call's arguments against its plan, or refuse as a value.
 
-  S1 composition seam: it proves that a plan, the suppliers, and the sci
-  hook compose. S2 owns the complete behavior matrix — the
-  `db?`/`connection?` predicate dispatch that preserves ruling #41's
-  positional shortcut, and the three failure faces in their final form.
+  Three failure faces and nothing else reaches the caller: an
+  `:seon.call-preparation/unavailable` value when a declared supplier
+  cannot produce (the target body is never entered), an
+  `:seon.call-preparation/ambiguous-call` value when two derived shapes
+  land on one supplied count, and — for an explicitly supplied wrong or
+  nil value — NO face at all, because caller presence wins and the
+  ordinary Malli contract violation owns that result.
 
-  Caller presence always wins, tested by argument occupancy and
-  `contains?`, never truthiness: a supplied nil reaches ordinary Malli
-  input validation."
+  Caller presence is tested by argument occupancy and `contains?`, never
+  truthiness: a supplied nil reaches ordinary Malli input validation."
   {:malli/schema
    [:=> [:cat :seon.call-preparation/snapshot :seon.env/environment
          [:maybe :seon.call-preparation/plan] :seon.schema/arguments]
@@ -807,8 +941,10 @@
     arguments
     (let [sym (:seon.fn/sym plan-value)
           supplied (count arguments)
-          answer (get (:seon.call-preparation/by-supplied-count plan-value)
-                      supplied)]
+          answer (some-> (get (:seon.call-preparation/by-supplied-count
+                               plan-value)
+                              supplied)
+                         (as-> found (decided current found arguments)))]
       (cond
         (nil? answer) arguments
 
@@ -816,8 +952,9 @@
         (error-value
          :seon.call-preparation/ambiguous-call
          (str "Cannot call " sym " with " supplied
-              " arguments: more than one arity and omitted-slot set fits, so "
-              "which positions were named is not determined.")
+              " arguments: more than one derived call shape fits that count, "
+              "so which positions were named is not determined. Pass the "
+              "declared arguments in full.")
          {:seon.fn/sym sym
           :seon.call-preparation/supplied-count supplied
           :seon.call-preparation/candidates
@@ -871,25 +1008,35 @@
   lookup, no effect request. A ctx with no call-preparation state, no
   environment, or no plan for this callee is passed through untouched, so
   the hook is inert in a non-Seon context. The return is genuinely
-  polymorphic — sci's contract is `args` OR a `reduced` result."
+  polymorphic — sci's contract is `args` OR a `reduced` result.
+
+  THE HOOK IS ARMED ON EVERY CALL IN THE CLUSTER, so the path for a
+  callee that declares nothing suppliable is the one that matters. It
+  ends at the snapshot's `prepared-symbols` set: one connection deref,
+  one basis comparison, one string, one set lookup — no plan lookup, no
+  Datalog, no supplier, no argument copy."
   {:malli/schema
    [:=> [:cat :map :seon.schema/value :seon.schema/arguments]
     :seon.schema/value]}
   [ctx callee arguments]
   (let [call-state (get ctx carrier)
         environment (env/of ctx)
-        sym (when (and call-state environment) (var-symbol callee))
         projection (:seon.schema/projection ctx)
-        connection (when sym (:seon.db/connection environment))
-        database (when (and projection connection) (db/db connection))]
+        connection (when (and call-state environment projection)
+                     (:seon.db/connection environment))
+        database (when connection (db/db connection))]
     (if-not (and database (not (error-value? database)))
       arguments
       (let [current (current-snapshot call-state database projection)]
         (if (error-value? current)
           arguments
-          (let [prepared (prepare current environment
-                                  (plan call-state database current (str sym))
-                                  (vec arguments))]
-            (if (error-value? prepared)
-              (reduced prepared)
-              prepared)))))))
+          (let [sym (callee-identity callee)]
+            (if-not (contains? (:seon.call-preparation/prepared-symbols current)
+                               sym)
+              arguments
+              (let [prepared (prepare current environment
+                                      (plan call-state database current sym)
+                                      (vec arguments))]
+                (if (error-value? prepared)
+                  (reduced prepared)
+                  prepared)))))))))

@@ -60,6 +60,15 @@
 
  :refusals [:vector :seon.error/value],
 
+ ;; THE HOT-PATH GATE. Every identity in this cluster whose contract could be
+ ;; prepared at all, derived by the same query set the plan is compiled from.
+ ;; The hook is armed on every call in the cluster, so the path that matters is
+ ;; the one for a callee declaring nothing suppliable: it ends at one lookup in
+ ;; this set. A conservative superset (a required key whose value shape matches
+ ;; while its keyword does not) costs one cached empty plan; a subset would
+ ;; silently skip preparation, so the derivation may only ever over-include.
+ :prepared-symbols [:set :seon.fn/sym],
+
  ;; The basis at which this snapshot was derived (`checked-through-t`) and the
  ;; newest transaction that asserted or retracted any row fact (`basis-t`).
  ;; Both are Datahike basis transactions read from a database value, never
@@ -113,11 +122,33 @@
 
  :arity-plans [:vector :seon.call-preparation/arity-plan],
 
+ ;; One call shape: which arity runs, which slots are inserted at their
+ ;; recorded indexes, and which required argument-map entries are filled.
+ :call-shape
+ [:map
+  [:seon.fn.arity/order :seon.fn.arity/order]
+  [:seon.call-preparation/inserts :seon.call-preparation/slots]
+  [:seon.call-preparation/entries :seon.call-preparation/slots]],
+
+ ;; A declared arity and a derived shorter shape landing on ONE supplied
+ ;; count. The collision is decided at call time by the leading omitted
+ ;; slot's own declared value schema — ruling 2's `db?`/`connection?`
+ ;; disambiguation — so ruling #41's leave-off-the-database positional
+ ;; shortcut survives through the general planner instead of a second
+ ;; per-function implementation. `supplied` is the declared arity taken when
+ ;; the first argument satisfies that schema; `omitted` is the derived shape.
+ :dispatch
+ [:map
+  [:seon.call-preparation/key :seon.call-preparation/key]
+  [:seon.call-preparation/supplied :seon.call-preparation/call-shape]
+  [:seon.call-preparation/omitted :seon.call-preparation/call-shape]],
+
  ;; One entry per supplied-argument count the plan answers for. An exact
- ;; full-arity call carries no inserts; a unique shorter expansion carries the
- ;; slots to insert at their recorded indexes; a structurally ambiguous count
- ;; carries `:seon.call-preparation/ambiguous? true` plus its candidate
- ;; omitted-index sets and never guesses by arity order.
+ ;; full-arity call carries no inserts; a derived shorter shape carries the
+ ;; slots to insert at their recorded indexes; a collision that a value can
+ ;; settle carries a `dispatch`; a structurally ambiguous count carries
+ ;; `:seon.call-preparation/ambiguous? true` plus its candidate omitted-index
+ ;; sets and never guesses by arity order.
  :preparation
  [:map
   [:seon.call-preparation/ambiguous? :seon.call-preparation/ambiguous?]
@@ -128,6 +159,9 @@
   [:seon.call-preparation/entries
    {:optional true}
    :seon.call-preparation/slots]
+  [:seon.call-preparation/dispatch
+   {:optional true}
+   :seon.call-preparation/dispatch]
   [:seon.call-preparation/candidates
    {:optional true}
    :seon.call-preparation/candidates]],
