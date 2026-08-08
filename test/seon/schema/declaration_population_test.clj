@@ -16,7 +16,8 @@
   fails here rather than in a wedged suite.
 
   Issue: docs/seon/issues/packaged-forms-rereads-every-schema-resource-per-call.md"
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [seon.config :as config]
             [seon.print :as print]
             [seon.reconcile :as reconcile]
@@ -63,3 +64,28 @@
               (run! (fn [attribute] (schema/identity-attr? forms attribute))
                     (take 200 (keys forms))))))
           "the population-taking arities must not re-resolve"))))
+
+(defn- fallback-warning
+  "Whatever the classpath fallback wrote to stderr while calling `thunk`."
+  [thunk]
+  (let [captured (java.io.StringWriter.)]
+    (binding [*err* captured]
+      (thunk))
+    (str captured)))
+
+(deftest the-classpath-fallback-is-never-silent
+  (testing "resolution with no population in hand names its caller loudly"
+    (let [warning (fallback-warning schema/declaration-population)]
+      (is (str/includes? warning "DECLARATION POPULATION FALLBACK")
+          "the fallback must announce itself — the 2026-08-07 incident logged
+          nothing and was found only by thread dump")
+      (is (str/includes? warning "seon.schema.declaration-population-test")
+          "the warning must name the calling function, not the callee")))
+  (testing "a population in hand says nothing"
+    (let [forms (schema/declaration-population)]
+      (is (= ""
+             (fallback-warning
+              (fn []
+                (run! (fn [attribute] (schema/identity-attr? forms attribute))
+                      (take 200 (keys forms))))))
+          "the threaded path reaches no fallback, so it must not warn"))))

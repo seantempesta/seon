@@ -584,7 +584,68 @@
                   "recorded admission source, so this row is admitted as "
                   "agent-authored.")))))
 
+;;; ---------------------------------------------------------------------------
+;;; The classpath fallback, and why it is loud
+;;; ---------------------------------------------------------------------------
+
+;; Reached with no population in hand, resolution reads and merges every schema
+;; resource on the classpath. On 2026-08-07 one caller reached it 1,886 times —
+;; 286,672 file reads, twenty-six seconds — and logged NOTHING; both instances
+;; found that day were found by thread dump. R41 says development must be
+;; unable to miss it. The mechanism is the stderr line `seon.instrument/apply!`
+;; already uses (`instrument.clj:411-414`), which is the only one available
+;; here: this namespace sits below `seon.db`, so the
+;; `:seon.config/on-core-error` fact is unreadable, and a panic would be wrong
+;; regardless — the fallback is the LEGITIMATE bootstrap path before any
+;; projection exists, so panicking would make boot impossible. Loud therefore
+;; means NAMED AND COUNTED, and production-bounded means one line per calling
+;; function per decade of occurrences: the 2026-08-07 loop would have printed
+;; six lines, not a quarter of a million.
+(defonce ^:private !fallback-counts (atom {}))
+
+(defn- frame-namespace
+  [^StackTraceElement frame]
+  (let [demunged (clojure.lang.Compiler/demunge (.getClassName frame))
+        separator (.indexOf demunged "/")]
+    (if (neg? separator) demunged (subs demunged 0 separator))))
+
+(defn- fallback-caller
+  "The nearest frame outside declaration resolution itself.
+   Stack introspection is a diagnostic and runs only on the fallback path."
+  []
+  (or (some (fn [^StackTraceElement frame]
+              (let [frame-ns (frame-namespace frame)]
+                (when-not (or (#{"seon.schema" "seon.schema.edn"} frame-ns)
+                              (.startsWith ^String frame-ns "clojure.")
+                              (.startsWith ^String frame-ns "java."))
+                  (str frame-ns " (" (.getFileName frame) ":"
+                       (.getLineNumber frame) ")"))))
+            (.getStackTrace (Thread/currentThread)))
+      "an unidentified caller"))
+
+(defn- decade?
+  [n]
+  (let [magnitude (Math/log10 (double n))]
+    (== magnitude (Math/floor magnitude))))
+
+(defn- warn-classpath-fallback!
+  []
+  (let [caller (fallback-caller)
+        occurrence (get (swap! !fallback-counts update caller (fnil inc 0))
+                        caller)]
+    (when (decade? occurrence)
+      (binding [*out* *err*]
+        (println (str "seon.schema: DECLARATION POPULATION FALLBACK — "
+                      caller
+                      " resolved the declaration population with none in hand,"
+                      " reading every schema resource on the classpath"
+                      " (occurrence " occurrence " for this caller)."
+                      " Resolve it ONCE with schema/declaration-population and"
+                      " pass it to every question the operation asks."))
+        (flush)))))
+
 (defn- packaged-forms []
+  (warn-classpath-fallback!)
   ((requiring-resolve 'seon.schema.edn/packaged-forms)))
 
 (defn- candidate-forms []
@@ -687,6 +748,25 @@
                 {:registry this}))))
        (-schemas [_]
          (merge (mr/-schemas defaults) forms))))))
+
+(defn declaration-projection
+  "One immutable projection over the declaration population in hand.
+
+   A seam that walks many attributes resolves this ONCE and passes it to every
+   `-in` question it asks (see [[declaration-population]] for the cost of not
+   doing so). It carries the registry as well as the forms, because a
+   projection without one cannot compile a validator — a forms-only map made
+   `projection-validator` throw `:malli.core/invalid-schema` for every
+   EDN-backed attribute (2026-08-07). The registry is a lazy `reify`, so
+   pairing it costs nothing beyond the population itself."
+  {:malli/schema
+   [:function
+    [:=> [:cat] ::projection]
+    [:=> [:catn [::forms :map]] ::projection]]}
+  ([] (declaration-projection (declaration-population)))
+  ([forms]
+   {:seon.schema.projection/forms forms
+    :seon.schema.projection/registry (candidate-registry forms)}))
 
 ;; THE one stable registry facade Seon installs as Malli's process-global
 ;; default. Once a projection is active it reads only that committed
