@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (31)
+## Blocker (32)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -50,12 +50,14 @@ See `README.md` for the convention.
 | [Reuse one HttpClient so concurrent provider calls stop closing mid-read](concurrent-provider-calls-fail-with-a-closed-response-body.md) | blocker | whole-system arc repair wave |
 | [Settle what arrived when a provider stream closes mid-body](a-mid-stream-provider-disconnect-discards-the-whole-turn.md) | blocker | whole-system arc repair wave |
 | [Stop `seon.db/transact!` returning a different shape per dynamic var](transact-returns-a-different-shape-depending-on-a-dynamic-var.md) | blocker | P17 S4 `seon.db` conversion sweep |
+| [Settle an unreadable reply as a form the agent can see](an-unreadable-reply-closes-a-run-with-no-forms-and-no-trace.md) | blocker | live-drive context repair wave |
 
-## Friction (126)
+## Friction (127)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Render a capability namespace by its API, not by its Malli source](namespace-units-render-error-schema-boilerplate.md) | friction | agent context repair wave (2026-08-10 audit) |
+| [Decide whether contract fit selects a producer for a nested value](contract-fit-render-selection-never-reaches-a-nested-value.md) | friction | owner ruling — render selection |
 | [Do not tell an agent an unindexed namespace is empty](unindexed-namespaces-render-as-empty.md) | friction | agent context repair wave (2026-08-10 audit) |
 | [Show a never-run agent's prospective context on its debug page](a-never-run-agents-context-cannot-be-inspected.md) | friction | agent context repair wave (2026-08-10 audit) |
 | [Stop sending debug pages patches for elements they do not have](debug-pages-receive-block-patches-for-elements-they-do-not-have.md) | friction | UI watchability wave (2026-08-10 route walk) |

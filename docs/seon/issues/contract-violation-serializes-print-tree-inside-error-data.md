@@ -49,3 +49,23 @@ Contract evidence remains bounded ordinary data inside `:seon.error/data`.
 The error producer renders that data for a reader, no consumer calls
 `edn/read-string` on an error field, and regressions assert the semantic
 problem and argument shapes rather than serialized print-node syntax.
+
+## Recurrence on routine operator faults, 2026-08-10
+
+Observer lane, cluster `default` (pid 91415). `:seon.error/data-edn` sizes for
+the seven error facts on a freshly booted cluster:
+
+```clojure
+[[:seon.operator/reap-incomplete          177293]
+ [:seon.operator/process-census-incomplete 175215]
+ [:seon.operator/collection-incomplete      19631]
+ [:seon.operator/failed                      9859]
+ [:seon.cluster.reply/unreadable             1860]]
+```
+
+Two 175 KB print trees serialized into error data, on **routine scheduled
+maintenance faults** rather than an exotic contract violation. This is below
+the 4.25 MB worst case of the original report but above the 158 KB the
+2026-08-08 observer measured, and the shape is the same: evidence stored as
+serialized print syntax instead of bounded ordinary data. These faults recur
+on every boot, so the cost is not incidental.

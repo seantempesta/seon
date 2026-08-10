@@ -204,3 +204,24 @@ The core-namespace attribution is refuted. After `f098bbdc7`,
 declaration fallback, from `seon.db`, and zero from `seon.schema.datahike`.
 That independent cost is filed as
 [core-namespace-pages-spend-seven-seconds-without-declaration-fallbacks.md](core-namespace-pages-spend-seven-seconds-without-declaration-fallbacks.md).
+
+## Independent confirmation, 2026-08-10
+
+Observer lane on cluster `default` (pid 91415), four consecutive samples over
+the live HTTP server, measuring TTFB and total separately:
+
+```text
+/data 200 3147B ttfb=0.131s total=0.131s
+/data 200 3147B ttfb=0.125s total=0.126s
+/data 200 3147B ttfb=0.124s total=0.124s
+/data 200 3147B ttfb=0.123s total=0.123s
+```
+
+The first request of the JVM took 0.32 s, then 0.123–0.131 s steady. Against
+the 5.5 s originally filed and the 6.4–6.5 s the 2026-08-08 observer measured
+for the same 3,147-byte payload, that is a ~50× improvement with a real warm
+path. The stall is gone from an independent lane's measurement as well.
+
+The note's other acceptance edges (retained bytes on an unchanged basis, only
+8 of 525 schema keys shown, root's page identity) were not exercised here, so
+this is corroboration of the latency fix only.
