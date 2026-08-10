@@ -68,6 +68,19 @@ in the OPEN QUESTIONS section, not silently assumed.
 11. **Long waits are bugs. Root causes everywhere. Holistic, not
     whack-a-mole.** (Standing orders from this session, applied to all
     of the below.)
+12. **Fast by default, everywhere.** "No 3s+ page loads or thousands
+    of wasted redundant queries. We have one really well designed
+    system and we optimize it and if it ever gets long we investigate
+    and assume it's a bug." A slow surface is never a tuning backlog
+    item — it is a defect with a cause, investigated on sight. The
+    open namespace-page cost (~3 s, 3,859 pulls/21,560 datom reads per
+    walk, measured 2026-08-10) is governed by this ruling.
+13. **Great defaults, always** (restated for this design, owner
+    directive): every surface — fresh agent, namespace owner, debug
+    overlay, system view — behaves GREAT with zero configuration;
+    overrides are one obvious fact or argument, never a tuning
+    exercise. An independent critic reviews the PRD against this
+    standard before the owner sees it.
 
 ## Plan skeleton (sequencing only; content governed by the rulings)
 
