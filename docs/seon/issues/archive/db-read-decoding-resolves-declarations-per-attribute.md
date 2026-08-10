@@ -155,3 +155,17 @@ deliberately not done.
   substantially under its current ~60 s with no change to the test.
 - No new process-global cache of declaration facts is introduced; the fix is
   resolve-once-and-pass, per the PRD's mutable-reference rule.
+
+## Recurrence audit, 2026-08-10
+
+The `/data` regression was not a recurrence of this class. On isolated cluster
+`db-decode-scratch`, a wildcard pull of the cluster entity returned six keys
+in 14 ms and incremented `seon.schema/!fallback-counts` exactly once, at
+`seon.db`'s operation-level `read-declarations` seam. The standing regression
+remained green: 3 tests, 12 assertions.
+
+The route's 530 repeated resolutions came from the separate
+`seon.schema.datahike/database-attributes-for-in` derivation. That bridge now
+passes and supplies one immutable projection for the whole operation in
+`f098bbdc7`; the current `seon.db` decode walkers and this archived resolution
+were unchanged.
