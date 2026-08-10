@@ -16,7 +16,35 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
-**CURRENT EDGE — 2026-08-08 morning.** The seon.env platform is BUILT
+**CURRENT EDGE — 2026-08-10.** THE PROGRAM IS THE AGENT INTERFACE
+ECONOMY PRD + ROADMAP:
+[agent-interface-economy-2026-08-10.md](agent-interface-economy-2026-08-10.md)
+(five invariants — one total floor, fit at one choke point, requery
+totality + deep doc, API-first lean context, quality page; phases A-F
+ending in the six verification gates). Verification day evidence, all
+committed: [ui-truth-2026-08-10.md](../research/ui-truth-2026-08-10.md)
+(full loop PROVEN LIVE in a real browser; defects presentational/cost
+only — drive verdict PROCEED),
+[claims-sweep-2026-08-10.md](../research/claims-sweep-2026-08-10.md)
+(5/6 overnight claims held; truncation half repaired same day
+`a8a38313c`),
+[context-quality-audit-2026-08-10.md](../research/context-quality-audit-2026-08-10.md)
+(root ~15.9k tokens: 43% schema walls, 5% API; ns renderer budget never
+supplied), and
+[bad-output-catalog-2026-08-10.md](../research/bad-output-catalog-2026-08-10.md)
+(23 classes, 15 invisible; Option 1 recommended). Landed fixes: /data
+7.5 s→130 ms (`f098bbdc7`), print faces as real child text
+(`977f3a033`), transact! one native report shape (`fb78d3027`),
+config application entry (`6a465d0d0`). Suite truth: the complete run
+is STILL unestablished — today's attempt aborted at 90 min wedged in
+`init-owns-current-source…` with a contaminated source boundary (47F/6E
+partial, unattributable); ONE test is 2,617 s
+(`cohost-boot…second-cluster…`; lane on it). The MODEL-AUTHORING
+MILESTONE remains the single most important open question; every known
+blocker is now closed and the drive runs at the Phase B frozen
+checkpoint. The prior edge below stands as history.
+
+**CURRENT EDGE — 2026-08-08 morning (superseded above).** The seon.env platform is BUILT
 and PROVEN; the full ruling + evidence ledger is
 [overnight-report-2026-08-08.md](overnight-report-2026-08-08.md) and the
 2026-08-08 README ruling block. State in one paragraph:
