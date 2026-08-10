@@ -10,4 +10,5 @@
                   :reasoning-size [:int {:min 1}],
                   :run [:and #:seon.db{:index true} :seon.db/ref],
                   :settings-edn [:string #:seon.db{:no-history? true}],
+                  :truncation :seon.db/ref,
                   :usage-edn [:string #:seon.db{:no-history? true}]}

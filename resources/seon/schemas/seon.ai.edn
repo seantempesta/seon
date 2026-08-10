@@ -29,6 +29,9 @@
            [:seon.ai.attempt/finish-reason
             {:optional true}
             :seon.ai.attempt/finish-reason]
+           [:seon.ai.attempt/truncation
+            {:optional true}
+            :seon.ai.attempt/truncation]
            [:seon.ai/http-status {:optional true} :seon.ai/http-status]
            [:seon.ai/request-transmitted?
             {:optional true}

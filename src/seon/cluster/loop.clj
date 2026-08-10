@@ -684,27 +684,32 @@
 (defn- attempt-evidence
   "Provider evidence projected from one completion or failure value."
   [{completion :seon.ai/completion}]
-  (cond-> {}
-    (:seon.ai.model/last-latency-ms completion)
-    (assoc :seon.ai.model/last-latency-ms
-           (:seon.ai.model/last-latency-ms completion))
-    (or (:seon.ai/usage completion)
-        (get-in completion [:seon.error/data :seon.ai/usage]))
-    (assoc :seon.ai/usage
-           (or (:seon.ai/usage completion)
-               (get-in completion [:seon.error/data :seon.ai/usage])))
-    (or (:seon.ai/reasoning-content completion)
-        (get-in completion [:seon.error/data :seon.ai/reasoning-content]))
-    (assoc :seon.ai/reasoning-content
-           (or (:seon.ai/reasoning-content completion)
-               (get-in completion
-                       [:seon.error/data :seon.ai/reasoning-content])))
-    (or (:seon.ai/finish-reason completion)
-        (get-in completion [:seon.error/data :seon.ai/finish-reason]))
-    (assoc :seon.ai/finish-reason
-           (or (:seon.ai/finish-reason completion)
-               (get-in completion
-                       [:seon.error/data :seon.ai/finish-reason])))))
+  (let [truncation (or (:seon.ai/truncation completion)
+                       (when (= :seon.ai/stream-truncated
+                                (:seon.error/kind completion))
+                         completion))]
+    (cond-> {}
+      (:seon.ai.model/last-latency-ms completion)
+      (assoc :seon.ai.model/last-latency-ms
+             (:seon.ai.model/last-latency-ms completion))
+      (or (:seon.ai/usage completion)
+          (get-in completion [:seon.error/data :seon.ai/usage]))
+      (assoc :seon.ai/usage
+             (or (:seon.ai/usage completion)
+                 (get-in completion [:seon.error/data :seon.ai/usage])))
+      (or (:seon.ai/reasoning-content completion)
+          (get-in completion [:seon.error/data :seon.ai/reasoning-content]))
+      (assoc :seon.ai/reasoning-content
+             (or (:seon.ai/reasoning-content completion)
+                 (get-in completion
+                         [:seon.error/data :seon.ai/reasoning-content])))
+      (or (:seon.ai/finish-reason completion)
+          (get-in completion [:seon.error/data :seon.ai/finish-reason]))
+      (assoc :seon.ai/finish-reason
+             (or (:seon.ai/finish-reason completion)
+                 (get-in completion
+                         [:seon.error/data :seon.ai/finish-reason])))
+      truncation (assoc :seon.ai/truncation truncation))))
 
 (defn- attempt-request
   "One record-attempt request assembled from target, evidence, and provenance."
@@ -741,7 +746,7 @@
      ::schedule (if backup [] (ai/delays strategy rand))}))
 
 (defn- record-attempt!
-  "Commit ONE model attempt — and its error fact when it failed.
+  "Commit ONE model attempt and its error or truncation facts.
   Returns the COMMITTED error fact on failure, nil otherwise.
 
   The error fact and the attempt row ride ONE transaction, with the
@@ -765,6 +770,7 @@
          settings :seon.ai/settings
          reasoning-content :seon.ai/reasoning-content
          finish-reason :seon.ai/finish-reason
+         truncation :seon.ai/truncation
          delay-ms :seon.ai.attempt/delay-ms
          failover-from :seon.ai.attempt/failover-from} request
         connection (:seon.db/connection cluster)
@@ -779,10 +785,18 @@
                                    (> reasoning-size threshold))
                           (blob/stage! connection reasoning-content))
         reasoning-blob (:seon.blob/digest reasoning-stage)
-        commit (when failure
-                 (error-tx cluster db failure now
-                           {:seon.cluster.agent/id agent-id
-                            :seon.cluster.run/id run-id}))
+        attribution {:seon.cluster.agent/id agent-id
+                     :seon.cluster.run/id run-id}
+        failure-recording (when failure
+                            (error-tx cluster db failure now attribution))
+        truncation-recording
+        (cond
+          (nil? truncation) nil
+          (= truncation failure) failure-recording
+          :else (error-tx cluster db truncation now attribution))
+        recording (into (vec failure-recording)
+                        (when (not= truncation failure)
+                          truncation-recording))
         row (cond-> (merge
                      {:seon.ai.attempt/id (attempt-id run-id ordinal)
                       :seon.ai.attempt/run [:seon.cluster.run/id run-id]
@@ -798,7 +812,12 @@
               ;; THE REF'S PRESENCE IS THE OUTCOME: an attempt failed
               ;; exactly when it points at an error fact, and there is
               ;; no stored :success/:error label restating that.
-              commit (assoc :seon.ai.attempt/error (:db/id (first commit)))
+              failure-recording
+              (assoc :seon.ai.attempt/error
+                     (:db/id (first failure-recording)))
+              truncation-recording
+              (assoc :seon.ai.attempt/truncation
+                     (:db/id (first truncation-recording)))
               settings
               (assoc :seon.ai.attempt/settings-edn (pr-str settings))
               usage (assoc :seon.ai.attempt/usage-edn (pr-str usage))
@@ -827,9 +846,9 @@
          connection (cond-> [] reasoning-stage (conj reasoning-stage))
          (fn []
            (db/transact! connection
-                         (into (conj (vec commit) row) observation-tx))))]
+                         (into (conj recording row) observation-tx))))]
     (when-not (:seon.error/kind outcome)
-      (some-> commit first (dissoc :db/id)))))
+      (some-> failure-recording first (dissoc :db/id)))))
 
 (defn- form-data
   "The source and parse-time namespace of one form of a run, by ordinal."

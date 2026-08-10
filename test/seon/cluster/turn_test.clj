@@ -2184,6 +2184,67 @@
           (is (= "stop" (:seon.ai.attempt/finish-reason row))
               "finish reason is its own fact, never inserted into usage"))))))
 
+(deftest a-partial-stream-truncation-is-a-durable-nonfailure-attempt-fact
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.db/connection cluster)
+            requests (atom [])
+            truncation
+            {:seon.error/kind :seon.ai/stream-truncated
+             :seon.error/message
+             "The provider stream ended after 12 characters."
+             :seon.error/data
+             {:seon.ai/text-received 12
+              :seon.ai/thread-interrupted? false
+              :seon.ai/cause-chain
+              ["java.io.IOException: closed"
+               "java.io.IOException: connection reset by peer"]}}]
+        (with-redefs [ai/complete
+                      (recording-completer
+                       requests
+                       [{:seon.ai/text "(my.run/complete \"partial\")"
+                         :seon.ai/truncation truncation}])]
+          (with-redefs [injected-evaluation
+                        {:seon.cluster.eval/result-edn
+                         (pr-str (my.run/complete "partial"))
+                         :seon.sci.admit/value
+                         (my.run/complete "partial")}]
+            (drive! cluster 10)))
+        (let [database @connection
+              attempt-id
+              (db/q '[:find ?attempt-id .
+                      :where
+                      [?attempt :seon.ai.attempt/id ?attempt-id]
+                      [?attempt :seon.ai.attempt/truncation]]
+                    database)
+              truncation-id
+              (db/q '[:find ?truncation-id .
+                      :in $ ?attempt-id
+                      :where
+                      [?attempt :seon.ai.attempt/id ?attempt-id]
+                      [?attempt :seon.ai.attempt/truncation ?truncation]
+                      [?truncation :seon.error/id ?truncation-id]]
+                    database attempt-id)
+              row (db/pull database '[*]
+                           [:seon.ai.attempt/id attempt-id])
+              fact (db/pull database '[*]
+                            [:seon.error/id truncation-id])]
+          (is (= 1 (count @requests)))
+          (is (string? attempt-id)
+              "the query finds the attempt by truncation-fact presence")
+          (is (string? truncation-id)
+              "the attempt ref resolves to a durable error fact")
+          (is (= truncation
+                 (semantic-result (:seon.error/data-edn fact)))
+              "the durable fact retains why and where the stream ended")
+          (is (not (contains? row :seon.ai.attempt/error))
+              "partial output remains an ordinary completion, not a failure")
+          (is (some? (db/q '[:find ?digest .
+                            :where
+                            [?run :seon.cluster.run/plan-digest ?digest]]
+                          database))
+              "the already-arrived completion still settles as the plan"))))))
+
 (deftest reasoning-starvation-persists-usage-finish-and-the-named-error
   (with-cluster
     (fn [cluster]
