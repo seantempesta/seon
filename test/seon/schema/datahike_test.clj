@@ -6,7 +6,9 @@
             [seon.db :as db]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
-            [seon.test-support :as support]))
+            [seon.schema.edn :as schema.edn]
+            [seon.test-support :as support])
+  (:import [java.util.concurrent Callable FutureTask]))
 
 (def ^:private schema-delta (schema/begin-registration-delta))
 
@@ -126,6 +128,37 @@
               projection :gen/schema)))
     (is (contains? attributes :seon.error/class))
     (is (not (contains? attributes :gen/schema)))))
+
+(deftest database-attribute-derivation-resolves-the-population-once
+  (let [without-bindings
+        (fn [operation]
+          ;; A raw Java task starts with no Clojure thread bindings, matching
+          ;; the HTTP worker on which the live regression was measured.
+          (let [task (FutureTask. ^Callable (fn [] (operation)))
+                thread (Thread. task)]
+            (.start thread)
+            (.get task)))
+        resource-reads
+        (fn [operation]
+          (let [reads (atom 0)
+                read-one @#'schema.edn/read-schema-resource]
+            (with-redefs [schema.edn/read-schema-resource
+                          (fn [resource]
+                            (swap! reads inc)
+                            (read-one resource))]
+              (let [value (without-bindings operation)]
+                {:resource-reads @reads :value value}))))
+        one-population
+        (:resource-reads (resource-reads schema/declaration-population))
+        result
+        (resource-reads schema/canonical-database-attributes)]
+    (testing "the route-shaped bridge operation resolves once, not per attribute"
+      (is (pos? one-population)
+          "the fallback must read resources or the count is vacuous")
+      (is (> (count (:value result)) 500)
+          "the regression must exercise the production-wide attribute walk")
+      (is (= one-population (:resource-reads result))
+          "one operation carries one population through every bridge question"))))
 
 (def ^:private refused-form-generator
   (gen/elements

@@ -291,11 +291,19 @@
    [:=> [:cat :map [:fn clojure.core/map?]]
     [:vector :qualified-keyword]]}
   [projection forms]
-  (->> (schema.form/property-attributes forms)
-         (filter #(storable-attribute-in? projection %))
+  ;; Passing the projection answers this bridge's explicit lookups. Supplying
+  ;; the same forms answers registered predicates such as `malli-form?`, which
+  ;; Malli invokes with the candidate value alone while the attribute walk is
+  ;; in progress. Without both, one 525-attribute `/data` derivation resolved
+  ;; the complete classpath population 530 times (7.1-8.2 s, 2026-08-10).
+  (schema/call-with-forms
+   (:seon.schema.projection/forms projection)
+   #(->> (schema.form/property-attributes forms)
+         (filter (fn [attribute]
+                   (storable-attribute-in? projection attribute)))
          (into (set (schema.form/database-attributes forms)))
          (sort-by str)
-         vec))
+         vec)))
 
 (defn database-attributes-in
   "Database attributes plus bridge-storable schema-row properties."
