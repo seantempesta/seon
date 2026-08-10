@@ -8,6 +8,7 @@
   program rows, message connections, transcript inputs, and committed test
   rows from the database; logs are never an oracle."
   (:require [clojure.core.async :as async]
+            [clojure.core.async.flow :as flow]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
@@ -15,6 +16,7 @@
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
+            [seon.cluster.loop :as loop]
             [seon.cluster.run :as run]
             [seon.cluster.work :as work]
             [seon.config :as config]
@@ -23,7 +25,8 @@
             [seon.render.transcript :as transcript]
             [seon.schema :as schema]
             [seon.test-support :as test-support])
-  (:import [java.util Date UUID]))
+  (:import [java.util Date UUID]
+           [java.util.concurrent CountDownLatch]))
 
 (set! *warn-on-reflection* true)
 
@@ -143,25 +146,21 @@
        (let [next-spec (nth initial (mod (inc index) agent-count))
              previous-spec (nth initial (mod (dec index) agent-count))
              payload (str "ring|" scenario "|" (::agent-id spec)
-                          "|to|" (::agent-id next-spec) "|")]
-         (let [planned (assoc spec
-                              ::next-agent-id (::agent-id next-spec)
-                              ::incoming-message-id
-                              (::outbound-message-id previous-spec)
-                              ::payload payload)]
-           (assoc planned ::sources (plan-sources planned)))))
+                          "|to|" (::agent-id next-spec) "|")
+             planned (assoc spec
+                            ::next-agent-id (::agent-id next-spec)
+                            ::incoming-message-id
+                            (::outbound-message-id previous-spec)
+                            ::payload payload)]
+         (assoc planned ::sources (plan-sources planned))))
      (range agent-count)
      initial)))
 
-(defn- seed-scenario!
+(defn- create-scenario-agents!
   [instance specs]
   (let [connection (:seon.boot/cluster-connection instance)
-        database @connection
         cluster-name (get-in instance [:seon.boot/config
                                        :seon.boot/cluster-name])
-        process (get-in instance [:seon.cluster.loop/cluster
-                                  :seon.cluster.run/process])
-        now (Date.)
         creation-tx
         (mapcat (fn [spec]
                   (agent/creation-tx
@@ -169,14 +168,40 @@
                     :seon.ns/name (::namespace spec)
                     :seon.cluster/name cluster-name}))
                 specs)
-        ring-rows
-        (mapv (fn [spec]
-                {:seon.cluster.message/id (::outbound-message-id spec)
-                 :seon.cluster.message/to
-                 [:seon.cluster.agent/id (::next-agent-id spec)]
-                 :seon.cluster.message/content (::payload spec)
-                 :seon.cluster.message/at now})
-              specs)
+        result
+        (db/transact!
+         connection
+         {:tx-data (into [] creation-tx)})]
+    (is (not (:seon.error/kind result))
+        (str "agent creation was refused: " (pr-str result)))
+    result))
+
+(defn- pause-scenario-mailboxes!
+  [instance specs]
+  (let [handle (:seon.cluster.loop/cluster instance)
+        routing (:seon.cluster.agent/routing instance)
+        quiesced (async/promise-chan)]
+    ;; The armer channel orders this request after the creation wake. Its
+    ;; acknowledgement therefore proves every scenario agent has an entry.
+    (async/>!! (:seon.cluster.wake/channel handle)
+               {::agent/quiesce quiesced})
+    (test-support/await-event! quiesced "scenario agents armed")
+    (doseq [spec specs]
+      (let [entry (agent/armed routing (::agent-id spec))
+            graph (:seon.flow/graph entry)]
+        (is (some? entry) "the armer published the scenario agent")
+        (flow/pause-proc graph ::agent/mailbox)
+        (is (= :paused
+               (::flow/status (flow/ping-proc graph ::agent/mailbox)))
+            "the mailbox is paused before planned work can deliver a wake")))))
+
+(defn- seed-scenario-runs!
+  [instance specs]
+  (let [connection (:seon.boot/cluster-connection instance)
+        database @connection
+        process (get-in instance [:seon.cluster.loop/cluster
+                                  :seon.cluster.run/process])
+        now (Date.)
         run-tx
         (mapcat
          (fn [spec]
@@ -188,8 +213,6 @@
              :seon.cluster.run/opened-at now
              :seon.cluster.run/starting-ns
              [:seon.ns/name (::namespace spec)]
-             :seon.cluster.run/trigger
-             [:seon.cluster.message/id (::incoming-message-id spec)]
              :seon.cluster.run/plan-digest
              (digest-value (::sources spec))
              :seon.cluster.run/sources (::sources spec)}))
@@ -197,12 +220,52 @@
         result
         (db/transact!
          connection
-         {:tx-data (into [] cat [creation-tx ring-rows run-tx])
+         {:tx-data (into [] run-tx)
           :tx-meta {:seon.db/process
                     [:seon.db.process/id process]}})]
     (is (not (:seon.error/kind result))
-        (str "scenario seed transaction was refused: " (pr-str result)))
+        (str "scenario run transaction was refused: " (pr-str result)))
     result))
+
+(defn- fold-scenario-runs!
+  [instance specs]
+  (let [connection (:seon.boot/cluster-connection instance)
+        handle (:seon.cluster.loop/cluster instance)
+        process (:seon.cluster.run/process handle)
+        work-items
+        (mapv
+         (fn [spec]
+           (let [work-item (work/next-agent-work
+                            @connection
+                            {:seon.cluster.agent/id (::agent-id spec)
+                             :seon.cluster.run/process process})]
+             (is (= :resume (:seon.cluster.work/situation work-item))
+                 "a caller-planned run begins at the resume boundary")
+             work-item))
+         specs)
+        start (CountDownLatch. 1)
+        completed (async/chan (count work-items))]
+    (doseq [work-item work-items]
+      (future
+        (.await start)
+        (async/>!!
+         completed
+         (try
+           {:seon.cluster.loop/report
+            (loop/turn {:seon.cluster.loop/cluster handle
+                        :seon.cluster.work/next work-item}
+                       (Date.))}
+           (catch Throwable failure
+             {:seon.cluster.loop/failure failure})))))
+    (.countDown start)
+    (dotimes [_ (count work-items)]
+      (let [outcome
+            (test-support/await-event! completed "concurrent planned fold")
+            report (:seon.cluster.loop/report outcome)]
+        (is (nil? (:seon.cluster.loop/failure outcome))
+            (some-> (:seon.cluster.loop/failure outcome) Throwable->map pr-str))
+        (is (= :closed (:seon.cluster.loop/outcome report)))
+        (is (= form-count (:seon.cluster.loop/forms-run report)))))))
 
 (defn- await-runs-closed
   [connection run-ids]
@@ -232,6 +295,29 @@
           [?receipt :seon.cluster.eval/ordinal ?ordinal]]
         database run-ids))
 
+(def ^:private receipt-failure-attributes
+  [:seon.cluster.eval/error
+   :seon.error/kind
+   :seon.cluster.eval/interrupted-at])
+
+(defn- receipt-failures
+  [database run-ids]
+  (into
+   #{}
+   (mapcat
+    (fn [attribute]
+      (map (fn [[run-id ordinal value]]
+             [run-id ordinal attribute value])
+           (db/q '[:find ?run-id ?ordinal ?value
+                   :in $ [?run-id ...] ?attribute
+                   :where
+                   [?run :seon.cluster.run/id ?run-id]
+                   [?receipt :seon.cluster.eval/run ?run]
+                   [?receipt :seon.cluster.eval/ordinal ?ordinal]
+                   [?receipt ?attribute ?value]]
+                 database run-ids attribute)))
+    receipt-failure-attributes)))
+
 (defn- assert-receipts!
   [database specs]
   (let [run-ids (mapv ::run-id specs)
@@ -247,24 +333,7 @@
                          ordinal])
                       (range form-count))))
               specs)
-        failures
-        (db/q '[:find ?run-id ?ordinal ?error ?kind ?interrupted-at
-                :in $ [?run-id ...]
-                :where
-                [?run :seon.cluster.run/id ?run-id]
-                [?receipt :seon.cluster.eval/run ?run]
-                [?receipt :seon.cluster.eval/ordinal ?ordinal]
-                [(get-else $ ?receipt :seon.cluster.eval/error "") ?error]
-                [(get-else $ ?receipt :seon.error/kind
-                           :seon.concurrency-independence/absent) ?kind]
-                [(get-else $ ?receipt :seon.cluster.eval/interrupted-at
-                           :seon.concurrency-independence/absent)
-                 ?interrupted-at]
-                [(or (not= ?error "")
-                     (not= ?kind :seon.concurrency-independence/absent)
-                     (not= ?interrupted-at
-                           :seon.concurrency-independence/absent))]]
-              database run-ids)]
+        failures (receipt-failures database run-ids)]
     (is (= expected actual)
         "every receipt identity maps to exactly its owning agent's run")
     (is (empty? failures)
@@ -366,16 +435,14 @@
 (defn- ring-facts
   [database specs]
   (let [message-ids (mapv ::outbound-message-id specs)]
-    (db/q '[:find ?message-id ?from-id ?to-id ?cause-id
+    (db/q '[:find ?message-id ?from-id ?to-id
             :in $ [?message-id ...]
             :where
             [?message :seon.cluster.message/id ?message-id]
             [?message :seon.cluster.message/from ?from]
             [?from :seon.cluster.agent/id ?from-id]
             [?message :seon.cluster.message/to ?to]
-            [?to :seon.cluster.agent/id ?to-id]
-            [?message :seon.cluster.message/caused-by ?cause]
-            [?cause :seon.cluster.message/id ?cause-id]]
+            [?to :seon.cluster.agent/id ?to-id]]
           database message-ids)))
 
 (defn- assert-ring!
@@ -386,14 +453,16 @@
               (map (fn [spec]
                      [(::outbound-message-id spec)
                       (::agent-id spec)
-                      (::next-agent-id spec)
-                      (::incoming-message-id spec)]))
+                      (::next-agent-id spec)]))
               specs)]
     (is (= expected actual)
-        "all N ring messages are delivered and causally traceable")
+        "all N triggerless ring messages are delivered exactly once")
     (doseq [spec specs]
-      (is (empty? (work/unanswered-triggers database (::agent-id spec)))
-          "the preidentified ring trigger was answered by its system run"))))
+      (is (= #{(::incoming-message-id spec)}
+             (into #{}
+                   (map :seon.cluster.message/id)
+                   (work/unanswered-triggers database (::agent-id spec))))
+          "the paused mailbox leaves exactly the declared incoming ring message"))))
 
 (defn- agent-message-ids
   [database agent-id]
@@ -488,7 +557,10 @@
         process (get-in instance [:seon.cluster.loop/cluster
                                   :seon.cluster.run/process])
         started (System/nanoTime)]
-    (seed-scenario! instance specs)
+    (create-scenario-agents! instance specs)
+    (pause-scenario-mailboxes! instance specs)
+    (seed-scenario-runs! instance specs)
+    (fold-scenario-runs! instance specs)
     (await-runs-closed connection run-ids)
     (let [elapsed-ms (/ (double (- (System/nanoTime) started)) 1000000.0)
           database @connection]
@@ -504,6 +576,35 @@
       {::scenario scenario
        ::agent-count agent-count
        ::elapsed-ms elapsed-ms})))
+
+(deftest receipt-diagnostic-selects-only-present-failure-facts
+  (test-support/with-database
+    (fn [connection]
+      (let [run-id "receipt-diagnostic-run"
+            interrupted-at (Date.)]
+        (db/transact!
+         connection
+         [{:seon.cluster.run/id run-id}
+          {:seon.cluster.eval/id (pr-str [run-id 0])
+           :seon.cluster.eval/run [:seon.cluster.run/id run-id]
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/result-edn "42"}
+          {:seon.cluster.eval/id (pr-str [run-id 1])
+           :seon.cluster.eval/run [:seon.cluster.run/id run-id]
+           :seon.cluster.eval/ordinal 1
+           :seon.cluster.eval/error "failed"}
+          {:seon.cluster.eval/id (pr-str [run-id 2])
+           :seon.cluster.eval/run [:seon.cluster.run/id run-id]
+           :seon.cluster.eval/ordinal 2
+           :seon.error/kind :user-input}
+          {:seon.cluster.eval/id (pr-str [run-id 3])
+           :seon.cluster.eval/run [:seon.cluster.run/id run-id]
+           :seon.cluster.eval/ordinal 3
+           :seon.cluster.eval/interrupted-at interrupted-at}])
+        (is (= #{[run-id 1 :seon.cluster.eval/error "failed"]
+                 [run-id 2 :seon.error/kind :user-input]
+                 [run-id 3 :seon.cluster.eval/interrupted-at interrupted-at]}
+               (receipt-failures @connection [run-id])))))))
 
 (deftest n-agents-fold-independently-on-one-live-cluster
   (let [model-calls (atom [])]

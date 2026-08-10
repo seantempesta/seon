@@ -57,8 +57,6 @@ See `README.md` for the convention.
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [Make the concurrency receipt diagnostic select only failed receipts](concurrency-receipt-diagnostic-classifies-success-as-failure.md) | friction | concurrency harness repair |
-| [Keep concurrency plans from opening provider-backed follow-up runs](concurrency-plans-open-unplanned-follow-up-runs.md) | friction | concurrency harness repair |
 | [Derive the oversight fleet proof from the live proc roster](oversight-fleet-test-pins-a-stale-proc-roster.md) | friction | oversight test repair |
 | [Give `seon.cluster.loop/settle!` a complete public contract](settle-is-public-without-a-complete-contract.md) | friction | unreadable-reply lane coordination |
 | [Construct the schedule graph test from a real environment-bearing handle](schedule-graph-test-constructs-a-handle-without-an-environment.md) | friction | schedule fixture repair |

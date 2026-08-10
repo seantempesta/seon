@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, testing, concurrency, runtime]
 ---
@@ -41,3 +41,20 @@ messages merely to satisfy the test.
 - Transcript assertions derive their expected message set from the scenario's
   declared traffic.
 - The provider stub receives zero calls in all six scenarios.
+
+## Resolution
+
+Resolved 2026-08-10 in the concurrency-independence harness. Production was
+correct: a completed run answers the agent that sent its trigger. The harness
+now creates each scenario agent, pauses its mailbox through Flow's own
+pause-and-ping control protocol, opens triggerless caller-planned runs, and
+starts their production folds together behind one latch. The plan's declared
+ring messages remain durable unanswered work in the paused mailboxes; no
+completion reply or provider-backed follow-up run can be constructed.
+
+`bin/test seon.concurrency-independence-test` passed 2 tests and 2,942
+assertions with zero failures and zero errors. The provider stub received zero
+calls in every scenario, every transcript contained exactly its declared
+incoming/outgoing ring pair, and the long test completed in 187.65 seconds
+from its runner begin/end timestamps (the clean retained gate took 195.32
+seconds at the same boundary).

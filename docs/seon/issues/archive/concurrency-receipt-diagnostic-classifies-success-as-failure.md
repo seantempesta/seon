@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, testing, concurrency]
 ---
@@ -35,3 +35,17 @@ these rows.
 - Each genuine error, refusal, or interruption does satisfy it.
 - The long gate keeps the exact receipt-identity census and reports zero false
   failures across all six scenarios.
+
+## Resolution
+
+Resolved 2026-08-10 in the concurrency-independence harness. Datalog function
+expressions do not recursively evaluate nested function forms; the old query
+therefore handed three truthy `(not= ...)` lists to `or` and selected every
+receipt. The diagnostic now queries the presence of each failure attribute
+directly, making a successful receipt structurally unselectable.
+
+The class regression commits one successful receipt plus distinct error,
+typed-refusal, and interruption receipts, and observes exactly the latter
+three. `bin/test seon.concurrency-independence-test` passed 2 tests and 2,942
+assertions with zero failures and zero errors; all six long scenarios also
+reported no receipt failures.
