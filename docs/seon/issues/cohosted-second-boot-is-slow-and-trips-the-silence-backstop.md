@@ -44,6 +44,10 @@ live JVM shows both boots COMPLETED:
 63.6 s — 33 s after the operator declared failure. The wrapper's abandonment
 also costs the URL line the operator normally prints.
 
+The 2026-08-10 complete gate amplified the same regression: this test consumed
+2,616.8 seconds. A current-tree phase probe and the correction are recorded in
+[the co-hosted boot speed measurement](../../prds/sci-execution-runtime/research/cohost-boot-speed-2026-08-10.md).
+
 The gap sits between the `recovery` phase and the next published progress
 event, i.e. in `config`/`program`. The in-JVM regression
 `test/seon/cluster/cohost_boot_test.clj` shows the same ratio (cluster A ~50 s
@@ -82,3 +86,28 @@ cluster.
 - `bin/seon start` for a co-hosted cluster reports success and its URL when
   the boot succeeds; the silence backstop no longer fires on a boot that is
   still publishing progress.
+
+## 2026-08-10 implementation status
+
+The production slowness class is corrected at `src/seon/reconcile.cljc`.
+Configuration reconciliation used to wildcard-pull every identity-bearing
+entity in the source fork before it used provenance to derive the managed
+slice. With process-wide instrumentation live, one converged config plan made
+11,164 pulls. It now pulls only the provenance-managed entities; the structural
+regression supplies 20 foreign identities and observes exactly one pull.
+
+Measured second-boot time fell from 55.405 seconds to 21.663 seconds, and its
+recovery-to-config phase fell from 36.379 seconds to 0.561 seconds. The isolated
+test fell from 145.19 seconds to 124.05 seconds. It is no longer marked
+`:seon.test/long`; the platform tier continues to run it on every gate.
+
+The required changed gate loaded all 120 test namespaces and completed this
+test in 71.31 seconds, projecting a 42.42-minute saving against the recorded
+2,616.8-second full-gate observation across the schema-derivation and
+reconciliation corrections. The complete changed gate passed 106 tests and
+632 assertions.
+
+This issue remains open only for the distinct operator contract: success must
+follow published readiness, and the silence clock must be a loud backstop
+rather than the primary completion detector. No change in this lane touched
+`script/seon/fresh_operator.clj`.

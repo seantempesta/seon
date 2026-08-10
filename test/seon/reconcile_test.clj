@@ -198,6 +198,33 @@
                         '[:seon.config/cluster]
                         [:seon.config/cluster "remove"]))))))
 
+(deftest planning-pulls-only-the-provenance-managed-slice
+  (with-model-database
+    (fn [connection]
+      (let [managed (config-row "managed-slice" 10)
+            foreign
+            (mapv #(config-row (str "foreign-slice-" %) 10) (range 20))]
+        (transact-as! connection managing-process [managed])
+        (transact-as! connection unmanaged-process foreign)
+        (let [managed-eid
+              (db/q
+               '[:find ?entity .
+                 :where
+                 [?entity :seon.config/cluster "managed-slice"]]
+               @connection)
+              original-pull db/pull
+              pulled-eids (atom [])
+              tx-data
+              (with-redefs
+               [db/pull
+                (fn [& args]
+                  (swap! pulled-eids conj (last args))
+                  (apply original-pull args))]
+                (reconcile/plan @connection (request [managed])))]
+          (is (empty? tx-data) "the managed row is already exact")
+          (is (= [managed-eid] @pulled-eids)
+              "foreign identities are unrepresentable in the pull slice"))))))
+
 (deftest malformed-and-conflicting-identities-refuse
   (with-model-database
     (fn [connection]

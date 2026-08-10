@@ -85,9 +85,7 @@
     :seon.sci.eval/time-limit-ms 5000
     :seon.config/on-core-error :panic}))
 
-(deftest ^{:seon.test/long
-           "Boots two real clusters in this JVM with instrumentation live."}
-  a-second-cluster-boots-under-the-first-cluster-s-instrumentation
+(deftest a-second-cluster-boots-under-the-first-cluster-s-instrumentation
   (let [root (published-root)
         instances (atom [])]
     (try

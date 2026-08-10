@@ -352,12 +352,6 @@
         (into {}
               (map (juxt ::identity :db/id))
               facts)
-        entities
-        (into {}
-              (map
-               (fn [eid]
-                 [eid (seon.db/pull db '[*] eid)]))
-              (keys entity-identities))
         first-tx
         (first-assertion-transactions db installed-attrs)
         process-by-tx (process-by-transaction db)
@@ -391,7 +385,17 @@
          identities)]
     (when outside
       (refuse! ::identity-outside-scope {::identity outside}))
-    (let [desired
+    (let [entities
+          ;; Reconciliation can inspect or change only managed entities. Pull
+          ;; after provenance has established that finite slice; wildcard-
+          ;; pulling every identity-bearing program entity made the cost of a
+          ;; config apply proportional to the whole source fork.
+          (into {}
+                (map
+                 (fn [eid]
+                   [eid (seon.db/pull db '[*] eid)]))
+                managed-eids)
+          desired
           (mapv #(canonical-desired-entity db %) desired)
           desired-set (set identities)
           entity-tx
