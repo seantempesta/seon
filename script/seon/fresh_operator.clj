@@ -1945,6 +1945,12 @@
                    :seon.operator/managed-root ~root))
           `(seon.cluster.registry/ensure-cluster! ~request))]
     `(fn [~store ~source ~instance]
+       (when-not ~source
+         (throw
+          (ex-info
+           "No `current-src` branch is published; run `bin/seon init` first."
+           {:seon.fresh-operator/root ~root
+            :seon.fresh-operator/name ~name})))
        (let [~branch (seon.cluster.registry/cluster-branch ~name)
              ~request {:seon.store/store ~store
                        :seon.boot/cluster-name ~name
@@ -1964,12 +1970,15 @@
                 ~operation)))))
 
 (defn- init-form
-  [root name force? changed-paths source-process?]
+  [root name force? changed-paths source-process? publish-before-fork?]
   (let [cluster-root (str (cluster-root root))
         changed-paths (mapv #(str (if (fs/absolute? (fs/path %))
                                     (fs/path %)
                                     (fs/path root %)))
                             changed-paths)
+        cold-source (gensym "source")
+        cold-store (gensym "store")
+        publish? (or (seq changed-paths) (not name) publish-before-fork?)
         operation
         (cond
           (seq changed-paths)
@@ -1979,25 +1988,44 @@
           `(seon.cluster/refresh-source! ~cluster-root)
 
           source-process?
-          `(let [source# (seon.cluster/refresh-source! ~cluster-root)
-                 store#
+          `(let [~cold-source
+                 ~(when publish-before-fork?
+                    `(seon.cluster/refresh-source! ~cluster-root))
+                 ~cold-store
                  (seon.cluster.store/open-store!
                   {:seon.store/dir ~(str (fs/path cluster-root "store"))})]
              (try
-               (~(named-init-form root name force?) store# source# nil)
+               (~(named-init-form root name force?)
+                ~cold-store
+                ~(if publish-before-fork?
+                   cold-source
+                   `(seon.cluster.source/current ~cold-store))
+                nil)
                (finally
-                 (seon.cluster.store/release-store! store#))))
+                 (seon.cluster.store/release-store! ~cold-store))))
 
           :else
-          `(let [source# (seon.cluster/refresh-source! ~cluster-root)
-                 instances#
+          `(let [instances#
                  @@(ns-resolve 'seon.cluster (symbol "running-instances"))
                  store# (some :seon.store/store (vals instances#))]
              (when-not store#
                (throw
                 (ex-info "The live JVM has no process-root store." {})))
              (~(named-init-form root name force?)
-              store# source# (get instances# ~name))))]
+              store#
+              (seon.cluster.source/current store#)
+              (get instances# ~name))))
+        emitted-operation
+        (if source-process?
+          `(println
+            ~init-result-prefix
+            (pr-str
+             (try
+               {:seon.fresh-operator/value ~operation}
+               (catch Throwable failure#
+                 {:seon.fresh-operator/message (ex-message failure#)
+                  :seon.fresh-operator/data (ex-data failure#)}))))
+          operation)]
     (pr-str
      `(do
         ;; Instrumentation wrappers are process-local compiled artifacts. They
@@ -2005,10 +2033,11 @@
         ;; publication request, so no wrapper may validate the candidate
         ;; source population. The finally below restores instrumentation from
         ;; an extant cluster's own projection after publication settles.
-        (when-let [remove!#
-                   (some-> (find-ns 'seon.instrument)
-                           (ns-resolve (symbol "remove!")))]
-          (remove!#))
+        (when ~publish?
+          (when-let [remove!#
+                     (some-> (find-ns 'seon.instrument)
+                             (ns-resolve (symbol "remove!")))]
+            (remove!#)))
         ;; The live JVM owns the process-root store lock. Reload the
         ;; source-analysis owners before asking that JVM to publish
         ;; `current-src`; the running clusters and their program facts remain
@@ -2016,9 +2045,10 @@
         ;; Reload the schema runtime before its loader and before any namespace
         ;; whose top-level forms call `load!`. A long-lived JVM may predate a
         ;; newly published schema API that the publication owner calls.
-        (println "● current-src: reload schema runtime")
-        (flush)
-        (require 'seon.schema :reload)
+        (when ~publish?
+          (println "● current-src: reload schema runtime")
+          (flush)
+          (require 'seon.schema :reload)
         (println "● current-src: reload schema declarations")
         (flush)
         (require 'seon.schema.edn :reload)
@@ -2053,33 +2083,31 @@
         (require 'seon.cluster :reload)
         (println "● current-src: reload remaining publication owners")
         (flush)
-        (require 'seon.cluster.registry
-                 'seon.cluster.store
-                 'seon.fs
-                 'seon.operator)
-        (println "● current-src: publication started")
-        (flush)
-        (let [progress-var#
-              (ns-resolve 'seon.cluster (symbol "*source-progress!*"))
-              progress!#
-              (fn [phase#]
-                (println (str "● current-src: " phase#))
-                (flush))]
-          (with-bindings
-            {progress-var# progress!#}
-            (try
-              ~(if source-process?
-                 `(println
-                   ~init-result-prefix
-                   (pr-str
-                    (try
-                      {:seon.fresh-operator/value ~operation}
-                      (catch Throwable failure#
-                        {:seon.fresh-operator/message (ex-message failure#)
-                         :seon.fresh-operator/data (ex-data failure#)}))))
-                 operation)
-              (finally
-                ~(refresh-instrument-form)))))))))
+          (require 'seon.cluster.registry
+                   'seon.cluster.store
+                   'seon.fs
+                   'seon.operator)
+          (println "● current-src: publication started")
+          (flush))
+        (when-not ~publish?
+          (require 'seon.cluster.source
+                   'seon.cluster.registry
+                   'seon.cluster.store
+                   'seon.operator))
+        ~(if publish?
+           `(let [progress-var#
+                  (ns-resolve 'seon.cluster (symbol "*source-progress!*"))
+                  progress!#
+                  (fn [phase#]
+                    (println (str "● current-src: " phase#))
+                    (flush))]
+              (with-bindings
+                {progress-var# progress!#}
+                (try
+                  ~emitted-operation
+                  (finally
+                    ~(refresh-instrument-form)))))
+           emitted-operation)))))
 
 (defn- source-process-value!
   [root form]
@@ -2087,25 +2115,37 @@
         (start-child-jvm!
          {:seon.fresh-operator/root root
           :seon.fresh-operator/arguments ["-e" form]})
-        output (slurp (.getInputStream process))
-        exit (.waitFor process)]
-    (when-not (zero? exit)
-      (fail! "The initialization JVM exited unsuccessfully."
-             {:seon.fresh-operator/exit exit
-              :seon.fresh-operator/output output}))
-    (or
-     (some
-      (fn [line]
-        (when (str/starts-with? line init-result-prefix)
-          (edn/read-string (subs line (count init-result-prefix)))))
-      (str/split-lines output))
-     (fail! "The initialization JVM returned no result."
-            {:seon.fresh-operator/output output}))))
+        exited (.onExit process)
+        output (StringBuilder.)
+        result (volatile! nil)]
+    (with-open [reader (io/reader (.getInputStream process))]
+      (doseq [line (line-seq reader)]
+        (.append output line)
+        (.append output \newline)
+        (if (str/starts-with? line init-result-prefix)
+          (vreset!
+           result
+           (edn/read-string (subs line (count init-result-prefix))))
+          (do
+            (println line)
+            (flush)))))
+    (.get exited)
+    (let [exit (.exitValue process)
+          output (str output)]
+      (when-not (zero? exit)
+        (fail! "The initialization JVM exited unsuccessfully."
+               {:seon.fresh-operator/exit exit
+                :seon.fresh-operator/output output}))
+      (or @result
+          (fail! "The initialization JVM returned no result."
+                 {:seon.fresh-operator/output output})))))
 
 (declare stop-empty-jvm!)
 
 (defn- init!
-  [root arguments]
+  ([root arguments]
+   (init! root arguments false))
+  ([root arguments publish-before-fork?]
   (let [{:seon.fresh-operator/keys [name force? changed-paths]}
         (parse-init-arguments arguments)
         _ (operator.state/claim-root-under-lock!
@@ -2131,7 +2171,8 @@
            (terminal-value
             (prepl-eval!
              (:seon.fresh-operator/transport-advertisement anchor)
-             (init-form root name force? changed-paths false)
+             (init-form root name force? changed-paths false
+                        publish-before-fork?)
              (operator-silence-backstop-ms {})
              (fn [event]
                (when (= :out (:tag event))
@@ -2145,7 +2186,8 @@
           :else
           (let [outcome
                 (source-process-value!
-                 root (init-form root name force? changed-paths true))]
+                 root (init-form root name force? changed-paths true
+                                 publish-before-fork?))]
             (if-let [message (:seon.fresh-operator/message outcome)]
               (fail! message (:seon.fresh-operator/data outcome))
               (:seon.fresh-operator/value outcome))))
@@ -2172,6 +2214,7 @@
            (:seon.fresh-operator/advertisement live-target)
            (:seon.fresh-operator/registered-advertisement live-target))
        name))))
+  )
 
 (defn- row-state
   [row]
@@ -2671,8 +2714,7 @@
           (:seon.operator.cleanup/removed-file-bytes cleanup)
           " bytes; removed "
           (str/join ", " (:seon.operator.cleanup/removed cleanup)))))
-  (init! root [])
-  (init! root ["default"])
+  (init! root ["default"] true)
   (println "● reset republished current-src and reforked default"))
 
 (defn- logs!

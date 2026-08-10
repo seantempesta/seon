@@ -1110,6 +1110,7 @@
   (let [root (fresh-root)
         store-dir (str (io/file root "data" "clusters" "store"))
         name "init-command"
+        published-commit (atom nil)
         current-digest
         (:seon.source/digest (cluster/source-snapshot))]
     (try
@@ -1119,7 +1120,16 @@
         (is (str/includes? (::output bare) (str source/current-branch))
             (::output bare))
         (is (str/includes? (::output bare) current-digest)
-            (::output bare)))
+            (::output bare))
+        (let [opened (store/open-store! {:seon.store/dir store-dir})]
+          (try
+            (reset!
+             published-commit
+             (registry/branch-commit-id
+              {:seon.store/store opened
+               :seon.store/branch source/current-branch}))
+            (finally
+              (store/release-store! opened)))))
       (let [status (run-operator root "status")]
         (is (= 0 (::exit status)) (::output status))
         (is (str/includes? (::output status) "0/0 clusters alive")
@@ -1146,7 +1156,12 @@
             (is (contains? roster source/current-branch))
             (is (contains? roster (registry/cluster-branch name)))
             (is (not (contains? roster :cluster-default))
-                "bare init does not invent a default cluster"))
+                "bare init does not invent a default cluster")
+            (is (= @published-commit
+                   (registry/branch-commit-id
+                    {:seon.store/store opened
+                     :seon.store/branch source/current-branch}))
+                "named fork/refork operations consume, but never republish, current-src"))
           (finally
             (store/release-store! opened))))
       (let [started (run-operator root "start" name)
