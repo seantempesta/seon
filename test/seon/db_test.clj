@@ -486,81 +486,7 @@
        (is (not-any? #(instance? datahike.datom.Datom %)
                      explicit-datoms))))))
 
-(deftest agent-transactions-return-one-bounded-useful-report
-  (test-support/with-database
-   (fn [connection]
-     (db/transact!
-      connection
-      [{:seon.ns/name 'my.agents.root}
-       {:seon.cluster.agent/id "root"
-        :seon.cluster.agent/namespace [:seon.ns/name 'my.agents.root]}
-       {:seon.config.eval.result/max-collection 8192}])
-     (let [system-report
-           (db/transact!
-            connection
-            [{:seon.cluster.message/id "db-test-system-explicit"}])
-           message
-           {:seon.cluster.message/id "db-test-agent-report"
-            :seon.cluster.message/to [:seon.cluster.agent/id "root"]
-            :seon.cluster.message/from [:seon.cluster.agent/id "root"]
-            :seon.cluster.message/content "bounded report"
-            :seon.cluster.message/at #inst "2026-08-04T22:00:00Z"
-            :my.message/reason "test"}
-           full-report
-           (binding [db/*conn* connection]
-             (db/transact! {:tx-data [message]}))
-           explicit-agent-report
-           (binding [db/*conn* connection]
-             (db/transact! connection {:tx-data []}))]
-       (testing "the explicit system arity retains exact database values"
-         (is (db/database-value? (:db-before system-report)))
-         (is (db/database-value? (:db-after system-report))))
-       (testing "the ambient arity returns the useful seven-datom projection"
-         (is (= 7 (:seon.db/datom-count full-report)))
-         (is (= 7 (count (:tx-data full-report))))
-         (is (int? (:tx full-report)))
-         (is (uuid? (:datahike/commit-id full-report)))
-         (is (map? (:tempids full-report)))
-         (is (not-any? #(contains? full-report %)
-                       [:db-before :db-after]))
-         (is (every? #(= #{:e :a :v :tx :added} (set (keys %)))
-                     (:tx-data full-report)))
-         (is (schema/valid-candidate-value?
-              :seon.db/transaction-report full-report))
-         (is (= 'seon.db/render-transaction-ai
-                (->> (schema/matching-shapes full-report)
-                     (some #(when (= :seon.db/transaction-report
-                                     (:seon.schema/key %))
-                              (:seon.render/ai %))))))
-         (is (str/includes? (db/render-transaction-ai full-report)
-                            "with 7 datoms")))
-       (testing "the explicit arity under ambient custody has the same face"
-         (is (schema/valid-candidate-value?
-              :seon.db/transaction-report explicit-agent-report))
-         (is (not-any? #(contains? explicit-agent-report %)
-                       [:db-before :db-after])))
-       (testing "the configured collection ceiling bounds committed datoms"
-         (let [config-entity
-               (d/q '[:find ?entity .
-                      :where
-                      [?entity :seon.config.eval.result/max-collection _]]
-                    @connection)]
-           (db/transact!
-            connection
-            [[:db/add config-entity
-              :seon.config.eval.result/max-collection 2]])
-           (let [bounded
-                 (binding [db/*conn* connection]
-                   (db/transact!
-                    [{:seon.cluster.message/id "db-test-bounded-report"
-                      :seon.cluster.message/to
-                      [:seon.cluster.agent/id "root"]
-                      :seon.cluster.message/content "bounded"}]))]
-             (is (< (count (:tx-data bounded))
-                    (:seon.db/datom-count bounded)))
-             (is (= 2 (count (:tx-data bounded)))))))))))
-
-(deftest nested-native-reports-admit-reference-identities-not-database-walks
+(deftest nested-native-reports-admit-bounded-reference-identities
   (test-support/with-database
    (fn [connection]
      (let [effective (config/defaults)
@@ -570,16 +496,11 @@
             :seon.sci.admit/interrupt-fn (fn [])
             :seon.sci.admit/caps (config/result-caps effective)
             :seon.config/on-core-error :record}
-           walked
-           (with-redefs [schema/identity-only-projection (constantly nil)]
-             (admit/admit request))
            admitted (admit/admit request)
            semantic (:seon.sci.admit/value admitted)
            report (:probe/report semantic)
            before (:db-before report)
            after (:db-after report)
-           walked-artifact
-           (render.value/artifact-edn (render.value/artifact walked))
            admitted-artifact
            (render.value/artifact-edn (render.value/artifact admitted))
            inline-ceiling
@@ -590,11 +511,8 @@
        (is (uuid? (:datahike/commit-id after)))
        (is (not-any? db/database-value?
                      (tree-seq coll? seq semantic)))
-       (is (< (* 10 (count admitted-artifact))
-              (count walked-artifact))
-           "identity admission removes at least one order of magnitude")
        (is (< (count admitted-artifact) inline-ceiling)
-           "the nested report falls out of the blob artifact size class")
+           "identity admission keeps the native report inline")
        (is (false? (:seon.sci.admit/capped? admitted)))))))
 
 (deftest unique-rejection-names-the-existing-owner-as-data

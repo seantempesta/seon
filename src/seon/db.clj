@@ -1185,24 +1185,14 @@
      :seon.error/data (merge data conflict)
      ::transaction-refused true}))
 
-(declare agent-transaction-report)
-
 (defn- transact-call
   [connection transaction]
   (if (error-value? connection)
     connection
     (try
-      (let [report
-            (d/transact connection
-                        (schema.datahike/encode-transaction
-                         (jdk-integers->long transaction)))]
-        ;; Ambient custody marks an agent-facing call. Both public arities
-        ;; therefore return the same declared semantic report inside an eval;
-        ;; unbound system callers retain Datahike's exact report for reducers
-        ;; and listeners.
-        (if (some? *conn*)
-          (agent-transaction-report report)
-          report))
+      (d/transact connection
+                  (schema.datahike/encode-transaction
+                   (jdk-integers->long transaction)))
       (catch Throwable throwable
         (let [data (error.refusal/refusal throwable)]
           (cond
@@ -1227,33 +1217,6 @@
                           failure
                           throwable)))
               failure)))))))
-
-(defn- transaction-report-limit
-  [database]
-  (try
-    (long
-     (or (d/q '[:find ?limit .
-                :where
-                [_ :seon.config.eval.result/max-collection ?limit]]
-              database)
-         0))
-    (catch Throwable _
-      0)))
-
-(defn- agent-transaction-report
-  [report]
-  (let [database (:db-after report)
-        datoms (:tx-data report)
-        limit (transaction-report-limit database)
-        declarations (read-declarations)]
-    {:tx (:tx (first datoms))
-     :datahike/commit-id (or (get-in report [:tx-meta :db/commitId])
-                             (d/commit-id database))
-     ::datom-count (count datoms)
-     :tx-data (into []
-                    (map #(datom->data declarations database %))
-                    (take limit datoms))
-     :tempids (:tempids report)}))
 
 (defn- rendered-value
   [unit]
@@ -1346,7 +1309,7 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.store/transaction]
-     [:or :seon.db/transaction-report :seon.error/value]]
+     [:or :map :seon.error/value]]
     [:=> [:cat :seon.db/connection :seon.store/transaction]
      [:or :map :seon.error/value]]]}
   ([transaction]
