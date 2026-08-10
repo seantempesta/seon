@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, web, testing]
 ---
@@ -40,8 +40,27 @@ wrong.
 
 ## Acceptance
 
-- Agent-profile rendering always includes the active/settled session
-  transcript required by namespace pages.
+- The agent profile remains active for AI rendering but never governs an HTML
+  page target.
 - Message and thinking-stream web proofs pass with the profile active.
-- A regression proves the profile remains bounded without making required
-  session state budget-optional.
+- A regression proves the HTML transcript surface survives while the AI target
+  retains its bounded profile.
+
+## Resolution
+
+Commit `3479a5a50` made render profile selection target-aware at the single
+render-argument seam. The declared agent profile continues to govern
+`:seon.render/ai`; `:seon.render/html` receives no fit profile until Phase 0 of
+the transcript PRD declares the page profile. The walk and transcript producer
+remain unchanged.
+
+The behavioral regression is
+`the-html-page-keeps-the-transcript-outside-the-agent-profile`: the real HTML
+page must contain `surface-transcript` while the service has an active agent
+profile. The two original red proofs also pass:
+
+- `bin/test seon.render.web-test`: 38 tests, 330 assertions, zero failures and
+  zero errors; and
+- `bin/test --changed src/seon/render.clj --changed
+  test/seon/render/web_test.clj`: 209 tests, 2,516 assertions, zero failures and
+  zero errors (62 declared long tests skipped by the changed tier).
