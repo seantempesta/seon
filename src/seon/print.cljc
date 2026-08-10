@@ -155,8 +155,8 @@
     [:details
      {:class (str "seon-print-node " (face-class (::kind node)))
       :data-seon-path (pr-str (::path node))}
-     [:summary {:class "seon-print-summary"
-                :data-seon-summary (::summary node)}]
+     [:summary {:class "seon-print-summary"}
+      (::summary node)]
      (into [:span {:class "seon-print-content"}] children)]))
 
 (deftype ^:private HiccupSink [state]

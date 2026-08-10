@@ -99,6 +99,123 @@
   --color-log-error: #f87171;
 }
 
+/* Structural print faces. Labels are real summary text in the markup, so a
+   missing stylesheet degrades to readable native details instead of silently
+   dropping every value name. CSS owns only hierarchy, disclosure, and tone. */
+.seon-print-root,
+.seon-print-node {
+  color: var(--color-text-200);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
+details.seon-print-node {
+  margin: 0.1rem 0;
+}
+
+.seon-print-summary {
+  color: var(--color-text-300);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.seon-print-summary:hover,
+.seon-print-node[open] > .seon-print-summary {
+  color: var(--color-text-100);
+}
+
+.seon-print-summary::marker {
+  color: var(--color-text-500);
+}
+
+.seon-print-node[open] > .seon-print-summary::marker {
+  color: var(--color-signal);
+}
+
+.seon-print-node[open] > .seon-print-content {
+  display: inline;
+}
+
+.seon-print-content {
+  overflow-wrap: anywhere;
+}
+
+.seon-print-delimiter,
+.seon-print-separator {
+  color: var(--color-text-500);
+}
+
+.seon-print-keyword { color: var(--color-info); }
+.seon-print-string,
+.seon-print-char { color: var(--color-success); }
+.seon-print-number,
+.seon-print-boolean,
+.seon-print-nil { color: var(--color-eval); }
+.seon-print-symbol,
+.seon-print-tag { color: var(--color-text-100); }
+.seon-print-elision,
+.seon-print-prune { color: var(--color-warning); }
+.seon-print-object,
+.seon-print-projected { color: var(--color-text-300); }
+
+.seon-print-table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.seon-print-table > .seon-print-content {
+  display: none;
+}
+
+.seon-print-visual {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  color: var(--color-text-200);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+
+.seon-print-visual th,
+.seon-print-visual td {
+  padding: 0.2rem 0.4rem;
+  border-bottom: 1px solid var(--color-base-800);
+  text-align: left;
+  vertical-align: top;
+}
+
+.seon-print-visual th {
+  color: var(--color-text-400);
+  font-size: 0.625rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* A renderer refusal is a compact diagnostic face, not loose body text. */
+.seon-render-unavailable {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  margin: 0.1rem 0;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--color-base-700);
+  border-left-color: var(--color-warning);
+  border-radius: 0.25rem;
+  background: var(--color-base-900);
+  color: var(--color-text-300);
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  line-height: 1.2;
+}
+
+.seon-render-unavailable::before {
+  color: var(--color-warning);
+  content: "!";
+  font-weight: 700;
+}
+
 /* Skeleton animation keyframes */
 @keyframes skeleton-pulse {
   0%, 100% { opacity: 1; }

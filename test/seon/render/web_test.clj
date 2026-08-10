@@ -455,6 +455,13 @@
   (with-server
     (fn [_connection server _context]
       (is (= 200 (.statusCode (fetch server "/js/datastar.js"))))
+      (let [stylesheet (fetch server "/css/input.css")]
+        (is (= 200 (.statusCode stylesheet)))
+        (doseq [selector [".seon-print-summary"
+                          ".seon-print-table"
+                          ".seon-render-unavailable"]]
+          (is (str/includes? (.body stylesheet) selector)
+              (str selector " has a rule in the served stylesheet"))))
       (testing "and path traversal is refused by construction"
         (is (= 404 (.statusCode (fetch server "/css/../../secret"))))))))
 

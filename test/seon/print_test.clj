@@ -86,6 +86,15 @@
        item))
    value))
 
+(defn- print-summaries
+  [hiccup]
+  (filter
+   (fn [node]
+     (and (vector? node)
+          (= :summary (first node))
+          (= "seon-print-summary" (get-in node [1 :class]))))
+   (tree-seq sequential? seq hiccup)))
+
 (declare readable-value)
 
 (def ^:private unreadable-faces
@@ -181,6 +190,17 @@
                 (normalize-whitespace (lexical-hiccup-text hiccup)))))
          :seed 202608010302)]
     (test-support/assert-check! check "P-TEE failed.")))
+
+(deftest structural-summaries-carry-readable-child-text
+  (let [hiccup (print/emit-hiccup
+                (admitted-node {:alpha [1 2] :beta {:nested true}})
+                no-cuts)
+        summaries (print-summaries hiccup)]
+    (is (seq summaries) "the representative value emits disclosures")
+    (is (every? (fn [[_ _ & children]]
+                  (some #(and (string? %) (not (str/blank? %))) children))
+                summaries)
+        "every print summary owns a visible label without CSS")))
 
 (deftest tagged-envelope-never-collides-with-authored-print-keywords
   (let [value {:seon.print/face :seon.print/elided

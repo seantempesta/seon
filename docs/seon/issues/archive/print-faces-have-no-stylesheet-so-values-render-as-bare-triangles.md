@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, web, live-drive]
 ---
@@ -101,3 +101,31 @@ correctly with no stylesheet at all.
 - The table face's `hidden` content span is either styled or removed.
 - One recurring proof asserts a rendered page has zero unlabeled
   summaries, so the class cannot silently return.
+
+## Resolution
+
+Resolved in this commit at the producer and presentation owners:
+
+- `seon.print` emits the summary label as the `<summary>` element's real child
+  text. The unused `data-seon-summary` copy was deleted, leaving one semantic
+  source and readable native disclosure markup when CSS is absent.
+- `resources/public/css/input.css` supplies quiet print-token, native marker,
+  derived-table, and `seon-render-unavailable` rules. `bin/css` rebuilt the
+  ignored `output.css` asset with Tailwind v4.1.18 in 95 ms.
+- `seon.print-test/structural-summaries-carry-readable-child-text` proves that
+  emitted print disclosures cannot have an empty label, while the static-route
+  regression proves the tracked source stylesheet covers the print summary,
+  table, and unavailable faces.
+
+Live proof on 2026-08-10:
+
+- the existing `default` cluster served the rebuilt semantic rules immediately
+  from `http://127.0.0.1:7994/css/output.css`, proving CSS resources are
+  live-served without a JVM restart;
+- its retained root package honestly stayed on the sovereign cluster's older
+  rendered markup rather than synchronizing application code behind its back;
+  and
+- fresh cluster `ui-print-css`, forked from the newly published `current-src`,
+  served 124 `summary.seon-print-summary` elements at
+  `http://127.0.0.1:7979/`: 124 labeled and zero empty. Its built stylesheet
+  served the summary/marker, table, and unavailable selectors.
