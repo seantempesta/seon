@@ -15,10 +15,12 @@ work starts.
 ## Decision in one sentence
 
 Derive one ordered session value from message, run-form, receipt, program, and
-cluster facts; walk it from an agent root or cluster root; emit it through the
-one `seon.print` traversal to the AI text sink and HTML Hiccup sink under two
-profiles; use that same value for bootstrap, later context, namespace pages,
-the live two-pane debug overlay, and the multi-agent system view.
+cluster facts; walk it from an agent root or cluster root; project that same
+semantic value independently through `seon.print` to the AI text target under
+the agent profile and to the HTML Hiccup target under the page profile; use it
+for bootstrap, later context, namespace pages, the live two-pane debug overlay,
+and the multi-agent system view. The one mechanism is the semantic unit vector,
+not a requirement that two differently fitted targets share one physical tee.
 
 This directly implements rulings 1–11: one mechanism; real REPL teaching;
 results as printed data; two P targets; generic printer improvement; measured
@@ -62,6 +64,10 @@ I read every requested source and evidence document end to end, not by grep:
   [`contract-fit-render-selection-never-reaches-a-nested-value.md`](../../../seon/issues/contract-fit-render-selection-never-reaches-a-nested-value.md),
   and
   [`debug-pages-receive-block-patches-for-elements-they-do-not-have.md`](../../../seon/issues/debug-pages-receive-block-patches-for-elements-they-do-not-have.md).
+- the independent revision critique,
+  [`repl-transcript-context-prd-critique-2026-08-10.md`](repl-transcript-context-prd-critique-2026-08-10.md),
+  all 520 lines, end to end. The disposition of every numbered finding is
+  explicit in [Critique disposition](#critique-disposition).
 
 For the two added design surfaces I also read the current web delivery and
 fleet owners: `src/seon/render/web.clj:306-427,503-566,673-800,978-1085`,
@@ -95,9 +101,11 @@ The change is complete only when all nine statements are simultaneously true:
 1. A fresh agent, a ten-turn agent, and root use the same session derivation.
 2. Every visible session item is a form and the value that form produced; the
    only visible comments are comments the agent actually submitted as source.
-3. AI and HTML receive the same ordered unit value and differ only by printer
-   target/profile. `seon.print/emit-both` already proves the one-traversal tee
-   shape (`src/seon/print.cljc:584-595`).
+3. AI and HTML receive the same ordered unit identities and semantic values,
+   then run independent target/profile projection and fit passes. Their bytes
+   and retained children may differ. `seon.print/emit-both` is used only when
+   both targets have identical fit options; it is not the general two-profile
+   contract (`src/seon/print.cljc:584-595,756-791`).
 4. Bootstrap is a pinned prefix of real or explicitly injected session forms,
    not a second prompt assembler. The current bootstrap already stores ordered
    form sources (`resources/seon/bootstrap.edn:1-73`); this PRD changes their
@@ -105,9 +113,12 @@ The change is complete only when all nine statements are simultaneously true:
 5. No namespace must define a special context function. Producer selection
    remains declared/contract-derived at the one render boundary
    (`src/seon/render.clj:110-221`).
-6. An unchanged database basis plus unchanged code/read evidence executes no
-   producer in either target. Current retained calls already compare static and
-   read evidence before reuse (`src/seon/render.clj:401-447`).
+6. When program generation, selected profile, root, and retained database-read
+   evidence are all current, each target performs zero session queries,
+   candidate selections, and producer invocations. Current retained calls
+   already compare static and read evidence before invocation reuse, but do not
+   prove the broader acquisition gate (`src/seon/render.clj:401-447`); Phases
+   1 and 4 add counters at that outer boundary.
 7. The printer stress harness supplies generated registered-schema values and
    sampled real database values to both sinks; every failure becomes a printer
    grammar fix or an explicit producer exception, never a test-specific clip.
@@ -117,6 +128,53 @@ The change is complete only when all nine statements are simultaneously true:
 9. The system view is the same walk rooted at the cluster/fleet entity with a
    preview profile. Agent order is derived from unit `changed-at`; no dashboard
    query, stored rank, or second delivery path exists.
+
+## One semantic session owner
+
+The pure target function is `seon.render.walk/session-units`. It receives an
+open request map and returns the only ordered semantic value consumed by the
+prompt, namespace page, debug overlay, and cluster-root previews:
+
+```clojure
+(seon.render.walk/session-units
+ {:seon.render.walk/root [:seon.cluster.agent/id "task-agent-17"]
+  :seon.render.walk/database-value db
+  :seon.render.walk/profile :seon.render.profile/agent})
+=>
+{:seon.render.session/units [<open session-unit maps>]
+ :seon.render.session/read-evidence <retained database evidence>}
+```
+
+The public `seon.render/walk` contract remains a rendered string during this
+wave; current callers and its schema require that string
+(`src/seon/render/walk.clj:469-496,568-671`). This new data-returning function
+is added in the existing owner rather than silently changing `walk`. Profile
+selection uses the namespaced request key `:seon.render.walk/profile` and a
+declared profile identity. Exact consumers are `src/seon/cluster/prompt.clj`
+for provider context, `src/seon/render/web.clj` for page/debug/system packages,
+and `src/seon/render/agent.clj` for an agent-root render. The separate assembly
+in `src/seon/render/transcript.clj:26-226,639-778` is deleted after those
+consumers switch in the same phase.
+
+One unit owns one form and its optional settled value, so adjacency is
+structural rather than reconstructed by sorting separate entries. The exact
+total order is:
+
+```clojure
+bootstrap unit  [0 ordinal form-id]
+inbound message [1 at-ms 0 tx ordinal message-id]
+run form        [1 run-opened-ms 1 ordinal form-id]
+```
+
+Stable identities break every same-transaction tie. A human message that
+triggers a run sorts before that run because its recorded arrival precedes the
+run opening. A form without a terminal receipt remains as an unsettled unit.
+Active-run acquisition retains the current `not-join` exclusion of any run
+named by `:seon.cluster.run/supersedes`
+(`src/seon/render/transcript.clj:85-91`); attempts/reasoning are not independent
+REPL units unless their bytes are exact submitted form source or a settled
+value. The current multi-family rank order at
+`src/seon/render/transcript.clj:400-416` is deleted, not carried forward.
 
 ## Worked example A — complete fresh-task context
 
@@ -145,19 +203,21 @@ my.agents.task-agent-17=> (seon.program/faces {:seon.program/identities ['my.mes
 |--------------------+-------------------+--------------|
 | my.message/decline | ([to about reason]) | Decline an assignment and explain why to its sender. |
 | my.message/send    | ([to content] [to content about]) | Address a message to another agent. |
-my.agents.task-agent-17=> (doc my.run/complete)
-{:seon.program/name my.run/complete,
- :seon.fn/arglists ([result]),
- :seon.fn/doc "Finish this run with a reply for its requester.",
- :seon.fn/input [:my.run/result],
- :seon.fn/output [:my.run/completed :seon.error/value]}
-my.agents.task-agent-17=> (doc :my.run/result)
-{:seon.schema/key :my.run/result,
- :seon.schema/definition [:string {:min 1}],
- :seon.schema/properties {:min 1},
- :seon.schema/example "The report is complete and the focused tests pass.",
- :seon.schema/accepted-by [my.run/complete],
- :seon.schema/contained-by [:my.run/completed]}
+my.agents.task-agent-17=> (seon.program/faces {:seon.program/identities ['my.agents.task-agent-17] :seon.program/detail :summary})
+[{:seon.ns/name my.agents.task-agent-17,
+  :seon.ns/doc nil,
+  :seon.ns/public-functions []}]
+my.agents.task-agent-17=> (seon.program/faces {:seon.program/identities [:my.run/result] :seon.program/detail :deep})
+[{:seon.schema/key :my.run/result,
+  :seon.schema/definition [:string {:min 1}],
+  :seon.schema/properties {:min 1},
+  :seon.schema/example "The report is complete and the focused tests pass.",
+  :seon.schema/example-seed 1224898382,
+  :seon.schema/program-commit #uuid "6a7a4c6f-9745-55b1-ae67-510c8e622317",
+  :seon.schema/accepted-by [{:seon.fn/sym my.run/complete,
+                             :seon.fn/arglists ([result])}],
+  :seon.schema/returned-by [],
+  :seon.schema/contained-by [:my.run/completed]}]
 my.agents.task-agent-17=> (db/q '[:find (count ?function) . :where [?function :seon.fn/sym _]])
 2775
 my.agents.task-agent-17=> (defn total
@@ -177,8 +237,13 @@ my.agents.task-agent-17=> (my.message/read "inbound-536871250-0")
 my.agents.task-agent-17=>
 ```
 
-The candidate is intentionally not declared minimal. Its measured size is
-recorded after authoring in [Measured baselines](#measured-baselines); Phase 5
+Every `seon.program/faces` result above is a **target result** until Phase 3
+implements and re-executes the candidate; it is not claimed as current REPL
+behavior. Current `doc` prints its familiar human documentation and returns
+`nil` (`src/seon/sci/eval.clj:1111-1122`), so the example uses the new data API
+where the returned value itself is the lesson. The candidate is intentionally
+not declared minimal. Its measured size is
+recorded after authoring in [Measured baselines](#measured-baselines); Phase 6
 must remove forms until quality fails, then restore the last necessary form.
 The successful `defn` replaces the current deliberate `:any` and wrong-arity
 teaching failures at `resources/seon/bootstrap.edn:49-70`, which the audit
@@ -201,18 +266,17 @@ my.agents.root=> (seon.db/q '[:find ?agent-id ?run-id
                               [?agent :seon.cluster.agent/id ?agent-id]
                               [?agent :seon.cluster.agent/run ?run]
                               [?run :seon.cluster.run/id ?run-id]])
-[["invoice" "6177a48d-3dd0-44ef-b351-299bd0b8fe0a"]]
+#{["invoice" "6177a48d-3dd0-44ef-b351-299bd0b8fe0a"]}
 my.agents.root=> ;; Derive the newest changed unit; do not store an activity rank.
-                 (seon.render/walk {:root [:seon.cluster/name "default"]
-                                    :depth 2
-                                    :profile :seon.render.profile/preview})
-{:seon.cluster/name "default",
- :seon.render.walk/agents
+                 (seon.render.walk/session-units
+                  {:seon.render.walk/root [:seon.cluster/name "default"]
+                   :seon.render.walk/profile :seon.render.profile/preview})
+{:seon.render.session/units
  [{:seon.cluster.agent/id "invoice",
    :seon.render.walk/changed-at 536871319,
    :seon.render.preview/content
    {:seon.cluster.run.form/source "(db/q invoice-query)"
-    :seon.cluster.eval/result-edn [["inv-203" :invalid-tax-code]]}}
+    :seon.render/value [["inv-203" :invalid-tax-code]]}}
   {:seon.cluster.agent/id "root",
    :seon.render.walk/changed-at 536871311,
    :seon.render.preview/content
@@ -228,6 +292,12 @@ example does not turn comments into result entries. The message maps omit
 `:seon.cluster.message/from` deliberately: current storage uses absence of that
 ref for an origin outside the cluster, rather than inventing a human identity
 (`src/seon/cluster/message.clj:267-269,437-440`).
+
+The `session-units`, `seon.program/faces`, and `my.message/read` results in
+these examples are normative target values. Ordinary query results retain
+actual REPL collection semantics—the `:find` relation above is a set, not an
+authored vector
+(`src/seon/db.clj:779-823`).
 
 ## Exact unit grammar
 
@@ -337,24 +407,31 @@ second documentation index.
 ### Deep schema doc — actual target call and result
 
 ```clojure
-(doc :my.run/result)
-{:seon.schema/key :my.run/result
- :seon.schema/definition [:string {:min 1}]
- :seon.schema/properties {:min 1}
- :seon.schema/example "The report is complete and the focused tests pass."
- :seon.schema/accepted-by
- [{:seon.fn/sym "my.run/complete"
-   :seon.fn/arglists "([result])"}]
- :seon.schema/returned-by []
- :seon.schema/contained-by [:my.run/completed]}
+(seon.program/faces
+ {:seon.program/identities [:my.run/result]
+  :seon.program/detail :deep})
+[{:seon.schema/key :my.run/result
+  :seon.schema/definition [:string {:min 1}]
+  :seon.schema/properties {:min 1}
+  :seon.schema/example "The report is complete and the focused tests pass."
+  :seon.schema/example-seed 1224898382
+  :seon.schema/program-commit #uuid "6a7a4c6f-9745-55b1-ae67-510c8e622317"
+  :seon.schema/accepted-by
+  [{:seon.fn/sym my.run/complete
+    :seon.fn/arglists ([result])}]
+  :seon.schema/returned-by []
+  :seon.schema/contained-by [:my.run/completed]}]
 ```
 
 The definition is current fact content
 (`resources/seon/schemas/my.run.edn:1-8`); `my.run/complete` declares it as its
-input (`src/my/run.clj:32-47`). The generated example must come from the
-registered schema generator at the acquired basis, then be validated again
-before return; a generator failure returns a flat error in the example slot,
-not an invented value.
+input (`src/my/run.clj:32-47`). The generated example seed is the low 31 bits
+of the first eight hex digits of `seon.schema/sha-256` over UTF-8
+`(pr-str [schema-key program-commit-id])`; the face returns both seed and
+program commit. Repeated calls at the same acquired program commit return
+byte-equal example data; a generator failure returns a flat error in the
+example slot, not an invented value. Seon's schema owner already derives
+registered forms and properties (`src/seon/schema.clj:482-493,1974-2028`).
 
 ### Bulk faces function — exact target signature
 
@@ -364,13 +441,11 @@ not an invented value.
 request :=
 [:map
  [:seon.program/identities
-  [:vector [:or :qualified-symbol :qualified-keyword :symbol]]]
+  [:vector [:or :qualified-symbol :qualified-keyword :seon.ns/name]]]
  [:seon.program/detail {:optional true} [:enum :summary :deep]]]
 
 result :=
-[:or
- [:vector :seon.program/face]
- :seon.error/value]
+[:vector [:or :seon.program/face :seon.error/value]]
 ```
 
 One mixed call:
@@ -395,7 +470,13 @@ One mixed call:
 
 Order equals request order; unknown identities produce a flat error value in
 that vector position, so one miss does not erase the other requested faces.
-Bare `doc` delegates to the same owner for one identity. The existing private
+Unqualified function/test symbols and unqualified schema keywords are loud
+`:seon.program/ambiguous-identity` errors; namespace identities validate as
+`:seon.ns/name`. This removes the ambiguous bare-symbol arm rather than adding
+precedence.
+Under recommended DOC-1, bare `doc` prints the familiar readable face and
+returns `nil`; callers that need data use `seon.program/faces`. Both invoke the
+same projection owner. The existing private
 `program-documentation` derivation is therefore replaced, not duplicated
 (`src/seon/sci/eval.clj:1057-1122`). Concretely, the database acquisition and
 SCI binding remain in `src/seon/sci/eval.clj`, while the row-to-face pure
@@ -423,6 +504,47 @@ introduced.
 | Debug feed packages | Debug has its own registration key at `src/seon/render/web.clj:700-737,1030-1034`; package/delta/keyframe logic is shared at `:596-643` | Survives. Debug packages contain exactly two target IDs, preventing no-target patches by construction. |
 | Fleet oversight special unit | Root page calls `oversight/unit` outside the walk at `src/seon/render/web.clj:336-375`; its bespoke table is `src/seon/oversight.clj:261-301` | Replaced by cluster-root walk + preview profile. Flow observations may remain ordinary values reachable from the cluster unit. |
 | Agent renderer | Agent schema currently points both projections to transcript wrappers at `resources/seon/schemas/seon.cluster.agent.edn:1-14` | Updated to the one session producer; no status-plus-transcript composition. |
+
+### Render-producer argument ABI conversion
+
+The target does **not** redefine `:seon.render/unit`. Current
+`render-argument` merges a rendered map's arbitrary keys into the producer
+argument, so existing producers read flat domain attributes alongside render
+custody (`src/seon/render.clj:76-108`). A live program-graph query on
+2026-08-10 found 49 function contracts in 18 namespaces accepting
+`:seon.render/unit`: `seon.ai`, `seon.bootstrap`, `seon.cluster`,
+`seon.cluster.agent`, `seon.cluster.instruction`, `seon.cluster.message`,
+`seon.cluster.run`, `seon.config`, `seon.context`, `seon.effect`,
+`seon.oversight`, `seon.print`, `seon.problems`, `seon.render.agent`,
+`seon.render.ns`, `seon.render.transcript`, `seon.render.value`, and
+`seon.render.web`. For example, the message producer reads the flat message
+attributes at `src/seon/cluster/message.clj:429-463`. Removing the merge
+without converting these consumers would break their input semantics while
+their old schema still validated; that is forbidden breakage.
+
+Phase 2 therefore introduces a new, globally identified request shape:
+
+```clojure
+[:seon.render/producer-request
+ [:map
+  [:seon.render/value :seon.render/value]
+  [:seon.render/context
+   [:map
+    [:seon.render/target [:enum :seon.render/ai :seon.render/html]]
+    [:seon.render/profile :qualified-keyword]
+    [:seon.render/database-value :seon.db/database-value]
+    [:seon.render/rendering-stack [:set :qualified-symbol]]]]]]
+```
+
+Every surviving producer reads domain data only below
+`:seon.render/value` and custody only below `:seon.render/context`. Phase 2
+adds the new declarations, converts all 49 contracts and all 18 implementation
+owners in one wave, converts the selector/invocation callers, proves zero
+remaining `:seon.render/unit` consumers by database query, and only then
+deletes the flattening branch. The old key is not widened, narrowed, aliased,
+or given new meaning; it disappears with its final consumer. This is the
+accretion-safe conversion demanded by the rule that a key's definition and
+relationship to output never change (`AGENTS.md:516-548`).
 
 ### Storage verification — live `default`, door mode, 2026-08-10
 
@@ -508,10 +630,10 @@ my.agents.root=> (seon.db/q '[:find ?agent-id ?run-id
                               [?agent :seon.cluster.agent/id ?agent-id]
                               [?agent :seon.cluster.agent/run ?run]
                               [?run :seon.cluster.run/id ?run-id]])
-[["invoice" "6177a48d-3dd0-44ef-b351-299bd0b8fe0a"]]
-my.agents.root=> (seon.render/walk {:root [:seon.cluster/name "default"]
-                                    :depth 2
-                                    :profile :seon.render.profile/preview})
+#{["invoice" "6177a48d-3dd0-44ef-b351-299bd0b8fe0a"]}
+my.agents.root=> (seon.render.walk/session-units
+                  {:seon.render.walk/root [:seon.cluster/name "default"]
+                   :seon.render.walk/profile :seon.render.profile/preview})
 ```
 
 There is no following value or prompt because that last form has not settled.
@@ -536,12 +658,14 @@ The right pane is the Hiccup target for those same three units, concretely:
             [:td "6177a48d-3dd0-44ef-b351-299bd0b8fe0a"]]]]]
  [:article {:id "repl-form-6177a48d-1" :data-settled "false"}
   [:pre {:class "seon-repl-form"}
-   "my.agents.root=> (seon.render/walk {:root [:seon.cluster/name \"default\"] :depth 2 :profile :seon.render.profile/preview})"]]]
+   "my.agents.root=> (seon.render.walk/session-units {:seon.render.walk/root [:seon.cluster/name \"default\"] :seon.render.walk/profile :seon.render.profile/preview})"]]]
 ```
 
 The HTML may compose a map as a definition list and rows as a table because
-the page profile differs from the text profile; it cannot add a fourth fact or
-omit one of these three units. The stable wrapper rule follows the current
+the page profile differs from the text profile. Both projections must preserve
+the exact three unit identities, but independent fitting may retain different
+children inside a unit and represent omitted children as ordinary elision
+values. The stable wrapper rule follows the current
 debug pane IDs at `src/seon/render/web.clj:525-545`.
 
 When ordinal 1 settles, the database transaction wakes the render proc; one
@@ -550,7 +674,12 @@ package. This closes the send-then-discover class documented at
 [`debug-pages-receive-block-patches-for-elements-they-do-not-have.md`, lines 56–81](../../../seon/issues/debug-pages-receive-block-patches-for-elements-they-do-not-have.md#L56):
 the debug registration produces only elements the debug layout declares.
 
-The left pane is current session text, not “latest prompt capture.” Current
+The left pane is current session text under exactly the agent profile and
+immutable database value used by prompt acquisition; a same-basis regression
+compares its bytes to the acquired provider-context bytes. The right pane uses
+the page profile independently, so only ordered unit identities—not bytes or
+retained children—must match. The left pane is not “latest prompt capture.”
+Current
 code uses the latest capture and otherwise says no capture exists
 (`src/seon/render/web.clj:503-531`), while the right pane already derives a live
 page (`:547-566`). Historical captures remain available through their identity
@@ -563,10 +692,9 @@ because they are durable provider evidence (`src/seon/context.clj:150-188`).
 The route asks the same walk for:
 
 ```clojure
-(seon.render/walk
- {:root [:seon.cluster/name "default"]
-  :depth 2
-  :profile :seon.render.profile/preview})
+(seon.render.walk/session-units
+ {:seon.render.walk/root [:seon.cluster/name "default"]
+  :seon.render.walk/profile :seon.render.profile/preview})
 ```
 
 Agents already point to their cluster through
@@ -577,33 +705,24 @@ carries `:seon.render.walk/changed-at`, derived as the newest transaction that
 touched the entity (`src/seon/render/walk.clj:219-225,367-370`).
 
 For each agent, derive candidate blocks from that agent's session/page units,
-order by `[:seon.render.walk/changed-at :seon.render.walk/path]` descending,
-and select the first unit admitted by the preview profile. Ties break by stable
-path, never insertion order. Nothing stores “active,” “last block,” or rank.
+order by `:seon.render.walk/changed-at` descending and stable path ascending,
+and select the first unit admitted by the preview profile. Nothing stores
+“active,” “last block,” or rank.
 Flow state may render as an ordinary cluster/agent value; current oversight
 already derives it without committing (`src/seon/oversight.clj:1-24,161-204`).
 
-The selection query is over the just-derived walk rows, not another database
-entity. Given relation rows `[agent-id stable-path changed-at html]`, the first
-pass is exactly:
-
-```clojure
-(seon.db/q
- '[:find ?agent-id (max ?changed-at)
-   :in $ [[?agent-id ?stable-path ?changed-at ?html]]]
- preview-candidates)
-```
-
-Join each returned `[agent-id changed-at]` to the same relation, choose the
-lexicographically first stable path on a tie, and then apply the preview
-profile to that row's HTML. This query names no message, transcript, canvas,
-or error family. `changed-at` is already derived from the newest datom touching
+Selection is a pure deterministic reduce over the already-derived rows, not a
+Datalog relation containing Hiccup. Given ordinary rows
+`{:agent-id … :stable-path … :changed-at … :html …}`, reduce by agent and keep
+the greatest `changed-at`; on a tie keep the lexicographically least stable
+path. The resulting HTML remains opaque ordinary
+data. This names no message, transcript, canvas, or error family.
+`changed-at` is already derived from the newest datom touching
 each walked entity (`src/seon/render/walk.clj:219-225,366-370`), while the path
 is already part of walk ordering and text metadata
 (`src/seon/render/walk.clj:535-550,609-669`).
-I live-probed this relation-input query through door mode on `default`; rows
-for `invoice` at transactions 536871300 and 536871319 plus `root` at 536871311
-returned `[[invoice 536871319] [root 536871311]]`.
+A regression passes tied Hiccup candidates `[:div "z"]` and `[:div "a"]` in
+both insertion orders and requires the stable-path winner `[:div "a"]`.
 
 Preview profile proposal:
 
@@ -612,20 +731,21 @@ Preview profile proposal:
  :seon.render.profile/token-budget 220
  :seon.render.profile/max-depth 4
  :seon.render.profile/max-children 12
- :seon.render.profile/composition :multiline
- :seon.render.profile/max-agents 24
- :seon.render.profile/staleness-bands [25 100 500]}
+ :seon.render.profile/composition :multiline}
 ```
 
-The first five keys use the current declared profile face
-(`resources/seon/schemas/seon.render.profile.edn:1-18`). Phase 4 declares the
-last two keys as `[:int {:min 1}]` and
-`[:vector {:min 1} [:int {:min 1}]]`; leaving them undeclared would make them
-ignored extras, not policy. The numeric values are experiment inputs, not
-sealed defaults. “Decay” means the selected profile tier spends fewer
-children/depth after those derived transaction-distance bands; no wall clock
-or stored stale flag is introduced. Phase 5 measures and replaces the
-candidate numbers.
+All five keys use the current declared profile face
+(`resources/seon/schemas/seon.render.profile.edn:1-18`). There is no
+system-only max-agent or staleness dial. With 20 agents the generic
+`max-children 12` admits the first 12 activity-ordered cards and emits one
+ordinary elision for the remaining 8 with total, next offset, profile, and
+cluster requery identity. Responsive CSS changes columns, never spend. The 220,
+4, and 12 values remain Phase 0 measurement inputs, then one whole-profile
+config fact may override them; no independent preview knobs are declared.
+The initial staleness decay is therefore one profile-derived step: activity
+order gives the newest 12 full cards and collapses every older card into the
+ordinary continuation. Any smoother decay is a later generic profile
+capability only after measurement; it is not a system-view band table.
 
 ### Four-agent worked example
 
@@ -666,6 +786,49 @@ makes the cluster entity's ordinary walk produce agent preview units. The
 current bespoke fleet table at `src/seon/oversight.clj:261-301` is then deleted
 or retained only as a deep explicit doc face, never as the root-page mechanism.
 
+## Live NESTED-2 decision probe
+
+I ran the demanded probe through MCP `eval_clj` against the live `default` JVM
+on 2026-08-10. Every run used a fresh SCI fork and ordinary values; the
+unrelated-basis case used `datahike.api/db-with` and committed no durable fact.
+The realistic workload was 1,000 heterogeneous map nodes per target and an
+80-candidate public roster (74 current public schema candidates plus six
+controlled candidates):
+
+| Selection design | AI | HTML | Combined work |
+|---|---:|---:|---|
+| Current per-node full candidate scan | 306.991 ms | 303.866 ms | 687.871 ms first run; 2,000 roster enumerations, 160,000 accepts validations, 48,000 return validations |
+| Same database basis, current scan | — | — | 624.906 ms; zero retained selection hits |
+| Unrelated data basis, current scan | — | — | 620.353 ms; zero retained selection hits |
+| Acquired output-compatible roster + per-node input fit | — | — | 4.720 ms first run; 2 roster builds, 1,998 roster hits, 2,000 accepts validations, 160 return validations |
+| Same program acquisition, indexed | — | — | 3.314 ms; zero builds, 2,000 roster hits, 2,000 accepts validations, zero repeated invocations |
+| Unrelated data basis, indexed | — | — | 3.543 ms; same counts as same-program run |
+
+The heterogeneous full scan classified 1,000 single-fit, 500 ambiguous, and
+500 no-fit target/node pairs. An ambiguity probe supplied the same two
+candidates in reverse orders and returned the same flat
+`:seon.render/ambiguous` value with sorted candidate identities in 1 ms.
+The target must print that error node; current `project-node*` may silently
+fall through after a nested error (`src/seon/render.clj:294-353`), which the
+class regression forbids.
+
+The cycle falsifier installed controlled producers in an SCI fork. A
+self-delegating producer ran once and returned total output in 92.823 ms cold.
+The alternating A→B→A case completed in 147.748 ms cold with invocation order
+`[A B]`: A and B each ran once and A never re-entered. This verifies the
+rendering-stack fence passed through recursive projection
+(`src/seon/render.clj:238-265,294-353`).
+
+**Decision:** the probe refutes uncached NESTED-2 but supports indexed
+NESTED-2. The output-compatible roster is derived once into the acquired
+program snapshot, keyed by program generation, target, and accepted output
+shape. Per-node work validates only that short roster's input contracts.
+Unrelated data transactions do not invalidate it; program publication creates
+a new acquired generation and therefore a new roster with no check-then-act
+cache. Existing retained render calls suppress repeated producer invocation.
+The graduation budget is at most 20 ms of candidate-selection work per target
+for this 1,000-node/80-candidate fixture.
+
 ## Option blocks requiring owner rulings
 
 Every block has exactly three options, simplest first. Cost is relative source,
@@ -683,16 +846,18 @@ explicit/schema producers (`:294-353`) after a measured recursive cycle.
    register a schema before its producer affects transcript children.
    Trade-off: the model-authored producer from the drive remains inert in its
    own returned value.
-2. **NESTED-2 — Consult candidates with the existing rendering-stack guard
-   (Recommended).** Guarantee: the same precedence applies top-level and nested;
-   a producer already on the stack cannot re-enter. Cost/risk: medium; candidate
-   lookup may increase per-node work and needs retained selection evidence.
-   Trade-off: none in callability; malformed ambiguous producers become loud
-   errors.
-3. **NESTED-3 — Preselect one producer for the whole admitted tree.** Guarantee:
-   one candidate query per shape. Cost/risk: high; requires a shape-index/cache
-   whose invalidation overlaps the existing retained-call owner. Trade-off:
-   heterogeneous nested values may miss the producer their actual node fits.
+2. **NESTED-2 — Acquired output roster + per-node fit + stack guard
+   (Recommended by live probe).** Guarantee: top-level and nested precedence
+   agree; ambiguity is a sorted flat error; a producer already on the stack
+   cannot re-enter. Cost/risk: medium; derive the roster with each acquired
+   program generation and meet the 20 ms fixture budget. Trade-off: a program
+   publication rebuilds the roster once. The measured 3.314–4.720 ms result
+   decides this recommendation.
+3. **NESTED-3 — Cache final producer selection by admitted shape.** Guarantee:
+   repeated shape-identical nodes skip even input validation. Cost/risk: high;
+   shape identity, open-map extras, and value-sensitive predicates make cache
+   validity substantially harder. Trade-off: rejects or misselects producers
+   unless the cache key approaches the whole value.
 
 ### HUMAN — form shape for an inbound human message
 
@@ -745,6 +910,20 @@ comments and rejects prose-only replies (`src/seon/cluster/reply.clj:155-268,
    schema stays visible. Cost/risk: high; generated prose rules must cover ~1,900
    declarations and can lie. Trade-off: retains the wall, only shorter.
 
+### DOC — familiar prose versus returned data
+
+1. **DOC-1 — Keep familiar printed documentation and return nil
+   (Recommended).** Guarantee: existing REPL habit and return contract survive;
+   `seon.program/faces` is the explicit data API. Cost/risk: low; both use one
+   row-to-face projection. Trade-off: scripts cannot use bare `doc` data.
+2. **DOC-2 — Make doc return the face it prints.** Guarantee: one call is both
+   readable and composable. Cost/risk: medium; silently changes today's nil
+   return (`src/seon/sci/eval.clj:1111-1122`). Trade-off: existing code that
+   relies on nil changes meaning, so this needs a new name rather than `doc`.
+3. **DOC-3 — Make doc print nothing and return data.** Guarantee: result is
+   ordinary data only. Cost/risk: medium; loses the familiar Clojure REPL face.
+   Trade-off: every human must learn the generic printer's deeper map output.
+
 ### OPENING — forms pinned in a fresh session
 
 1. **OPENING-1 — Six forms: help, in-ns, require, two face pulls, task read.**
@@ -777,21 +956,30 @@ comments and rejects prose-only replies (`src/seon/cluster/reply.clj:155-268,
    makes the choice circular and adds a context negotiation turn. Trade-off:
    latency and a new protocol.
 
-MINIMUM-1 uses at least five seeded tasks: function authoring, schema-driven
-data modeling, query/debugging, message delegation, and recovery from one flat
-error. Each condition runs the same model/settings on fresh reforked clusters;
-the fixed success gate is ≥90% task completion, 100% form/receipt settlement,
-zero undeclared contract, and no condition worse than full-context provider
-tokens by >10%. Those numbers are experiment acceptance inputs and must be
-owner-marked before execution.
+MINIMUM-1 uses five task families—function authoring, schema-driven data
+modeling, query/debugging, message delegation, and recovery from one flat
+error—with ten fixed seeds each, 50 attempts per condition. Attempts use the
+same model descriptor/settings, opening program commit, task order, and fresh
+refork per attempt. Mechanical judges score task facts, valid forms/receipts,
+contract correctness, help/faces/query use, repair turns, total provider
+tokens, c:p, and elapsed time; two blinded reviewers resolve only outcomes the
+mechanical facts cannot decide. A candidate passes at ≥45/50 task success,
+50/50 settlement, zero undeclared contracts, no task-family success drop over
+one attempt versus full context, and no >10% increase in total provider tokens.
+After greedy ablation, every removed pair is restored once to expose the
+largest pairwise interaction. Seeds, prompts, receipts, judges, and reviewer
+disagreements are committed with the report. These thresholds remain
+owner-marked experiment inputs.
 
 ### DEBUG-LIVE — keeping the text pane current
 
-1. **DEBUG-1 — Re-render current text on every settled database wake
-   (Recommended).** Guarantee: left and right share one immutable basis and one
-   debug package; no extra durable data. Cost/risk: medium; text projection must
-   join the same retained-call cache. Trade-off: left pane can differ from the
-   last historical provider capture because it is current, which is the point.
+1. **DEBUG-1 — Re-render after every relevant settlement
+   (Recommended).** Retained interest/read evidence rejects unrelated database
+   wakes before session acquisition. Guarantee: left and right share one
+   immutable database value and one debug package; no extra durable data.
+   Cost/risk: medium; text projection joins the same retained-call cache.
+   Trade-off: left can differ from the last historical provider capture because
+   it is current, which is the point.
 2. **DEBUG-2 — Commit a context capture after every form settlement.** Guarantee:
    every intermediate pane is durable. Cost/risk: high write amplification and
    semantic corruption: a capture currently means exact pre-provider bytes
@@ -818,6 +1006,50 @@ owner-marked before execution.
    changed canvas or other block and recreates a transcript-specific system
    view.
 
+### SYSTEM-ROUTE — where the cluster-root walk lives
+
+1. **SYSTEM-1 — Add canonical `/system`; keep `/` as root's namespace page
+   (Recommended).** Guarantee: the ruled route truth remains intact and the new
+   cluster-root walk is explicit. Cost/risk: low; one route-table line and the
+   existing package owner. Trade-off: owner opens `/system` for the wall.
+2. **SYSTEM-2 — Make `/` the system walk; move root namespace to
+   `/ns/my.agents.root`.** Guarantee: system wall is the landing page.
+   Cost/risk: medium; changes the current root route contract
+   (`src/seon/render/route.clj:17-76`). Trade-off: existing root links change.
+3. **SYSTEM-3 — Put a system preview block inside root's namespace walk.**
+   Guarantee: no new route. Cost/risk: high; conflates agent-root and
+   cluster-root semantics and revives the current outside-walk append.
+   Trade-off: the owner cannot address the system walk independently.
+
+## Critique disposition
+
+I read the independent critique end to end. No finding is answered by silence:
+
+| Finding | Disposition in this revision |
+|---|---|
+| RC-1 | Fixed: one semantic unit vector, two independent target/profile passes; a tee is only an optimization for identical fit options. |
+| RC-2 | Fixed: removed max-agent and staleness-band keys; one ordinary preview profile and elision spend all cards. |
+| RC-3 | Fixed: named pure `seon.render.walk/session-units`, its request/result, and every prompt/page/debug/system consumer. |
+| RC-4 | Fixed: `seon.render/walk` keeps its string contract; the new data function has a new name and namespaced request keys. |
+| RC-5 | Retained: no per-namespace obligation, activity rank, bespoke feed, comment output, or capture-as-live-authority. |
+| IS-1 | Fixed: new `:seon.render/producer-request`; all 49 contracts/18 namespaces convert atomically before flattening or `:seon.render/unit` disappears. |
+| IS-2 | Fixed: one unit owns form+optional value; exact total keys, same-tx ties, unsettled forms, attempt exclusion, and superseded-run exclusion are specified. |
+| IS-3 | Fixed: faces returns a vector whose positions are face-or-error; ambiguous unqualified identities refuse loudly. |
+| IS-4 | Fixed: Hiccup selection is a pure reduce, with an insertion-order/tied-path regression. |
+| IS-5 | Fixed: query output is a set, target-only values are labeled, and current `doc` nil behavior is preserved. |
+| IS-6 | Fixed: deep examples derive a stable seed from schema identity plus program commit and expose both. |
+| IS-7 | Fixed: zero producer execution is required only when retained read/program/profile evidence is current; gate counters distinguish query, selection, and invocation. |
+| DE-1 | Fixed: fresh context now pulls its own namespace face and honestly shows an empty public-function vector. |
+| DE-2 | Fixed: 20 agents means 12 visible plus an 8-card ordinary elision under the proposed profile; CSS changes no spend. |
+| DE-3 | Fixed: debug left uses the exact agent profile/database value; right independently uses the page profile; identities, not bytes, correspond. |
+| DE-4 | Fixed: DOC-1 preserves printed Clojure-like help plus nil and reserves returned data for faces. |
+| Quiet configuration | Fixed: one whole preview profile, explicit debug profiles, bounded acquisition, stable example seed, and SYSTEM-ROUTE options; no hidden bands or knobs. |
+| PF-1 | Fixed: changed-basis acquisition is the first implementation gate, with 3.168 s/3,859-pull baseline and subsecond target. |
+| PF-2 | Fixed: candidate identity acquisition is bounded before pull/fit; elision carries the continuation. |
+| PF-3 | Fixed by probe: full scans are rejected; the acquired output roster and its invalidation/budget are normative. |
+| PF-4 | Fixed: every wake checks retained interest/read evidence first; unrelated transactions cause zero session queries, selections, or invocations. |
+| PF-5 | Fixed: 20-agent changed-basis target is under 1 s with one cluster identity query, bounded pulls, and no per-agent namespace walk. |
+
 ## Measured baselines
 
 These are before-values, not targets.
@@ -837,17 +1069,22 @@ These are before-values, not targets.
 | Latest live-capture `my.web` | 997 estimated tokens | Same probe |
 | Latest live-capture `my.agents.root` | 459 estimated tokens | Same probe |
 | Warm namespace HTML | 17 ms | Observer route table, `model-authoring-observer-2026-08-10.md:331-343` |
+| Changed-basis agent-page walk | 3.168 s, 178 render calls, 3,859 pulls, 21,560 datoms | Critique live probe, `repl-transcript-context-prd-critique-2026-08-10.md:287-302,385-407` |
+| Unchanged-basis agent-page walk | 16.5 ms, zero render calls, zero pulls | Same critique probe |
+| Nested full scan, 1,000 nodes × 2 targets × 80 candidates | 687.871 ms first; 624.906 ms same basis | Live NESTED-2 decision probe in this PRD |
+| Nested acquired roster, same fixture | 4.720 ms first; 3.314 ms same program; 3.543 ms unrelated data basis | Live NESTED-2 decision probe in this PRD |
+| Alternating producer cycle | 147.748 ms cold, invocation order A then B once each | Live NESTED-2 decision probe in this PRD |
 | Warm `/data` | 123–131 ms (report as 130 ms) | Observer, `model-authoring-observer-2026-08-10.md:337-354` |
 | Drive completion:prompt ratio | 0.12–0.42 for the three directed turns | Driver, `model-authoring-drive-2026-08-10.md:100-105` |
 | Debug no-target warnings | 200+ on one load | Issue, `debug-pages-receive-block-patches-for-elements-they-do-not-have.md:24-44` |
 
-The fresh worked transcript above is **1,005 estimated tokens** on the shipped
-uncalibrated estimator, including prompts, forms, and values. This number is a
-candidate starting point, not the minimum-context answer.
+The revised fresh worked transcript above is **888 estimated tokens** on the
+shipped uncalibrated estimator, including prompts, forms, and values. This
+number is a candidate starting point, not the minimum-context answer.
 
 ## Implementation phases and lane-ready boundaries
 
-No phase begins until the owner rules all eight option blocks. “One class
+No phase begins until the owner rules all ten option blocks. “One class
 regression” below means one recurring test for the structural failure class,
 not one test per example.
 
@@ -865,50 +1102,99 @@ Falsifier: two reviewers independently reconstruct every worked value from
 current facts or mark it explicitly injected/target; no unexplained authored
 output survives.
 
-Exit: owner-approved transcript bytes, debug panes, cluster preview, option
-verdicts, success rubric, and candidate profile inputs.
+Exit: owner-approved transcript bytes, debug panes, cluster preview, all ten
+option verdicts, success rubric, candidate agent/page/preview profiles, exact
+20-agent zero-config spend, stable example-seed rule, bounded-acquisition
+rule, and canonical system route. No numeric preview value becomes a config
+dial independently; the only override is one whole declared profile value.
 
-### Phase 1 — make the value floor total and establish stress proof
+### Phase 1 — bound changed-basis acquisition before expanding the walk
 
 Owned production files:
 
-- `src/seon/render.clj`, `src/seon/render/value.clj`, `src/seon/print.cljc`;
-- `resources/seon/schemas/seon.render.edn` and print/profile schema resources;
-- focused tests under `test/seon/render_simplification_test.clj`,
-  `test/seon/render/value_test.clj`, and `test/seon/print_test.clj`.
+- `src/seon/render/walk.clj` and its existing tests;
+- `src/seon/render.clj` only for retained read-evidence counters;
+- the changed-basis measurement record under the PRD research directory.
 
 Changes:
 
-- remove the map-value merge at `src/seon/render.clj:76-108`, so arbitrary
-  user keys travel only under `:seon.render/value`;
-- delete “Renderer unavailable” substitute faces at
-  `src/seon/render.clj:479-519` and `src/seon/render/walk.clj:424-438`; selected
-  failures print as their actual flat error values;
-- implement the ruled nested producer option while retaining the rendering
-  stack cycle fence at `src/seon/render.clj:294-353`;
-- generate values from every registered schema plus sample real entity/result
-  values, admit once, tee to text/Hiccup, and assert total output, budget,
-  requeryable elisions, and twin semantic identity.
+- query only ordered candidate identities: pinned bootstrap plus the newest
+  history identities admitted by `max-children`; do not pull all history first;
+- pull only those bounded identities, then project and fit them; the elision
+  carries omitted total, next offset, profile, and a cluster/agent requery
+  identity through the current elision grammar (`src/seon/print.cljc:600-724`);
+- retain current read evidence before any query, candidate selection, or
+  producer invocation; an unrelated transaction yields counters
+  `{:session-queries 0 :candidate-selections 0 :producer-invocations 0}`;
+- measure a cold changed database value, not only the current unchanged reuse.
 
 Shortest falsifiers:
 
 ```clojure
-(render-ai {:seon.render/value {:a 1 :rows [{:b 2}]} ...})
-(emit-both generated-node preview-profile)
+(session-candidate-identities db agent-profile)
 ```
 
 Class regressions:
 
-1. Arbitrary map keys can never become render-unit keys.
-2. A selected producer failure can never become an unavailable substitute.
-3. A recursive producer can never re-enter while on its own rendering stack.
-4. An elision can never exceed its fitted parent value or omit both requery
-   identity and explicit refusal.
+1. Adding 10,000 old settled forms cannot increase pulled identity count above
+   the selected profile's bounded prefix plus one elision continuation.
+2. An unrelated transaction cannot execute a session query, candidate
+   selection, or producer.
 
-Live proof: door-mode ordinary unqualified map emits data in both targets; a
-generated sample from every registered schema completes under the time limit.
+Live proof: the critique baseline of 3.168 s/3,859 pulls/21,560 datoms falls
+below 1.0 s, with bounded pulls independent of schema registry and session
+history size; unchanged basis stays in the measured tens-of-milliseconds
+class (`src/seon/render.clj:401-447`).
 
-### Phase 2 — one session derivation and program faces
+### Phase 2 — convert the producer ABI and make the printer floor total
+
+Owned production files:
+
+- `src/seon/render.clj`, `src/seon/render/value.clj`, `src/seon/print.cljc`;
+- all 18 producer owners: `src/seon/ai.clj`, `src/seon/bootstrap.clj`,
+  `src/seon/cluster.clj`, `src/seon/cluster/agent.clj`,
+  `src/seon/cluster/instruction.clj`, `src/seon/cluster/message.clj`,
+  `src/seon/cluster/run.clj`, `src/seon/config.clj`, `src/seon/context.clj`,
+  `src/seon/effect.clj`, `src/seon/oversight.clj`, `src/seon/problems.clj`,
+  `src/seon/render/agent.clj`, `src/seon/render/ns.clj`,
+  `src/seon/render/transcript.clj`, and `src/seon/render/web.clj`;
+- `resources/seon/schemas/seon.render.edn` and print schemas;
+- existing producer/render/print tests.
+
+Changes:
+
+- declare `:seon.render/producer-request` without changing
+  `:seon.render/unit`;
+- convert all 49 contracts, implementations, selectors, and invocation sites
+  to nested value/context access in one phase; query zero old consumers before
+  deleting the flattening branch at `src/seon/render.clj:76-108`;
+- install the measured acquired output roster for NESTED-2, loud sorted
+  ambiguity, and the existing rendering-stack guard;
+- delete unavailable substitute faces at `src/seon/render.clj:479-519` and
+  `src/seon/render/walk.clj:424-438`;
+- stress generated registered-schema values and sampled real database values
+  independently through AI and HTML profiles. Use `emit-both` only for a
+  same-profile cross-sink assertion (`src/seon/print.cljc:584-595`).
+
+Shortest falsifier: query all functions whose input refs contain
+`:seon.render/unit`; the phase may delete flattening only when the result is
+empty and a message-map producer succeeds solely through
+`:seon.render/value`.
+
+Class regressions:
+
+1. Domain keys can never collide with producer custody because the new request
+   has no flat domain-key position.
+2. Ambiguous nested producers can never fall through to generic output.
+3. An A→B→A producer chain can never re-enter A.
+4. A selected failure can never become an unavailable substitute.
+5. An elision can never omit both requery identity and explicit refusal.
+
+Live proof: the 1,000-node roster fixture stays below 20 ms per target; ordinary
+unqualified-key maps emit data in both targets; all registered generator
+samples complete under the time limit.
+
+### Phase 3 — one session derivation and program faces
 
 Owned production files:
 
@@ -926,12 +1212,16 @@ Owned production files:
 
 Changes:
 
-- derive ordered message-read, form, and receipt units inside the one walk;
+- add pure `seon.render.walk/session-units`; derive message-read and
+  form-with-optional-receipt units under the exact total order and
+  superseded-run rule in this PRD;
 - emit exact prompt+form+value through `seon.print`; delete `prose`,
   `compact-ai-text`, schema closures in context, comment metadata, six-entry
   tail policy, and per-family token budgets;
-- implement `my.message/read`, `seon.program/faces`, and keyword-aware `doc`
-  per ruled options;
+- implement `my.message/read` and `seon.program/faces`; under DOC-1 keep
+  familiar `doc` output/nil while sharing the row projection;
+- seed deep generated examples by schema identity plus program commit and
+  expose both values;
 - replace the 13 current bootstrap forms with the approved successful prefix;
 - keep capture facts and provider prompt assembly, but make prompt acquisition
   request the session text projection.
@@ -946,16 +1236,21 @@ Class regressions:
    `:seon.cluster.run.form/source`.
 2. Every receipt with run+ordinal appears immediately after exactly one form;
    every form without a terminal receipt is visibly unsettled, never dropped.
+   One fixture includes two same-transaction messages, two form ordinals, an
+   unsettled form, and a superseded run, and compares exact identity order
+   before comparing bytes.
 3. Function/schema/test/namespace faces all come from one database query owner;
    an unknown identity is a flat in-position error.
 4. No raw schema form enters initial context unless a displayed `doc` requested
    it.
+5. Repeating a deep face call at one program commit returns byte-equal example
+   data; an unqualified ambiguous identity returns an in-position flat error.
 
 Live proof: create a scratch agent, compare its exact first prompt to the
 approved fresh transcript, execute one new form, and observe one appended
 form/value pair on its next prompt.
 
-### Phase 3 — live debug overlay and target-owned packages
+### Phase 4 — live debug overlay and target-owned packages
 
 Owned production files:
 
@@ -964,37 +1259,46 @@ Owned production files:
 
 Changes:
 
-- derive both debug panes from one current session value/basis;
+- derive both debug panes from one ordered session value; project left with
+  the exact prompt agent profile/database value and right independently with
+  the page profile;
 - use two debug package elements only, with retained text and Hiccup calls;
 - keep historical captures accessible but remove latest capture as the live
   pane authority;
 - preserve one debug registration key, shared package revision/delta/keyframe,
   sliding-1 tap, and drain-or-close writer.
+- check retained interest/read evidence before session acquisition so an
+  unrelated database wake produces zero session queries, selections, calls,
+  or outgoing delta.
 
 Shortest falsifier: open debug, settle one agent form, and record one revision
 whose delta targets exactly `debug-ai-<id>` and `debug-html-<id>`.
 
-Class regression: every element ID in a tab's outgoing package belongs to that
-tab layout. This one regression closes the no-target warning class for normal
-and debug tabs.
+Class regressions:
+
+1. Every element ID in a tab's outgoing package belongs to that tab layout.
+   This closes the 200+ no-target warning class.
+2. At one database value, left bytes equal prompt-acquisition bytes and both
+   panes contain the same ordered unit identities.
+3. An unrelated transaction cannot produce a debug session query or package.
 
 Live proof: browser console has zero `PatchElementsNoTargetsFound`; both panes
 advance on the same settlement; the left bytes equal the next acquired model
 context at the same database value.
 
-### Phase 4 — cluster-root preview walk
+### Phase 5 — cluster-root preview walk
 
 Owned production files:
 
 - `src/seon/render/walk.clj`, `src/seon/render/web.clj`,
   `src/seon/oversight.clj`, cluster/agent renderers and schemas;
-- `resources/seon/schemas/seon.render.profile.edn` for the two declared preview
-  spend keys;
+- the existing `resources/seon/schemas/seon.render.profile.edn` face; no
+  system-only profile keys;
 - walk, web package, and oversight tests.
 
 Changes:
 
-- route `/` to a cluster-root walk under the preview profile;
+- install the owner-ruled SYSTEM-ROUTE option;
 - derive reverse agent connections from existing cluster refs;
 - choose the ruled preview unit by changed transaction and stable path;
 - remove the outside-walk `fleet-call` append and bespoke root fleet table;
@@ -1010,11 +1314,15 @@ Class regressions:
 2. A preview selection cannot name a family; it consumes walked units and the
    selected profile only.
 3. The system view cannot create a second SSE route/package/mult.
+4. Twenty agents under the candidate profile always produce 12 cards plus one
+   ordinary 8-card elision; responsive layout cannot change that spend.
 
-Live proof: four scratch agents matching the worked example; one mid-turn; one
-settlement produces one delta and reorders only the affected card.
+Live proof: four scratch agents matching the worked example; then a 20-agent
+changed-basis fixture. One settlement produces one changed card plus cluster
+order, uses one shared cluster identity query and bounded pulls, performs no
+per-agent namespace walk, and completes below 1.0 s.
 
-### Phase 5 — minimum-context and performance experiment
+### Phase 6 — minimum-context and performance experiment
 
 Owned files:
 
@@ -1036,7 +1344,7 @@ Exit: replace candidate profile/bootstrap values with the smallest passing
 condition; retain the complete worked transcript in this PRD as the marked-up
 design record.
 
-### Phase 6 — integrated graduation
+### Phase 7 — integrated graduation
 
 Run focused gates after each phase, then the relevant complete checkpoint and
 live browser/agent drive. Graduation requires:
@@ -1072,8 +1380,8 @@ The implementation brief is ready only after the owner marks:
 - the exact bytes of Worked examples A and B;
 - the exact left/right debug example;
 - the four-card system-view example and candidate preview profile;
-- one verdict in each of NESTED, HUMAN, PROSE, SCHEMA, OPENING, MINIMUM,
-  DEBUG-LIVE, and PREVIEW;
+- one verdict in each of NESTED, HUMAN, PROSE, SCHEMA, DOC, OPENING, MINIMUM,
+  DEBUG-LIVE, PREVIEW, and SYSTEM-ROUTE;
 - the experiment success thresholds; and
 - whether `seon.program/faces` is the accepted concrete public name; its
   database-binding and pure-projection owners are fixed above.
