@@ -28,7 +28,27 @@ incremental path (`bin/seon init --changed`) as the default fix-loop surface.
 Publication progress events (landed with the init-silence fix `b465b4613`)
 give per-phase timestamps for free — use them.
 
+The 2026-08-10 attribution is now recorded in
+[the suite fat-tail report](../../prds/sci-execution-runtime/research/suite-fat-tail-2026-08-10.md).
+On the current tree, namespace load took 11.334 s and the following complete
+refresh took 45.079 s. Program rows consumed 34.781 s: declarations alone
+took 22.786 s, keywords 3.770 s, and calls 4.351 s.
+
+The progress callback is not observational today. Its presence divides every
+ordered program phase into up to six writer transactions. A direct falsifier
+using the same population with one transaction per phase reduced program rows
+to 27.143 s and complete refresh to 36.487 s. Separately, the listed suite tail
+contains at least 22 complete populations because tests and operator commands
+rebuild private roots instead of forking one immutable source base. Fix both
+classes: progress must not change transaction mechanics, and the owner-ruled
+`source-base!`/`start-fork!` path must make repeated population structurally
+unavailable to ordinary tests.
+
 ## Acceptance
 
-A named cause with numbers; complete publication back near its historical
-cost or an owner-ruled accepted budget with the fix-loop default adjusted.
+- Progress and no-progress publication issue identical writer transaction
+  shapes.
+- One suite source digest produces exactly one base-build event; ordinary
+  test forks cannot invoke complete population.
+- A named cause with numbers; complete publication is back near its historical
+  cost or an owner-ruled accepted budget has the fix-loop default adjusted.
