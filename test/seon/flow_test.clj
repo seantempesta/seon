@@ -102,13 +102,6 @@
     :db/cardinality :db.cardinality/one}
    {:db/ident ::fault-message
     :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one}
-   {:db/ident ::fault-drop-id
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one
-    :db/unique :db.unique/identity}
-   {:db/ident ::fault-drop-count
-    :db/valueType :db.type/long
     :db/cardinality :db.cardinality/one}])
 
 (defn- database-events
@@ -167,9 +160,7 @@
       (db/transact!
        connection
        [{::core-error-config-id "testbed"
-         ::on-core-error :record}
-        {::fault-drop-id "fault-committer"
-         ::fault-drop-count 0}])
+         ::on-core-error :record}])
       (body connection)
       (finally
         (d/release connection)
@@ -193,21 +184,7 @@
      [{::fault-id (random-uuid)
        ::fault-proc (::flow/pid fault)
        ::fault-message message}])
-    [{:seon.error/signature signature} ::sut/committed]))
-
-(defn- commit-fault-drop!
-  [connection _fault]
-  (let [count
-        (db/q
-         '[:find ?count .
-           :where
-           [?counter :seon.flow-test/fault-drop-id "fault-committer"]
-           [?counter :seon.flow-test/fault-drop-count ?count]]
-         @connection)]
-    (db/transact!
-     connection
-     [{::fault-drop-id "fault-committer"
-       ::fault-drop-count (inc count)}])))
+    [{:seon.error/signature signature} ::sut/committed false]))
 
 (defn- committed-faults
   [database]
@@ -219,13 +196,26 @@
      [?fault :seon.flow-test/fault-message ?message]]
    database))
 
-(defn- committed-drop-count
+(defn- committed-overflow-count
+  [database]
+  (or (db/q
+       '[:find (sum ?count) .
+         :where
+         [?drop :seon.error/kind :seon.flow/fault-channel-overflow]
+         [?drop :seon.error/dropped-fault-count ?count]]
+       database)
+      0))
+
+(defn- committed-overflows
   [database]
   (db/q
-   '[:find ?count .
+   '[:find ?count ?digest ?proc ?message
      :where
-     [?counter :seon.flow-test/fault-drop-id "fault-committer"]
-     [?counter :seon.flow-test/fault-drop-count ?count]]
+     [?drop :seon.error/kind :seon.flow/fault-channel-overflow]
+     [?drop :seon.error/dropped-fault-count ?count]
+     [?drop :seon.error/dropped-fault-digest ?digest]
+     [?drop :seon.error/proc ?proc]
+     [?drop :seon.error/message ?message]]
    database))
 
 (deftest production-launcher-wedges-degrade-capacity-by-exactly-n
@@ -693,7 +683,7 @@
     ::sut/monitor-buffer-capacity monitor-buffer-capacity
     ::sut/read-core-error-mode #(core-error-mode connection)
     ::sut/commit-fault! #(commit-fault! connection %)
-    ::sut/commit-drop! #(commit-fault-drop! connection %)
+    ::sut/commit-drop! #(commit-fault! connection %)
     ::sut/panic!
     (fn [fault]
       (throw
@@ -788,7 +778,7 @@
         (fn [_database _cluster-name]
           {:seon.config.error/recurrence-limit 3
            :seon.config.eval.result/blob-threshold inline-ceiling})]
-    (testing "132 equal faults produce one bounded durable fact and stderr face"
+    (testing "132 equal faults produce 132 facts and one bounded stderr face"
       (test-support/with-database
         (fn [connection]
           (with-redefs [config/effective effective]
@@ -814,18 +804,27 @@
                      initial-state
                      (range 132)))
                   facts
-                  (db/q '[:find ?signature ?message ?capped? ?data-edn
+                  (db/q '[:find ?error ?signature ?message ?capped? ?data-edn
                           :where
                           [?error :seon.error/signature ?signature]
                           [?error :seon.error/message ?message]
                           [?error :seon.error/capped? ?capped?]
                           [?error :seon.error/data-edn ?data-edn]]
                         @connection)
-                  [_signature message capped? data-edn] (first facts)
+                  [_error signature message capped? data-edn] (first facts)
+                  recurrence
+                  (db/q '[:find (count ?error) .
+                          :in $ ?signature ?process
+                          :where
+                          [?error :seon.error/signature ?signature]
+                          [?error :seon.error/process ?process]]
+                        @connection signature "process-1")
                   lines (str/split-lines (str stderr-writer))]
-              (is (= 1 (count facts))
-                  "all 132 equal envelopes own one durable fact")
-              (is (= 1 (::sut/committed final-state)))
+              (is (= 132 (count facts))
+                  "every equal envelope owns a durable fact")
+              (is (= 132 recurrence)
+                  "recurrence is the query-derived count of those facts")
+              (is (= 132 (::sut/committed final-state)))
               (is (= 1 (::sut/panicked final-state)))
               (is (= 1 (count (::sut/seen-signatures final-state))))
               (is (= inline-ceiling (count message)))
@@ -842,7 +841,7 @@
       (test-support/with-database
         (fn [connection]
           (with-redefs [config/effective effective]
-            (let [[durable-fact durable-outcome]
+            (let [[durable-fact durable-outcome _]
                   (commit-core-fault! connection "fault-test" "process-3"
                                       caps repeated-fault)
                   initial-state
@@ -872,6 +871,10 @@
                           :where [_ :seon.error/signature ?signature]]
                         @connection)
                   signature-set (set (map first signatures))
+                  fact-count
+                  (db/q '[:find (count ?error) .
+                          :where [?error :seon.error/signature _]]
+                        @connection)
                   lines (str/split-lines (str stderr-writer))]
               (is (= ::sut/committed durable-outcome))
               (is (empty? duplicate-stderr)
@@ -879,8 +882,10 @@
               (is (contains? signature-set
                              (:seon.error/signature durable-fact)))
               (is (= 2 (count signature-set)))
+              (is (= 3 fact-count)
+                  "the rebuilt proc commits the repeated occurrence too")
               (is (= signature-set (::sut/seen-signatures final-state)))
-              (is (= 1 (::sut/committed final-state)))
+              (is (= 2 (::sut/committed final-state)))
               (is (= 1 (::sut/panicked final-state)))
               (is (= 1 (count lines))
                   "one genuinely new signature remains visible")
@@ -927,8 +932,8 @@
             (is (= 2 (count lines))
                 "the repeated signature and the distinct signature print once")
             (is (= 2 (count (::sut/seen-signatures @final-state))))
-            (is (= 2 @transaction-attempts)
-                "the repeated signature does not reach the dead writer twice")
+            (is (= 3 @transaction-attempts)
+                "every occurrence reaches the writer even while output is bounded")
             (is (zero? (::sut/committed @final-state)))
             (is (= 2 (::sut/panicked @final-state)))
             (is (every? #(str/includes? % "durable record refused") lines))
@@ -1097,7 +1102,6 @@
                (::sut/monitor-error-channel fanout)
                ::monitor-buffered-core-fault))
             (is (empty? (committed-faults @connection)))
-            (is (zero? (committed-drop-count @connection)))
             (flow/resume-proc fault-graph ::sut/fault-committer)
             (test-support/await-event!
              (::channel transactions)
@@ -1113,44 +1117,78 @@
               (sut/stop-error-fanout! fanout)
               (stop-source-testbed! testbed))))))))
 
-(deftest fault-tap-overflow-commits-a-loud-drop-counter
-  (testing "faults beyond the bounded tap are counted as durable drops"
-    (with-fault-database
+(deftest fault-tap-overflow-commits-a-queryable-drop-fact
+  (testing "faults beyond the bounded tap become one queryable drop batch"
+    (test-support/with-database
       (fn [connection]
-        (let [fault-buffer-capacity 2
+        (let [commit-core-fault!
+              (var-get (ns-resolve 'seon.cluster 'commit-fault!))
+              fault-buffer-capacity 2
               fault-count 5
-              {::keys [graph started] :as testbed}
-              (source-testbed)
+              caps {:seon.config.eval.result/max-depth 8
+                    :seon.config.eval.result/max-collection 8
+                    :seon.config.eval.result/max-string 64
+                    :seon.config.eval.result/max-nodes 64}
+              effective
+              (fn [_database _cluster-name]
+                {:seon.config.error/recurrence-limit 3
+                 :seon.config.eval.result/blob-threshold 256})
+              {::keys [graph started] :as testbed} (source-testbed)
               fanout
-              (start-test-fanout!
-               connection graph started
-               fault-buffer-capacity fault-count)
+              (sut/start-error-fanout!
+               {:seon.env/environment @test-environment
+                ::sut/graph graph
+                ::sut/started started
+                ::sut/fault-buffer-capacity fault-buffer-capacity
+                ::sut/monitor-buffer-capacity fault-count
+                ::sut/read-core-error-mode (constantly :record)
+                ::sut/commit-fault!
+                #(commit-core-fault! connection "fault-test" "process-overflow"
+                                     caps %)
+                ::sut/commit-drop!
+                #(commit-core-fault! connection "fault-test" "process-overflow"
+                                     caps %)
+                ::sut/panic!
+                (fn [fault]
+                  (throw (ex-info "Record mode unexpectedly panicked."
+                                  {::fault fault})))})
               fault-graph (::sut/fault-graph fanout)
               transactions (database-events connection)]
           (try
-            (flow/pause-proc fault-graph ::sut/fault-committer)
-            (is (= :paused
-                   (::flow/status
-                    (flow/ping-proc
-                     fault-graph ::sut/fault-committer))))
-            (doseq [fault (map synthetic-core-fault (range fault-count))]
-              (async/>!! (:error-chan started) fault))
-            (dotimes [_ fault-count]
+            (with-redefs [config/effective effective]
+              (flow/pause-proc fault-graph ::sut/fault-committer)
+              (is (= :paused
+                     (::flow/status
+                      (flow/ping-proc
+                       fault-graph ::sut/fault-committer))))
+              (doseq [fault (map synthetic-core-fault (range fault-count))]
+                (async/>!! (:error-chan started) fault))
+              (dotimes [_ fault-count]
+                (test-support/await-event!
+                 (::sut/monitor-error-channel fanout)
+                 ::monitor-overflow-core-fault))
+              (is (zero? (committed-overflow-count @connection))
+                  "the paused committer proves the producer did not transact")
+              (flow/resume-proc fault-graph ::sut/fault-committer)
               (test-support/await-event!
-               (::sut/monitor-error-channel fanout)
-               ::monitor-overflow-core-fault))
-            (test-support/await-event!
-             (::channel transactions)
-             ::fault-drops-committed
-             #(<= (- fault-count fault-buffer-capacity)
-                  (committed-drop-count (:db-after %))))
-            (flow/resume-proc fault-graph ::sut/fault-committer)
-            (test-support/await-event!
-             (::channel transactions)
-             ::retained-core-faults-committed
-             #(<= fault-buffer-capacity
-                  (count (committed-faults (:db-after %)))))
-            (is (= 3 (committed-drop-count @connection)))
+               (::channel transactions)
+               ::fault-drops-committed
+               #(<= (- fault-count fault-buffer-capacity)
+                    (committed-overflow-count (:db-after %))))
+              (test-support/await-event!
+               (::channel transactions)
+               ::retained-core-faults-committed
+               #(<= (inc fault-buffer-capacity)
+                    (db/q '[:find (count ?error) .
+                            :where [?error :seon.error/id]]
+                          (:db-after %))))
+              (is (= 3 (committed-overflow-count @connection)))
+              (let [[drop-count digest proc message]
+                    (first (committed-overflows @connection))]
+                (is (= 3 drop-count))
+                (is (= 64 (count digest)))
+                (is (= :source proc))
+                (is (str/includes? message "dropped 3 faults"))))
             (finally
               (stop-database-events! connection transactions)
               (sut/stop-error-fanout! fanout)

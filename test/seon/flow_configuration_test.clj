@@ -66,6 +66,7 @@
                 ::sut/completion completion
                 ::sut/read-core-error-mode (constantly :record)
                 ::sut/commit-fault! identity
+                ::sut/commit-drop! identity
                 ::sut/panic! identity})]
              [:cluster
               ;; the render proc joins the census automatically: it is

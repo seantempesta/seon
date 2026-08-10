@@ -276,7 +276,7 @@
     (.size buffer))
   async.impl/Capacity
   (capacity [_]
-    capacity)
+    (inc capacity))
   core.protocols/Datafiable
   (datafy [_]
     {:type 'RefusingBuffer
@@ -805,35 +805,98 @@
          ::value (::value settled)
          ::submission-wait-ms submission-wait-ms}))))
 
+(defn- dropped-fault-descriptor
+  [fault]
+  (let [failure (::flow/ex fault)
+        ^String message (or (when (instance? Throwable failure)
+                              (ex-message failure))
+                            "")
+        frame (when (instance? Throwable failure)
+                (some-> ^Throwable failure .getStackTrace first str))]
+    (cond-> {::dropped-fault-proc (::flow/pid fault)
+             ::dropped-fault-status (::flow/status fault)
+             ::dropped-fault-class
+             (when (instance? Throwable failure)
+               (.getName (class failure)))
+             ::dropped-fault-message-digest
+             (schema/sha-256 [(.getBytes message "UTF-8")])}
+      (::flow/cid fault) (assoc ::dropped-fault-cid (::flow/cid fault))
+      (::flow/op fault) (assoc ::dropped-fault-op (::flow/op fault))
+      frame (assoc ::dropped-fault-frame frame)
+      (:seon.cluster.agent/id fault)
+      (assoc :seon.cluster.agent/id (:seon.cluster.agent/id fault)))))
+
+(defn- merge-dropped-fault
+  [summary fault]
+  (let [descriptor (dropped-fault-descriptor fault)
+        previous-digest (::dropped-fault-digest summary)]
+    {::dropped-fault-count (inc (long (or (::dropped-fault-count summary) 0)))
+     ::dropped-fault-digest
+     (schema/sha-256
+      [(.getBytes (pr-str [previous-digest descriptor]) "UTF-8")])
+     ::dropped-fault descriptor}))
+
+(defn- overflow-core-fault
+  [{::keys [dropped-fault-count dropped-fault-digest dropped-fault]}]
+  (cond->
+   {::flow/pid (::dropped-fault-proc dropped-fault)
+    ::flow/status (::dropped-fault-status dropped-fault)
+    ::flow/op (or (::dropped-fault-op dropped-fault) ::fault-channel-overflow)
+    ::flow/ex
+    (ex-info
+     (str "The core-fault channel overflowed and dropped "
+          dropped-fault-count
+          (if (= 1 dropped-fault-count) " fault." " faults."))
+     {:seon.error/kind ::fault-channel-overflow
+      ::dropped-fault-count dropped-fault-count
+      ::dropped-fault-digest dropped-fault-digest
+      ::dropped-fault dropped-fault})
+    ::dropped-fault-count dropped-fault-count
+    ::dropped-fault-digest dropped-fault-digest
+    ::dropped-fault dropped-fault}
+    (::dropped-fault-cid dropped-fault)
+    (assoc ::flow/cid (::dropped-fault-cid dropped-fault))
+
+    (:seon.cluster.agent/id dropped-fault)
+    (assoc :seon.cluster.agent/id
+           (:seon.cluster.agent/id dropped-fault))))
+
 (deftype CountedDroppingBuffer
-  [^LinkedList buffer ^long capacity drop!]
+  [^LinkedList buffer
+   ^long capacity
+   ^:unsynchronized-mutable dropped-summary]
   async.impl/UnblockingBuffer
   async.impl/Buffer
   (full? [_]
     false)
   (remove! [_]
-    (.removeLast buffer))
+    (if dropped-summary
+      (let [fault (overflow-core-fault dropped-summary)]
+        (set! dropped-summary nil)
+        fault)
+      (.removeLast buffer)))
   (add!* [this value]
     (if (>= (.size buffer) capacity)
-      (drop! value)
+      (set! dropped-summary (merge-dropped-fault dropped-summary value))
       (.addFirst buffer value))
     this)
   (close-buf! [_])
   Counted
   (count [_]
-    (.size buffer))
+    (+ (.size buffer) (if dropped-summary 1 0)))
   async.impl/Capacity
   (capacity [_]
     capacity)
   core.protocols/Datafiable
   (datafy [_]
     {:type 'CountedDroppingBuffer
-     :count (.size buffer)
-     :capacity capacity}))
+     :count (+ (.size buffer) (if dropped-summary 1 0))
+     :capacity (inc capacity)
+     ::dropped-fault-count (::dropped-fault-count dropped-summary)}))
 
 (defn- counted-dropping-buffer
-  [capacity drop!]
-  (CountedDroppingBuffer. (LinkedList.) (long capacity) drop!))
+  [capacity]
+  (CountedDroppingBuffer. (LinkedList.) (long capacity) nil))
 
 (defn- fault-committer-step
   ([]
@@ -852,7 +915,8 @@
      ;; inventing a clock.
      (async/put! completion ::stopped))
    state)
-  ([{::keys [read-core-error-mode commit-fault! panic! seen-signatures]
+  ([{::keys [read-core-error-mode commit-fault! commit-drop! panic!
+             seen-signatures]
      :as state}
     _input fault]
    ;; A closed source error channel presents one terminal nil before
@@ -860,13 +924,12 @@
    (if (nil? fault)
      [state nil]
     (let [mode (read-core-error-mode)
-          [fact outcome]
-          (commit-fault! (assoc fault ::seen-signatures seen-signatures))
+          [fact outcome previously-reported?]
+          ((if (::dropped-fault-count fault) commit-drop! commit-fault!) fault)
           signature (:seon.error/signature fact)
           repeated? (and signature (contains? seen-signatures signature))
           already-reported?
-          (or repeated?
-              (contains? #{::already-committed ::already-reported} outcome))
+          (or repeated? previously-reported?)
           next-state (cond-> state
                        signature (update ::seen-signatures conj signature)
                        (= ::committed outcome) (update ::committed inc))
@@ -875,10 +938,7 @@
                           ::commit-outcome outcome
                           ::core-error-mode mode)
           commit-refused?
-          (not (contains? #{::committed
-                            ::already-committed
-                            ::already-reported}
-                          outcome))]
+          (not= ::committed outcome)]
       (cond
         already-reported?
         [next-state nil]
@@ -945,10 +1005,11 @@
   "Own report/error fan-out for one already-started Flow graph.
 
    Core faults enter a bounded nonblocking tap. Every admitted fault is
-   processed by a dedicated Flow proc; each overflow calls commit-drop! with
-   the dropped fault. Flow Monitor receives independent sliding-buffer taps
-   through the returned datafiable graph, so it never competes for the source
-   channels or delays fault commitment."
+   processed by a dedicated Flow proc. Overflow is retained as one bounded
+   synthetic core fault carrying a dropped count and digest, then handed to
+   commit-drop! on that same proc. Flow Monitor receives independent
+   sliding-buffer taps through the returned datafiable graph, so it never
+   competes for the source channels or delays fault commitment."
   {:malli/schema
    [:=> [:catn [::request ::error-fanout-request]] ::error-fanout]}
   [{::keys [graph started fault-buffer-capacity monitor-buffer-capacity
@@ -966,7 +1027,7 @@
         (async/chan (async/sliding-buffer monitor-buffer-capacity))
         fault-channel
         (async/chan
-         (counted-dropping-buffer fault-buffer-capacity commit-drop!))
+         (counted-dropping-buffer fault-buffer-capacity))
         completion (async/promise-chan)
         fault-graph
         (flow/create-flow
@@ -976,6 +1037,7 @@
             ::completion completion
             ::read-core-error-mode read-core-error-mode
             ::commit-fault! commit-fault!
+            ::commit-drop! commit-drop!
             ::panic! panic!}
            environment)))
         _ (flow/start fault-graph)

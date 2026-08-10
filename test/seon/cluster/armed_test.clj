@@ -155,8 +155,7 @@
         (testing "and the fault path exists — this is D4"
           (is (some? (:seon.flow/error-fanout instance)))
           (is (some? (:seon.flow/fault-channel
-                      (:seon.flow/error-fanout instance))))
-          (is (zero? @(:seon.error/drops instance))))
+                      (:seon.flow/error-fanout instance)))))
         (testing "the handle retains identity while AI settings stay live"
           (let [handle (:seon.cluster.loop/cluster instance)]
             (is (seon.schema/valid-candidate-value? :seon.cluster.loop/cluster
@@ -417,5 +416,7 @@
                  (:clojure.core.async.flow/status
                   (flow/ping-proc graph :seon.cluster.agent/turn
                                   :timeout-ms 5000))))
-          (is (zero? @(:seon.error/drops instance))
-              "and nothing was dropped on the way"))))))
+          (is (empty? (filter #(= :seon.flow/fault-channel-overflow
+                                  (:seon.error/kind %))
+                              (errors @connection)))
+              "and no overflow fact was needed on the way"))))))

@@ -79,6 +79,7 @@
              [:seon.flow/read-core-error-mode
               :seon.flow/read-core-error-mode]
              [:seon.flow/commit-fault! :seon.flow/commit-fault!]
+             [:seon.flow/commit-drop! :seon.flow/commit-drop!]
              [:seon.flow/panic! :seon.flow/panic!]],
             :future
             [:fn

@@ -27,12 +27,8 @@
                :seon.config.error/escalate-to]],
              :data :map,
              :data-edn :string,
-             :drops
-             [:fn
-              {:error/message
-               "must be a process-local atom containing the dropped-error count"
-               :gen/gen seon.flow/atom-reference-generator}
-              seon.flow/atom-reference?],
+             :dropped-fault-count [:int {:min 1}],
+             :dropped-fault-digest [:string {:min 64, :max 64}],
              :evidence [:tuple [:enum :seon.error/id] :seon.error/id],
              :fact
              [:map
@@ -53,6 +49,12 @@
               [:seon.error/proc {:optional true} :seon.error/proc]
               [:seon.error/op {:optional true} :seon.error/op]
               [:seon.error/cid {:optional true} :seon.error/cid]
+              [:seon.error/dropped-fault-count
+               {:optional true}
+               :seon.error/dropped-fault-count]
+              [:seon.error/dropped-fault-digest
+               {:optional true}
+               :seon.error/dropped-fault-digest]
               [:seon.error/basis-t
                {:optional true}
                :seon.error/basis-t]
