@@ -47,3 +47,55 @@ declaration bridge without a new fallback-count falsifier.
   magnitude as the 19 ms agent namespace page, or record the ruled reason it
   cannot.
 - Add one recurring route-level cost proof for the identified class.
+
+## Measured partial resolution, 2026-08-10
+
+Implementation commit `1a2dabeba` derives the agent render profile once from
+the render pass's immutable database value and carries it through every page
+unit. Previously, each unit independently called `config/effective`; those
+reads became retained render-call evidence and were replayed at the next
+basis.
+
+The route profiler forced the retained package for `seon.db` one basis stale,
+then measured the actual HTTP request through `render-pass`, the neighborhood
+walk, and HTML projection. A representative 6.327-second pre-fix pass broke
+down as follows (nested totals overlap):
+
+| Seam | Calls | Cumulative time |
+| --- | ---: | ---: |
+| namespace neighborhood | 1 | 6.27 s |
+| `render/render-call` | 178 | 3.20 s |
+| retained read-evidence validation | 178 | 3.16 s |
+| `render/request-profile` | 334 | 1.32 s |
+| `config/effective` | 111 | 1.28 s |
+| `db/pull` | 3,858 | 1.91-2.26 s |
+| `db/datoms` | 21,560 | 1.03-1.24 s |
+| program-graph queries | 7 | 17-49 ms |
+
+Blob reads and serialization were below the material seams. Program-graph
+queries were also negligible, and the declaration-fallback attribution stays
+refuted.
+
+After the change, the same instrumented stale-basis render made one
+`config/effective` call in 8.8 ms. The 178 retained read-evidence checks fell
+to 35.8 ms, the 178 render calls to 84.2 ms, and the whole neighborhood to
+3.279 seconds. The remaining dominant cost is the walk's per-node database
+work: 3,859 pulls and 21,560 datom reads. That is a separate unsettled class,
+so this issue remains open.
+
+Raw live HTTP timings on scratch cluster `ns-perf-scratch` were:
+
+| Namespace page | Before, stale-basis derivation | After, stale-basis derivation | After, unchanged-basis reuse |
+| --- | ---: | ---: | ---: |
+| `/ns/seon.db` | 8.218 s | 3.168 s | 16.5 ms |
+| `/ns/seon.fn` | 3.467 s | 0.943 s | 17.0 ms |
+
+The recurring count proof is
+`test/seon/render/web_performance_test.clj`: two registered pages may ask for
+the profile repeatedly, while one render pass is permitted exactly one
+effective-config derivation. Its focused run passed 1 test and 4 assertions.
+The changed-files gate ran 114 tests and 684 assertions; this regression
+passed, but the gate ended red on the existing
+`the-message-appears-on-the-page-wire-test` assertion and
+`thinking-stream-morphs-into-the-settled-session-transcript` completion
+backstop. Their cause was not attributed in this lane.
