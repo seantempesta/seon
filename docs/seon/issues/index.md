@@ -16,13 +16,12 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (35)
+## Blocker (34)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Publish terminal evidence for every background binary result](background-binary-settlement-does-not-publish-required-event.md) | blocker | background settlement investigation |
 | [Make the first injected core fault observable at the fault committer](fault-committer-misses-the-first-injected-fault.md) | blocker | fault-facts lane |
-| [Keep source-publication fixtures complete under activation lookup refs](activation-closure-fixtures-lag-lookup-ref-prerequisites.md) | blocker | activation/source fixture repair |
 | [Rebuild an export without reopening an already-connected branch](export-fallback-reopens-an-already-connected-branch.md) | blocker | suite-speed-tail / export owner |
 | [Keep the session transcript reachable under the active render profile](render-profile-activation-elides-the-session-transcript.md) | blocker | render profile activation follow-up |
 | [Stop the bootstrap plan's deliberate failures from interrupting the run](bootstrap-teaching-failures-strand-every-new-agent.md) | blocker | agent context repair wave (2026-08-10 audit) |
