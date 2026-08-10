@@ -1373,6 +1373,35 @@ live browser/agent drive. Graduation requires:
 - No streaming model partial presented as a settled REPL form/value.
 - No test-specific character clip, schema allowlist, or family hand list.
 
+## Owner rulings received (2026-08-10 markup round 1)
+
+- **SYSTEM-ROUTE — RULED, supersedes all three options:** `/` is the
+  system view (all agents, activity-sorted, live previews) WITH root's
+  message bar. Root is an agent the user talks to, but root "isn't
+  supposed to look like another agent" — its surface is the fleet.
+  Root SEES WHAT THE USER SEES (the current view state joins root's
+  context), and root CAN CHANGE THE VIEW into a specific agent's view
+  when the user asks for something task-specific — navigation is
+  root's effect; the work itself goes to the agent by message.
+  View-steering (view state as data root sets, morphing the page) is
+  NEW SCOPE: design its shape before Phase 5, as an ordinary
+  fact + SSE morph, never a second channel.
+- **DEBUG-LIVE — RULED, simplifies the two-pane design:** the debug
+  variant shows the AI-rendered context; THE MAIN VIEW IS the HTML
+  side. No two-pane requirement.
+- **SCHEMA/OPENING — REFRAMED by owner:** the governing question is
+  "what do we show by default," answered by DEMONSTRATED RETRIEVAL:
+  opening forms include real, concise, programmatically assembled
+  queries (e.g. the functions in the agent's own namespace plus the
+  schemas those functions use) whose genuine outputs replace both the
+  schema wall and any hand-written API list. Not fake-looking;
+  re-runnable; the example teaches the tool.
+- **NESTED — owner's formulation pending confirmation:** "visit and
+  only look at top-level declarations" — each visited node (entity or
+  value piece) checks the pre-derived roster of top-level declared
+  producers; the walk's entity descent and value projection unify on
+  that one visit rule (this IS indexed NESTED-2).
+
 ## Owner markup checklist
 
 The implementation brief is ready only after the owner marks:
