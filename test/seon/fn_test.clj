@@ -22,6 +22,29 @@
     (spit file source)
     file))
 
+(deftest progress-observation-cannot-change-index-transaction-shapes
+  (let [commit-phase! (deref (ns-resolve 'seon.fn 'commit-index-phase!))
+        transactions-with
+        (fn [progress!]
+          (let [transactions (atom [])]
+            (with-redefs [db/transact!
+                          (fn [_ request]
+                            (swap! transactions conj request)
+                            {})]
+              (commit-phase! ::connection boot-process progress!
+                             :seon.fn/declarations
+                             [{:seon.fn/sym "sample/one"}
+                              {:seon.fn/sym "sample/two"}
+                              {:seon.fn/sym "sample/three"}]))
+            @transactions))
+        silent (transactions-with nil)
+        observed-lines (atom [])
+        observed (transactions-with #(swap! observed-lines conj %))]
+    (is (= silent observed)
+        "a progress callback cannot split or otherwise change writer work")
+    (is (= 1 (count observed)))
+    (is (= ["declarations: 3/3"] @observed-lines))))
+
 (defn- capability-fixture!
   [root capability-source]
   (write-source!

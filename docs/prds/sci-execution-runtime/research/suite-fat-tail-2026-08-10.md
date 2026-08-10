@@ -151,6 +151,15 @@ future (`test/seon/dev/fresh_operator_test.clj:535-572`) `slurp` child stdout
 to EOF. Existing source progress is therefore buffered instead of advancing
 either the operator or the suite.
 
+The clean landed run in `tmp/full-gate-2026-08-10b.log` confirms the narrower
+claim. The test did not wedge the suite for 90 minutes, but it did reach its
+own 300-second last-resort process backstop: it ran for 297.514 s before
+`await-process!` reported the missing child-exit event. The forced-reset test
+independently hit the same backstop class after 157.617 s. The incident is
+therefore load/mid-edit sensitive at suite scale, while the repeatable defect
+remains slow, buffered multi-command operator composition rather than an
+unobservable process exit.
+
 ## Generated fixture breakdown
 
 ### Turn attempts

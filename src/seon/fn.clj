@@ -1273,13 +1273,28 @@
                  canonical-schemas))
      progress!)))
 
+(defn- commit-index-phase!
+  [connection process progress! phase tx-data]
+  (when (seq tx-data)
+    (let [total (count tx-data)]
+      (require-committed!
+       (db/transact!
+        connection
+        (cond-> {:tx-data (vec tx-data)}
+          process (assoc :tx-meta {:seon.db/process process})))
+       phase)
+      (report-index-progress!
+       progress!
+       (str (name phase) ": " total "/" total))))
+  nil)
+
 (defn index!
   "Populate one fresh source scratch branch from static analysis.
 
   The optional callback receives bounded progress lines while contract rows
-  are derived and committed. Supplying it also divides each ordered phase
-  into at most `progress-line-budget` vector transactions; the scratch branch
-  remains unpublished until every phase and the source seal commit."
+  are derived and after each ordered phase commits. Observation never changes
+  transaction boundaries; the scratch branch remains unpublished until every
+  phase and the source seal commit."
   {:malli/schema
    [:function
     [:=> [:cat :seon.fn/index-request] :seon.reconcile/result]
@@ -1336,33 +1351,8 @@
                             {identity-attribute identity-value
                              :seon.fn/calls (:seon.fn/calls row)}))))
                 declarations)
-          commit-phase! (fn [phase tx-data]
-                          (when (seq tx-data)
-                            (let [total (count tx-data)
-                                  stride (progress-stride
-                                          total progress-line-budget)]
-                              (reduce
-                               (fn [completed batch]
-                                 (require-committed!
-                                  (db/transact!
-                                   connection
-                                   (cond-> {:tx-data (vec batch)}
-                                     process
-                                     (assoc :tx-meta
-                                            {:seon.db/process process})))
-                                  phase)
-                                 (let [completed (+ completed (count batch))]
-                                   (when progress!
-                                     (report-index-progress!
-                                      progress!
-                                      (str (name phase) ": "
-                                           completed "/" total)))
-                                   completed))
-                               0
-                               (if progress!
-                                 (partition-all stride tx-data)
-                                 [tx-data]))
-                              nil)))]
+          commit-phase! (partial commit-index-phase!
+                                 connection process progress!)]
        ;; Datahike processes tx-data in order. Every identity therefore exists
        ;; before a requires lookup ref resolves it, including the shared
        ;; name-only rows for external namespaces.

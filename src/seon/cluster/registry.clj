@@ -233,11 +233,11 @@
 
 (defn reset-cluster!
   "Return a cluster to an exact source commit.
-  This is L18 exactly — reset to current code and pages, never migrate
-  — and it is `delete-branch!` + `branch!`, NEVER `delete-database`
-  (b2-plan §0.6 condition 2). The old tail becomes unreachable and the
-  next `collect!` reclaims it; siblings and the source branch are untouched
-  by construction (§0.7).
+  This is L18 exactly — reset to current code and pages, never migrate.
+  Datahike's `force-branch!` writes immutable values before atomically
+  replacing the branch head, so a failed reset leaves the old head reachable;
+  the old tail becomes unreachable only after the replacement commits. The
+  next `collect!` reclaims it; siblings and the source branch are untouched.
   Always returns `::created? true`: the branch after the call is new.
   Refuses `::cluster-connected` (this process still holds a connection
   to that branch — Datahike refuses too at
@@ -246,19 +246,31 @@
   {:malli/schema [:=> [:cat :seon.cluster.registry/cluster-request]
                   :seon.cluster.registry/branch-result]}
   [{:keys [:seon.store/store :seon.boot/cluster-name]
-    source-commit :seon.source/commit-id
-    :as request}]
-  (let [branch (cluster-branch cluster-name)]
-    ;; Refuse before retiring the existing cluster. A bad requested commit
-    ;; must never turn a reset attempt into data loss.
+    source-commit :seon.source/commit-id}]
+  (let [branch (cluster-branch cluster-name)
+        current-commit (branch-commit-id {:seon.store/store store
+                                          :seon.store/branch branch})]
     (when-not (commit-present? store source-commit)
       (refuse! ::source-absent
                (str "the source commit " source-commit " is unavailable")
                {::dir (:seon.store/dir store)
                 :seon.source/commit-id source-commit
                 :seon.boot/cluster-name cluster-name}))
-    (retire-branch! {:seon.store/store store :seon.store/branch branch})
-    (ensure-cluster! request)))
+    (when (branch-connected? store branch)
+      (refuse! ::cluster-connected
+               (str "branch " branch " still has a connection in this process")
+               {::dir (:seon.store/dir store) :seon.store/branch branch}))
+    (let [source-db (d/commit-as-db (:seon.store/connection-object store)
+                                    source-commit)]
+      (when-not source-db
+        (refuse! ::source-absent
+                 (str "the source commit " source-commit " is unavailable")
+                 {::dir (:seon.store/dir store)
+                  :seon.source/commit-id source-commit
+                  :seon.boot/cluster-name cluster-name}))
+      (d/force-branch! source-db branch #{source-commit}
+                       {:expected-current-commit current-commit})
+      {:seon.store/branch branch :seon.cluster/created? true})))
 
 (defn retire-branch!
   "Remove one branch from the roster. Idempotent; data survives until GC.

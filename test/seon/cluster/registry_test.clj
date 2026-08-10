@@ -296,6 +296,36 @@
             (finally
               (d/release connection))))))))
 
+(deftest failed-forced-refork-keeps-the-prior-branch-reachable
+  (with-source-store
+    (fn [opened]
+      (registry/ensure-cluster! (cluster-request opened "atomic-refork"))
+      (let [branch (registry/cluster-branch "atomic-refork")
+            connection (store/open-branch! opened branch)]
+        (write-marker! connection "prior")
+        (d/release connection)
+        (let [before (registry/branch-commit-id
+                      {:seon.store/store opened :seon.store/branch branch})
+              failure (ex-info "injected refork failure"
+                               {:seon.error/kind ::injected})]
+          (with-redefs [d/force-branch! (fn [& _] (throw failure))]
+            (is (identical?
+                 failure
+                 (try
+                   (registry/reset-cluster!
+                    (cluster-request opened "atomic-refork"))
+                   nil
+                   (catch Throwable thrown thrown)))))
+          (is (= before
+                 (registry/branch-commit-id
+                  {:seon.store/store opened :seon.store/branch branch})))
+          (is (contains? (registry/roster opened) branch))
+          (let [reopened (store/open-branch! opened branch)]
+            (try
+              (is (= #{"ancestral" "prior"} (markers reopened)))
+              (finally
+                (d/release reopened)))))))))
+
 (deftest an-unwritten-cluster-retires-beside-its-unwritten-sibling
   ;; Branch-off copies the source's head commit id verbatim, so two
   ;; never-written clusters and their source all name ONE commit. A
