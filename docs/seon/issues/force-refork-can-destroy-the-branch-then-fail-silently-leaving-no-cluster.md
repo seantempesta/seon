@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: complete
 tags: [issue, operator]
 ---
 
@@ -27,3 +27,27 @@ Acceptance: a forced refork whose refork phase fails leaves the prior
 branch intact and refuses loudly with the phase named; a regression
 injects the silence and proves the branch survives; the silent-refork
 cause on a live shared JVM is attributed with evidence.
+
+## Resolution — 2026-08-10
+
+The destructive state was a composition defect. The operator retired the
+named branch as one committed operation, then attempted to create its
+replacement as a second operation. A silent or failed second half therefore
+made absence durable.
+
+Commit `69d95a4be` changed `seon.cluster.registry/reset-cluster!` to one
+expected-head `force-branch!`: the replacement commit becomes the branch head
+atomically, and an injected failure leaves the exact prior head and facts
+reachable. Commit `59e71e0cd` removed the operator's retire-then-refork caller:
+it quiesces the process and no-follow cluster directory without touching the
+branch, reacquires the store after process stop, and calls only the atomic
+reset owner. There is no longer a committed state between destruction and
+replacement.
+
+The reported silence was amplified by the caller publishing source before a
+named fork and by its parent buffering child output until EOF. Commit
+`a0738794f` makes named init consume `current-src`, composes reset as one
+publish-and-fork child, and relays child progress while it is read. On an
+isolated root, the clean-run failing reset boundary changed from 157.617 s and
+its backstop failure to 61.22 s and success. The registry regression injects
+the replacement failure and proves the prior branch commit and facts remain.

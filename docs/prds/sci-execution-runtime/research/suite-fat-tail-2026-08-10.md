@@ -360,3 +360,52 @@ population without hiding them from bare selection.
    bare tier from the same frozen source digest.
 
 No phase-2 edit is authorized until the orchestrator reports `gate landed`.
+
+## Phase-2 landing evidence
+
+The orchestrator released the tree after the clean complete run. The four
+implemented class boundaries are commits `69d95a4be`, `59e71e0cd`,
+`a0738794f`, and `d50275487`.
+
+| Class boundary | Before | After | Evidence |
+|---|---:|---:|---|
+| Progress changed writer mechanics | 45.079 s complete in-process publication; 34.781 s program rows | 36.487 s complete publication; 27.143 s program rows | The same population probe with progress present in both cases. Transaction-shape regression proves callback presence cannot change batches. |
+| Named/reset operator composition | named init 64.73 s; clean-run forced reset 157.617 s and failed | named init 21.46 s; reset 61.22 s and passed | Isolated operator roots. Reset now has one child publication and one fork; child phase lines were visible before exit. |
+| Per-trial database projection/context | 0.974 s empty turn trial; generated property 58.182 s in the clean suite | 18–20 ms warmed empty trial; generated property 2.562 s inside `bin/test` | Five-trial empty probe and the unchanged 48-case property. Fresh-JVM command wall was 27.14 s including namespace load and the one 11.9 s base construction. |
+| Destroy-then-fail refork | branch retirement committed before replacement | expected-head replacement is one `force-branch!`; operator has no retire-then-refork call | Injected replacement failure retains the exact prior commit and facts; focused registry/operator gate: 31 tests, 166 assertions, green. |
+
+`source-base!` now returns the published commit, digest, activation closure,
+immutable database value, canonical projection, and acquired SCI `ctx`.
+New production cluster branches receive connection custody and their own
+projection/call-preparation state through `fork-cluster-ctx`; existing
+sovereign branches still acquire their own older program. The sibling
+regression mutates one SCI fork and one database branch and proves neither
+mutation reaches its sibling. The ordinary test database fork reuses the
+base projection and constructs a basis-specific projection state instead of
+re-deriving the complete registry per test.
+
+The clean run's `init-owns-current-source-and-dormant-cluster-lifecycle` did
+not wedge for 90 minutes; it reached its own 300 s child backstop after
+297.514 s. That remains load/mid-edit sensitive evidence, not a missing child
+exit event. The fixed parent streams phase progress and named commands no
+longer publish, removing both the repeated work and the silent interval.
+
+### Revised projections
+
+The measured lower bound is about 6.4 minutes: 96.4 s on reset, 55.6 s on the
+turn property, and approximately 189 s from the 8.592 s publication saving
+across the 22 populations identified above; named-init removals in the
+lifecycle test add roughly another minute without double-counting reset.
+Projection reuse also benefits every ordinary `with-database` test, but no
+suite-wide count is claimed without a new complete run.
+
+Against the 4,827 s clean baseline, the conservative revised complete-suite
+projection is **about 4,250 s (70.8 minutes)**. This deliberately does not
+claim the larger phase-1 11.8–14.3 minute estimate, because the direct
+scratch-root publication proofs still intentionally rebuild source.
+
+The last retained bare-tier timing was about 9.5 minutes for 987 tests. Its
+ordinary database tests now avoid roughly 0.34 s of projection work per fork,
+and the turn property loses 55.6 s. Without inventing an exact invocation
+count, the revised bare-tier projection is **5.5–6.5 minutes**; the next frozen
+bare run must replace that range with an observed total.
