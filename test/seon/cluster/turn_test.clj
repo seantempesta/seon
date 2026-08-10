@@ -1883,6 +1883,127 @@
                       "my.agents.agent-a=> ; I explained the result"))
                 "the prose is no longer replayed as an evaluated REPL line")))))))
 
+;;; THE CLASS: a complete, paid provider reply that failed to read used to
+;;; close through the pre-form refusal path. The attempt survived, but the run
+;;; had zero forms and zero receipts, so neither the reply nor its correctable
+;;; reader error reached the next prompt. The unreadable branch now atomically
+;;; freezes one exact-source form and starts its receipt, then settles that
+;;; receipt through the ordinary inline/blob result projection.
+(deftest an-unreadable-reply-is-a-settled-form-with-paid-attempt-evidence
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.db/connection cluster)
+            reply-text (str "(+ 1 2)\n"
+                            "(defn broken [x]\n"
+                            "  (+ x 1)")
+            usage {"prompt_tokens" 10665
+                   "completion_tokens" 1229}
+            reports
+            (with-redefs [ai/complete
+                          (fn [_]
+                            {:seon.ai/text reply-text
+                             :seon.ai/usage usage
+                             :seon.ai/finish-reason "stop"})]
+              (drive! cluster 10))
+            run-id
+            (db/q '[:find ?run-id .
+                    :in $ ?source
+                    :where
+                    [?form :seon.cluster.run.form/source ?source]
+                    [?form :seon.cluster.run.form/run ?run]
+                    [?run :seon.cluster.run/id ?run-id]]
+                  @connection reply-text)
+            receipt
+            (db/q '[:find (pull ?receipt [*]) .
+                    :in $ ?run-id
+                    :where
+                    [?run :seon.cluster.run/id ?run-id]
+                    [?receipt :seon.cluster.eval/run ?run]]
+                  @connection run-id)
+            refusal (edn/read-string
+                     (:seon.cluster.eval/result-edn receipt))
+            attempt
+            (db/q '[:find (pull ?attempt [*]) .
+                    :in $ ?run-id
+                    :where
+                    [?run :seon.cluster.run/id ?run-id]
+                    [?attempt :seon.ai.attempt/run ?run]]
+                  @connection run-id)]
+        (testing "the unreadable outcome is one form with one receipt"
+          (is (= [:open :call :close]
+                 (mapv :seon.cluster.work/situation reports)))
+          (is (= 1
+                 (db/q '[:find (count ?form) .
+                         :in $ ?run-id
+                         :where
+                         [?run :seon.cluster.run/id ?run-id]
+                         [?form :seon.cluster.run.form/run ?run]]
+                       @connection run-id)))
+          (is (= 1
+                 (db/q '[:find (count ?receipt) .
+                         :in $ ?run-id
+                         :where
+                         [?run :seon.cluster.run/id ?run-id]
+                         [?receipt :seon.cluster.eval/run ?run]]
+                       @connection run-id)))
+          (is (some? (db/q '[:find ?closed .
+                            :in $ ?run-id
+                            :where
+                            [?run :seon.cluster.run/id ?run-id]
+                            [?run :seon.cluster.run/closed-at ?closed]]
+                          @connection run-id))))
+        (testing "the receipt is the typed refusal and retains exact source"
+          (is (= :seon.cluster.reply/unreadable
+                 (:seon.error/kind receipt)))
+          (is (str/includes? (:seon.cluster.eval/error receipt)
+                             "EOF while reading"))
+          (is (= reply-text (:seon.cluster.reply/unreadable refusal)))
+          (is (= reply-text
+                 (get-in refusal
+                         [:seon.error/data :seon.cluster.reply/text])))
+          (is (= :seon.cluster.reply/unreadable
+                 (db/q '[:find ?kind .
+                         :in $ ?run-id
+                         :where
+                         [?run :seon.cluster.run/id ?run-id]
+                         [?form :seon.cluster.run.form/run ?run]
+                         [?receipt :seon.cluster.eval/run ?run]
+                         [?receipt :seon.error/kind ?kind]]
+                       @connection run-id))
+              "the run is distinguishable by its own form/receipt facts"))
+        (testing "the already-paid provider attempt remains queryable"
+          (is (= usage
+                 (edn/read-string (:seon.ai.attempt/usage-edn attempt))))
+          (is (= "stop" (:seon.ai.attempt/finish-reason attempt)))
+          (is (not (contains? attempt :seon.ai.attempt/error))
+              "the provider succeeded; reading its complete text failed"))
+        (testing "the next prompt renders both correction inputs"
+          (db/transact!
+           connection
+           {:tx-data [{:seon.cluster.run/id "run-after-unreadable"
+                       :seon.cluster.run/agent
+                       [:seon.cluster.agent/id "agent-a"]
+                       :seon.cluster.run/trigger
+                       [:seon.cluster.message/id "m-1"]
+                       :seon.cluster.run/opened-at (Date.)}
+                      {:seon.cluster.agent/id "agent-a"
+                       :seon.cluster.agent/run
+                       [:seon.cluster.run/id "run-after-unreadable"]}]})
+          (let [next-prompt
+                (:seon.cluster.prompt/text
+                 (prompt/prompt
+                  @connection
+                  {:seon.cluster.run/id "run-after-unreadable"
+                   :seon.cluster.agent/id "agent-a"
+                   :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+                   :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
+                   :seon.sci.eval/time-limit-ms 2000
+                   :seon.config/on-core-error :panic
+                   :seon.render/context-channel
+                   (:seon.render/context-channel cluster)}))]
+            (is (str/includes? next-prompt "(defn broken [x]"))
+            (is (str/includes? next-prompt "EOF while reading"))))))))
+
 (deftest a-completing-disposition-closes-in-the-terminal-transaction
   (with-cluster
     (fn [cluster]

@@ -1091,8 +1091,55 @@
                   sources
                   (reply/sources (:seon.ai/text completion)
                                  namespace-name)]
-              (if (:seon.error/kind sources)
+              (cond
+                ;; THE CLASS: an unreadable reply used to take `fail!`, whose
+                ;; absent ordinal can only close the run with `run/error`.
+                ;; The paid attempt survived, but the reply had no form and no
+                ;; receipt, so its source and typed reader refusal disappeared
+                ;; from the transcript. Freeze one exact-source form AND start
+                ;; its receipt in the same transaction: after that commit, a
+                ;; silent formless close is structurally impossible. Settle the
+                ;; receipt with the ordinary evaluation-result projection so a
+                ;; large refusal uses the existing inline/blob split.
+                (= ::reply/unreadable (:seon.error/kind sources))
+                (let [ordinal 0
+                      form {:seon.cluster.run.form/source
+                            (::reply/unreadable sources)}
+                      forms [form]
+                      frozen
+                      (db/transact!
+                       connection
+                       {:tx-data
+                        (into [] cat
+                              [(run/plan-tx
+                                {:seon.cluster.run/id run-id
+                                 :seon.cluster.run/process process
+                                 :seon.cluster.run/plan-digest (digest forms)
+                                 :seon.cluster.run/sources forms})
+                               (run/receipt-start-tx
+                                {:seon.cluster.run/id run-id
+                                 :seon.cluster.eval/ordinal ordinal
+                                 :seon.cluster.eval/at now})])})]
+                  (if (:seon.error/kind frozen)
+                    (fail! frozen)
+                    (do
+                      (settle!
+                       {::cluster cluster
+                        ::now now
+                        :seon.cluster.agent/id agent-id
+                        :seon.cluster.run/id run-id
+                        :seon.cluster.run.form/ordinal ordinal
+                        :seon.sci.eval/evaluation
+                        {:seon.sci.admit/value sources
+                         :seon.cluster.eval/result-edn (pr-str sources)
+                         :seon.cluster.eval/error
+                         (:seon.error/message sources)}})
+                      (report :error 1))))
+
+                (:seon.error/kind sources)
                 (fail! sources)
+
+                :else
                 (let [outcome (db/transact!
                                connection
                                (run/plan-tx

@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (37)
+## Blocker (36)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -55,7 +55,6 @@ See `README.md` for the convention.
 | [Reuse one HttpClient so concurrent provider calls stop closing mid-read](concurrent-provider-calls-fail-with-a-closed-response-body.md) | blocker | whole-system arc repair wave |
 | [Settle what arrived when a provider stream closes mid-body](a-mid-stream-provider-disconnect-discards-the-whole-turn.md) | blocker | whole-system arc repair wave |
 | [Stop `seon.db/transact!` returning a different shape per dynamic var](transact-returns-a-different-shape-depending-on-a-dynamic-var.md) | blocker | P17 S4 `seon.db` conversion sweep |
-| [Settle an unreadable reply as a form the agent can see](an-unreadable-reply-closes-a-run-with-no-forms-and-no-trace.md) | blocker | live-drive context repair wave |
 
 ## Friction (132)
 

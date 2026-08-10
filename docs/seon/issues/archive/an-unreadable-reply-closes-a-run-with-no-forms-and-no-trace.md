@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, agent, ai, live-drive]
 ---
@@ -16,7 +16,7 @@ receipts**, in the same second it opened. The agent is never told. Its next
 turn begins with no evidence that the previous turn happened at all.
 
 This is a DIFFERENT mechanism from
-[a mid-stream provider disconnect](a-mid-stream-provider-disconnect-discards-the-whole-turn.md),
+[a mid-stream provider disconnect](../a-mid-stream-provider-disconnect-discards-the-whole-turn.md),
 and must not be folded into it. There the body was truncated in transport
 (`:seon.ai/unparseable-body`, "not readable JSON: closed"). Here the body
 arrived whole, the JSON parsed, and the attempt recorded
@@ -54,7 +54,7 @@ Two costs, one of them the real one:
    indistinguishable from a run that legitimately had nothing to do. The only
    trace is a separate `:seon.error` row that nothing on the run points at
    from the run's own side. This is the same class as
-   [recovery closing an interrupted run without marking it](recovery-closes-an-interrupted-run-without-marking-it.md):
+   [recovery closing an interrupted run without marking it](../recovery-closes-an-interrupted-run-without-marking-it.md):
    two very different outcomes share one database signature.
 
 The agent also learns nothing. A reader error is the single most correctable
@@ -88,5 +88,39 @@ sees, exactly like every other agent mistake:
 
 ## Evidence
 
-- [model-authoring-observer-2026-08-10.md](../../prds/sci-execution-runtime/research/model-authoring-observer-2026-08-10.md)
+- [model-authoring-observer-2026-08-10.md](../../../prds/sci-execution-runtime/research/model-authoring-observer-2026-08-10.md)
   — verdict 4, the discarded turn; raw dump `tmp/observer-0810-errors.edn`.
+
+## Resolution
+
+Resolved in the commit that archives this note. The reply reader already
+returned the complete flat `:seon.cluster.reply/unreadable` value, including
+the original text and SCI's delimiter position. The loss happened one boundary
+later: `call-turn` sent every reply refusal through the pre-form failure path,
+whose absent ordinal can only close with `:seon.cluster.run/error`.
+
+The unreadable branch now freezes one exact-source form and starts ordinal
+zero's receipt in the same Datahike transaction. After that commit, a silent
+formless close is structurally impossible: the receipt exists and either
+settles with the reader refusal or recovery records its interruption. The
+receipt settles through the existing evaluation-result projection, so the
+complete refusal uses ruling #25's existing inline/blob result split. The
+successful provider attempt remains unchanged and retains usage and finish
+evidence.
+
+The one class regression,
+`an-unreadable-reply-is-a-settled-form-with-paid-attempt-evidence`, proves:
+
+- the turn reaches `open → call → close` with one form and one receipt;
+- the form retains the exact reply source and the receipt carries
+  `:seon.cluster.reply/unreadable` plus the reader message;
+- the outcome is queryable through the run's form and receipt without joining
+  `:seon.error`;
+- the successful attempt retains 11,894 tokens of usage evidence and finish
+  reason `"stop"`; and
+- the next prompt contains both the malformed source and `EOF while reading`.
+
+Proof: `bin/test seon.cluster.turn-test` passed 51 tests / 362 assertions, and
+`bin/test --changed src/seon/cluster/loop.clj --changed
+test/seon/cluster/turn_test.clj` passed 134 tests / 755 assertions with zero
+failures or errors.
