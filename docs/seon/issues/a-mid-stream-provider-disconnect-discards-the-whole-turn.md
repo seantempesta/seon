@@ -154,8 +154,33 @@ Content-Length it does not deliver settles what it sent.
 is on the value but is not yet a durable FACT. It must ride a new
 `:seon.ai.attempt/truncation` ref recorded by `seon.cluster.loop` —
 never `:seon.ai.attempt/error`, whose presence already means "this
-attempt failed" (`test/seon/cluster/turn_test.clj:2393`). Declaring that
-attribute is blocked: `src/seon/cluster/prompt.clj:22` requires
-`clojure.tools.logging`, which is absent from `deps.edn`, so
-`seon.cluster` will not load and schema admission refuses every edit to
-`resources/seon/schemas/seon.ai.edn`.
+attempt failed" (`test/seon/cluster/turn_test.clj:2393`).
+
+## Independent live re-verification — 2026-08-10
+
+The old `clojure.tools.logging` blocker has cleared, but the durable half still
+has not landed. On the running `default` cluster, pid 31570, this full schema
+and fact probe returned:
+
+```clojure
+{:installed? false
+ :fact-count 0}
+```
+
+The exact probe took the live connection's current database value, tested
+`(contains? (:schema database) :seon.ai.attempt/truncation)`, and queried
+`[:find (count ?v) . :where [_ :seon.ai.attempt/truncation ?v]]`. A production
+source and schema search finds no declaration or loop settlement owner.
+
+The value half is genuinely live. A JVM probe against the loaded
+`seon.ai/streamed-completion` fed one valid SSE delta and then an
+`IOException("closed", IOException("v3 reset"))`. It returned the text
+`"(+ 1 2)"` as an ordinary completion, with no top-level error, plus
+`:seon.ai/stream-truncated` and the full two-element cause chain under
+`:seon.ai/truncation`. Two reads of the loaded private `client` were identical
+and its class was `jdk.internal.net.http.HttpClientFacade`.
+
+Remaining acceptance is therefore narrow and unblocked: declare and install
+the attempt ref, settle the completion's truncation value through the one loop
+attempt owner, and prove it queryable after settlement without classifying the
+attempt itself as failed.

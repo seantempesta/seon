@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, config, web, gate]
+tags: [issue, config, web]
 ---
 
 # Eight `:seon.config.web/*` dials are registered with no shipped default
@@ -68,3 +68,29 @@ missing-default.` The missing attributes existed in report data but were not
 named in the visible face, so operators had to inspect the EDN report to learn
 what blocked boot. That is a remaining ugly-output defect: the concise refusal
 must name the missing keys directly while retaining the structured report.
+
+## Current recurrence — 2026-08-10
+
+The eight keys now have shipped defaults, but the search projection default is
+not applicable. While creating the independent `v3-scratch` recovery probe,
+
+```bash
+bin/seon config apply v3-scratch config/default.edn
+```
+
+failed at compile time with:
+
+```text
+var: seon.web.search/organic-results is not public
+```
+
+The mismatch is direct: `config/default.edn:282` supplies the symbol
+`seon.web.search/organic-results`, while `src/seon/web/search.clj:23` declares
+it with `defn-`. The generated prepl form resolves that symbol from `user`, so
+Clojure's privacy check refuses before `seon.config/apply!` runs. This is
+committed state, not a dirty source edit.
+
+The acceptance boundary now includes a live `config apply` of the shipped
+manifest into a new named cluster. The selected projection must be a resolvable
+declared function at that boundary; a shipped default that cannot be resolved
+is not a default the system can apply.

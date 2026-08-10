@@ -54,3 +54,24 @@ whoever owns claim hygiene for roots that no longer exist.
 - What remains unreadable says WHICH key it did not recognise, so the reader
   can tell a rename leftover from a truncated write.
 - `bin/seon status` on a healthy installation prints no refusal lines.
+
+## Independent characterization — 2026-08-10
+
+The same eight warnings remain on the running shared root. All eight files are
+readable EDN maps, and all eight fail the current private `root-claim?`
+predicate; none is byte-corrupt or a foreign repository's claim.
+
+The records divide into two exact stale shapes:
+
+- seven carry `:seon.operator.claim/repository-root
+  "/Users/sean/src/seon"`, but their creator uses the deleted
+  `:seon.dev.process/pid` and `:seon.dev.process/start-instant` keys, with the
+  start instant stored as `java.lang.String`; current validation requires
+  `:seon.boot/pid` plus an `inst?` `:seon.boot/start-instant`;
+- `1ff66f77-6d55-351a-a96a-37d657a5d485.edn` is an older destroyed/cleanup
+  record with no creator and no repository-root at all.
+
+The managed paths are also mixed, which rules out "all foreign" and "all
+already absent" explanations: five still exist and three are absent. Every
+path is a historical test/proof root below this checkout's `tmp/` or `target/`.
+No record was deleted during verification.
