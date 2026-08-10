@@ -367,7 +367,7 @@
 ;;; The document
 ;;; ---------------------------------------------------------------------------
 
-(deftest the-namespace-page-is-the-html-walk
+(deftest the-html-page-keeps-the-transcript-outside-the-agent-profile
   (with-server
     (fn [_connection server _context]
       (let [response (fetch server "/")
@@ -376,7 +376,7 @@
         (is (str/includes? body "data-walk-path=\"[]\""))
         (is (str/includes? body "Agent root is idle."))
         (is (str/includes? body "id=\"surface-transcript\"")
-            "the HTML projection includes the total walked neighbourhood")
+            "the AI profile cannot fit the HTML transcript out of the page")
         (is (str/starts-with? body "<!doctype html>"))))))
 
 (deftest the-feed-opener-is-a-sibling-of-the-morph-targets

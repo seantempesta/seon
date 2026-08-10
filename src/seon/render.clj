@@ -73,10 +73,16 @@
         (when effective
           (agent-render-profile effective)))))
 
+(defn- target-profile
+  [request]
+  ;; The declared profile is the agent/AI face. The page profile lands with
+  ;; the transcript walk; until then HTML keeps its unfitted projection.
+  (when (= :seon.render/ai (:seon.render/output request))
+    (request-profile request)))
+
 (defn- render-argument
   [request]
-  (let [value (render-value request)
-        context (select-keys request
+  (let [context (select-keys request
                              [:seon.db/db
                               :seon.sci.eval/ctx
                               :seon.cluster.agent/id
@@ -96,7 +102,7 @@
                               ;; delegates its own value onward cannot
                               ;; be selected for it a second time
                               :seon.render/rendering])
-        profile (request-profile request)
+        profile (target-profile request)
         value (render-value request)
         context (cond-> context
                   profile (assoc :seon.render/profile profile)
