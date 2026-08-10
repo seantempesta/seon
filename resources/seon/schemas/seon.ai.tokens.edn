@@ -4,9 +4,11 @@
  :chars-per-token [:double {:min 0.1}]
 
  ;; WHICH evidence produced an estimate. :observed is fitted to committed
- ;; provider usage facts; :shipped-constant is the uncalibrated chars/4
- ;; fallback used before any usage exists for that model.
- :basis [:enum :seon.ai.tokens/observed :seon.ai.tokens/shipped-constant]
+ ;; provider usage facts; :shipped-prior is the evidence-backed first-turn
+ ;; prior; :shipped-constant remains readable for historical facts only.
+ :basis [:enum :seon.ai.tokens/observed
+         :seon.ai.tokens/shipped-prior
+         :seon.ai.tokens/shipped-constant]
 
  :sample-count [:int {:min 0}]
 

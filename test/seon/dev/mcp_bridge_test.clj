@@ -340,9 +340,10 @@
     (is (= "mcp.fixture.target" (:seon.dev.mcp/namespace data)))
     (is (= "fixture" (:seon.dev.mcp/cluster data)))
     (is (= "coordinates" (:seon.dev.mcp/session-id data)))
+    (is (= "(+ 1 2)" (:seon.dev.mcp/form data)))
     (is (= "transport-fixture" (:seon.dev.mcp/failure data)))))
 
-(deftest evaluation-events-report-the-exact-caller-source
+(deftest evaluation-response-reports-the-exact-caller-source-once
   (let [source "  (+ 20 22)\n"]
     (doseq [mode ["jvm" "door"]
             exception? [false true]]
@@ -375,9 +376,31 @@
         (is (not= source @transport-form)
             "the test must exercise a generated transport wrapper")
         (is (= (count raw-events) (count events)))
-        (is (every? #(= source (:form %)) events)
-            (str mode " events must report the caller source on "
+        (is (= source (:seon.dev.mcp/form data)))
+        (is (every? #(not (contains? % :form)) events)
+            (str mode " events retain their prepl structure on "
                  (if exception? "evaluation error" "success")))))))
+
+(deftest capped-list-tail-is-a-declared-elision-value
+  (let [event {:tag :ret
+               :val (pr-str
+                     {:seon.dev.mcp/value
+                      '(0 1 :seon.sci.admit/elided)
+                      :seon.sci.admit/capped? true})}
+        decoded ((bridge-var 'decoded-projection-event) event)
+        enriched ((bridge-var 'enrich-projection-elisions) decoded)
+        value (get-in enriched [:val :seon.dev.mcp/value])
+        elision (last value)]
+    (is (list? value) "projection must preserve the returned collection")
+    (is (= {:seon.print/face :seon.print/elided
+            :seon.print/omitted 1
+            :seon.print/elision-unit :children
+            :seon.render.data/path []
+            :seon.render.data/next-offset 2
+            :seon.render.profile/id :seon.render.profile/agent
+            :seon.print/requery-refusal
+            "the MCP projection retained no stable identity for this cut"}
+           elision))))
 
 (deftest endpoint-selection-is-root-scoped-and-reaches-degraded-registrations
   (let [fixture-root (io/file project-root "tmp"

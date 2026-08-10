@@ -26,8 +26,8 @@
 (defn- text-of [characters] (str/join (repeat characters "x")))
 
 (deftest token-budget-derivations-share-one-character-ratio
-  (is (= 12 (tokens/estimate-chars 3)))
-  (is (= "abcdefghijkl…"
+  (is (= 9 (tokens/estimate-chars 3)))
+  (is (= "abcdefghi…"
          (tokens/clip-str "abcdefghijklmnop" 3)))
   (is (= "short" (tokens/clip-str "short" 3)))
   (is (= "" (tokens/clip-str nil 0)))
@@ -35,23 +35,27 @@
     (is (= (tokens/estimate (text-of 4096))
            (tokens/estimate-of-characters 4096)))))
 
-(deftest an-uncalibrated-estimate-is-chars-over-four-and-says-so
+(deftest a-first-turn-estimate-uses-the-measured-prior-without-a-band
   (testing "the fallback path — no usage recorded for this model yet"
     (let [calibration (tokens/calibrate [])]
       (is (= tokens/shipped-calibration calibration))
-      (is (= :seon.ai.tokens/shipped-constant
+      (is (= :seon.ai.tokens/shipped-prior
              (:seon.ai.tokens/basis calibration)))
-      (is (zero? (:seon.ai.tokens/sample-count calibration)))
+      (is (= 17 (:seon.ai.tokens/sample-count calibration)))
       (testing "no invented error band: with no observations it is unknown"
         (is (not (contains? calibration :seon.ai.tokens/relative-error))))
-      (let [report (tokens/budget-report (text-of 116572) budget calibration)]
-        (is (= 29143 (:seon.ai.tokens/estimated report))
-            "unchanged chars/4 arithmetic")
+      (let [provider-tokens 10766
+            report (tokens/budget-report (text-of 34798) budget calibration)
+            miss (/ (abs (- (double (:seon.ai.tokens/estimated report))
+                            provider-tokens))
+                    provider-tokens)]
+        (is (= 10874 (:seon.ai.tokens/estimated report)))
+        (is (< miss 0.02) "the shipped prior corrects the measured 19.2% miss")
         (is (= :seon.ai.tokens/within (:seon.ai.tokens/verdict report))
-            "this is the admission the defect was made of")
+            "the measured first-turn prompt is well within the budget")
         (is (not (contains? report :seon.ai.tokens/upper-bound)))
-        (is (str/includes? (tokens/report-sentence report) "uncalibrated")
-            "an uncalibrated number must name its basis")))))
+        (is (str/includes? (tokens/report-sentence report) "measured prior")
+            "the first-turn number must name its evidence basis")))))
 
 (deftest a-calibrated-estimate-predicts-the-provider-within-its-own-band
   (let [calibration (tokens/calibrate (observations observed-usage))]
@@ -78,11 +82,12 @@
       (doseq [[characters provider-tokens] observed-usage]
         (let [text (text-of characters)
               calibrated (tokens/budget-report text budget calibration)
-              fallback (tokens/budget-report text budget
-                                             tokens/shipped-calibration)
+              prior (tokens/budget-report text budget
+                                          tokens/shipped-calibration)
               really-over? (> provider-tokens budget)]
-          (is (= :seon.ai.tokens/within (:seon.ai.tokens/verdict fallback))
-              "the uncalibrated basis admits all ten — the defect")
+          (is (= really-over?
+                 (= :seon.ai.tokens/over (:seon.ai.tokens/verdict prior)))
+              "the shipped prior agrees with the recorded budget verdict")
           (is (= really-over?
                  (= :seon.ai.tokens/over (:seon.ai.tokens/verdict calibrated)))
               (str characters " characters really cost " provider-tokens

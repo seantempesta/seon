@@ -88,6 +88,7 @@
    :seon.config.ai/model :live
    :seon.config.ai/max-tokens :live
    :seon.config.ai/prompt-token-budget :live
+   :seon.config.ai/chars-per-token-prior :live
    :seon.config.ai/thinking :live
    :seon.config.ai/temperature :live
    :seon.config.ai/top-p :live
@@ -137,6 +138,7 @@
    :seon.config.ai/model "application-proof"
    :seon.config.ai/max-tokens 123
    :seon.config.ai/prompt-token-budget 32
+   :seon.config.ai/chars-per-token-prior 3.25
    :seon.config.ai/thinking :high
    :seon.config.ai/temperature 0.5
    :seon.config.ai/top-p 0.75

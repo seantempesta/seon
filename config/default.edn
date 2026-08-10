@@ -316,6 +316,14 @@
  ; opening an unbounded provider request.
  :seon.config.ai/prompt-token-budget 32768
 
+ ; Unit: characters per provider prompt token before this cluster has its own
+ ; attempt facts. Provenance: 17 recorded DeepSeek prompt samples across the
+ ; 2026-08-08 whole-system arc and 2026-08-10 model-authoring observer fit
+ ; 3.21–3.23 characters/token. This is a measured cross-run prior, not an
+ ; error band; the first local attempt still replaces it with that model's
+ ; own committed usage fit.
+ :seon.config.ai/chars-per-token-prior 3.2
+
  ; Explicitly disabled by owner ruling #34: ordinary per-turn agents optimize
  ; for reasonably smart, fast, and cheap work; planners opt into thinking with
  ; an agent-entity override. The flash-quality-interrogation-2026-08-01 bench

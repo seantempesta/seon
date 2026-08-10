@@ -13,10 +13,11 @@
     the provider billed for that same run — per model, because
     tokenizers differ. Measured on cluster `default` 2026-08-08 over 14
     attempts of `deepseek-v4-flash`: 3.28 characters per token, not 4;
-  - the SHIPPED basis is the flat `chars/4` fallback used when no usage
-    has been recorded yet for that model. It is honest only about being
-    uncalibrated: it carries NO error band, and every report says which
-    basis produced it.
+  - the SHIPPED PRIOR is 3.2 characters per token, measured from 17
+    recorded DeepSeek prompt samples across the 2026-08-08 whole-system
+    arc and 2026-08-10 model-authoring observer. It carries NO invented
+    error band; the first local attempt replaces it with the model's own
+    committed usage fit.
 
   Why this exists: `chars/4` ran 23-26% low against DeepSeek's own
   count, so a 35,827-token prompt passed a 32,768-token budget with no
@@ -42,19 +43,25 @@
   one schema population like every other file.")
 
 (def shipped-chars-per-token
-  "The no-tokenizer fallback: ~4 characters per token. The ONLY constant
-  in this namespace, used exactly when a model has no recorded usage to
-  calibrate against. Measured drift on DeepSeek is ~23% low, which is
-  why an estimate on this basis carries no error band and says so."
-  4)
+  "The evidence-backed default when no database-derived prior is supplied."
+  3.2)
+
+(def shipped-prior-sample-count
+  "Recorded prompt samples underlying the shipped cross-run prior."
+  17)
+
+(defn prior-calibration
+  "A measured prior calibration with no invented error band."
+  {:malli/schema [:=> [:cat :seon.ai.tokens/chars-per-token]
+                  :seon.ai.tokens/calibration]}
+  [chars-per-token]
+  {:seon.ai.tokens/chars-per-token (double chars-per-token)
+   :seon.ai.tokens/basis :seon.ai.tokens/shipped-prior
+   :seon.ai.tokens/sample-count shipped-prior-sample-count})
 
 (def shipped-calibration
-  "The uncalibrated fallback calibration. No `:seon.ai.tokens/relative-error`
-  key: with no observations the error is genuinely UNKNOWN, and an
-  invented band would be a tuned constant pretending to be evidence."
-  {:seon.ai.tokens/chars-per-token (double shipped-chars-per-token)
-   :seon.ai.tokens/basis :seon.ai.tokens/shipped-constant
-   :seon.ai.tokens/sample-count 0})
+  "The measured shipped prior when no database-derived prior is supplied."
+  (prior-calibration shipped-chars-per-token))
 
 (defn- observation-usable?
   [observation]
@@ -71,14 +78,20 @@
   is the worst relative miss that ratio makes across the same
   observations — the honest margin a budget check must carry.
 
-  With no usable observation this returns [[shipped-calibration]]:
-  uncalibrated, band-free, and named as such."
-  {:malli/schema [:=> [:cat :seon.ai.tokens/observations]
-                  :seon.ai.tokens/calibration]}
-  [observations]
+  With no usable observation this returns the supplied measured prior,
+  still band-free and named as such."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.ai.tokens/observations]
+     :seon.ai.tokens/calibration]
+    [:=> [:cat :seon.ai.tokens/observations
+          :seon.ai.tokens/calibration]
+     :seon.ai.tokens/calibration]]}
+  ([observations] (calibrate observations shipped-calibration))
+  ([observations fallback-calibration]
   (let [usable (filterv observation-usable? observations)]
     (if (empty? usable)
-      shipped-calibration
+      fallback-calibration
       (let [characters (reduce + 0 (map :seon.ai.tokens/characters usable))
             provider-tokens (reduce + 0 (map :seon.ai.usage/prompt-tokens
                                              usable))
@@ -98,7 +111,7 @@
         {:seon.ai.tokens/chars-per-token ratio
          :seon.ai.tokens/basis :seon.ai.tokens/observed
          :seon.ai.tokens/sample-count (count usable)
-         :seon.ai.tokens/relative-error band}))))
+         :seon.ai.tokens/relative-error band})))))
 
 (defn estimate-of-characters
   "Estimate the token count of `character-count` characters.
@@ -120,9 +133,8 @@
 (defn estimate
   "Estimate the token count of `text`, integer-floored, zero for empty.
 
-  The one-argument arity uses the uncalibrated [[shipped-calibration]]
-  and is therefore `(quot (count text) 4)` exactly as before. Supply a
-  calibration whenever one is derivable — a budget check always
+  The one-argument arity uses the evidence-backed [[shipped-calibration]].
+  Supply a calibration whenever one is derivable — a budget check always
   should."
   {:malli/schema
    [:function
@@ -174,7 +186,7 @@
     what shipped an over-budget prompt; it is admitted LOUDLY instead;
   - `:seon.ai.tokens/within` — the estimate plus its band still fits.
 
-  On the uncalibrated shipped basis there is no band, so no
+  On the shipped prior there is no band, so no
   `near-limit` verdict is derivable and the report says which basis it
   used. Read the basis before trusting the verdict."
   {:malli/schema [:=> [:cat :string [:int {:min 0}]
@@ -219,13 +231,20 @@
                                relative-error upper-bound]
          budget :seon.config.ai/prompt-token-budget} report]
     (str estimated " estimated tokens against a " budget "-token budget, "
-         (if (= basis :seon.ai.tokens/observed)
+         (case basis
+           :seon.ai.tokens/observed
            (str "calibrated at " (rounded chars-per-token 2)
                 " characters per token from " sample-count
                 " recorded provider usage facts (worst observed miss "
                 (rounded (* 100.0 relative-error) 1)
                 "%, so as much as " upper-bound " tokens)")
-           (str "on the uncalibrated " (long chars-per-token)
-                "-characters-per-token fallback — no provider usage has been"
-                " recorded for this model yet, so the real count is unknown"
-                " and has run about a quarter higher in practice")))))
+
+           :seon.ai.tokens/shipped-prior
+           (str "using the shipped measured prior of "
+                (rounded chars-per-token 2)
+                " characters per token from " sample-count
+                " recorded provider prompt samples; no local usage exists"
+                " yet, so no error band is asserted")
+
+           (str "on the legacy uncalibrated " (long chars-per-token)
+                "-characters-per-token fallback")))))

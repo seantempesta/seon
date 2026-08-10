@@ -172,3 +172,39 @@ was unusable. This reopens the issue: acceptance additionally requires a clean
 isolated boot whose selected runtime health satisfies the
 `seon.problems/problems` output contract when an error-signature entry contains
 an absent side of a comparison.
+
+## Envelope economy and elision repair — 2026-08-10
+
+The 2026-08-08 independent verification found a separate response-economy
+defect in the same bridge owner: every prepl event repeated the complete caller
+form. Four diagnostic events plus the terminal return therefore echoed a
+roughly 1,000-character form five times. The 2026-08-10 model-authoring
+observer also found capped query lists ending in the internal
+`:seon.sci.admit/elided` scalar, with no count, path, offset, or requery
+decision.
+
+`script/seon/dev/mcp.clj` now removes the prepl transport form from each event
+and retains the exact caller source once as `:seon.dev.mcp/form` on the response.
+The event vector keeps the prepl event grain and order. At the bridge's decoded
+projection boundary, a capped sequential tail becomes the declared
+`:seon.print/elision` value with its parent path, next offset, and an explicit
+requery refusal; the internal scalar no longer reaches the JSON consumer as a
+face.
+
+Recurring proof:
+
+- `seon.dev.mcp-bridge-test/evaluation-response-reports-the-exact-caller-source-once`
+  exercises JVM and door modes on success and failure, proves one source echo,
+  and proves every returned event is free of a form copy;
+- `seon.dev.mcp-bridge-test/capped-list-tail-is-a-declared-elision-value`
+  proves a capped list stays a list and its tail is the complete declared
+  refusal-bearing elision shape; and
+- `bin/test seon.ai-test seon.ai.tokens-test seon.cluster.prompt-test
+  seon.dev.mcp-bridge-test seon.config-application-test` passed 81 tests / 510
+  assertions / 0 failures / 0 errors; after extending the same attribution
+  assertion through transport failures, `bin/test seon.dev.mcp-bridge-test`
+  passed 21 tests / 145 assertions / 0 failures / 0 errors.
+
+The issue remains open only for its independently reopened runtime-health
+contract case above. A newly started MCP bridge process is still required for
+live client proof; existing clients retain the old script definition.

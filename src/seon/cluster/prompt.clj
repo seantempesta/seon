@@ -80,12 +80,18 @@
   tokenizers differ.
 
   A model with no recorded usage yet — a fresh cluster's first turns —
-  falls back to `seon.ai.tokens/shipped-calibration`, which names
-  itself as uncalibrated so nothing downstream mistakes it for
-  evidence. Recorded drift stays queryable: this function IS the query."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.ai/model]
-                  :seon.ai.tokens/calibration]}
-  [database model]
+  uses the supplied measured prior without inventing an error band.
+  Recorded drift stays queryable: this function IS the query."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/database-value :seon.ai/model]
+     :seon.ai.tokens/calibration]
+    [:=> [:cat :seon.db/database-value :seon.ai/model
+          :seon.ai.tokens/calibration]
+     :seon.ai.tokens/calibration]]}
+  ([database model]
+   (model-calibration database model tokens/shipped-calibration))
+  ([database model fallback-calibration]
   (let [;; `?attempt` IS IN THE FIND ON PURPOSE: a Datalog result is a
         ;; SET, so two attempts that recorded the same characters and
         ;; the same count would collapse into one sample and quietly
@@ -107,7 +113,8 @@
                (when (int? provider-tokens)
                  {:seon.ai.tokens/characters characters
                   :seon.ai.usage/prompt-tokens provider-tokens})))
-           (if (:seon.error/kind rows) [] rows)))))
+           (if (:seon.error/kind rows) [] rows))
+     fallback-calibration))))
 
 (defn- refuse!
   [rule message]
@@ -221,5 +228,9 @@
       (acquire-within-budget
        database request
        (:seon.config.ai/prompt-token-budget settings)
-       (model-calibration database (:seon.config.ai/model settings))
+       (model-calibration
+        database
+        (:seon.config.ai/model settings)
+        (tokens/prior-calibration
+         (:seon.config.ai/chars-per-token-prior settings)))
        agent-id))))

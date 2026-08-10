@@ -24,6 +24,8 @@
                   :seon.ai/max-tokens],
                  :prompt-token-budget
                  [:int {:min 1, :seon.config/per-agent true}],
+                 :chars-per-token-prior
+                 [:double {:min 0.1}],
                  :model
                  [:string {:min 1, :seon.config/per-agent true}],
                  :no-auth

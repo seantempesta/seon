@@ -479,6 +479,59 @@
         event))
     event))
 
+(defn- elision-value
+  [path next-offset]
+  {:seon.print/face :seon.print/elided
+   :seon.print/omitted 1
+   :seon.print/elision-unit :children
+   :seon.render.data/path path
+   :seon.render.data/next-offset next-offset
+   :seon.render.profile/id :seon.render.profile/agent
+   :seon.print/requery-refusal
+   "the MCP projection retained no stable identity for this cut"})
+
+(declare enrich-collection-tail-elisions)
+
+(defn- enrich-sequential-tail
+  [value path rebuild]
+  (let [items (vec value)
+        final-index (dec (count items))]
+    (rebuild
+     (map-indexed
+      (fn [index item]
+        (if (and (= index final-index)
+                 (= :seon.sci.admit/elided item))
+          (elision-value path index)
+          (enrich-collection-tail-elisions item (conj path index))))
+      items))))
+
+(defn- enrich-collection-tail-elisions
+  [value path]
+  (cond
+    (vector? value)
+    (enrich-sequential-tail value path vec)
+
+    (list? value)
+    (enrich-sequential-tail value path #(apply list %))
+
+    (map? value)
+    (reduce-kv
+     (fn [result key child]
+       (assoc result key (enrich-collection-tail-elisions child
+                                                          (conj path key))))
+     (empty value)
+     value)
+
+    :else value))
+
+(defn- enrich-projection-elisions
+  [event]
+  (if (and (= :ret (:tag event))
+           (true? (get-in event [:val :seon.sci.admit/capped?])))
+    (update-in event [:val :seon.dev.mcp/value]
+               enrich-collection-tail-elisions [])
+    event))
+
 (defn- one-shot-events!
   [root cluster remote-form timeout-ms]
   (let [session-id (str "value-" (random-uuid))
@@ -590,6 +643,7 @@
                :seon.dev.mcp/root root
                :seon.dev.mcp/cluster cluster
                :seon.dev.mcp/session-id session-id
+               :seon.dev.mcp/form code
                :seon.dev.mcp/error (ex-message throwable)}
               (ex-data throwable)))
       (let [mode (:seon.dev.mcp/mode validation)
@@ -603,7 +657,11 @@
               (current-clj-session! root cluster session-id)]
           (.write ^java.io.Writer writer (str remote-form "\n"))
           (.flush ^java.io.Writer writer)
-          (let [events (mapv #(assoc (decoded-projection-event %) :form code)
+          (let [events (mapv (fn [event]
+                               (-> event
+                                   decoded-projection-event
+                                   enrich-projection-elisions
+                                   (dissoc :form)))
                              (collect-prepl-response! session timeout-ms))
                 terminal (some #(when (= :ret (:tag %)) %) events)
                 response {:seon.dev.mcp/runtime "clj"
@@ -614,6 +672,7 @@
                           :seon.dev.mcp/mode mode
                           :seon.dev.mcp/namespace (str namespace-symbol)
                           :seon.dev.mcp/session-id session-id
+                          :seon.dev.mcp/form code
                           :seon.dev.mcp/events events}]
             (if (:exception terminal)
               (mcp-error (assoc response :seon.dev.mcp/failure :evaluation))
@@ -627,6 +686,7 @@
                       :seon.dev.mcp/mode mode
                       :seon.dev.mcp/namespace (str namespace-symbol)
                       :seon.dev.mcp/session-id session-id
+                      :seon.dev.mcp/form code
                       :seon.dev.mcp/timeout-ms timeout-ms}))
         (catch Throwable throwable
           (close-clj-session! key)
@@ -640,6 +700,7 @@
                    :seon.dev.mcp/mode mode
                    :seon.dev.mcp/namespace (str namespace-symbol)
                    :seon.dev.mcp/session-id session-id
+                   :seon.dev.mcp/form code
                    :seon.dev.mcp/error (ex-message throwable)}
                   (ex-data throwable)))))))))
 

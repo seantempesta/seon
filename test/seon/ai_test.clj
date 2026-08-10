@@ -80,6 +80,8 @@
             :seon.ai/max-tokens (:seon.config.ai/max-tokens @dials)
             :seon.ai/prompt-token-budget
             (:seon.config.ai/prompt-token-budget @dials)
+            :seon.ai/chars-per-token-prior
+            (:seon.config.ai/chars-per-token-prior @dials)
             :seon.ai/api-key-variable (:seon.config.ai/api-key-variable @dials)
             :seon.ai/thinking :disabled
             :seon.ai/timeout-ms (:seon.config.ai/timeout-ms @dials)}
@@ -187,6 +189,8 @@
             :seon.ai/max-tokens (:seon.config.ai/max-tokens @dials)
             :seon.ai/prompt-token-budget
             (:seon.config.ai/prompt-token-budget @dials)
+            :seon.ai/chars-per-token-prior
+            (:seon.config.ai/chars-per-token-prior @dials)
             :seon.ai/api-key-variable "OTHER_PROVIDER_KEY"
             :seon.ai/thinking :disabled
             :seon.ai/timeout-ms 30000}

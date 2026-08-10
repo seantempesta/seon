@@ -273,13 +273,13 @@
                      (let [distance (:seon.render/distance render-request)]
                        (swap! distances conj distance)
                        {:seon.cluster.prompt/text
-                        (if (= 1 distance) "fits in twelve" (apply str (repeat 40 "x")))
+                        (if (= 1 distance) "fits nine" (apply str (repeat 40 "x")))
                         :seon.db/db (:seon.db/db render-request)}))]
        (with-redefs [render/acquire-context! acquire]
          (let [compacted (prompt/prompt @connection
                                         (request connection context-channel))]
            (is (= [2 1] @distances))
-           (is (= "fits in twelve" (:seon.cluster.prompt/text compacted)))
+           (is (= "fits nine" (:seon.cluster.prompt/text compacted)))
            (is (<= (-> compacted :seon.context/contributions first
                        :seon.context.contribution/tokens)
                    3))))
@@ -338,11 +338,13 @@
        (db/transact! connection
                      [{:seon.cluster.agent/id "walker"
                        :seon.config.ai/prompt-token-budget 100}])
-       (testing "with no recorded usage the honest fallback is named"
+       (testing "with no recorded usage the measured prior is named"
          (let [calibration (prompt/model-calibration @connection model)]
-           (is (= :seon.ai.tokens/shipped-constant
+           (is (= :seon.ai.tokens/shipped-prior
                   (:seon.ai.tokens/basis calibration)))
-           (is (zero? (:seon.ai.tokens/sample-count calibration)))))
+           (is (= 17 (:seon.ai.tokens/sample-count calibration)))
+           (is (not (contains? calibration
+                              :seon.ai.tokens/relative-error)))))
        ;; three settled attempts at a real 3.2 characters per token
        (doseq [ordinal [1 2 3]]
          (db/transact! connection
@@ -362,8 +364,8 @@
                           :seon.db/db (:seon.db/db render-request)})]
            (let [refusal (prompt/prompt @connection
                                         (request connection context-channel))]
-             (is (= 85 (tokens/estimate text))
-                 "the uncalibrated estimate is what silently admitted it")
+             (is (= 106 (tokens/estimate text))
+                 "the measured prior catches the first turn too")
              (is (= :seon.cluster.prompt/budget-exceeded
                     (:seon.error/kind refusal))
                  "the calibrated estimate refuses it")
