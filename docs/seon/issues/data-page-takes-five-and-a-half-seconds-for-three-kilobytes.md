@@ -168,3 +168,39 @@ than as a separate note because the fallback owner named above is the likely
 shared cause; a fix should be verified against those routes too.
 
 Full walk: [ui-truth-2026-08-10.md](../../prds/sci-execution-runtime/research/ui-truth-2026-08-10.md)
+
+## Bridge fix and remaining route work, 2026-08-10
+
+The measured 530-resolution bridge class is fixed by `f098bbdc7`.
+`database-attributes-for-in` now supplies the same immutable forms it passes
+as a projection for the full derivation, so registered predicates invoked by
+Malli cannot resolve the classpath population per attribute. The recurring
+regression runs the production 525-attribute operation on a raw Java task with
+no inherited Clojure bindings and asserts its resource reads equal exactly one
+population.
+
+Live before/after in the same JVM, with `seon.schema/!fallback-counts`
+snapshotted around each request:
+
+| Cluster | Before | After | Bridge fallbacks after |
+|---|---:|---:|---:|
+| `db-decode-scratch` | 7.12-7.95 s / 554-556 total fallbacks | 418 ms cold, 130 ms warm | 0 |
+| `default` (read-only route) | 8.17 s / 578 total fallbacks | 128 ms | 0 |
+
+The first scratch request before the fix happened to finish in 109 ms with
+eight fallbacks; three immediate repeats then reproduced the 7.8 s / 556
+shape. That is why the class regression deliberately uses a worker with no
+inherited bindings rather than relying on whichever HTTP worker serves one
+sample.
+
+The five-second stall is gone, but this note remains open for its other
+acceptance edges: unchanged-basis requests still derive a new response rather
+than serving retained bytes, the page still shows only 8 of 525 schema keys,
+and it still wears root's page identity. Those are route/render concerns, not
+reasons to retain the repaired bridge fallback.
+
+The core-namespace attribution is refuted. After `f098bbdc7`,
+`/ns/seon.db` still took 7.65 s for 908,444 bytes while causing one total
+declaration fallback, from `seon.db`, and zero from `seon.schema.datahike`.
+That independent cost is filed as
+[core-namespace-pages-spend-seven-seconds-without-declaration-fallbacks.md](core-namespace-pages-spend-seven-seconds-without-declaration-fallbacks.md).
