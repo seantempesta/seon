@@ -4,179 +4,116 @@ status: active
 tags: [prd, render, agent, runtime]
 ---
 
-# The agent interface economy — the complete plan (2026-08-10, owner-aligned)
+# The agent interface — owner rulings and plan (2026-08-10)
 
-Owner direction, sealed across this session's dialogue: minimum context
-through the NORMAL value printer; context is a REPL transcript that IS
-the walk that IS the bootstrap — **one mechanism that works
-everywhere**; both renderers are the P in REPL, just different targets;
-no hacks, no per-value faces, no character chops; question everything a
-unit renders; don't get bogged down on things we may not need.
+This document contains ONLY what the owner ruled in the 2026-08-10
+session, each marked verbatim-grounded, plus a plan skeleton and an
+explicit list of open questions. Anything the owner has not ruled is
+in the OPEN QUESTIONS section, not silently assumed.
 
-Evidence base (all committed 2026-08-10):
-[ui-truth](../research/ui-truth-2026-08-10.md) ·
-[context-quality-audit](../research/context-quality-audit-2026-08-10.md) ·
-[claims-sweep](../research/claims-sweep-2026-08-10.md) ·
-[bad-output-catalog](../research/bad-output-catalog-2026-08-10.md) ·
-[cohost-boot-speed](../research/cohost-boot-speed-2026-08-10.md) ·
-[model-authoring-drive](../research/model-authoring-drive-2026-08-10.md)
-(driver: MILESTONE ACHIEVED, both stages; observer verdict pending).
+## What the owner ruled (grounded in the owner's own words)
 
-## THE TARGET — one mechanism
+1. **One mechanism everywhere.** "If we can make the transcript just
+   part of the walk that's even better. One mechanism that works
+   everywhere." The initial context, the live conversation, and the
+   historical transcript are one walk over the same facts. The
+   transcript must work for ALL agents under the same rules; bootstrap
+   plus additional standing forms is an acceptable combination.
+2. **Context is a REPL session that teaches.** The initial context is
+   the bootstrap rendered as the walk: it looks to the agent like it
+   has already issued ~10–20 forms — requires, docs, queries — with
+   their actual results, "and all the functions are super intuitive."
+   Teach the agent; no magic. "In a repl you don't get back commented
+   weird summaries" — results are DATA printed by the value printer,
+   never prose summaries or comment-framed output.
+3. **Both renderers are the P in REPL, just different targets.** One
+   walk, one printer; the AI text target and the HTML hiccup target
+   are two projections with different spends ("same walk, two
+   profiles" — owner-selected).
+4. **The value printer is the workhorse and must get better
+   generically.** "Our value printer should pick up more slack and we
+   should improve it so it does more correctly without directly being
+   customized for every value." Stress-test it so overrides are needed
+   "only for specific situations but make it so this will work
+   everywhere too." No hacks: "Don't truncate things to 900 characters
+   just so it looks good on one test."
+5. **Find the MINIMUM context — assume nothing.** "We need find the
+   minimum context using NORMAL value function printing functionality…
+   DO NOT ASSUME we have to display everything in the walk." Question
+   everything currently rendered: "How are we rendering schemas? is it
+   fucking stupid? We need a better solution then." The API can be
+   "lightly explained" rather than every function in full; agents pull
+   detail on demand.
+6. **Smart bulk pull tools.** "We need smart tools to make it easy to
+   get an array of docs for multiple functions, schemas, tests,
+   namespaces, etc." Deep `doc` on schema keys (deeper definition,
+   generated examples, and/or functions that take or return that data)
+   was proposed by the owner earlier the same day.
+7. **No per-namespace obligations; injection is acceptable.** "I don't
+   want to require every namespace to have specific
+   namespaces/functions" — the system may INJECT forms into the REPL
+   session (not part of the indexed code). Injected-but-honest session
+   forms are the accepted mechanism.
+8. **Agent-authored renderers appear on the UI automatically.**
+   Owner requirement, proven live the same day: a model-authored
+   `:seon.render/ai` producer was selected by contract query with zero
+   wiring (driver account; observer confirmation pending).
+9. **Cheap by construction, hard gate.** Unchanged basis ⇒ no
+   re-render, BOTH projections ("It should be cheap to walk and render
+   everything if it hasn't changed" — owner-selected as a hard gate).
+10. **Track all potentially bad outputs, unified and queryable**
+    (owner directive), with the floor automatically using the value
+    printer — a substitute face like "renderer unavailable" is a
+    defect, not a tracking category.
+11. **Long waits are bugs. Root causes everywhere. Holistic, not
+    whack-a-mole.** (Standing orders from this session, applied to all
+    of the below.)
 
-**An agent's context is a REPL transcript rendered by the walk.** A new
-agent's prompt reads as 10–20 ordinary forms it appears to have already
-run — requires, a help call, doc on its own API, a query over its
-messages — each followed by its actual printed value. Bootstrap already
-executes REAL forms settling REAL run/form/receipt facts, and form rows
-already carry `:seon.cluster.run.form/{id,ns,ordinal,run,source}` with
-results stored under ruling #25's inline/blob split — so **the initial
-context, the live conversation, and the historical transcript are the
-SAME walk over the SAME facts**, differing only in how far back the
-profile spends. The separate transcript assembly path, the schema-wall
-namespace dump, and the `;; d0 · [:lookup]` comment-header framing are
-all second mechanisms this deletes.
+## Plan skeleton (sequencing only; content governed by the rulings)
 
-**Both renderers are the P in REPL, just different targets** (owner
-verbatim): the walk yields forms + values; the one printer renders each
-value to the text target (agent prompt) or the hiccup target (page).
-One session, two projections, two profiles — the page spends deep for
-humans, the prompt spends minimal for models. Declared producers are
-printer arms for shapes the grammar cannot serve, discovered by
-contract (proven live today: a model-authored producer was selected
-with zero wiring), and matter mostly for HTML.
+- **Now (running):** the clean full-suite gate; the model-authoring
+  drive observer. Tree frozen until the gate lands.
+- **Phase 1 — prep (only what the target needs):** make the printer
+  total (the unqualified-keys refusal at `render-argument`,
+  `src/seon/render.clj:106-107`, is the found seam; delete the
+  renderer-unavailable substitute face; elision never longer than its
+  value) and stand up the recurring printer STRESS HARNESS (generated
+  values from every registered schema + real database values; every
+  bad face is a grammar fix). Finish the declaration-resolution noise
+  at its last owners. Measure warm-walk cost at unchanged basis (both
+  projections) and make reuse real. Root-cause the suite fat tail
+  (the ~185 s operator tests, the await-process! wedge).
+- **Phase 2 — the transcript walk:** design session with the owner on
+  the unit grammar (see open questions), then build: walk renders the
+  ordered run/form/result facts as form → printed-value units; delete
+  the separate transcript assembly, the schema walls, the comment
+  headers; deep doc + bulk faces tool; the HTML page is the same
+  session rendered with the page profile. Storage verified 2026-08-10:
+  form sources/ordinals and settled results are already facts — this
+  is render-side unification plus deletions.
+- **Phase 3 — prove by drives:** a fresh agent bootstraps on the
+  transcript context; re-drive model authoring on the minimum context
+  vs today's measured baseline; browser re-walk; then the multi-agent
+  preview discussion on proven ground.
+- **Phase 4 — the bad-output catalog** per the owner directive,
+  trimmed to the classes that survive Phases 1–2 structurally.
 
-**Push is minimal; pull is rich.** Identity + lightly-explained API
-(names, arglists, one-liners — never full bodies) + recent
-conversation + handles. Everything else is one query away: `doc` on
-functions AND schema keys (definition, properties, a generated
-example, consumers/producers derived from arity refs), plus one bulk
-tool taking an array of symbols/keys/namespaces and returning their
-faces together. Every elision carries a working requery handle;
-refusals name the query that answers them — the system's own output
-is the teacher, and the transcript shape means the agent has already
-watched itself pull.
+## OPEN QUESTIONS (nothing here is decided)
 
-**Economics by construction.** The only dial is the prompt-level
-budget; per-unit spend is DERIVED (distance, recency, the agent's own
-references). Zero re-render at an unchanged basis in BOTH projections
-is a hard graduation gate (HTML proven ~17 ms today; AI unmeasured).
-No timeouts, no waits: long operations are defects to root-cause.
-
-## PHASE 1 — prep: fix only what the target needs (lanes, parallel)
-
-1. **The total floor + the printer stress harness** (the drive found
-   the exact seam): the printer renders ANY value — `{:a 1 :b 2}`
-   currently refused because `render-argument` merges value keys into
-   the unit (`src/seon/render.clj:106-107`) against a qualified-keys
-   unit contract; fix the class (the value rides as a value, never
-   merged into the envelope). Delete the web `Renderer unavailable`
-   substitute face; close anonymous `...` cuts and the unknown-face
-   throw; an elision must never be longer than the value it replaces.
-   Then STRESS-TEST the printer as a standing harness (owner
-   direction): generated values from every registered schema plus real
-   database values, printed at several profiles; every refusal, ugly
-   face, or over-elision is a GRAMMAR fix, never a per-value override
-   — overrides remain rare, justified, and recorded. One regression
-   per closed hole; the harness itself recurs in `bin/test`.
-2. **Declaration-resolution noise at its last owners**: the ×1000
-   fallback warnings observed live (instrument.clj:125/136, the
-   per-EVAL projection rebuild in eval.clj) — same class as the two
-   fixes that killed /data and the write seam; finish it.
-3. **Warm-walk measurement + reuse**: measure the AI walk at an
-   unchanged basis; make unit reuse real in both projections (retained
-   calls exist; the remaining ~3 s per-node pull cost from
-   ns-page-perf's measurements lives here). This prices Phase 2.
-4. **Suite fat tail** (velocity only, no gold-plating): the ~185 s
-   operator tests and the wedge-prone `init-owns-current-source…` —
-   root-cause the await-process! hang seen in the aborted gate run.
-
-Explicitly NOT prep (parked unless the target demands them): further
-per-unit budget refinement (the dial dies in Phase 2), polishing the
-old transcript renderer (replaced), the remaining Phase-3 dynamic-var
-deletions (own wave, unchanged), docs-as-facts (parked by owner).
-
-## PHASE 2 — the REPL-transcript walk (the centerpiece, one design + one build wave)
-
-Design session first (owner + orchestrator, short — the shape is
-already sealed; what needs ruling is only the unit grammar):
-
-- how a HUMAN message renders as a form/value in the session;
-- how model prose renders (comment grammar: `;` prose before forms —
-  the reply parser already preserves this);
-- the compact schema/API faces (`doc`-style) replacing schema walls;
-- what the 10–20 bootstrap-visible forms ARE for a fresh agent (the
-  current bootstrap forms, re-read as the initial transcript).
-
-Refinements sealed 2026-08-10 late: the mechanism is UNIVERSAL — every
-agent, same rules; bootstrap + additional standing forms is the
-accepted combo. NO MAGIC OUTPUTS: a REPL returns data printed by the
-value printer — never commented summaries or prose faces where a value
-belongs. NO PER-NAMESPACE OBLIGATIONS: namespaces are not required to
-define render/help functions; the system may INJECT session forms
-(requires, helpers) that are part of the transcript but not the
-indexed corpus — injected-but-honest forms are the mechanism.
-
-Build (file-disjoint lanes over one sealed design):
-
-- walk renders run.form rows + settled results in ordinal order as
-  form → printed-value units; recency-derived spend from the one
-  prompt budget; old runs elide to handles;
-- DELETE: the separate transcript assembly, compact-ai-text's
-  unconditional schema dump, comment-header unit framing, the
-  per-unit token dial;
-- deep `doc` (schema keys: definition + properties + generated
-  example + consumers by arity-ref query) and the bulk faces tool;
-- HTML target: the namespace/agent page is the same session rendered
-  rich (two profiles, one walk) — the page IS the transcript.
-
-Data changes: none expected beyond declaring any missing edge found
-during build (verified today: form sources/ordinals and settled
-results are already facts; the context capture stays as forensic
-truth). If a missing fact appears, declare it — never a side channel.
-
-## PHASE 3 — prove it (drives, not assertions)
-
-1. Fresh cluster; a NEW agent bootstraps on walk-only context and its
-   prompt reads as a plausible REPL history (human-judged + observer).
-2. Re-drive model authoring on the minimum context; compare against
-   today's baseline (success first-try at ~12-13k prompt tokens):
-   same-or-better success, materially fewer tokens, healthy c:p.
-3. The UI walk re-run: every route PROVEN-LIVE, pages render the same
-   session rich; THEN the multi-agent preview wall design discussion
-   (owner) on proven ground.
-
-## PHASE 4 — the quality page (only what survives)
-
-Census Option 1, trimmed: many of the 23 classes die structurally in
-Phases 1–2 (no second floors, no unbounded faces, no dead handles).
-Commit exceptional-observation facts only at the seams that survive;
-one derived dual-projection page; zero-write success path.
-
-## GATES — "everything is working" (Phase F, updated)
-
-1. Model-authoring drive: both stages confirmed by an independent
-   observer (stage 1+2 driver-claimed today; observer pending), then
-   recorded as a recurring deterministic proof in `bin/test`.
-2. `bin/test --full` on a quiet tree: green or fully attributed, under
-   ~15 minutes (cohost fix landed: 43.6 min → 71 s; run in flight).
-3. Browser truth table: every route PROVEN-LIVE, zero substitute
-   faces, zero console patch warnings, pages < ~2 s cold.
-4. A fresh agent's context ≤ ~5k tokens, reads as a REPL session, and
-   a core-namespace owner fits its prompt budget.
-5. Zero re-render at unchanged basis, measured, both projections.
-6. The quality page live; every surviving bad-output class queryable.
-
-## Owner rulings recorded this session (2026-08-10)
-
-- Context is a REPL transcript = the walk = the bootstrap; one
-  mechanism everywhere. Both renderers are the P in REPL.
-- Minimum push via the normal printer; producers are printer arms,
-  discovery matters mostly for HTML; per-agent difference is profile
-  selection, never code.
-- The only budget dial is prompt-level; per-unit spend derived; no
-  per-value customization; no character chops; elisions never longer
-  than the value.
-- Long waits are bugs. No hacky fixes to look good on one test.
-- Bad outputs: catalog as queryable facts (census Option 1), zero
-  writes on success.
+1. The unit grammar for the design session: how does an inbound HUMAN
+   message appear in the session (as what form/value)? How does model
+   prose appear (comment grammar is the current convention — does it
+   survive the "no commented weird summaries" rule as INPUT prose
+   while outputs stay pure data)?
+2. Which forms open a fresh agent's session (the current bootstrap
+   forms re-read as the transcript, plus which injected requires)?
+3. What "lightly explained API" looks like concretely (names +
+   arglists + one-liners is the working guess — NOT ruled).
+4. The minimum-context target size: found by experiment (ruled
+   "find the minimum"), no number is ruled.
+5. How much of the bad-output catalog survives after Phases 1–2; which
+   observation facts are actually worth committing (census Option 1
+   was a lane's recommendation, not an owner ruling).
+6. Schema rendering's replacement face (owner: current form "is
+   fucking stupid" — the replacement is a design-session item, not
+   pre-decided here).
