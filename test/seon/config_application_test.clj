@@ -34,6 +34,7 @@
    :seon.config.flow.io/concurrency :arm-time
    :seon.config.flow/ping-timeout-ms :live
    :seon.config.effect/long-call-ms :live
+   :seon.config.effect.background/time-limit-ms :live
    :seon.config.shell/home :live
    :seon.config.shell/lang :live
    :seon.config.shell/path :live
