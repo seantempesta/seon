@@ -133,9 +133,15 @@ and the owner. Never a stored report, counter, or notification queue.
   producers; implement schema-key `doc` (definition/properties/example/
   consumers). Proof: every elision handle in root's context resolves; `doc`
   on a schema key answers all four sections from facts.
-- **W4 — the profile flip.** API-first spend, lean defaults, dedup the
-  closure rendering. Proof: root ≤ ~9k tokens, API lines intact, drive
-  observer confirms better signal.
+- **W4 — the profile flip.** API-first spend, dedup the closure
+  rendering, and DERIVED ALLOCATION (owner direction 2026-08-10: the
+  flat per-unit 1,024 constant is a knob to delete — the only honest
+  dial is the prompt-level budget, which is real; per-unit spend is
+  DERIVED from what the walk already knows: distance, recency, the
+  agent's own references. No per-value customization ever — a shape
+  that renders badly improves the grammar or the profile, never gets a
+  bespoke face; no character-count chops). Proof: root ≤ ~9k tokens,
+  API lines intact, drive observer confirms better signal.
 - **W5 — the quality page.** Census Option 1 facts + the dual-projection
   page. Proof: each of the census's 15 invisible classes is either
   queryable or structurally dead (made unrepresentable by W1/W2), zero
