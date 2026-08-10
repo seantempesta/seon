@@ -135,3 +135,36 @@ and still essentially all from the Malli-to-Datahike bridge. Same cause, larger.
 The per-resolution cost was re-measured directly on this JVM rather than reused
 from the earlier note: 12.90 ms at n=10 and 11.51 ms at n=50, flat, confirming
 it is still not memoized.
+
+## Recurrence, 2026-08-10 (UI-truth route walk)
+
+Cluster `default` (pid 31570), current HEAD. Still not fixed, and slower again:
+
+| Sample | Status | Bytes | Total |
+|---|---|---:|---:|
+| cold | 200 | 3,168 | 7.864 s |
+| warm | 200 | 3,168 | 7.452 s |
+
+Still no warm path — the repeat request at an unchanged basis costs essentially
+the same as the first. The trend across the three recordings is 5.5 s → 6.5 s
+→ 7.9 s.
+
+Two additions this walk found, both about usefulness rather than latency:
+
+- The page renders only **8 of 525** schema keys before eliding, with
+  `elided — this value is larger than the configured window`. The elision value
+  itself is good — it names the count, the requery attribute, the path, the
+  offset, and the producing profile — but a schema drill page that shows 1.5%
+  of its subject for 7.9 s is not usable for its purpose.
+- `/data` wears the root agent's identity: `<title>seon · root</title>`, the
+  `/agent/root` nav, and a `message agent root …` form bar. It reads as the
+  root page with a data block appended rather than as a data page.
+
+The same latency signature appears on core namespace pages measured in the same
+walk — `/ns/seon.db` 18.4 s cold and 12.0 s warm, `/ns/seon.fn` 17.2 s cold and
+6.7 s warm, `/ns/seon.render` 14.0 s — while the agent-owned
+`/ns/my.agents.root` serves a comparable 903 KB in 19 ms. Recorded here rather
+than as a separate note because the fallback owner named above is the likely
+shared cause; a fix should be verified against those routes too.
+
+Full walk: [ui-truth-2026-08-10.md](../../prds/sci-execution-runtime/research/ui-truth-2026-08-10.md)
