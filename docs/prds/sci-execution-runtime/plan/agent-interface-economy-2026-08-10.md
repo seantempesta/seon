@@ -93,6 +93,25 @@ deepened `doc`, all derived from existing facts:
 
 ### I4 — HONEST PUSH/PULL BALANCE (lean context, API-first)
 
+OWNER REVISION (2026-08-10 evening, governs this invariant): find the
+MINIMUM context using NORMAL value-printer functionality. DO NOT ASSUME
+the walk must display everything. The working hypotheses to prove or
+refute, not presume:
+
+- the AI projection may need few or no declared producers — the
+  structural printer plus requery handles plus on-demand `doc` may be
+  the whole AI context, with declared producers reserved for genuinely
+  hairy shapes the printer cannot serve ("the floor detecting the
+  render functions to adapt hairy issues");
+- declared-producer DISCOVERY matters primarily for the HTML side
+  (pages are for humans; prose/layout earn producers there);
+- context differs per agent/namespace (root shows different context
+  than a task agent) via profiles, never per-agent code;
+- both projections must be CHEAP AT AN UNCHANGED BASIS: HTML reuse is
+  proven (~17 ms warm page, 2026-08-10); the AI walk's warm cost is
+  UNMEASURED — measuring it is W4's first act, and a unit re-rendering
+  at an unchanged basis is a defect in either projection.
+
 Context = identity + own-namespace API + neighbor API cards + handles.
 Schemas, tests, and source are ONE query away (I3 makes that real). The walk
 model is right (owner: "I like the walk based rendering"); the spend is
