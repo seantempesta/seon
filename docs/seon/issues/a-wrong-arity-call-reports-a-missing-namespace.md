@@ -80,3 +80,26 @@ Confirmed not to be a placeholder-substitution artifact: these three agents
 were created at runtime and received correctly substituted `(in-ns 'arc.…)`
 forms which succeeded, unlike `bootstrap:root` (see
 [Substitute the bootstrap plan's namespace placeholder before it is evaluated](bootstrap-plan-forms-ship-unsubstituted-namespace-placeholders.md)).
+
+## Recurrence — live default cluster, 2026-08-10
+
+Still live, and now visibly INCONSISTENT across agents in one cluster. Three
+core-namespace agents were created on 2026-08-10; querying `:seon.error/run`
+on the default cluster (pid 31570) gives:
+
+```text
+["bootstrap:root"        :seon.sci.eval/evaluation-failed  "No such namespace: my.agents.root"]
+["bootstrap:seon.db"     :seon.instrument/contract-violated  "Wrong number of args (0) passed to: seon.db/largest"]
+["bootstrap:seon.fn"     :seon.instrument/contract-violated  "Wrong number of args (0) passed to: seon.fn/largest"]
+["bootstrap:seon.render" :seon.instrument/contract-violated  "Wrong number of args (0) passed to: seon.render/largest"]
+```
+
+Same shipped form, `(largest)`; three agents get the correct arity message
+and one gets the false namespace claim. Root's own captured context still
+carries the false line (`Execution error (IllegalArgumentException) at
+seon.instrument/violation (instrument.clj:224). No such namespace:
+my.agents.root`), immediately followed by a successful `(largest [])`.
+
+Related: these deliberate teaching failures are also committed as core
+faults that interrupt the bootstrap run —
+[bootstrap-teaching-failures-strand-every-new-agent](bootstrap-teaching-failures-strand-every-new-agent.md).

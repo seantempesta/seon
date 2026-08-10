@@ -72,3 +72,42 @@ compact namespace cards and rendered 17,696 estimated tokens (71,302 UTF-8
 bytes). No raw alias/import/function entity datoms remained. The remaining
 size is therefore this absent namespace-card budget on the real walk path,
 not the repaired distance seam.
+
+## Recurrence and exact root cause — live default cluster, 2026-08-10
+
+The key mismatch is now pinned precisely. `seon.render.ns` reads
+`::token-budget`, i.e. `:seon.render.ns/token-budget`, at
+`src/seon/render/ns.clj:320-322`. `rg 'render\.ns/token-budget' src/ test/`
+returns **zero hits** — no producer, no test. The configured dial
+`:seon.config.render.agent/token-budget` is **1024** on the live cluster, and
+`seon.render/agent-render-profile` (`src/seon/render.clj:47-49`) already maps
+it to `:seon.render.profile/token-budget`. `seon.render.value` reads that
+profile correctly (`src/seon/render/value.clj:72-76`); `seon.render.ns` never
+reads it. So `budgeted-ai` (`ns.clj:447-461`) always takes the `(nil? budget)`
+branch, and `minimal-ai-text` (`:435-445`) plus `omission-comment`
+(`:329-339`) are unreachable in production.
+
+The budget is also INVERTED where it would apply: `compact-ai-text`
+(`ns.clj:405-426`) emits every `own-schemas` row unconditionally at
+`:417-419` and caps only `functions` via `included-count`. Even with the key
+supplied, the Malli schema wall would be a fixed floor and the callable API
+would be what gets squeezed out.
+
+Measured consequences on the live default cluster (pid 31570):
+
+- Root's exact context: 63,669 characters / **15,917 estimated tokens**, of
+  which the seven toolkit namespace units are **9,552 (60%)** — `my.fs`
+  alone renders **2,843 tokens against the declared 1,024-token budget**,
+  2.8×. Only **829 tokens (5%)** are the `; fn` API lines.
+- A core-namespace owner is far worse than the 17,696 tokens recorded above
+  for `seon.flow` on 2026-07-31: `/ns/seon.db` renders **141 namespace family
+  entries, 655,937 characters ≈ 163,984 estimated tokens** against a
+  `:seon.config.ai/prompt-token-budget` of **32,768** — 5× the whole prompt
+  budget. `acquire-within-budget` (`src/seon/cluster/prompt.clj:148-193`)
+  can only respond by collapsing distance 2 → 1 → 0, where the agent gets its
+  transcript and nothing else.
+
+Full measurement and the API-first fit ordering this needs:
+[context quality audit 2026-08-10](../../prds/sci-execution-runtime/research/context-quality-audit-2026-08-10.md),
+findings 1 and 2. This is named there as the single change with the largest
+effect on what agents read.

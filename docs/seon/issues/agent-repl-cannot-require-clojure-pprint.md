@@ -66,3 +66,24 @@ Consider whether the refusal itself should be better. `Could not find
 namespace clojure.pprint.` does not say what IS available, so the agent's only
 recovery is to guess again. A refusal that names the resolvable set turns a
 dead end into one more query.
+
+## Recurrence — live default cluster, 2026-08-10
+
+Root lost a real turn to this. From its captured `:seon.render/ai` context
+(pid 31570), root was mid-investigation of a maintenance error and wrote a
+multi-form `do` whose first line was the require:
+
+```text
+my.agents.root=> (do
+  (require '[clojure.pprint :refer [pprint]]
+           '[clojure.string :as str])
+  …)
+Execution error at sci.impl.load/handle-require-libspec (load.cljc:248).
+Could not find namespace clojure.pprint.
+```
+
+The whole form was discarded, and the next turn re-wrote the same
+investigation without `pprint`. The durable fact is recorded on run
+`f500af63-bf5d-4c4b-b196-81d85e3c5b32` as
+`:seon.sci.eval/evaluation-failed`. This is the "refusal that names nothing
+available" cost predicted in the note above, paid live.
