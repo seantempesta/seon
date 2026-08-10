@@ -16,6 +16,25 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**THE MILESTONE IS ACHIEVED — 2026-08-10 evening, observer-confirmed.**
+A real DeepSeek model authored `my.agents.root/token-pressure` with a
+complete `:malli/schema` contract, called it (correct receipt), and a
+later turn queried its own contract back — provenance chain
+attempt→run→forms→fn-fact proven by the independent observer from its
+own Datalog ([driver](../research/model-authoring-drive-2026-08-10.md),
+[observer](../research/model-authoring-observer-2026-08-10.md)).
+30 forms / 30 receipts / zero unsettled; custody clean; token
+economics sane (worst c:p 0.417, estimator within ±2.2%); UI live
+throughout (119 samples, zero non-200; /data confirmed 0.13 s).
+Stage 2 SPLIT: the model's authored `:seon.render/ai` producer is
+selected automatically by the top-level contract-fit path (probe
+proven) but `project-node*` deliberately never consults candidates for
+NESTED values — owner ruling filed
+([issue](../../../seon/issues/contract-fit-render-selection-never-reaches-a-nested-value.md)).
+New blocker filed: an unreadable reply closes a run with NO forms and
+no trace (a paid turn discarded invisibly). First-turn-after-boot token
+estimate falls back to chars/4 (19.2% low) until attempt facts exist.
+
 **CURRENT EDGE — 2026-08-10.** THE PROGRAM IS THE AGENT INTERFACE
 ECONOMY PRD + ROADMAP:
 [agent-interface-economy-2026-08-10.md](agent-interface-economy-2026-08-10.md)
