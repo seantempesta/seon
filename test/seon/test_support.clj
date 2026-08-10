@@ -10,7 +10,8 @@
             [seon.env :as env]
             [seon.fs :as fs]
             [seon.fn :as seon.fn]
-            [seon.schema :as schema])
+            [seon.schema :as schema]
+            [seon.sci.eval :as sci.eval])
   (:import [java.util.concurrent CountDownLatch Future TimeUnit
             TimeoutException]))
 
@@ -104,7 +105,8 @@
        (Thread. ^Runnable #(close-base! configuration connection)
                 "seon-test-database-base-cleanup"))
       {:seon.test-support/configuration configuration
-       :seon.test-support/connection connection}
+       :seon.test-support/connection connection
+       :seon.sci.eval/ctx (sci.eval/cluster-ctx @connection)}
       (catch Throwable failure
         (close-base! configuration connection)
         (throw failure)))))
@@ -113,6 +115,15 @@
   ;; One new test JVM gets one newly populated base. Nothing survives process
   ;; exit, and bin/test never reuses this delay across invocations.
   (delay (create-base)))
+
+(defn fork-cluster-ctx
+  "Fork the process source base's acquired SCI ctx for `connection`."
+  [connection]
+  (let [base-ctx (:seon.sci.eval/ctx @database-base)
+        projection (:seon.schema/projection base-ctx)
+        projection-state (sci.eval/projection-state @connection projection)]
+    (sci.eval/fork-cluster-ctx base-ctx @connection connection
+                               projection-state)))
 
 (defn environment
   "One subset environment (store + facts, no graphs, no web) for a test.
@@ -286,15 +297,18 @@
      (body connection))))
 
 (defn- reconnect-with-projection
-  [configuration provisional-connection]
+  ([configuration provisional-connection]
+   (reconnect-with-projection configuration provisional-connection
+                              (schema/projection-from-database
+                               @provisional-connection)))
+  ([configuration provisional-connection projection]
   (let [projection-state
-        (atom {:seon.schema/projection
-               (schema/projection-from-database @provisional-connection)})]
+        (sci.eval/projection-state @provisional-connection projection)]
     (d/release provisional-connection)
     {:seon.test-support/connection
      (schema/call-with-projection-state
       projection-state #(d/connect configuration))
-     :seon.sci.eval/projection-state projection-state}))
+     :seon.sci.eval/projection-state projection-state})))
 
 (defn- with-fresh-database
   [database-id extra-schema body]
@@ -320,7 +334,9 @@
 (defn- with-branched-database
   [extra-schema body]
   (let [{configuration :seon.test-support/configuration
-         base-connection :seon.test-support/connection} @database-base
+         base-connection :seon.test-support/connection
+         base-ctx :seon.sci.eval/ctx} @database-base
+        base-projection (:seon.schema/projection base-ctx)
         branch (acquire-branch!)]
     (try
       ;; The private :db head is populated and sealed exactly once, then never
@@ -332,8 +348,9 @@
         (try
           (let [{connection :seon.test-support/connection
                  projection-state :seon.sci.eval/projection-state}
-                (reconnect-with-projection branch-configuration
-                                           provisional-connection)]
+            (reconnect-with-projection branch-configuration
+                                           provisional-connection
+                                           base-projection)]
             (try
               (run-database-body connection projection-state extra-schema body)
               (finally

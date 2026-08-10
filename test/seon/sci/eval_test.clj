@@ -258,6 +258,35 @@
             ctx-b
             "(clojure.walk/macroexpand-all '(when true :ok))")))))
 
+(deftest acquired-source-context-forks-have-branch-custody-and-private-defs
+  (test-support/with-database
+    (fn [connection-a]
+      (test-support/with-database
+        (fn [connection-b]
+          (db/transact! connection-a [{:seon.cluster/name "fork-a"}])
+          (db/transact! connection-b [{:seon.cluster/name "fork-b"}])
+          (let [ctx-a (test-support/fork-cluster-ctx connection-a)
+                ctx-b (test-support/fork-cluster-ctx connection-b)
+                query
+                "(seon.db/q '[:find [?name ...] :where [_ :seon.cluster/name ?name]])"
+                evaluate
+                (fn [ctx]
+                  (eval/evaluate
+                   {:seon.cluster.run.form/source query
+                    :seon.cluster.run.form/ns [:seon.ns/name 'user]
+                    :seon.sci.eval/ctx ctx
+                    :seon.sci.admit/caps caps
+                    :seon.sci.eval/time-limit-ms 5000
+                    :seon.config/on-core-error :panic}))]
+            (sci/eval-string* ctx-a "(def fork-private :only-a)")
+            (is (= :only-a (sci/eval-string* ctx-a "fork-private")))
+            (is (thrown? Throwable
+                         (sci/eval-string* ctx-b "fork-private"))
+                "a definition in one fork cannot mutate its sibling")
+            (is (= ["fork-a"] (:seon.sci.admit/value (evaluate ctx-a))))
+            (is (= ["fork-b"] (:seon.sci.admit/value (evaluate ctx-b)))
+                "each fork derives database custody from its branch")))))))
+
 (deftest agent-context-exposes-no-concurrency-capability
   (let [ctx (eval/build-base-ctx)
         env @(:env ctx)

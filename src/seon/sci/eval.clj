@@ -1544,6 +1544,39 @@
         (get ctx call-preparation/carrier) connection projection))
      ctx)))
 
+(defn fork-cluster-ctx
+  "Fork an acquired program ctx for one sovereign database connection.
+
+  Program Vars remain copy-on-write through SCI's generation-aware `fork`;
+  connection custody, schema projection, and supplied-default state are
+  reconstructed from the receiving branch and therefore cannot leak between
+  sibling clusters."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value
+          :seon.db/connection]
+     :seon.sci.eval/ctx]
+    [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value
+          :seon.db/connection :seon.sci.eval/projection-state]
+     :seon.sci.eval/ctx]]}
+  ([base-ctx db connection]
+   (fork-cluster-ctx base-ctx db connection nil))
+  ([base-ctx db connection supplied-projection-state]
+   (let [projection (or (:seon.schema/projection
+                         (some-> supplied-projection-state deref))
+                        (schema/projection-from-database db))
+         projection-state (or supplied-projection-state
+                              (projection-state db projection))
+         ctx (call-preparation/install
+              (assoc (sci/fork base-ctx)
+                     ::custody {:seon.db/connection connection}
+                     :seon.schema/projection projection
+                     ::projection-state projection-state))]
+     (when connection
+       (call-preparation/watch!
+        (get ctx call-preparation/carrier) connection projection))
+     ctx)))
+
 (defn- declared-row
   [{event :seon.sci.eval/event
     eval-form! :seon.sci.eval/eval-form!

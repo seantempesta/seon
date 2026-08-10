@@ -197,7 +197,7 @@
                :seon.flow/work-launcher launcher
                :seon.cluster.run/process process
                :seon.sci.eval/ctx
-               (sci.eval/cluster-ctx @connection connection)
+               (test-support/fork-cluster-ctx connection)
                :seon.cluster.wake/channel
                (clojure.core.async/chan (clojure.core.async/sliding-buffer 1))
              :seon.cluster.loop/evaluate 'seon.cluster.turn-test/fake-evaluate

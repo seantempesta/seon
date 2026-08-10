@@ -1278,11 +1278,40 @@
        "No `current-src` branch is published; run `bin/seon init` first."
        {:seon.source/branch source/current-branch})))
 
-(defn- require-current-source-activation!
+(defn source-base!
+  "Acquire the immutable published program value shared by new cluster forks."
+  {:malli/schema
+   [:=> [:cat :seon.store/store]
+    [:map
+     [:seon.source/commit-id :seon.source/commit-id]
+     [:seon.source/digest :seon.source/digest]
+     [:seon.source/activation-closure :seon.activation/closure]
+     [:seon.store/store :seon.store/store]
+     [:seon.store/branch :seon.store/branch]
+     [:seon.db/db :seon.db/database-value]
+     [:seon.schema/projection :seon.schema/projection]
+     [:seon.sci.eval/ctx :seon.sci.eval/ctx]]]}
   [store]
-  (let [connection (store/open-branch! store source/current-branch)]
+  (let [{commit-id :seon.source/commit-id} (current-source! store)
+        connection (store/open-branch! store source/current-branch)]
     (try
-      (require-activation! @connection)
+      (let [database @connection
+            activation-closure (require-activation! database)
+            source-digest
+            (db/q '[:find ?digest .
+                    :where [_ :seon.source/digest ?digest]]
+                  database)
+            projection (schema/projection-from-database database)
+            projection-state (sci.eval/projection-state database projection)]
+        {:seon.source/commit-id commit-id
+         :seon.source/digest source-digest
+         :seon.source/activation-closure activation-closure
+         :seon.store/store store
+         :seon.store/branch source/current-branch
+         :seon.db/db database
+         :seon.schema/projection projection
+         :seon.sci.eval/ctx
+         (sci.eval/cluster-ctx database nil projection-state)})
       (finally
         (d/release connection)))))
 
@@ -2353,7 +2382,7 @@
 
 (defn- stand-cluster-runtime!
   [instance publish! compiled-config connection cluster-name config
-   projection-state]
+   projection-state base-ctx]
   (schema/call-with-projection-state
    projection-state
    (fn []
@@ -2373,8 +2402,12 @@
            instance (publish!
                      (assoc instance :seon.search/index
                             (search/open! connection search-path)))
-           bare-ctx (sci.eval/cluster-ctx
-                     @connection connection projection-state)
+           bare-ctx
+           (if base-ctx
+             (sci.eval/fork-cluster-ctx
+              base-ctx @connection connection projection-state)
+             (sci.eval/cluster-ctx
+              @connection connection projection-state))
            boot-dials (config/effective @connection cluster-name)
            ;; The launcher's own graph belongs to this cluster too, but the
            ;; launcher cannot be a member of the environment its own procs
@@ -2449,8 +2482,7 @@
                          [:config :store :id])
         cluster-branch (registry/cluster-branch cluster-name)
         existing-cluster? (contains? (registry/roster store) cluster-branch)
-        published-source (when-not existing-cluster? (current-source! store))
-        _ (when published-source (require-current-source-activation! store))
+        source-base (when-not existing-cluster? (source-base! store))
         start-permit (gc-guard/try-reachability-permit! store-id :roster)
         _ (when-let [kind (:seon.error/kind start-permit)]
             (throw
@@ -2468,7 +2500,7 @@
              {:seon.store/store store
               :seon.boot/cluster-name cluster-name
               :seon.source/commit-id
-              (:seon.source/commit-id published-source)
+              (:seon.source/commit-id source-base)
               :datahike.gc-guard/reachability-permit start-permit}))
           (finally
             (gc-guard/release-reachability-permit! start-permit)))
@@ -2508,7 +2540,7 @@
                   (assoc instance :seon.boot/cluster-connection connection))]
     (stand-cluster-runtime!
      instance publish! compiled-config connection cluster-name config
-     projection-state)))
+     projection-state (:seon.sci.eval/ctx source-base))))
 
 (defn start!
   "Start one cluster instance in this JVM, REPL FIRST, then the tower.
