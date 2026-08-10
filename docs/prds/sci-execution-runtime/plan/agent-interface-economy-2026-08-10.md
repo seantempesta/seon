@@ -137,6 +137,39 @@ producers shows current quality — floor-heavy shapes, dead-end handles,
 oversized faces, truncations, token pathologies — the same truth for agents
 and the owner. Never a stored report, counter, or notification queue.
 
+## THE RULING SHAPE — context is a REPL transcript (owner, 2026-08-10 evening)
+
+Owner direction sealing I3/I4's target, completing the 2026-08-01
+"context IS a real REPL" ruling: **the initial context IS the bootstrap
+IS the render walk — one thing.** A new agent's prompt reads as 10–20
+ordinary forms it appears to have already run — requires of its
+namespaces, a help call, doc on its own API, a query over its messages
+— each followed by its actual printed value. Teaching is by
+demonstration: the visible history IS pulling, in Clojure idioms the
+agent can obviously repeat. Consequences:
+
+- **Both renderers are the P in REPL, just different targets** (owner
+  verbatim): the walk yields forms + values; the printer renders each
+  value to the text target (AI) or hiccup target (HTML). One session,
+  two projections, two profiles. Producers are printer arms for shapes
+  the grammar cannot serve, discovered by contract, mostly an HTML
+  concern.
+- The `;; d0 · [:lookup]` comment-header unit framing violates this
+  shape (`render-walk-frames-values-as-comments` graduates to a design
+  casualty): a unit is a plausible FORM plus its printed value.
+- Schema walls fail the REPL test: a session would never show 201 raw
+  Malli forms — `(doc :some/key)` shows a compact face + example WHEN
+  ASKED. The API renders lightly explained (names, arglists,
+  one-liners), never full bodies.
+- Owed bulk pull tools: one function taking an array of
+  symbols/schema-keys/namespaces and returning their doc faces
+  together, printer-fitted — orientation in one form.
+- Static always-present forms are permitted, but anything solvable as
+  the graph walk rendered through Clojure idioms (requires, detected
+  render functions) is preferred over a special seon/walk face.
+- Per-agent difference (root vs task agents) is profile selection over
+  the same mechanism, never per-agent code.
+
 ## Waves (dependency order; each wave = one lane set, one proof)
 
 - **W1 — the total floor.** Delete the renderer-unavailable substitute and
