@@ -648,6 +648,7 @@
                    ((requiring-resolve 'seon.render.walk/neighborhood)
                     {:seon.db/db db
                      :seon.sci.eval/ctx (:seon.sci.eval/ctx *walk-context*)
+                     :seon.cluster.agent/id agent-id
                      :seon.cluster.run/id
                      (:seon.cluster.run/id *walk-context*)
                      :seon.render/retained-calls
