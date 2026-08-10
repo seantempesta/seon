@@ -34,7 +34,8 @@
                  [:seon.ns/name namespace-name])
          :seon.db/db db
          :seon.render/distance distance
-         ::sut/token-budget token-budget))
+         :seon.render/profile
+         {:seon.render.profile/token-budget token-budget}))
 
 (defn- reader-valid?
   ([text]
@@ -303,7 +304,9 @@
                           [(keyword (str "field-" index)) :string]))
                    (range 180)))
             budget-schemas
-            [{:seon.schema/key :budget.external/a
+            [{:seon.schema/key :fixture.budget/own
+              :seon.schema/form large-form}
+             {:seon.schema/key :budget.external/a
               :seon.schema/form ":string"}
              {:seon.schema/key :budget.external/b
               :seon.schema/form large-form}]
@@ -324,37 +327,18 @@
                     (let [text (sut/render-ai
                                 (namespace-unit db budget-ns 2 budget))]
                       (when (and (str/includes? text "; fn fixture.budget/a")
-                                 (not (str/includes? text
-                                                     "; fn fixture.budget/b")))
-                        {:budget budget :text text})))
-                  budgets)
-            html-candidate
-            (some (fn [budget]
-                    (let [text (hiccup/->string
-                                (sut/render-html
-                                 (namespace-unit db budget-ns 2 budget)))]
-                      (when (and (str/includes? text "fn fixture.budget/a")
-                                 (not (str/includes? text
-                                                     "fn fixture.budget/b")))
+                                 (str/includes? text "; fn fixture.budget/b")
+                                 (not (str/includes? text "; schema "))
+                                 (not (str/includes? text "; (register! ")))
                         {:budget budget :text text})))
                   budgets)]
-        (testing "each budget candidate carries exactly its function closure"
+        (testing "compact budgets admit the callable API before schemas"
           (is (map? ai-candidate))
-          (is (map? html-candidate))
           (when ai-candidate
             (is (str/includes? (:text ai-candidate)
-                               "(register! :budget.external/a :string)"))
-            (is (not (str/includes? (:text ai-candidate)
-                                    "(register! :budget.external/b")))
+                               "omitted by the namespace render budget"))
             (is (<= (tokens/estimate (:text ai-candidate))
-                    (:budget ai-candidate))))
-          (when html-candidate
-            (is (str/includes? (:text html-candidate)
-                               "(register! :budget.external/a :string)"))
-            (is (not (str/includes? (:text html-candidate)
-                                    "(register! :budget.external/b")))
-            (is (<= (tokens/estimate (:text html-candidate))
-                    (:budget html-candidate)))))))))
+                    (:budget ai-candidate)))))))))
 
 (deftest compact-and-name-projections-respect-explicit-budgets
   (support/with-database

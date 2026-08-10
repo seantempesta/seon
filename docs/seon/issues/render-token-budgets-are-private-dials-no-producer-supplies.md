@@ -111,3 +111,32 @@ Full measurement and the API-first fit ordering this needs:
 [context quality audit 2026-08-10](../../prds/sci-execution-runtime/research/context-quality-audit-2026-08-10.md),
 findings 1 and 2. This is named there as the single change with the largest
 effect on what agents read.
+
+## Implementation boundary — 2026-08-10
+
+The namespace owner now reads
+\`:seon.render.profile/token-budget\` from \`:seon.render/profile\`, and its
+compact AI entry order is functions, own schemas, then referenced schemas.
+The focused namespace suite passed 5 tests / 60 assertions. After hot reload,
+a direct census of every indexed \`my.*\` namespace rendered at or below 1,002
+estimated tokens against the 1,024-token profile, with every public function
+line retained.
+
+The live context path exposed one protected-owner dependency. The
+\`seon.render/walk\` call to \`seon.render.walk/neighborhood\`
+(\`src/seon/render.clj\`, in the request assembled around lines 640-660) omits
+both \`:seon.render/profile\` and \`:seon.cluster.agent/id\`. Consequently
+\`request-profile\` cannot derive the effective profile before invoking the
+namespace producer. A proc-owned \`seon.render/acquire-context!\` probe after the
+hot reload still returned 229,442 characters / 57,360 estimated tokens on the
+current default database, while the last recorded root capture remains 63,669
+characters / 15,917 estimated tokens.
+
+The exact remaining edit is to add
+\`:seon.cluster.agent/id agent-id\` to that \`neighborhood\` request. The existing
+\`request-profile\` function then derives the cluster and agent effective
+profile and supplies the already-declared token budget; no second profile or
+budget mechanism is needed. \`src/seon/render.clj\` was owned by the concurrent
+\`ns-page-perf\` lane, so this lane did not edit it. The live root before/after
+and prospective \`seon.db\` walk measurements remain acceptance evidence for
+that integration.

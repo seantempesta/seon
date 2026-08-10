@@ -319,7 +319,10 @@
 
 (defn- token-budget
   [unit]
-  (some-> (::token-budget unit) long (max 1)))
+  (some-> (get-in unit [:seon.render/profile
+                        :seon.render.profile/token-budget])
+          long
+          (max 1)))
 
 (defn- within-budget?
   [text budget]
@@ -402,35 +405,44 @@
        (and (empty? functions) (empty? own-schemas))
        (conj (empty-comment owner-agent-id))))))
 
+(defn- compact-ai-items
+  [{::keys [db schema-row-cache functions own-schemas]}]
+  (let [{::keys [schema-lines schemas-capped?]}
+        (referenced-schema-lines db schema-row-cache functions own-schemas)]
+    (vec
+     (concat
+      (map #(str "; " (compact-function-line %)) functions)
+      (map #(str "; " (compact-schema-line %)) own-schemas)
+      (map-indexed
+       (fn [index line]
+         (str (when (zero? index) "; referenced schemas\n")
+              "; " line))
+       schema-lines)
+      (when schemas-capped?
+        [(str "; " referenced-schema-cap
+              "+ referenced schemas capped; more reachable via the db")])))))
+
 (defn- compact-ai-text
-  [{::keys [db schema-row-cache namespace-name requires functions own-schemas
-            owner-agent-id]}
-   included-count]
-  (let [included (subvec functions 0 included-count)
-        omitted (- (count functions) included-count)
-        schema-section
-        (referenced-schema-ai-section
-         db schema-row-cache included own-schemas true)]
+  [{::keys [namespace-name requires functions own-schemas owner-agent-id]}
+   items included-count]
+  (let [included (subvec items 0 included-count)
+        omitted (- (count items) included-count)]
     (str/join
      "\n\n"
      (cond-> [(pr-str (ns-form namespace-name requires))]
-       (seq own-schemas)
-       (conj (str/join "\n" (map #(str "; " (compact-schema-line %))
-                                   own-schemas)))
-       schema-section (conj schema-section)
        (seq included)
-       (conj (str/join "\n" (map #(str "; " (compact-function-line %))
-                                   included)))
+       (conj (str/join "\n" included))
        (and (empty? functions) (empty? own-schemas))
        (conj (empty-comment owner-agent-id))
        (pos? omitted) (conj (omission-comment 0 omitted))))))
 
 (defn- ai-text
-  [data included-count]
+  [data]
   (case (::distance data)
     0 (str (::namespace-name data))
     1 (full-ai-text data)
-    (compact-ai-text data included-count)))
+    (let [items (compact-ai-items data)]
+      (compact-ai-text data items (count items)))))
 
 (defn- minimal-ai-text
   [{::keys [namespace-name requires functions own-schemas owner-agent-id]}]
@@ -446,19 +458,21 @@
 
 (defn- budgeted-ai
   [data budget]
-  (let [function-count (count (::functions data))]
-    (if (or (nil? budget) (< (::distance data) 2))
-      (ai-text data function-count)
-      (let [initial (ai-text data 0)]
-        (if-not (within-budget? initial budget)
-          (minimal-ai-text data)
-          (loop [included 0]
-            (let [next-count (inc included)
-                  candidate (when (<= next-count function-count)
-                              (ai-text data next-count))]
-              (if (and candidate (within-budget? candidate budget))
-                (recur next-count)
-                (ai-text data included)))))))))
+  (if (or (nil? budget) (< (::distance data) 2))
+    (ai-text data)
+    (let [items (compact-ai-items data)
+          item-count (count items)
+          render #(compact-ai-text data items %)
+          initial (render 0)]
+      (if-not (within-budget? initial budget)
+        (minimal-ai-text data)
+        (loop [included 0]
+          (let [next-count (inc included)
+                candidate (when (<= next-count item-count)
+                            (render next-count))]
+            (if (and candidate (within-budget? candidate budget))
+              (recur next-count)
+              (render included))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; HTML twin
