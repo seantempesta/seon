@@ -1,17 +1,18 @@
 ---
 type: issue
-status: resolved
+status: superseded
 severity: friction
 tags: [issue, flow, error, render]
 ---
 
-# Collapse repeated identical core faults into one bounded record
+# Bound repeated identical core-fault notification
 
 ## Problem
 
-One core cause could be printed and committed repeatedly as giant identical
-stack traces even though `:seon.error/signature` already content-addressed the
-same failure. The dead-writer incident rendered the same cause repeatedly.
+One core cause could print giant identical stack traces repeatedly. The
+dead-writer incident rendered the same cause 878 times. Durable occurrences
+are evidence and must remain individually queryable; only the human face is
+eligible for signature suppression.
 
 ## Evidence
 
@@ -27,10 +28,10 @@ second error path.
 
 ## Acceptance
 
-One signature produces one bounded durable fault record and one bounded human
-face; repeated delivery creates no duplicate record or stack dump. A distinct
-signature still records independently, and focused recurring proof exercises
-both cases.
+Every delivery produces one durable fact, recurrence derives by counting facts
+of the signature, and one signature produces one bounded human face per
+committer lifetime. A rebuilt committer consults existing facts to keep that
+face silent without suppressing the new occurrence transaction.
 
 ## Resolution — 2026-08-03
 
@@ -52,3 +53,14 @@ next distinct successful commit adds one fact and exactly one bounded panic
 face. `bin/test seon.flow-test` passed 25 tests / 234 assertions. The combined
 `seon.flow-test`, `seon.test-runner-test`, and `seon.cluster.mcp-test`
 checkpoint passed 36 tests / 282 assertions with zero failures or errors.
+
+## Superseded — 2026-08-10
+
+The old acceptance collapsed durable occurrences and therefore made recurrence
+volume unqueryable. Commit `3630a34cd` supersedes that half while retaining the
+useful notification bound: every repeated fault now reaches the writer, the
+process-local and database signature observations suppress only stderr/panic,
+and `error/commit-tx` continues to derive recurrence from committed facts.
+`seon.flow-test/core-fault-signatures-bound-durable-and-stderr-output` commits
+132 equal faults, queries recurrence as 132, and observes one bounded stderr
+face; a rebuilt proc commits the repeated occurrence without printing it.

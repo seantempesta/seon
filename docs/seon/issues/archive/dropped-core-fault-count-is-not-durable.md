@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, flow, error, observability]
 ---
@@ -48,3 +48,21 @@ blocking the faulting proc.
   many core faults were dropped.
 - A focused saturation proof overflows the channel, observes the durable fact,
   and proves the producer remains nonblocking.
+
+## Resolution — 2026-08-10
+
+Commit `3630a34cd` replaces the process-local drop atom and producer-thread
+stderr callback with a reserved bounded overflow observation inside the fault
+buffer. The observation carries a dropped-fault count, a rolling digest, and
+the representative Flow proc/op/cid and agent provenance. The existing fault
+committer proc writes it as an ordinary `:seon.error/fact` with queryable
+`:seon.error/dropped-fault-count` and `/dropped-fault-digest` datoms.
+
+`seon.flow-test/fault-tap-overflow-commits-a-queryable-drop-fact` pauses the
+committer, injects five faults into a two-fault buffer, proves no transaction
+occurs on the producer path, resumes the proc, and queries a count of three
+plus its 64-character digest from the durable fact. The complete
+`seon.flow-test` and `seon.flow-configuration-test` namespaces passed in the
+same checkpoint. The broader armed-cluster checkpoint stopped on the unrelated
+`two-clusters-in-one-jvm-own-distinct-live-program-contexts` failure, where
+`my.agents.agent-a/shared-live` was unresolved after all fault tests passed.
