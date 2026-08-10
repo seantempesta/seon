@@ -443,11 +443,10 @@
 
 (declare collect-under-lock!)
 
-(defn- cleanup-cluster-under-lock!
+(defn- quiesce-cluster-under-lock!
   [{repository-root :seon.operator/repository-root
     managed-root :seon.operator/managed-root
-    cluster-name :seon.boot/cluster-name
-    supplied-store :seon.store/store}]
+    cluster-name :seon.boot/cluster-name}]
   (let [managed-root (state/canonical-path managed-root)
         claim (state/root-claim repository-root managed-root)]
     (when-not (and claim
@@ -467,16 +466,31 @@
           instance (get @runtime/running-instances cluster-name)
           stopped? (map? instance)
           _ (when stopped? (cluster/stop! instance))
+          present? (.exists (io/file cluster-dir))]
+      (when present?
+        (fs/delete-recursively! cluster-root cluster-dir))
+      {:seon.operator.cluster-cleanup/managed-root managed-root
+       :seon.boot/cluster-name cluster-name
+       :seon.store/branch (registry/cluster-branch cluster-name)
+       :seon.operator.cluster-cleanup/live-instance-stopped? stopped?
+       :seon.operator.cluster-cleanup/removed (if present? [cluster-dir] [])
+       :seon.operator.cluster-cleanup/reclaimed-bytes
+       (:seon.operator.footprint/file-bytes before)
+       ::cluster-dir cluster-dir})))
+
+(defn- cleanup-cluster-under-lock!
+  [{supplied-store :seon.store/store
+    :as request}]
+  (let [{cluster-dir ::cluster-dir
+         branch :seon.store/branch
+         :as quiesced} (quiesce-cluster-under-lock! request)
+        managed-root (:seon.operator.cluster-cleanup/managed-root quiesced)
           [operation-store release?]
           (acquire-operation-store! managed-root supplied-store)]
-      (try
-        (let [branch (registry/cluster-branch cluster-name)
-              _ (registry/retire-branch!
-                 {:seon.store/store operation-store
-                  :seon.store/branch branch})
-              present? (.exists (io/file cluster-dir))
-              _ (when present?
-                  (fs/delete-recursively! cluster-root cluster-dir))
+    (try
+      (let [_ (registry/retire-branch!
+               {:seon.store/store operation-store
+                :seon.store/branch branch})
               collection (collect-under-lock! managed-root operation-store)
               remaining (cond-> []
                           (.exists (io/file cluster-dir))
@@ -485,29 +499,22 @@
                                      branch)
                           (conj (str branch)))
               complete? (empty? remaining)
-              result
-              {:seon.operator.cluster-cleanup/managed-root managed-root
-               :seon.boot/cluster-name cluster-name
-               :seon.store/branch branch
-               :seon.operator.cluster-cleanup/live-instance-stopped?
-               stopped?
-               :seon.operator.cluster-cleanup/branch-retired? true
-               :seon.operator.cluster-cleanup/removed
-               (if present? [cluster-dir] [])
-               :seon.operator.cluster-cleanup/collection collection
-               :seon.operator.cluster-cleanup/remaining remaining
-               :seon.operator.cluster-cleanup/reclaimed-bytes
-               (:seon.operator.footprint/file-bytes before)
-               :seon.operator.cluster-cleanup/complete? complete?}]
+              result (-> quiesced
+                         (dissoc ::cluster-dir)
+                         (assoc
+                          :seon.operator.cluster-cleanup/branch-retired? true
+                          :seon.operator.cluster-cleanup/collection collection
+                          :seon.operator.cluster-cleanup/remaining remaining
+                          :seon.operator.cluster-cleanup/complete? complete?))]
           (when-not complete?
             (throw
              (ex-info "Cluster cleanup left claimed state."
                       {:seon.error/kind
                        :seon.operator/cluster-cleanup-incomplete
                        :seon.operator.cluster-cleanup/result result})))
-          result)
-        (finally
-          (when release? (store/release-store! operation-store)))))))
+        result)
+      (finally
+        (when release? (store/release-store! operation-store))))))
 
 (defn cleanup-cluster!
   "Stop, retire, delete, and collect one exactly claimed cluster."
@@ -768,13 +775,13 @@
     source-commit :seon.source/commit-id
     supplied-store :seon.store/store
     :as request}]
-  ;; No store is held ACROSS the destructive arm. Cleanup stops the live
+  ;; No store is held ACROSS the quiesce arm. Stopping the live
   ;; instance, and the last instance out releases the process-root store
   ;; with its flock (`seon.cluster/release-root-store!`), so a store
   ;; captured before cleanup can be a released connection by the time the
-  ;; fork needs it — the whole refork then failed with
-  ;; `:connection-has-been-released` after the old branch was already
-  ;; destroyed.
+  ;; fork needs it. The branch itself is not retired during quiescence:
+  ;; `registry/reset-cluster!` performs one values-before-head replacement,
+  ;; so every failure before that replacement leaves the prior branch intact.
   ;;
   ;; So the fork RE-ASKS after the destructive arm rather than reusing a
   ;; captured value, and `acquire-operation-store!` answers from the one
@@ -786,14 +793,17 @@
   ;; itself, outside the running-instance holder table — destroyed the
   ;; branch and then refused its own second open of a store it still
   ;; held.
-  (cleanup-cluster-under-lock! request)
+  (quiesce-cluster-under-lock! request)
   (let [[operation-store release?]
         (acquire-operation-store! managed-root supplied-store)]
     (try
-      (registry/ensure-cluster!
-       {:seon.store/store operation-store
-        :seon.boot/cluster-name (:seon.boot/cluster-name request)
-        :seon.source/commit-id source-commit})
+      (let [result
+            (registry/reset-cluster!
+             {:seon.store/store operation-store
+              :seon.boot/cluster-name (:seon.boot/cluster-name request)
+              :seon.source/commit-id source-commit})]
+        (collect-under-lock! managed-root operation-store)
+        result)
       (finally
         (when release? (store/release-store! operation-store))))))
 
