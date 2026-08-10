@@ -1302,7 +1302,9 @@
                     :where [_ :seon.source/digest ?digest]]
                   database)
             projection (schema/projection-from-database database)
-            projection-state (sci.eval/projection-state database projection)]
+            projection-state (sci.eval/projection-state database projection)
+            base-ctx
+            (sci.eval/cluster-ctx database connection projection-state)]
         {:seon.source/commit-id commit-id
          :seon.source/digest source-digest
          :seon.source/activation-closure activation-closure
@@ -1310,8 +1312,7 @@
          :seon.store/branch source/current-branch
          :seon.db/db database
          :seon.schema/projection projection
-         :seon.sci.eval/ctx
-         (sci.eval/cluster-ctx database nil projection-state)})
+         :seon.sci.eval/ctx base-ctx})
       (finally
         (d/release connection)))))
 
