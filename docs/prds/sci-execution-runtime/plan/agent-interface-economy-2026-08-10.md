@@ -65,15 +65,20 @@ No timeouts, no waits: long operations are defects to root-cause.
 
 ## PHASE 1 — prep: fix only what the target needs (lanes, parallel)
 
-1. **The total floor** (the drive found the exact seam): the printer
-   renders ANY value — `{:a 1 :b 2}` currently refused because
-   `render-argument` merges value keys into the unit
-   (`src/seon/render.clj:106-107`) against a qualified-keys unit
-   contract; fix the class (the value rides as a value, never merged
-   into the envelope). Delete the web `Renderer unavailable` substitute
-   face; close anonymous `...` cuts and the unknown-face throw; an
-   elision must never be longer than the value it replaces (the
-   4-char-string elision defect). One regression per hole.
+1. **The total floor + the printer stress harness** (the drive found
+   the exact seam): the printer renders ANY value — `{:a 1 :b 2}`
+   currently refused because `render-argument` merges value keys into
+   the unit (`src/seon/render.clj:106-107`) against a qualified-keys
+   unit contract; fix the class (the value rides as a value, never
+   merged into the envelope). Delete the web `Renderer unavailable`
+   substitute face; close anonymous `...` cuts and the unknown-face
+   throw; an elision must never be longer than the value it replaces.
+   Then STRESS-TEST the printer as a standing harness (owner
+   direction): generated values from every registered schema plus real
+   database values, printed at several profiles; every refusal, ugly
+   face, or over-elision is a GRAMMAR fix, never a per-value override
+   — overrides remain rare, justified, and recorded. One regression
+   per closed hole; the harness itself recurs in `bin/test`.
 2. **Declaration-resolution noise at its last owners**: the ×1000
    fallback warnings observed live (instrument.clj:125/136, the
    per-EVAL projection rebuild in eval.clj) — same class as the two
@@ -102,6 +107,15 @@ already sealed; what needs ruling is only the unit grammar):
 - the compact schema/API faces (`doc`-style) replacing schema walls;
 - what the 10–20 bootstrap-visible forms ARE for a fresh agent (the
   current bootstrap forms, re-read as the initial transcript).
+
+Refinements sealed 2026-08-10 late: the mechanism is UNIVERSAL — every
+agent, same rules; bootstrap + additional standing forms is the
+accepted combo. NO MAGIC OUTPUTS: a REPL returns data printed by the
+value printer — never commented summaries or prose faces where a value
+belongs. NO PER-NAMESPACE OBLIGATIONS: namespaces are not required to
+define render/help functions; the system may INJECT session forms
+(requires, helpers) that are part of the transcript but not the
+indexed corpus — injected-but-honest forms are the mechanism.
 
 Build (file-disjoint lanes over one sealed design):
 
