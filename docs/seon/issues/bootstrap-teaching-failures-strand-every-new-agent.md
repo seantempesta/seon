@@ -96,6 +96,17 @@ error facts bound to it. The direct regression passed, and
 test/seon/cluster/boot_test.clj` passed 141 tests / 758 assertions / zero
 failures / zero errors.
 
+The same falsifier refuted this issue's interruption attribution: before the
+repair the bootstrap also settled all 13 receipts and closed. The recurrence
+notice was the lie. `seon.error/commit-tx` correctly treats throwable presence
+as the interrupted-run condition for direct attribution, but `ai-prose`'s
+`:recurring` arm calls every run-attributed recurrence a “Core fault” and says
+“It interrupted run …” without checking that condition. Removing agent
+evaluation errors from the fault family prevents this teaching path from
+reaching that false notice. The three new agents' zero context captures are
+therefore not explained by an interrupted bootstrap; the audit's separately
+measured prompt-budget failure remains their proven blocker.
+
 The operator live proof remains pending because the shared-tree publication
 checkpoint was invalidated by foreign in-flight source changes. A first
 `bin/seon init bt-scratch --force` completed branch publication but hit the
