@@ -16,10 +16,15 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (32)
+## Blocker (37)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Publish terminal evidence for every background binary result](background-binary-settlement-does-not-publish-required-event.md) | blocker | background settlement investigation |
+| [Make the first injected core fault observable at the fault committer](fault-committer-misses-the-first-injected-fault.md) | blocker | fault-facts lane |
+| [Keep source-publication fixtures complete under activation lookup refs](activation-closure-fixtures-lag-lookup-ref-prerequisites.md) | blocker | activation/source fixture repair |
+| [Rebuild an export without reopening an already-connected branch](export-fallback-reopens-an-already-connected-branch.md) | blocker | suite-speed-tail / export owner |
+| [Keep the session transcript reachable under the active render profile](render-profile-activation-elides-the-session-transcript.md) | blocker | render profile activation follow-up |
 | [Stop the bootstrap plan's deliberate failures from interrupting the run](bootstrap-teaching-failures-strand-every-new-agent.md) | blocker | agent context repair wave (2026-08-10 audit) |
 | [Every agent prompt is a neighborhood render-walk contract violation](every-agent-prompt-is-a-neighborhood-render-walk-contract-violation.md) | blocker | live-drive context repair wave |
 | [Settle a receipt for every recorded run form](a-runs-last-form-can-close-without-a-receipt.md) | blocker | live-drive context repair wave |
@@ -52,10 +57,15 @@ See `README.md` for the convention.
 | [Stop `seon.db/transact!` returning a different shape per dynamic var](transact-returns-a-different-shape-depending-on-a-dynamic-var.md) | blocker | P17 S4 `seon.db` conversion sweep |
 | [Settle an unreadable reply as a form the agent can see](an-unreadable-reply-closes-a-run-with-no-forms-and-no-trace.md) | blocker | live-drive context repair wave |
 
-## Friction (127)
+## Friction (132)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Make the concurrency receipt diagnostic select only failed receipts](concurrency-receipt-diagnostic-classifies-success-as-failure.md) | friction | concurrency harness repair |
+| [Keep concurrency plans from opening provider-backed follow-up runs](concurrency-plans-open-unplanned-follow-up-runs.md) | friction | concurrency harness repair |
+| [Derive the oversight fleet proof from the live proc roster](oversight-fleet-test-pins-a-stale-proc-roster.md) | friction | oversight test repair |
+| [Give `seon.cluster.loop/settle!` a complete public contract](settle-is-public-without-a-complete-contract.md) | friction | unreadable-reply lane coordination |
+| [Construct the schedule graph test from a real environment-bearing handle](schedule-graph-test-constructs-a-handle-without-an-environment.md) | friction | schedule fixture repair |
 | [Render a capability namespace by its API, not by its Malli source](namespace-units-render-error-schema-boilerplate.md) | friction | agent context repair wave (2026-08-10 audit) |
 | [Decide whether contract fit selects a producer for a nested value](contract-fit-render-selection-never-reaches-a-nested-value.md) | friction | owner ruling — render selection |
 | [Do not tell an agent an unindexed namespace is empty](unindexed-namespaces-render-as-empty.md) | friction | agent context repair wave (2026-08-10 audit) |
