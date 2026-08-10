@@ -33,6 +33,7 @@
             [seon.flow :as seon.flow]
             [seon.operator :as operator]
             [seon.program :as program]
+            [seon.render.transcript :as transcript]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
@@ -1120,16 +1121,46 @@
                     :seon.boot.phase/web
                     :seon.boot.phase/ready]
                    @phases)))
-          (testing "the bootstrap fold installs both declarations and closes"
-            (await-bootstrap! (:seon.boot/cluster-connection instance) "root")
-            (is (= 13
-                   (db/q '[:find (count ?receipt) .
+          (testing "bootstrap keeps teaching refusals in the agent's session"
+            (let [connection (:seon.boot/cluster-connection instance)
+                  run-id (bootstrap/run-id "root")
+                  _ (await-bootstrap! connection "root")
+                  database @connection
+                  session
+                  (transcript/render-ai
+                   {:seon.db/db database
+                    :seon.sci.eval/ctx (:seon.sci.eval/ctx instance)
+                    :seon.sci.eval/time-limit-ms 1000
+                    :seon.config/on-core-error :record
+                    :seon.cluster.agent/id "root"
+                    :seon.render.transcript/token-budget 100000
+                    :seon.sci.admit/caps
+                    (config/result-caps (config/defaults))})
+                  refusal-index
+                  (.indexOf session "uses :any in an agent-authored contract")
+                  repair-index
+                  (.indexOf session
+                            "The row with the largest :amount; {} when there are none.")]
+              (is (= 13
+                     (db/q '[:find (count ?receipt) .
+                             :in $ ?run-id
+                             :where
+                             [?run :seon.cluster.run/id ?run-id]
+                             [?receipt :seon.cluster.eval/run ?run]]
+                           database run-id))
+                  "every form settles, including both deliberate refusals")
+              (is (<= 0 refusal-index)
+                  "the agent's session retains the teaching refusal")
+              (is (< refusal-index repair-index)
+                  "the repair follows the refusal in the same session")
+              (is (empty?
+                   (db/q '[:find ?error
                            :in $ ?run-id
                            :where
                            [?run :seon.cluster.run/id ?run-id]
-                           [?receipt :seon.cluster.eval/run ?run]]
-                         @(:seon.boot/cluster-connection instance)
-                         (bootstrap/run-id "root")))))
+                           [?error :seon.error/run ?run]]
+                         database run-id))
+                  "an agent evaluation error never enters the core-fault family")))
           (testing "a second cluster acquires its own projection from the
                     shared store"
             (let [sibling (cluster/start!

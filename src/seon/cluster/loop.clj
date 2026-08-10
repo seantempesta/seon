@@ -471,13 +471,6 @@
     trigger :seon.cluster.message/trigger}]
   (let [database @(get cluster :seon.db/connection)
         settled (disposition (:seon.sci.admit/value evaluation))
-        evaluation-failure
-        (or (when (:seon.error/kind (:seon.sci.admit/value evaluation))
-              (:seon.sci.admit/value evaluation))
-            (when (:seon.error/kind problem) problem)
-            (when-let [message (:seon.cluster.eval/error evaluation)]
-              {:seon.error/kind ::evaluation-failed
-               :seon.error/message message}))
         asked (asked-value
                (cond-> {:seon.db/db database
                         :seon.sci.eval/evaluation evaluation
@@ -509,11 +502,6 @@
                   ::settlement-evaluation settlement-evaluation}
            problem (assoc :seon.problems/form-problem problem)
            settled (assoc :my.run/value settled)))
-        recording
-        (when evaluation-failure
-          (error-tx cluster database evaluation-failure now
-                    {:seon.cluster.agent/id agent-id
-                     :seon.cluster.run/id run-id}))
         tx-data
         (into (run/receipt-settle-tx receipt)
               (concat
@@ -524,8 +512,7 @@
                    :seon.cluster.run/process process
                    :seon.cluster.run/closed-at now}))
                (:seon.cluster.message/rows delivery)
-               (:seon.error/values-tx delivery)
-               recording))]
+               (:seon.error/values-tx delivery)))]
     {::settled settled
      ::evaluation evaluation
      ::receipt receipt
@@ -590,7 +577,8 @@
   "The sole terminal writer for one run.
 
   Evaluation settlement commits its receipt, disposition, deliveries, desk
-  rows, durable error fact, and close together. A phase failure before
+  rows, and close together. An agent evaluation error stays in that receipt;
+  it never enters the durable core-fault family. A phase failure before
   evaluation has no ordinal and therefore commits zero receipts. A refused
   terminal transaction takes one bounded refusal branch; success is the
   returned transaction report, never a value constructed before commit."
