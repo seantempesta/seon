@@ -59,6 +59,7 @@
                {:seon.store/store opened
                 :seon.source/digest seal-digest
                 :seon.source/populate 'seon.cluster/populate-source!
+                :seon.source/activation 'seon.cluster/derive-activation
                 :seon.source/populate-request
                 {:seon.fn/manifest @test-support/source-manifest}})
               connection

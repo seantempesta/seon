@@ -131,6 +131,42 @@
     (spit file source)
     (.getCanonicalPath file)))
 
+(defn- initialization-function-symbols
+  []
+  (into
+   #{}
+   (keep
+    (fn [value]
+      (when (and (vector? value)
+                 (= 2 (count value))
+                 (= :seon.fn/sym (first value))
+                 (string? (second value)))
+        (symbol (second value)))))
+   (tree-seq coll? seq (config/default-population))))
+
+(defn- write-function-sources!
+  [source-root symbols]
+  (doseq [[ns-name-text ns-symbols]
+          (sort-by key (group-by namespace symbols))]
+    (write-source!
+     source-root
+     (str (str/replace ns-name-text "." "/") ".clj")
+     (str "(ns " ns-name-text ")\n"
+          (str/join
+           "\n"
+           (map (fn [qualified-symbol]
+                  (pr-str (list 'defn
+                                (symbol (name qualified-symbol))
+                                []
+                                nil)))
+                (sort ns-symbols)))))))
+
+(defn- activation-missing-member?
+  [missing]
+  (or (contains? missing :seon.activation/executable-symbol)
+      (and (contains? missing :seon.activation/lookup-attribute)
+           (contains? missing :seon.activation/lookup-value))))
+
 (defn- prepl-eval
   "Open a real socket to `host:port`, evaluate `form-string` through
   io-prepl, return the :ret payload's :val string. The whole round trip
@@ -864,7 +900,7 @@
         (try
           (testing "namespaces without functions are denied despite a current digest"
             (is (some? activation-refusal))
-            (is (every? :seon.activation/executable-symbol
+            (is (every? activation-missing-member?
                         (:seon.activation/missing activation-refusal)))
             (is (pos? (:seon.activation/missing-count activation-refusal)))
             (is (< (count (ex-message failure)) 2000))
@@ -1023,11 +1059,11 @@
                               "(ns sample.a)\n(defn value [] 1)\n")
         b-path (write-source! source-root "sample/b.clj"
                               "(ns sample.b)\n(defn value [] 10)\n")
-        _ (write-source!
-           source-root "seon/cluster.clj"
-           (str "(ns seon.cluster)\n"
-                "(defn populate-source! [_] nil)\n"
-                "(defn derive-activation [_] nil)\n"))
+        _ (write-function-sources!
+           source-root
+           (into #{'seon.cluster/populate-source!
+                   'seon.cluster/derive-activation}
+                 (initialization-function-symbols)))
         roots (mapv #(.getCanonicalPath ^java.io.File %)
                     [source-root test-root])
         all-roots (conj roots schema-path)]

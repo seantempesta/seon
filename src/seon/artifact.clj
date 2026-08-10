@@ -64,6 +64,7 @@
           {:seon.store/store held-store
            :seon.source/digest source-digest
            :seon.source/populate `cluster/populate-source!
+           :seon.source/activation `cluster/derive-activation
            :seon.source/populate-request {:seon.fn/manifest manifest}})
          (source/current held-store)))
       (finally
