@@ -351,6 +351,9 @@
                 (assoc :seon.render/output :seon.render/html
                        :seon.render.call/id
                        [:seon.render/html [::fleet-oversight]])
+                (cond-> (contains? request :seon.render/profile)
+                  (assoc :seon.render/profile
+                         (:seon.render/profile request)))
                 (assoc :seon.render/retained-calls retained-calls
                        :seon.render/captured-calls captured-calls)
                 render/render-call)
@@ -682,6 +685,10 @@
                       (keep (fn [[registration-key tabs]]
                               (when (pos? (long tabs)) registration-key)))
                       @registration)
+        profile
+        (when (some string? watched)
+          (render/agent-render-profile
+           (config/effective db (:seon.cluster/name handle))))
         ;; The run id makes each partial self-describing. Keep only
         ;; entries whose run is still unsettled at THIS immutable
         ;; database value; terminal facts supersede and remove them.
@@ -716,6 +723,7 @@
                                     (:seon.config.eval/time-limit-ms handle)
                                     :seon.config/on-core-error
                                     (:seon.config/on-core-error handle)
+                                    :seon.render/profile profile
                                     :seon.db/connection connection
                                     :seon.cluster.run/live-processes
                                     #{(:seon.cluster.run/process handle)}
@@ -1322,6 +1330,9 @@
              (:seon.config.eval/time-limit-ms render-context)
              :seon.config/on-core-error
              (:seon.config/on-core-error render-context)}
+      (contains? render-context :seon.render/profile)
+      (assoc :seon.render/profile (:seon.render/profile render-context))
+
       connection
       (assoc :seon.db/connection connection)))
 
