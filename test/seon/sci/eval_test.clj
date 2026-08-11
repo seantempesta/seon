@@ -1419,14 +1419,15 @@
     "(java.io.File. \"/etc/passwd\")"]))
 
 (deftest generated-sources-compose-fork-guard-and-admission
-  (let [check
+  (let [time-limit-ms (:seon.config.eval/time-limit-ms (config/defaults))
+        check
         (tc/quick-check
          100
          (prop/for-all
           [ordinary ordinary-source-value-generator
            failing-source failing-source-generator]
-          (let [ordinary-evaluation (deadlined (pr-str ordinary) 300)
-                failed-evaluation (deadlined failing-source 300)
+          (let [ordinary-evaluation (deadlined (pr-str ordinary) time-limit-ms)
+                failed-evaluation (deadlined failing-source time-limit-ms)
                 evaluations [ordinary-evaluation failed-evaluation]]
             (and
              (ok? ordinary-evaluation)

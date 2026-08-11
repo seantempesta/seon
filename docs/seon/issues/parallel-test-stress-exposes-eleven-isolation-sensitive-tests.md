@@ -65,6 +65,24 @@ clean JVM per failed task but starts those confirmations with bounded
 parallelism. This removes diagnosis serialization; it does not classify away
 or hide any row in this issue.
 
+The SCI generated-source row is now classified as test-local load timing, not
+shared state or a seed collision. Nine concurrent JVMs running the fixed seed
+all failed its first trial independently. A narrower probe showed the ordinary
+empty-string value being cut as `:seon.sci.eval/time-limit` after 423--559 ms
+while the malformed `let` classified as `:seon.sci.eval/evaluation-failed`
+after 251--456 ms. The property had given both finite inputs a 300 ms
+evaluation time limit and then required the first to succeed and the second to
+fail, so CPU oversubscription could legally turn either expected disposition
+into a time-limit disposition. The property now uses the shipped
+`:seon.config.eval/time-limit-ms`; its separate 10-second future deref remains
+the harness backstop for a genuine hang. The pattern to check in the other ten
+rows is a subsecond internal wall-clock bound used as an expected-result
+classifier: capture the actual disposition and duration under concurrent JVMs
+before attributing the failure to shared process state.
+
+That class is fixed by this issue's SCI regression. The other ten historical
+rows remain open for independent resource classification.
+
 ## Owner
 
 The test and production owner of each resource named during triage: clj-kondo
