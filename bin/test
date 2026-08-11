@@ -323,6 +323,7 @@ for worker_number in $(seq 1 "$worker_count"); do
 done
 populate_checkout_root "$worker_parent/serial"
 populate_checkout_root "$worker_parent/confirmation"
+shared_published_base="$run_root/shared-published-base"
 
 if [ -z "$result_root" ]; then
   result_root="$run_root/data/clusters"
@@ -411,12 +412,30 @@ else
   : >"$changed_paths_file"
 fi
 
+echo "bin/test: preparing one shared published test base"
+clojure \
+  "-J-Dseon.operator.root=$run_root" \
+  "-J-Dseon.test.root=$run_root" \
+  "-J-Dseon.test.source-root=$source_root" \
+  -M:test -m seon.test.runner --prepare-base "$shared_published_base"
+base_status=$?
+if [ "$base_status" -ne 0 ]; then
+  status=$base_status
+  printf 'runner-exit=%s runner-reaped-at=%s\n' \
+    "$status" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+    >>"$run_root/test-run.txt"
+  cd "$source_root"
+  echo "bin/test: shared published base preparation failed; retained isolated operator root $run_root" >&2
+  exit "$status"
+fi
+
 clojure \
   "-J-Dseon.operator.root=$run_root" \
   "-J-Dseon.test.root=$run_root" \
   "-J-Dseon.test.source-root=$source_root" \
   "-J-Dseon.test.changed-paths-file=$changed_paths_file" \
   "-J-Dseon.test.worker-parent=$worker_parent" \
+  "-J-Dseon.test.published-base=$shared_published_base" \
   -M:test -m seon.test.runner \
   "${result_cluster:--}" "$result_root" "$git_sha" "$selection_mode" \
   "${namespaces[@]}" &

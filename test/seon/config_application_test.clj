@@ -163,7 +163,7 @@
 (defn- fresh-root []
   (let [root (str "tmp/config-application-test/" (random-uuid))]
     (.mkdirs (io/file root))
-    (cluster/refresh-source! root)
+    (test-support/populate-published-root! root)
     root))
 
 (defn- consumers-by-attribute

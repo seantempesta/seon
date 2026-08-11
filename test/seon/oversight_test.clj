@@ -43,7 +43,7 @@
   [name body]
   (let [root (str "tmp/oversight-test/" name)]
     (support/delete-recursively! root)
-    (cluster/refresh-source! root)
+    (support/populate-published-root! root)
     (let [instance (cluster/start! {:seon.boot/cluster-name name
                                     :seon.boot/root root})]
       (try

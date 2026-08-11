@@ -65,7 +65,7 @@
   [name body]
   (let [root (str "tmp/armed-test/" name)]
     (test-support/delete-recursively! root)
-    (cluster/refresh-source! root)
+    (test-support/populate-published-root! root)
     (let [instance (cluster/start! {:seon.boot/cluster-name name
                                     :seon.boot/root root})]
       (try
@@ -181,7 +181,7 @@
 (deftest two-clusters-in-one-jvm-own-distinct-live-program-contexts
   (let [root "tmp/armed-test/live-program-boundary"]
     (test-support/delete-recursively! root)
-    (cluster/refresh-source! root)
+    (test-support/populate-published-root! root)
     (let [left (cluster/start! {:seon.boot/cluster-name "live-left"
                                 :seon.boot/root root})
           right (cluster/start! {:seon.boot/cluster-name "live-right"
@@ -281,7 +281,7 @@
         next-agent-work work/next-agent-work
         arm! agent/arm!]
     (test-support/delete-recursively! root)
-    (cluster/refresh-source! root)
+    (test-support/populate-published-root! root)
     (with-redefs
       [work/next-agent-work
        (fn [& arguments]

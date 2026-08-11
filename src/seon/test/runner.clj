@@ -981,11 +981,18 @@
   [worker-id checkout-root operator-root]
   (.mkdirs (io/file operator-root "logs"))
   (let [error-log (io/file operator-root "logs" "worker-stderr.log")
-        command [(or (System/getenv "SEON_TEST_CLOJURE") "clojure")
-                 (str "-J-Dseon.operator.root=" (.getCanonicalPath operator-root))
-                 (str "-J-Dseon.test.root=" (.getCanonicalPath operator-root))
-                 (str "-J-Dseon.test.source-root=" (source-root))
-                 "-M:test" "-m" "seon.test.runner" "--worker" worker-id]
+        published-base (System/getProperty "seon.test.published-base")
+        command (cond-> [(or (System/getenv "SEON_TEST_CLOJURE") "clojure")
+                         (str "-J-Dseon.operator.root="
+                              (.getCanonicalPath operator-root))
+                         (str "-J-Dseon.test.root="
+                              (.getCanonicalPath operator-root))
+                         (str "-J-Dseon.test.source-root=" (source-root))]
+                  published-base
+                  (conj (str "-J-Dseon.test.published-base=" published-base))
+                  true
+                  (into ["-M:test" "-m" "seon.test.runner"
+                         "--worker" worker-id]))
         builder (doto (ProcessBuilder. ^java.util.List command)
                   (.directory checkout-root)
                   (.redirectError
@@ -1366,10 +1373,18 @@
           (catch IllegalStateException _))))))
 
 (defn -main
-  "Run the coordinator, or one internal long-lived worker."
+  "Run the coordinator, prepare its immutable base, or run one worker."
   [& arguments]
-  (if (= "--worker" (first arguments))
+  (case (first arguments)
+    "--worker"
     (worker-main! (second arguments))
+
+    "--prepare-base"
+    (let [root (.getCanonicalPath (io/file (second arguments)))]
+      (.mkdirs (io/file root))
+      ((requiring-resolve 'seon.cluster/refresh-source!) root)
+      (println "bin/test: shared published test base ready at" root))
+
     (let [[cluster-name root git-sha selection-mode & namespace-names]
           arguments]
       (System/exit

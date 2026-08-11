@@ -46,7 +46,7 @@
   (or @*published-root*
       (let [root (str "tmp/cohost-boot-test/" (random-uuid))]
         (.mkdirs (io/file root))
-        (cluster/refresh-source! root)
+        (test-support/populate-published-root! root)
         (reset! *published-root* root)
         root)))
 

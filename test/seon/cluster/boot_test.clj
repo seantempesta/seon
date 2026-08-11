@@ -65,7 +65,7 @@
       (locking *published-root*
         (or @*published-root*
             (let [root (bare-root)]
-              (cluster/refresh-source! root)
+              (test-support/populate-published-root! root)
               (reset! *published-root* root)
               root)))))
 
@@ -94,7 +94,7 @@
         (when-let [root @*published-root*]
           (test-support/delete-recursively! root))))))
 
-(use-fixtures :once with-published-root)
+(use-fixtures :each with-published-root)
 
 (defn- await-fact
   "Return the first truthy `probe` result published by a database value."

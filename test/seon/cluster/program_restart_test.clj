@@ -169,7 +169,7 @@
         cluster-name (str "program-restart-" (random-uuid))]
     (.mkdirs (io/file root))
     (try
-      (cluster/refresh-source! root)
+      (test-support/populate-published-root! root)
       (let [first-instance
             (cluster/start! {:seon.boot/cluster-name cluster-name
                              :seon.boot/root root})

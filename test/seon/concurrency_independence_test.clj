@@ -76,7 +76,7 @@
   (let [root "tmp/concurrency-independence-test"
         cluster-name "concurrency-independence"]
     (test-support/delete-recursively! root)
-    (cluster/refresh-source! root)
+    (test-support/populate-published-root! root)
     (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
                                     :seon.boot/root root})]
       (try

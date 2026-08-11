@@ -46,9 +46,7 @@
         destination (io/file root "exported")
         exported-store (io/file destination "store")]
     (try
-      (let [initialized (run-seon root "init")]
-        (is (true? (::completed? initialized)) (::output initialized))
-        (is (= 0 (::exit initialized)) (::output initialized)))
+      (test-support/populate-published-operator-root! root)
       (let [cold-destination (io/file root "cold-export")
             cold (run-seon root "export" (.getPath cold-destination))]
         (is (= 1 (::exit cold)) (::output cold))

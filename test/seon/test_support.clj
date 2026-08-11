@@ -7,6 +7,7 @@
             [datahike.api :as d]
             [seon.db :as db]
             [seon.cluster :as cluster]
+            [seon.cluster.export :as cluster.export]
             [seon.env :as env]
             [seon.fs :as fs]
             [seon.fn :as seon.fn]
@@ -20,6 +21,56 @@
 (def event-backstop-seconds
   "The loud clock around test events whose publishers are observable."
   20)
+
+(defn- clone-directory!
+  "Copy one immutable test base into a private mutable root."
+  [source target]
+  (let [source (.getCanonicalFile (io/file source))
+        target (.getCanonicalFile (io/file target))
+        _ (.mkdirs target)
+        command
+        (if (= "Mac OS X" (System/getProperty "os.name"))
+          ["/bin/cp" "-cR" (str source java.io.File/separator ".")
+           (.getPath target)]
+          ["cp" "-a" "--reflink=auto"
+           (str source java.io.File/separator ".") (.getPath target)])
+        process (.start (doto (ProcessBuilder. ^java.util.List command)
+                          (.redirectErrorStream true)))
+        output (future (slurp (.getInputStream process)))
+        exit (.waitFor process)]
+    (when-not (zero? exit)
+      (throw
+       (ex-info "The shared published test base could not be cloned."
+                {:seon.error/kind ::published-base-clone-failed
+                 ::source (.getPath source)
+                 ::target (.getPath target)
+                 ::exit exit
+                 ::output @output})))
+    @output
+    (.getPath target)))
+
+(defn populate-published-root!
+  "Populate `root` from the runner's immutable base, or publish standalone."
+  [root]
+  (if-let [base (System/getProperty "seon.test.published-base")]
+    (let [root (clone-directory! base root)]
+      (cluster.export/reidentify! (io/file root "store"))
+      root)
+    (do
+      (cluster/refresh-source! (str root))
+      (str root))))
+
+(defn populate-published-operator-root!
+  "Populate an operator root from the runner's immutable current-src base."
+  [root]
+  (if-let [base (System/getProperty "seon.test.published-base")]
+    (let [store (io/file root "data" "clusters" "store")]
+      (clone-directory! (io/file base "store") store)
+      (cluster.export/reidentify! store)
+      (str root))
+    (do
+      (cluster/refresh-source! (str (io/file root "data" "clusters")))
+      (str root))))
 
 (def committed
   "Returned when a boundary expected to refuse instead commits."

@@ -2,10 +2,11 @@
   "The opt-in JVM test-result fact sink."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :as test :refer [deftest is testing]]
             [seon.config :as config]
             [seon.db :as db]
             [seon.cluster.agent :as agent]
+            [seon.cluster.boot-test]
             [seon.test-runner-failure-fixture]
             [seon.test.runner :as runner]
             [seon.test-support :as test-support])
@@ -95,6 +96,14 @@
         "one root-owning worker group has no concurrent execution shape")
     (is (true? @cross-group-overlap?)
         "distinct root-owning worker groups remain deliberately concurrent")))
+
+(deftest boot-tests-have-no-namespace-wide-execution-shape
+  (let [namespace-object (find-ns 'seon.cluster.boot-test)
+        fixtures (meta namespace-object)]
+    (is (empty? (::test/once-fixtures fixtures)))
+    (is (seq (::test/each-fixtures fixtures)))
+    (is (not (#'runner/atomic-namespace-task? namespace-object))
+        "each boot test receives a private base clone and can be queued alone")))
 
 (deftest captures-one-pass-or-fail-value-per-test
   (let [result (captured-run)
