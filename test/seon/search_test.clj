@@ -49,7 +49,21 @@
               {predicate-symbol @(requiring-resolve predicate-symbol)}))
             generated (mg/sample compiled {:seed 2026080604 :size 20})]
         (is (seq generated))
-        (is (every? #(m/validate compiled %) generated))))))
+        (is (every? #(m/validate compiled %) generated))))
+    (test-support/with-database
+      (fn [connection]
+        (let [stored
+              (edn/read-string
+               (:seon.fn/spec
+                (db/pull @connection
+                         [:seon.fn/spec]
+                         [:seon.fn/sym "seon.search/index-step"])))
+              stored-values (set (tree-seq coll? seq stored))]
+          (is (contains? stored-values 'seon.search/ping-map-fn?))
+          (is (contains? stored-values 'seon.search/ping-map-fn-generator))
+          (is (contains? stored-values 'seon.search/datahike-datom?))
+          (is (contains? stored-values
+                         'seon.search/datahike-datom-generator)))))))
 
 (deftest tokenization-follows-natural-name-separators
   (is (= ["invoice" "line" "item" "count"]

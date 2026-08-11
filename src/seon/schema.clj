@@ -303,11 +303,11 @@
                         (symbol? value)
                         (vector? value)))))
         canonical
-        (letfn [(canonicalize [value predicate-reference?]
+        (letfn [(canonicalize [value reference-kind]
                   (cond
                     (callable? value)
                     (let [predicate (callable-symbol value)]
-                      (if predicate-reference?
+                      (if reference-kind
                         predicate
                         [:fn predicate]))
 
@@ -317,7 +317,8 @@
                             (if (map? (second value)) 2 1))]
                       (mapv (fn [index child]
                               (canonicalize child
-                                            (= predicate-index index)))
+                                            (when (= predicate-index index)
+                                              :predicate)))
                             (range)
                             value))
 
@@ -336,13 +337,15 @@
                                       :seon.schema/value v
                                       :seon.error/kind :core-bug})))
                                  [(canonicalize k false)
-                                  (canonicalize v (= :gen/gen k))]))
+                                  (canonicalize v
+                                                (when (= :gen/gen k)
+                                                  :generator))]))
                           value)
 
                     (set? value)
                     (into #{} (map #(canonicalize % false)) value)
 
-                    (and predicate-reference?
+                    (and (= :predicate reference-kind)
                          (seq? value)
                          (= 'quote (first value))
                          (nil? (next (next value)))
