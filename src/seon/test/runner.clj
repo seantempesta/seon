@@ -1190,8 +1190,8 @@
   cluster, then exit zero exactly when no test failed or errored."
   {:malli/schema
    [:=> [:cat :seon.boot/cluster-name :seon.boot/root :string :string
-         [:* :string]]
-    :nil]}
+         [:sequential :string]]
+    :int]}
   [cluster-name root git-sha selection-mode namespace-names]
   (when-not (contains? selection-modes selection-mode)
     (throw
