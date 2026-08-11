@@ -1,16 +1,19 @@
 (ns seon.test.runner
   "Run the JVM gate and optionally commit per-test result facts."
   (:refer-clojure :exclude [run!])
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :as test]
             [seon.config :as config]
             [seon.db :as db]
             [seon.test.selection :as selection])
-  (:import (java.lang ProcessHandle Runtime Thread)
+  (:import (java.io BufferedReader PrintWriter StringWriter)
+           (java.lang Process ProcessBuilder$Redirect ProcessHandle Runtime Thread)
            (java.lang.management ManagementFactory ThreadInfo)
            (java.time Instant)
-           (java.util.concurrent Executors ThreadFactory TimeUnit))
+           (java.util.concurrent Executors LinkedBlockingQueue ThreadFactory
+                                 TimeUnit))
   (:gen-class))
 
 (defn- var-symbol
@@ -437,6 +440,55 @@
    {::platform [] ::selected [] ::skipped [] ::unreached []}
    (test-vars-in namespaces)))
 
+(defn- atomic-namespace-task?
+  [namespace-object]
+  (or (seq (::test/once-fixtures (meta namespace-object)))
+      (find-var (symbol (str (ns-name namespace-object)) "test-ns-hook"))))
+
+(defn- test-tasks
+  "Derived worker tasks preserving namespace-wide fixture boundaries."
+  [all-vars selected-vars]
+  (let [ordinal-by-symbol
+        (into {} (map-indexed (fn [ordinal test-var]
+                               [(var-symbol test-var) ordinal])) all-vars)
+        selected-by-namespace (group-by (comp :ns meta) selected-vars)]
+    (->> selected-by-namespace
+         (mapcat
+          (fn [[namespace-object namespace-vars]]
+            (let [ordered (sort-by (comp ordinal-by-symbol var-symbol)
+                                   namespace-vars)]
+              (if (atomic-namespace-task? namespace-object)
+                [ordered]
+                (mapv vector ordered)))))
+         (map (fn [task-vars]
+                (let [symbols (mapv (comp str var-symbol) task-vars)]
+                  {::task-id (str (random-uuid))
+                   ::task-ordinal
+                   (apply min (map #(ordinal-by-symbol (var-symbol %))
+                                   task-vars))
+                   ::task-namespace
+                   (str (ns-name (:ns (meta (first task-vars)))))
+                   ::task-symbols symbols
+                   ::task-long? (boolean (some long-reason task-vars))})))
+         (sort-by (juxt (comp not ::task-long?) ::task-ordinal))
+         vec)))
+
+(defn- indexed-test-symbols
+  [manifest]
+  (into #{}
+        (keep :seon.test/sym)
+        (mapcat :seon.fn.file/rows
+                (:seon.fn.manifest/artifacts manifest))))
+
+(defn- split-resolved-tasks
+  [manifest tasks]
+  (let [indexed (indexed-test-symbols manifest)]
+    (group-by (fn [task]
+                (if (every? indexed (::task-symbols task))
+                  ::resolved
+                  ::unresolved))
+              tasks)))
+
 (defn- run-selected-tests
   [namespaces selected-vars]
   (let [selected-by-namespace (group-by (comp :ns meta) selected-vars)]
@@ -533,6 +585,132 @@
       :seon.test.runner/summary summary
       :seon.test.runner/results (captured-results @capture)}
       stopped-after (assoc ::stopped-after stopped-after))))
+
+(defn- task-summary
+  [raw-summary]
+  {::test-count (:test raw-summary)
+   ::pass-count (:pass raw-summary)
+   ::fail-count (:fail raw-summary)
+   ::error-count (:error raw-summary)})
+
+(defn- resolve-task-vars
+  [task]
+  (mapv (fn [test-symbol]
+          (or (find-var (symbol test-symbol))
+              (throw
+               (ex-info "A worker could not resolve a selected test Var."
+                        {:seon.error/kind ::unresolved-test-var
+                         :seon.test/sym test-symbol}))))
+        (::task-symbols task)))
+
+(defn- run-task!
+  "Run one worker task with all output captured as attributed data."
+  [task]
+  (let [test-vars (resolve-task-vars task)
+        namespace-name (symbol (::task-namespace task))
+        options (select-keys
+                 (config/defaults)
+                 [:seon.config.eval.result/blob-threshold
+                  :seon.print/length
+                  :seon.print/level])
+        capture (atom {::order [] ::results {}})
+        reported-signatures (atom #{})
+        output (StringWriter.)
+        started-at (Instant/now)
+        started-nanos (System/nanoTime)
+        default-report test/report]
+    (try
+      (let [raw-summary
+            (binding [*out* output
+                      *err* output
+                      test/*test-out* output
+                      test/report
+                      (fn [event]
+                        (capture-event! options capture #{namespace-name} event)
+                        (report-event! options default-report
+                                       reported-signatures event))]
+              (let [summary (run-selected-tests [namespace-name] test-vars)]
+                (test/do-report (assoc summary :type :summary))
+                summary))]
+        (assoc task
+               ::task-started-at (str started-at)
+               ::task-ended-at (str (Instant/now))
+               ::task-elapsed-ms
+               (quot (- (System/nanoTime) started-nanos) 1000000)
+               ::task-summary (task-summary raw-summary)
+               ::task-results (captured-results @capture)
+               ::task-output (bounded-text options (str output))))
+      (catch Throwable failure
+        (assoc task
+               ::task-started-at (str started-at)
+               ::task-ended-at (str (Instant/now))
+               ::task-elapsed-ms
+               (quot (- (System/nanoTime) started-nanos) 1000000)
+               ::task-summary {::test-count 0 ::pass-count 0
+                               ::fail-count 0 ::error-count 1}
+               ::task-results
+               [{:seon.test/sym (first (::task-symbols task))
+                 :seon.ns/name namespace-name
+                 :seon.test.result/outcome :fail
+                 :seon.test.failure/message
+                 (bounded-text options
+                               (str "Worker task failed outside a test Var: "
+                                    (.getName (class failure)) ": "
+                                    (or (ex-message failure) "")))}]
+               ::task-output
+               (bounded-text options
+                             (str output "\n" (throwable-face options failure
+                                                               (throwable-signature failure)))))))))
+
+(defn- write-protocol!
+  [^PrintWriter writer value]
+  (.println writer (pr-str value))
+  (.flush writer))
+
+(defn- worker-command-loop!
+  "Read and execute worker commands serially until explicitly stopped."
+  [worker-id ^BufferedReader reader ^PrintWriter writer]
+  (write-protocol! writer {::worker-event :ready ::worker-id worker-id})
+  (loop []
+    (when-let [line (.readLine reader)]
+      (let [command (edn/read-string line)]
+        (case (::worker-command command)
+          :initialize
+          (let [namespaces (mapv symbol (::worker-namespaces command))]
+            (doseq [namespace-name namespaces]
+              (require namespace-name))
+            (write-protocol! writer
+                             {::worker-event :initialized
+                              ::worker-id worker-id
+                              ::worker-namespace-count (count namespaces)})
+            (recur))
+
+          :run
+          (do
+            (write-protocol! writer
+                             (assoc (run-task! (::worker-task command))
+                                    ::worker-event :task-complete
+                                    ::worker-id worker-id))
+            (recur))
+
+          :stop
+          (write-protocol! writer
+                           {::worker-event :stopped ::worker-id worker-id})
+
+          (throw
+           (ex-info "A test worker received an unknown command."
+                    {:seon.error/kind ::unknown-worker-command
+                     ::command command})))))))
+
+(defn- worker-main!
+  [worker-id]
+  (let [protocol-out (PrintWriter. System/out true)
+        reader (io/reader System/in)]
+    ;; Only the protocol uses stdout. Test and dependency output goes to the
+    ;; worker's attributed stderr log even when a library writes System/out.
+    (System/setOut System/err)
+    (binding [*out* *err*]
+      (worker-command-loop! worker-id reader protocol-out))))
 
 (defn run!
   "Run namespaces through `clojure.test` and return per-test values.
@@ -692,18 +870,13 @@
 
 (defn- reaching-selection
   "Bulk-tier test symbols for one set of changed repository-relative paths."
-  [progress changed-paths]
-  (let [build-manifest (requiring-resolve 'seon.fn/build-manifest)
-        relative (requiring-resolve 'seon.test.selection/manifest-relative-artifacts)]
-    (announce! progress
-               (str "SELECT building the program graph for "
-                    (count changed-paths) " changed path(s)"))
-    (let [manifest (build-manifest {:seon.fn/roots selection/graph-roots})
-          artifacts (relative "." manifest)
+  [manifest changed-paths]
+  (let [relative (requiring-resolve 'seon.test.selection/manifest-relative-artifacts)
+        artifacts (relative "." manifest)
           tests (selection/reaching-tests artifacts changed-paths)]
-      {::symbols (set tests)
-       ::reason (str (count tests) " test(s) reach "
-                     (count changed-paths) " changed path(s)")})))
+    {::symbols (set tests)
+     ::reason (str (count tests) " test(s) reach "
+                   (count changed-paths) " changed path(s)" )}))
 
 (defn- bulk-selection
   "Resolve the bulk tier: every eligible test, a reaching subset, or none.
@@ -711,7 +884,7 @@
   Widening is loud and named. A missing basis, a removed file, or a change to
   a declared gate input no call edge can reach all widen to every eligible
   test rather than guessing a narrower answer."
-  [selection-mode progress]
+  [selection-mode manifest]
   (case selection-mode
     ("all" "full") {::symbols :all
                     ::reason (str "the " selection-mode " tier")
@@ -724,7 +897,7 @@
           {::symbols :all
            ::reason (str "changed gate input outside the program graph: "
                          (str/join ", " (take 5 widening)))}
-          (reaching-selection progress explicit))
+          (reaching-selection manifest explicit))
         (if-let [basis (selection/read-basis (source-root))]
           (let [current (selection/input-digests ".")
                 {changed :seon.test.selection/changed
@@ -750,7 +923,7 @@
                  ::reason (str "changed gate input outside the program graph: "
                                (str/join ", " (take 5 widening)))
                  ::digests current}
-                (assoc (reaching-selection progress changed)
+                (assoc (reaching-selection manifest changed)
                        ::digests current
                        ::changed changed))))
           {::symbols :all
@@ -770,7 +943,243 @@
   (println "bin/test: recorded a new green basis over"
            (count digests) "declared inputs"))
 
-(defn -main
+(defn- worker-count
+  []
+  (max 1 (quot (.availableProcessors (Runtime/getRuntime)) 2)))
+
+(defn- worker-parent
+  []
+  (io/file (or (System/getProperty "seon.test.worker-parent")
+               (str (io/file (System/getProperty "seon.test.root")
+                             "workers")))))
+
+(defn- worker-checkout
+  [worker-id]
+  (io/file (worker-parent) worker-id))
+
+(defn- start-worker!
+  [worker-id checkout-root operator-root]
+  (.mkdirs (io/file operator-root "logs"))
+  (let [error-log (io/file operator-root "logs" "worker-stderr.log")
+        command [(or (System/getenv "SEON_TEST_CLOJURE") "clojure")
+                 (str "-J-Dseon.operator.root=" (.getCanonicalPath operator-root))
+                 (str "-J-Dseon.test.root=" (.getCanonicalPath operator-root))
+                 (str "-J-Dseon.test.source-root=" (source-root))
+                 "-M:test" "-m" "seon.test.runner" "--worker" worker-id]
+        builder (doto (ProcessBuilder. ^java.util.List command)
+                  (.directory checkout-root)
+                  (.redirectError
+                   (ProcessBuilder$Redirect/appendTo error-log)))
+        process (.start builder)
+        worker {::worker-id worker-id
+                ::worker-process process
+                ::worker-reader (io/reader (.getInputStream process))
+                ::worker-writer (PrintWriter. (.getOutputStream process) true)
+                ::worker-checkout (.getCanonicalPath checkout-root)
+                ::worker-root (.getCanonicalPath operator-root)
+                ::worker-error-log (.getCanonicalPath error-log)}
+        ready-line (.readLine ^BufferedReader (::worker-reader worker))]
+    (when-not ready-line
+      (throw
+       (ex-info "A test worker exited before publishing readiness."
+                {::worker-id worker-id
+                 ::worker-exit (when-not (.isAlive process)
+                                 (.exitValue process))
+                 ::worker-error-log (::worker-error-log worker)})))
+    (let [ready (edn/read-string ready-line)]
+      (when-not (= :ready (::worker-event ready))
+        (throw
+         (ex-info "A test worker published an invalid readiness value."
+                  {::worker-id worker-id ::worker-ready ready}))))
+    worker))
+
+(defn- worker-rpc!
+  [worker command]
+  (write-protocol! (::worker-writer worker) command)
+  (if-let [line (.readLine ^BufferedReader (::worker-reader worker))]
+    (edn/read-string line)
+    (throw
+     (ex-info "A test worker exited without returning its task result."
+              {::worker-id (::worker-id worker)
+               ::worker-exit
+               (when-not (.isAlive ^Process (::worker-process worker))
+                 (.exitValue ^Process (::worker-process worker)))
+               ::worker-error-log (::worker-error-log worker)}))))
+
+(defn- initialize-worker!
+  [worker namespace-names]
+  (let [result (worker-rpc!
+                worker
+                {::worker-command :initialize
+                 ::worker-namespaces (mapv str namespace-names)})]
+    (when-not (= :initialized (::worker-event result))
+      (throw
+       (ex-info "A test worker refused namespace initialization."
+                {::worker-id (::worker-id worker)
+                 ::worker-result result})))
+    worker))
+
+(defn- stop-process-tree!
+  [^Process process]
+  (doseq [^ProcessHandle descendant
+          (reverse (vec (.toList (.descendants (.toHandle process)))))]
+    (when (.isAlive descendant)
+      (.destroy descendant)))
+  (when (.isAlive process)
+    (.destroy process))
+  (when-not (.waitFor process 10 TimeUnit/SECONDS)
+    (doseq [^ProcessHandle descendant
+            (reverse (vec (.toList (.descendants (.toHandle process)))))]
+      (when (.isAlive descendant)
+        (.destroyForcibly descendant)))
+    (.destroyForcibly process)
+    (.waitFor process 10 TimeUnit/SECONDS)))
+
+(defn- stop-worker!
+  [worker]
+  (let [process ^Process (::worker-process worker)]
+    (when (.isAlive process)
+      (try
+        (worker-rpc! worker {::worker-command :stop})
+        (catch Throwable _))
+      (stop-process-tree! process))))
+
+(defn- drain-worker-tasks!
+  "Execute tasks one at a time until `next-task` returns nil."
+  [next-task execute-task!]
+  (loop [results []]
+    (if-let [task (next-task)]
+      (recur (conj results (execute-task! task)))
+      results)))
+
+(defn- execute-worker-task!
+  [progress worker task]
+  (announce! progress
+             (str "BEGIN worker=" (::worker-id worker)
+                  " task=" (str/join "," (::task-symbols task))))
+  (let [result (worker-rpc! worker
+                            {::worker-command :run ::worker-task task})]
+    (announce! progress
+               (str "END worker=" (::worker-id worker)
+                    " elapsed-ms=" (::task-elapsed-ms result)
+                    " task=" (str/join "," (::task-symbols task))))
+    result))
+
+(defn- task-red?
+  [task-result]
+  (pos? (+ (get-in task-result [::task-summary ::fail-count] 0)
+           (get-in task-result [::task-summary ::error-count] 0))))
+
+(defn- run-task-pool!
+  [progress workers serial-worker resolved-tasks unresolved-tasks]
+  (let [queue (LinkedBlockingQueue.)
+        finished (Object.)
+        executor (Executors/newVirtualThreadPerTaskExecutor)]
+    (doseq [task resolved-tasks]
+      (.put queue task))
+    (doseq [_ workers]
+      (.put queue finished))
+    (try
+      (let [parallel-futures
+            (mapv
+             (fn [worker]
+               (.submit
+                executor
+                ^java.util.concurrent.Callable
+                (fn []
+                  (drain-worker-tasks!
+                   (fn []
+                     (let [task (.take queue)]
+                       (when-not (identical? finished task) task)))
+                   #(execute-worker-task! progress worker %)))))
+             workers)
+            ;; The serial remainder uses the same sequential worker loop,
+            ;; without a second scheduler or concurrent command on its root.
+            serial-future
+            (when (seq unresolved-tasks)
+              (.submit
+               executor
+               ^java.util.concurrent.Callable
+               (fn []
+                 (mapv #(execute-worker-task! progress serial-worker %)
+                       unresolved-tasks))))
+            parallel-results (mapcat #(.get %) parallel-futures)
+            serial-results (if serial-future (.get serial-future) [])]
+        (vec (concat parallel-results serial-results)))
+      (finally
+        (.shutdownNow executor)))))
+
+(defn- confirmation-root
+  [task]
+  (doto (io/file (worker-checkout "confirmation")
+                 "operator-roots" (::task-id task))
+    (.mkdirs)))
+
+(defn- confirm-parallel-failure!
+  [progress namespace-names task-result]
+  (let [task (select-keys task-result
+                          [::task-id ::task-ordinal ::task-namespace
+                           ::task-symbols ::task-long?])
+        checkout (worker-checkout "confirmation")
+        root (confirmation-root task)
+        worker (start-worker! (str "confirmation-" (::task-ordinal task))
+                              checkout root)]
+    (try
+      (initialize-worker! worker namespace-names)
+      (announce! progress
+                 (str "CONFIRM isolated task="
+                      (str/join "," (::task-symbols task))))
+      (let [confirmation (execute-worker-task! progress worker task)
+            classification (if (task-red? confirmation)
+                             :reproducible
+                             :parallel-only)]
+        (println "bin/test: confirmation" (name classification)
+                 (str/join "," (::task-symbols task)))
+        (assoc task-result
+               ::parallel-failure classification
+               ::confirmation-result confirmation))
+      (finally
+        (stop-worker! worker)))))
+
+(defn- summarize-task-results
+  [task-results]
+  (reduce
+   (fn [summary result]
+     (merge-with + summary (::task-summary result)))
+   {::test-count 0 ::pass-count 0 ::fail-count 0 ::error-count 0}
+   task-results))
+
+(defn- print-task-failures!
+  [task-results]
+  (doseq [result (sort-by ::task-ordinal (filter task-red? task-results))]
+    (println)
+    (println "bin/test: attributed output for"
+             (str/join "," (::task-symbols result)))
+    (print (::task-output result))))
+
+(defn- run-parallel-stage!
+  [progress namespace-names manifest workers serial-worker tasks]
+  (let [{::keys [resolved unresolved]} (split-resolved-tasks manifest tasks)]
+    (when (seq unresolved)
+      (println "bin/test:" (count unresolved)
+               "task(s) lack complete :seon.test rows; running serially:")
+      (doseq [task unresolved]
+        (println " -" (str/join "," (::task-symbols task)))))
+    (let [initial (run-task-pool! progress workers serial-worker
+                                  resolved unresolved)
+          confirmed
+          (mapv (fn [result]
+                  (if (and (task-red? result)
+                           (some #(= (::task-id result) (::task-id %))
+                                 resolved))
+                    (confirm-parallel-failure! progress namespace-names result)
+                    result))
+                initial)]
+      (print-task-failures! confirmed)
+      {::task-results confirmed
+       ::task-summary (summarize-task-results confirmed)})))
+
+(defn- coordinator-main!
   "Run selected tests with progress and a liveness backstop.
 
   Every tiered invocation runs the declared `:seon.test/platform` moving-part
@@ -783,7 +1192,7 @@
    [:=> [:cat :seon.boot/cluster-name :seon.boot/root :string :string
          [:* :string]]
     :nil]}
-  [cluster-name root git-sha selection-mode & namespace-names]
+  [cluster-name root git-sha selection-mode namespace-names]
   (when-not (contains? selection-modes selection-mode)
     (throw
      (ex-info
@@ -798,26 +1207,60 @@
         suite-start (Instant/now)
         configured-silence-seconds (silence-seconds)
         backstop (start-liveness-backstop!
-                  progress configured-silence-seconds suite-start)]
+                  progress configured-silence-seconds suite-start)
+        pool-size (if (= "explicit" selection-mode) 1 (worker-count))
+        worker-ids (conj (mapv #(str "pool-" %) (range 1 (inc pool-size)))
+                         "serial")
+        workers* (atom [])
+        shutdown-hook
+        (Thread. (fn [] (doseq [worker @workers*] (stop-worker! worker)))
+                 "seon-test-worker-reaper")
+        launch-executor (Executors/newVirtualThreadPerTaskExecutor)]
+    (.addShutdownHook (Runtime/getRuntime) shutdown-hook)
     (try
       (announce! progress
                  (str "START pid=" (.pid (ProcessHandle/current))
                       " git=" git-sha
                       " namespaces=" (count namespaces)
+                      " workers=" pool-size
                       " silence-backstop=" configured-silence-seconds "s"))
-      (doseq [[index test-namespace] (map-indexed vector namespaces)]
-        (announce! progress
-                   (str "LOAD " (inc index) "/" (count namespaces)
-                        " " test-namespace))
-        (require test-namespace)
-        (announce! progress
-                   (str "LOADED " (inc index) "/" (count namespaces)
-                        " " test-namespace)))
-      (let [explicit? (= "explicit" selection-mode)
-            bulk (when-not explicit? (bulk-selection selection-mode progress))
+      (let [worker-futures
+            (mapv
+             (fn [worker-id]
+               (.submit
+                launch-executor
+                ^java.util.concurrent.Callable
+                (fn []
+                  (let [checkout (worker-checkout worker-id)
+                        worker (start-worker! worker-id checkout checkout)]
+                    (swap! workers* conj worker)
+                    (initialize-worker! worker namespaces)))))
+             worker-ids)]
+        ;; Coordinator namespace loading and manifest construction overlap the
+        ;; workers' JVM startup and namespace loading.
+        (doseq [[index test-namespace] (map-indexed vector namespaces)]
+          (announce! progress
+                     (str "LOAD " (inc index) "/" (count namespaces)
+                          " " test-namespace))
+          (require test-namespace)
+          (announce! progress
+                     (str "LOADED " (inc index) "/" (count namespaces)
+                          " " test-namespace)))
+        (announce! progress "SELECT building the program graph")
+        (let [build-manifest (requiring-resolve 'seon.fn/build-manifest)
+              manifest (build-manifest
+                        {:seon.fn/roots selection/graph-roots})
+              workers (mapv #(.get %) worker-futures)
+              pool-workers (filterv #(str/starts-with? (::worker-id %) "pool-")
+                                    workers)
+              serial-worker (first (filter #(= "serial" (::worker-id %))
+                                           workers))
+              explicit? (= "explicit" selection-mode)
+              bulk (when-not explicit? (bulk-selection selection-mode manifest))
+              all-vars (test-vars-in namespaces)
             {::keys [platform selected skipped unreached]}
             (if explicit?
-              {::platform [] ::selected (test-vars-in namespaces)
+              {::platform [] ::selected all-vars
                ::skipped [] ::unreached []}
               (test-selection namespaces
                               {::include-long? (= "full" selection-mode)
@@ -829,25 +1272,56 @@
                                 "; platform " (count platform)
                                 ", bulk " (count selected)
                                 ", not reached " (count unreached))))
-            run-result
-            (run-request! {:seon.test.runner/namespaces namespaces
-                           :seon.test.run/id (str (random-uuid))
-                           :seon.test.run/at (java.util.Date.)
-                           :seon.test.run/git-sha git-sha}
-                          progress
-                          [{::tier-name :platform ::vars platform
-                            ::fail-fast? true}
-                           {::tier-name :bulk ::vars selected}])
+              platform-tasks (test-tasks all-vars platform)
+              selected-tasks (test-tasks all-vars selected)
+              _ (announce! progress
+                           (str "TIER platform " (count platform) " tests"))
+              platform-outcome
+              (run-parallel-stage! progress namespaces manifest pool-workers
+                                   serial-worker platform-tasks)
+              platform-red? (pos? (+ (get-in platform-outcome
+                                              [::task-summary ::fail-count])
+                                     (get-in platform-outcome
+                                             [::task-summary ::error-count])))
+              bulk-outcome
+              (if platform-red?
+                {::task-results []
+                 ::task-summary {::test-count 0 ::pass-count 0
+                                 ::fail-count 0 ::error-count 0}}
+                (do
+                  (announce! progress
+                             (str "TIER bulk " (count selected) " tests"))
+                  (run-parallel-stage! progress namespaces manifest pool-workers
+                                       serial-worker selected-tasks)))
+              task-results (->> (concat (::task-results platform-outcome)
+                                        (::task-results bulk-outcome))
+                                (sort-by ::task-ordinal)
+                                vec)
+              summary (merge-with + (::task-summary platform-outcome)
+                                  (::task-summary bulk-outcome))
+              run-result
+              {:seon.test.run/id (str (random-uuid))
+               :seon.test.run/at (java.util.Date.)
+               :seon.test.run/git-sha git-sha
+               :seon.test.runner/summary summary
+               :seon.test.runner/results
+               (into [] (mapcat ::task-results) task-results)
+               ::stopped-after (when platform-red? :platform)}
             _ (when-not (= "-" cluster-name)
                 (record! {:seon.test.runner/run-result run-result
                           :seon.boot/cluster-name cluster-name
                           :seon.boot/root root}))
-            summary (:seon.test.runner/summary run-result)
             green? (zero? (+ (::fail-count summary) (::error-count summary)))
             failures (->> (:seon.test.runner/results run-result)
                           (filter #(= :fail (:seon.test.result/outcome %)))
                           (map :seon.test/sym)
                           sort)]
+          (println)
+          (println "Ran" (::test-count summary) "tests containing"
+                   (+ (::pass-count summary) (::fail-count summary))
+                   "assertions.")
+          (println (::fail-count summary) "failures,"
+                   (::error-count summary) "errors.")
         (when-let [stopped (::stopped-after run-result)]
           (println)
           (println "bin/test: PLATFORM TIER RED —" (name stopped)
@@ -862,6 +1336,23 @@
         (when (and green? (::digests bulk))
           (record-green-basis! selection-mode git-sha (::digests bulk)))
         (flush)
-        (System/exit (if green? 0 1)))
+          (if green? 0 1)))
       (finally
-        (.shutdownNow backstop)))))
+        (doseq [worker @workers*]
+          (stop-worker! worker))
+        (.shutdownNow launch-executor)
+        (.shutdownNow backstop)
+        (try
+          (.removeShutdownHook (Runtime/getRuntime) shutdown-hook)
+          (catch IllegalStateException _))))))
+
+(defn -main
+  "Run the coordinator, or one internal long-lived worker."
+  [& arguments]
+  (if (= "--worker" (first arguments))
+    (worker-main! (second arguments))
+    (let [[cluster-name root git-sha selection-mode & namespace-names]
+          arguments]
+      (System/exit
+       (coordinator-main! cluster-name root git-sha selection-mode
+                          namespace-names)))))

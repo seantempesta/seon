@@ -277,30 +277,52 @@ bb --config "$source_root/bb.edn" -e '
   nil' "$run_parent"
 
 run_root=$(mktemp -d "$run_parent/run.XXXXXX")
-mkdir -p "$run_root/data" "$run_root/logs" "$run_root/target" "$run_root/tmp"
 
-while IFS= read -r entry; do
-  case "$entry" in
-    data|logs|target|tmp) ;;
-    bin|config|resources|script|src|test)
-      case "$(uname -s)" in
-        Darwin) cp -cR "$source_root/$entry" "$run_root/$entry" ;;
-        Linux) cp -a --reflink=auto "$source_root/$entry" "$run_root/$entry" ;;
-        *) cp -pR "$source_root/$entry" "$run_root/$entry" ;;
-      esac
-      ;;
-    *) ln -s "$source_root/$entry" "$run_root/$entry" ;;
-  esac
-done < <(git -C "$source_root" ls-files | awk -F/ '{print $1}' | sort -u)
+populate_checkout_root() {
+  local target_root=$1 entry
+  mkdir -p "$target_root/data" "$target_root/logs" \
+    "$target_root/target" "$target_root/tmp"
+  while IFS= read -r entry; do
+    case "$entry" in
+      data|logs|target|tmp) ;;
+      bin|config|resources|script|src|test)
+        case "$(uname -s)" in
+          Darwin) cp -cR "$source_root/$entry" "$target_root/$entry" ;;
+          Linux) cp -a --reflink=auto "$source_root/$entry" "$target_root/$entry" ;;
+          *) cp -pR "$source_root/$entry" "$target_root/$entry" ;;
+        esac
+        ;;
+      *) ln -s "$source_root/$entry" "$target_root/$entry" ;;
+    esac
+  done < <(git -C "$source_root" ls-files | awk -F/ '{print $1}' | sort -u)
 
-ln -s "$source_root/.git" "$run_root/.git"
-if [ -e "$source_root/.env" ]; then
-  ln -s "$source_root/.env" "$run_root/.env"
+  ln -s "$source_root/.git" "$target_root/.git"
+  if [ -e "$source_root/.env" ]; then
+    ln -s "$source_root/.env" "$target_root/.env"
+  fi
+  if [ -d "$source_root/target/dev-dependency-classes" ]; then
+    ln -s "$source_root/target/dev-dependency-classes" \
+      "$target_root/target/dev-dependency-classes"
+  fi
+}
+
+populate_checkout_root "$run_root"
+
+logical_processors=$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)
+if ! [[ "$logical_processors" =~ ^[1-9][0-9]*$ ]]; then
+  logical_processors=2
 fi
-if [ -d "$source_root/target/dev-dependency-classes" ]; then
-  ln -s "$source_root/target/dev-dependency-classes" \
-    "$run_root/target/dev-dependency-classes"
+worker_count=$((logical_processors / 2))
+if [ "$worker_count" -lt 1 ]; then
+  worker_count=1
 fi
+worker_parent="$run_root/workers"
+mkdir -p "$worker_parent"
+for worker_number in $(seq 1 "$worker_count"); do
+  populate_checkout_root "$worker_parent/pool-$worker_number"
+done
+populate_checkout_root "$worker_parent/serial"
+populate_checkout_root "$worker_parent/confirmation"
 
 if [ -z "$result_root" ]; then
   result_root="$run_root/data/clusters"
@@ -394,6 +416,7 @@ clojure \
   "-J-Dseon.test.root=$run_root" \
   "-J-Dseon.test.source-root=$source_root" \
   "-J-Dseon.test.changed-paths-file=$changed_paths_file" \
+  "-J-Dseon.test.worker-parent=$worker_parent" \
   -M:test -m seon.test.runner \
   "${result_cluster:--}" "$result_root" "$git_sha" "$selection_mode" \
   "${namespaces[@]}" &

@@ -41,6 +41,61 @@
       (recur (+ match-at (count fragment)) (inc found))
       found)))
 
+(defn- next-task
+  [tasks]
+  (let [[before _] (swap-vals! tasks #(if (seq %) (subvec % 1) %))]
+    (first before)))
+
+(deftest root-owning-tasks-never-co-run-inside-one-worker-group
+  (let [group-a-tasks (atom [:a-1 :a-2])
+        group-b-tasks (atom [:b-1])
+        group-a-active (atom 0)
+        group-a-maximum (atom 0)
+        total-active (atom 0)
+        cross-group-overlap? (atom false)
+        a-started (CountDownLatch. 1)
+        b-started (CountDownLatch. 1)
+        release-a (CountDownLatch. 1)
+        execute-a
+        (fn [task]
+          (let [active (swap! group-a-active inc)]
+            (swap! group-a-maximum max active)
+            (when (> (swap! total-active inc) 1)
+              (reset! cross-group-overlap? true))
+            (try
+              (when (= :a-1 task)
+                (.countDown a-started)
+                (is (.await b-started 10 TimeUnit/SECONDS)
+                    "the disjoint worker group must be able to overlap")
+                (is (.await release-a 10 TimeUnit/SECONDS)))
+              task
+              (finally
+                (swap! total-active dec)
+                (swap! group-a-active dec)))))
+        execute-b
+        (fn [task]
+          (is (.await a-started 10 TimeUnit/SECONDS))
+          (when (> (swap! total-active inc) 1)
+            (reset! cross-group-overlap? true))
+          (.countDown b-started)
+          (.countDown release-a)
+          (swap! total-active dec)
+          task)
+        group-a
+        (future
+          (#'runner/drain-worker-tasks!
+           #(next-task group-a-tasks) execute-a))
+        group-b
+        (future
+          (#'runner/drain-worker-tasks!
+           #(next-task group-b-tasks) execute-b))]
+    (is (= [:a-1 :a-2] @group-a))
+    (is (= [:b-1] @group-b))
+    (is (= 1 @group-a-maximum)
+        "one root-owning worker group has no concurrent execution shape")
+    (is (true? @cross-group-overlap?)
+        "distinct root-owning worker groups remain deliberately concurrent")))
+
 (deftest captures-one-pass-or-fail-value-per-test
   (let [result (captured-run)
         by-symbol (into {}
