@@ -55,7 +55,9 @@
        [{:seon.config.eval.result/blob-threshold 4096
          :seon.render.value/max-collection 8}])
       (let [payload (apply str (repeat 4000 \r))
-            window-heavy (admitted-result [payload])
+            window-heavy
+            (admitted-result
+             (bigint (apply str (repeat 4050 "9"))))
             window-light (admitted-result (vec (repeat 40 payload)))
             retained (settlement connection window-heavy)
             blobbed (settlement connection window-light)]
