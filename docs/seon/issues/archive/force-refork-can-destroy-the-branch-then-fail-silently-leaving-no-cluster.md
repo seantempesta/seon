@@ -1,6 +1,7 @@
 ---
 type: issue
-status: complete
+status: resolved
+severity: blocker
 tags: [issue, operator]
 ---
 
