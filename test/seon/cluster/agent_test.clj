@@ -42,6 +42,11 @@
   ;; namespace constructs names; boot's own constructor, fewer layers.
   (delay (test-support/environment "seon.cluster.agent-test")))
 
+(def ^:private shipped-eval-time-limit-ms
+  ;; Ordinary finite evaluation must stay ordinary under scheduler load.
+  ;; A shorter fixture-only limit changes the tested disposition.
+  (delay (:seon.config.eval/time-limit-ms (config/defaults))))
+
 
 (set! *warn-on-reflection* true)
 
@@ -122,7 +127,8 @@
                     :seon.config.eval.result/max-string 4096
                     :seon.config.eval.result/max-nodes 256}
                    :seon.sci.eval/ctx ctx
-                   :seon.config.eval/time-limit-ms 2000
+                   :seon.config.eval/time-limit-ms
+                   @shipped-eval-time-limit-ms
                    :seon.config/on-core-error :panic
                   :seon.cluster.run/process process}})}}
               :conns []
@@ -166,7 +172,7 @@
                          :seon.config.eval.result/max-collection 8
                          :seon.config.eval.result/max-string 4096
                          :seon.config.eval.result/max-nodes 256}
-   :seon.config.eval/time-limit-ms 2000
+   :seon.config.eval/time-limit-ms @shipped-eval-time-limit-ms
    :seon.config/on-core-error :panic
    :seon.config.error/recurrence-limit 3
    :seon.config.message/max-chain 16})
@@ -212,6 +218,23 @@
         (when (< attempt 200)
           (Thread/sleep 25)
           (recur (inc attempt))))))
+
+(defn- await-database-state!
+  "Return the first observed database value satisfying `accept?`.
+
+  The caller registers `event-source` before its initial derivation. A commit
+  between the connection read and the channel take is therefore queued, and
+  no wall clock can turn merely pending work into a false invariant verdict.
+  The test runner owns the outer loud backstop for a genuinely missing event."
+  [connection event-source accept?]
+  (loop [database @connection]
+    (if (accept? database)
+      database
+      (if-some [report (async/<!! event-source)]
+        (recur (:db-after report))
+        (throw
+         (ex-info "The database event source closed before the required state."
+                  {:seon.error/kind ::database-event-source-closed}))))))
 
 (defn- turn-ping
   [entry]
@@ -328,7 +351,7 @@
                  :seon.config.eval.result/max-string 4096
                  :seon.config.eval.result/max-nodes 256}
                 :seon.sci.eval/ctx ctx
-                :seon.sci.eval/time-limit-ms 2000
+                :seon.sci.eval/time-limit-ms @shipped-eval-time-limit-ms
                 :seon.config/on-core-error :panic}))]
         (is (= :seon.cluster.prompt/refused
                (:seon.error/kind failure)))
@@ -447,14 +470,13 @@
                 (doseq [[agent-id message-id] triggers]
                   (outside-trigger! connection agent-id message-id "work"))
                 (let [terminal
-                      (test-support/await-event!
+                      (await-database-state!
+                       connection
                        (:seon.cluster.agent-test/events events)
-                       ::parallel-turns-settled
-                       #(let [db (:db-after %)]
-                          (and (= (count triggers)
-                                  (count (answers-by-trigger db)))
-                               (quiescent? db agent-ids))))
-                      db (:db-after terminal)
+                       #(and (= (count triggers)
+                                (count (answers-by-trigger %)))
+                             (quiescent? % agent-ids)))
+                      db terminal
                       answers (answers-by-trigger db)
                       run-count (or (db/q '[:find (count ?run) . :where
                                            [?run :seon.cluster.run/id _]]
@@ -1351,7 +1373,19 @@
             _ (flow/resume armer-graph)
             ledger (atom [])
             created (atom [])
-            message-count (atom 0)]
+            message-count (atom 0)
+            agent-ids
+            (mapv #(str "ra-" %)
+                  (range (count (filter #{:create :create-and-message}
+                                        operations))))
+            expected-agent-ids (set agent-ids)
+            armed-event (async/promise-chan)
+            watch-key (random-uuid)
+            publish-armed!
+            (fn [state]
+              (when (= expected-agent-ids
+                       (set (keys (:seon.cluster.agent/armed state))))
+                (async/offer! armed-event state)))]
         (db/transact! connection
                     [(config-row "route-trial"
                                  {:seon.config.run/max-episode-runs 100})])
@@ -1371,56 +1405,70 @@
                           :seon.cluster.wake/fault-channel
                           (:seon.cluster.agent/fault-channel @routing)
                           :seon.cluster.wake/key ::route-trial})
-            (doseq [[op index] (map vector operations (range))]
-              (let [agent-id (str "ra-" (count @created))]
-                (case op
-                  :create
-                  (do (db/transact! connection
-                                  [(agent-row agent-id)])
-                      (swap! created conj agent-id))
+            (let [events (database-events connection ::routing-conservation)]
+              (add-watch routing watch-key
+                         (fn [_ _ _ current] (publish-armed! current)))
+              ;; Register before deriving current state: the empty-agent case
+              ;; is already complete, while every later arm swap publishes.
+              (publish-armed! @routing)
+              (try
+                (doseq [[op index] (map vector operations (range))]
+                  (let [agent-id (str "ra-" (count @created))]
+                    (case op
+                      :create
+                      (do (db/transact! connection
+                                        [(agent-row agent-id)])
+                          (swap! created conj agent-id))
 
-                  :create-and-message
-                  ;; the one-commit window the armer belt exists for:
-                  ;; the recipient's graph cannot exist yet
-                  (do (db/transact!
+                      :create-and-message
+                      ;; the one-commit window the armer belt exists for:
+                      ;; the recipient's graph cannot exist yet
+                      (do (db/transact!
+                           connection
+                           [(agent-row agent-id)
+                            {:seon.cluster.message/id
+                             (str "rm-" index)
+                             :seon.cluster.message/to
+                             {:seon.cluster.agent/id agent-id}
+                             :seon.cluster.message/content "hello, newborn"
+                             :seon.cluster.message/at (Date.)}])
+                          (swap! created conj agent-id)
+                          (swap! message-count inc))
+
+                      :message
+                      (when-let [target (first @created)]
+                        (outside-trigger! connection target
+                                          (str "rm-" index) "more work")
+                        (swap! message-count inc)))))
+                (when (nil? (async/<!! armed-event))
+                  (throw
+                   (ex-info "The routing watch closed before every agent armed."
+                            {:seon.error/kind ::routing-watch-closed})))
+                (let [db
+                      (await-database-state!
                        connection
-                       [(agent-row agent-id)
-                        {:seon.cluster.message/id
-                         (str "rm-" index)
-                         :seon.cluster.message/to
-                         {:seon.cluster.agent/id agent-id}
-                         :seon.cluster.message/content "hello, newborn"
-                         :seon.cluster.message/at (Date.)}])
-                      (swap! created conj agent-id)
-                      (swap! message-count inc))
-
-                  :message
-                  (when-let [target (first @created)]
-                    (outside-trigger! connection target
-                                      (str "rm-" index) "more work")
-                    (swap! message-count inc)))))
-            (let [agent-ids @created
-                  settled? (await-until
-                            #(and (= (set agent-ids)
-                                     (set (keys (:seon.cluster.agent/armed
-                                                 @routing))))
-                                  (quiescent? @connection agent-ids)))
-                  db @connection
-                  answers (answers-by-trigger db)]
-              {:settled? (boolean settled?)
-               :armed-once?
-               (= (count agent-ids)
-                  (count (:seon.cluster.agent/armed @routing)))
-               :no-unarmed-with-triggers?
-               (every? (fn [agent-id]
-                         (or (contains? (:seon.cluster.agent/armed
-                                         @routing) agent-id)
-                             (empty? (work/unanswered-triggers
-                                      db agent-id))))
-                       agent-ids)
-               :every-message-answered-once?
-               (and (= @message-count (count answers))
-                    (every? #(= 1 (val %)) answers))}))
+                       (:seon.cluster.agent-test/events events)
+                       #(and (= @message-count
+                                (count (answers-by-trigger %)))
+                             (quiescent? % agent-ids)))
+                      answers (answers-by-trigger db)]
+                  {:settled? true
+                   :armed-once?
+                   (= (count agent-ids)
+                      (count (:seon.cluster.agent/armed @routing)))
+                   :no-unarmed-with-triggers?
+                   (every? (fn [agent-id]
+                             (or (contains? (:seon.cluster.agent/armed
+                                             @routing) agent-id)
+                                 (empty? (work/unanswered-triggers
+                                          db agent-id))))
+                           agent-ids)
+                   :every-message-answered-once?
+                   (and (= @message-count (count answers))
+                        (every? #(= 1 (val %)) answers))})
+                (finally
+                  (remove-watch routing watch-key)
+                  (stop-database-events! connection events)))))
           (finally
             (wake/unlisten! {:seon.cluster.wake/connection connection
                              :seon.cluster.wake/key ::route-trial})
@@ -1442,6 +1490,31 @@
          :seed 2026072819)]
     (is (:pass? result)
         (str "shrunk counterexample: " (pr-str (:shrunk result))))))
+
+(deftest routing-conservation-waits-for-terminal-evidence
+  (let [provider-entered (CountDownLatch. 1)
+        release-provider (CountDownLatch. 1)
+        original recording-completer
+        held-completer
+        (fn [ledger text-fn]
+          (let [complete (original ledger text-fn)]
+            (fn [request]
+              (.countDown provider-entered)
+              (.await release-provider)
+              (complete request))))
+        verdict
+        (future
+          (with-redefs [recording-completer held-completer]
+            (routing-trial [:create-and-message])))]
+    (try
+      (test-support/await-event! provider-entered ::provider-entered)
+      (is (false? (realized? verdict))
+          "pending routed work is not classified as a conservation failure")
+      (.countDown release-provider)
+      (is (every? val
+                  (test-support/await-event! verdict ::terminal-evidence)))
+      (finally
+        (.countDown release-provider)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; 10. wait-closes-in-terminal-tx-test — seed 2026072820

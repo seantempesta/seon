@@ -5,7 +5,7 @@ severity: friction
 tags: [issue, testing, concurrency, operator]
 ---
 
-# Classify eleven parallel-only test failures by their shared resource
+# Classify parallel-only test failures by their shared resource
 
 ## Problem
 
@@ -15,6 +15,11 @@ when the runner immediately reran each test alone. The tests own isolated
 operator roots where applicable, so root identity alone does not explain the
 failures. Moving them into the serial remainder would hide either a production
 concurrency defect or an undeclared test resource and is not an admissible fix.
+
+Two agent generative properties later joined this class:
+`seon.cluster.agent-test/n-agent-parallel-turns-property` and
+`seon.cluster.agent-test/wake-routing-conservation-property`. They failed with
+different fixed-seed shrinks under load and passed direct and isolated reruns.
 
 ## Evidence
 
@@ -82,6 +87,38 @@ before attributing the failure to shared process state.
 
 That class is fixed by this issue's SCI regression. The other ten historical
 rows remain open for independent resource classification.
+
+The two agent properties are classified and fixed as the same test-local
+clock class, not as lost routing. The retained explicit namespace run at
+`82196a61b2ef0211c341491a820493315ecdc938` took 25m51s and failed both; the
+retained worker log carried no core fault. Neither `src/seon/cluster/agent.clj`
+nor `src/seon/cluster/wake.clj` changed after the last documented green agent
+suite. Both supplied routing shrinks passed directly with every named verdict
+true.
+
+The decisive probes held one correctly routed provider call beyond each
+property's local clock. The routing trial returned only `:settled? false`
+after its approximately five-second polling window; arming, trigger routing,
+and exactly-once answers were already or subsequently true, and orderly
+teardown observed the held turn complete. The parallel-turn trial threw only
+the shared 20-second test-event backstop, then orderly teardown observed the
+same held turn complete. Thus the specific interleaving was listener delivery
+→ armer derivation and route publication → mailbox prime → active turn held in
+the provider stub → test clock expiration → terminal transaction during
+orderly teardown. No wake was lost and no agent remained unarmed.
+
+`test/seon/cluster/agent_test.clj` now registers a routing-atom watch and a
+database listener before deriving current state, then waits on those observable
+events without an inner semantic clock. It also derives the evaluation limit
+from the shipped config instead of imposing a fixture-only 2,000ms limit. The
+held-provider regression proves pending work remains pending until terminal
+database evidence instead of becoming a false property verdict.
+
+This classification leaves the incremental invalidation listener design
+unchanged: its one-listener, nonparking, payload-free wake law was not the
+defect. Its future generative proof must likewise register interest before
+derivation and await observable render completion; a tuned polling interval
+must never classify a pending derivation as a lost invalidation.
 
 ## Owner
 
