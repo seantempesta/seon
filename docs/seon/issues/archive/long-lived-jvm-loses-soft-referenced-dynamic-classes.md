@@ -220,3 +220,13 @@ Resolved by the immutable dependency cache commits
 regression in `389afa77b`. The failed dependency owners now have reloadable
 bytes for the exact lifetime of every operator JVM, and the same constrained
 pressure scenario no longer loses them.
+
+The 2026-08-10 complete gate exposed a later vocabulary regression from
+`4a72cb066`: the operator began writing the current
+`:seon.operator.process-record/*` plus `:seon.boot/*` shape while
+`dev-cache/reap` still read the deleted `:seon.dev.process/*` keys. It
+therefore classified every recorded JVM as dead and could delete its exact
+cache directory. Commit `f23ae318a` makes the reaper consume the process
+record's one current shape and compare its instant-valued start identity by
+epoch millisecond. The original constrained lazy-class regression again
+passes all ten assertions.

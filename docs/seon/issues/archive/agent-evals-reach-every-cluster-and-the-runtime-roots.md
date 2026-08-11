@@ -294,3 +294,10 @@ metadata remains exactly equal, and instrumentation reads the original
 arglists (`test/seon/sci/eval_test.clj:307-360`). The maintained SCI focus
 passed 139 tests / 677 assertions under both Clojure 1.10.3 and 1.11.1; the
 combined Seon eval/instrument focus passed 55 tests / 246 assertions.
+
+The later shared-source-base optimization added two reviewed construction
+owners to the derived census. `seon.cluster/source-base!` returns only the
+fresh store and acquired base context it constructs, while
+`seon.sci.eval/fork-cluster-ctx` replaces custody with its explicitly supplied
+branch connection. Neither discovers an existing foreign cluster. Commit
+`b5e86f740` records those three output rows in the exact recurring census.

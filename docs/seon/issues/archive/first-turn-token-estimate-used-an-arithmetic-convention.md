@@ -58,3 +58,9 @@ Focused proof: `bin/test seon.ai-test seon.ai.tokens-test
 seon.cluster.prompt-test seon.dev.mcp-bridge-test
 seon.config-application-test` passed 81 tests / 510 assertions / 0 failures / 0
 errors. The config application census classifies the prior as next-turn live.
+
+The complete gate then caught one omitted declaration property: unlike every
+other AI dial, the new prior lacked `:seon.config/per-agent true`, so the
+derived agent overlay could not carry it. Commit `b539d0ecb` adds that property
+at the one leaf declaration; the overlay remains entirely derived, and the
+exact config-surface regression passes.
