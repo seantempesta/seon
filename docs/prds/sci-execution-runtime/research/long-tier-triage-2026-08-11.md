@@ -167,7 +167,7 @@ tests, and completed 1,109 tests / 8,961 assertions. Wall time was **389.67 s
 were:
 
 - shared publication, nine worker launches, namespace loading, and graph
-  selection: about 92.5 s before the platform tier;
+  selection: about 99.7 s before the platform tier;
 - platform tier: 33.825 s;
 - bulk tier through the last pool result: 173.283 s; and
 - four bounded concurrent isolated confirmations plus teardown: about 82.6 s.
