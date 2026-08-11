@@ -16,6 +16,29 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+**SUITE + PARALLEL RUNNER — 2026-08-10 night.** The suite went 80.5 min
+(80F/10E) → 62.1 min sequential (29F/3E) → **15:33 on the new parallel
+runner** (`be6db44da`..`c6275060c`: nine root-isolated workers, derived
+split, shared publication base, boot chain 15:18→3:25, platform tier
+34.4 s, utilization 7.9/9). Ceiling (owner: ≤5-8 min) NOT met — the gap
+is total work, next lever deeper base reuse. Every red from the clean
+gates has a landed fix (17 classes + the ten-var triage `8f9cf17bd` —
+forked ctxs shared kernel cache atoms, a real platform class) EXCEPT
+nested-declared-faces (waits the ruled NESTED build). NEW from the
+stress run: [11 parallel-only isolation-sensitive
+tests](../../../seon/issues/parallel-test-stress-exposes-eleven-isolation-sensitive-tests.md)
+plus 6 reproducible reds (9F/12E at 1,160 tests) — the next fix wave.
+Malli fork repaired (`:preset` removed, direct Var resolution;
+`e9d020b2f`). THE INTERFACE PROGRAM: the REPL-transcript PRD is final
+at [repl-transcript-context-prd-2026-08-10.md](repl-transcript-context-prd-2026-08-10.md)
+(`2d9e2ef25`; page-one explanation, labeled examples, option blocks) —
+awaiting the owner's remaining option verdicts (NESTED confirm, HUMAN,
+PROSE, OPENING, MINIMUM thresholds, message-recipient ref) with round-1
+rulings recorded in the file; vocabulary ruled: history/form+value,
+bare injected doc+docs (schema- and test-aware, varargs + namespaced
+map arities), acquired candidates, the agent's defs (AGENTS.md rows
+`d6ce5b96a`/`3656f9b8f`).
+
 **THE MILESTONE IS ACHIEVED — 2026-08-10 evening, observer-confirmed.**
 A real DeepSeek model authored `my.agents.root/token-pressure` with a
 complete `:malli/schema` contract, called it (correct receipt), and a
