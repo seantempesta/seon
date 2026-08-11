@@ -31,6 +31,12 @@ A durable Malli definition contains an unnamed callable.
 
 So this contract cannot be written back as durable EDN.
 
+The quoted-symbol repair landed in `375f79b01`, but exposed the other half of
+the same contract boundary. When Malli compiles the now-durable `:gen/gen`
+symbol during `seon.instrument/apply!`, `malli.sci/evaluator` calls the pinned
+SCI with the removed `:preset` option. The cohost platform regression therefore
+refuses before the second cluster boot, even in a fresh single-test JVM.
+
 ## Evidence
 
 `seon.search-test/index-step-contract-has-durable-generative-host-predicates`
@@ -48,21 +54,38 @@ disabling that widening and re-running:
 ;; => "A durable Malli definition contains an unnamed callable."   (unchanged)
 ```
 
+Reproduced again on 2026-08-10 after `375f79b01` through both
+`bin/test seon.cluster.cohost-boot-test` and a direct invocation of its fixture.
+The complete cause data identifies `seon.search/index-step`; Malli's nested
+exception is:
+
+```text
+Unsupported option passed to sci/init: [:preset]
+```
+
+The parallel runner's full gate stopped correctly after 73 platform tests in
+49.5 seconds and reproduced the same failure in its isolated confirmation JVM.
+No bulk test was submitted.
+
 The failure was previously masked: every run of this namespace errored
 earlier, in the fixture, on an unrelated capability-graph refusal.
 
 ## Owner
 
-`seon.search/index-step`'s declaration. The registry is behaving
-correctly — an unnamed callable genuinely cannot be made durable.
+`seon.search/index-step`'s declaration and Malli's generator-symbol resolution
+against the pinned SCI interface. The durable form and live compilation must
+be one valid contract.
 
 ## Acceptance
 
 - `index-step`'s predicate is written as a quoted qualified symbol, matching
   its own `:gen/gen` entry two lines above.
+- Compiling and instrumenting that durable definition uses only options the
+  pinned SCI declares; no compatibility option is silently ignored.
 - `seon.search-test/index-step-contract-has-durable-generative-host-predicates`
   passes, including the `(= definition (edn/read-string (pr-str definition)))`
   round-trip its first assertion makes.
+- `bin/test seon.cluster.cohost-boot-test` passes in a fresh isolated root.
 - A sweep confirms no other first-party `:malli/schema` writes a predicate
   unquoted; the program graph already records every arity's declaration, so
   this is a query rather than a read-through.

@@ -1135,7 +1135,7 @@
     (.mkdirs)))
 
 (defn- confirm-parallel-failure!
-  [progress namespace-names task-result]
+  [progress task-result]
   (let [task (select-keys task-result
                           [::task-id ::task-ordinal ::task-namespace
                            ::task-symbols ::task-long?])
@@ -1144,7 +1144,7 @@
         worker (start-worker! (str "confirmation-" (::task-ordinal task))
                               checkout root)]
     (try
-      (initialize-worker! worker namespace-names)
+      (initialize-worker! worker [(symbol (::task-namespace task))])
       (announce! progress
                  (str "CONFIRM isolated task="
                       (str/join "," (::task-symbols task))))
@@ -1177,7 +1177,7 @@
     (print (::task-output result))))
 
 (defn- run-parallel-stage!
-  [progress namespace-names manifest workers serial-worker tasks]
+  [progress manifest workers serial-worker tasks]
   (let [{::keys [resolved unresolved]} (split-resolved-tasks manifest tasks)]
     (when (seq unresolved)
       (println "bin/test:" (count unresolved)
@@ -1191,7 +1191,7 @@
                   (if (and (task-red? result)
                            (some #(= (::task-id result) (::task-id %))
                                  resolved))
-                    (confirm-parallel-failure! progress namespace-names result)
+                    (confirm-parallel-failure! progress result)
                     result))
                 initial)]
       (print-task-failures! confirmed)
@@ -1296,7 +1296,7 @@
               _ (announce! progress
                            (str "TIER platform " (count platform) " tests"))
               platform-outcome
-              (run-parallel-stage! progress namespaces manifest pool-workers
+              (run-parallel-stage! progress manifest pool-workers
                                    serial-worker platform-tasks)
               platform-red? (pos? (+ (get-in platform-outcome
                                               [::task-summary ::fail-count])
@@ -1310,7 +1310,7 @@
                 (do
                   (announce! progress
                              (str "TIER bulk " (count selected) " tests"))
-                  (run-parallel-stage! progress namespaces manifest pool-workers
+                  (run-parallel-stage! progress manifest pool-workers
                                        serial-worker selected-tasks)))
               task-results (->> (concat (::task-results platform-outcome)
                                         (::task-results bulk-outcome))
