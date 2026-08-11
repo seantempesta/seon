@@ -9,6 +9,7 @@
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.config :as config]
+            [seon.fresh-operator]
             [seon.instrument :as instrument]
             [seon.operator.state :as operator.state]
             [seon.test-support :as test-support])
@@ -139,153 +140,59 @@
 
 (defn- operator-private-value
   [function-name & arguments]
-  (let [code
-        (pr-str
-         `(do
-            (require 'seon.fresh-operator)
-            (prn
-             (apply
-              (var-get
-               (ns-resolve 'seon.fresh-operator '~function-name))
-              ~(vec arguments)))))
-        process
-        (.start
-         (doto
-          (ProcessBuilder.
-           ^java.util.List
-           ["bb"
-            "--config" (str (io/file project-root "bb.edn"))
-            "--deps-root" (str project-root)
-            "--classpath" operator-classpath
-            "-e" code])
-           (.directory project-root)
-           (.redirectErrorStream true)))
-        completed? (.waitFor process 10 TimeUnit/SECONDS)
-        _ (when-not completed? (.destroyForcibly process))
-        output (str/trim (slurp (.getInputStream process)))]
-    (when-not (and completed? (zero? (.exitValue process)))
-      (throw
-       (ex-info "The fresh operator parser probe failed."
-                {:seon.dev.fresh-operator-test/output output})))
-    (edn/read-string (last (str/split-lines output)))))
+  (apply (var-get (ns-resolve 'seon.fresh-operator function-name)) arguments))
 
 (defn- operator-private-outcome
   [function-name & arguments]
-  (let [code
-        (pr-str
-         `(do
-            (require 'seon.fresh-operator)
-            (prn
-             (try
-               {:seon.dev.fresh-operator-test/value
-                (apply
-                 (var-get
-                  (ns-resolve 'seon.fresh-operator '~function-name))
-                 ~(vec arguments))}
-               (catch Throwable failure#
-                 {:seon.dev.fresh-operator-test/message
-                  (ex-message failure#)
-                  :seon.dev.fresh-operator-test/data
-                  (ex-data failure#)})))))
-        process
-        (.start
-         (doto
-          (ProcessBuilder.
-           ^java.util.List
-           ["bb"
-            "--config" (str (io/file project-root "bb.edn"))
-            "--deps-root" (str project-root)
-            "--classpath" operator-classpath
-            "-e" code])
-           (.directory project-root)
-           (.redirectErrorStream true)))
-        completed? (.waitFor process 10 TimeUnit/SECONDS)
-        _ (when-not completed? (.destroyForcibly process))
-        output (str/trim (slurp (.getInputStream process)))]
-    (when-not (and completed? (zero? (.exitValue process)))
-      (throw
-       (ex-info "The fresh operator outcome probe failed."
-                {:seon.dev.fresh-operator-test/output output})))
-    (edn/read-string (last (str/split-lines output)))))
+  (try
+    {:seon.dev.fresh-operator-test/value
+     (apply operator-private-value function-name arguments)}
+    (catch Throwable failure
+      {:seon.dev.fresh-operator-test/message (ex-message failure)
+       :seon.dev.fresh-operator-test/data (ex-data failure)})))
 
 (defn- cold-start-calls
   [root]
-  (let [code
-        (pr-str
-         `(do
-            (require 'seon.fresh-operator)
-            (let [calls# (atom [])
-                  start-instant# (java.util.Date. 1000)
-                  generation# (random-uuid)
-                  operator-var#
-                  (fn [name#]
-                    (ns-resolve 'seon.fresh-operator name#))
-                  advertisement#
-                  {:seon.boot/cluster-name "cold-start"
-                   :seon.boot/pid 42
-                   :seon.boot/start-instant start-instant#
-                   :seon.render.web/url "http://127.0.0.1:7994"
-                   :seon.boot/prepl-port 7993}]
-              (with-redefs-fn
-                {(operator-var# (symbol "source-observations"))
-                 (fn [_#]
-                   {:seon.fresh-operator/advertisements []
+  (let [calls (atom [])
+        start-instant (Date. 1000)
+        generation (random-uuid)
+        operator-var #(ns-resolve 'seon.fresh-operator %)
+        advertisement
+        {:seon.boot/cluster-name "cold-start"
+         :seon.boot/pid 42
+         :seon.boot/start-instant start-instant
+         :seon.render.web/url "http://127.0.0.1:7994"
+         :seon.boot/prepl-port 7993}]
+    (with-redefs-fn
+      {(operator-var 'source-observations)
+       (constantly {:seon.fresh-operator/advertisements []
                     :seon.fresh-operator/jvms []})
-                 (operator-var# (symbol "offline-roster"))
-                 (fn [_#]
-                   (swap! calls# conj :offline-roster)
-                   (throw
-                    (ex-info "cold start read the offline roster" {})))
-                 (operator-var# (symbol "ensure-dependency-cache!"))
-                 (fn []
-                   (swap! calls# conj :dependency-cache)
-                   {:seon.dev-cache/path
-                    ~(.getCanonicalPath
-                      (io/file project-root
-                               "target/dev-dependency-classes/test"))})
-                 (operator-var# (symbol "launch!"))
-                 (fn [_root# name# _manifest# _ready-port# _adoption-port#
-                      _silence-ms# _cache-path#]
-                   (swap! calls# conj [:launch name#])
-                   {:seon.fresh-operator/pid 42})
-                 (operator-var# (symbol "record-launched-process!"))
-                 (fn [_root# _adoption-server# _silence-ms# _launch-result#]
-                   {:seon.operator.process-record/generation generation#
-                    :seon.boot/pid 42
-                    :seon.boot/start-instant
-                    start-instant#
-                    :seon.operator.process-record/root ~(str root)
-                    :seon.operator.process-record/log "test.log"})
-                 (operator-var# (symbol "await-advertisement!"))
-                 (fn [_root# _name# _pid# _ready-server# _silence-ms#]
-                   advertisement#)
-                 (operator-var# (symbol "print-started!"))
-                 (fn [_root# name# _value#]
-                   (swap! calls# conj [:started name#]))}
-                (fn []
-                  ((var-get (operator-var# (symbol "start!")))
-                   ~(str root) ["cold-start"])))
-              (prn @calls#))))
-        process
-        (.start
-         (doto
-          (ProcessBuilder.
-           ^java.util.List
-           ["bb"
-            "--config" (str (io/file project-root "bb.edn"))
-            "--deps-root" (str project-root)
-            "--classpath" operator-classpath
-            "-e" code])
-           (.directory project-root)
-           (.redirectErrorStream true)))
-        completed? (.waitFor process 10 TimeUnit/SECONDS)
-        _ (when-not completed? (.destroyForcibly process))
-        output (str/trim (slurp (.getInputStream process)))]
-    (when-not (and completed? (zero? (.exitValue process)))
-      (throw
-       (ex-info "The cold-start operator probe failed."
-                {:seon.dev.fresh-operator-test/output output})))
-    (edn/read-string output)))
+       (operator-var 'offline-roster)
+       (fn [_]
+         (swap! calls conj :offline-roster)
+         (throw (ex-info "cold start read the offline roster" {})))
+       (operator-var 'ensure-dependency-cache!)
+       (fn []
+         (swap! calls conj :dependency-cache)
+         {:seon.dev-cache/path
+          (.getCanonicalPath
+           (io/file project-root "target/dev-dependency-classes/test"))})
+       (operator-var 'launch!)
+       (fn [_ name _ _ _ _ _]
+         (swap! calls conj [:launch name])
+         {:seon.fresh-operator/pid 42})
+       (operator-var 'record-launched-process!)
+       (fn [_ _ _ _]
+         {:seon.operator.process-record/generation generation
+          :seon.boot/pid 42
+          :seon.boot/start-instant start-instant
+          :seon.operator.process-record/root (str root)
+          :seon.operator.process-record/log "test.log"})
+       (operator-var 'await-advertisement!) (fn [& _] advertisement)
+       (operator-var 'print-started!)
+       (fn [_ name _] (swap! calls conj [:started name]))}
+      #(operator-private-value 'start! (str root) ["cold-start"]))
+    @calls))
 
 (defn- launch-observation
   [root]
@@ -336,194 +243,102 @@
 
 (defn- readiness-simulation
   [root mode]
-  (let [code
-        (pr-str
-         `(do
-            (require 'clojure.java.io 'seon.fresh-operator)
-            (let [root# ~(str root)
-                  name# "simulated-boot"
-                  child#
-                  (.start
-                   (ProcessBuilder.
-                    ^java.util.List
-                    ["/usr/bin/python3" "-c"
-                     "import signal; signal.pause()"]))
-                  server#
-                  (java.net.ServerSocket.
-                   0 1 (java.net.InetAddress/getLoopbackAddress))
-                  writer#
-                  (Thread.
-                   (fn []
-                     (with-open
-                      [socket#
-                       (java.net.Socket.
-                        "127.0.0.1" (.getLocalPort server#))
-                       output#
-                       (clojure.java.io/writer
-                        (.getOutputStream socket#))]
-                       (.write output# "namespaces\n")
-                       (.flush output#)
-                       (if (= ~mode :slow)
-                         (do
-                           (Thread/sleep 150)
-                           (.write output# "schema\n")
-                           (.flush output#)
-                           (Thread/sleep 150)
-                           (.write output# "flow\n")
-                           (.flush output#)
-                           (Thread/sleep 150)
-                           (let [directory#
-                                 (java.io.File.
-                                  root#
-                                  (str "data/clusters/" name#))
-                                 start#
-                                 (.get
-                                  (.startInstant
-                                   (.info (.toHandle child#))))]
-                             (.mkdirs directory#)
-                             (spit
-                              (java.io.File. directory# "prepl.edn")
-                              (pr-str
-                               {:seon.boot/cluster-name name#
-                                :seon.boot/pid (.pid child#)
+  (let [root (str root)
+        name "simulated-boot"
+        child (start-disposable-process!)
+        server (ServerSocket. 0 1 (java.net.InetAddress/getLoopbackAddress))
+        writer
+        (Thread.
+         (fn []
+           (with-open [socket (java.net.Socket. "127.0.0.1"
+                                                (.getLocalPort server))
+                       output (io/writer (.getOutputStream socket))]
+             (doseq [phase (if (= mode :slow)
+                             ["namespaces" "schema" "flow"]
+                             ["namespaces"])]
+               (.write output (str phase "\n"))
+               (.flush output)
+               (Thread/sleep (if (= mode :slow) 150 1000)))
+             (when (= mode :slow)
+               (let [directory (io/file root "data" "clusters" name)]
+                 (.mkdirs directory)
+                 (spit (io/file directory "prepl.edn")
+                       (pr-str {:seon.boot/cluster-name name
+                                :seon.boot/pid (.pid child)
                                 :seon.boot/start-instant
-                                (java.util.Date/from start#)
+                                (process-start-date child)
                                 :seon.boot/prepl-port 1
-                                :seon.render.web/url
-                                "http://127.0.0.1:1"})))
-                           (.write output# "ready\n")
-                           (.flush output#))
-                         (Thread/sleep 1000)))))
-                  _# (.setDaemon writer# true)
-                  _# (.start writer#)
-                  started# (System/nanoTime)
-                  outcome#
-                  (try
-                    {:seon.dev.fresh-operator-test/value
-                     (select-keys
-                      ((var-get
-                        (ns-resolve
-                         'seon.fresh-operator
-                         (symbol "await-advertisement!")))
-                       root# name# (.pid child#) server# 250)
-                      [:seon.boot/cluster-name :seon.boot/pid])}
-                    (catch Throwable failure#
-                      {:seon.dev.fresh-operator-test/message
-                       (ex-message failure#)
-                       :seon.dev.fresh-operator-test/data
-                       (ex-data failure#)}))
-                  elapsed-ms#
-                  (long (/ (- (System/nanoTime) started#) 1000000))]
-              (.close server#)
-              (.destroyForcibly child#)
-              (.get (.onExit (.toHandle child#)) 5
-                    java.util.concurrent.TimeUnit/SECONDS)
-              (prn (assoc outcome#
-                          :seon.dev.fresh-operator-test/elapsed-ms
-                          elapsed-ms#)))))
-        process
-        (.start
-         (doto
-          (ProcessBuilder.
-           ^java.util.List
-           ["bb"
-            "--config" (str (io/file project-root "bb.edn"))
-            "--deps-root" (str project-root)
-            "--classpath" operator-classpath
-            "-e" code])
-          (.directory project-root)
-          (.redirectErrorStream true)))
-        completed? (.waitFor process 10 TimeUnit/SECONDS)
-        _ (when-not completed? (.destroyForcibly process))
-        output (str/trim (slurp (.getInputStream process)))]
-    (when-not (and completed? (zero? (.exitValue process)))
-      (throw
-       (ex-info "The readiness simulation failed."
-                {:seon.dev.fresh-operator-test/output output})))
-    {:seon.dev.fresh-operator-test/output output
-     :seon.dev.fresh-operator-test/outcome
-     (edn/read-string (last (str/split-lines output)))}))
+                                :seon.render.web/url "http://127.0.0.1:1"})))
+               (.write output "ready\n")
+               (.flush output)))))
+        captured (java.io.StringWriter.)]
+    (.setDaemon writer true)
+    (.start writer)
+    (try
+      (let [started (System/nanoTime)
+            outcome
+            (binding [*out* captured]
+              (try
+                {:seon.dev.fresh-operator-test/value
+                 (select-keys
+                  (operator-private-value 'await-advertisement!
+                                          root name (.pid child) server 250)
+                  [:seon.boot/cluster-name :seon.boot/pid])}
+                (catch Throwable failure
+                  {:seon.dev.fresh-operator-test/message (ex-message failure)
+                   :seon.dev.fresh-operator-test/data (ex-data failure)})))]
+        {:seon.dev.fresh-operator-test/output (str captured)
+         :seon.dev.fresh-operator-test/outcome
+         (assoc outcome :seon.dev.fresh-operator-test/elapsed-ms
+                (quot (- (System/nanoTime) started) 1000000))})
+      (finally
+        (.close server)
+        (.destroyForcibly child)
+        (.get (.onExit (.toHandle child)) 5 TimeUnit/SECONDS)))))
 
 (defn- prepl-response-simulation
   [mode]
-  (let [code
-        (pr-str
-         `(do
-            (require 'clojure.edn 'clojure.java.io 'seon.fresh-operator)
-            (let [server#
-                  (java.net.ServerSocket.
-                   0 1 (java.net.InetAddress/getLoopbackAddress))
-                  served#
-                  (future
-                    (with-open
-                     [socket# (.accept server#)
-                      reader# (clojure.java.io/reader socket#)
-                      writer# (clojure.java.io/writer socket#)]
-                      (.readLine ^java.io.BufferedReader reader#)
-                      (if (= ~mode :progress)
-                        (do
-                          (doseq [value# ["analysis\n"
-                                          "schema population\n"
-                                          "branch publication\n"]]
-                            (Thread/sleep 120)
-                            (.write writer#
-                                    (str (pr-str {:tag :out :val value#})
-                                         "\n"))
-                            (.flush writer#))
-                          (.write writer#
-                                  (str (pr-str {:tag :ret :val "{:ok true}"})
-                                       "\n"))
-                          (.flush writer#))
-                        (Thread/sleep 600))))
-                  observed# (atom [])
-                  started# (System/nanoTime)
-                  outcome#
-                  (try
-                    {:seon.dev.fresh-operator-test/value
-                     ((var-get
-                       (ns-resolve 'seon.fresh-operator
-                                   (symbol "prepl-eval!")))
-                      {:seon.boot/prepl-host "127.0.0.1"
-                       :seon.boot/prepl-port (.getLocalPort server#)}
-                      "(+ 1 2)"
-                      250
-                      (fn [event#] (swap! observed# conj event#)))}
-                    (catch Throwable failure#
-                      {:seon.dev.fresh-operator-test/message
-                       (ex-message failure#)
-                       :seon.dev.fresh-operator-test/data
-                       (ex-data failure#)}))
-                  elapsed-ms#
-                  (long (/ (- (System/nanoTime) started#) 1000000))]
-              (.close server#)
-              (deref served# 1000 nil)
-              (prn
-               (assoc outcome#
-                      :seon.dev.fresh-operator-test/observed @observed#
-                      :seon.dev.fresh-operator-test/elapsed-ms
-                      elapsed-ms#)))))
-        process
-        (.start
-         (doto
-          (ProcessBuilder.
-           ^java.util.List
-           ["bb"
-            "--config" (str (io/file project-root "bb.edn"))
-            "--deps-root" (str project-root)
-            "--classpath" operator-classpath
-            "-e" code])
-          (.directory project-root)
-          (.redirectErrorStream true)))
-        completed? (.waitFor process 10 TimeUnit/SECONDS)
-        _ (when-not completed? (.destroyForcibly process))
-        output (str/trim (slurp (.getInputStream process)))]
-    (when-not (and completed? (zero? (.exitValue process)))
-      (throw
-       (ex-info "The prepl response simulation failed."
-                {:seon.dev.fresh-operator-test/output output})))
-    {:seon.dev.fresh-operator-test/output output
+  (let [server (ServerSocket. 0 1 (java.net.InetAddress/getLoopbackAddress))
+        served
+        (future
+          (with-open [socket (.accept server)
+                      reader (io/reader socket)
+                      writer (io/writer socket)]
+            (.readLine ^java.io.BufferedReader reader)
+            (if (= mode :progress)
+              (do
+                (doseq [value ["analysis\n" "schema population\n"
+                               "branch publication\n"]]
+                  (Thread/sleep 120)
+                  (.write writer (str (pr-str {:tag :out :val value}) "\n"))
+                  (.flush writer))
+                (.write writer (str (pr-str {:tag :ret :val "{:ok true}"})
+                                    "\n"))
+                (.flush writer))
+              (Thread/sleep 600))))
+        observed (atom [])
+        captured (java.io.StringWriter.)
+        started (System/nanoTime)
+        outcome
+        (binding [*out* captured]
+          (try
+            {:seon.dev.fresh-operator-test/value
+             (operator-private-value
+              'prepl-eval!
+              {:seon.boot/prepl-host "127.0.0.1"
+               :seon.boot/prepl-port (.getLocalPort server)}
+              "(+ 1 2)" 250 #(swap! observed conj %))}
+            (catch Throwable failure
+              {:seon.dev.fresh-operator-test/message (ex-message failure)
+               :seon.dev.fresh-operator-test/data (ex-data failure)})))]
+    (.close server)
+    (deref served 1000 nil)
+    {:seon.dev.fresh-operator-test/output (str captured)
      :seon.dev.fresh-operator-test/outcome
-     (edn/read-string (last (str/split-lines output)))}))
+     (assoc outcome
+            :seon.dev.fresh-operator-test/observed @observed
+            :seon.dev.fresh-operator-test/elapsed-ms
+            (quot (- (System/nanoTime) started) 1000000))}))
 
 (defn- process-output
   [^Process process]
