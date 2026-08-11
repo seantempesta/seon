@@ -22,6 +22,15 @@ wedges the whole gate at the 300 s liveness backstop instead of failing.
 
 ## Evidence
 
+- The first nine-worker full measurement on 2026-08-10 reproduced the same
+  var-level hang. The task began at `2026-08-11T02:14:41.331900Z`; the last
+  other worker completed at `02:19:17.469359Z`; the suite liveness backstop
+  then stopped the run at 24:55.66 wall time with exit 124. A
+  virtual-thread-aware dump shows the worker main thread blocked in
+  `seon.flow/stop-work-launcher!` waiting on `drained`, reached from the test's
+  `finally` cleanup at `test/seon/flow_test.clj:411`. The retained run root is
+  `tmp/test-runs/run.3xA5xw`; the measurement is recorded in
+  [parallel-runner-measurement-2026-08-10.md](../../prds/sci-execution-runtime/research/parallel-runner-measurement-2026-08-10.md).
 - `bin/test --platform` on 2026-08-07 night, with four `seon.flow-test` vars
   declared `:seon.test/platform` (graph construction, callback contracts,
   submission time limit, completion diagnostics). Three completed; the run then
