@@ -9,6 +9,7 @@
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
             [seon.render.walk :as walk]
+            [seon.schema :as schema]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]
             [seon.test-support :as support]))
@@ -72,14 +73,49 @@
            ctx (support/fork-cluster-ctx connection)
            report (binding [db/*conn* connection]
                     (db/transact! []))
-           rendered (render-ai
-                     (render-request database ctx nil
-                                     {:probe/database database
-                                      :probe/report report}))]
-       (is (str/includes? rendered "database"))
-       (is (str/includes? rendered "basis transaction"))
-       (is (str/includes? rendered "Committed transaction"))
-       (is (not (str/includes? rendered "#datahike.db.DB")))))))
+           request (render-request database ctx nil
+                                   {:probe/database database
+                                    :probe/report report})
+           ai (render-ai request)
+           html (hiccup/->string (render-html request))]
+       (is (str/includes? ai "database"))
+       (is (str/includes? ai "basis transaction"))
+       (is (not (str/includes? ai "#datahike.db.DB")))
+       (doseq [rendered [ai html]]
+         (is (str/includes? rendered "Committed transaction"))
+         (is (not (str/includes? rendered "datahike.db.TxReport"))))
+
+       (let [first-producer
+             'seon.render-simplification.fixture-ambiguous/first-ai
+             second-producer
+             'seon.render-simplification.fixture-ambiguous/second-ai
+             matches
+             [{:seon.schema/key :fixture.render/second
+               :seon.render/ai second-producer
+               :seon.render/html second-producer}
+              {:seon.schema/key :fixture.render/first
+               :seon.render/ai first-producer
+               :seon.render/html first-producer}]
+             matching-shapes-in schema/matching-shapes-in
+             render-with-ambiguity
+             (fn [render]
+               (with-redefs
+                [schema/matching-shapes-in
+                 (fn [projection value]
+                   (if (:fixture.render/ambiguous value)
+                     matches
+                     (matching-shapes-in projection value)))]
+                 (render
+                  (render-request database ctx nil
+                                  {:probe/nested
+                                   {:fixture.render/ambiguous true}}))))
+             ambiguous-ai (render-with-ambiguity render-ai)
+             ambiguous-html
+             (hiccup/->string (render-with-ambiguity render-html))]
+         (doseq [rendered [ambiguous-ai ambiguous-html]]
+           (is (str/includes? rendered "seon.render/ambiguous"))
+           (is (< (str/index-of rendered (str first-producer))
+                  (str/index-of rendered (str second-producer))))))))))
 
 (deftest owning-namespace-alone-selects-across-a-walk
   (support/with-database

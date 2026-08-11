@@ -1229,51 +1229,43 @@
   {:malli/schema
    [:=> [:cat :seon.db/transaction-report] [:string {:min 1}]]}
   [unit]
-  (let [{transaction :tx
-         commit-id :datahike/commit-id
-         datom-count ::datom-count
-         datoms :tx-data
+  (let [{database :db-after
+         transaction-data :tx-data
          tempids :tempids}
         (rendered-value unit)
-        shown (count datoms)]
-    (str "Committed transaction " transaction
-         " at commit " commit-id
+        datom-count (count transaction-data)]
+    (str "Committed transaction " (:t database)
+         " at commit " (:datahike/commit-id database)
          " with " datom-count " datoms"
-         (when (< shown datom-count)
-           (str " (showing " shown ")"))
          "."
          (when (seq tempids)
            (str "\nTempids: " (pr-str tempids)))
-         (when (seq datoms)
+         (when (seq transaction-data)
            (str "\nCommitted datoms:\n"
-                (str/join "\n" (map pr-str datoms)))))))
+                (str/join "\n" (map pr-str transaction-data)))))))
 
 (defn render-transaction-html
   "Render a committed transaction report as bounded readable Hiccup."
   {:malli/schema
    [:=> [:cat :seon.db/transaction-report] :seon.render/hiccup]}
   [unit]
-  (let [{transaction :tx
-         commit-id :datahike/commit-id
-         datom-count ::datom-count
-         datoms :tx-data
+  (let [{database :db-after
+         transaction-data :tx-data
          tempids :tempids}
         (rendered-value unit)
-        shown (count datoms)]
+        datom-count (count transaction-data)]
     [:article {:class "seon-family-entry seon-db-transaction-entry"}
      [:h3 "Committed transaction"]
      [:dl
-      [:div [:dt "Transaction"] [:dd (str transaction)]]
-      [:div [:dt "Commit ID"] [:dd (str commit-id)]]
+      [:div [:dt "Transaction"] [:dd (str (:t database))]]
+      [:div [:dt "Commit ID"] [:dd (str (:datahike/commit-id database))]]
       [:div [:dt "Datoms"]
-       [:dd (str datom-count
-                 (when (< shown datom-count)
-                   (str " (showing " shown ")")))]]
+       [:dd (str datom-count)]]
       [:div [:dt "Tempids"] [:dd (pr-str tempids)]]]
-     (when (seq datoms)
+     (when (seq transaction-data)
        (into [:ol {:class "seon-db-transaction-datoms"}]
              (map (fn [datom] [:li [:code (pr-str datom)]]))
-             datoms))]))
+             transaction-data))]))
 
 (defn render-rejection-ai
   "Render a rejected database transaction as readable steering text."

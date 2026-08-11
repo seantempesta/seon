@@ -297,6 +297,15 @@
         (range)
         children))
 
+(defn- bounded-error-node
+  [request error]
+  (:seon.sci.admit/print-node
+   (admit/admit-value
+    {:seon.sci.admit/value error
+     :seon.sci.admit/caps (:seon.sci.admit/caps request)
+     :seon.sci.admit/interrupt-fn (fn [])
+     :seon.config/on-core-error (:seon.config/on-core-error request)})))
+
 (defn- project-node*
   [request output path node value]
   (let [projection (sci.kernel/context-projection
@@ -322,7 +331,7 @@
                        (schema-producer projection value output)))
         selected (when-not (contains? rendering selected) selected)]
     (cond
-      (:seon.error/kind selected) node
+      (:seon.error/kind selected) (bounded-error-node request selected)
 
       selected
       (let [rendered (invoke-selected

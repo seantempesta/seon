@@ -169,11 +169,15 @@
           [:map
            {:seon.render/ai seon.db/render-transaction-ai
             :seon.render/html seon.db/render-transaction-html}
-           [:tx :int]
-           [:datahike/commit-id :uuid]
-           [:seon.db/datom-count :seon.db/datom-count]
-           [:tx-data [:vector :seon.db/datom]]
-           [:tempids :map]],
+           [:db-before
+            [:or :seon.db/database-value
+             :seon.db/database-value-identity]]
+           [:db-after
+            [:or :seon.db/database-value
+             :seon.db/database-value-identity]]
+           [:tx-data [:vector :seon.schema/value]]
+           [:tempids :map]
+           [:tx-meta :map]],
           :user [:and #:seon.db{:index true} :seon.db/ref],
           :conflict-attribute :qualified-keyword,
           :conflict-value :seon.schema/value,
