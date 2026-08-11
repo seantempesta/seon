@@ -336,3 +336,52 @@ bridge would now leave the largest single caller untouched.
 
 The warning wall also persists by volume: 44 of the first 62 boot log lines
 (71%) are fallback occurrence lines.
+
+## Recurrence, 2026-08-11 — the render walk costs 23 seconds, and this is all of it
+
+Design-session probe for the self-generating context work, on an isolated
+scratch cluster (`bin/seon --root tmp/probe-root start probe`, pid 47301,
+freshly published `current-src`: 2,825 functions, 1,097 tests, 207 namespaces
+with requires).
+
+One `seon.render.walk/neighborhood` of the root agent at distance 2, returning
+132 render calls, measured three consecutive times in the same JVM:
+
+| Run | Wall |
+|---|---:|
+| first | 23,814 ms |
+| second | 23,189 ms |
+| third | 23,462 ms |
+
+Flat with repetition, so it is not cold-start and nothing memoizes it. The
+fallback occurrence lines emitted during the walk name two callers at ×1000
+each — `seon.db (db.clj:430)` and `seon.print (print.cljc:232)` — plus ×100 and
+×10 sites, so roughly 2,110 resolutions.
+
+Per-resolution cost measured directly on the same JVM (20 iterations):
+
+```clojure
+{:per-population-ms 11.057, :population-size 1951}
+```
+
+11.057 ms × 2,110 ≈ **23,330 ms predicted** against 23,189 / 23,462 ms
+measured — within 1%. The walk's entire wall time is this class. `db.clj:430`
+is a caller not previously listed in this note.
+
+### Why this raises the severity
+
+The neighbourhood walk is the one traversal behind agent context, the
+namespace pages, and the `/` system view, and it is the substrate the
+2026-08-10 REPL-history design builds on. The previously recorded warm-walk
+figure of 122 ms was measured with retained calls reusing their outputs; a
+walk that must actually render — a fresh agent, a changed basis, a new
+cluster — pays the full 23 s. Under the owner's fast-by-default ruling that
+is a defect to attack before any work lands on top of the walk.
+
+### Two further defects observed in the same walk
+
+- **59 of 132 render calls carry an `:seon.error/value`** (45%).
+- **114 of 132 lookups are raw entity ids** with no identity attribute
+  resolved, so an entity-level fallback form can only be spelled
+  `[:db/id 2484]`. Both are recorded here as observations from this probe,
+  not diagnosed; they need their own issues once someone reads them.
