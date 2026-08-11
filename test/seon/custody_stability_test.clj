@@ -31,7 +31,14 @@
     ;; the one carried by the environment it is called with, so it widens no
     ;; custody. This snapshot caught it exactly as intended — the row landed
     ;; with S1 and this census was the thing that noticed.
-    ["seon.db/supplied-connection" :seon.db/connection]})
+    ["seon.db/supplied-connection" :seon.db/connection]
+    ;; Source acquisition owns both values while constructing the one base
+    ;; later forked by sovereign clusters. Neither function is agent-callable:
+    ;; `source-base!` returns only newly constructed source custody, and
+    ;; `fork-cluster-ctx` replaces connection custody with its explicit branch.
+    ["seon.cluster/source-base!" :seon.store/store]
+    ["seon.cluster/source-base!" :seon.sci.eval/ctx]
+    ["seon.sci.eval/fork-cluster-ctx" :seon.sci.eval/ctx]})
 
 (def ^:private custody-returning-query
   '[:find ?function-symbol ?schema-key
