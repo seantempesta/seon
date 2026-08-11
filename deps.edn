@@ -11,7 +11,7 @@
  ;; The system's dependency closure. Every coordinate is deliberate; the
  ;; maintained forks are vendored in reference-code/ and read, not guessed.
  :deps {org.clojure/clojure {:mvn/version "1.12.5"}
-        metosin/malli {:mvn/version "0.20.0"}
+        metosin/malli {:local/root "reference-code/malli"}
         clj-kondo/clj-kondo
         {:local/root "reference-code/clj-kondo"
          ;; Both coordinates publish the same parser namespaces. Datahike's
