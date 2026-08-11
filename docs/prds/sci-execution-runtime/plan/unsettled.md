@@ -39,6 +39,18 @@ bare injected doc+docs (schema- and test-aware, varargs + namespaced
 map arities), acquired candidates, the agent's defs (AGENTS.md rows
 `d6ce5b96a`/`3656f9b8f`).
 
+**BASE-REUSE FOLLOW-UP — 2026-08-11.** Simpler ordinary fixtures now use the
+existing generation-aware SCI fork and the fresh-operator logic tests call
+their owning functions in-JVM (net −185 lines); the proposed boot/start
+context injection was measured slower and fully removed, while child pooling
+and a second database-template path failed the simplicity gate. The final full
+pool was **15:26.95** and the complete 17-red diagnostic was **39:06.62**:
+the ceiling remains a total-work miss, led by whole-registry instrumentation,
+one fully instrumented live cluster, real export/publication, and the shell/web
+JVM families. Evidence, the assertion-derived 16/15 operator split, proof
+attribution, and the simplicity ledger are in
+[`base-reuse-measurement-2026-08-11.md`](../research/base-reuse-measurement-2026-08-11.md).
+
 **THE MILESTONE IS ACHIEVED — 2026-08-10 evening, observer-confirmed.**
 A real DeepSeek model authored `my.agents.root/token-pressure` with a
 complete `:malli/schema` contract, called it (correct receipt), and a
