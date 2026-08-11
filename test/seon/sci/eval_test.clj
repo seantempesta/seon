@@ -287,6 +287,28 @@
             (is (= ["fork-b"] (:seon.sci.admit/value (evaluate ctx-b)))
                 "each fork derives database custody from its branch")))))))
 
+(deftest acquired-source-context-forks-own-their-lazy-program-state
+  (test-support/with-database
+    (fn [connection]
+      (let [ctx-a (test-support/fork-cluster-ctx connection)
+            ctx-b (test-support/fork-cluster-ctx connection)
+            installed-a (::kernel/installed-functions ctx-a)
+            installed-b (::kernel/installed-functions ctx-b)
+            snapshot-a (::kernel/program-snapshot ctx-a)
+            snapshot-b (::kernel/program-snapshot ctx-b)
+            function-symbol 'fork-private/lazy-function
+            function-row {:seon.fn/sym function-symbol}]
+        (is (not (identical? installed-a installed-b)))
+        (is (not (identical? snapshot-a snapshot-b)))
+        (kernel/cache-function! ctx-a function-symbol function-row)
+        (kernel/mark-installed! ctx-a function-symbol)
+        (is (= function-row (kernel/program-function ctx-a function-symbol)))
+        (is (contains? @installed-a function-symbol))
+        (is (nil? (kernel/program-function ctx-b function-symbol))
+            "a sibling must retain its own acquired program snapshot")
+        (is (not (contains? @installed-b function-symbol))
+            "a sibling must not skip installation because another fork installed the symbol")))))
+
 (deftest agent-context-exposes-no-concurrency-capability
   (let [ctx (eval/build-base-ctx)
         env @(:env ctx)

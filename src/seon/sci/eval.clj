@@ -1569,6 +1569,10 @@
                               (projection-state db projection))
          ctx (call-preparation/install
               (assoc (sci/fork base-ctx)
+                     ::kernel/installed-functions
+                     (atom @(::kernel/installed-functions base-ctx))
+                     ::kernel/program-snapshot
+                     (atom @(::kernel/program-snapshot base-ctx))
                      ::custody {:seon.db/connection connection}
                      :seon.schema/projection projection
                      ::projection-state projection-state))]
