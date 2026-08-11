@@ -474,7 +474,7 @@
        [:fn
         {:error/message "must project the search proc state to a ping map"
          :gen/gen 'seon.search/ping-map-fn-generator}
-        seon.search/ping-map-fn?]]]]
+        'seon.search/ping-map-fn?]]]]
     [:=>
      [:catn
       [::request
@@ -511,7 +511,7 @@
           [:fn
            {:error/message "must be a raw Datahike transaction datom"
             :gen/gen 'seon.search/datahike-datom-generator}
-           seon.search/datahike-datom?]]]]]]
+           'seon.search/datahike-datom?]]]]]]
      [:tuple
       [:map
        [::index-id :seon.search/index-id]

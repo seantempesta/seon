@@ -1,6 +1,7 @@
 (ns seon.oversight-test
   "The fleet story over real booted Flow graphs and a real root page."
   (:require [clojure.core.async :as async]
+            [clojure.datafy :as datafy]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
@@ -85,7 +86,10 @@
                                    :seon.sci.admit/caps caps})
             value (:seon.render/value built)
             root (first (:seon.oversight/agents value))
-            plumbing (:seon.oversight/plumbing value)]
+            plumbing (:seon.oversight/plumbing value)
+            declared-plumbing
+            (set (keys (:procs (datafy/datafy
+                                (:seon.flow/graph instance)))))]
         (testing "the unit joins live ping data to the immutable facts"
           (is (some? built))
           (is (= `oversight/ai-story (:seon.render/ai built)))
@@ -107,8 +111,7 @@
           (is (= {:seon.oversight/count 0
                   :seon.oversight/capacity 1}
                  (:seon.oversight/turn-buffer root)))
-          (is (= #{:seon.cluster.agent/armer
-                   :seon.render.web/render}
+          (is (= declared-plumbing
                  (into #{} (map :seon.oversight/proc) plumbing)))
           (is (every? #(int? (:seon.oversight/passes %)) plumbing)
               "the cluster graph's ordinary Flow count is the pass oracle"))

@@ -342,6 +342,13 @@
                     (set? value)
                     (into #{} (map #(canonicalize % false)) value)
 
+                    (and predicate-reference?
+                         (seq? value)
+                         (= 'quote (first value))
+                         (nil? (next (next value)))
+                         (qualified-symbol? (second value)))
+                    (second value)
+
                     (sequential? value)
                     (doall (map #(canonicalize % false) value))
 

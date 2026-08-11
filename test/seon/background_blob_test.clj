@@ -99,8 +99,9 @@
     (fn [connection]
       (db/transact!
        connection
-       [{:seon.config/cluster "default"
-         :seon.config.eval.result/blob-threshold 8}
+       [(assoc (config/defaults)
+               :seon.config/cluster "default"
+               :seon.config.eval.result/blob-threshold 8)
         {:seon.cluster.agent/id "binary-agent"}
         {:seon.cluster.run/id "binary-run"
          :seon.cluster.run/agent
@@ -138,34 +139,39 @@
         (try
           (doseq [[ordinal size] (map-indexed vector sizes)]
             (testing (str size " invalid UTF-8 bytes")
-              (let [result-ref
+              (let [expected-ref
+                    [:seon.effect/id
+                     (pr-str ["binary-run" 0 ordinal])]
+                    result-ref
                     (binding [effect/*request-context* context]
                       (effect/request!
                        #'binary-capability
                        {:seon.background-blob-test/size size}
-                       {:seon.effect/background? true}))
-                    effect-id (second result-ref)]
-                (support/await-event!
-                 events
-                 [::settled ordinal]
-                 #(:seon.effect/to
-                   (db/pull (:db-after %)
-                            [:seon.effect/to]
-                            [:seon.effect/id effect-id])))
-                (let [receipt
-                      (db/pull @connection
-                               [:seon.effect/result-blob
-                                :seon.effect/result-size]
-                               result-ref)
-                      expected (invalid-utf8 size)
-                      actual
-                      (exact-bytes connection
-                                   (:seon.effect/result-blob receipt)
-                                   (:seon.effect/result-size receipt)
-                                   7)]
-                  (is (= size (:seon.effect/result-size receipt)))
-                  (is (string? (:seon.effect/result-blob receipt)))
-                  (is (Arrays/equals expected actual))))))
+                       {:seon.effect/background? true}))]
+                (is (= expected-ref result-ref) (pr-str result-ref))
+                (when (= expected-ref result-ref)
+                  (let [effect-id (second expected-ref)]
+                    (support/await-event!
+                     events
+                     [::settled ordinal]
+                     #(:seon.effect/to
+                       (db/pull (:db-after %)
+                                [:seon.effect/to]
+                                [:seon.effect/id effect-id])))
+                    (let [receipt
+                          (db/pull @connection
+                                   [:seon.effect/result-blob
+                                    :seon.effect/result-size]
+                                   result-ref)
+                          expected (invalid-utf8 size)
+                          actual
+                          (exact-bytes connection
+                                       (:seon.effect/result-blob receipt)
+                                       (:seon.effect/result-size receipt)
+                                       7)]
+                      (is (= size (:seon.effect/result-size receipt)))
+                      (is (string? (:seon.effect/result-blob receipt)))
+                      (is (Arrays/equals expected actual))))))))
           (finally
             (datahike/unlisten! connection listener-key)
             (async/close! events)

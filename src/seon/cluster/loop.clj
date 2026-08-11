@@ -582,6 +582,10 @@
   evaluation has no ordinal and therefore commits zero receipts. A refused
   terminal transaction takes one bounded refusal branch; success is the
   returned transaction report, never a value constructed before commit."
+  {:malli/schema
+   [:=>
+    [:cat :seon.cluster.loop/settle-request]
+    :seon.cluster.loop/settlement]}
   [{cluster ::cluster
     now ::now
     agent-id :seon.cluster.agent/id

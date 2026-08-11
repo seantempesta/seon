@@ -34,7 +34,13 @@
                     :completion :seon.flow/channel,
                     :evaluation
                     [:map
-                     [:seon.sci.admit/value :any]
+                     [:seon.sci.admit/value
+                      [:any
+                       {:seon.schema.admission/exemption
+                        :seon.schema.admission/polymorphic-boundary
+                        :seon.schema.admission/reason
+                        "An evaluation carries any already-admitted Clojure value; receipt settlement separately projects its durable representation."
+                        :gen/elements [nil true 0 "" :k [] {} #{}]}]]
                      [:seon.cluster.eval/result-edn
                       {:optional true}
                       :seon.cluster.eval/result-edn]
@@ -66,8 +72,12 @@
                       {:optional true}
                       :seon.print/options]],
                     :forms-run [:int {:min 0}],
+                    :now :inst,
                     :outcome
                     [:enum :closed :released :error :interrupted],
+                    :commit-outcome
+                    [:map
+                     [:db-after :seon.db/database-value]],
                     :terminal-request
                     [:map
                      [:seon.cluster.run/id :seon.cluster.run/id]
@@ -112,6 +122,71 @@
                       {:optional true}
                       :seon.def/rows]
                      [:my.run/value {:optional true} :my.run/value]],
+                    :settle-evaluation-request
+                    [:map
+                     [:seon.cluster.loop/cluster
+                      :seon.cluster.loop/cluster]
+                     [:seon.cluster.loop/now :seon.cluster.loop/now]
+                     [:seon.cluster.agent/id :seon.cluster.agent/id]
+                     [:seon.cluster.run/id :seon.cluster.run/id]
+                     [:seon.cluster.run.form/ordinal
+                      :seon.cluster.run.form/ordinal]
+                     [:seon.sci.eval/evaluation
+                      :seon.sci.eval/evaluation]
+                     [:seon.problems/form-problem
+                      {:optional true}
+                      :seon.problems/form-problem]
+                     [:seon.cluster.message/trigger
+                      {:optional true}
+                      :seon.cluster.message/id]],
+                    :settle-failure-request
+                    [:map
+                     [:seon.cluster.loop/cluster
+                      :seon.cluster.loop/cluster]
+                     [:seon.cluster.loop/now :seon.cluster.loop/now]
+                     [:seon.cluster.agent/id :seon.cluster.agent/id]
+                     [:seon.error/value :seon.error/value]
+                     [:seon.cluster.run/id
+                      {:optional true}
+                      :seon.cluster.run/id]
+                     [:seon.cluster.run.form/ordinal
+                      {:optional true}
+                      :seon.cluster.run.form/ordinal]],
+                    :settle-request
+                    [:or
+                     :seon.cluster.loop/settle-evaluation-request
+                     :seon.cluster.loop/settle-failure-request],
+                    :evaluation-settlement
+                    [:map
+                     [:seon.cluster.loop/settled
+                      [:or :nil :my.run/value]]
+                     [:seon.cluster.loop/evaluation
+                      :seon.cluster.loop/evaluation]
+                     [:seon.cluster.loop/receipt
+                      :seon.cluster.loop/terminal-request]
+                     [:seon.blob/staged-writes
+                      [:vector :seon.blob/staged-write]]
+                     [:seon.db/tx-data
+                      :seon.store/transaction-data]
+                     [:seon.cluster.loop/outcome
+                      :seon.cluster.loop/commit-outcome]
+                     [:seon.cluster.loop/refused-outcome
+                      {:optional true}
+                      :seon.error/value]],
+                    :failure-settlement
+                    [:map
+                     [:seon.error/value :seon.error/value]
+                     [:seon.db/tx-data
+                      :seon.store/transaction-data]
+                     [:seon.cluster.loop/outcome
+                      :seon.cluster.loop/commit-outcome]
+                     [:seon.cluster.loop/refused-outcome
+                      {:optional true}
+                      :seon.error/value]],
+                    :settlement
+                    [:or
+                     :seon.cluster.loop/evaluation-settlement
+                     :seon.cluster.loop/failure-settlement],
                     :turn-report
                     [:map
                      [:seon.cluster.run/id

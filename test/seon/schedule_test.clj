@@ -3,6 +3,7 @@
             [malli.core :as m]
             [seon.cluster.agent :as agent]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.schedule :as schedule]
             [seon.test-support :as test-support])
   (:import [java.time Instant]
@@ -189,9 +190,11 @@
                        @connection))))))))
 
 (deftest schedule-remains-the-third-proc-in-the-agent-graph
-  (let [definition
+  (let [environment (test-support/environment "seon.schedule-test")
+        handle (env/carry {:seon.schedule/channel ::channel} environment)
+        definition
         (agent/graph-definition
-         {:seon.cluster.loop/cluster {:seon.schedule/channel ::channel}
+         {:seon.cluster.loop/cluster handle
           :seon.cluster.agent/id "root"})]
     (is (= #{::agent/mailbox ::agent/turn ::agent/schedule}
            (set (keys (:procs definition)))))))
