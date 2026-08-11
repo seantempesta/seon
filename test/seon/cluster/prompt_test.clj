@@ -13,7 +13,6 @@
             [seon.flow :as flow]
             [seon.render :as render]
             [seon.render.web :as web]
-            [seon.sci.eval :as sci.eval]
             [seon.test-support :as support])
   (:import [java.util Date]))
 
@@ -62,7 +61,7 @@
             pages-channel (async/chan (async/sliding-buffer 1))
             stream-channel (async/chan (async/sliding-buffer 1))
             completion (async/promise-chan)
-            ctx (sci.eval/cluster-ctx @connection connection)
+            ctx (support/fork-cluster-ctx connection)
             graph
             (flow.core/create-flow
              {:procs
@@ -106,7 +105,7 @@
   {:seon.cluster.run/id "walk-run"
    :seon.cluster.agent/id "walker"
    :seon.sci.admit/caps caps
-   :seon.sci.eval/ctx (sci.eval/cluster-ctx @connection connection)
+   :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
    :seon.sci.eval/time-limit-ms 2000
    :seon.config/on-core-error :panic
    :seon.render/context-channel context-channel})

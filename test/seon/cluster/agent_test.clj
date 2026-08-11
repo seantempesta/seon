@@ -32,7 +32,6 @@
             [seon.problems :as problems]
             [seon.render.web :as web]
             [seon.schema :as schema]
-            [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
   (:import [java.net ServerSocket Socket]
            [java.util Date]
@@ -85,7 +84,7 @@
   [body]
   (test-support/with-database
     (fn [connection]
-      (let [ctx (sci.eval/cluster-ctx @connection connection)
+      (let [ctx (test-support/fork-cluster-ctx connection)
             launcher
             (seon.flow/start-work-launcher!
              {:seon.env/environment @test-environment

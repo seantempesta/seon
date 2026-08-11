@@ -53,7 +53,7 @@
   (support/with-database
    (fn [connection]
      (let [database @connection
-           ctx (eval/cluster-ctx database connection)]
+           ctx (support/fork-cluster-ctx connection)]
        (doseq [rendered-value [7 [1 2 3] {:open/declared 1 :open/extra 2}]]
          (let [request (render-request database ctx nil rendered-value)
                floor-unit {:seon.render/value rendered-value
@@ -69,7 +69,7 @@
   (support/with-database
    (fn [connection]
      (let [database @connection
-           ctx (eval/cluster-ctx database connection)
+           ctx (support/fork-cluster-ctx connection)
            report (binding [db/*conn* connection]
                     (db/transact! []))
            rendered (render-ai
@@ -85,7 +85,7 @@
   (support/with-database
    (fn [connection]
      (let [database @connection
-           ctx (eval/cluster-ctx database connection)
+           ctx (support/fork-cluster-ctx connection)
            rendered-value {:seon.ns/name fixture-b}
            request (render-request database ctx fixture-b rendered-value)]
        (is (= (str "B:" fixture-b) (render-ai request)))
@@ -122,7 +122,7 @@
   (support/with-database
    (fn [connection]
      (let [database @connection
-           ctx (eval/cluster-ctx database connection)
+           ctx (support/fork-cluster-ctx connection)
            result (render-ai
                    (render-request database ctx fixture-ambiguous
                                    {:seon.ns/name fixture-ambiguous}))
@@ -156,7 +156,7 @@
   (support/with-database
    (fn [connection]
      (let [database @connection
-           ctx (eval/cluster-ctx database connection)
+           ctx (support/fork-cluster-ctx connection)
            request (render-request database ctx fixture-b
                                    {:seon.ns/name fixture-b})]
        (with-redefs [clojure.core/requiring-resolve
@@ -223,9 +223,9 @@
                      (render-request database ctx fixture-b
                                      {:seon.ns/name fixture-b}))]
        (is (= (str "B:" fixture-b)
-              (render-ai (request (eval/cluster-ctx database connection)))))
+              (render-ai (request (support/fork-cluster-ctx connection)))))
        (is (= (str "B:" fixture-b)
-              (render-ai (request (eval/cluster-ctx database connection)))))))))
+              (render-ai (request (support/fork-cluster-ctx connection)))))))))
 
 (deftest distance-spends-only-real-ref-hops-and-caps-win
   (support/with-database
@@ -235,7 +235,7 @@
       [[:db/add [:seon.ns/name fixture-a]
         :seon.ns/requires [:seon.ns/name fixture-b]]])
      (let [database @connection
-           ctx (eval/cluster-ctx database connection)
+           ctx (support/fork-cluster-ctx connection)
            request {:seon.db/db database
                     :seon.sci.eval/ctx ctx
                     :seon.render.walk/lookup [:seon.ns/name fixture-a]
@@ -264,7 +264,7 @@
   (support/with-database
    (fn [connection]
      (let [database @connection
-           ctx (eval/cluster-ctx database connection)
+           ctx (support/fork-cluster-ctx connection)
            expected [:section {:data-slot "inert"}
                      [:span {:data-ref "[:db/id 7]"} "also inert"]]
            result

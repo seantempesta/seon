@@ -26,7 +26,7 @@
 
 (defn- agent-evaluation
   [connection]
-  (let [base-ctx (sci.eval/cluster-ctx @connection connection)
+  (let [base-ctx (test-support/fork-cluster-ctx connection)
         environment
         (env/refuse-incomplete-environment!
          (env/environment

@@ -38,7 +38,6 @@
             [seon.config :as config]
             [seon.error :as error]
             [seon.render.walk :as walk]
-            [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
             [seon.sci.admit :as admit]
             [seon.test-support :as test-support]
@@ -614,7 +613,8 @@
       (let [db @connection
             units (walk/neighborhood
                   {:seon.db/db db
-                   :seon.sci.eval/ctx (sci.eval/cluster-ctx db connection)
+                   :seon.sci.eval/ctx
+                   (test-support/fork-cluster-ctx connection)
                    :seon.render.walk/lookup
                    [:seon.cluster.agent/id "agent-3"]
                    :seon.render/output :seon.render/ai

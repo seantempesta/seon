@@ -1278,6 +1278,32 @@
        "No `current-src` branch is published; run `bin/seon init` first."
        {:seon.source/branch source/current-branch})))
 
+(defn- acquire-source-base
+  [store acquired-ctx]
+  (let [{commit-id :seon.source/commit-id} (current-source! store)
+        connection (store/open-branch! store source/current-branch)]
+    (try
+      (let [database @connection
+            activation-closure (require-activation! database)
+            source-digest
+            (db/q '[:find ?digest .
+                    :where [_ :seon.source/digest ?digest]]
+                  database)
+            projection (schema/projection-from-database database)
+            projection-state (sci.eval/projection-state database projection)]
+        {:seon.source/commit-id commit-id
+         :seon.source/digest source-digest
+         :seon.source/activation-closure activation-closure
+         :seon.store/store store
+         :seon.store/branch source/current-branch
+         :seon.db/db database
+         :seon.schema/projection projection
+         :seon.sci.eval/ctx
+         (or acquired-ctx
+             (sci.eval/cluster-ctx database connection projection-state))})
+      (finally
+        (d/release connection)))))
+
 (defn source-base!
   "Acquire the immutable published program value shared by new cluster forks."
   {:malli/schema
@@ -1292,29 +1318,7 @@
      [:seon.schema/projection :seon.schema/projection]
      [:seon.sci.eval/ctx :seon.sci.eval/ctx]]]}
   [store]
-  (let [{commit-id :seon.source/commit-id} (current-source! store)
-        connection (store/open-branch! store source/current-branch)]
-    (try
-      (let [database @connection
-            activation-closure (require-activation! database)
-            source-digest
-            (db/q '[:find ?digest .
-                    :where [_ :seon.source/digest ?digest]]
-                  database)
-            projection (schema/projection-from-database database)
-            projection-state (sci.eval/projection-state database projection)
-            base-ctx
-            (sci.eval/cluster-ctx database connection projection-state)]
-        {:seon.source/commit-id commit-id
-         :seon.source/digest source-digest
-         :seon.source/activation-closure activation-closure
-         :seon.store/store store
-         :seon.store/branch source/current-branch
-         :seon.db/db database
-         :seon.schema/projection projection
-         :seon.sci.eval/ctx base-ctx})
-      (finally
-        (d/release connection)))))
+  (acquire-source-base store nil))
 
 (defn- count-installed
   [db attribute]
@@ -2471,7 +2475,7 @@
   Each layer is assoc'd as it stands, and the whole value is republished
   to the registry at every step, so the instance a failure carries is
   exactly what stands: absence marks where boot stopped."
-  [instance publish! compiled-config]
+  [instance publish! compiled-config acquired-ctx]
   (let [config (:seon.boot/config instance)
         cluster-name (:seon.boot/cluster-name config)
         keep-history?
@@ -2483,7 +2487,9 @@
                          [:config :store :id])
         cluster-branch (registry/cluster-branch cluster-name)
         existing-cluster? (contains? (registry/roster store) cluster-branch)
-        source-base (when-not existing-cluster? (source-base! store))
+        source-base
+        (when-not existing-cluster?
+          (acquire-source-base store acquired-ctx))
         start-permit (gc-guard/try-reachability-permit! store-id :roster)
         _ (when-let [kind (:seon.error/kind start-permit)]
             (throw
@@ -2565,12 +2571,13 @@
   {:malli/schema [:=> [:cat :seon.boot/start-request] :seon.boot/instance]}
   [request]
   (let [began (System/nanoTime)
+        acquired-ctx (:seon.sci.eval/ctx request)
         config-request
         (select-keys request
                      [:seon.config/manifest :seon.config/environment])
         config
         (resolve-bootstrap
-         (apply dissoc request (keys config-request)))
+         (apply dissoc request :seon.sci.eval/ctx (keys config-request)))
         cluster-name (:seon.boot/cluster-name config)
         compiled-config
         (config/compile-manifest
@@ -2650,7 +2657,8 @@
         ;; the elapsed measure belongs to boot, not to whoever prints
         ;; the banner: a caller timing `start!` from outside measures
         ;; its own require time too
-        (let [stood (stack-tower! instance publish! compiled-config)]
+        (let [stood (stack-tower! instance publish! compiled-config
+                                  acquired-ctx)]
           (publish! (assoc stood :seon.boot/ready-ms
                            (quot (- (System/nanoTime) began) 1000000))))
         (catch Throwable failure

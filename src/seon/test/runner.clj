@@ -688,6 +688,7 @@
           (let [namespaces (mapv symbol (::worker-namespaces command))]
             (doseq [namespace-name namespaces]
               (require namespace-name))
+            ((requiring-resolve 'seon.test-support/prepare-base!))
             (write-protocol! writer
                              {::worker-event :initialized
                               ::worker-id worker-id

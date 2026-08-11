@@ -463,8 +463,8 @@
   repl-is-live-after-the-boot-tower
   (let [root (published-root)]
     (try
-      (let [instance (cluster/start! {:seon.boot/cluster-name "solo"
-                                      :seon.boot/root root})
+      (let [instance (test-support/start-cluster!
+                      {:seon.boot/cluster-name "solo" :seon.boot/root root})
             advertisement (:seon.boot/advertisement instance)
             answer (prepl-eval (:seon.boot/prepl-host advertisement)
                                (:seon.boot/prepl-port advertisement)
@@ -493,10 +493,10 @@
   two-instances-are-isolated
   (let [root (published-root)]
     (try
-      (let [a (cluster/start! {:seon.boot/cluster-name "a"
-                               :seon.boot/root root})
-            b (cluster/start! {:seon.boot/cluster-name "b"
-                               :seon.boot/root root})
+      (let [a (test-support/start-cluster!
+               {:seon.boot/cluster-name "a" :seon.boot/root root})
+            b (test-support/start-cluster!
+               {:seon.boot/cluster-name "b" :seon.boot/root root})
             port-of #(get-in % [:seon.boot/advertisement
                                 :seon.boot/prepl-port])]
         (try
@@ -527,8 +527,8 @@
   stale-advertisements-read-as-absent
   (let [root (published-root)]
     (try
-      (let [instance (cluster/start! {:seon.boot/cluster-name "stale"
-                                      :seon.boot/root root})
+      (let [instance (test-support/start-cluster!
+                      {:seon.boot/cluster-name "stale" :seon.boot/root root})
             advertisement (:seon.boot/advertisement instance)
             file (io/file (:seon.boot/advertisement-file
                            (cluster/cluster-paths root "stale")))]
@@ -563,8 +563,9 @@
   ;; value must leave a same-named replacement fully alive
   (let [root (published-root)]
     (try
-      (let [old-instance (cluster/start! {:seon.boot/cluster-name "swap"
-                                          :seon.boot/root root})]
+      (let [old-instance (test-support/start-cluster!
+                          {:seon.boot/cluster-name "swap"
+                           :seon.boot/root root})]
         (cluster/stop! old-instance)
         (let [replacement (cluster/start! {:seon.boot/cluster-name "swap"
                                            :seon.boot/root root})
@@ -589,8 +590,8 @@
         server-name (str "seon.cluster/" cluster-name)]
     (try
       (let [first-instance
-            (cluster/start! {:seon.boot/cluster-name cluster-name
-                             :seon.boot/root root})]
+            (test-support/start-cluster!
+             {:seon.boot/cluster-name cluster-name :seon.boot/root root})]
         (cluster/stop! first-instance)
         (is (not (contains? (registered-prepl-servers) server-name))
             "stop! releases the clojure.core.server name synchronously")
@@ -619,8 +620,9 @@
         root-store-key (.getCanonicalPath (io/file root "store"))
         retry-release-calls (atom 0)]
     (try
-      (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
-                                      :seon.boot/root root})
+      (let [instance (test-support/start-cluster!
+                      {:seon.boot/cluster-name cluster-name
+                       :seon.boot/root root})
             advertisement (:seon.boot/advertisement instance)
             registered-instances
             (var-get (ns-resolve 'seon.cluster 'running-instances))
@@ -703,8 +705,9 @@
         original-transact! db/transact!
         original-stop flow/stop]
     (try
-      (let [instance (cluster/start! {:seon.boot/cluster-name "stopping"
-                                      :seon.boot/root root})
+      (let [instance (test-support/start-cluster!
+                      {:seon.boot/cluster-name "stopping"
+                       :seon.boot/root root})
             connection (:seon.boot/cluster-connection instance)]
         (try
           (with-redefs
@@ -774,7 +777,7 @@
   operator-root-history-policy-is-creation-fixed
   (let [root (fresh-root-with-history-policy false)
         instance
-        (cluster/start!
+        (test-support/start-cluster!
          {:seon.boot/root root
           :seon.boot/cluster-name "history-off"
           :seon.config/manifest {:seon.config.db/keep-history? false}})]
@@ -1199,7 +1202,7 @@
                   "an agent evaluation error never enters the core-fault family")))
           (testing "a second cluster acquires its own projection from the
                     shared store"
-            (let [sibling (cluster/start!
+            (let [sibling (test-support/start-cluster!
                            {:seon.boot/cluster-name "twr2"
                             :seon.boot/root root
                             :seon.config/manifest
@@ -1424,8 +1427,9 @@
       ;; a first boot writes the wreckage a kill -9 mid-model-call leaves:
       ;; an open run claimed by a process that will not exist afterwards,
       ;; a live lease, and a dangling :running receipt
-      (let [instance (cluster/start! {:seon.boot/cluster-name "recov"
-                                      :seon.boot/root root})
+      (let [instance (test-support/start-cluster!
+                      {:seon.boot/cluster-name "recov"
+                       :seon.boot/root root})
             connection (:seon.boot/cluster-connection instance)
             now (java.util.Date.)]
         (await-bootstrap! connection "root")
@@ -1514,8 +1518,9 @@
             (cluster/stop! instance))))
 
       ;; a clean boot commits nothing
-      (let [instance (cluster/start! {:seon.boot/cluster-name "clean"
-                                      :seon.boot/root root})]
+      (let [instance (test-support/start-cluster!
+                      {:seon.boot/cluster-name "clean"
+                       :seon.boot/root root})]
         (try
           (is (= 0 (:seon.boot/recovery-operations instance))
               "a store with no wreckage is not written to at boot")

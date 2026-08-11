@@ -13,7 +13,6 @@
             [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.form :as schema.form]
-            [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support]))
 
 (def ^:private caps
@@ -191,7 +190,7 @@
     (test-support/with-database
      (fn [connection]
        (let [database @connection
-             ctx (sci.eval/cluster-ctx database connection)
+             ctx (test-support/fork-cluster-ctx connection)
              representative-key (first (sort class-keys))
              value (generated-class-value projection
                                           (get rows representative-key)

@@ -630,7 +630,7 @@
       (db/transact! connection [{:seon.config/cluster "default"}
                                 {:seon.cluster.run/id "effect-run"}])
       (install-capability! connection)
-      (let [ctx (sci.eval/cluster-ctx @connection connection)
+      (let [ctx (test-support/fork-cluster-ctx connection)
             effective (config/defaults)
             evaluation
             (sci.eval/evaluate

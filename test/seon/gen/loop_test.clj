@@ -141,7 +141,7 @@
           :seon.cluster/name "generate-code-v0"
           :seon.flow/work-launcher launcher
           :seon.cluster.run/process process
-          :seon.sci.eval/ctx (sci.eval/cluster-ctx @connection)
+          :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
           :seon.cluster.wake/channel
           (async/chan (async/sliding-buffer 1))
           :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate

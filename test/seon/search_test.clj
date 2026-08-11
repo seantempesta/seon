@@ -196,7 +196,7 @@
 (deftest search-is-an-ordinary-door-mode-function
   (with-index
     (fn [connection _]
-      (let [ctx (eval/cluster-ctx @connection connection)
+      (let [ctx (test-support/fork-cluster-ctx connection)
             request {:seon.search/query "search"
                      :seon.search/families #{:seon.fn/sym}
                      :seon.search/namespace-prefix 'seon.search

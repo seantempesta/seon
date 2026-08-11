@@ -66,8 +66,8 @@
   (let [root (str "tmp/armed-test/" name)]
     (test-support/delete-recursively! root)
     (test-support/populate-published-root! root)
-    (let [instance (cluster/start! {:seon.boot/cluster-name name
-                                    :seon.boot/root root})]
+    (let [instance (test-support/start-cluster!
+                    {:seon.boot/cluster-name name :seon.boot/root root})]
       (try
         (await-fact
          (:seon.boot/cluster-connection instance)
@@ -182,10 +182,10 @@
   (let [root "tmp/armed-test/live-program-boundary"]
     (test-support/delete-recursively! root)
     (test-support/populate-published-root! root)
-    (let [left (cluster/start! {:seon.boot/cluster-name "live-left"
-                                :seon.boot/root root})
-          right (cluster/start! {:seon.boot/cluster-name "live-right"
-                                 :seon.boot/root root})]
+    (let [left (test-support/start-cluster!
+                {:seon.boot/cluster-name "live-left" :seon.boot/root root})
+          right (test-support/start-cluster!
+                 {:seon.boot/cluster-name "live-right" :seon.boot/root root})]
       (try
         (doseq [instance [left right]]
           (await-fact
@@ -307,8 +307,8 @@
        (fn [_request]
          (.countDown called)
          {:seon.ai/text "(my.run/complete \"answered\")"})]
-      (let [instance (cluster/start! {:seon.boot/cluster-name name
-                                      :seon.boot/root root})]
+      (let [instance (test-support/start-cluster!
+                      {:seon.boot/cluster-name name :seon.boot/root root})]
         (try
           (test-support/await-event! called "boot-window model call")
           (is (= "boot-window-message"

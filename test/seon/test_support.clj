@@ -167,6 +167,12 @@
   ;; exit, and bin/test never reuses this delay across invocations.
   (delay (create-base)))
 
+(defn prepare-base!
+  "Acquire this test worker's immutable database and SCI base once."
+  []
+  @database-base
+  nil)
+
 (defn fork-cluster-ctx
   "Fork the process source base's acquired SCI ctx for `connection`."
   [connection]
@@ -175,6 +181,12 @@
         projection-state (sci.eval/projection-state @connection projection)]
     (sci.eval/fork-cluster-ctx base-ctx @connection connection
                                projection-state)))
+
+(defn start-cluster!
+  "Start a current-source cluster from this worker's acquired SCI base."
+  [request]
+  (cluster/start!
+   (assoc request :seon.sci.eval/ctx (:seon.sci.eval/ctx @database-base))))
 
 (defn environment
   "One subset environment (store + facts, no graphs, no web) for a test.

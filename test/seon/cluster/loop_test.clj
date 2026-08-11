@@ -397,7 +397,7 @@
           {::run/id run-id
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/at now}))
-        (let [ctx (sci.eval/cluster-ctx @connection connection)
+        (let [ctx (test-support/fork-cluster-ctx connection)
               first-evaluation
               (sci.eval/evaluate
                {:seon.cluster.run.form/source
@@ -645,7 +645,7 @@
                    (get-in planned-form
                            [:seon.cluster.run.form/ns :seon.ns/name])]
                   :seon.sci.eval/ctx
-                  (sci.eval/cluster-ctx @connection connection)
+                  (test-support/fork-cluster-ctx connection)
                   :seon.sci.admit/caps
                   (config/result-caps (config/defaults))
                   :seon.sci.eval/time-limit-ms 2000
@@ -693,7 +693,7 @@
                     :seon.cluster/name cluster-name
                     :seon.cluster.run/process process
                     :seon.sci.eval/ctx
-                    (sci.eval/cluster-ctx @connection connection)
+                    (test-support/fork-cluster-ctx connection)
                     :seon.config.eval/time-limit-ms 2000
                     :seon.config/on-core-error :panic
                     :seon.sci.admit/caps

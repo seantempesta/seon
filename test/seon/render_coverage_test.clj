@@ -141,7 +141,7 @@
    (fn [connection]
      (seed-entities! connection)
      (let [database @connection
-           ctx (sci.eval/cluster-ctx database connection)
+           ctx (support/fork-cluster-ctx connection)
            cluster-value (pulled database [:seon.cluster/name cluster-name])
            config-value (pulled database [:seon.config/cluster cluster-name])
            plan-value (pulled database
@@ -217,7 +217,7 @@
    (fn [connection]
      (seed-entities! connection)
      (let [database @connection
-           ctx (sci.eval/cluster-ctx database connection)
+           ctx (support/fork-cluster-ctx connection)
            pending (pulled database [:seon.effect/id "effect-pending"])
            returned (pulled database [:seon.effect/id "effect-returned"])
            interrupted (pulled database [:seon.effect/id
@@ -318,7 +318,7 @@
         :seon.ai.attempt/settings-edn "{}"
         :seon.ai.attempt/reasoning "private provider reasoning"}])
      (let [database @connection
-           ctx (sci.eval/cluster-ctx database connection)
+           ctx (support/fork-cluster-ctx connection)
            attempt (pulled database [:seon.ai.attempt/id "re-entrance-attempt"])
            request (render-request database ctx attempt)
            html (support/await-event!
