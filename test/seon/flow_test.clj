@@ -407,7 +407,6 @@
                ::did-not-settle)]
           (is (= ::sut/time-limit (::sut/outcome result))))
         (finally
-          (flow/resume graph)
           (stop-test-work-launcher!)))))
   (testing "queued behind a fully occupied owner"
     (let [entered (CountDownLatch. 1)
