@@ -385,3 +385,43 @@ is a defect to attack before any work lands on top of the walk.
   resolved, so an entity-level fallback form can only be spelled
   `[:db/id 2484]`. Both are recorded here as observations from this probe,
   not diagnosed; they need their own issues once someone reads them.
+
+## 2026-08-11 implementation probe — the remaining choke point is the walk entry
+
+The three owner-requested carrier options were probed against Datahike
+`10540578248eaa686c1f88a7fe57644ee4c9f993` and the current Seon call graph.
+
+- **Database-value metadata is insufficient.** A raw `DB` record retains
+  Clojure metadata through ordinary reads and `d/with`, but `history`, `as-of`,
+  and `since` construct fresh outer records, reopen reconstructs a fresh
+  database value from storage, and `seon.print` is never handed the database
+  value. Making this carrier complete would require refresh, temporal-origin,
+  reopen, and print-carriage machinery.
+- **The environment's projection is not basis-correct.** `seon.env` carries
+  the projection object faithfully, but boot snapshots it while the SCI
+  context's projection state advances after program/schema accretion. It
+  cannot be used as the projection for an arbitrary current or historical
+  database value without a broader ownership change.
+- **Per-operation entry resolution is the simplest complete form.** A walk
+  request already carries both the exact immutable database value and the SCI
+  context. Resolve `schema/projection-from-database` once at that database
+  basis (using the context projection only as its reusable candidate), then
+  run the complete traversal under the existing
+  `schema/call-with-projection`. Every nested `seon.db` read and every
+  `seon.print` emit then consumes the one supplied projection, so both
+  `db.clj:430` and `print.cljc:232` become zero-fallback paths together.
+
+The structural choke point is `seon.render.walk/neighborhood`, not any
+remaining leaf. `seon.db` already resolves once per individual read and
+`seon.print` once per individual emit; neither leaf can know that hundreds of
+those calls belong to one walk. This implementation lane did not edit
+`src/seon/render/walk.clj` because the task explicitly protected it for the
+concurrent walk owner. No weaker cache or second carrier was landed.
+
+The recurring regression belongs beside the walk. It must shadow
+`test-support/with-database`'s supplied projection state with
+`(schema/call-with-projection-state (atom {}) ...)`; otherwise the current
+fallbacks appear fixed and the test is vacuous. Seed at least one transcript
+value so both database reads and print emission execute, then assert the walk
+performs at most one declaration-population resolution, zero schema-resource
+reads, and emits no `DECLARATION POPULATION FALLBACK` line.
