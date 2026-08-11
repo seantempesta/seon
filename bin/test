@@ -376,6 +376,28 @@ reap_runner() {
     >>"$run_root/test-run.txt"
 }
 
+launch_runner() {
+  "$@" &
+  suite_pid=$!
+  printf 'runner-pid=%s runner-started-at=%s\n' \
+    "$suite_pid" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+    >>"$run_root/test-run.txt"
+}
+
+await_runner() {
+  local runner_pid=$suite_pid runner_exit
+  if wait "$runner_pid"; then
+    runner_exit=0
+  else
+    runner_exit=$?
+  fi
+  printf 'runner-exit=%s runner-reaped-at=%s\n' \
+    "$runner_exit" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+    >>"$run_root/test-run.txt"
+  suite_pid=
+  return "$runner_exit"
+}
+
 retain_run_root() {
   local caught_signal=$1
   local status=$2
@@ -413,23 +435,24 @@ else
 fi
 
 echo "bin/test: preparing one shared published test base"
-clojure \
+launch_runner clojure \
   "-J-Dseon.operator.root=$run_root" \
   "-J-Dseon.test.root=$run_root" \
   "-J-Dseon.test.source-root=$source_root" \
   -M:test -m seon.test.runner --prepare-base "$shared_published_base"
-base_status=$?
+if await_runner; then
+  base_status=0
+else
+  base_status=$?
+fi
 if [ "$base_status" -ne 0 ]; then
   status=$base_status
-  printf 'runner-exit=%s runner-reaped-at=%s\n' \
-    "$status" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
-    >>"$run_root/test-run.txt"
   cd "$source_root"
   echo "bin/test: shared published base preparation failed; retained isolated operator root $run_root" >&2
   exit "$status"
 fi
 
-clojure \
+launch_runner clojure \
   "-J-Dseon.operator.root=$run_root" \
   "-J-Dseon.test.root=$run_root" \
   "-J-Dseon.test.source-root=$source_root" \
@@ -438,20 +461,12 @@ clojure \
   "-J-Dseon.test.published-base=$shared_published_base" \
   -M:test -m seon.test.runner \
   "${result_cluster:--}" "$result_root" "$git_sha" "$selection_mode" \
-  "${namespaces[@]}" &
-suite_pid=$!
-printf 'runner-pid=%s runner-started-at=%s\n' \
-  "$suite_pid" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
-  >>"$run_root/test-run.txt"
-if wait "$suite_pid"; then
+  "${namespaces[@]}"
+if await_runner; then
   status=0
 else
   status=$?
 fi
-printf 'runner-exit=%s runner-reaped-at=%s\n' \
-  "$status" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
-  >>"$run_root/test-run.txt"
-suite_pid=
 set -e
 cd "$source_root"
 
