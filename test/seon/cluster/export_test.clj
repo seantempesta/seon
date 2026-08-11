@@ -186,7 +186,17 @@
         (is (= path (export/reidentify! path)) "twice changes nothing")
         (let [exported (store/open-store! {:seon.store/dir path})]
           (try
-            (is (= #{"on-main"} (markers (:seon.store/connection-object exported))))
+            (let [connection (:seon.store/connection-object exported)
+                  commit-id (get-in @connection [:meta :datahike/commit-id])]
+              (is (= #{"on-main"} (markers connection)))
+              (d/branch! connection commit-id :future-fork)
+              (let [future-connection
+                    (store/open-branch! exported :future-fork)]
+                (try
+                  (is (= #{"on-main"} (markers future-connection))
+                      "an exact copied commit can seed a future branch")
+                  (finally
+                    (d/release future-connection)))))
             (finally
               (store/release-store! exported))))))))
 

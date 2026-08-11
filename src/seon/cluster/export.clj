@@ -23,8 +23,11 @@
     rides the live config into the next commit's stored config, so
     every later flag-free connect fails a different way. A one-time
     fork problem must not become a permanent config asymmetry.
-  - EVERY BRANCH HEAD CARRIES ITS OWN STORED CONFIG, so `reidentify!`
-    rewrites the whole roster, not only `:db`. Probed live
+  - EVERY BRANCH HEAD AND REACHABLE COMMIT CARRIES ITS OWN STORED CONFIG, so
+    `reidentify!` rewrites the whole reachable commit graph, not only `:db`.
+    A future branch may fork an exact commit ID rather than a branch head;
+    leaving that immutable record stamped with the source identity makes the
+    newly created branch refuse on first open. Probed live
     (`tmp/b2-draft-probe/head_config_probe.clj`): with only `:db`
     rewritten, `d/connect` to `:db` succeeded and `:ancestor-x` refused
     `:store-identity-mismatch`. An export whose cluster branches cannot
@@ -225,22 +228,33 @@
             (refuse! ::genesis-incomplete
                      (str "the store at " path " has no branch roster")
                      {:seon.store/dir path}))
-        identity (get-in (store/datahike-configuration identity-path)
+        store-id (get-in (store/datahike-configuration identity-path)
                          [:store :id])]
-    ; EVERY head, not only :db: each one carries its own stored config,
-    ; and connect compares the head it is opening (connector.cljc:159-169)
-    (doseq [branch (conj (set branches) :db)]
-      (when-let [record (k/get konserve branch nil {:sync? true})]
-        (k/assoc konserve branch
-                 (-> record
-                     (assoc-in [:config :store :id] identity)
-                     (assoc-in [:config :store :path] identity-path))
-                 {:sync? true})))
+    ;; Branching from an exact commit reads that immutable commit record, not
+    ;; the branch head. Walk heads -> their own commit IDs -> parents so every
+    ;; value Datahike may later use as a branch source carries the new identity.
+    (loop [pending (seq (conj (set branches) :db))
+           visited #{}]
+      (when-let [record-key (first pending)]
+        (if (contains? visited record-key)
+          (recur (next pending) visited)
+          (let [record (k/get konserve record-key nil {:sync? true})
+                related (when record
+                          (conj (set (get-in record [:meta :datahike/parents]))
+                                (get-in record [:meta :datahike/commit-id])))]
+            (when record
+              (k/assoc konserve record-key
+                       (-> record
+                           (assoc-in [:config :store :id] store-id)
+                           (assoc-in [:config :store :path] identity-path))
+                       {:sync? true}))
+            (recur (concat (next pending) (remove nil? related))
+                   (conj visited record-key))))))
     identity-path))
 
 (defn reidentify!
   "Rewrite a copied store's stored identity to match its own path.
-  One `k/get` / `k/assoc` pair per branch in `:branches`, plus `:db`,
+  One `k/get` / `k/assoc` pair per reachable branch head and commit record,
   setting `[:config :store :id]` to the path-derived id
   `seon.cluster.store/datahike-configuration` would present and
   `[:config :store :path]` to the canonical path — measured at 13.8 ms
