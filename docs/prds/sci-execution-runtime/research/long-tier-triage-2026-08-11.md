@@ -1,6 +1,6 @@
 ---
 type: research
-status: active
+status: complete
 tags: [testing, performance]
 ---
 
@@ -113,6 +113,16 @@ Focused proof results:
 - work: 11 / 139 / zero;
 - blob publication + curation: 2 / 104 / zero.
 
+The first complete-tier attempt then exposed a separate runner waste: every
+worker checkout symlinked the same writable `.clj-kondo` cache. A losing
+worker could poison its delayed canonical database base and make every later
+database test fail immediately. `bin/test` now gives each worker a
+copy-on-write private `.clj-kondo`; the structural regression proves it is a
+directory, not a symlink. Clean isolated confirmations also run with bounded
+parallelism while preserving one fresh JVM per failed task and original
+attribution order. The maintained issue is
+[`parallel-test-stress-exposes-eleven-isolation-sensitive-tests.md`](../../../seon/issues/parallel-test-stress-exposes-eleven-isolation-sensitive-tests.md).
+
 ## Ranked make-them-faster queue
 
 1. **Complete publication/indexing.** Three boot tests spend 158–193 s and
@@ -143,5 +153,130 @@ Focused proof results:
 
 ## Default complete tier
 
-Pending the frozen-tree `bin/test --all` measurement after the metadata and
-fixture changes above.
+The final frozen-tree command was:
+
+```sh
+/usr/bin/time -p bin/test --all 2>&1 \
+  | tee tmp/default-complete-long-tier-triage-final-2026-08-11.log
+```
+
+The source was `c8a0e009fefbf5313b024cddcdf2f197c6ceb95a`. The runner
+selected 71 platform tests and 1,038 bulk tests, skipped 53 declared long
+tests, and completed 1,109 tests / 8,961 assertions. Wall time was **389.67 s
+(6:29.67)**, inside the owner's 5--8 minute ceiling. The command's phases
+were:
+
+- shared publication, nine worker launches, namespace loading, and graph
+  selection: about 92.5 s before the platform tier;
+- platform tier: 33.825 s;
+- bulk tier through the last pool result: 173.283 s; and
+- four bounded concurrent isolated confirmations plus teardown: about 82.6 s.
+
+The runner was red, but the timing result is complete: three failures and one
+error. Three reproduced in clean JVMs:
+
+- `seon.public-contract-test/every-fresh-public-function-has-a-complete-contract`
+  still finds the pre-existing uncontracted `seon.test.runner/-main`;
+- `seon.render-simplification-test/nested-values-render-their-declared-faces`
+  still misses the declared transaction-report face; and
+- `seon.test-runner-test/interrupted-launcher-awaits-its-runner-before-retaining-the-root`
+  still misses its fake-runner readiness backstop under load.
+
+`seon.sci.eval-test/generated-sources-compose-fork-guard-and-admission` failed
+in the pool and passed its isolated confirmation; it remains a parallel-only
+stress finding. No pool task exceeded 45 seconds after triage. The slowest
+remaining members were source-publication admission at 44.281 s, run-model
+transitions at 43.665 s, and the goal/message property at 42.002 s.
+
+## Declared long roster
+
+The final default runner printed this exact 53-test roster. Grouped symbols
+share the displayed reason.
+
+- `seon.bootstrap-drive-test/one-fake-o1-drive-grades-on-its-ending-commit` —
+  171.859 s pool: real cluster graph bootstrap, objective/fork drive, and
+  ending-commit grading.
+- All five `seon.cluster.armed-test` vars — 48.642 s slowest pool member:
+  every test boots a real armed cluster; fault-to-fact delivery is the proof.
+- `seon.cluster.boot-test/a-dead-holders-run-is-unclaimed-by-the-time-start-returns`
+  — 60.475 s pool: real boot, simulated dead holder, restart recovery, and
+  custody read-back.
+- `seon.cluster.boot-test/explicit-refork-destroys-the-old-branch-and-forks-current-source`
+  — 192.600 s pool: complete publication, real start, destructive composed
+  refork, replacement boot, and read-back.
+- `seon.cluster.boot-test/incremental-source-refresh-publishes-without-touching-existing-clusters`
+  — 186.733 s pool: complete incremental publication dominates, followed by
+  existing-cluster and later-fork agreement.
+- `seon.cluster.boot-test/operator-root-history-policy-is-creation-fixed` —
+  133.791 s pool: fresh physical-store creation plus real starts/reopens under
+  both history policies.
+- `seon.cluster.boot-test/partial-clusters-refuse-and-fresh-clusters-are-current`
+  — 114.810 s pool: real boot, program-fact corruption/refusal, and
+  fresh-cluster currentness proof.
+- `seon.cluster.boot-test/refork-does-not-collide-with-the-store-its-caller-already-holds`
+  — 158.206 s pool: published real store plus child-JVM operator refork and
+  collision/read-back proof.
+- `seon.cluster.boot-test/repl-is-live-after-the-boot-tower` — 47.230 s pool:
+  published-base clone, real cluster boot tower, live prepl call, and stop.
+- `seon.cluster.boot-test/same-jvm-same-name-restart-releases-the-registered-prepl`
+  — 49.939 s pool: real start/stop/start generation proves registered prepl
+  release.
+- `seon.cluster.boot-test/selected-config-repairs-locked-state-before-consumers-arm`
+  — 53.139 s pool: real boot, locked-state config repair, restart, and pre-arm
+  fact proof.
+- `seon.cluster.boot-test/the-tower-stands-in-one-start` — 46.987 s pool:
+  complete real boot tower plus sibling-cluster acquisition and independent
+  config proof.
+- Nine pre-existing boot proofs remain long for their declared real boundary:
+  `a-delayed-stop-never-kills-a-replacement`,
+  `a-failed-stop-remains-addressable-and-retryable`,
+  `a-failed-tower-never-takes-the-repl`,
+  `incompatible-sovereign-schema-refusal-steers-the-operator`,
+  `incremental-source-refresh-preserves-agreement-across-real-edits`,
+  `orderly-stop-awaits-the-active-loop-pass`,
+  `stale-advertisements-read-as-absent`,
+  `start-allows-an-older-complete-program-without-indexing`, and
+  `two-instances-are-isolated`; their reasons respectively name the real
+  generation restart, teardown retry, corrupted prepl boot, incompatible
+  store, real edit publication, active flow pass, advertisement lifecycle,
+  sovereign older program, and two-cluster isolation.
+- `seon.cluster.program-restart-test/an-agent-definition-survives-restart-and-another-agent-calls-it`
+  — 67.758 s pool: real cluster stop/restart plus cross-agent acquisition and
+  call proof.
+- Both long `seon.cluster.store-test` vars — foreign-JVM operating-system
+  store-fence proofs.
+- Both `seon.concurrency-independence-test` vars — 136.721 s pool: one real
+  cluster folds 5- and 10-agent plans concurrently and verifies every receipt.
+- Both `seon.concurrency-streams-test` vars — shared-cluster database write and
+  multi-message delivery races.
+- Both long `seon.config-application-test` vars — real-cluster effective config
+  and credential-selection proofs.
+- `seon.dev.dependency-cache-test/refresh-preserves-a-recorded-jvms-exact-cache-directory`
+  — delayed AOT classes across refresh and heap pressure.
+- `seon.dev.edit-feedback-test/split-schema-edits-run-admission-before-publication`
+  — 59.518 s pool: real hook subprocesses cover schema admission before
+  edit-hook publication.
+- `seon.dev.fresh-operator-export-test/export-verb-produces-an-openable-queryable-store`
+  — 200.542 s pool: real start JVM, export JVM, store copy/reidentify, reopen,
+  and query proof.
+- Eight `seon.dev.fresh-operator-test` vars remain long: stale-wrapper refresh
+  (53.876 s), forced reset (92.850 s), fresh-process instrumentation (93.065
+  s), full init lifecycle (110.837 s), cached boot/readiness (90.430 s), live
+  schema reload (110.095 s), full operator restart (114.689 s), and source-less
+  reset/republication (94.568 s).
+- `seon.flow-test/forced-child-jvm-death-preserves-committed-facts` — real
+  child-JVM death and committed-fact survival.
+- `seon.fn-test/current-output-floor-classification-is-recorded` — complete
+  indexed-graph analysis and committed diagnostic update.
+- `seon.oversight-test/a-booted-cluster-tells-its-live-fleet-story` — real boot
+  plus root-page fleet integration.
+- Both long `seon.print-test` properties — 93.195/94.303 s pool for 200
+  generated text/Hiccup equivalence and readable EDN round-trip trials.
+- `seon.render.transcript-test/every-generated-history-is-ordered-total-and-token-bounded`
+  — 66.666 s pool: 40 fresh-branch histories with dual AI/HTML ordering and
+  token-bound proofs.
+- `seon.sci.desk-test/desk-survives-kill-9-and-explicit-clear` — 80.213 s pool:
+  settle defs, SIGKILL the writer JVM, restart, restore, and clear.
+- `seon.sci.eval-instrumentation-test/an-instrumented-dev-cluster-completes-one-agent-turn`
+  — 233.603 s pool: published-root start, whole-image instrumentation, and one
+  settled agent turn.
