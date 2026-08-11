@@ -282,76 +282,81 @@
   (let [instance (mcp-instance cluster-name)
         connection (:seon.boot/cluster-connection instance)
         effective (mcp-effective cluster-name bootstrap-effective)
-        evaluation-print-node (evaluation-node value)
-        exception-envelope? (prepl-exception-envelope? value)
-        exception-summary-value (when exception-envelope?
-                                  (exception-summary value))
-        admitted
-        (if evaluation-print-node
-          {:seon.sci.admit/print-node evaluation-print-node
-           :seon.sci.admit/capped?
-           (boolean (:seon.sci.admit/capped? value))}
-          (admit/admit-value
-           {:seon.sci.admit/value (or exception-summary-value value)
-            :seon.sci.admit/interrupt-fn (fn [])
-            :seon.sci.admit/caps (config/result-caps effective)
-            :seon.config/on-core-error
-            (:seon.config/on-core-error effective)}))
-        artifact (render.value/artifact admitted)
-        content (render.value/artifact-edn artifact)
-        content-digest (blob/digest content)
-        threshold (:seon.config.eval.result/blob-threshold effective)
-        oversized? (> (count content) threshold)
-        artifact-backed? oversized?
-        print-node (:seon.sci.admit/print-node artifact)
-        projected-node (if oversized?
-                         (print/fit
-                          print-node
-                          (cond-> (render/agent-render-profile effective)
-                            connection
-                            (assoc :seon.print/requery-id
-                                   [:seon.blob/digest content-digest])
+        caps (config/result-caps effective)]
+    (if (:seon.error/kind caps)
+      {:seon.dev.mcp/value caps
+       :seon.sci.admit/capped? false
+       :seon.dev.mcp/windowed? false}
+      (let [evaluation-print-node (evaluation-node value)
+            exception-envelope? (prepl-exception-envelope? value)
+            exception-summary-value (when exception-envelope?
+                                      (exception-summary value))
+            admitted
+            (if evaluation-print-node
+              {:seon.sci.admit/print-node evaluation-print-node
+               :seon.sci.admit/capped?
+               (boolean (:seon.sci.admit/capped? value))}
+              (admit/admit-value
+               {:seon.sci.admit/value (or exception-summary-value value)
+                :seon.sci.admit/interrupt-fn (fn [])
+                :seon.sci.admit/caps caps
+                :seon.config/on-core-error
+                (:seon.config/on-core-error effective)}))
+            artifact (render.value/artifact admitted)
+            content (render.value/artifact-edn artifact)
+            content-digest (blob/digest content)
+            threshold (:seon.config.eval.result/blob-threshold effective)
+            oversized? (> (count content) threshold)
+            artifact-backed? oversized?
+            print-node (:seon.sci.admit/print-node artifact)
+            projected-node (if oversized?
+                             (print/fit
+                              print-node
+                              (cond-> (render/agent-render-profile effective)
+                                connection
+                                (assoc :seon.print/requery-id
+                                       [:seon.blob/digest content-digest])
 
-                            (nil? connection)
-                            (assoc :seon.print/requery-refusal
-                                   "the cluster has no database connection")))
-                         print-node)
-        staged (when (and artifact-backed? connection)
-                 (blob/stage! connection content))
-        stored-digest
-        (when staged
-          (blob/with-publication!
-           connection
-           [staged]
-           (fn []
-             (let [result
-                   (db/transact!
-                    connection
-                    [{:seon.dev.mcp.artifact/id content-digest
-                      :seon.dev.mcp.artifact/digest content-digest}])]
-               (when (:seon.error/kind result)
-                 (throw
-                  (ex-info
-                   "The durable MCP artifact root did not commit."
-                   {:seon.error/kind :core-bug
-                    :seon.dev.mcp.artifact/digest content-digest
-                    :seon.dev.mcp.artifact/transaction-result result})))
-               content-digest))))]
-    (cond-> {:seon.dev.mcp/value
-             (if evaluation-print-node
-               (evaluation-face value projected-node effective)
-               (admit/semantic-value projected-node))
-             :seon.sci.admit/capped?
-             (:seon.sci.admit/capped? artifact)
-             :seon.dev.mcp/windowed? artifact-backed?}
-      artifact-backed?
-      (assoc :seon.blob/digest content-digest
-             :seon.blob/size (count content)
-             :seon.dev.mcp/retrievable? (boolean stored-digest))
+                                (nil? connection)
+                                (assoc :seon.print/requery-refusal
+                                       "the cluster has no database connection")))
+                             print-node)
+            staged (when (and artifact-backed? connection)
+                     (blob/stage! connection content))
+            stored-digest
+            (when staged
+              (blob/with-publication!
+               connection
+               [staged]
+               (fn []
+                 (let [result
+                       (db/transact!
+                        connection
+                        [{:seon.dev.mcp.artifact/id content-digest
+                          :seon.dev.mcp.artifact/digest content-digest}])]
+                   (when (:seon.error/kind result)
+                     (throw
+                      (ex-info
+                       "The durable MCP artifact root did not commit."
+                       {:seon.error/kind :core-bug
+                        :seon.dev.mcp.artifact/digest content-digest
+                        :seon.dev.mcp.artifact/transaction-result result})))
+                   content-digest))))]
+        (cond-> {:seon.dev.mcp/value
+                 (if evaluation-print-node
+                   (evaluation-face value projected-node effective)
+                   (admit/semantic-value projected-node))
+                 :seon.sci.admit/capped?
+                 (:seon.sci.admit/capped? artifact)
+                 :seon.dev.mcp/windowed? artifact-backed?}
+          artifact-backed?
+          (assoc :seon.blob/digest content-digest
+                 :seon.blob/size (count content)
+                 :seon.dev.mcp/retrievable? (boolean stored-digest))
 
-      (and artifact-backed? (nil? stored-digest))
-      (assoc :seon.dev.mcp/remainder
-             "The cluster has no database connection; the remainder is not retrievable."))))
+          (and artifact-backed? (nil? stored-digest))
+          (assoc :seon.dev.mcp/remainder
+                 "The cluster has no database connection; the remainder is not retrievable."))))))
 
 (defn mcp-valf
   "Project marked MCP returns; preserve ordinary io-prepl returns unchanged."

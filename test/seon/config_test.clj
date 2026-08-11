@@ -393,6 +393,22 @@
                (:seon.config.flow.compute/queue-depth
                 (config/effective @connection "fork"))))))))
 
+(deftest result-caps-refuses-a-stale-config-row-at-construction
+  (test-support/with-database
+    (fn [connection]
+      (config/apply! {:seon.db/connection connection})
+      (db/transact!
+       connection
+       [[:db/retract
+         [:seon.config/cluster "default"]
+         :seon.config.eval.result/max-nodes]])
+      (let [result (config/result-caps (config/effective @connection))]
+        (is (= ::config/missing-result-cap (:seon.error/kind result)))
+        (is (= :seon.config.eval.result/max-nodes
+               (get-in result [:seon.error/data :seon.config/key])))
+        (is (str/includes? (:seon.error/message result)
+                           ":seon.config.eval.result/max-nodes"))))))
+
 (deftest two-clusters-on-one-jvm-have-no-config-bleed
   (test-support/with-database
     (fn [alpha]
@@ -418,8 +434,10 @@
                 missing-alpha (config/effective @beta "alpha")]
             (is (= "beta" (:seon.config/missing-effective missing-beta)))
             (is (= "alpha" (:seon.config/missing-effective missing-alpha)))
-            (is (= missing-beta (config/result-caps missing-beta)))
-            (is (= missing-alpha (config/result-caps missing-alpha)))
+            (is (= ::config/missing-result-cap
+                   (:seon.error/kind (config/result-caps missing-beta))))
+            (is (= ::config/missing-result-cap
+                   (:seon.error/kind (config/result-caps missing-alpha))))
             (is (= "No effective configuration facts match cluster \"beta\"; available clusters [\"alpha\"]."
                    (:seon.error/message missing-beta)))
             (is (= "No effective configuration facts match cluster \"alpha\"; available clusters [\"beta\"]."

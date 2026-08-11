@@ -99,16 +99,30 @@
    :seon.config.eval.result/max-nodes])
 
 (defn result-caps
-  "Derive the value-admission caps from one effective configuration."
+  "Derive complete value-admission caps or name the first absent key."
   {:malli/schema
    [:=> [:cat [:or :seon.config/effective
                 :seon.config/missing-effective-error]]
     [:or :seon.sci.admit/caps
-     :seon.config/missing-effective-error]]}
+     :seon.error/value]]}
   [effective]
-  (if (:seon.config/missing-effective effective)
-    effective
-    (select-keys effective result-cap-attributes)))
+  (let [reported-missing
+        (set (get-in effective [:seon.error/data ::missing]))
+        missing
+        (or (some reported-missing result-cap-attributes)
+            (some #(when-not (contains? effective %) %)
+                  result-cap-attributes))]
+    (if missing
+      {:seon.error/kind ::missing-result-cap
+       :seon.error/message
+       (str "Value-admission caps require config key " missing
+            "; a partial caps map cannot be constructed.")
+       :seon.error/data
+       (cond-> {::key missing}
+         (:seon.config/missing-effective effective)
+         (assoc :seon.config/missing-effective
+                (:seon.config/missing-effective effective)))}
+      (select-keys effective result-cap-attributes))))
 
 ;;; Every function below asks the declaration population one question per
 ;;; config key. The population is resolved ONCE per operation at that
@@ -521,8 +535,8 @@
   (let [forms (schema/declaration-population)
         row (db/pull db '[*] [:seon.config/cluster cluster-name])
         effective (select-keys row (dial-attributes forms))
-        missing (sort (set/difference (required-dial-attributes forms)
-                                      (set (keys effective))))]
+        missing (vec (sort (set/difference (required-dial-attributes forms)
+                                           (set (keys effective)))))]
      (if (and row (empty? missing))
        effective
        (let [shown (take 6 missing)
@@ -535,6 +549,8 @@
                        [_ :seon.config/cluster ?available]]
                      db)))]
          {:seon.config/missing-effective cluster-name
+          :seon.error/kind ::missing-effective
+          :seon.error/data {::missing missing}
           :seon.error/message
           (if row
             (str "Effective configuration for cluster " (pr-str cluster-name)
