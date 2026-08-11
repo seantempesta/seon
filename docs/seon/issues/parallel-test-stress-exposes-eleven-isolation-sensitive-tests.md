@@ -41,6 +41,16 @@ threw `Clj-kondo cache is locked by other thread or process` during
 lifecycle assertions and generated-property counterexamples. Those are
 observations, not yet one asserted cause.
 
+The cache-lock class is now fixed at its owner. `bin/test` copied each
+worker's source tree but symlinked the top-level `.clj-kondo` directory, so all
+nine processes wrote the same cache. A losing worker could poison the delayed
+canonical database base on its first population attempt; later database tests
+in that worker then failed immediately. Worker checkouts now copy `.clj-kondo`
+copy-on-write, and
+`seon.test-runner-test/worker-checkouts-own-the-writable-clj-kondo-cache`
+proves the directory is private rather than a symlink. The remaining rows in
+this issue still require classification after the repaired complete-tier run.
+
 The same run had six failures that reproduced alone. They are deliberately
 excluded from this issue because isolated confirmation falsified parallelism
 as their cause.

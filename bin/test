@@ -285,7 +285,7 @@ populate_checkout_root() {
   while IFS= read -r entry; do
     case "$entry" in
       data|logs|target|tmp) ;;
-      bin|config|resources|script|src|test)
+      .clj-kondo|bin|config|resources|script|src|test)
         case "$(uname -s)" in
           Darwin) cp -cR "$source_root/$entry" "$target_root/$entry" ;;
           Linux) cp -a --reflink=auto "$source_root/$entry" "$target_root/$entry" ;;

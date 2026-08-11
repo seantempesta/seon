@@ -365,3 +365,50 @@
             (.get (.onExit (.toHandle launched)) 10 TimeUnit/SECONDS)))
         (when (.exists fixture-root)
           (test-support/delete-recursively! fixture-root))))))
+
+(deftest worker-checkouts-own-the-writable-clj-kondo-cache
+  (let [fixture-root
+        (io/file project-root "tmp" "test-runner-worker-cache"
+                 (str (random-uuid)))
+        fake-bin (io/file fixture-root "bin")
+        fake-clojure (io/file fake-bin "clojure")
+        run-parent (io/file fixture-root "runs")
+        fake-runner
+        (str
+         "#!/usr/bin/env bash\n"
+         "set -euo pipefail\n"
+         "prepare=false\n"
+         "for argument in \"$@\"; do\n"
+         "  if [ \"$argument\" = \"--prepare-base\" ]; then prepare=true; fi\n"
+         "done\n"
+         "if [ \"$prepare\" = true ]; then exit 0; fi\n"
+         "test -d workers/pool-1/.clj-kondo\n"
+         "test ! -L workers/pool-1/.clj-kondo\n")]
+    (try
+      (.mkdirs fake-bin)
+      (.mkdirs run-parent)
+      (spit fake-clojure fake-runner)
+      (is (.setExecutable fake-clojure true false))
+      (let [builder
+            (doto
+             (ProcessBuilder.
+              ^java.util.List
+              [(str (io/file project-root "bin" "test"))
+               "seon.test-runner-test"])
+              (.directory project-root)
+              (.redirectErrorStream true))
+            _ (.put (.environment builder)
+                    "SEON_TEST_RUN_PARENT" (.getCanonicalPath run-parent))
+            _ (.put (.environment builder)
+                    "PATH"
+                    (str (.getCanonicalPath fake-bin)
+                         java.io.File/pathSeparator
+                         (System/getenv "PATH")))
+            launched (.start builder)
+            output (slurp (.getInputStream launched))]
+        (is (zero? (.waitFor launched)) output)
+        (is (empty? (vec (.listFiles run-parent)))
+            "a successful structural probe leaves no retained run root"))
+      (finally
+        (when (.exists fixture-root)
+          (test-support/delete-recursively! fixture-root))))))
