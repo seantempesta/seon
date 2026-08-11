@@ -425,3 +425,46 @@ fallbacks appear fixed and the test is vacuous. Seed at least one transcript
 value so both database reads and print emission execute, then assert the walk
 performs at most one declaration-population resolution, zero schema-resource
 reads, and emits no `DECLARATION POPULATION FALLBACK` line.
+
+## 2026-08-11 repair — one exact-basis projection per walk
+
+`seon.render.walk/neighborhood` now derives one projection from the request's
+exact immutable database value. The request context's projection is bound only
+while those database rows are read and is passed only as the reusable
+fingerprint candidate; the exact result is then bound across the complete
+traversal. Nested `seon.db` reads, renderer selection, and `seon.print` emits
+therefore consume one supplied projection without a cache or second carrier.
+
+The non-vacuous regression is
+`test/seon/render/walk_test.clj`'s
+`one-basis-projection-covers-the-complete-walk`. It deliberately shadows
+`test-support/with-database`'s projection state with `(atom {})`, seeds a real
+form/result transcript, and proves the walk calls `projection-from-database`
+exactly once, reads zero schema resources, and emits no declaration-population
+fallback warning. Its first version caught five real classpath populations:
+projection construction queried the database before any candidate projection
+was bound. Binding the reusable candidate only around exact-basis construction
+made the regression green rather than weakening its observation.
+
+### Live before and after
+
+The before condition remains the fresh distance-2 root-agent walk above:
+23,189–23,814 ms, with `seon.db (db.clj:430)` and
+`seon.print (print.cljc:232)` each reaching ×1000 fallback warnings.
+
+After the repair, an independent isolated fresh cluster ran the exact same
+request with `config/effective` → `config/result-caps`, `:record`, and a 5,000
+ms eval time limit. The measured pass was 2,199.16 ms; two repeats were
+1,744.62 and 1,847.85 ms. Compared with the recorded 23.2 s before value, the
+first pass is 10.5× faster. The complete fallback-counter delta was `{}` and
+captured warnings were empty, including zero `db.clj:430` and
+`print.cljc:232` fallback lines.
+
+The fresh live census returned the original 132 units: 73 successful renderer
+outputs and 59 `:seon.error/value` structural markers. Every marker was
+`:seon.render.walk/elided`, truthfully naming connections omitted at the
+requested distance cap; there were zero renderer failures. The earlier “59 of
+132 render calls” observation had counted these traversal markers as renderer
+calls, so it did not reveal a failing render function or schema declaration.
+The same census contained zero raw numeric lookups and therefore zero
+identityless residue after the separately tested declared-identity repair.

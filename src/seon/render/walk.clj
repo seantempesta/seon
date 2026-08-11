@@ -41,6 +41,7 @@
             [seon.ai.tokens :as tokens]
             [seon.effect :as effect]
             [seon.render :as render]
+            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -252,9 +253,18 @@
 
 (defn- entity-lookup
   [db eid]
-  (let [entity (concrete-entity db eid)]
-    (if-let [namespace-name (:seon.ns/name entity)]
-      [:seon.ns/name namespace-name]
+  (let [entity (concrete-entity db eid)
+        identity-attribute
+        (->> (:seon.schema.projection/shape-rows
+              (schema/current-projection))
+             vals
+             (keep :seon.entity/id-attr)
+             distinct
+             (filter #(contains? entity %))
+             (sort-by str)
+             first)]
+    (if identity-attribute
+      [identity-attribute (get entity identity-attribute)]
       eid)))
 
 (defn owning-namespace
@@ -304,13 +314,22 @@
   throws."
   {:malli/schema [:=> [:cat :seon.render.walk/request] :seon.render.walk/units]}
   [{:keys [:seon.db/db :seon.sci.admit/caps]
+    ctx :seon.sci.eval/ctx
     output :seon.render/output
     :seon.render.walk/keys [lookup]
     :as request}]
-  (let [hops (long (get request :seon.render/distance 1))
-        root-eid (eid-of db lookup)
-        root-namespace-eid (when root-eid
-                             (assigned-namespace-eid db root-eid))]
+  (let [reusable-projection (or (:seon.schema/projection ctx) {})
+        projection
+        (schema/call-with-projection
+         reusable-projection
+         #(schema/projection-from-database db reusable-projection))]
+    (schema/call-with-projection
+     projection
+     (fn []
+      (let [hops (long (get request :seon.render/distance 1))
+            root-eid (eid-of db lookup)
+            root-namespace-eid (when root-eid
+                                 (assigned-namespace-eid db root-eid))]
     ;; The remaining node budget and the rendered-entity set are the
     ;; walk's RETURN state: every node and child hands `[node state]`
     ;; back to its parent, so the budget cannot be consumed by a branch
@@ -493,7 +512,7 @@
                 :seon.error/message
                 (str "Nothing in the database answers to "
                      (pr-str lookup) ".")}})]
-        (units tree)))))
+        (units tree))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Assembly — the ai kind
