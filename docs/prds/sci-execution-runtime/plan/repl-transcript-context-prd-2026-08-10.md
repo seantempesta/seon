@@ -1020,9 +1020,20 @@ explicitly.
 another value without making every render slow. Top-level selection already
 works (`src/seon/render.clj:203-221`); this settles nesting.
 
+**RULED (owner, 2026-08-11): NESTED-1.** Nested selection stays
+explicit-or-declared-schema; contract-fit remains a top-level
+convenience; the acquired-candidates nested mechanism is DROPPED (the
+probe stands as evidence it was affordable — simplicity outranked it).
+The taught habit replaces the machinery: DECLARE YOUR SHAPE as a schema
+key carrying its render producer property and it renders through its
+face at every depth via the existing door. The red test
+`nested-values-render-their-declared-faces` is a defect in that
+EXISTING door (a declared face not honored nested), not a missing third
+mechanism. (Original options for the record:)
+
 1. **NESTED-1 — Nested schema-only.** Low cost and no cycles; gives up authored nested producers.
-2. **NESTED-2 — Acquired candidates + visit + stack (Recommended by probe; owner wording awaits confirmation).** Every value checks acquired declarations; sorted ambiguity, no re-entry, ≤20 ms gate.
-3. **NESTED-3 — Cache final selection by shape.** High invalidation risk with open maps/predicates; buys skipped input validation.
+2. **NESTED-2 — Acquired candidates + visit + stack.** Probe-affordable; not taken.
+3. **NESTED-3 — Cache final selection by shape.** High invalidation risk; not taken.
 
 ### HUMAN — form shape for an inbound human message
 
