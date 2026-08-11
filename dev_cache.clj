@@ -458,11 +458,11 @@
 (defn- live-process-reference?
   [record]
   (try
-    (let [pid (:seon.dev.process/pid record)
-          start-instant (:seon.dev.process/start-instant record)
-          cache-path (:seon.dev.process/cache-path record)
+    (let [pid (:seon.boot/pid record)
+          start-instant (:seon.boot/start-instant record)
+          cache-path (:seon.operator.process-record/cache-path record)
           optional (java.lang.ProcessHandle/of (long pid))]
-      (when (and (pos-int? pid) (string? start-instant)
+      (when (and (pos-int? pid) (inst? start-instant)
                  (string? cache-path)
                  (= (.getCanonicalPath (canonical-file cache-root))
                     (.getCanonicalPath
@@ -472,7 +472,8 @@
               observed (.startInstant (.info handle))]
           (and (.isAlive handle)
                (.isPresent observed)
-               (= start-instant (str (.get observed)))))))
+               (= (.getTime ^java.util.Date start-instant)
+                  (.toEpochMilli ^java.time.Instant (.get observed)))))))
     (catch Throwable _
       false)))
 
@@ -510,7 +511,7 @@
             (let [references (read-live-process-references!)
                   live-paths
                   (into #{}
-                        (map #(-> (:seon.dev.process/cache-path %)
+                        (map #(-> (:seon.operator.process-record/cache-path %)
                                   canonical-file
                                   .getCanonicalPath))
                         references)
