@@ -1400,6 +1400,7 @@
 
 (defn -main
   "Run the coordinator, prepare its immutable base, or run one worker."
+  {:malli/schema [:=> [:cat [:* :string]] :nil]}
   [& arguments]
   (case (first arguments)
     "--worker"
