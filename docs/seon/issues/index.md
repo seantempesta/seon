@@ -16,11 +16,10 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (39)
+## Blocker (38)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [Spell every identifiable render-walk entity with its lookup ref](render-walk-spells-declared-identities-as-raw-eids.md) | blocker | render-walk identity repair (this session) |
 | [Make the render value floor total over ordinary unqualified-key maps](render-value-floor-refuses-any-map-with-unqualified-keys.md) | blocker | interface-economy W1 total-floor wave |
 | [Reconcile the context architecture with append-only refresh entries](context-architecture-conflicts-with-append-only-refresh-entries.md) | blocker | self-generating context design (this session) |
 | [Make pull evidence cover automatic component expansion](datahike-pull-evidence-misses-automatic-component-expansion.md) | blocker | root-pull implementation wave |

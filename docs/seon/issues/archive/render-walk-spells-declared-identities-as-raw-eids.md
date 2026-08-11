@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, database, context]
 ---
@@ -40,3 +40,12 @@ projection's `:seon.entity/id-attr` declarations.
   live proof.
 - A fresh distance-2 root-agent walk contains zero numeric lookups for entities
   that do carry a declared identity.
+
+## Resolution
+
+Resolved by `ee255347b`. `entity-lookup` now derives its candidate identity
+attributes from the exact-basis projection's `:seon.entity/id-attr`
+declarations and selects only an attribute the pulled entity actually carries.
+The fresh-cluster distance-2 root walk returned zero numeric lookups; its
+identityless raw-eid residue was also zero. The regression separately proves
+that a deliberately identityless reverse-ref entity remains numeric.
