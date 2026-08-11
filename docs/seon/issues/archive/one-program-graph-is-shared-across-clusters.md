@@ -20,6 +20,13 @@ independent `sci/init` contexts and lacked `:sci/built-in`. Rebinding
 `clojure.walk/macroexpand-all` through context A changed the value observed
 through context B.
 
+A later complete-suite run exposed the remaining fork boundary: SCI copied
+Vars on write, but Seon's `::seon.sci.kernel/installed-functions` and
+`::seon.sci.kernel/program-snapshot` atoms were ordinary context values and
+therefore remained identical across sibling cluster forks. Lazy installation
+in one cluster could make another skip installation against its own SCI
+namespace, producing `:seon.sci.kernel/unresolved-invocation` values.
+
 ## Evidence
 
 `plan/per-cluster-base-context-2026-08-01.md` §3.4 derives the exact residue:
@@ -64,6 +71,12 @@ and the behavior.
   `macroexpand-all` root rebinding is refused.
 - Root commit `8d32828c9` pins SCI `6de1568` and adds the same structural and
   behavioral regression through two `seon.sci.eval/build-base-ctx` calls.
+- Root commit `8f9cf17bd` derives fresh kernel state atoms from the acquired
+  values in every `fork-cluster-ctx`. Its regression proves that changing
+  either the lazy-install set or program snapshot in one fork cannot reach a
+  sibling. The five previously order-dependent `seon.cluster.turn-test` vars
+  then passed together: 51 tests and 362 assertions with no failures or
+  errors.
 
 The SCI JVM suite passed on both supported matrices: Clojure 1.10.3 and
 1.11.1 each ran 383 tests and 1,423 assertions with zero failures or errors.
