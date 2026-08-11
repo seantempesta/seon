@@ -1167,6 +1167,34 @@
       (finally
         (stop-worker! worker)))))
 
+(defn- confirm-task-results!
+  "Confirm resolved pool failures concurrently while preserving result order."
+  [parallelism progress resolved-task-ids task-results confirm!]
+  (let [failures (filterv #(and (task-red? %)
+                                (contains? resolved-task-ids (::task-id %)))
+                          task-results)]
+    (if (empty? failures)
+      (vec task-results)
+      (let [executor (Executors/newFixedThreadPool
+                      (min parallelism (count failures)))
+            futures
+            (into {}
+                  (map (fn [result]
+                         [(::task-id result)
+                          (.submit
+                           executor
+                           ^java.util.concurrent.Callable
+                           #(confirm! progress result))]))
+                  failures)]
+        (try
+          (mapv (fn [result]
+                  (if-let [confirmation (get futures (::task-id result))]
+                    (.get ^java.util.concurrent.Future confirmation)
+                    result))
+                task-results)
+          (finally
+            (.shutdownNow executor)))))))
+
 (defn- summarize-task-results
   [task-results]
   (reduce
@@ -1193,14 +1221,12 @@
         (println " -" (str/join "," (::task-symbols task)))))
     (let [initial (run-task-pool! progress workers serial-worker
                                   resolved unresolved)
-          confirmed
-          (mapv (fn [result]
-                  (if (and (task-red? result)
-                           (some #(= (::task-id result) (::task-id %))
-                                 resolved))
-                    (confirm-parallel-failure! progress result)
-                    result))
-                initial)]
+          confirmed (confirm-task-results!
+                     (worker-count)
+                     progress
+                     (into #{} (map ::task-id) resolved)
+                     initial
+                     confirm-parallel-failure!)]
       (print-task-failures! confirmed)
       {::task-results confirmed
        ::task-summary (summarize-task-results confirmed)})))

@@ -45,6 +45,16 @@ The same run had six failures that reproduced alone. They are deliberately
 excluded from this issue because isolated confirmation falsified parallelism
 as their cause.
 
+The 2026-08-11 default-tier rerun at `e75b2a553` exposed the operational cost
+of leaving this class open. One worker returned a run of database-dependent
+pool failures in 0--4 ms; the same two-namespace sequence then passed 33 tests
+and 200 assertions in one worker. Before that falsifier completed, the runner
+had spent more than 14 minutes serially starting a fresh approximately
+12-second JVM for each clean confirmation. `seon.test.runner` now retains one
+clean JVM per failed task but starts those confirmations with bounded
+parallelism. This removes diagnosis serialization; it does not classify away
+or hide any row in this issue.
+
 ## Owner
 
 The test and production owner of each resource named during triage: clj-kondo

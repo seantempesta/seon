@@ -97,6 +97,40 @@
     (is (true? @cross-group-overlap?)
         "distinct root-owning worker groups remain deliberately concurrent")))
 
+(deftest isolated-confirmations-overlap-with-bounded-parallelism
+  (let [started (CountDownLatch. 2)
+        release (CountDownLatch. 1)
+        confirm!
+        (fn [_progress result]
+          (.countDown started)
+          (is (.await started 10 TimeUnit/SECONDS)
+              "both independent confirmations must start before either exits")
+          (is (.await release 10 TimeUnit/SECONDS))
+          (assoc result ::runner/parallel-failure :parallel-only))
+        task-results
+        [{::runner/task-id :first
+          ::runner/task-summary {::runner/fail-count 1
+                                 ::runner/error-count 0}}
+         {::runner/task-id :pass
+          ::runner/task-summary {::runner/fail-count 0
+                                 ::runner/error-count 0}}
+         {::runner/task-id :second
+          ::runner/task-summary {::runner/fail-count 0
+                                 ::runner/error-count 1}}]
+        run (future
+              (#'runner/confirm-task-results!
+               2 nil #{:first :second} task-results confirm!))]
+    (is (.await started 10 TimeUnit/SECONDS)
+        "confirmation scheduling must not serialize clean JVM launches")
+    (.countDown release)
+    (let [confirmed (deref run 10000 ::confirmation-backstop)]
+      (is (not= ::confirmation-backstop confirmed))
+      (is (= [:first :pass :second]
+             (mapv ::runner/task-id confirmed))
+          "concurrent confirmation preserves task attribution order")
+      (is (= [:parallel-only nil :parallel-only]
+             (mapv ::runner/parallel-failure confirmed))))))
+
 (deftest boot-tests-have-no-namespace-wide-execution-shape
   (let [namespace-object (find-ns 'seon.cluster.boot-test)
         fixtures (meta namespace-object)]
