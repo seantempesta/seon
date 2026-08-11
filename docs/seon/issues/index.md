@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (34)
+## Blocker (35)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -52,6 +52,7 @@ See `README.md` for the convention.
 | [Reuse one HttpClient so concurrent provider calls stop closing mid-read](concurrent-provider-calls-fail-with-a-closed-response-body.md) | blocker | whole-system arc repair wave |
 | [Settle what arrived when a provider stream closes mid-body](a-mid-stream-provider-disconnect-discards-the-whole-turn.md) | blocker | whole-system arc repair wave |
 | [Stop `seon.db/transact!` returning a different shape per dynamic var](transact-returns-a-different-shape-depending-on-a-dynamic-var.md) | blocker | P17 S4 `seon.db` conversion sweep |
+| [Await every worker writer before deleting its root](test-runner-cleans-a-worker-root-while-kondo-is-still-writing.md) | blocker | test runner cleanup repair wave |
 
 ## Friction (133)
 
@@ -61,7 +62,7 @@ See `README.md` for the convention.
 | [Give `seon.cluster.loop/settle!` a complete public contract](settle-is-public-without-a-complete-contract.md) | friction | unreadable-reply lane coordination |
 | [Construct the schedule graph test from a real environment-bearing handle](schedule-graph-test-constructs-a-handle-without-an-environment.md) | friction | schedule fixture repair |
 | [Render a capability namespace by its API, not by its Malli source](namespace-units-render-error-schema-boilerplate.md) | friction | agent context repair wave (2026-08-10 audit) |
-| [Decide whether contract fit selects a producer for a nested value](contract-fit-render-selection-never-reaches-a-nested-value.md) | friction | owner ruling — render selection |
+| [Render database identities in HTML instead of opaque host objects](database-values-render-as-opaque-host-objects-in-html.md) | friction | render important-schema producer wave |
 | [Do not tell an agent an unindexed namespace is empty](unindexed-namespaces-render-as-empty.md) | friction | agent context repair wave (2026-08-10 audit) |
 | [Show a never-run agent's prospective context on its debug page](a-never-run-agents-context-cannot-be-inspected.md) | friction | agent context repair wave (2026-08-10 audit) |
 | [Stop sending debug pages patches for elements they do not have](debug-pages-receive-block-patches-for-elements-they-do-not-have.md) | friction | UI watchability wave (2026-08-10 route walk) |
