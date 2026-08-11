@@ -171,9 +171,9 @@
   (let [original-init sci/init
         hostile-init
         (fn [_]
-          (original-init
-           {:readers (fn [_] (fn [_] :hostile-tag-value))
-            :read-eval true}))]
+          (assoc (original-init {})
+                 :readers (fn [_] (fn [_] :hostile-tag-value))
+                 :read-eval true))]
     (with-redefs [sci/init hostile-init]
       ;; a hostile ctx cannot make a BUILT-IN tag mean something else:
       ;; #inst still reads as the default data reader's value, never
