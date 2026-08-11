@@ -8,6 +8,9 @@
             [seon.db :as db]
             [seon.cluster :as cluster]
             [seon.cluster.export :as cluster.export]
+            [seon.cluster.registry :as registry]
+            [seon.cluster.source :as source]
+            [seon.cluster.store :as store]
             [seon.env :as env]
             [seon.fs :as fs]
             [seon.fn :as seon.fn]
@@ -71,6 +74,24 @@
     (do
       (cluster/refresh-source! (str (io/file root "data" "clusters")))
       (str root))))
+
+(defn with-published-file-database
+  "Run `body` on a private file-store branch of the published test base."
+  [root branch body]
+  (let [root (str root)]
+    (populate-published-root! root)
+    (let [opened (store/open-store! {:seon.store/dir (str (io/file root "store"))})]
+    (try
+      (registry/branch! {:seon.store/store opened
+                         :seon.cluster.registry/from source/current-branch
+                         :seon.store/branch branch})
+      (let [connection (store/open-branch! opened branch)]
+        (try
+          (body connection)
+          (finally
+            (d/release connection))))
+      (finally
+        (store/release-store! opened))))))
 
 (def committed
   "Returned when a boundary expected to refuse instead commits."

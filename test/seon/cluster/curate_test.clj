@@ -10,7 +10,8 @@
             [seon.db :as db]
             [seon.eval.drive]
             [seon.render.transcript :as transcript]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.test-support :as support]))
 
 (defn- await-run! [connection run-id]
   ((ns-resolve 'seon.eval.drive 'await-fact!)
@@ -80,7 +81,7 @@
   (let [suffix (subs (str (random-uuid)) 0 8)
         process-root (str "tmp/session-curation-tests/" suffix)
         cluster-name (str "session-curation-test-" suffix)
-        _ (cluster/refresh-source! process-root)
+        _ (support/populate-published-root! process-root)
         instance (cluster/start! {:seon.boot/cluster-name cluster-name
                                   :seon.boot/root process-root})]
     (try

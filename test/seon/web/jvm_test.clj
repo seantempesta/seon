@@ -1,17 +1,10 @@
-(ns ^{:seon.test/long
-      "Real HTTP server exercises (~202 s serial); full-tier only until the
-       fork-based test infrastructure lands parallel numbers (owner,
-       2026-08-07)."}
- seon.web.jvm-test
+(ns seon.web.jvm-test
   (:require [clojure.data.json :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
-            [datahike.api :as datahike]
             [my.web :as web]
             [seon.blob :as blob]
-            [seon.cluster.registry :as registry]
-            [seon.cluster.store :as store]
             [seon.config :as seon-config]
             [seon.db :as db]
             [seon.effect :as effect]
@@ -32,25 +25,17 @@
 
 (defn- with-file-database
   [body]
-  (let [root (io/file "tmp/my-web-test" (str (random-uuid)))
-        opened (store/open-store! {:seon.store/dir (str root "/store")})]
+  (let [root (io/file "tmp/my-web-test" (str (random-uuid)))]
     (try
-      ((ns-resolve 'seon.test-support 'populate-database!)
-       (:seon.store/connection-object opened))
-      (registry/branch! {:seon.store/store opened
-                         :seon.cluster.registry/from :db
-                         :seon.store/branch :my-web-test})
-      (let [connection (store/open-branch! opened :my-web-test)]
-        (try
+      (support/with-published-file-database
+       root :my-web-test
+       (fn [connection]
           (db/transact!
            connection
            [{:seon.config/cluster "default"
              :seon.config.eval.result/blob-threshold 8}])
-          (body connection)
-          (finally
-            (datahike/release connection))))
+          (body connection)))
       (finally
-        (store/release-store! opened)
         (when (.exists root)
           (filesystem/delete-recursively! (str root) (str root)))))))
 

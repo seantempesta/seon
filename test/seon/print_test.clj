@@ -154,7 +154,9 @@
         (readable-value (:seon.print/value node))
         nil))))
 
-(deftest p-total-generated-grammar-emits-and-readable-faces-round-trip
+(deftest ^{:seon.test/long
+           "94.303 s pool: 200 generated grammar validation, text/Hiccup emission, and EDN read-back trials."}
+  p-total-generated-grammar-emits-and-readable-faces-round-trip
   (let [compiled (compiled-node-schema)
         generator (mg/generator compiled)
         check
@@ -176,7 +178,9 @@
          :seed 202608010301)]
     (test-support/assert-check! check "P-TOTAL failed.")))
 
-(deftest p-tee-generated-grammar-cannot-disagree
+(deftest ^{:seon.test/long
+           "93.195 s pool: 200 generated text/Hiccup lexical-equivalence trials over print options."}
+  p-tee-generated-grammar-cannot-disagree
   (let [compiled (compiled-node-schema)
         generator (mg/generator compiled)
         check

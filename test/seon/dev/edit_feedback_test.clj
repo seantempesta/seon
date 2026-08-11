@@ -100,7 +100,7 @@
         (delete-files! [source config directory])))))
 
 (deftest ^{:seon.test/long
-           "Spawns real hook subprocesses to cover schema admission at the edit-hook process boundary."}
+           "59.518 s pool: real hook subprocesses cover schema admission before edit-hook publication."}
   split-schema-edits-run-admission-before-publication
   (let [directory (fixture-directory)
         config (io/file directory "hook.edn")
@@ -339,4 +339,3 @@
                   (:seon.dev.changed-test/findings analysis))))
       (finally
         (delete-files! [broken valid source-directory directory])))))
-

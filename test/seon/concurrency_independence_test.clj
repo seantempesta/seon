@@ -1,4 +1,5 @@
-(ns ^{:seon.test/long "Boots one real cluster and folds 5- and 10-agent plans concurrently."}
+(ns ^{:seon.test/long
+      "136.721 s pool: one real cluster folds 5- and 10-agent plans concurrently and verifies every receipt."}
   seon.concurrency-independence-test
   "Fact-space proof that many agents independently fold on one branch.
 

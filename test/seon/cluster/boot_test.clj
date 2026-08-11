@@ -459,7 +459,8 @@
 ;;; The live lifecycle — real sockets, real files, this JVM
 ;;; ---------------------------------------------------------------------------
 
-(deftest ^{:seon.test/long "Starts a real cluster and proves its live prepl boundary."}
+(deftest ^{:seon.test/long
+           "47.230 s pool: published-base clone, real cluster boot tower, live prepl call, and stop."}
   repl-is-live-after-the-boot-tower
   (let [root (published-root)]
     (try
@@ -582,7 +583,8 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/long "Restarts a real prepl server under one registered name."}
+(deftest ^{:seon.test/long
+           "49.939 s pool: real start/stop/start generation proves registered prepl release."}
   same-jvm-same-name-restart-releases-the-registered-prepl
   (let [root (published-root)
         cluster-name "registered-restart"
@@ -770,7 +772,8 @@
   [failure]
   (some-> (ex-data failure) :seon.boot/instance cluster/stop!))
 
-(deftest ^{:seon.test/long "Starts real clusters against a creation-fixed store policy."}
+(deftest ^{:seon.test/long
+           "133.791 s pool: fresh physical-store creation plus real starts/reopens under both history policies."}
   operator-root-history-policy-is-creation-fixed
   (let [root (fresh-root-with-history-policy false)
         instance
@@ -861,7 +864,8 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/long "Starts a real cluster before and after corrupting program facts."}
+(deftest ^{:seon.test/long
+           "114.810 s pool: real boot, program-fact corruption/refusal, and fresh-cluster currentness proof."}
   partial-clusters-refuse-and-fresh-clusters-are-current
   (let [root (published-root)
         cluster-name "partial-program"
@@ -917,7 +921,8 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/long "Keeps a real cluster live across source publication and a later fork."}
+(deftest ^{:seon.test/long
+           "186.733 s pool: complete incremental publication dominates, followed by existing-cluster and later-fork agreement."}
   incremental-source-refresh-publishes-without-touching-existing-clusters
   (let [root (published-root)
         current-digest
@@ -971,7 +976,8 @@
         (cluster/stop! old-world)
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/long "Restarts a real cluster to prove configuration applies before arming."}
+(deftest ^{:seon.test/long
+           "53.139 s pool: real boot, locked-state config repair, restart, and pre-arm fact proof."}
   selected-config-repairs-locked-state-before-consumers-arm
   (let [root (published-root)
         cluster-name "config-unlock"
@@ -1121,7 +1127,8 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/long "Starts the complete real boot tower and a sibling cluster."}
+(deftest ^{:seon.test/long
+           "46.987 s pool: complete real boot tower plus sibling-cluster acquisition and independent config proof."}
   the-tower-stands-in-one-start
   (let [root (published-root)]
     (try
@@ -1261,7 +1268,8 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/long "Publishes, starts, and reforks a real cluster through the composed operator verb."}
+(deftest ^{:seon.test/long
+           "192.600 s pool: complete publication, real start, destructive composed refork, replacement boot, and read-back."}
   explicit-refork-destroys-the-old-branch-and-forks-current-source
   ;; The COMPOSED verb, on a real store, in the operator's OWN layout:
   ;; `bin/seon init NAME --force` is exactly this call
@@ -1334,7 +1342,8 @@
       (finally
         (delete-recursively! repository-root)))))
 
-(deftest ^{:seon.test/long "Reforks through the operator's own child-JVM shape on a real store."}
+(deftest ^{:seon.test/long
+           "158.206 s pool: published real store plus child-JVM operator refork and collision/read-back proof."}
   refork-does-not-collide-with-the-store-its-caller-already-holds
   ;; The second shape of the same class. The sibling test above supplies a
   ;; RUNNING instance's store, which the fork arm could also find in the
@@ -1411,7 +1420,8 @@
 ;;; Boot recovery — a dead holder's wreckage is settled before anything resumes
 ;;; ---------------------------------------------------------------------------
 
-(deftest ^{:seon.test/long "Restarts a real cluster over simulated process wreckage."}
+(deftest ^{:seon.test/long
+           "60.475 s pool: real boot, simulated dead holder, restart recovery, and custody read-back."}
   a-dead-holders-run-is-unclaimed-by-the-time-start-returns
   ;; The live crash drill found this gap: `recover-tx` existed with no
   ;; caller, so a process that died holding a claimed run left the agent

@@ -18,13 +18,8 @@
   [latch event]
   (support/await-event! latch event))
 
-(defn- populate-production-store!
+(defn- ensure-test-cluster!
   [opened]
-  ((ns-resolve 'seon.test-support 'populate-database!)
-   (:seon.store/connection-object opened))
-  (registry/branch! {:seon.store/store opened
-                     :seon.cluster.registry/from :db
-                     :seon.store/branch :current-src})
   (registry/ensure-cluster!
    {:seon.store/store opened
     :seon.boot/cluster-name "blob-publication"
@@ -67,9 +62,10 @@
         first-digest (blob/digest first-content)
         second-digest (blob/digest second-content)
         crash-digest (blob/digest crash-content)
+        _ (support/populate-published-root! root)
         opened (store/open-store! {:seon.store/dir directory})]
     (try
-      (populate-production-store! opened)
+      (ensure-test-cluster! opened)
       (let [connection (store/open-branch! opened branch)]
         (try
           (testing "a batch-contained orphan cannot overlap publication"

@@ -2,10 +2,11 @@
   "The in-JVM operator surface stays a thin, error-valued delegation."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.java.io :as io]
+            [malli.instrument :as mi]
             [seon.cluster :as cluster]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
-            [seon.instrument :as instrument]
+            [seon.instrument]
             [seon.operator :as operator]
             [seon.operator.runtime :as runtime]
             [seon.operator.state :as operator.state]
@@ -677,9 +678,14 @@
         (test-support/delete-recursively! repository-root)))))
 
 (deftest public-contracts-refuse-invalid-input-and-output
-  (let [delegate-calls (atom 0)]
+  (let [delegate-calls (atom 0)
+        start-filter (mi/-filter-var #{#'operator/start!})]
     (try
-      (instrument/apply! {:seon.config/on-core-error :panic})
+      (mi/clj-collect! {:ns ['seon.operator]})
+      (mi/instrument!
+       {:scope #{:input :output}
+        :filters [start-filter]
+        :report ((ns-resolve 'seon.instrument 'throwing-report) nil)})
       (with-redefs [cluster/start!
                     (fn [_]
                       (swap! delegate-calls inc)
@@ -697,4 +703,4 @@
                    (:seon.error/kind (ex-data failure))))
             (is (= 1 @delegate-calls)))))
       (finally
-        (instrument/remove!)))))
+        (mi/unstrument! {:filters [start-filter]})))))

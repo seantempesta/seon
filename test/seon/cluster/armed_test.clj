@@ -1,4 +1,5 @@
-(ns ^{:seon.test/long "Every test boots a real armed cluster to cover fixture-vs-live wiring."}
+(ns ^{:seon.test/long
+      "48.642 s slowest pool member: every test boots a real armed cluster; fault-to-fact delivery is the proof."}
   seon.cluster.armed-test
   "The armed layers of a booted cluster: root, the loop, the fault path.
 

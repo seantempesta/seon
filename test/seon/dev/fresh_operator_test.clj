@@ -920,7 +920,8 @@
         (str "offline status, cluster start, initialization, and managed-root "
              "cleanup use one owner"))))
 
-(deftest ^{:seon.test/long "Runs complete source initialization through a fresh operator JVM."}
+(deftest ^{:seon.test/long
+           "110.837 s pool: complete publication JVM plus named fork/refork, start, readiness, and store read-back."}
   init-owns-current-source-and-dormant-cluster-lifecycle
   (let [root (fresh-root)
         store-dir (str (io/file root "data" "clusters" "store"))
@@ -1000,7 +1001,8 @@
           (catch Throwable _))
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/long "Runs live initialization and reload through a fresh operator JVM."}
+(deftest ^{:seon.test/long
+           "110.095 s pool: real init/start JVM, live namespace damage, republication/reload, and admission proof."}
   live-init-reloads-schema-runtime-and-moved-predicate-owners-before-admission
   (let [root (fresh-root)
         cluster-name "predicate-owner-reload"
@@ -1092,7 +1094,8 @@
           (reap-process-identity! process-identity))
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/long "Destructively resets and republishes a source-less operator root."}
+(deftest ^{:seon.test/long
+           "94.568 s pool: destructive reset performs complete republication and default refork in a real JVM."}
   source-less-root-reset-republishes-and-reforks-default
   (let [root (fresh-root)
         store-dir (str (io/file root "data" "clusters" "store"))]
@@ -1145,7 +1148,8 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/long "Boots a real JVM, SIGKILLs it, then proves forced reset self-recovers."}
+(deftest ^{:seon.test/long
+           "92.850 s pool: init/start JVM, SIGKILL, exact process-record fencing, complete reset/republication."}
   forced-reset-clears-an-exact-dead-process-record
   (let [root (fresh-root)
         record* (atom nil)]
@@ -1241,7 +1245,8 @@
               :populated)))]
     (edn/read-string (prepl-eval advertisement form))))
 
-(deftest ^{:seon.test/long "Restarts a populated cluster across two fresh operator JVMs."}
+(deftest ^{:seon.test/long
+           "114.689 s pool: init/fork, two real JVM identities, stop/restart, and populated-store read-back."}
   populated-stopped-cluster-reopens-after-full-operator-restart
   (let [root (fresh-root)
         name "restart-populated"
@@ -1307,7 +1312,9 @@
           (reap-process-identity! process-identity))
         (delete-recursively! root)))))
 
-(deftest add-refreshes-a-genuinely-stale-wrapper-before-current-start
+(deftest ^{:seon.test/long
+           "53.876 s pool: real Malli collection/instrumentation refreshes a stale start wrapper before add."}
+  add-refreshes-a-genuinely-stale-wrapper-before-current-start
   (let [root (fresh-root)
         form (operator-private-value 'add-form (str root) "scratch" {})
         start-var #'cluster/start!
@@ -1402,7 +1409,8 @@
         (is (true? (:seon.error/retryable? refusal)))
         (is (= [instance] @stopped))))))
 
-(deftest ^{:seon.test/long "Loads and instruments schemas in a genuinely fresh operator process."}
+(deftest ^{:seon.test/long
+           "93.065 s pool: complete init plus fresh-process whole-image instrumentation and readiness proof."}
   fresh-process-loads-schema-before-every-operator-instrumentation
   (let [root (fresh-root)]
     (try
@@ -1425,7 +1433,8 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/long "Carries boot refusal and readiness over the cached phase protocol."}
+(deftest ^{:seon.test/long
+           "90.430 s pool: refused cold boot, complete init, cached real-JVM boot, and every readiness phase."}
   isolated-cached-boot-reports-refusal-then-reaches-readiness
   (let [root (fresh-root)
         name "cached-readiness"

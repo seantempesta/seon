@@ -329,7 +329,7 @@
        (is (not (contains? atom-row :seon.def/source)))))))
 
 (deftest ^{:seon.test/long
-           "Forcibly kills the writer JVM after terminal settlement."}
+           "80.213 s pool: settle defs, SIGKILL the writer JVM, restart, restore, and explicitly clear."}
   desk-survives-kill-9-and-explicit-clear
   (let [root (str "tmp/desk-kill/" (random-uuid))
         database-path (str root "/database")

@@ -799,7 +799,9 @@
       (if (= :message kind) source-index id)])
    events))
 
-(deftest every-generated-history-is-ordered-total-and-token-bounded
+(deftest ^{:seon.test/long
+           "66.666 s pool: 40 fresh-branch generated histories with dual AI/HTML ordering and token-bound proofs."}
+  every-generated-history-is-ordered-total-and-token-bounded
   (let [check
         (tc/quick-check
          40

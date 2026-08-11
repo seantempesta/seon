@@ -22,46 +22,15 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [datahike.api :as d]
             [seon.db :as db]
             [seon.cluster.work :as work]
             [seon.schema]
-            [seon.schema.datahike :as schema.datahike])
+            [seon.test-support :as support])
   (:import [java.util Date]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; A real database, one per state
 ;;; ---------------------------------------------------------------------------
-
-(def ^:private attributes
-  [:seon.cluster.agent/id
-   :seon.cluster.agent/run
-   :seon.cluster.run/id
-   :seon.cluster.run/agent
-   :seon.cluster.run/trigger
-   :seon.cluster.run/opened-at
-   :seon.cluster.run/closed-at
-   :seon.cluster.run/process
-   :seon.cluster.run/plan-digest
-   :seon.cluster.run/forms
-   :seon.cluster.run.form/id
-   :seon.cluster.run.form/run
-   :seon.cluster.run.form/ordinal
-   :seon.cluster.run.form/source
-   :seon.cluster.eval/id
-   :seon.cluster.eval/run
-   :seon.cluster.eval/ordinal
-   :seon.cluster.eval/at
-   :seon.cluster.eval/interrupted-at
-   :seon.cluster.eval/result-edn
-   :seon.cluster.eval/error
-   :seon.cluster.message/id
-   :seon.cluster.message/to
-   :seon.cluster.message/content
-   :seon.cluster.message/at
-   :seon.cluster.message/caused-by
-   :seon.config/cluster
-   :seon.config.run/max-episode-runs])
 
 (def ^:private process "process/one")
 (def ^:private other-process "process/two")
@@ -77,18 +46,10 @@
                      [{:seon.fn.analyzer/level :error}]}})
 
 (defn- with-database [body]
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :schema-flexibility :write}
-        _ (d/create-database configuration)
-        connection (d/connect configuration)]
-    (try
-      (db/transact! connection
-                  (schema.datahike/malli->datahike-schema attributes))
+  (support/with-database
+   (fn [connection]
       (db/transact! connection [{:seon.cluster.agent/id agent-id}])
-      (body connection)
-      (finally
-        (d/release connection)
-        (d/delete-database configuration)))))
+      (body connection))))
 
 (defn- add-trigger!
   "Commit one trigger message for the agent."

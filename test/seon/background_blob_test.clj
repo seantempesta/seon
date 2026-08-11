@@ -2,11 +2,8 @@
   (:require [clojure.core.async :as async]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
-            [datahike.api :as datahike-api]
             [datahike.core :as datahike]
             [seon.blob :as blob]
-            [seon.cluster.registry :as registry]
-            [seon.cluster.store :as store]
             [seon.config :as config]
             [seon.db :as db]
             [seon.effect :as effect]
@@ -26,23 +23,11 @@
   (let [root (io/file "tmp/background-effect-binary-test")]
     (when (.exists root)
       (support/delete-recursively! root))
-    (let [opened (store/open-store!
-                  {:seon.store/dir (str root "/store")})]
-      (try
-        ((ns-resolve 'seon.test-support 'populate-database!)
-         (:seon.store/connection-object opened))
-        (registry/branch! {:seon.store/store opened
-                           :seon.cluster.registry/from :db
-                           :seon.store/branch :background-effect-binary-test})
-        (let [connection
-              (store/open-branch! opened :background-effect-binary-test)]
-          (try
-            (body connection)
-            (finally
-              (datahike-api/release connection))))
-        (finally
-          (store/release-store! opened)
-          (support/delete-recursively! root))))))
+    (try
+      (support/with-published-file-database
+       root :background-effect-binary-test body)
+      (finally
+        (support/delete-recursively! root)))))
 
 (defn- invalid-utf8
   [size]
@@ -92,9 +77,7 @@
           (recur (+ offset (alength ^bytes octets))))))
     (.toByteArray output)))
 
-(deftest ^{:seon.test/long
-           "Uses a real file store and work launcher to cover durable background binary receipts."}
-  background-binary-results-remain-exact-across-the-inline-threshold
+(deftest background-binary-results-remain-exact-across-the-inline-threshold
   (with-file-effect-store
     (fn [connection]
       (db/transact!

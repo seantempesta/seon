@@ -39,7 +39,8 @@
      :seon.dev.fresh-operator-export-test/output
      (deref output 10000 "The operator output reader did not finish.")}))
 
-(deftest ^{:seon.test/long "Starts a scratch root and exports its live store."}
+(deftest ^{:seon.test/long
+           "200.542 s pool: real start JVM, export JVM, store copy/reidentify, reopen, and query proof."}
   export-verb-produces-an-openable-queryable-store
   (let [root (fresh-root)
         cluster-name "export-verb"

@@ -1,16 +1,9 @@
-(ns ^{:seon.test/long
-      "Real subprocess exercises (~208 s serial); full-tier only until the
-       fork-based test infrastructure lands parallel numbers (owner,
-       2026-08-07)."}
- seon.shell.jvm-test
+(ns seon.shell.jvm-test
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [datahike.api :as datahike]
             [my.shell :as shell]
             [seon.blob :as blob]
-            [seon.cluster.registry :as registry]
-            [seon.cluster.store :as store]
             [seon.config :as config]
             [seon.db :as db]
             [seon.effect :as effect]
@@ -58,20 +51,7 @@
 
 (defn- with-file-database
   [root f]
-  (let [opened (store/open-store! {:seon.store/dir (str root "/store")})]
-    (try
-      ((ns-resolve 'seon.test-support 'populate-database!)
-       (:seon.store/connection-object opened))
-      (registry/branch! {:seon.store/store opened
-                         :seon.cluster.registry/from :db
-                         :seon.store/branch :my-shell-test})
-      (let [connection (store/open-branch! opened :my-shell-test)]
-        (try
-          (f connection)
-          (finally
-            (datahike/release connection))))
-      (finally
-        (store/release-store! opened)))))
+  (support/with-published-file-database root :my-shell-test f))
 
 (defn- with-handler
   [effective-map f]

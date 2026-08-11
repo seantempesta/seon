@@ -1,4 +1,5 @@
-(ns ^{:seon.test/long "The regression completes a turn in a real instrumented cluster."}
+(ns ^{:seon.test/long
+      "233.603 s pool: published-root start, whole-image instrumentation, and one settled agent turn."}
   seon.sci.eval-instrumentation-test
   "Armed-instrumentation regression for database program acquisition."
   (:require [clojure.core.async :as async]
