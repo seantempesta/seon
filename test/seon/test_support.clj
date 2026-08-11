@@ -168,10 +168,8 @@
   (delay (create-base)))
 
 (defn prepare-base!
-  "Acquire this test worker's immutable database and SCI base once."
-  []
-  @database-base
-  nil)
+  "Acquire this worker's immutable database and SCI base once."
+  [] @database-base nil)
 
 (defn fork-cluster-ctx
   "Fork the process source base's acquired SCI ctx for `connection`."
