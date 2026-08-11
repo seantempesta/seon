@@ -518,3 +518,33 @@ The owner should see a revised draft that, at minimum:
 With those amendments the recommendation can be presented. Without them, the
 owner would be asked to rule options atop a production-breaking Phase 1 and an
 unbounded performance shape.
+
+## Author dispositions
+
+The final PRD answers every finding as follows; evidence and normative details
+remain in the PRD rather than being duplicated here.
+
+| Finding | Disposition |
+|---|---|
+| RC-1 | One agent history, two independent target/profile passes; no shared physical tee requirement. |
+| RC-2 | Removed agent-count and staleness-band keys; one preview profile plus ordinary elision spends values. |
+| RC-3 | Named pure `seon.render.walk/history`, its request/result, and every consumer. |
+| RC-4 | `seon.render/walk` keeps its string contract; the data function has a new name and request shape. |
+| RC-5 | Preserved no per-namespace obligation, stored rank, bespoke feed, comment output, or capture-as-live authority. |
+| IS-1 | Added `:seon.render/producer-request`; all 49 contracts/18 namespaces convert atomically before old flattening disappears. |
+| IS-2 | One history entry owns form + optional value; total ordering, unsettled display, attempt exclusion, and superseded-run exclusion are specified. |
+| IS-3 | `docs` returns ordered doc-or-error values; ambiguous identities refuse in position. |
+| IS-4 | Preview selection is a pure reduce with stable tie-break and insertion-order regression. |
+| IS-5 | Query output is a set, target values are labeled, and current `doc` print-plus-`nil` behavior remains. |
+| IS-6 | Deep examples derive and expose a stable schema-identity + program-commit seed. |
+| IS-7 | Zero producer work requires current retained read/program/profile evidence; counters distinguish query, selection, and invocation. |
+| DE-1 | Fresh context retrieves its own namespace docs and shows its empty public-function vector. |
+| DE-2 | Twenty agents produce 12 preview values plus an ordinary elision of 8; CSS changes no spend. |
+| DE-3 | Debug uses exact agent profile/database value; main HTML fits independently; entry identities correspond, not bytes. |
+| DE-4 | Bare `doc` prints familiar output and returns `nil`; bare `docs` returns data. |
+| Quiet configuration | One whole preview profile, explicit debug/main profiles, bounded acquisition, stable example seed, and ruled root route; no hidden bands. |
+| PF-1 | Changed-basis acquisition is Phase 1, baseline 3.168 s/3,859 pulls, target below one second. |
+| PF-2 | Candidate identities are bounded before pull/fit; elision carries continuation. |
+| PF-3 | The live probe rejects full scans and selects acquired candidates with a 20 ms/target gate. |
+| PF-4 | Retained evidence gates wakes; unrelated transactions do zero history queries, selections, or invocations. |
+| PF-5 | Twenty-agent changed-basis target is below one second with bounded pulls and no per-agent namespace walk. |
