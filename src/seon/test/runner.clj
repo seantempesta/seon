@@ -161,12 +161,13 @@
    :seon.fn/projection-boundary :none}
   [progress description]
   (let [at (Instant/now)]
-    (reset! progress
-            {::description description
-             ::at-nanos (System/nanoTime)
-             ::at at})
-    (println "bin/test:" (str at) description)
-    (flush)))
+    (locking progress
+      (reset! progress
+              {::description description
+               ::at-nanos (System/nanoTime)
+               ::at at})
+      (println "bin/test:" (str at) description)
+      (flush))))
 
 (defn- progress-event!
   [progress event]
@@ -662,7 +663,15 @@
                              (str output "\n" (throwable-face options failure
                                                                (throwable-signature failure)))))))))
 
+(def ^:private protocol-prefix
+  "SEON_TEST_WORKER_EDN ")
+
 (defn- write-protocol!
+  [^PrintWriter writer value]
+  (.println writer (str protocol-prefix (pr-str value)))
+  (.flush writer))
+
+(defn- write-command!
   [^PrintWriter writer value]
   (.println writer (pr-str value))
   (.flush writer))
@@ -957,6 +966,17 @@
   [worker-id]
   (io/file (worker-parent) worker-id))
 
+(defn- read-worker-protocol!
+  [worker]
+  (loop []
+    (if-let [line (.readLine ^BufferedReader (::worker-reader worker))]
+      (if (str/starts-with? line protocol-prefix)
+        (edn/read-string (subs line (count protocol-prefix)))
+        (do
+          (spit (::worker-error-log worker) (str line "\n") :append true)
+          (recur)))
+      nil)))
+
 (defn- start-worker!
   [worker-id checkout-root operator-root]
   (.mkdirs (io/file operator-root "logs"))
@@ -978,26 +998,25 @@
                 ::worker-checkout (.getCanonicalPath checkout-root)
                 ::worker-root (.getCanonicalPath operator-root)
                 ::worker-error-log (.getCanonicalPath error-log)}
-        ready-line (.readLine ^BufferedReader (::worker-reader worker))]
-    (when-not ready-line
+        ready (read-worker-protocol! worker)]
+    (when-not ready
       (throw
        (ex-info "A test worker exited before publishing readiness."
                 {::worker-id worker-id
                  ::worker-exit (when-not (.isAlive process)
                                  (.exitValue process))
                  ::worker-error-log (::worker-error-log worker)})))
-    (let [ready (edn/read-string ready-line)]
-      (when-not (= :ready (::worker-event ready))
-        (throw
-         (ex-info "A test worker published an invalid readiness value."
-                  {::worker-id worker-id ::worker-ready ready}))))
+    (when-not (= :ready (::worker-event ready))
+      (throw
+       (ex-info "A test worker published an invalid readiness value."
+                {::worker-id worker-id ::worker-ready ready})))
     worker))
 
 (defn- worker-rpc!
   [worker command]
-  (write-protocol! (::worker-writer worker) command)
-  (if-let [line (.readLine ^BufferedReader (::worker-reader worker))]
-    (edn/read-string line)
+  (write-command! (::worker-writer worker) command)
+  (if-let [result (read-worker-protocol! worker)]
+    result
     (throw
      (ex-info "A test worker exited without returning its task result."
               {::worker-id (::worker-id worker)
