@@ -6,7 +6,119 @@ tags: [testing, performance, concurrency, operator]
 
 # Parallel runner measurement — 2026-08-10
 
-## Verdict
+## Shared-base rerun verdict
+
+The shared-publication implementation removed the dominant repeated setup and
+the boot namespace's atomic chain, but the complete stress run still missed
+the 5–8 minute ceiling. The frozen-tree command was:
+
+```sh
+/usr/bin/time -p bin/test --full 2>&1 \
+  | tee tmp/full-gate-parallel-shared-base-2026-08-10.log
+```
+
+The source was `b9c0f63fd2c7f2dc36f61098c69688eee1604234`. The runner
+selected **1,160 tests**: 73 platform and 1,087 bulk. It aggregated **10,004
+assertions, 9 failures, and 12 errors** across 17 failing tests. The command
+exited 1 after **40:00.36 wall time** (`real 2400.36`, `user 5762.55`, `sys
+1022.93`). The foreign Flow drained-hang did not recur, so no test was excluded
+from the aggregation.
+
+The wall time has two materially different parts:
+
+- The nine-worker execution window ran from the first platform task at
+  `02:58:30.175091Z` through the last pool result at `03:14:03.112791Z`:
+  **15:32.94**. Including one shared-base preparation, namespace loading, and
+  selection, the command reached pool drain in about **17:13.85**.
+- The required isolated confirmations then serialized 17 failed tests through
+  `03:36:49.621964Z`, adding **22:46.51**. This diagnosis cost belongs to a red
+  stress run, not the projected green critical path, but both the 15:32.94 pool
+  window and 17:13.85 pre-confirmation command time independently miss the
+  eight-minute ceiling.
+
+The verdict against the ceiling is therefore **fail**: the pool is 1.94 times
+the eight-minute maximum, and the complete red diagnostic command is 5.00
+times the maximum.
+
+## What the implementation changed
+
+Commit `e36377a02` prepares one published database base per `bin/test`
+invocation, copies it copy-on-write into worker/operator roots, and
+reidentifies the copied commit graph. Commit `6bb9cfe8d` makes exact copied
+commit records use the destination database identity, so branches can fork
+from the shared base honestly.
+
+`seon.cluster.boot-test` now has a per-test fixture over that base instead of
+one namespace-wide `:once` fixture. Its 29 tests are ordinary dynamic-queue
+tasks. The largest boot member was
+`explicit-refork-destroys-the-old-branch-and-forks-current-source` at **205.218
+s (3:25.22)**, below the requested four-minute worst-case chain. The old
+atomic namespace cost was 918.334 s (15:18.33).
+
+The full run's platform tier completed in **34.413 s**, below the 60-second
+requirement. Its cohost test was 34.375 s under full load. This clears the
+platform-tier requirement, though it does not reach the design's more
+aggressive 15-second cohost target.
+
+## Stress findings and confirmation
+
+The runner distinguished eleven parallel-only findings from six failures that
+reproduced alone. The parallel-only class is filed as
+[`parallel-test-stress-exposes-eleven-isolation-sensitive-tests.md`](../../../seon/issues/parallel-test-stress-exposes-eleven-isolation-sensitive-tests.md).
+No test was silently moved to the serial remainder.
+
+Parallel-only confirmations:
+
+- `seon.cluster.boot-test/incremental-source-refresh-preserves-agreement-across-real-edits`;
+- `seon.concurrency-independence-test/n-agents-fold-independently-on-one-live-cluster`;
+- `seon.dev.fresh-operator-export-test/export-verb-produces-an-openable-queryable-store`;
+- `seon.dev.fresh-operator-test/forced-reset-clears-an-exact-dead-process-record`;
+- `seon.dev.fresh-operator-test/init-owns-current-source-and-dormant-cluster-lifecycle`;
+- `seon.dev.fresh-operator-test/isolated-cached-boot-reports-refusal-then-reaches-readiness`;
+- `seon.dev.fresh-operator-test/live-init-reloads-schema-runtime-and-moved-predicate-owners-before-admission`;
+- `seon.dev.fresh-operator-test/populated-stopped-cluster-reopens-after-full-operator-restart`;
+- `seon.dev.fresh-operator-test/source-less-root-reset-republishes-and-reforks-default`;
+- `seon.sci.desk-test/desk-survives-kill-9-and-explicit-clear`; and
+- `seon.sci.eval-test/generated-sources-compose-fork-guard-and-admission`.
+
+Reproducible confirmations:
+
+- `seon.cluster.armed-test/two-clusters-in-one-jvm-own-distinct-live-program-contexts`;
+- `seon.cluster.program-restart-test/an-agent-definition-survives-restart-and-another-agent-calls-it`;
+- `seon.dev.fresh-operator-test/fresh-process-loads-schema-before-every-operator-instrumentation`;
+- `seon.public-contract-test/every-fresh-public-function-has-a-complete-contract`;
+- `seon.render-simplification-test/nested-values-render-their-declared-faces`; and
+- `seon.test-runner-test/interrupted-launcher-awaits-its-runner-before-retaining-the-root`.
+
+## Shared-base worker utilization
+
+Utilization is completed-task elapsed time divided by the 932.938 s pool
+window. It includes blocking IO and is not CPU utilization. The serial
+fail-closed remainder was one 69-test REPL-parity task; it completed in 73.525
+s alongside the pool and did not extend the critical path.
+
+| Worker | Tasks | Busy time | Utilization | Largest task |
+| --- | ---: | ---: | ---: | --- |
+| pool-1 | 196 | 816.084 s | 87.5% | instrumented agent turn, 229.998 s |
+| pool-2 | 100 | 816.164 s | 87.5% | bootstrap drive, 185.670 s |
+| pool-3 | 120 | 793.096 s | 85.0% | fresh-operator export, 208.674 s |
+| pool-4 | 84 | 909.172 s | 97.5% | operator contracts, 221.475 s |
+| pool-5 | 152 | 786.283 s | 84.3% | explicit refork, 205.218 s |
+| pool-6 | 144 | 786.761 s | 84.3% | refork with held database, 169.346 s |
+| pool-7 | 57 | 811.367 s | 87.0% | web oversized body, 149.422 s |
+| pool-8 | 121 | 817.765 s | 87.7% | shell concurrent drain, 150.521 s |
+| pool-9 | 117 | 814.897 s | 87.3% | incremental publication, 201.518 s |
+
+The pool averaged **7.89 occupied workers** (87.6%). The remaining ceiling
+miss is therefore not worker starvation. It is the sum of 2.5–3.8 minute
+resource-heavy tasks under contention plus the fast tail. The leading cuts
+remain the 229.998 s instrumented agent turn, 221.475 s operator contract
+property, 208.674 s fresh-operator export, 185.670 s bootstrap drive, and
+150–161 s shell/web child-JVM tests. Each needs a smaller fixture/property or
+less child-JVM setup; accepting the 15:32.94 pool wall time would violate the
+owner ceiling.
+
+## Previous measurement verdict
 
 The first coherent-tree full measurement did not meet the 5–8 minute ceiling
 and did not produce a terminal suite summary. `bin/test --full` stopped at its
