@@ -259,6 +259,16 @@ back — everywhere, for every agent, with no maintained list of forms.
     propagates into the data-modeling review standards and the
     schema-review checklist alongside ruling 35's coherence check.
 
+## Ruling 49 (owner, 2026-08-12 night — one task noun)
+
+49. **The todo is the one task system; my.plan is retired unbuilt.** The
+    todo is derived-first (unanswered messages, open runs, failing tests —
+    rebirth-proof by construction) extended with authored item FACTS for
+    agent decomposition; the render is the union, completed items vanish.
+    The my.plan toolkit (never implemented) is removed from the target
+    vocabulary; agent-authored intentions live as todo items under the
+    survivability law.
+
 ## The mechanism (composed from the verified reports)
 
 ### One derivation
