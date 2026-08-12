@@ -211,10 +211,11 @@ See `README.md` for the convention.
 | [Preserve the interrupted blob staging artifact until it can be observed](interrupted-blob-staging-leaves-no-observable-artifact.md) | friction | blob staging repair wave |
 | [Reconcile the error-class catalog with declared schemas and renderers](error-class-catalog-and-renderers-disagree.md) | friction | error class contract repair |
 
-## Cleanup (15)
+## Cleanup (16)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Unify :seon.db/database-value into :seon.db/db](database-value-shape-name-duplicates-the-db-key.md) | cleanup | post-gate rename wave (with kind migration) |
 | [Reject readerless rows and duplicate mechanisms at publication](class-readerless-duplicate-mechanisms-survive-cuts.md) | cleanup | class-kill queue |
 | [Derive callable shape documentation from executable contracts](class-documentation-restates-executable-contracts.md) | cleanup | class-kill queue |
 | [Carry schema source provenance as immutable admission data](schema-source-provenance-accumulates-in-a-global-atom.md) | cleanup | schema admission cleanup wave |
