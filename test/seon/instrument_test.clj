@@ -22,6 +22,9 @@
             [malli.instrument :as mi]
             [seon.dev.docstring :as docstring]
             [seon.dev.markdown :as markdown]
+            [seon.db :as db]
+            [seon.effect :as effect]
+            [seon.env :as env]
             [seon.error :as error]
             [seon.flow :as flow]
             [seon.instrument :as instrument]
@@ -168,6 +171,38 @@
             "[:=> [:cat [:fn clojure.core/int?]] :int]"
             projection :record caps wrapped))
         ":record removes an already-installed interpreted wrapper")))
+
+(deftest a-sci-only-arity-miss-names-its-program-graph-arglists
+  (test-support/with-database
+   (fn [connection]
+     (let [function-symbol 'my.agents.reporter/largest
+           _ (db/transact!
+              connection
+              [{:seon.fn/sym (str function-symbol)
+                :seon.fn/arglists "([rows])"}])
+           projection (schema/build-projection (schema/snapshot))
+           wrapped (instrument/wrap-interpreted
+                    function-symbol
+                    "[:=> [:cat [:vector :map]] :map]"
+                    projection :panic nil identity)
+           environment (env/environment
+                        {:seon.boot/cluster-name "instrument-test"
+                         :seon.db/connection connection})
+           failure (binding [effect/*request-context*
+                             {:seon.env/environment environment}]
+                     (try (wrapped)
+                          (catch Exception thrown thrown)))]
+       (is (= {:seon.error/kind :seon.instrument/contract-violated
+               :seon.error/message
+               (str "Wrong number of args (0) passed to: " function-symbol
+                    "; declared arglists: ([rows])")
+               :seon.error/data
+               {:seon.instrument/malli :malli.core/invalid-arity
+                :seon.instrument/arm :input
+                :seon.instrument/arity 0
+                :seon.instrument/fn (str function-symbol)
+                :seon.instrument/arglists '([rows])}}
+              (ex-data failure)))))))
 
 (deftest a-violation-carries-bounded-arguments-only-when-it-can
   (let [caps {:seon.config.eval.result/max-depth 4

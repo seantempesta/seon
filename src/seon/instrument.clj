@@ -85,6 +85,9 @@
             [malli.core :as m]
             [malli.error :as me]
             [malli.instrument :as mi]
+            [seon.db :as db]
+            [seon.effect :as effect]
+            [seon.env :as env]
             [seon.print :as print]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]))
@@ -203,6 +206,75 @@
                       (reverse path))]
     (if (= :malli.core/invalid-input kind) [value] value)))
 
+(defn- program-graph-arglists
+  [function-symbol]
+  (try
+    (if-let [environment (env/of effect/*request-context*)]
+      (if-let [connection (:seon.db/connection environment)]
+        (let [database (db/db connection)]
+          (if (flat-error-value? database)
+            {:seon.instrument.lookup/status :failed}
+            (let [result
+                  (db/q '[:find ?arglists .
+                          :in $ ?function-symbol
+                          :where
+                          [?function :seon.fn/sym ?function-symbol]
+                          [?function :seon.fn/arglists ?arglists]]
+                        database (str function-symbol))]
+              (cond
+                (flat-error-value? result)
+                {:seon.instrument.lookup/status :failed}
+
+                (string? result)
+                {:seon.instrument.lookup/status :found
+                 :seon.fn/arglists result}
+
+                (nil? result)
+                {:seon.instrument.lookup/status :missing}
+
+                :else
+                {:seon.instrument.lookup/status :failed}))))
+        {:seon.instrument.lookup/status :failed})
+      {:seon.instrument.lookup/status :no-program-graph})
+    (catch Throwable _
+      {:seon.instrument.lookup/status :failed})))
+
+(defn- jvm-arglists
+  [function-symbol]
+  (try
+    (some-> function-symbol find-var meta :arglists)
+    (catch Throwable _ nil)))
+
+(defn- diagnostic-arglists
+  [function-symbol]
+  (let [{status :seon.instrument.lookup/status
+         stored :seon.fn/arglists}
+        (program-graph-arglists function-symbol)]
+    (case status
+      :found (try (edn/read-string stored) (catch Throwable _ nil))
+      ;; With a graph, only an established miss reaches JVM metadata. Outside
+      ;; an evaluation there is no program graph to consult; that is the
+      ;; system-side, compiled-function case this fallback exists for.
+      :missing (jvm-arglists function-symbol)
+      :no-program-graph (jvm-arglists function-symbol)
+      nil)))
+
+(defn- minimal-violation
+  [kind data]
+  (let [function-symbol (:fn-name data)
+        arity? (= :malli.core/invalid-arity kind)]
+    {:seon.error/kind ::contract-violated
+     :seon.error/message
+     (if arity?
+       (str "Wrong number of args (" (:arity data) ") passed to: "
+            function-symbol)
+       (str function-symbol " violated its contract (" kind ")."))
+     :seon.error/data
+     (cond-> {::malli kind
+              ::arm (if (= :malli.core/invalid-output kind) :output :input)}
+       arity? (assoc ::arity (:arity data))
+       function-symbol (assoc ::fn (str function-symbol)))}))
+
 (defn- violation
   "One malli report as a flat, bounded, agent-readable value.
   `:args` can hold ANYTHING — a live Datahike connection is an ordinary
@@ -217,22 +289,19 @@
   ;; schema instead — the first thing this reporter did — humanizes to
   ;; the useless "should be a valid function".
   [caps kind data]
-  (if-let [inner (buried-error kind data)]
-    inner
-    (if (= :malli.core/invalid-arity kind)
-    (let [function-symbol (:fn-name data)
-          arglists (some-> function-symbol find-var meta :arglists)]
-      {:seon.error/kind ::contract-violated
-       :seon.error/message
-       (str "Wrong number of args (" (:arity data) ") passed to: "
-            function-symbol)
-       :seon.error/data
-       (cond-> {::malli kind
-                ::arm :input
-                ::arity (:arity data)
-                ::fn (str function-symbol)}
-         arglists (assoc ::arglists arglists))})
-    (let [[offended value] (if (= :malli.core/invalid-output kind)
+  (let [fallback (minimal-violation kind data)]
+    (try
+      (if-let [inner (buried-error kind data)]
+        inner
+        (if (= :malli.core/invalid-arity kind)
+          (let [function-symbol (:fn-name data)
+                arglists (diagnostic-arglists function-symbol)]
+            (cond-> fallback
+              arglists
+              (-> (update :seon.error/message
+                          str "; declared arglists: " (pr-str arglists))
+                  (update :seon.error/data assoc ::arglists arglists))))
+          (let [[offended value] (if (= :malli.core/invalid-output kind)
                              [(:output data) (:value data)]
                              [(:input data) (:args data)])
           explanation (m/explain offended value)
@@ -291,8 +360,10 @@
                  problem-face
                  (assoc ::problems (:seon.instrument/edn problem-face)))}
         argument-face
-        (update :seon.error/data assoc
-                ::args (:seon.instrument/value-edn argument-face)))))))
+            (update :seon.error/data assoc
+                    ::args (:seon.instrument/value-edn argument-face))))))
+      (catch Throwable _
+        fallback))))
 
 (defn- throwing-report
   "The `:panic` reporter: raise the violation as our own flat error.
