@@ -230,8 +230,10 @@
                                    (apply replay arguments))
                                  web/append-history
                                  (fn [entries observations]
-                                   (swap! appended conj (count observations))
-                                   (append entries observations))]
+                                   (let [result (append entries observations)]
+                                     (swap! appended conj
+                                            (- (count result) (count entries)))
+                                     result))]
                      (:seon.cluster.prompt/text
                       (prompt/prompt @connection request)))
              first-replays @replays
@@ -263,8 +265,10 @@
                        :seon.cluster.message/at (Date. 1700000004000)}])
        (let [after (with-redefs [web/append-history
                                  (fn [entries observations]
-                                   (swap! appended conj (count observations))
-                                   (append entries observations))]
+                                   (let [result (append entries observations)]
+                                     (swap! appended conj
+                                            (- (count result) (count entries)))
+                                     result))]
                      (:seon.cluster.prompt/text
                       (prompt/prompt @connection request)))]
          (is (str/starts-with? after before) "all prior bytes are retained")
