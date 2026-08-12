@@ -39,8 +39,9 @@ function contracts.
 
 ## Resolution
 
-Commit `fef44a5a8` makes registration Var-local: the exact Var and its authored
-contract remain beside Malli's registration operation, and a failure is built
-with `seon.error/diagnostic` from the deepest Malli cause. The focused
+Commits `fef44a5a8` and `806381813` make registration Var-local: the exact Var
+and its authored contract remain beside Malli's registration operation, and a
+failure follows Malli's own nested exception field into the deepest cause
+before calling `seon.error/diagnostic`. The focused
 `seon.instrument-test/registration-failure-names-the-var-and-authored-contract`
 regression passes.
