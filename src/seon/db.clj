@@ -428,7 +428,8 @@
 (defn- read-declarations
   [database]
   (delay
-    (schema/projection-from-database database)))
+    (or (schema/handed-projection)
+        (schema/projection-from-database database))))
 
 (defn- ask-declarations
   "Ask one declaration question with the population both PASSED and SUPPLIED.

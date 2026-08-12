@@ -1301,15 +1301,18 @@
         connection (store/open-branch! store source/current-branch)]
     (try
       (let [database @connection
-            activation-closure (require-activation! database)
-            source-digest
-            (db/q '[:find ?digest .
-                    :where [_ :seon.source/digest ?digest]]
-                  database)
             projection (schema/projection-from-database database)
             projection-state (sci.eval/projection-state database projection)
-            base-ctx
-            (sci.eval/cluster-ctx database connection projection-state)]
+            [activation-closure source-digest base-ctx]
+            (schema/call-with-projection-state
+             projection-state
+             #(vector
+               (require-activation! database)
+               (db/q '[:find ?digest .
+                       :where [_ :seon.source/digest ?digest]]
+                     database)
+               (sci.eval/cluster-ctx
+                database connection projection-state)))]
         {:seon.source/commit-id commit-id
          :seon.source/digest source-digest
          :seon.source/activation-closure activation-closure
@@ -2539,24 +2542,30 @@
         instance (publish!
                   (assoc instance
                          :seon.boot/cluster-connection provisional-connection))
-        ;; Activation is a property of this cluster's own immutable database
-        ;; value. A newly forked branch was preflighted before creation; an
-        ;; older sovereign branch is checked here without consulting files or
-        ;; another cluster's projection.
-        _ (require-activation! @provisional-connection)
-        ;; Boot never reads or indexes the file tree. This gate precedes schema
-        ;; accretion, recovery, config, and arming:
-        ;; an incoherent program graph gets no runtime semantics. A complete
-        ;; older corpus remains a legitimate sovereign world.
-        _ (require-coherent-program! provisional-connection cluster-name)
-        ;; A branch may predate this process's additive schema population.
-        ;; Install it before recovery or config can transact a newly added
-        ;; attribute. This is the same population that creates `current-src`;
-        ;; converged reopens issue zero transactions.
-        _ (accrete-schema-population! provisional-connection cluster-name)
-        projection (schema/projection-from-database @provisional-connection)
-        projection-state
-        (sci.eval/projection-state @provisional-connection projection)
+        initial-database @provisional-connection
+        initial-projection
+        (or (:seon.schema/projection source-base)
+            (schema/projection-from-database initial-database))
+        initial-projection-state
+        (sci.eval/projection-state initial-database initial-projection)
+        ;; Every branch read receives the projection acquired with that branch.
+        ;; A new fork can reuse current-src's immutable projection because it
+        ;; names the exact commit just forked; a sovereign existing branch
+        ;; derives once from its own database value.
+        _ (schema/call-with-projection-state
+           initial-projection-state
+           #(do
+              (require-activation! @provisional-connection)
+              (require-coherent-program!
+               provisional-connection cluster-name)
+              (accrete-schema-population!
+               provisional-connection cluster-name)))
+        database @provisional-connection
+        projection
+        (if (= (db/basis-t initial-database) (db/basis-t database))
+          initial-projection
+          (schema/projection-from-database database))
+        projection-state (sci.eval/projection-state database projection)
         ;; Datahike's writer is a core.async state machine created with the
         ;; connection. Create the durable cluster connection while its one
         ;; advanceable projection state is bound, so in-writer transaction
