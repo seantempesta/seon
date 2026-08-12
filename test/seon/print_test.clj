@@ -317,13 +317,13 @@
         fitted (print/fit
                 node
                 {:seon.render.profile/id :seon.render.profile/agent
-                 :seon.render.profile/token-budget 10000
+                 :seon.render.profile/token-budget 1
                  :seon.render.profile/max-depth 8
                  :seon.render.profile/max-children 1
                  :seon.render.profile/composition :multiline})
         items (:seon.print/items fitted)
-        elision (peek items)
-        rendered (dec (count items))]
+        elision (if items (peek items) fitted)
+        rendered (if items (dec (count items)) 0)]
     (is (= :seon.print/elided (:seon.print/face elision)))
     (is (= total (:seon.render.data/total elision)))
     (is (= (- total rendered) (:seon.print/omitted elision)))

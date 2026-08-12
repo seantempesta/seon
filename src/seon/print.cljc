@@ -737,14 +737,25 @@
       (elision-node profile path retained (- original retained) original
                     :characters (pr-str (subs value 0 retained))))))
 
+(defn- structural-elision
+  [node profile path]
+  (let [children (vec (or (::items node) (::entries node) []))
+        carried (when (= ::elided (::face (peek children))) (peek children))
+        admitted (if carried (dec (count children)) (count children))
+        total (or (:seon.render.data/total carried)
+                  (when-some [omitted (::omitted carried)]
+                    (+ admitted omitted))
+                  admitted)]
+    (merge (elision-node profile path 0 (max 1 total) total :subtree nil)
+           (select-keys carried [::requery-id ::requery-refusal]))))
+
 (defn- fit-node
   [node profile depth path child-limit string-limit]
   (let [face (::face node)]
     (cond
       (and (>= depth (:seon.render.profile/max-depth profile))
            (contains? structural-faces face))
-      (let [total (count (or (::items node) (::entries node) [node]))]
-        (elision-node profile path 0 (max 1 total) total :subtree nil))
+      (structural-elision node profile path)
 
       :else
       (case face
