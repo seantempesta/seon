@@ -54,7 +54,7 @@ context-quality work.
 
 ## Resolution
 
-Resolved by `3f6958fc2`. `seon.print/fit` no longer discards a carried trailing
+Resolved by `3f6958fc2` and `731958e80`. `seon.print/fit` no longer discards a carried trailing
 collection elision and then mistakes the admitted prefix for the source total.
 It reads the carried total (or derives it from retained plus omitted), applies
 the current child limit, and emits one recalculated trailing elision while
@@ -62,9 +62,11 @@ preserving the original requery identity or refusal.
 
 `refitting-a-truncated-collection-preserves-its-honest-elision` fixes the
 observed class at its outer boundary: a 210-result collection already admitted
-as one rendered child plus an elision is fitted again, and the recurring test
-asserts `rendered + omitted = total`, specifically `1 + 209 = 210`, with the
-requery identity retained. The focused regression passed on 2026-08-12. The
+as one rendered child plus an elision is fitted again under a one-token budget,
+and the recurring test asserts `rendered + omitted = total` with the requery
+identity retained. Even the terminal zero-depth fit therefore reports
+`0 + 210 = 210` instead of silently replacing the source total with the two
+admitted nodes. The focused regression passed on 2026-08-12. The
 repository `bin/test` selection was separately attempted but stopped before
 test execution while the concurrently changing shared source scratch
 population was refused; the integrated lane owns that publication gate.
