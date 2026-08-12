@@ -444,7 +444,10 @@
                       {:seon.error/kind ::first-cluster-proc-fault}))
             (armer-step state transition)))
          ([state input message]
-          (armer-step state input message)))]
+          (armer-step state input message)))
+       ai/complete
+       (fn [_request]
+         {:seon.ai/text "(my.run/complete \"fault observed\")"})]
       (let [instance (cluster/start! {:seon.boot/cluster-name name
                                       :seon.boot/root root})]
         (try
