@@ -469,7 +469,13 @@
 
 (defn- floor-text
   [unit value]
-  (value/render-ai (assoc unit :seon.render/value value)))
+  ;; Transcript values are immutable history entries. Give the shared value
+  ;; floor an explicit, content-stable block identity when this internal
+  ;; projection is not itself running as a retained render call.
+  (value/render-ai
+   (cond-> (assoc unit :seon.render/value value)
+     (nil? (:seon.render.call/id unit))
+     (assoc :seon.render.call/id [::history-value value]))))
 
 (defn- bounded-scalar
   [unit value]
@@ -484,6 +490,8 @@
         rendered (render/render-ai
                   (cond-> (assoc unit
                                  :seon.render/value family-unit
+                                 :seon.render.call/id
+                                 [::history-entity (:db/id family-unit)]
                                  :seon.render/distance distance)
                     owner (assoc :seon.render/namespace owner)))
         output (if (:seon.error/kind rendered)

@@ -827,7 +827,7 @@
 
 (defn history
   "Derive ordered form/printed-value entries for one agent from one walk."
-  {:malli/schema [:=> [:cat :seon.render.walk/request] [:vector :map]]}
+  {:malli/schema [:=> [:cat :seon.render.walk/history-request] [:vector :map]]}
   [{captured :seon.render/captured-calls
     :as request}]
   (let [captured (or captured (atom {}))

@@ -33,7 +33,24 @@
                      :seon.db/connection]
                     [:seon.render.walk/lookup :seon.render.walk/lookup]
                     [:seon.render/output
-                     [:enum :seon.render/ai :seon.render/html]]
+                     [:enum :seon.render/ai :seon.render/html
+                      :seon.render/form]]
+                    [:seon.sci.admit/caps :seon.sci.admit/caps]
+                    [:seon.sci.eval/time-limit-ms
+                     :seon.sci.eval/time-limit-ms]
+                    [:seon.config/on-core-error
+                     :seon.config/on-core-error]
+                    [:seon.render/distance
+                     {:optional true}
+                     :seon.render/distance]],
+                   :history-request
+                   [:map
+                    [:seon.db/db :seon.db/database-value]
+                    [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+                    [:seon.db/connection
+                     {:optional true}
+                     :seon.db/connection]
+                    [:seon.render.walk/lookup :seon.render.walk/lookup]
                     [:seon.sci.admit/caps :seon.sci.admit/caps]
                     [:seon.sci.eval/time-limit-ms
                      :seon.sci.eval/time-limit-ms]
