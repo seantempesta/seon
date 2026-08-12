@@ -447,8 +447,28 @@
      targets)))
 
 (defn- runtime-namespace-form
-  [namespace-name namespace-row]
-  (let [requires (vec (runtime-require-specs namespace-row))
+  [namespace-name namespace-row function-rows]
+  ;; SCI makes every program-graph function callable. clj-kondo resolves a
+  ;; qualified call only when that namespace is in the current `ns` form, so
+  ;; the analysis-only form derives a bare require from every function row.
+  ;; The agent's real aliases/refers/imports stay intact, and none of these
+  ;; synthetic requires become durable namespace facts.
+  (let [program-requires
+        (into #{}
+              (comp
+               (keep (fn [row]
+                       (some-> (:seon.fn/sym row)
+                               symbol
+                               namespace
+                               symbol)))
+               (remove #{namespace-name})
+               (map (fn [required-name]
+                      {:seon.ns/name required-name})))
+              function-rows)
+        requires
+        (vec (runtime-require-specs
+              (update namespace-row :seon.ns/requires
+                      #(into program-requires %))))
         imports (->> (:seon.ns/imports namespace-row)
                      (keep :seon.ns.import/target-class)
                      (sort-by str)
@@ -480,7 +500,8 @@
         function-rows (runtime-function-rows database)
         prelude (analysis-program-prelude function-rows)
         namespace-source (pr-str (runtime-namespace-form namespace-name
-                                                         namespace-row))
+                                                         namespace-row
+                                                         function-rows))
         prefix (str prelude (when (seq prelude) "\n") namespace-source "\n")
         first-source-row (inc (count (filter #{\newline} prefix)))
         analysis

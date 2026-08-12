@@ -301,6 +301,72 @@
                     @connection
                     "seon.cluster.run/plan-tx-for-author")))))))
 
+(deftest settled-form-records-calls-across-every-program-namespace
+  (test-support/with-database
+    (fn [connection]
+      (let [namespace-name 'my.agents.call-edges
+            run-id "call-edges-run"
+            process "call-edges-process"
+            source
+            (str "(do (seon.db/q '[:find (count ?function) . "
+                 ":where [?function :seon.fn/sym _]]) "
+                 "(my.run/complete \"done\"))")]
+        (db/transact!
+         connection
+         [{:seon.ns/name namespace-name
+           :seon.ns/source "(ns my.agents.call-edges)"
+           :seon.ns/requires [[:seon.ns/name 'my.run]]}
+          {:seon.cluster.agent/id "call-edges-agent"
+           :seon.cluster.agent/namespace
+           [:seon.ns/name namespace-name]}])
+        (db/transact!
+         connection
+         (run/open-tx
+          {:seon.cluster.run/id run-id
+           :seon.cluster.run/agent
+           [:seon.cluster.agent/id "call-edges-agent"]
+           :seon.cluster.run/opened-at (java.util.Date.)}))
+        (db/transact!
+         connection
+         (run/claim-tx
+          {:seon.cluster.run/id run-id
+           :seon.cluster.run/process process
+           :seon.cluster.run/live-processes #{process}
+           :seon.cluster.run/now (java.util.Date.)}))
+        (db/transact!
+         connection
+         (run/plan-tx
+          {:seon.cluster.run/id run-id
+           :seon.cluster.run/process process
+           :seon.cluster.run/starting-ns [:seon.ns/name namespace-name]
+           :seon.cluster.run/plan-digest "call-edges-digest"
+           :seon.cluster.run/sources
+           [{:seon.cluster.run.form/source source}]}))
+        (db/transact!
+         connection
+         (run/receipt-start-tx
+          {:seon.cluster.run/id run-id
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/at (java.util.Date.)}))
+        (db/transact!
+         connection
+         (run/receipt-settle-tx
+          @connection
+          {:seon.cluster.run/id run-id
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/result-edn ":done"}))
+        (is (= #{"my.run/complete" "seon.db/q"}
+               (set
+                (db/q '[:find [?symbol ...]
+                        :in $ ?form-id
+                        :where
+                        [?form :seon.cluster.run.form/id ?form-id]
+                        [?form :seon.fn/calls ?function]
+                        [?function :seon.fn/sym ?symbol]]
+                      @connection
+                      (run/form-identity run-id 0))))
+            "callability comes from the program graph, not stored requires")))))
+
 (deftest settled-agent-form-has-static-index-edge-parity
   (let [root (fixture-root)
         namespace-name 'sample.settlement-parity
