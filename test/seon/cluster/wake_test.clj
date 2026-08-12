@@ -70,7 +70,9 @@
    (route-probe! connection mailbox fenced? interest
                  (async/chan (async/sliding-buffer 1))))
   ([connection mailbox fenced? interest render]
-   (let [armer (async/chan (async/sliding-buffer 1))
+   (let [recipient-eid (agent-eid connection)
+         channels {recipient-eid mailbox}
+         armer (async/chan (async/sliding-buffer 1))
          search (async/chan (async/sliding-buffer 1))
          faults (async/chan (async/sliding-buffer 1))]
      {:mailbox mailbox
@@ -80,7 +82,7 @@
       :faults faults
       :key (wake/route! {:seon.cluster.wake/connection connection
                          :seon.cluster.wake/channels
-                         (fn [] {(agent-eid connection) mailbox})
+                         (constantly channels)
                          :seon.cluster.wake/fenced? fenced?
                          :seon.cluster.wake/armer-channel armer
                          :seon.cluster.wake/render-channel render
@@ -253,12 +255,13 @@
   ;; the router now says so.
   (with-connection
     (fn [connection]
-      (let [mailbox (async/chan (async/sliding-buffer 1))
+      (let [recipient-eid (agent-eid connection)
+            mailbox (async/chan (async/sliding-buffer 1))
             {:keys [faults key]}
             (route-probe!
              connection mailbox
              (fn [recipient channel]
-               (and (= recipient (agent-eid connection))
+               (and (= recipient recipient-eid)
                     (identical? channel mailbox)
                     (async.protocols/closed? channel))))]
         (try
@@ -353,7 +356,9 @@
           (test-support/with-database
             (fn [connection]
               (db/transact! connection [{:seon.cluster.agent/id "agent-a"}])
-              (let [mailbox (async/chan 64)
+              (let [recipient-eid (agent-eid connection)
+                    mailbox (async/chan 64)
+                    channels {recipient-eid mailbox}
                     armer (async/chan 64)
                     ;; a COUNTING render channel: production slides,
                     ;; because a wake says only "look" and coalescing is
@@ -364,7 +369,7 @@
                     key (wake/route!
                          {:seon.cluster.wake/connection connection
                           :seon.cluster.wake/channels
-                          (fn [] {(agent-eid connection) mailbox})
+                          (constantly channels)
                           :seon.cluster.wake/fenced? (fn [_ _] false)
                           :seon.cluster.wake/armer-channel armer
                           :seon.cluster.wake/render-channel render
