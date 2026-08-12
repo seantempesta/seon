@@ -32,6 +32,22 @@ crossing uses the universal output floor.
 - The freshly forked database graph reported nine sink facts and nine boundary
   facts; those totals contain only the installed `src/` leaves.
 
+## N2 disposition — 2026-08-11
+
+A fresh in-memory production-population probe reproduced the vacuity against
+the current tree. `seon.fn/output-path-report` reported ten installed sinks;
+the standing test's assertions (`totals` is a map and every value is an
+integer) returned true. In the same JVM, `seon.fn/rows` over
+`script/seon/dev/mcp.clj` and `script/seon/fresh_operator.clj` derived five
+additional sink rows and six projection-boundary rows that were absent from
+the installed report.
+
+This is a production-subject-construction defect. The program-index/build-fact
+boundary deliberately has no value that combines installed rows with the
+analyzable non-installed leaves, so a test-only concatenation would be a
+second roster. N2 leaves the member open for that production owner and does
+not mask it in `test/seon/fn_test.clj`.
+
 ## Owner
 
 The program-index/build-fact boundary and the universal-output-floor standing

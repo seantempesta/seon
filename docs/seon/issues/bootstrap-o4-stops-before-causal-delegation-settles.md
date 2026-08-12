@@ -57,11 +57,27 @@ The broken source boundary is:
 Neither `test/seon/eval/drive_test.clj` nor
 `test/seon/bootstrap_drive_test.clj` proves a multi-agent causal episode.
 
+## N2 disposition — 2026-08-11
+
+The recorded isolated probe is the retained counterexample for this member:
+the old terminal query returned `:stopped` with one peer run and zero replies.
+The proof therefore reached its success-shaped terminal while the causal
+subject was incomplete.
+
+This is a production-constructor defect, not a fixture-only omission.
+`seon.eval.drive` does not yet construct the complete causal run/message
+closure that both the terminal predicate and O4 grader must consume. A test
+cannot honestly derive a nonempty complete subject from that production query
+until the query exists. The test owners are also in the live `projection`
+lane's protected set, so N2 defers this member to that named holder without a
+test-side seed or alternate closure query.
+
 ## Owner
 
-The existing `seon.eval.drive` fact-space episode boundary and the O4 grader
-in `seon.bootstrap-drive`. Strengthen the one driver; do not change runtime
-message delivery or restore open-run `wait` semantics.
+The live `projection` lane, at the existing `seon.eval.drive` fact-space
+episode boundary and the O4 grader in `seon.bootstrap-drive`. Strengthen the
+one driver; do not change runtime message delivery or restore open-run `wait`
+semantics.
 
 ## Acceptance
 

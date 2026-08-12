@@ -76,3 +76,18 @@ generator (`(gen/choose 0 8)` offsets over up to 18 events) hammers the
 ## Evidence
 
 `docs/prds/sci-execution-runtime/research/context-wave-audit-2026-07-31.md`
+
+## N2 disposition — 2026-08-11
+
+The member remains a valid retained-counterexample ledger: its recorded seed
+showed zero floor draws in 40 trials, and the P1/P5 generators could not
+construct the cases their properties named. The current W2 wave has already
+replaced the old 1,000-line walk property file with a smaller production-query
+fixture while `src/seon/render.clj`, `src/seon/render/walk.clj`, and
+`src/seon/render/web.clj` are in flight. Both member test files are inside the
+live W2 `render*`/`walk` ownership set.
+
+N2 therefore defers this member to W2 without editing or grading its
+in-progress tests. W2 owns the required per-property failing-case generators,
+explicit floor weighting, nonempty production-derived subject assertions,
+and retained counterexamples.

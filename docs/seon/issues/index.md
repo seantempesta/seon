@@ -48,7 +48,7 @@ See `README.md` for the convention.
 | [Pass ordered entity ids to transcript `pull-many`](transcript-about-lookup-passes-a-set-to-pull-many.md) | blocker | live-drive render repair wave |
 | [Observe and claim every deletable directory](deletable-directories-have-no-claim-or-size-facts.md) | blocker | operator directory-claim governor wave |
 | [Prevent ranged collection from deleting resurrected branch data](ranged-store-collection-can-delete-live-segments-via-branch-resurrection.md) | blocker | exclusive sweep implementation wave |
-| [Make bootstrap O4 wait for the causal delegation](bootstrap-o4-stops-before-causal-delegation-settles.md) | blocker | bootstrap delegation-drive repair wave |
+| [Make bootstrap O4 wait for the causal delegation](bootstrap-o4-stops-before-causal-delegation-settles.md) | blocker | projection lane — causal episode production query |
 | [Refuse malformed SSE data before it can change agent code](malformed-sse-data-can-change-agent-code.md) | blocker | AI provider-integrity wave |
 | [Bound work submission before Flow injection can block](work-submission-can-block-before-its-time-limit.md) | blocker | Flow bounded-submission wave |
 | [Cut the ~42 MB of store each eval sample costs](eval-samples-cost-42mb-of-store-each.md) | blocker | eval-scale economics wave |
@@ -123,7 +123,7 @@ See `README.md` for the convention.
 | [Make the changed-test report readable at a glance](changed-test-report-is-one-enormous-line.md) | friction | dev-tooling face hygiene |
 | [Render live-proof roots have no declared lifecycle owner](render-live-proof-roots-have-no-lifecycle-owner.md) | friction | operator directory-claim governor wave |
 | [Render adversarial roots outlive their fault experiment](render-adversarial-roots-outlive-their-experiment.md) | friction | operator directory-claim governor wave |
-| [Include non-installed operator and MCP leaves in the sink proof](output-sink-query-excludes-operator-and-mcp-scripts.md) | friction | universal output floor graduation wave |
+| [Include non-installed operator and MCP leaves in the sink proof](output-sink-query-excludes-operator-and-mcp-scripts.md) | friction | program-index production-subject wave |
 | [Stop reporting an MCP-proven live prepl as unreachable](status-reports-a-live-mcp-proven-prepl-unreachable.md) | friction | operator status-truth wave |
 | [Give open map unions explicit discriminants](map-unions-have-no-explicit-discriminants.md) | friction | open-maps accretion wave |
 | [Give debug pages the real live-process set](debug-pages-invent-wedged-runs.md) | friction | render liveness-evidence wave |
@@ -168,7 +168,7 @@ See `README.md` for the convention.
 | [Bind first-party namespaces so value-position reads deref](host-bound-first-party-vars-break-in-value-position.md) | friction | SCI eval-context owner design gate |
 | [Create the store with the write-amplification options it already has](file-store-commits-pay-five-times-the-fsyncs-they-need.md) | friction | store/perf fix lane |
 | [Give render token budgets one config owner instead of private dials](render-token-budgets-are-private-dials-no-producer-supplies.md) | friction | context wave fix lane |
-| [Make the render wave's properties able to produce their failing cases](render-wave-properties-cannot-produce-their-failing-cases.md) | friction | context wave fix lane |
+| [Make the render wave's properties able to produce their failing cases](render-wave-properties-cannot-produce-their-failing-cases.md) | friction | W2 — render property premise repair |
 | [Clear the floor's residue, duplicate cursors, and marker hand list](value-floor-residue-duplicate-cursors-and-marker-hand-lists.md) | friction | context wave fix lane |
 | [Align vendored Malli source with the pinned dependency](malli-vendor-is-ahead-of-pinned-dependency.md) | friction | general |
 | [Merge the 28 upstream Datahike commits our fork is missing](datahike-fork-is-28-commits-behind-upstream.md) | friction | upstream-delta sweep follow-up |
@@ -185,7 +185,7 @@ See `README.md` for the convention.
 | [Publish eval arming before testing concurrent interruption](concurrent-eval-test-calibrates-interpreted-work-to-wall-time.md) | friction | SCI eval readiness wave |
 | [Resolve namespace aliases before selecting runtime lint stubs](runtime-lint-does-not-resolve-namespace-aliases.md) | friction | future runtime-lint wave |
 | [Permit accretive schema loosenings over existing data](schema-guard-refuses-accretive-loosenings-with-data.md) | friction | schema-lifecycle wave |
-| [Make the Context MVP drive prove its semantic exit](context-mvp-drive-can-false-green-after-cross-agent-delivery.md) | friction | context MVP harness wave |
+| [Make the Context MVP drive prove its semantic exit](context-mvp-drive-can-false-green-after-cross-agent-delivery.md) | friction | projection lane — causal episode recurring proof |
 | [Preserve Inst semantics when a value is also collection-like](admit-inst-overlap-prefers-collection-shape.md) | friction | adversarial-audit fix wave |
 | [Require the general printer bound for every contract headline](instrumentation-headline-unbounded-when-caps-absent.md) | friction | adversarial-audit fix wave |
 | [Keep interpreter-private markers out of the time-limit face](time-limit-face-exposes-interpreter-interrupt-marker.md) | friction | SCI failure-face repair wave |
