@@ -2979,14 +2979,14 @@
     :boolean]}
   [projection function-symbol arguments]
   (try
-    (when-let [contract
-               (get (:seon.schema.projection/function-contracts projection)
-                    function-symbol)]
-      (let [compiled
-            (m/function-schema
-             contract
-             {:registry (:seon.schema.projection/registry projection)})]
-        (boolean
+    (boolean
+     (when-let [contract
+                (get (:seon.schema.projection/function-contracts projection)
+                     function-symbol)]
+       (let [compiled
+             (m/function-schema
+              contract
+              {:registry (:seon.schema.projection/registry projection)})]
          (some (fn [arity]
                  (let [input (:input (m/-function-info arity))]
                    ((m/validator input) arguments)))

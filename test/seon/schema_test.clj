@@ -22,6 +22,11 @@
   (schema/begin-registration-delta
    (schema/build-projection (schema/registered-schemas))))
 
+(deftest function-input-fit-is-total-for-an-absent-contract
+  (let [projection (schema/build-projection (schema/registered-schemas))]
+    (is (false? (schema/function-accepts-in?
+                 projection 'seon.schema-test/missing [{}])))))
+
 (deftest every-predicate-schema-declares-what-it-accepts
   (let [missing (volatile! [])]
     (walk/postwalk
