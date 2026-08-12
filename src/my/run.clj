@@ -16,7 +16,7 @@
 
 (defn render-namespace-ai
   "Present my.run as the lifecycle protocol, in use order."
-  {:malli/schema [:=> [:cat :my.run/namespace-unit] :string]}
+  {:malli/schema [:=> [:cat :my.run/namespace-unit] :seon.render/ai]}
   [unit]
   (let [database (:seon.db/db unit)
         docs
@@ -91,7 +91,7 @@
   its recurring anti-rot gate disappears."
   {:malli/schema
    [:=> [:cat [:or :my.run/namespace-unit :my.run/usage-unit]]
-    :seon.repl/entries]}
+    :seon.render/form]}
   [unit]
   (let [database (:seon.db/db unit)
         usage-test
