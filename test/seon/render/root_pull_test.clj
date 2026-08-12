@@ -243,8 +243,7 @@
                         (fn [& arguments]
                           (swap! reads inc)
                           (apply f arguments)))]
-       (with-redefs [db/q (count-read db/q)
-                     db/pull (count-read db/pull)
+       (with-redefs [db/pull (count-read db/pull)
                      db/pull-many (count-read db/pull-many)
                      db/datoms (count-read db/datoms)]
          (walk/neighborhood
@@ -284,11 +283,12 @@
      (db/transact! connection [{::root-id "root" ::value "one"}])
      (let [captured (atom [])
            database @connection
+           fixed (db/as-of database (db/basis-t database))
            acquisition (binding [db/*read-evidence-sink* captured]
-                         (walk/root-acquisition (request connection)))
+                         (walk/root-acquisition
+                          (assoc (request connection) :seon.db/db fixed)))
            call {:seon.render.call/read-evidence (db/read-evidence @captured)
-                 :seon.render.call/output acquisition}
-           fixed (db/as-of database (db/basis-t database))]
+                 :seon.render.call/output acquisition}]
        (is (empty? (#'web/candidate-call-ids
                     {::root call} fixed))
            "an opening as-of database compares through seon.db revisions")))))
