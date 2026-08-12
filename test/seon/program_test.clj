@@ -737,7 +737,17 @@
            :seon.test/source "(deftest property)"
            :seon.fn/calls [[:seon.fn/sym "sample/helper"]]
            :seon.test/subject [:seon.fn/sym "sample/subject"]
-           :unowned/value :ignored}))))
+           :unowned/value :ignored})))
+  (is (= [:seon.fn/sym "sample/subject"]
+         (:seon.test/subject
+          (program/canonical-row
+           {:seon.fn/sym "sample/f"
+            :seon.fn/ns [:seon.ns/name 'sample]
+            :seon.fn/source "(defn f [] 1)"
+            :seon.fn/arglists "([])"
+            :seon.fn/private? false
+            :seon.test/subject [:seon.fn/sym "sample/subject"]})))
+      "function rows retain their declared test subject during canonicalization"))
 
 (deftest schema-row-properties-survive-and-retract-exactly
   (let [current {:seon.schema/key :sample/error

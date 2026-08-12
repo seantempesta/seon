@@ -26,7 +26,8 @@
     :seon.program/owned-attributes
     [:seon.fn/sym :seon.fn/ns :seon.fn/source :seon.fn/arglists
      :seon.fn/arglists-override?
-     :seon.fn/doc :seon.fn/private? :seon.fn/spec :seon.fn/arities
+     :seon.fn/doc :seon.fn/private? :seon.fn/spec :seon.test/subject
+     :seon.fn/arities
      :seon.fn/ast :seon.fn/calls :seon.fn/keywords :seon.fn/workload
      :seon.fn/external-sink :seon.fn/projection-boundary
      :seon.effect/capability
