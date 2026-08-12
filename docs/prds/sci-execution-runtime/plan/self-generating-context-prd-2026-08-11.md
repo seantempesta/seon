@@ -9,7 +9,8 @@ tags: [prd, render, agent, context, runtime]
 Design session with the owner, 2026-08-11. This document records the rulings
 and the composed mechanism; it extends — never replaces —
 [repl-transcript-context-prd-2026-08-10.md](repl-transcript-context-prd-2026-08-10.md)
-(the history-is-the-context move, storage verification, ordering keys) and is
+(the history-is-the-context move, storage verification, and printing grammar;
+its ordering bands are superseded) and is
 grounded in two research reports commissioned and verified this session:
 [incremental-invalidation-design-2026-08-11.md](../research/incremental-invalidation-design-2026-08-11.md)
 and
@@ -24,7 +25,7 @@ what enters context, new data/refs/functions surface as agents define them,
 and every entry reads as something the agent could have typed and would get
 back — everywhere, for every agent, with no maintained list of forms.
 
-## Owner rulings this session (each confirmed in chat, 2026-08-11)
+## Owner rulings 1-50
 
 1. **Render once; re-render only on an affecting change.** A render function
    runs once; its output is retained with the database reads it made
@@ -52,6 +53,10 @@ back — everywhere, for every agent, with no maintained list of forms.
    page morphs; the agent sees the fresh entries at its next turn, whatever
    caused that turn. Attention-worthiness is an explicit act: an agent that
    should interrupt root SENDS ROOT A MESSAGE.
+   **SUPERSEDED (2026-08-12):** T2 and rulings 36/44 replace “history
+   appends” with pending-page-only display. Passive changes create no run,
+   form, receipt, or settled-history entry; the next message or error
+   addressed to the agent runs generation and settles the delta.
 7. **Both surfaces must be beautiful and lean.** No long context dumps, no
    useless error walls; the point of render functions is ideal context. Ugly
    output remains a defect with a feedback loop (standing order).
@@ -78,8 +83,87 @@ back — everywhere, for every agent, with no maintained list of forms.
     extension of the ONE per-cluster `seon.env` value (`env/scope` with the
     already-declared agent-id member), persistent and shared at the cluster;
     never a second environment noun.
+    **SUPERSEDED (2026-08-12):** ruling 38 retires the “extension” phrasing.
+    `seon.env` carries derivation inputs; opening context is derived per agent
+    from the walk and is never stored in or on the environment.
 
-## Rulings 24-28 (owner, 2026-08-12 midday — the generated episode)
+14. **Define-before-use is the one intra-distance ordering rule**: no entry
+    may reference a symbol the history has not already introduced (require
+    introduces an alias, `dir` introduces names, `doc` may then use one, a
+    call may follow its doc). Computed from the parsed forms, stable
+    alphabetical tie-breaks. One regression walks a generated history with
+    the introduced-symbol set and asserts the property — "the context
+    teaches" becomes machine-checkable.
+15. **Render functions live with the shape's owner** (existing convention,
+    now ruled): the schema names a fully qualified function in the owning
+    namespace; agent-authored renderers live in the agent's namespace. No
+    `seon.agents` collection home, no roster.
+16. **V1 spend policy is concise-until-cap**: render everything at concise
+    (names, one-liners, schema names) in order until X tokens; every concise
+    value indicates its deeper form. No per-distance budgets in V1.
+    **[TARGET]** distance-adaptive rendering — render functions receiving
+    proximity to the agent's namespace and adapting spend, plus usage-edge
+    detail sharpening (`:seon.fn/calls` from run forms shortening effective
+    distance) — is the eventual design, deferred until a live V1 history is
+    measured.
+    **SUPERSEDED (2026-08-12):** D1 replaces concise-until-cap: arc closure
+    selects content; the cap bounds only declared-render admission beyond that
+    closure, while profiles still fit and never select (rulings 3/16).
+17. **Agent-authored functions, schemas, and tests get index parity**:
+    settlement commits them through the same analysis as shipped source —
+    same calls/keywords/subject edges, same tests-reaching derivation. One
+    mechanism, verified in W1.
+18. **HALF is the V1 minimum opening context**: instructions, own namespace
+    in detail, required namespaces as one dir listing each, the worked
+    contracted-defn demonstration, and the task message (drive evidence: two
+    replicates, identical durable results to FULL at 46% tokens). The
+    demonstration is the load-bearing teaching.
+    **SUPERSEDED (2026-08-12):** D1/D2 arc closure plus declared-render
+    admission replaces the fixed content roster; the ~7k-token scale and its
+    load-bearing worked-demonstration evidence remain the surviving lesson.
+19. **Tiles are live windows by default; pins override.** HTML renders exist
+    for the USER's eyes; each tile shows the agent's newest-basis block; the
+    user may star/pin any block and the pinned block holds the tile instead
+    of the live window until unpinned. For agents the same entries are a
+    glimpse of current work — and the context must TEACH root to query its
+    agents' histories or simply message them when an output does not explain
+    itself (attention is a taught vocabulary, never a dashboard mechanism).
+    **Implementation note (2026-08-12):** ruling 11 makes a creation-time read
+    of a nonexistent child unwritable, so root opens with plain HALF. The
+    existing first-agent arrival/armer path waits for that agent's bootstrap
+    episode to settle, then opens one ordinary system-authored root run: one
+    database read of the agent's two most recent form/value receipts and one
+    `my.message/send` asking what it is doing, with the latter also completing
+    the run. Each form self-erases independently when root's settled history
+    already proves the corresponding read or sent message; the deterministic
+    run identity prevents reinjection.
+    **SUPERSEDED (2026-08-12):** rulings 32 and 39 delete that fixed preview
+    and reinjection implementation note. Root's preview is root's own
+    gap-closure walk over the agent; no creation-time supply-push or fixed
+    receipt count survives.
+20. **Stable grid + freshness highlight** for tile arrangement; newest-first
+    ordering lives only inside an agent's own column.
+21. **Preview depth: newest block + recent messages** per attached agent in
+    root's context and tile.
+    **SUPERSEDED (2026-08-12):** ruling 39 removes fixed preview depth. Root's
+    preview is its own gap-closure walk over the agent, with the newest block
+    in membership and unshown messages selected from the retained shown basis.
+22. **The opening history is one complete episode** (gap-1 closure): help ->
+    a real stored task message -> require/explore -> build -> verify ->
+    `(run/complete ...)` — so an agent wakes MID-LIFE, its own last words the
+    disposition of a finished episode, the fresh addressed message its
+    purpose. The episode shape is the agent's remembered behavior, never
+    described prose. All existing mechanisms (bootstrap is an ordinary run;
+    the demo message is a real fact).
+    **SUPERSEDED (2026-08-12):** the arc shape stands, but the stale HALF
+    `dir`-listing content itemization does not; content is governed by rulings
+    37/D2.
+23. **Core-tooling presentation rides two rungs**: protocol-carrying ns/fn
+    docstrings first (zero mechanism — `:seon.ns/doc` already renders
+    through every dir), then a declared namespace render function owned by
+    the namespace itself (ruling 15) where richer presentation earns it —
+    e.g. my.run presented as a lifecycle in protocol order. No walk changes,
+    no priority lists.
 
 24. **The opening episode is GENERATED, never authored**: `bootstrap.edn`
     and the stored form plan are DELETED ("so we don't revert back...
@@ -107,8 +191,6 @@ back — everywhere, for every agent, with no maintained list of forms.
     renders + executed receipts; a hand-assembled prompt fragment found
     anywhere is a defect.
 
-## Rulings 29-31 (owner, 2026-08-12 afternoon — the expansion frame)
-
 29. **The explained-set rule is the generator's invariant** (the
     macroexpansion frame: expansion to fixed point, resolve-or-fail where
     resolve = teach): before ANY form is emitted — including the
@@ -123,8 +205,6 @@ back — everywhere, for every agent, with no maintained list of forms.
     went (the run's trigger sender); no separate "message your requester"
     teaching, no prose-packaging: the lifecycle routes replies because the
     run carries its trigger.
-
-## Rulings 32-34 (owner, 2026-08-12 — gap-closure generation)
 
 32. **The generator's input is (pull, retained history) — gap-closure
     generation**: for every unit, emit the cheapest TRUE form closing the
@@ -143,8 +223,6 @@ back — everywhere, for every agent, with no maintained list of forms.
     (only the delta since the shown basis generates). Generation is the
     derivative of the graph, never re-integration.
 
-## Ruling 35 (owner, 2026-08-12 — render contract coherence)
-
 35. **A render declaration must be contract-coherent at admission**: a
     schema X declaring `{:seon.render/ai fn-B}` (or /html, /form) is
     admissible only when fn-B's declared `:malli/schema` input accepts X —
@@ -156,8 +234,6 @@ back — everywhere, for every agent, with no maintained list of forms.
     contract-fit selection path already enforces this by construction;
     this extends the same coherence to explicit declarations.
 
-## Ruling 36 (owner, 2026-08-12 evening — work starts with a message)
-
 36. **Updating an agent's data never starts its work — a MESSAGE does.**
     If root updates an agent's plan, root explicitly messages the agent
     ("implement the plan") to wake it; the plan change itself appends
@@ -166,8 +242,10 @@ back — everywhere, for every agent, with no maintained list of forms.
     implementation (gap-closure T1/T2 mechanics) is GATED on owner review
     of the forthcoming PRD — exploration first, document, iterate, then
     build.
-
-## Ruling 37 (owner, 2026-08-12 night — the demonstration corrected)
+    **SUPERSEDED (2026-08-12):** T2 and ruling 44 replace “appends passively
+    to context.” A passive change may update only a disposable pending page
+    block; the next message or error addressed to the agent runs generation
+    and settles the delta.
 
 37. **Spec-first, no invented concepts, closest-wins.** The demonstration
     models schema-first development (data modeling before functions;
@@ -180,8 +258,6 @@ back — everywhere, for every agent, with no maintained list of forms.
     see it. No new shape family, no db-taking status function, no concept
     that does not already exist. Every form in the worked example must be
     one the generation machinery genuinely emits.
-
-## Rulings 38-40 (owner, 2026-08-12 night — watch-list resolved)
 
 38. **The environment carries, never contains** (clarifies 13): seon.env
     carries what derivation NEEDS — projection, basis, connection, agent
@@ -198,8 +274,6 @@ back — everywhere, for every agent, with no maintained list of forms.
     one runner, unlocking the demonstration's test exchange, the problems
     list, and after-change auto-runs — no phase builds on a stub.
 
-## Rulings 41-44 (owner, 2026-08-12 night — every open assumption ruled)
-
 41. **Zero turns force-settles `:wait`** with a typed budget-exhausted
     condition the requester sees; the agent stays alive and its next wake
     shows why the episode ended.
@@ -213,8 +287,6 @@ back — everywhere, for every agent, with no maintained list of forms.
 44. **Errors wake** — ruling 6's pair stands: facts ADDRESSED to the agent
     (messages, and errors recorded against it) open runs; everything else
     is passive until the next wake.
-
-## Rulings 45-46 (owner, 2026-08-12 night — capabilities, not schedules)
 
 45. **Rebirth must be a capability of the design** (no timing/trigger ruled):
     generate(current-facts, empty-history) at any episode boundary must
@@ -231,8 +303,6 @@ back — everywhere, for every agent, with no maintained list of forms.
     an agent that discovers something is never re-taught it after a
     rebirth.
 
-## Ruling 47 (owner, 2026-08-12 night — the survivability law)
-
 47. **What must survive rebirth must be a fact with a declared render;
     prose-only reasoning dies at episode boundaries by design** — the
     transport law applied to cognition (rebirth IS recovery of context).
@@ -245,8 +315,9 @@ back — everywhere, for every agent, with no maintained list of forms.
     capability proof if weaker today); and the teaching steers agents
     into survivable habits ("if it matters past this episode, make it a
     fact") — true mechanically, not advisory.
-
-## Ruling 48 (owner, 2026-08-12 night — rebirth-first design, universal)
+    **SUPERSEDED (2026-08-12):** ruling 49 retires `my.plan` unbuilt. The todo
+    is the one task system: derived obligations plus authored item facts,
+    with completed items omitted by its declared current-state render.
 
 48. **Everything is designed to start from existing database state and
     re-bootstrap the next agent minimally.** Not plan-specific — a
@@ -259,8 +330,6 @@ back — everywhere, for every agent, with no maintained list of forms.
     propagates into the data-modeling review standards and the
     schema-review checklist alongside ruling 35's coherence check.
 
-## Ruling 49 (owner, 2026-08-12 night — one task noun)
-
 49. **The todo is the one task system; my.plan is retired unbuilt.** The
     todo is derived-first (unanswered messages, open runs, failing tests —
     rebirth-proof by construction) extended with authored item FACTS for
@@ -268,8 +337,6 @@ back — everywhere, for every agent, with no maintained list of forms.
     The my.plan toolkit (never implemented) is removed from the target
     vocabulary; agent-authored intentions live as todo items under the
     survivability law.
-
-## Ruling 50 (owner, 2026-08-12 night — declared read-only effects)
 
 50. **Effectful values replay as OLD by default; a declared read-only tag
     authorizes re-execution** (owner refinement, same night): no read-only
@@ -319,41 +386,44 @@ total by construction:
   commit `ee255347b`).
 
 Attribute-level declarations are admissible (probed: Malli properties on ref
-attributes compile and read back exactly): `:seon.cluster.message/to` carries
-the form that spells its reverse traversal `(my.message/inbox)`. `dir`/`doc`
-are NOT engine arms — they are ordinary `/form` declarations on `:seon.ns`,
-`:seon.fn`, `:seon.schema`, `:seon.test`. Which shapes deserve better than
-the floor is a COUNT, not a judgment: the walk records floor hits per schema;
-declare the top, re-measure.
+attributes compile and read back exactly). A message's reverse traversal is
+spelled by its declared `seon.db` listing/current-pull form; no invented
+`my.message/inbox` function exists (ruling 37). `dir`/`doc` are NOT engine
+arms — they are ordinary `/form` declarations on `:seon.ns`, `:seon.fn`,
+`:seon.schema`, `:seon.test`. Which shapes deserve better than the floor is a
+COUNT, not a judgment: the walk records floor hits per schema; declare the
+top, re-measure.
 
-### Change detection (verified: ~90% already built)
+### Change detection and settlement
 
 Every first-party read already executes with evidence (`d/q-with-evidence` /
 `d/pull-with-evidence`, Datahike dependency plans, revisions, replayable
 requests; `seon.db/read-evidence-current?`). The two changes:
 
-1. the ONE `seon.cluster.wake` listener gains attribute-INTERSECTION routing
-   for the render wake (same O(tx-datoms) loop, payload-free, `offer!`);
-2. the render proc APPENDS basis-labelled entries and never rewrites — the
-   disposable latest-call lookup is separated from the ordered history
-   (today's code conflates them). Prompt N+1 = prompt N + suffix ⇒ provider
-   prompt-cache prefix stability.
+1. the ONE `seon.cluster.wake` listener routes only addressed messages and
+   errors into generation (ruling 44); and
+2. passive relevant changes may update only a disposable pending page block.
+   The next addressed wake runs gap closure and appends the basis-labelled
+   entries that settle that delta (T2; rulings 6 and 36 are superseded).
+   Settled history is append-only, so prompt N+1 = prompt N + suffix and the
+   provider prompt-cache prefix remains stable.
 
 Cost classes (acceptance): unchanged context = ZERO database reads;
 irrelevant commit = rejected in the listener; relevant-but-semantically-equal
 = one replay, no append.
 
-### Env executed once; authorship fence
+### Generated opening and authorship fence
 
-Bootstrap is already an ordinary created-once system run with settle-once
-receipts. Additions (from the env-once report): required
+The generated opening is an ordinary created-once system run with settle-once
+receipts; no authored bootstrap plan survives (ruling 24). Additions (from the
+env-once report): required
 `:seon.cluster.run.form/author` (`:agent` | `:system`) assigned by
-constructors, never a caller field; unique `:seon.cluster.run.form/refreshes`
-ref chaining a refreshed read to its predecessor; receipts own component
-`:seon.cluster.eval/read-evidence`. The refresh transition accepts only a
-prior form identity and proves `:author :system` + terminal receipt + no
-successor — re-executing an agent-authored form is unrepresentable. No
-migration; old clusters stay sovereign.
+constructors, never a caller field; receipts own component
+`:seon.cluster.eval/read-evidence`. At the next addressed wake, an obsolete
+system-authored read is re-observed as an ordinary generated form at the new
+basis (ruling 42); there is no correction run or second refresh mechanism.
+Re-executing an agent-authored form remains unrepresentable. No migration;
+old clusters stay sovereign.
 
 Blocker in current code (filed):
 [agent-definition-restore-reexecutes-authored-source.md](../../../seon/issues/agent-definition-restore-reexecutes-authored-source.md)
@@ -373,43 +443,21 @@ require line IS the teaching.
 
 The bespoke traversal engine's per-entity query/render/admission shape (the
 walk's novel jobs — elision, caps, cycle stops, changed-at display — survive
-as operations on the pull result); the 42k dump; hand-authored bootstrap form
-lists beyond `(help)` + `(in-ns …)` + the requires; `changed-at` as an
-invalidation oracle; the schema walls and comment-framed headers already
-slated by the transcript PRD.
+as operations on the pull result); the 42k dump; every hand-authored bootstrap
+form list and stored form plan (ruling 24); `changed-at` as an invalidation
+oracle; the schema walls and comment-framed headers already slated by the
+transcript PRD.
 
-## Rulings appended after W0 markup (owner, same session)
+## Implementation authority and landed evidence
 
-14. **Define-before-use is the one intra-distance ordering rule**: no entry
-    may reference a symbol the history has not already introduced (require
-    introduces an alias, `dir` introduces names, `doc` may then use one, a
-    call may follow its doc). Computed from the parsed forms, stable
-    alphabetical tie-breaks. One regression walks a generated history with
-    the introduced-symbol set and asserts the property — "the context
-    teaches" becomes machine-checkable.
-15. **Render functions live with the shape's owner** (existing convention,
-    now ruled): the schema names a fully qualified function in the owning
-    namespace; agent-authored renderers live in the agent's namespace. No
-    `seon.agents` collection home, no roster.
-16. **V1 spend policy is concise-until-cap**: render everything at concise
-    (names, one-liners, schema names) in order until X tokens; every concise
-    value indicates its deeper form. No per-distance budgets in V1.
-    **[TARGET]** distance-adaptive rendering — render functions receiving
-    proximity to the agent's namespace and adapting spend, plus usage-edge
-    detail sharpening (`:seon.fn/calls` from run forms shortening effective
-    distance) — is the eventual design, deferred until a live V1 history is
-    measured.
-    **SUPERSEDED (2026-08-12):** D1 replaces concise-until-cap: arc closure
-    selects content; the cap bounds only declared-render admission beyond that
-    closure, while profiles still fit and never select (rulings 3/16).
-17. **Agent-authored functions, schemas, and tests get index parity**:
-    settlement commits them through the same analysis as shipped source —
-    same calls/keywords/subject edges, same tests-reaching derivation. One
-    mechanism, verified in W1.
+The executable ordering now lives in
+[the evolving-session implementation PRD](evolving-session-implementation-2026-08-12.md).
+Its binding reconciliation is authoritative wherever an earlier ruling's
+literal shape was superseded. W1 and W2 are landed; the design is ruled
+complete through ruling 50 with zero open decisions. Implementation resumes
+at the test-result fact boundary, then the integration gate, rebirth proof,
+live drive, and the implementation PRD's phases.
 
-## Waves (build → drive → learn; design re-litigated only at boundaries)
-
-- **W0 (this document)** — owner marks up anything that reads wrong.
 - **W1 — LANDED 2026-08-12** (all four mechanisms, gate triaged to 0/0 on
   repaired owners; fresh-agent history live-proven; see
   [w1-integration-summary](../../../../tmp/orchestrator/w1-integration-summary.txt)
@@ -420,44 +468,29 @@ slated by the transcript PRD.
 - **W2 — LANDED 2026-08-12** at its sealed cost classes (0 reads unchanged /
   0 wakes irrelevant / 1 replay equal / 1 append per message —
   [acceptance evidence](../research/w2-change-flow-acceptance-2026-08-12.md));
-  ONE open cost defect: cold pull 1.5–1.8 s, attributed to triple selector
-  parsing (1,013 of 1,525 ms), three carrier options awaiting the owner on
-  [the issue](../../../seon/issues/cold-root-pull-is-slower-than-the-four-query-floor.md).
+  Its landing measurement was a 1.5–1.8 s cold pull attributed to triple
+  selector parsing (1,013 of 1,525 ms). The later live-pull measurement is
+  **24.2 s** and remains an implementation open; it is not an open design
+  ruling.
   Original scope: interest routing; `read-evidence-current?` replay;
   the schema-derived root pull. EXIT: one message transacted → exactly one
   appended entry, page morphs one block, everything else zero reads.
-- **W3 — both views beautiful**: agent page + `/` tiles from the same entries
-  (primary + column, newest-basis ranking), preview profiles, drill-by-form;
-  driven DeepSeek turn on minimum context vs the 42k baseline, independent
-  observer. EXIT: the owner looks at both surfaces and they are beautiful.
-- Each wave: sol lanes implement; a dogfood lane drives the agent-facing
-  surface and files every ugly output; injections-per-turn and floor-hit
-  counts are the instruments.
+- **Remaining surface proof**: agent page + `/` tiles derive from the same
+  entries; root preview uses the same gap closure over each agent with no
+  fixed preview depth (ruling 39). Floor hits and unexplained-gap closures are
+  the instruments; ruling 32 leaves no injection mechanism or counter.
 
-## W2 evidence — 2026-08-12
-
-W2 landed in `bc3dfe3fd`, `bdb7b8efc`, `b0a3713d3`, and `291681222`.
-The event-driven acceptance results are recorded in
-[W2 change-flow acceptance evidence](../research/w2-change-flow-acceptance-2026-08-12.md):
-unchanged acquisition made **0 reads**; an irrelevant commit produced **0
-render wakes**; a relevant semantically equal root read made **1 replay** and
-**0 appends**; one new message made **1 append** with prior bytes retained.
-
-The cold root pull measured **1,795.387292 ms** versus the **46.0 ms**
-four-query floor, a **39.0301585× regression**. W2's correctness and
-incremental change-flow exit is met, but cold performance remains open in
-[cold root pull is slower than the four-query floor](../../../seon/issues/cold-root-pull-is-slower-than-the-four-query-floor.md).
-
-## Morning 2026-08-12 — MINIMUM evidence (drive-proven, ruling pending)
+## Historical drive and implementation evidence
 
 HALF (7,393 tokens, 46% of FULL) produced the contracted defn, called it,
 and queried the contract back in ONE turn across two replicates; the only
 "incomplete" residue was disposition (not calling my.run/complete), which is
 a teaching/mechanism gap fixed the same night (undisposed-at + honest next-
 turn notice, 16672698d), not a context gap. QUARTER/FLOOR — which drop the
-worked demonstration — never attempted the defn. The load-bearing content is
-the WORKED CONTRACTED-DEFN DEMONSTRATION. Recommendation to the owner: rule
-HALF's shape as the V1 minimum; the ablation table lives in
+worked demonstration — never attempted the defn. The load-bearing lesson was
+the worked contracted-defn demonstration. Rulings 18, 37, and D1/D2 preserve
+that lesson while superseding HALF as a fixed content roster; the ablation
+table lives in
 [the plan](../research/minimum-context-ablation-plan-2026-08-11.md).
 
 Implementation evidence (2026-08-12): the authored bootstrap resource and
@@ -467,57 +500,11 @@ first-agent hook are committed. Focused integration is green: 96 tests and
 528 assertions across bootstrap, history, my.run, the run loop, and SCI eval.
 A fresh isolated, drive-free boot executes `(help)` once with a real receipt
 and makes zero model attempts, then fails loudly at the second derivation with
-`:seon.bootstrap/prefix-drift` (one form, one receipt, run still open). Thus a
-complete rendered-history token estimate is not yet claimable; the remaining
-boundary is stable subject/key selection for the post-receipt live pull.
+`:seon.bootstrap/prefix-drift` (one form, one receipt, run still open). That
+historical boundary was repaired by the later generated-episode work; the
+current proof boundary is the integration gate followed by rebirth proof and
+live drive.
 
-## Morning rulings 2026-08-12 (owner, second round)
-
-22. **The opening history is one complete episode** (gap-1 closure): help ->
-    a real stored task message -> require/explore -> build -> verify ->
-    `(run/complete ...)` — so an agent wakes MID-LIFE, its own last words the
-    disposition of a finished episode, the fresh addressed message its
-    purpose. The episode shape is the agent's remembered behavior, never
-    described prose. All existing mechanisms (bootstrap is an ordinary run;
-    the demo message is a real fact).
-    **SUPERSEDED (2026-08-12):** the arc shape stands, but the stale HALF
-    `dir`-listing content itemization does not; content is governed by rulings
-    37/D2.
-23. **Core-tooling presentation rides two rungs**: protocol-carrying ns/fn
-    docstrings first (zero mechanism — `:seon.ns/doc` already renders
-    through every dir), then a declared namespace render function owned by
-    the namespace itself (ruling 15) where richer presentation earns it —
-    e.g. my.run presented as a lifecycle in protocol order. No walk changes,
-    no priority lists.
-
-18. **HALF is the V1 minimum opening context**: instructions, own namespace
-    in detail, required namespaces as one dir listing each, the worked
-    contracted-defn demonstration, and the task message (drive evidence: two
-    replicates, identical durable results to FULL at 46% tokens). The
-    demonstration is the load-bearing teaching.
-    **SUPERSEDED (2026-08-12):** D1/D2 arc closure plus declared-render
-    admission replaces the fixed content roster; the ~7k-token scale and its
-    load-bearing worked-demonstration evidence remain the surviving lesson.
-19. **Tiles are live windows by default; pins override.** HTML renders exist
-    for the USER's eyes; each tile shows the agent's newest-basis block; the
-    user may star/pin any block and the pinned block holds the tile instead
-    of the live window until unpinned. For agents the same entries are a
-    glimpse of current work — and the context must TEACH root to query its
-    agents' histories or simply message them when an output does not explain
-    itself (attention is a taught vocabulary, never a dashboard mechanism).
-    **Implementation note (2026-08-12):** ruling 11 makes a creation-time read
-    of a nonexistent child unwritable, so root opens with plain HALF. The
-    existing first-agent arrival/armer path waits for that agent's bootstrap
-    episode to settle, then opens one ordinary system-authored root run: one
-    database read of the agent's two most recent form/value receipts and one
-    `my.message/send` asking what it is doing, with the latter also completing
-    the run. Each form self-erases independently when root's settled history
-    already proves the corresponding read or sent message; the deterministic
-    run identity prevents reinjection.
-20. **Stable grid + freshness highlight** for tile arrangement; newest-first
-    ordering lives only inside an agent's own column.
-21. **Preview depth: newest block + recent messages** per attached agent in
-    root's context and tile.
 - ~~History compaction~~ RULED 2026-08-11 night: DEFERRED — W2 builds
   without eviction; histories grow unbounded until a live long-lived agent
   forces the decision with evidence. Batched-at-checkpoint remains the
