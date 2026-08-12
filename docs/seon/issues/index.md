@@ -16,10 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (50)
+## Blocker (51)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Give background-result wakes a queryable run trigger](background-result-wakes-have-no-run-trigger.md) | blocker | why-awake situation work (generator lane) |
 | [Make wildcard receipt pulls accept stored read dependency plans](wildcard-receipt-pull-refuses-a-stored-dependency-plan.md) | blocker | database codec repair wave |
 | [Bring the cold root pull under the four-query floor](cold-root-pull-is-slower-than-the-four-query-floor.md) | blocker | projection lane re-measure, then its own investigation |
 | [Store the model's raw reply as a durable fact even when it parses to no forms](prose-only-model-replies-are-not-durable-facts.md) | blocker | reply-durability fix (overnight queue) |

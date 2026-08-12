@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: major
+severity: blocker
 tags: [issue, agent, runtime, data-model]
 ---
 
