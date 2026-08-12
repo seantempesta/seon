@@ -37,6 +37,50 @@
   {:seon.config.flow.io/queue-depth 2
    :seon.config.flow.io/concurrency 2})
 
+(defn- earliest-resume-fault-step
+  ([]
+   {:ins {}
+    :outs {}})
+  ([args]
+   args)
+  ([state transition]
+   (when (= ::flow/resume transition)
+     (throw (ex-info "earliest resume fault"
+                     {:seon.error/kind ::earliest-resume-fault})))
+   state)
+  ([state _input _message]
+   [state nil]))
+
+(deftest graph-construction-joins-every-declared-tap-before-resume
+  (let [{::sut/keys [graph joins]}
+        (sut/start-graph!
+         {::sut/graph-definition
+          {:procs
+           {::earliest-fault
+            {:proc (sut/var-process #'earliest-resume-fault-step
+                                    :io
+                                    {:seon.env/environment
+                                     @test-environment})}}
+           :conns []}
+          ::sut/joins
+          {::error-tap
+           (fn [{::sut/keys [started]}]
+             (let [error-mult (async/mult (:error-chan started))
+                   tap (async/chan 1)]
+               (async/tap error-mult tap)
+               {::error-mult error-mult
+                ::tap tap}))}})
+        {::keys [error-mult tap]} (::error-tap joins)]
+    (try
+      (let [fault (test-support/await-event! tap ::earliest-resume-fault)]
+        (is (= ::earliest-resume-fault
+               (:seon.error/kind (ex-data (::flow/ex fault))))
+            "the first resume transition reaches the declared tap"))
+      (finally
+        (flow/stop graph)
+        (async/untap error-mult tap)
+        (async/close! tap)))))
+
 (defn- install-test-work-launcher!
   [request]
   (let [launcher

@@ -437,11 +437,19 @@
                                 :seon.schedule/channel schedule-channel
                                 :seon.cluster.loop/completion completion
                                 :seon.cluster.agent/turn-stopped turn-stopped)
-            graph (flow/create-flow
-                   (graph-definition
-                    {:seon.cluster.loop/cluster agent-handle
-                     :seon.cluster.agent/id agent-id}))
-            started (flow/start graph)
+            {graph :seon.flow/graph}
+            (seon.flow/start-graph!
+             {:seon.flow/graph-definition
+              (graph-definition
+               {:seon.cluster.loop/cluster agent-handle
+                :seon.cluster.agent/id agent-id})
+              :seon.flow/joins
+              {::error-fanout
+               (fn [{started :seon.flow/started}]
+                 (seon.flow/join-error-fanout!
+                  {:seon.flow/started started
+                   :seon.flow/fault-channel (::fault-channel @routing)
+                   :seon.flow/tag {:seon.cluster.agent/id agent-id}}))}})
             entry {:seon.cluster.agent/id agent-id
                    :seon.cluster.agent/eid eid
                    :seon.cluster.loop/cluster handle
@@ -450,11 +458,6 @@
                    :seon.schedule/channel schedule-channel
                    :seon.cluster.loop/completion completion
                    :seon.cluster.agent/turn-stopped turn-stopped}]
-        (seon.flow/join-error-fanout!
-         {:seon.flow/started started
-          :seon.flow/fault-channel (::fault-channel @routing)
-          :seon.flow/tag {:seon.cluster.agent/id agent-id}})
-        (flow/resume graph)
         (swap! routing
                (fn [current]
                  (-> current

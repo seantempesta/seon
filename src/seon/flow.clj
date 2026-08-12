@@ -59,13 +59,38 @@
 (schema/register-core-predicate! 'seon.flow/channel? channel?)
 (schema/register-core-predicate! 'seon.flow/step-var? step-var?)
 
+(defn start-graph!
+  "Create, join declared fan-outs, and resume one Flow graph."
+  {:malli/schema
+   [:=>
+    [:cat
+     [:map
+      [::graph-definition :map]
+      [::joins {:optional true}
+       [:map-of :qualified-keyword [:fn clojure.core/ifn?]]]]]
+    [:map
+     [::graph ::graph]
+     [::started ::started]
+     [::joins :map]]]}
+  [{::keys [graph-definition joins]}]
+  (let [graph (flow/create-flow graph-definition)
+        started (flow/start graph)
+        construction {::graph graph
+                      ::started started}
+        joined (reduce-kv (fn [results join-key join!]
+                            (assoc results join-key (join! construction)))
+                          {}
+                          (or joins {}))]
+    (flow/resume graph)
+    (assoc construction ::joins joined)))
+
 ;;; Every generation makes a FRESH sample. One shared delayed object
 ;;; satisfied its predicate once but could never explore lifecycle or
 ;;; freshness, and a consumer that mutated or closed it changed every
 ;;; later sample. None of these constructors starts a thread, binds a
-;;; port, or runs a graph: an unsubmitted executor has no worker, an
-;;; uncalled FutureTask never runs, and `create-flow` builds without
-;;; starting.
+;;; port, or leaves a graph running: an unsubmitted executor has no worker,
+;;; an uncalled FutureTask never runs, and the empty graph is stopped before
+;;; the sample is returned.
 (def executor-generator
   (gen/fmap (fn [_] (Executors/newSingleThreadExecutor)) (gen/return nil)))
 (def atom-reference-generator
@@ -79,7 +104,12 @@
                       (start [_ _] nil)))
             (gen/return nil)))
 (def graph-generator
-  (gen/fmap (fn [_] (flow/create-flow {:procs {} :conns []}))
+  (gen/fmap (fn [_]
+              (let [{::keys [graph]}
+                    (start-graph! {::graph-definition
+                                   {:procs {} :conns []}})]
+                (flow/stop graph)
+                graph))
             (gen/return nil)))
 (def channel-generator
   (gen/fmap (fn [_] (async/chan)) (gen/return nil)))
@@ -634,22 +664,21 @@
         root-executors
         ((requiring-resolve 'seon.operator.runtime/root-executors))
         task-executor (:io root-executors)
-        graph
-        (flow/create-flow
-         (work-launcher-graph-definition
-          (env/carry
-           {::parallelism parallelism
-            ::active-work active-work
-            ::queue-depth queue-depth
-            ::io-queue-depth io-queue-depth
-            ::io-parallelism io-parallelism
-            ::io-submissions io-submissions
-            ::proc-stopped proc-stopped
-            ::compute-executor (:compute root-executors)
-            ::task-executor task-executor}
-           environment)))
-        started (flow/start graph)]
-    (flow/resume graph)
+        {::keys [graph started]}
+        (start-graph!
+         {::graph-definition
+          (work-launcher-graph-definition
+           (env/carry
+            {::parallelism parallelism
+             ::active-work active-work
+             ::queue-depth queue-depth
+             ::io-queue-depth io-queue-depth
+             ::io-parallelism io-parallelism
+             ::io-submissions io-submissions
+             ::proc-stopped proc-stopped
+             ::compute-executor (:compute root-executors)
+             ::task-executor task-executor}
+            environment))})]
     {::graph graph
      ::started started
      ::active-work active-work
@@ -1029,19 +1058,18 @@
         (async/chan
          (counted-dropping-buffer fault-buffer-capacity))
         completion (async/promise-chan)
-        fault-graph
-        (flow/create-flow
-         (fault-graph-definition
-          (env/carry
-           {::fault-channel fault-channel
-            ::completion completion
-            ::read-core-error-mode read-core-error-mode
-            ::commit-fault! commit-fault!
-            ::commit-drop! commit-drop!
-            ::panic! panic!}
-           environment)))
-        _ (flow/start fault-graph)
-        _ (flow/resume fault-graph)
+        {fault-graph ::graph}
+        (start-graph!
+         {::graph-definition
+          (fault-graph-definition
+           (env/carry
+            {::fault-channel fault-channel
+             ::completion completion
+             ::read-core-error-mode read-core-error-mode
+             ::commit-fault! commit-fault!
+             ::commit-drop! commit-drop!
+             ::panic! panic!}
+            environment))})
         monitor-view
         (monitor-graph
          graph monitor-report-channel monitor-error-channel)]

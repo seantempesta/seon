@@ -2227,42 +2227,49 @@
               ;; holder a run names and the holder a rendered page
               ;; judges are the same string.
               :seon.cluster.run/process (:seon.cluster.run/process handle)}
-        graph (flow.core/create-flow
-               (cluster-graph-definition handle routing view))
-        started (flow.core/start graph)
-        fanout (flow/start-error-fanout!
-                {:seon.env/environment (env/of handle)
-                 :seon.flow/graph graph
-                 :seon.flow/started started
-                 :seon.flow/fault-buffer-capacity 64
-                 :seon.flow/monitor-buffer-capacity 64
-                 :seon.flow/read-core-error-mode
-                 (fn []
-                   (or (:seon.config/on-core-error
-                        (config/effective @connection cluster-name))
-                       :record))
-                 :seon.flow/commit-fault!
-                 (fn [fault]
-                   (commit-fault! connection cluster-name process
-                                  (:seon.sci.admit/caps handle) fault))
-                 :seon.flow/commit-drop!
-                 (fn [dropped]
-                   ;; The buffer converts overflow into a bounded synthetic
-                   ;; fault. This callback runs on the committer proc, never
-                   ;; on the thread that faulted.
-                   (commit-fault! connection cluster-name process
-                                  (:seon.sci.admit/caps handle) dropped))
-                 :seon.flow/panic!
-                 (fn [reported]
-                   ;; FAIL LOUD IS NOT FALL DOWN (owner ruling): Flow calls
-                   ;; this only for the first occurrence of a signature. The
-                   ;; same callback reports a refused durable write once,
-                   ;; including in record mode, without a second trace path.
-                   (emit-core-fault! handle reported))})
-        ;; Flow starts every proc paused. Install every report/error tap before
-        ;; resume can run a transform or transition that emits into the source
-        ;; channels; core.async mults drop values received with no taps.
-        _ (flow.core/resume graph)]
+        {graph :seon.flow/graph
+         joins :seon.flow/joins}
+        (flow/start-graph!
+         {:seon.flow/graph-definition
+          (cluster-graph-definition handle routing view)
+          :seon.flow/joins
+          {::error-fanout
+           (fn [{started :seon.flow/started
+                 graph :seon.flow/graph}]
+             (flow/start-error-fanout!
+              {:seon.env/environment (env/of handle)
+               :seon.flow/graph graph
+               :seon.flow/started started
+               :seon.flow/fault-buffer-capacity 64
+               :seon.flow/monitor-buffer-capacity 64
+               :seon.flow/read-core-error-mode
+               (fn []
+                 (or (:seon.config/on-core-error
+                      (config/effective @connection cluster-name))
+                     :record))
+               :seon.flow/commit-fault!
+               (fn [fault]
+                 (commit-fault! connection cluster-name process
+                                (:seon.sci.admit/caps handle) fault))
+               :seon.flow/commit-drop!
+               (fn [dropped]
+                 ;; The buffer converts overflow into a bounded synthetic
+                 ;; fault. This callback runs on the committer proc, never
+                 ;; on the thread that faulted.
+                 (commit-fault! connection cluster-name process
+                                (:seon.sci.admit/caps handle) dropped))
+               :seon.flow/panic!
+               (fn [reported]
+                 ;; FAIL LOUD IS NOT FALL DOWN (owner ruling): Flow calls
+                 ;; this only for the first occurrence of a signature. The
+                 ;; same callback reports a refused durable write once,
+                 ;; including in record mode, without a second trace path.
+                 (emit-core-fault! handle reported))}))
+           ::pages-mult
+           (fn [_]
+             (async/mult pages-channel))}})
+        fanout (::error-fanout joins)
+        pages-mult (::pages-mult joins)]
     ;; the fault channel joins the routing entry so every later arm
     ;; can tap its agent graph's errors into the ONE committer inbox
     (swap! routing assoc :seon.cluster.agent/fault-channel
@@ -2301,7 +2308,7 @@
      ;; wake channel a freshly opened tab offers into
      :seon.render.web/view
      (assoc view
-            :seon.render.web/pages-mult (async/mult pages-channel)
+            :seon.render.web/pages-mult pages-mult
             :seon.render.web/fault-channel
             (:seon.flow/fault-channel fanout))
      :seon.search/completion (:seon.search/completion view)}))
