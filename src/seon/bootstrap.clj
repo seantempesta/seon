@@ -196,7 +196,7 @@
                         (keep :seon.entity/id-attr)
                         set)]
     {:seon.repl/root-key
-     [(first (:seon.render.walk/order acquisition)) 0]
+     [(:seon.render.walk/lookup request) 0]
      :seon.repl/candidates
      (into (direct-candidates request acquisition)
            (listing-candidates request acquisition))
@@ -274,7 +274,9 @@
         expected-sources (mapv entry-source (take index episode))]
     (when-not (= prior-sources expected-sources)
       (throw
-       (ex-info "The generated opening prefix differs from its receipts."
+       (ex-info
+        (str "The generated opening prefix differs from its receipts: expected "
+             (pr-str expected-sources) " actual " (pr-str prior-sources))
                 {:seon.error/kind ::prefix-drift
                  :seon.cluster.run/id run-id
                  :seon.bootstrap/expected expected-sources

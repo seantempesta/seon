@@ -1623,14 +1623,17 @@
   [[:db.fn/call #'recover-call request]])
 
 (defn recover-call
-  "Settle and close one interrupted run during boot recovery.
+  "Recover one interrupted run during boot recovery.
   When the run's holder is NOT a live process — dead, or absent
   entirely — THE RUN gets `::interrupted-at` asserted at `::now`, every
   running receipt (one carrying NO terminal fact) gets
   `:seon.cluster.eval/interrupted-at` asserted at `::now`, every open effect
-  receipt gets `:seon.effect/interrupted-at`, dead custody is released, the
-  run is CLOSED at `::now`, and the owning agent's run pointer is retracted.
-  The run stamp is what makes \"which runs did the last recovery cut?\" a
+  receipt gets `:seon.effect/interrupted-at`, and dead custody is released.
+  An ordinary run is CLOSED at `::now` and its agent pointer is retracted. A
+  generated run stays open and attached: its settled receipts are the
+  append-only derivation prefix, so the per-agent entry reclaims it and
+  derives only the next ordinal. No authored form re-executes.
+  The run stamp is what makes \"which runs did the last recovery touch?\" a
   query instead of a process-local boot counter, and it is the ONLY
   distinction available for a run whose dead process settled no receipt
   row at all.
@@ -1642,7 +1645,8 @@
   idempotent and never refuses. NOTHING here re-opens, re-plans, or
   re-executes.
 
-  THE CLOSE IS THE WHOLE POINT (owner ruling 25(b), 2026-07-29). An
+  THE CLOSE IS THE WHOLE POINT for a planned agent run (owner ruling 25(b),
+  2026-07-29). An
   interrupted run used to be left OPEN with its unsettled ordinals, so
   the next pass derived `:resume` and executed a plan suffix that had
   never started before the crash — with a fresh sci ctx that had lost
@@ -1650,8 +1654,10 @@
   stopping a capability-shaped form from making a post-crash external
   call. Both were live-reproduced
   (`research/repl-workflows-2026-07-29.md` §7). Closing here makes the
-  whole class unrepresentable rather than handled: there is no cold
-  resume to restore a context for, because there is no resume. This is
+  whole class unrepresentable rather than handled: there is no cold resume
+  of an authored plan to restore a context for. A generated prefix contains
+  only system-authored forms with terminal receipts, and its continuation is
+  a fresh append at the next ordinal. This is
   the crash model's \"the agent adapts\" clause made literal — the
   interruption is in the agent's next context and the agent decides.
 
@@ -1660,7 +1666,7 @@
   pointer is a caller bug; at recovery it is just what a dead process
   left behind, and a boot that threw on it would wedge the cluster it
   was trying to rescue. So the pointer is retracted exactly when it
-  points at this run, and the run closes either way."
+  points at this run when recovery closes the run."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map
                         [::id ::id]
@@ -1670,7 +1676,8 @@
   [db request]
   (let [{::keys [id live-processes now]} request
         run (current-run db id)
-        holder (::process run)]
+        holder (::process run)
+        generated? (= :generate (:seon.cluster.work/situation run))]
     (if (or (nil? run)
             (not (open? run))
             (contains? live-processes holder))
@@ -1685,11 +1692,13 @@
         (cond-> (into interrupted
                       (when (some? holder)
                         (retract-custody run)))
-          true
+          (not generated?)
           (conj [:db/add (:db/id run) ::closed-at now])
           ;; exactly when it points HERE — see the docstring: recovery
-          ;; settles wreckage, it does not refuse it
-          (= (:db/id run) (:db/id pointer))
+          ;; settles ordinary wreckage, but a generated prefix stays attached
+          ;; so the next process can append without opening a second answer
+          (and (not generated?)
+               (= (:db/id run) (:db/id pointer)))
           (conj [:db/retract agent-eid :seon.cluster.agent/run
                  (:db/id run)]))))))
 

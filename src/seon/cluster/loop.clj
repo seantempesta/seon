@@ -919,9 +919,11 @@
                   (:seon.flow/work-launcher cluster)))))
 
 (defn settle-interruption!
-  "Bury one orphaned run so its agent stops being busy.
+  "Reclaim a generated prefix or bury one ordinary orphaned run.
   Planned or unplanned, an unheld run is not work: there is no cold
-  resume. Settling is claim-then-close through the ordinary
+  resume of an authored plan. A system-generated prefix is append-only data,
+  however, so its open run is reclaimed and continues at the next ordinal.
+  Every other interruption is claim-then-close through the ordinary
   transitions: a survivor cannot close a run it does not hold
   (`close-call` refuses `::not-the-holder`), so it takes custody by the
   takeover path first and closes as the holder.
@@ -931,7 +933,7 @@
   holds what, and settlement decides what to do about it — and only
   the loop is entitled to decide that.
 
-  Settle-only for N3. The explanation an agent reads is derived from
+  Settle-only for N3 outside generated derivation. The explanation an agent reads is derived from
   the settled run's own shape (no plan, closed) by
   `seon.cluster.prompt`; when a richer reason is wanted, this
   transaction is where it would ride."
@@ -951,16 +953,22 @@
                                 :seon.cluster.run/now now}))]
     (if (:seon.error/kind claimed)
       false
-      (let [closed (db/transact!
-                    connection
-                    (run/close-tx {:seon.cluster.run/id run-id
-                                   :seon.cluster.run/process process
-                                   ;; the pass's ONE clock, not a second
-                                   ;; reading of it — review-caught, and
-                                   ;; the reason a state-machine property
-                                   ;; over settlements can be exact
-                                   :seon.cluster.run/closed-at now}))]
-        (not (:seon.error/kind closed))))))
+      (let [generated?
+            (= :generate
+               (:seon.cluster.work/situation
+                (db/pull @connection [:seon.cluster.work/situation]
+                         [:seon.cluster.run/id run-id])))]
+        (if generated?
+          true
+          (let [closed
+                (db/transact!
+                 connection
+                 (run/close-tx
+                  {:seon.cluster.run/id run-id
+                   :seon.cluster.run/process process
+                   ;; the pass's ONE clock, not a second reading of it
+                   :seon.cluster.run/closed-at now}))]
+            (not (:seon.error/kind closed))))))))
 
 (defn- open-trigger-call
   "Open a run only while its trigger still has no answering run."

@@ -38,7 +38,8 @@
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support])
-  (:import [java.util.concurrent CountDownLatch TimeUnit]))
+  (:import [java.io File]
+           [java.util.concurrent CompletableFuture CountDownLatch TimeUnit]))
 
 (def ^:private test-environment
   ;; The subset environment (store layer only) every crossing this
@@ -1420,6 +1421,118 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Boot recovery — a dead holder's wreckage is settled before anything resumes
 ;;; ---------------------------------------------------------------------------
+
+(deftest ^{:seon.test/long
+           "Kills a child JVM mid-generation and proves same-run continuation."}
+  a-generated-prefix-resumes-on-the-same-run-after-jvm-kill
+  (let [root (published-root)
+        cluster-name "generated-resume"
+        java-command (.getPath
+                      (File. (System/getProperty "java.home") "bin/java"))
+        process (-> (ProcessBuilder.
+                     ^java.util.List
+                     [java-command
+                      "-cp" (System/getProperty "java.class.path")
+                      "clojure.main"
+                      "-m" "seon.cluster.bootstrap-resume-child"
+                      root cluster-name])
+                    (.redirectErrorStream true)
+                    (.start))
+        readiness (CompletableFuture.)
+        child-output (atom [])
+        output-reader
+        (future
+          (try
+            (with-open [reader (io/reader (.getInputStream process))]
+              (loop []
+                (when-let [line (.readLine reader)]
+                  (swap! child-output conj line)
+                  (if (= (str "deriving " (bootstrap/run-id "root")) line)
+                    (.complete readiness ::deriving)
+                    (recur)))))
+            (catch java.io.IOException error
+              (.completeExceptionally readiness error))))
+        _ (.thenAccept
+           (.onExit process)
+           (reify java.util.function.Consumer
+             (accept [_ exited]
+               (.complete readiness exited))))]
+    (try
+      (let [observed (.get readiness 60 TimeUnit/SECONDS)]
+        (when (instance? Process observed)
+          (throw
+           (ex-info "The child JVM exited before entering derivation."
+                    {:seon.error/kind ::child-exited-before-derivation
+                     :seon.test/exit (.exitValue process)
+                     :seon.test/output (str/join "\n" @child-output)}))))
+      (.destroyForcibly process)
+      (test-support/await-event! (.onExit process) ::child-exit-after-kill)
+      (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
+                                      :seon.boot/root root})
+            connection (:seon.boot/cluster-connection instance)
+            run-id (bootstrap/run-id "root")]
+        (try
+          (await-fact
+           connection
+           (fn [database]
+             (db/q '[:find ?receipt .
+                     :in $ ?run-id
+                     :where
+                     [?run :seon.cluster.run/id ?run-id]
+                     [?receipt :seon.cluster.eval/run ?run]
+                     [?receipt :seon.cluster.eval/ordinal 1]
+                     (or [?receipt :seon.cluster.eval/result-edn _]
+                         [?receipt :seon.cluster.eval/error _])]
+                   database run-id)))
+          (let [database @connection
+                run (db/pull database
+                             '[:seon.cluster.run/id
+                               :seon.cluster.run/closed-at
+                               {:seon.cluster.run/trigger
+                                [:seon.cluster.message/id]}]
+                             [:seon.cluster.run/id run-id])
+                ordinals
+                (db/q {:query
+                       '[:find [?ordinal ...]
+                         :in $ ?run-id
+                         :where
+                         [?run :seon.cluster.run/id ?run-id]
+                         [?form :seon.cluster.run.form/run ?run]
+                         [?form :seon.cluster.run.form/ordinal ?ordinal]]
+                       :args [database run-id]
+                       :order-by '[?ordinal :asc]})
+                error-kinds
+                (into #{}
+                      (db/q '[:find [?kind ...]
+                              :where [_ :seon.error/kind ?kind]]
+                            database))]
+            (is (= run-id (:seon.cluster.run/id run)))
+            (is (nil? (:seon.cluster.run/closed-at run)))
+            (is (= (bootstrap/task-message-id "root")
+                   (get-in run [:seon.cluster.run/trigger
+                                :seon.cluster.message/id])))
+            (is (= [0 1] (vec (take 2 (sort ordinals)))))
+            (is (= [run-id]
+                   (db/q '[:find [?run-id ...]
+                           :in $ ?trigger-id
+                           :where
+                           [?trigger :seon.cluster.message/id ?trigger-id]
+                           [?run :seon.cluster.run/trigger ?trigger]
+                           [?run :seon.cluster.run/id ?run-id]]
+                         database (bootstrap/task-message-id "root"))))
+            (is (not (contains? error-kinds
+                                :seon.bootstrap/prefix-drift)))
+            (is (not (contains? error-kinds
+                                :seon.cluster.loop/trigger-already-answered))))
+          (finally
+            (schema/call-with-projection
+             (schema/projection-from-database @connection)
+             #(cluster/stop! instance)))))
+      (finally
+        (when (.isAlive process)
+          (.destroyForcibly process)
+          (.join (.onExit process)))
+        (future-cancel output-reader)))))
 
 (deftest ^{:seon.test/long
            "60.475 s pool: real boot, simulated dead holder, restart recovery, and custody read-back."}
