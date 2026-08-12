@@ -120,21 +120,27 @@ time limit fired. Reasoning is counted as observed paid output even when text is
 empty. The regression drives an SSE reasoning chunk followed by the JDK timeout
 cause shape.
 
-## Remaining Phase 2 boundary
+## Phase 2 repair — 2026-08-12
 
-This issue remains open for exactly one implementation remainder and its live
-proof:
+Commit `23cd25fb4` records the exact serialized provider request body on every
+network outcome:
 
-- Record the actual serialized outbound body on the durable attempt fact. The
-  JSON exists in `seon.ai/complete`, but attempt transaction data is assembled
-  by `record-attempt!` at `src/seon/cluster/loop.clj:674`; the new declaration
-  belongs in `resources/seon/schemas/seon.ai.attempt.edn`. The
-  `defs-rename-sweep` lane currently owns `loop.clj`, so these files await
-  orchestrator reassignment.
+- `seon.ai/http-request-data` serializes the JSON once. The JDK body publisher
+  and the returned `:seon.ai/sent-body` use that same string, so a later
+  projection cannot disagree with the bytes handed to HTTP.
+- `seon.cluster.loop/attempt-evidence` carries that value into
+  `record-attempt!`, which persists it as the no-history
+  `:seon.ai.attempt/sent-body` fact.
+- The ordinary attempt render omits the request body, like reasoning, so the
+  forensic fact does not recursively enter later prompts.
 
-The Phase 1 live proof uses the existing attempt usage fact: one isolated Flash
-call must persist effective thinking `:disabled` and zero reasoning tokens. It
-does not claim exact outbound-body proof until the Phase 2 fact lands.
+The class regression uses a loopback HTTP server to compare the captured raw
+body byte-for-byte with both the completion value and the durable attempt fact.
+It also asserts that the recorded JSON contains
+`"thinking":{"type":"disabled"}`. The turn-level regression proves that a
+reasoning-only timeout reaches the durable attempt error as the typed
+`:seon.ai/reasoning-without-answer` diagnostic, including the received
+reasoning count, zero assistant text, and the fired time limit.
 
 ### Live-proof boundary observed on 2026-08-12
 
@@ -152,5 +158,29 @@ count as the required live evidence:
 
 Per the shared-tree stop rule, Phase 1 does not retry either foreign boundary.
 After the owning lanes settle, the remaining live exit is still exactly one
-Flash call whose persisted attempt settings say `:disabled` and whose persisted
-usage has zero reasoning tokens.
+Flash call whose persisted attempt settings say `:disabled`, whose sent-body
+fact says `thinking.type = "disabled"`, and whose persisted usage has zero
+reasoning tokens.
+
+Phase 2 made that one call on isolated root
+`tmp/flash-sent-body-proof-20260812-01`. The message endpoint accepted it with
+HTTP 204, but the call never reached the HTTP owner: the cluster log records a
+development core fault at `seon.render.walk/root-acquisition` because required
+`:seon.render/output` was missing, followed by failure to record that fault
+because `seon.schema.datahike/resolve-datahike-form-in` received an invalid nil
+form. The database therefore still has zero attempt entities. Read-only prepl
+inspection subsequently timed out at 30 seconds although operator status
+reported PID 90278 alive. No second provider call was submitted.
+
+The requested changed-path gate also produced no green verdict. Its shared-base
+preparation runner exited zero, but the selected runner remained CPU-bound for
+61 minutes without a failure marker or completion and did not answer a
+virtual-thread-aware `jcmd` attach. Terminating only that gate's launcher caused
+its own runner to be reaped with exit 137; evidence is retained under
+`tmp/test-runs/run.LksNlc`. This is a verification boundary, not a test failure
+attributed to this change.
+
+Per the foreign-lane boundary rule, this issue stays open. The remaining exit
+is a fresh isolated-root one-call proof after the projection owner restores
+root acquisition, plus a completed green `bin/test --changed` verdict; neither
+requires another AI implementation change.
