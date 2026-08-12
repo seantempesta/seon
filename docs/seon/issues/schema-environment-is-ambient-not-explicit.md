@@ -216,8 +216,12 @@ Each failure reproduced in its isolated confirmation JVM. Those proof files
 are protected by the runner assignment, so the carrier remains landed and the
 issue remains open until the proofs explicitly construct their unhanded
 subject instead of depending on runner absence. The subsequent `bin/test
---all` checkpoint has not run because every tiered invocation would stop on
-the same red platform boundary.
+--all` checkpoint was run exactly once and stopped on the same platform result:
+71 tests / 383 assertions / 4 failures / 1 error. Its bulk tier therefore did
+not reach either the known message-delivery failure or the worker-root cleanup
+race. It again loaded every namespace with zero fallback/refusal lines and
+recorded exactly one acquisition per coordinator, pool, serial, and
+confirmation JVM.
 
 This issue therefore remains open for that test carrier and the separately
 recorded process-global Malli instrumentation facade, whose owner and falsifier are
