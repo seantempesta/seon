@@ -121,6 +121,25 @@ back — everywhere, for every agent, with no maintained list of forms.
     teaching, no prose-packaging: the lifecycle routes replies because the
     run carries its trigger.
 
+## Rulings 32-34 (owner, 2026-08-12 — gap-closure generation)
+
+32. **The generator's input is (pull, retained history) — gap-closure
+    generation**: for every unit, emit the cheapest TRUE form closing the
+    gap between the context and current facts. Fresh collection -> full
+    listing then per-entity reads; already-shown collection -> the honest
+    delta (`since` the retained entry's basis, Datahike's own vocabulary)
+    then reads of only the new ids. One process; the emitted form is a
+    function of the shown-basis the history already retains.
+33. **Change provenance renders from tx-meta**: the ruled minimal
+    provenance (:seon.db/user / :seon.db/process) joins through the delta
+    query's transactions, so a generated comment like "; Root updated my
+    plan" is a render of facts, never an inference.
+34. **Bounded turtles**: render functions receive data in hand (cannot
+    query -> rendering cannot cascade); the frontier is explained-once +
+    membership-gated (fixed point); time is append-only + evidence-gated
+    (only the delta since the shown basis generates). Generation is the
+    derivative of the graph, never re-integration.
+
 ## The mechanism (composed from the verified reports)
 
 ### One derivation
