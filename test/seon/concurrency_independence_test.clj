@@ -41,6 +41,14 @@
   [value]
   (schema/sha-256 [(.getBytes (pr-str value) "UTF-8")]))
 
+(defn- await-channel!
+  "Return the next published value, or refuse a closed event source."
+  [event-source event]
+  (or (async/<!! event-source)
+      (throw
+       (ex-info "The test channel closed before its required event."
+                {::event event}))))
+
 (defn- await-fact
   "Return the first truthy value `probe` derives from a database value."
   [connection probe]
@@ -56,7 +64,7 @@
       ;; those operations is necessarily observed on one side.
       (when-let [value (probe @connection)]
         (async/offer! events value))
-      (test-support/await-event! events "concurrent runs closed")
+      (await-channel! events "database fact")
       (finally
         (d/unlisten connection listener-key)))))
 
@@ -186,7 +194,7 @@
     ;; acknowledgement therefore proves every scenario agent has an entry.
     (async/>!! (:seon.cluster.wake/channel handle)
                {::agent/quiesce quiesced})
-    (test-support/await-event! quiesced "scenario agents armed")
+    (await-channel! quiesced "scenario agents armed")
     (doseq [spec specs]
       (let [entry (agent/armed routing (::agent-id spec))
             graph (:seon.flow/graph entry)]
@@ -261,7 +269,7 @@
     (.countDown start)
     (dotimes [_ (count work-items)]
       (let [outcome
-            (test-support/await-event! completed "concurrent planned fold")
+            (await-channel! completed "concurrent planned fold")
             report (:seon.cluster.loop/report outcome)]
         (is (nil? (:seon.cluster.loop/failure outcome))
             (some-> (:seon.cluster.loop/failure outcome) Throwable->map pr-str))
