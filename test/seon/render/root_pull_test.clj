@@ -334,8 +334,13 @@
    {:seon.test-support/extra-schema root-pull-schema}
    (fn [connection]
      (db/transact! connection [{::root-id "root" ::value "sample"}])
-     (let [started (System/nanoTime)
-           acquisition (acquire connection)
+     (let [acquisition-request (request connection)
+           pull-plan (walk/root-pull-plan acquisition-request)
+           started (System/nanoTime)
+           acquisition
+           (walk/root-acquisition
+            (assoc acquisition-request
+                   :seon.render.walk/root-pull-plan pull-plan))
            elapsed-ms (/ (double (- (System/nanoTime) started)) 1000000.0)]
        (println (pr-str {:seon.render.walk/cold-pull-ms elapsed-ms
                          :seon.render.walk/four-query-floor-ms 46.0}))

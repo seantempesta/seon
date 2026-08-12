@@ -330,7 +330,7 @@
          :seon.render.walk/selector selector
          :datahike.pull/plan
          ((requiring-resolve 'datahike.pull-api/compile-pull-plan)
-          selector)}))))
+          database selector)}))))
 
 (defn root-acquisition
   "Pull and index one agent-root neighbourhood by stable entity identity.
