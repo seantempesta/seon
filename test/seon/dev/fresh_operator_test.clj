@@ -369,21 +369,15 @@
      10 TimeUnit/SECONDS)))
 
 (defn- await-process!
-  [^Process process output-future context]
-  (try
-    (.get (.onExit (.toHandle process)) 90 TimeUnit/SECONDS)
-    {:seon.dev.fresh-operator-test/completed? true
-     :seon.dev.fresh-operator-test/exit (.exitValue process)
-     :seon.dev.fresh-operator-test/output
-     (deref output-future 10000
-            "The operator output reader did not finish.")}
-    (catch TimeoutException _
-      (terminate-process-tree! process)
-      (throw
-       (ex-info (str context " exceeded its last-resort backstop.")
-                {:seon.dev.fresh-operator-test/output
-                 (deref output-future 10000
-                        "The terminated output reader did not finish.")})))))
+  [^Process process output-future _context]
+  ;; Process exit and output EOF are observable completion events. The old
+  ;; 90-second wall-clock verdict killed healthy operator commands under the
+  ;; nine-worker load, before the same commands completed successfully in an
+  ;; isolated JVM. The test runner owns the outer loud liveness backstop.
+  (.get (.onExit process))
+  {:seon.dev.fresh-operator-test/completed? true
+   :seon.dev.fresh-operator-test/exit (.exitValue process)
+   :seon.dev.fresh-operator-test/output @output-future})
 
 (deftest init-changed-paths-are-an-explicit-source-publication-mode
   (is (= {:seon.fresh-operator/changed-paths
