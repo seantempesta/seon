@@ -15,7 +15,7 @@ the current tree, the proposed one-pass contract crosses three source owners
 while its phase claims one, and several later rulings are not explicitly
 reconciled with earlier ones.
 
-I read the subject, the immediate evolving-session parent, the 36-ruling
+I read the subject, the immediate evolving-session parent, the 50-ruling
 self-generating-context parent, and the transcript parent end to end. I checked
 the named contracts and examples against `bc1732d26` plus the shared working
 tree as observed on 2026-08-12. I did not mutate a cluster or edit production
@@ -78,9 +78,9 @@ task message, while the subject says “no namespace tours” and admits a new
 declared-render frontier. A generator admission cap is content selection; it
 must not be disguised as a render profile, because ruling 3 says profiles fit
 content and never select it
-([ruling 3](self-generating-context-prd-2026-08-11.md#L36),
-[ruling 16](self-generating-context-prd-2026-08-11.md#L369), and
-[ruling 18](self-generating-context-prd-2026-08-11.md#L466)).
+([ruling 3](self-generating-context-prd-2026-08-11.md#owner-rulings-1-50),
+[ruling 16](self-generating-context-prd-2026-08-11.md#owner-rulings-1-50), and
+[ruling 18](self-generating-context-prd-2026-08-11.md#owner-rulings-1-50)).
 
 **Exact fix:** specify the initial ordered seed vector as data: situation root
 `(help)`; the open run's trigger reached through
@@ -98,7 +98,7 @@ content roster or preserve it.
 
 The subject requires “fact-owned ties ... never string/hash.” Ruling 14
 requires “stable alphabetical tie-breaks”
-([ruling 14](self-generating-context-prd-2026-08-11.md#L360)).
+([ruling 14](self-generating-context-prd-2026-08-11.md#owner-rulings-1-50)).
 Current code instead preserves the pull's candidate-vector order through the
 ready filter; it has no explicit ready-set tie key
 ([`src/seon/render/walk.clj:708-769`](../../../../src/seon/render/walk.clj#L708)).
@@ -156,9 +156,9 @@ uses `message/inbox`, `message/read`, `db/q`, `run/complete`, bare `register!`,
 `deftest`, `is`, and `seon.test/run`. Explaining `my.message/inbox` does not
 introduce the different symbol `message/inbox`. Rulings 14, 22, and 29 require
 namespace/alias introduction and recursive explanation before use
-([ruling 14](self-generating-context-prd-2026-08-11.md#L360),
-[ruling 22](self-generating-context-prd-2026-08-11.md#L453), and
-[ruling 29](self-generating-context-prd-2026-08-11.md#L112)).
+([ruling 14](self-generating-context-prd-2026-08-11.md#owner-rulings-1-50),
+[ruling 22](self-generating-context-prd-2026-08-11.md#owner-rulings-1-50), and
+[ruling 29](self-generating-context-prd-2026-08-11.md#owner-rulings-1-50)).
 
 **Exact fix:** add the exact generated `(in-ns
 'my.agents.task-agent-9)` and `require` forms, then use
@@ -194,8 +194,8 @@ The subject and immediate parent say a passive fact change creates no settled
 history entry until the next wake. Earlier ruling 6 says passive refresh means
 “blocks update, history appends, page morphs,” and ruling 36 says the plan
 change “appends passively to context”
-([ruling 6](self-generating-context-prd-2026-08-11.md#L46),
-[ruling 36](self-generating-context-prd-2026-08-11.md#L159)).
+([ruling 6](self-generating-context-prd-2026-08-11.md#owner-rulings-1-50),
+[ruling 36](self-generating-context-prd-2026-08-11.md#owner-rulings-1-50)).
 An implementer can validly build either passive durable append or pending-only
 display. The subject also says only a message opens work, while ruling 6 keeps
 addressed errors as wakes.
@@ -504,9 +504,10 @@ identity used by the generator.
 
 Applied to
 [the revised implementation contract](evolving-session-implementation-2026-08-12.md).
-The final ruling round removes every owner-choice marker; the only external
-statuses left are a separately owned plan data-model dependency and ruling
-40's test-result-facts lane.
+The final ruling round removes every owner-choice marker. Ruling 49 supersedes
+the plan data-model dependency below with the todo system; ruling 50 adds the
+old-by-default effect-replay contract. Ruling 40's test-result-facts lane has
+since landed in commit `9648aed33`; its integration gate is the next boundary.
 
 | Finding | Disposition |
 |---|---|
@@ -524,7 +525,7 @@ statuses left are a separately owned plan data-model dependency and ruling
 | TM-2 | Removed nonexistent `my.message/inbox`, `my.message/read`, aliases, bare `register!`, and `seon.test/run`. Uses current `seon.db` forms plus qualified `seon.schema/register!`, `clojure.test/deftest`, and `clojure.test/is`; ruling 8 explicitly supersedes DOC-1 and the current `doc` keys are named. |
 | TM-3 | Uses the landed completion disposition/result/delivery shape and agent-id string. The reply says the replica test is declared, not green; no accretion note remains. |
 | TM-4 | Example B binds the positional `seon.db/since` result, queries numeric ids, and pulls those ids from the current database with the landed `pull` arity. It is explicitly additions-only. |
-| TM-5 | Example B's plan arm is `[target: external plan-model dependency]`, not owner markup in this PRD. The linked issue must land a real ref and separately identified shape before the example consumes it; instructions-as-plan remains forbidden. |
+| TM-5 | **SUPERSEDED by ruling 49.** The implementation revision replaces this proposed plan arm with the todo: derived obligations plus authored item facts, with completed items omitted. No agent-plan relationship or plan-status family survives. |
 | TM-6 | Narrows the law to evolving-session gap-closure wakes and explicitly preserves unanswered-background-result runs. |
 | TM-7 | Describes the current thrown prefix drift honestly and names the target flat error schema plus loop settlement boundary. |
 | TM-8 | Replaces false one-file/parallel claims with exact multi-file ownership and explicit serialization across shared bootstrap, walk, run, work, and loop owners. |
@@ -552,20 +553,22 @@ The suite/PRD byte-authority boundary from BA-6 remains unchanged.
 
 This round read rulings 38–44 and commits `174898321`, `5a01449de`,
 `aeb70b1cc`, and `e0b64758a` end to end before revising the subject. It then
-reconciled the later current-HEAD rulings 45–48 from commits `13a8c8519`,
-`fd0fb1892`, and `316fce6ec`.
+reconciled the later current-HEAD rulings 45–50 from commits `13a8c8519`,
+`fd0fb1892`, `316fce6ec`, `e3f42fc0e`, and `1b95579bf`.
 
 | Authority | Final disposition |
 |---|---|
 | Ruling 38 — environment carriage | The implementation and decision record now say `seon.env` carries only derivation inputs. Opening context is derived per agent from the walk and is never stored in or on the environment. |
 | Ruling 39 — derived root preview | Root's preview is explicitly the same gap closure over the agent. The phase and graduation gates contain no fixed preview-depth constant or second preview mechanism. |
-| Ruling 40 — test-result facts | Added a hard external prerequisite in the dependency ledger and Phase 0: `[in flight -> cite its commit when you land]`. No evolving-session phase owns a stub or may begin before that lane lands. |
+| Ruling 40 — test-result facts | The revision added a hard external prerequisite with no stub; it has since landed in commit `9648aed33`. Integration review and the queued gate now precede Phase 1. |
 | Ruling 41 / D3 | Deleted the owner choice. Phase 6 now names the typed budget-wait value, pure constructor, one in-transaction force-settlement owner, ordinary receipt/delivery path, and both zero transitions. |
 | Ruling 42 / D4 | Deleted the owner choice and rejected refresh runs. Phase 7 re-observes the same read on the next message/error wake, appends at the newer basis, preserves old bytes, and adds no meta-entry. |
 | Ruling 43 / D5+D6 | Deleted both owner choices. Phases 1 and 4 now require the one-pass invocation-local state, deletion of per-form re-pulls, additions-only `since` deltas, per-new-id current pulls, and zero new callable arities. |
 | Ruling 44 / error wakes | Removed ERROR-WAKE markup. Messages and errors addressed to the agent wake it; all other changes remain passive. |
 | Rulings 45–46 / rebirth and known facts | Added the real reborn-episode graduation proof. Current facts plus empty history must yield compact valid context; functions, declared renders, and green test-result facts suppress teaching they already demonstrate. |
-| Ruling 47 / survivable plans | Strengthened the external plan dependency: fact-backed statuses and a declared current-state render are required; history replay and prose are not substitutes. |
+| Ruling 47 / survivable meaning | Requires durable meaning to be fact-backed with a declared current-state render; history replay and prose are not substitutes. Ruling 49 supersedes the plan example. |
 | Ruling 48 / universal rebirth-first check | Made compact rendering from current facts alone an integration acceptance criterion rather than a plan-only concern. |
+| Ruling 49 / one task system | Retires `my.plan`, the agent-plan relationship, and plan-status family unbuilt. The todo unions derived obligations with authored item facts and omits completed items. |
+| Ruling 50 / effect replay | Makes every effectful replay receipt-backed and explicitly old by default; only a future declared read-only tag may authorize re-execution, with its first use carrying the never-lie regression. |
 | Rulings 11/16/18/22 sweep | The binding reconciliation retains only the surviving lessons: gap closure subsumes injection, the demonstration remains load-bearing, and the complete action arc stands. It deletes standing-form, HALF-roster, concise-until-cap, and stale itemization claims. |
 | Transcript supersession sweep | The transcript PRD now contributes only surviving history/storage/printing grammar. Ordering bands, pinned bootstrap bytes, HUMAN-2 synthesized reads, and identity-hash prints are explicitly non-authoritative. |
