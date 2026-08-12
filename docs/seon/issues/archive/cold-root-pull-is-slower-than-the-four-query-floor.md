@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, context, performance]
 ---
@@ -202,3 +202,33 @@ compiled plan per schema-generation/profile key, and hand that parsed value
 to evidence derivation, execution, and Seon decoding — the same
 derived-state-rides-the-value pattern as the environment projection. The
 W2 one-read membership contract is unchanged.
+
+## Resolution 2026-08-12
+
+Datahike commit `cdcb5792db8bd599487f099437265d18a31164a5` compiles each
+unique shared selector subpattern once and makes dependency derivation
+DAG-aware. Seon pins it at `db67d8ab1`, and `2e814eec1` retains the resulting
+root pull plan in the schema projection's compiled cache for direct, web, and
+through-SCI acquisition paths.
+
+The isolated depth-2 plan probe previously exhausted a 2 GiB heap and the
+original through-SCI test exhausted a 4 GiB heap. After the fork repair, plan
+derivation completed in 24.719917 ms with 12,434,840 allocated bytes, one root
+acquisition, and five unique subpattern parses. The focused cold acquisition
+sample after integration was 7.260791 ms against the recorded 46.0 ms floor.
+
+The now-fast plan exposed a second allocation owner in the same failing path:
+`config/effective` was resolved 36 times by render argument construction,
+allocating 57,385,026,968 bytes in 17,227.545875 ms. Commit `17dac676e`
+resolves it once in `seon.render/walk` and carries the resulting profile
+through every guarded render argument. With the fixture's explicit effective
+defaults, the through-SCI probe resolved configuration once, completed in
+336.320875 ms, and allocated 281,125,960 bytes.
+
+`public-walk-is-callable-through-an-agent-sci-eval` now counts exactly one
+root plan derivation shared by through-SCI, direct, and web acquisition, one
+effective-config resolution for the render operation, and an allocation bound
+below 1 GiB. It and
+`require-context-rows-persist-namespace-lookup-refs` passed together in three
+independent focused JVM runs. The maintained Datahike regression passed in
+all three configured test platforms: 6 tests, 30 assertions, zero failures.
