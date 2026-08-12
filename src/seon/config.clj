@@ -292,9 +292,9 @@
   "Read and admit the shipped initialization entity rows."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
-  (:seon.config/initialization
-   (admitted-default-document (schema/declaration-population)
-                              (default-document))))
+  (let [forms (schema.edn/packaged-forms)]
+    (:seon.config/initialization
+     (admitted-default-document forms (default-document)))))
 
 (defn- validate-default-decisions
   [forms document]
@@ -328,7 +328,7 @@
   absence decisions are resolved only by `compile-manifest`."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (let [forms (schema/declaration-population)]
+  (let [forms (schema.edn/packaged-forms)]
     (validate-default-decisions
      forms
      (:seon.config/decisions
@@ -338,7 +338,7 @@
   "Read and validate one sparse plain-EDN overlay without compiling it."
   {:malli/schema [:=> [:cat :string] :seon.config/manifest]}
   [path]
-  (validate-layer (schema/declaration-population) (read-edn-map path)))
+  (validate-layer (schema.edn/packaged-forms) (read-edn-map path)))
 
 (defn- resolve-smart-decision
   [key decision]
@@ -356,7 +356,7 @@
   {:malli/schema
    [:=> [:cat :seon.config/compile-request] :seon.config/compiled]}
   [request]
-  (let [forms (schema/declaration-population)
+  (let [forms (schema.edn/packaged-forms)
         {:seon.config/keys [decisions initialization]}
         (admitted-default-document forms (default-document))
         manifest (validate-layer forms (or (:seon.config/manifest request) {}))
@@ -448,7 +448,8 @@
    [:=> [:cat :seon.db/connection :seon.config/compiled]
     :seon.reconcile/result]}
   [connection compiled]
-  (let [forms (schema/declaration-population)
+  (let [projection (schema/projection-from-database @connection)
+        forms (:seon.schema.projection/forms projection)
         desired
         (into [(:seon.config/desired-row compiled)]
               (:seon.config/initialization compiled))
@@ -526,13 +527,15 @@
    ;; one it already resolved for its extent — measured live 2026-08-07:
    ;; 84,664 resource reads before the read seam was repaired, 1,216 after it,
    ;; and 152 (one population, 12.6 ms) once supplied.
-   (schema/call-with-forms
-    (schema/declaration-population)
-    #(effective-in db (or cluster-name "default")))))
+   (let [projection (schema/projection-from-database db)]
+     (schema/call-with-projection
+      projection
+      #(effective-in db (or cluster-name "default"))))))
 
 (defn- effective-in
   [db cluster-name]
-  (let [forms (schema/declaration-population)
+  (let [forms (:seon.schema.projection/forms
+               (schema/projection-from-database db))
         row (db/pull db '[*] [:seon.config/cluster cluster-name])
         effective (select-keys row (dial-attributes forms))
         missing (vec (sort (set/difference (required-dial-attributes forms)

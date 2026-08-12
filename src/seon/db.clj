@@ -372,14 +372,14 @@
                   (fn [arguments]
                     (mapv #(if (= ::database %) database %) arguments)))
           response (d/q-with-evidence query-request)]
-      (decode-query-result (read-declarations)
+      (decode-query-result (read-declarations database)
                            query-request
                            (:datahike.query/result response)))
 
     :pull
     (let [arguments (:seon.db/pull-arguments request)
           response (apply d/pull-with-evidence database arguments)]
-      (decode-pull-result (read-declarations)
+      (decode-pull-result (read-declarations database)
                           (pull-selector arguments)
                           :datahike.pull/result
                           (:datahike.pull/result response)))
@@ -387,7 +387,7 @@
     :pull-many
     (let [arguments (:seon.db/pull-arguments request)
           response (apply d/pull-many-with-evidence database arguments)]
-      (decode-pull-result (read-declarations)
+      (decode-pull-result (read-declarations database)
                           (pull-selector arguments)
                           :datahike.pull-many/result
                           (:datahike.pull-many/result response)))))
@@ -426,8 +426,9 @@
 ;;; one resolution. The delay is created fresh per operation and dies with it:
 ;;; operation-local, never a process-global cache of declaration facts.
 (defn- read-declarations
-  []
-  (delay (schema/declaration-projection)))
+  [database]
+  (delay
+    (schema/projection-from-database database)))
 
 (defn- ask-declarations
   "Ask one declaration question with the population both PASSED and SUPPLIED.
@@ -815,7 +816,8 @@
           (let [request (assoc normalized :args aligned)
                 response (d/q-with-evidence request)
                 result (decode-query-result
-                        (read-declarations)
+                        (read-declarations
+                         (some #(when (db.utils/db? %) %) aligned))
                         request (:datahike.query/result response))]
             (append-query-evidence! request response result)
             result)))
@@ -831,7 +833,7 @@
     (try
       (let [response (apply operation database arguments)
             selector (pull-selector arguments)
-            result (decode-pull-result (read-declarations) selector result-key
+            result (decode-pull-result (read-declarations database) selector result-key
                                        (get response result-key))]
         (append-pull-evidence! database arguments operation-key response result)
         result)
@@ -970,7 +972,7 @@
     (try
       ;; Datahike's index cursor is lazy and each element is a host Datom.
       ;; Realize both layers here so no process-local cursor escapes to SCI.
-      (let [declarations (read-declarations)
+      (let [declarations (read-declarations database)
             result (mapv #(datom->data declarations database %)
                          (apply d/datoms database arguments))]
         (append-database-evidence! database :all)
@@ -1190,9 +1192,18 @@
   (if (error-value? connection)
     connection
     (try
-      (d/transact connection
-                  (schema.datahike/encode-transaction
-                   (jdk-integers->long transaction)))
+      (let [database (d/db connection)
+            projection
+            (or (schema/handed-projection)
+                (when (seq (d/q '[:find [?key ...]
+                                  :where [_ :seon.schema/key ?key]]
+                                database))
+                  (schema/projection-from-database database))
+                (schema/declaration-projection
+                 ((requiring-resolve 'seon.schema.edn/packaged-forms))))]
+        (d/transact connection
+                    (schema.datahike/encode-transaction-in
+                     projection (jdk-integers->long transaction))))
       (catch Throwable throwable
         (let [data (error.refusal/refusal throwable)]
           (cond

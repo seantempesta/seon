@@ -69,7 +69,8 @@
   ;; projection supplied re-reads and re-merges every schema resource per key
   ;; — measured 2026-08-07 at 25,916 ms and 286,672 resource reads for this one
   ;; function (issue packaged-forms-rereads-every-schema-resource-per-call).
-  ([] (identity-attributes (schema/declaration-population)))
+  ([] (throw (ex-info "Reconciliation requires explicit declaration forms."
+                      {:seon.error/kind ::missing-declarations})))
   ([forms]
    (into #{}
          (filter #(schema/identity-attr? forms %))
@@ -330,8 +331,10 @@
   ;; liveness backstop (2026-08-07). `db/pull` deliberately takes no population
   ;; argument, so the operation supplies the one it already resolved for its
   ;; own extent; this is the same value, made visible, not a cache.
-  (let [forms (schema/declaration-population)]
-    (schema/call-with-forms forms #(plan-transaction-data forms db request))))
+  (let [projection (schema/projection-from-database db)
+        forms (:seon.schema.projection/forms projection)]
+    (schema/call-with-projection
+     projection #(plan-transaction-data forms db request))))
 
 (defn- plan-transaction-data
   [forms db request]

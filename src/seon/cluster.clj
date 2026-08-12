@@ -454,7 +454,7 @@
 ;; resolution two or three complete classpath re-reads (2026-08-07).
 (defn- require-candidate-value
   ([schema-key value message]
-   (require-candidate-value (schema/declaration-population)
+   (require-candidate-value (schema.edn/packaged-forms)
                             schema-key value message))
   ([forms schema-key value message]
    (if (schema/valid-candidate-value? forms schema-key value)
@@ -482,7 +482,7 @@
   [overrides]
   ;; ONE declaration population for the whole resolution — it asks two
   ;; questions and each refusal arm asks a third.
-  (let [forms (schema/declaration-population)]
+  (let [forms (schema.edn/packaged-forms)]
     (require-candidate-value
      forms
      :seon.boot/overrides

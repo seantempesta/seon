@@ -21,6 +21,7 @@
             [malli.registry :as mr]
             [clojure.set :as set]
             [clojure.walk :as walk]
+            [datahike.api :as d]
             [datahike.db.interface :as dbi]
             [seon.schema.form :as form]
             [seon.schema.internal :as internal]
@@ -653,7 +654,7 @@
            ;; `seon.db` requires this namespace for predicate registration and
            ;; transaction encoding. Resolve the one database Var late instead
            ;; of recreating that load cycle.
-           ((requiring-resolve 'seon.db/q)
+           (d/q
             '[:find [?source ...]
               :in $ ?tx
               :where
@@ -852,7 +853,16 @@
    immutable map of registry key -> schema form; read it with `get`."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (candidate-forms))
+  (if (or *candidate-forms-overlay* *packaged-forms* *projection*
+          *projection-state*)
+    (candidate-forms)
+    (throw
+     (ex-info
+      "Schema declaration resolution requires the projection handed to the operation."
+      {:seon.error/kind ::missing-projection
+       :seon.error/message
+       "No declaration projection was handed to this schema operation."
+       :seon.error/data {:seon.schema/caller (fallback-caller)}}))))
 
 (defn call-with-forms
   "Call `f` with one immutable declaration population for this operation."
@@ -931,7 +941,7 @@
                :seon.error/kind :user-input}))))
 
 (defn- candidate-registry
-  ([] (candidate-registry (candidate-forms)))
+  ([] (candidate-registry (declaration-population)))
   ([forms]
    (let [defaults (mr/fast-registry (m/default-schemas))]
      (reify
@@ -1032,8 +1042,7 @@
            (some? (m/schema
                    (compilable-form decoded {})
                    {:registry (candidate-registry)}))))
-    (catch Exception _
-      false)))
+    (catch Exception _ false)))
 
 (register-core-predicate! 'seon.schema/malli-form? malli-form?)
 
@@ -2191,21 +2200,21 @@
    (projection-from-rows
     {:seon.schema/database-value db
      :seon.schema/schema-rows
-     ((requiring-resolve 'seon.db/q)
+     (d/q
       '[:find ?key ?form ?tx
         :where
         [?schema :seon.schema/key ?key ?tx]
         [?schema :seon.schema/form ?form]]
       db)
      :seon.schema/function-contract-rows
-     ((requiring-resolve 'seon.db/q)
+     (d/q
       '[:find ?sym ?spec ?tx
         :where
         [?function :seon.fn/sym ?sym]
         [?function :seon.fn/spec ?spec ?tx]]
       db)
      :seon.schema/function-source-rows
-     ((requiring-resolve 'seon.db/q)
+     (d/q
       '[:find ?sym ?source ?tx
         :where
         [?function :seon.fn/sym ?sym]
@@ -2452,6 +2461,14 @@
   {:malli/schema [:=> [:cat] [:maybe :map]]}
   []
   (active-projection))
+
+(defn handed-projection
+  "The immutable projection explicitly supplied for this operation, or nil."
+  {:malli/schema [:=> [:cat] [:maybe :seon.schema/projection]]}
+  []
+  (or *projection*
+      (some-> *projection-state* deref :seon.schema/projection)
+      (when *packaged-forms* (declaration-projection *packaged-forms*))))
 
 (defn entity-catalog
   "Derived renderable entity catalog for packaged schema facts."
