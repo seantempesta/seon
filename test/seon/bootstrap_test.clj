@@ -154,6 +154,36 @@
                 plan-digest help-text]]
     (is (nil? (ns-resolve 'seon.bootstrap old)) (str old " is deleted"))))
 
+(deftest missing-or-failed-membership-is-not-a-fixed-point
+  (support/with-database
+    (fn [connection]
+      (seed-cluster! connection "generated-membership-failure")
+      (let [request (generator-request connection)
+            failed-pull
+            {:seon.error/kind :seon.db/invalid-read
+             :seon.error/message "injected failed membership pull"
+             :seon.error/data {:seon.db/operation "datahike.pull/result"}}
+            cases
+            [["missing root"
+              {:seon.render.walk/root nil
+               :seon.render.walk/members {}
+               :seon.render.walk/order []}
+              :seon.bootstrap/root-acquisition-empty]
+             ["failed pull"
+              {:seon.render.walk/root failed-pull
+               :seon.render.walk/members {}
+               :seon.render.walk/order []}
+              :seon.db/invalid-read]]]
+        (doseq [[label acquisition expected-kind] cases]
+          (let [result
+                (with-redefs [walk/root-acquisition
+                              (constantly acquisition)]
+                  (bootstrap/next-entry request "bootstrap:missing"))]
+            (is (map? result) label)
+            (is (= expected-kind (:seon.error/kind result)) label)
+            (is (not (nil? result))
+                (str label " must not look like a completed frontier"))))))))
+
 (deftest first-agent-supervision-is-one-self-erasing-system-run
   (support/with-database
     (fn [connection]

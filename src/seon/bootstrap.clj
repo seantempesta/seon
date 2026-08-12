@@ -191,16 +191,33 @@
   {:malli/schema [:=> [:cat :seon.render.walk/request] :map]}
   [request]
   (let [acquisition (walk/root-acquisition request)
-        identities (->> (vals (:seon.schema.projection/shape-rows
-                               (schema/current-projection)))
-                        (keep :seon.entity/id-attr)
-                        set)]
-    {:seon.repl/root-key
-     [(first (:seon.render.walk/order acquisition)) 0]
-     :seon.repl/candidates
-     (into (direct-candidates request acquisition)
-           (listing-candidates request acquisition))
-     :seon.print/identity-attributes identities}))
+        root (:seon.render.walk/root acquisition)
+        order (:seon.render.walk/order acquisition)]
+    (cond
+      (:seon.error/kind root)
+      root
+
+      (or (nil? root) (empty? order))
+      {:seon.error/kind ::root-acquisition-empty
+       :seon.error/message
+       "The generated opening root pull returned no membership data."
+       :seon.error/data
+       {:seon.render.walk/lookup (:seon.render.walk/lookup request)
+        :seon.render.walk/root-present? (some? root)
+        :seon.render.walk/member-count
+        (count (:seon.render.walk/members acquisition))}}
+
+      :else
+      (let [identities
+            (->> (vals (:seon.schema.projection/shape-rows
+                        (schema/current-projection)))
+                 (keep :seon.entity/id-attr)
+                 set)]
+        {:seon.repl/root-key [(first order) 0]
+         :seon.repl/candidates
+         (into (direct-candidates request acquisition)
+               (listing-candidates request acquisition))
+         :seon.print/identity-attributes identities}))))
 
 (defn- root-candidate
   [request root-key]
@@ -220,7 +237,7 @@
 (defn next-entry
   "Derive the next generated entry from receipts already stored on the run."
   {:malli/schema [:=> [:cat :seon.render.walk/request :seon.cluster.run/id]
-                  [:maybe :seon.repl/entry]]}
+                  [:or :nil :seon.repl/entry :seon.error/value]]}
   [request run-id]
   (let [rows
         (db/q {:query
@@ -236,52 +253,54 @@
                  [?receipt :seon.cluster.eval/result-edn ?result]]
                :args [(:seon.db/db request) run-id]
                :order-by '[?ordinal :asc]})
-        pull (pull-result request)
-        candidates
-        (let [root (root-candidate request (:seon.repl/root-key pull))]
-          (into [root]
-                (remove #(= (:seon.repl/key root) (:seon.repl/key %)))
-                (:seon.repl/candidates pull)))
-        candidate-by-source
-        (reduce (fn [by-source candidate]
-                  (let [source (entry-source (:seon.repl/entry candidate))]
-                    ;; Identical structural reads can explain several pulled
-                    ;; members. Candidate order is already stable; retain its
-                    ;; first subject so receipts have one deterministic key.
-                    (if (contains? by-source source)
-                      by-source
-                      (assoc by-source source candidate))))
-                {}
-                candidates)
-        settled
-        (mapv (fn [[_ source result]]
-                (let [candidate (get candidate-by-source source)]
-                  (when-not candidate
-                    (throw
-                     (ex-info "A stored generated form is outside the pull."
-                              {:seon.error/kind ::prefix-drift
-                               :seon.cluster.run/id run-id
-                               :seon.cluster.run.form/source source})))
-                  {:seon.repl/key (:seon.repl/key candidate)
-                   :seon.sci.admit/print-node (edn/read-string result)}))
-              rows)
-        episode
-        (walk/ordered-episode (assoc pull
-                                     :seon.repl/candidates candidates
-                                     :seon.repl/settled settled))
-        index (count rows)
-        prior-sources (mapv second rows)
-        expected-sources (mapv entry-source (take index episode))]
-    (when-not (= prior-sources expected-sources)
-      (throw
-       (ex-info
-        (str "The generated opening prefix differs from its receipts: expected "
-             (pr-str expected-sources) " actual " (pr-str prior-sources))
-                {:seon.error/kind ::prefix-drift
-                 :seon.cluster.run/id run-id
-                 :seon.bootstrap/expected expected-sources
-                 :seon.bootstrap/actual prior-sources})))
-    (nth episode index nil)))
+        pull (pull-result request)]
+    (if (:seon.error/kind pull)
+      pull
+      (let [candidates
+            (let [root (root-candidate request (:seon.repl/root-key pull))]
+              (into [root]
+                    (remove #(= (:seon.repl/key root) (:seon.repl/key %)))
+                    (:seon.repl/candidates pull)))
+            candidate-by-source
+            (reduce (fn [by-source candidate]
+                      (let [source (entry-source (:seon.repl/entry candidate))]
+                        ;; Identical structural reads can explain several pulled
+                        ;; members. Candidate order is already stable; retain its
+                        ;; first subject so receipts have one deterministic key.
+                        (if (contains? by-source source)
+                          by-source
+                          (assoc by-source source candidate))))
+                    {}
+                    candidates)
+            settled
+            (mapv (fn [[_ source result]]
+                    (let [candidate (get candidate-by-source source)]
+                      (when-not candidate
+                        (throw
+                         (ex-info "A stored generated form is outside the pull."
+                                  {:seon.error/kind ::prefix-drift
+                                   :seon.cluster.run/id run-id
+                                   :seon.cluster.run.form/source source})))
+                      {:seon.repl/key (:seon.repl/key candidate)
+                       :seon.sci.admit/print-node (edn/read-string result)}))
+                  rows)
+            episode
+            (walk/ordered-episode (assoc pull
+                                         :seon.repl/candidates candidates
+                                         :seon.repl/settled settled))
+            index (count rows)
+            prior-sources (mapv second rows)
+            expected-sources (mapv entry-source (take index episode))]
+        (when-not (= prior-sources expected-sources)
+          (throw
+           (ex-info
+            (str "The generated opening prefix differs from its receipts: expected "
+                 (pr-str expected-sources) " actual " (pr-str prior-sources))
+            {:seon.error/kind ::prefix-drift
+             :seon.cluster.run/id run-id
+             :seon.bootstrap/expected expected-sources
+             :seon.bootstrap/actual prior-sources})))
+        (nth episode index nil)))))
 
 (defn- digest-value
   [value]

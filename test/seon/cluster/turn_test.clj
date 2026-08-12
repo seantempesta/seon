@@ -3158,6 +3158,61 @@
                          [?form :seon.cluster.run.form/author ?author]]
                        @connection run-id))))))))
 
+(deftest generated-membership-failure-never-advances-the-run-to-call
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.db/connection cluster)
+            run-id "generated-membership-failure"]
+        (db/transact!
+         connection
+         (run/generated-run-tx
+          @connection
+          {:seon.cluster.agent/id "agent-a"
+           :seon.cluster.run/id run-id
+           :seon.cluster.run/process process
+           :seon.cluster.run/opened-at now
+           :seon.cluster.run/starting-ns
+           [:seon.ns/name 'my.agents.agent-a]
+           :seon.cluster.run.form/source "(help)"}))
+        (db/transact!
+         connection
+         (run/receipt-start-tx
+          {:seon.cluster.run/id run-id
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/at now}))
+        (db/transact!
+         connection
+         (run/receipt-settle-tx
+          {:seon.cluster.run/id run-id
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/result-edn "{:introduced 'my.run}"}))
+        (let [request {:seon.cluster.agent/id "agent-a"
+                       :seon.cluster.run/process process}
+              generated (work/next-agent-work @connection request)
+              failure
+              {:seon.error/kind :seon.bootstrap/root-acquisition-empty
+               :seon.error/message
+               "The generated opening root pull returned no membership data."
+               :seon.error/data
+               {:seon.render.walk/lookup [:seon.cluster.agent/id "agent-a"]}}
+              report
+              (with-redefs [bootstrap/next-entry (constantly failure)]
+                (cluster.loop/turn
+                 {:seon.cluster.loop/cluster cluster
+                  :seon.cluster.work/next generated}
+                 now))
+              run-state
+              (db/pull @connection
+                       [:seon.cluster.work/situation
+                        :seon.cluster.run/closed-at
+                        :seon.cluster.run/error]
+                       [:seon.cluster.run/id run-id])]
+          (is (= :error (:seon.cluster.loop/outcome report)))
+          (is (not= :call (:seon.cluster.work/situation run-state)))
+          (is (some? (:seon.cluster.run/closed-at run-state)))
+          (is (= (:seon.error/message failure)
+                 (:seon.cluster.run/error run-state))))))))
+
 (deftest generated-phase-failures-converge-through-one-terminal-exit
   (with-cluster
     (fn [cluster]

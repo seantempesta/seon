@@ -1598,19 +1598,30 @@
                   @connection run-id)
              0))
         entry
-        (bootstrap/next-entry
-         {:seon.db/db @connection
-          :seon.db/connection connection
-          :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
-          :seon.render.walk/lookup [:seon.cluster.agent/id agent-id]
-          :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
-          :seon.sci.eval/time-limit-ms
-          (:seon.config.eval/time-limit-ms cluster)
-          :seon.config/on-core-error (:seon.config/on-core-error cluster)
-          :seon.render/output :seon.render/form
-          :seon.render/distance 3}
-         run-id)]
-    (if-not entry
+        (phase
+         #(bootstrap/next-entry
+           {:seon.db/db @connection
+            :seon.db/connection connection
+            :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
+            :seon.render.walk/lookup [:seon.cluster.agent/id agent-id]
+            :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+            :seon.sci.eval/time-limit-ms
+            (:seon.config.eval/time-limit-ms cluster)
+            :seon.config/on-core-error (:seon.config/on-core-error cluster)
+            :seon.render/output :seon.render/form
+            :seon.render/distance 3}
+           run-id))]
+    (cond
+      (:seon.error/kind entry)
+      (do
+        (settle! {::cluster cluster
+                  ::now now
+                  :seon.cluster.agent/id agent-id
+                  :seon.cluster.run/id run-id
+                  :seon.error/value entry})
+        (report :error 0))
+
+      (nil? entry)
       (let [advanced
             (db/transact!
              connection
@@ -1626,6 +1637,8 @@
                       :seon.error/value advanced})
             (report :error 0))
           (report :released 0)))
+
+      :else
       (let [appended
             (db/transact!
              connection
