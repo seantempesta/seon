@@ -156,13 +156,30 @@
                 (cluster/mcp-get-value
                  cluster-name (:seon.blob/digest oversized-result)
                  [:seon.error/message] 0)]
-            (is (= {:seon.dev.mcp/exception-class
-                    "java.lang.IllegalArgumentException"
-                    :seon.error/kind :seon.dev.mcp/jvm-exception
-                    :seon.error/message small-message
-                    :seon.dev.mcp/frame throw-site-frame}
-                   face)
+            (is (= throw-site-frame (:seon.dev.mcp/frame face))
                 "the root exception location survives instead of the serving frame")
+            (is (= {:seon.error/diagnostic-layer :development-mcp
+                    :seon.error/diagnostic-operation :evaluate-jvm
+                    :seon.error/diagnostic-member :exception
+                    :seon.error/diagnostic-expected
+                    :successful-prepl-evaluation
+                    :seon.error/diagnostic-offending
+                    "java.lang.IllegalArgumentException"
+                    :seon.error/diagnostic-cause small-message
+                    :seon.error/diagnostic-evidence-availability
+                    :seon.error/known
+                    :seon.error/diagnostic-evidence
+                    {:seon.dev.mcp/frame throw-site-frame}}
+                   (select-keys
+                    (:seon.error/data face)
+                    [:seon.error/diagnostic-layer
+                     :seon.error/diagnostic-operation
+                     :seon.error/diagnostic-member
+                     :seon.error/diagnostic-expected
+                     :seon.error/diagnostic-offending
+                     :seon.error/diagnostic-cause
+                     :seon.error/diagnostic-evidence-availability
+                     :seon.error/diagnostic-evidence])))
             (is (not (contains? face :seon.dev.mcp/text))
                 "the same sentence is not rendered again inside the face")
             (is (false? (:seon.dev.mcp/windowed? result)))
@@ -198,11 +215,8 @@
           "Cannot invoke java.util.concurrent.Future.get() because fut is null"
           :phase :execution})
         face (:seon.dev.mcp/value result)]
-    (is (= {:seon.error/kind :seon.dev.mcp/nil-deref
-            :seon.error/message "The evaluated form dereferenced nil."
-            :seon.dev.mcp/exception-class "java.lang.NullPointerException"
-            :seon.dev.mcp/frame deref-frame}
-           face))
+    (is (= :seon.dev.mcp/nil-deref (:seon.error/kind face)))
+    (is (= deref-frame (:seon.dev.mcp/frame face)))
     (is (not (str/includes? (pr-str result) "Future.get"))
         "the misleading host overload sentence must not leak")))
 

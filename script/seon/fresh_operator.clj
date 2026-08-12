@@ -965,16 +965,16 @@
            (source-observations
             root {:seon.fresh-operator/probe-jvms? probe-jvms?}))
          canonical-root (.getCanonicalPath (java.io.File. root))
-         live-roster
+         reachable-jvm
          (some
-          (fn [jvm]
-            (when (and (= canonical-root
-                          (:seon.fresh-operator/root jvm))
-                       (:seon.fresh-operator/reachable? jvm)
-                       (:seon.fresh-operator/persisted-branches-observed?
-                        jvm))
-              (:seon.fresh-operator/persisted-branches jvm)))
+          #(when (and (= canonical-root (:seon.fresh-operator/root %))
+                      (:seon.fresh-operator/reachable? %))
+             %)
           jvms)
+         live-roster
+         (when (:seon.fresh-operator/persisted-branches-observed?
+                reachable-jvm)
+           (:seon.fresh-operator/persisted-branches reachable-jvm))
          live-recorded-process?
          (boolean
           (some
@@ -989,6 +989,14 @@
            {:seon.fresh-operator/roster-readable? true
             :seon.fresh-operator/roster-source :live-jvm
             :seon.fresh-operator/persisted-branches live-roster}
+
+           reachable-jvm
+           {:seon.fresh-operator/roster-readable? false
+            :seon.fresh-operator/roster-source :live-jvm
+            :seon.fresh-operator/roster-error
+            "The prepl is reachable but did not return persisted branch evidence."
+            :seon.error/diagnostic-evidence-availability :seon.error/unknown
+            :seon.error/diagnostic-evidence :seon.error/unknown}
 
            live-recorded-process?
            {:seon.fresh-operator/roster-readable? false

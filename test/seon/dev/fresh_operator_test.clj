@@ -151,6 +151,33 @@
       {:seon.dev.fresh-operator-test/message (ex-message failure)
        :seon.dev.fresh-operator-test/data (ex-data failure)})))
 
+(deftest reachable-prepl-without-roster-evidence-is-not-called-unreachable
+  (let [root (.getCanonicalPath (fresh-root))
+        source-observations-var
+        (ns-resolve 'seon.fresh-operator 'source-observations)]
+    (try
+      (with-redefs-fn
+        {source-observations-var
+         (fn [_]
+           {:seon.fresh-operator/advertisements []
+            :seon.fresh-operator/jvms
+            [{:seon.fresh-operator/root root
+              :seon.fresh-operator/reachable? true
+              :seon.fresh-operator/persisted-branches-observed? false}]
+            :seon.fresh-operator/process-records []
+            :seon.fresh-operator/process-record-errors []})}
+        (fn []
+          (let [truth (operator-private-value 'cluster-truth root)
+                roster (:seon.fresh-operator/roster (meta truth))]
+            (is (= :live-jvm (:seon.fresh-operator/roster-source roster)))
+            (is (= :seon.error/unknown
+                   (:seon.error/diagnostic-evidence roster)))
+            (is (not (str/includes?
+                      (:seon.fresh-operator/roster-error roster)
+                      "prepl is unreachable"))))))
+      (finally
+        (delete-recursively! root)))))
+
 (defn- cold-start-calls
   [root]
   (let [calls (atom [])
