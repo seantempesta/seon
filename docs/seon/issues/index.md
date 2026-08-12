@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (46)
+## Blocker (44)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -27,10 +27,8 @@ See `README.md` for the convention.
 | [Make mutable resources carry their root and lifetime](class-mutable-resources-lack-explicit-root-and-lifetime.md) | blocker | class-kill queue |
 | [Make accepted work require terminal evidence](class-accepted-work-can-end-without-terminal-evidence.md) | blocker | class-kill queue |
 | [Make destructive reachability changes atomic](class-destructive-reachability-changes-are-not-atomic.md) | blocker | class-kill queue |
-| [Emit an elision value when a collection render drops results](collection-render-drops-209-of-210-results-without-an-elision-value.md) | blocker | render/print prefix-stability wave |
 | [Settle a turn whose provider stream carries only reasoning](a-reasoning-only-stream-burns-the-whole-time-limit.md) | blocker | live-drive provider wave |
 | [Record a call edge when an agent form calls a core function](agent-form-calls-to-core-namespaces-are-not-indexed.md) | blocker | program-graph indexing wave |
-| [Stop emitting object identity addresses into agent context](object-identity-addresses-break-prompt-prefix-stability.md) | blocker | render/print prefix-stability wave |
 | [Replace the unregistered `:ifn` schema that breaks source publication](unregistered-ifn-malli-schema-breaks-source-publication.md) | blocker | flow graph-construction lane (working-tree edit) |
 | [Make the render value floor total over ordinary unqualified-key maps](render-value-floor-refuses-any-map-with-unqualified-keys.md) | blocker | interface-economy W1 total-floor wave |
 | [Publish terminal evidence for every background binary result](background-binary-settlement-does-not-publish-required-event.md) | blocker | background settlement investigation |
