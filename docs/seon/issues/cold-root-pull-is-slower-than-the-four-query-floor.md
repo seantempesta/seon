@@ -168,3 +168,28 @@ same prompt/render-path acquisition completes with bounded allocation under a
 real changed-path runner worker, in addition to meeting the 46 ms cold latency
 floor. The runner itself is only the observer and needs no separate issue or
 change for this retained incident.
+
+## 2026-08-12 spine-repair gate confirmation
+
+The spine repair's changed-path gate selected 71 platform tests and 1,075 bulk
+tests because the changed schema resource has no program-graph reachability
+edge. The platform tier completed green. Emitted bulk results, including the
+changed root-acquisition, prompt, fault-encoding, and render-web owners, also
+remained green before the same allocation collapse stopped the gate from
+publishing a terminal verdict.
+
+At 31 minutes, worker PIDs 6359 and 6363 each held about 17 GB RSS and remained
+CPU-bound. Virtual-thread-aware dumps retained at
+`tmp/test-runs/run.4BPt75/worker-6359-thread-dump.json` and
+`tmp/test-runs/run.4BPt75/worker-6363-thread-dump.json` independently show the
+same recursive `datalog.parser.pull/parse-pattern` boundary. PID 6359 reaches
+it from `seon.sci.eval-test` through `seon.render.walk/neighborhood`; PID 6363
+reaches it from `seon.render.web/render-step` through
+`seon.render.web/acquire-root`. Both pass through `datahike.pull-api/pull-with-evidence`,
+`seon.db/pull`, and `seon.render.walk/root-acquisition`.
+
+The gate was interrupted at that named owner and retained under
+`tmp/test-runs/run.4BPt75`; it is not a failure in the spine repair or in the
+protected test runner. This second real-runner observation strengthens the
+existing compiled-plan acceptance criterion rather than creating another
+issue.

@@ -198,9 +198,12 @@ The retained 61-minute changed-path run was independently attributed to the
 already-open root-pull parsing/allocation defect, not to the test runner. Its
 virtual-thread-aware dumps and heap evidence are recorded in
 [cold root pull is slower than the four-query floor](cold-root-pull-is-slower-than-the-four-query-floor.md).
-This AI issue remains open only for its paid one-call provider proof and final
-changed-path gate; the missing-output and unrecordable-fault blockers are
-closed in their archived issue records.
+This AI issue remains open only for its paid one-call provider proof; the
+missing-output and unrecordable-fault blockers are closed in their archived
+issue records. The requested changed-path gate reached its owners green but
+could not publish a terminal verdict because the separately owned root-pull
+allocation defect recurred; that exact boundary is recorded in
+[cold root pull is slower than the four-query floor](cold-root-pull-is-slower-than-the-four-query-floor.md).
 
 The no-paid-call acceptance proof subsequently passed at `d4e1ec9c6`: one
 scratch-root message reached a stubbed AI request with a non-empty derived

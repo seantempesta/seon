@@ -75,6 +75,15 @@ synthetic web zero. A scratch-root message with whole-image instrumentation
 then reached the stubbed AI boundary with a non-empty derived prompt and zero
 contract-violation facts (1 test, 76 assertions, no provider call).
 
+The requested changed-path gate widened to 71 platform tests plus 1,075 bulk
+tests because a schema resource has no program-graph reachability edge. The
+platform tier and every emitted bulk result were green, including the changed
+owners, but no terminal verdict was possible: at 31 minutes two workers were
+again CPU-bound at roughly 17 GB RSS in recursive pull-pattern parsing beneath
+root acquisition. The isolated root and virtual-thread-aware dumps are retained
+under `tmp/test-runs/run.4BPt75`; the exact attribution is recorded in
+[cold root pull is slower than the four-query floor](../../../seon/issues/cold-root-pull-is-slower-than-the-four-query-floor.md).
+
 ## Interpretation
 
 Correctness and incremental cost after the first acquisition meet W2's stated
