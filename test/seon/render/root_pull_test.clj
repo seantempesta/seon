@@ -91,12 +91,19 @@
      (let [initial (walk/root-pull-plan (request connection))
            compile-count (atom 0)]
        (with-redefs [pull-api/compile-pull-plan
-                     (fn [selector-or-plan]
-                       (if (pull-api/pull-plan? selector-or-plan)
-                         selector-or-plan
-                         (do
-                           (swap! compile-count inc)
-                           (:datahike.pull/plan initial))))]
+                     (fn
+                       ([selector-or-plan]
+                        (if (pull-api/pull-plan? selector-or-plan)
+                          selector-or-plan
+                          (do
+                            (swap! compile-count inc)
+                            (:datahike.pull/plan initial))))
+                       ([_database selector-or-plan]
+                        (if (pull-api/pull-plan? selector-or-plan)
+                          selector-or-plan
+                          (do
+                            (swap! compile-count inc)
+                            (:datahike.pull/plan initial)))))]
          (let [same (walk/root-pull-plan
                      (assoc (request connection)
                             :seon.render.walk/root-acquisition initial))

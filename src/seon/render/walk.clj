@@ -311,27 +311,29 @@
                        (schema/current-projection)
                        {})
         distance (long (get request :seon.render/distance 1))
-        previous (or (:seon.render.walk/root-pull-plan request)
-                     (:seon.render.walk/root-acquisition request))
-        fingerprint (:seon.schema.projection/fingerprint projection)]
-    (if (and (= fingerprint
-                (:seon.schema.projection/fingerprint previous))
-             (= distance (:seon.render/distance previous))
-             (= caps (:seon.sci.admit/caps previous)))
-      (select-keys previous
-                   [:seon.schema.projection/fingerprint
-                    :seon.render/distance
-                    :seon.sci.admit/caps
-                    :seon.render.walk/selector
-                    :datahike.pull/plan])
-      (let [selector (root-selector database distance caps)]
-        {:seon.schema.projection/fingerprint fingerprint
-         :seon.render/distance distance
-         :seon.sci.admit/caps caps
-         :seon.render.walk/selector selector
-         :datahike.pull/plan
-         ((requiring-resolve 'datahike.pull-api/compile-pull-plan)
-          database selector)}))))
+        selector (root-selector database distance caps)
+        cache (:seon.schema.projection/compiled projection)
+        cache-key [::root-pull-plan distance caps selector]
+        candidate
+        (delay
+          {:seon.schema.projection/fingerprint
+           (:seon.schema.projection/fingerprint projection)
+           :seon.render/distance distance
+           :seon.sci.admit/caps caps
+           :seon.render.walk/selector selector
+           :datahike.pull/plan
+           ((requiring-resolve 'datahike.pull-api/compile-pull-plan)
+            database selector)})
+        acquired
+        (if cache
+          (get (swap! cache
+                      (fn [compiled]
+                        (if (contains? compiled cache-key)
+                          compiled
+                          (assoc compiled cache-key candidate))))
+               cache-key)
+          candidate)]
+    @acquired))
 
 (defn root-acquisition
   "Pull and index one agent-root neighbourhood by stable entity identity.
