@@ -2003,6 +2003,7 @@
                         {:seon.sci.admit/value value
                          :seon.sci.admit/interrupt-fn interrupt-fn
                          :seon.sci.admit/caps caps
+                         :seon.schema/projection projection
                          ;; R41 travels WITH the request: admission does
                          ;; not read a dial of its own, and this
                          ;; evaluator does not default one
@@ -2045,6 +2046,9 @@
                  {:seon.sci.admit/value value
                   :seon.sci.admit/interrupt-fn (constantly nil)
                   :seon.sci.admit/caps caps
+                  :seon.schema/projection
+                  (evaluation-projection
+                   {:seon.sci.eval/ctx evaluation-ctx})
                   :seon.config/on-core-error :record
                   :seon.sci.admit/record record})]
           (failed-evaluation

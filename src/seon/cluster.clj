@@ -300,6 +300,10 @@
                {:seon.sci.admit/value (or exception-summary-value value)
                 :seon.sci.admit/interrupt-fn (fn [])
                 :seon.sci.admit/caps caps
+                :seon.schema/projection
+                (some-> (:seon.sci.eval/ctx instance)
+                        env/of
+                        :seon.schema/projection)
                 :seon.config/on-core-error
                 (:seon.config/on-core-error effective)}))
             artifact (render.value/artifact admitted)
