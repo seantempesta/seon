@@ -299,6 +299,39 @@
         {:seon.render.walk/members {}
          :seon.render.walk/order []}))))
 
+(defn root-pull-plan
+  "Acquire one immutable compiled pull plan for a schema generation and fit."
+  {:malli/schema [:=> [:cat :seon.render.walk/acquisition-request] :map]}
+  [{database :seon.db/db
+    caps :seon.sci.admit/caps
+    ctx :seon.sci.eval/ctx
+    :as request}]
+  (let [projection (or (sci.kernel/context-projection ctx)
+                       (schema/current-projection)
+                       {})
+        distance (long (get request :seon.render/distance 1))
+        previous (or (:seon.render.walk/root-pull-plan request)
+                     (:seon.render.walk/root-acquisition request))
+        fingerprint (:seon.schema.projection/fingerprint projection)]
+    (if (and (= fingerprint
+                (:seon.schema.projection/fingerprint previous))
+             (= distance (:seon.render/distance previous))
+             (= caps (:seon.sci.admit/caps previous)))
+      (select-keys previous
+                   [:seon.schema.projection/fingerprint
+                    :seon.render/distance
+                    :seon.sci.admit/caps
+                    :seon.render.walk/selector
+                    :datahike.pull/plan])
+      (let [selector (root-selector database distance caps)]
+        {:seon.schema.projection/fingerprint fingerprint
+         :seon.render/distance distance
+         :seon.sci.admit/caps caps
+         :seon.render.walk/selector selector
+         :datahike.pull/plan
+         ((requiring-resolve 'datahike.pull-api/compile-pull-plan)
+          selector)}))))
+
 (defn root-acquisition
   "Pull and index one agent-root neighbourhood by stable entity identity.
 
@@ -309,7 +342,6 @@
   {:malli/schema [:=> [:cat :seon.render.walk/acquisition-request] :map]}
   [{database :seon.db/db
     lookup :seon.render.walk/lookup
-    caps :seon.sci.admit/caps
     ctx :seon.sci.eval/ctx
     :as request}]
   (let [projection (or (sci.kernel/context-projection ctx)
@@ -318,11 +350,19 @@
     (schema/call-with-projection
      projection
      (fn []
-       (let [distance (long (get request :seon.render/distance 1))
-             selector (root-selector database distance caps)
-             root (db/pull database selector lookup)]
-         (merge {:seon.render.walk/selector selector
-                 :seon.render.walk/root root}
+       (let [{distance :seon.render/distance
+              caps :seon.sci.admit/caps
+              selector :seon.render.walk/selector
+              plan :datahike.pull/plan
+              :as pull-plan}
+             (or (:seon.render.walk/root-pull-plan request)
+                 (root-pull-plan request))
+             root (db/pull database
+                           {:selector selector
+                            :eid lookup
+                            :datahike.pull/plan plan})]
+         (merge pull-plan
+                {:seon.render.walk/root root}
                 (acquisition-members database root distance caps)))))))
 
 (defn membership-diff

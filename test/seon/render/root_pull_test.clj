@@ -2,6 +2,7 @@
   "Class regressions for schema-derived root acquisition and membership."
   (:require [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [datahike.pull-api :as pull-api]
             [seon.config :as config]
             [seon.db :as db]
             [seon.render.walk :as walk]
@@ -47,7 +48,10 @@
 
 (defn- acquire
   [connection]
-  (walk/root-acquisition (request connection)))
+  (let [acquisition-request (request connection)]
+    (walk/root-acquisition
+     (assoc acquisition-request :seon.render.walk/root-pull-plan
+            (walk/root-pull-plan acquisition-request)))))
 
 (defn- member-lookups
   [acquisition]
@@ -78,6 +82,41 @@
        (is (schema/valid-candidate-value? :seon.render.walk/units units))
        (is (every? #(not (contains? % :seon.render.walk/changed-at))
                    units))))))
+
+(deftest compiled-root-plan-rides-its-schema-generation-distance-and-caps
+  (support/with-database
+   {:seon.test-support/extra-schema root-pull-schema}
+   (fn [connection]
+     (db/transact! connection [{::root-id "root" ::value "one"}])
+     (let [initial (walk/root-pull-plan (request connection))
+           compile-count (atom 0)]
+       (with-redefs [pull-api/compile-pull-plan
+                     (fn [selector-or-plan]
+                       (if (pull-api/pull-plan? selector-or-plan)
+                         selector-or-plan
+                         (do
+                           (swap! compile-count inc)
+                           (:datahike.pull/plan initial))))]
+         (let [same (walk/root-pull-plan
+                     (assoc (request connection)
+                            :seon.render.walk/root-acquisition initial))
+               nearer (walk/root-pull-plan
+                       (assoc (request connection)
+                              :seon.render/distance 0
+                              :seon.render.walk/root-acquisition initial))
+               shallower-caps
+               (assoc caps :seon.config.eval.result/max-depth 63)
+               recapped (walk/root-pull-plan
+                         (assoc (request connection)
+                                :seon.sci.admit/caps shallower-caps
+                                :seon.render.walk/root-acquisition initial))]
+           (is (identical? (:datahike.pull/plan initial)
+                           (:datahike.pull/plan same))
+               "an unchanged immutable acquisition key reuses its plan")
+           (is (= 2 @compile-count)
+               "distance and caps changes each compile one replacement")
+           (is (= 0 (:seon.render/distance nearer)))
+           (is (= shallower-caps (:seon.sci.admit/caps recapped)))))))))
 
 (defn- reverse-attribute
   [attribute]
@@ -280,6 +319,11 @@
              "the relevant attribute revision selects the root read")
          (is (= 1 @pulls) "the semantically equal root read replays once")
          (is (false? (:changed? refreshed)))
+         (is (identical?
+              (:datahike.pull/plan
+               (:seon.render.call/output initial-entry))
+              (:datahike.pull/plan (:acquisition refreshed)))
+             "W2 hands the retained compiled plan through its replay")
          (is (empty? appended) "semantic equality appends no entry")
          (is (empty? (#'web/candidate-call-ids
                       {call-id (:entry refreshed)} database))

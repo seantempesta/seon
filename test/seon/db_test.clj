@@ -2,6 +2,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [datahike.api :as d]
+            [datahike.pull-api :as pull-api]
             [seon.config :as config]
             [seon.db :as db]
             [seon.instrument :as instrument]
@@ -339,6 +340,10 @@
               (mapv :seon.db/source-argument-position @entries)))
        (is (every? #(contains? % :datahike.read/dependency-plan)
                    @entries))
+       (is (not-any?
+            #(and (map? %) (contains? % :datahike.pull/plan))
+            (tree-seq coll? seq @entries))
+           "captured pull replay arguments retain ordinary selector data")
        (is (every? #(schema/valid-candidate-value?
                      :seon.db/captured-read %)
                    @entries))))))
@@ -481,9 +486,9 @@
      (let [database @connection
            entity-ids [schema-ref missing-schema-ref schema-ref]
            calls (atom [])
-           pull-many-with-evidence d/pull-many-with-evidence
+           pull-many-with-evidence pull-api/pull-many-plan-with-evidence
            entries (atom [])]
-       (with-redefs [d/pull-many-with-evidence
+       (with-redefs [pull-api/pull-many-plan-with-evidence
                      (fn [db-value pattern eids]
                        (swap! calls conj [db-value pattern eids])
                        (pull-many-with-evidence db-value pattern eids))]

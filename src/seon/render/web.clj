@@ -750,7 +750,10 @@
 
 (defn- acquire-root
   [request call-id]
-  (let [captured (atom [])
+  (let [pull-plan
+        ((requiring-resolve 'seon.render.walk/root-pull-plan) request)
+        request (assoc request :seon.render.walk/root-pull-plan pull-plan)
+        captured (atom [])
         acquisition
         (binding [db/*read-evidence-sink* captured]
           ((requiring-resolve 'seon.render.walk/root-acquisition) request))]
@@ -771,7 +774,13 @@
   (let [previous (get retained call-id)
         previous-acquisition (:seon.render.call/output previous)]
     (if (or (nil? previous) (contains? candidates call-id))
-      (let [[acquisition entry] (acquire-root request call-id)]
+      (let [[acquisition entry]
+            (acquire-root
+             (cond-> request
+               previous-acquisition
+               (assoc :seon.render.walk/root-acquisition
+                      previous-acquisition))
+             call-id)]
         {:acquisition acquisition
          :entry entry
          :changed? (not= previous-acquisition acquisition)})

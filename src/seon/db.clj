@@ -14,7 +14,6 @@
             [datahike.query :as query]
             [datahike.store :as datahike.store]
             [datalog.parser.impl.proto :as parser]
-            [datalog.parser.pull :as pull.parser]
             [clojure.test.check.generators :as gen]
             [seon.env :as env]
             [seon.error.refusal :as error.refusal]
@@ -261,13 +260,22 @@
 
 (defn- append-pull-evidence!
   [database arguments operation-key response result]
-  (append-read-evidence!
-   {:seon.db/db database
-    :seon.db/source-argument-position 0
-    :datahike.read/dependency-plan (:datahike.read/dependency-plan response)
-    :seon.db/read-request {:seon.db/read-operation operation-key
-                           :seon.db/pull-arguments arguments}
-    :seon.db/read-result (stable-read-result result)}))
+  (let [selector
+        ((requiring-resolve 'datahike.pull-api/pull-plan-selector)
+         (:datahike.pull/plan response))
+        replay-arguments
+        (if (map? (first arguments))
+          (assoc arguments 0 (-> (first arguments)
+                                 (assoc :selector selector)
+                                 (dissoc :datahike.pull/plan)))
+          (assoc arguments 0 selector))]
+    (append-read-evidence!
+     {:seon.db/db database
+      :seon.db/source-argument-position 0
+      :datahike.read/dependency-plan (:datahike.read/dependency-plan response)
+      :seon.db/read-request {:seon.db/read-operation operation-key
+                             :seon.db/pull-arguments replay-arguments}
+      :seon.db/read-result (stable-read-result result)})))
 
 ;;; The committed identity a retained read's revision is keyed on. Datahike
 ;;; derives its OWN query-cache key exactly this way
@@ -361,7 +369,18 @@
                    :seon.db/read-result (:seon.db/read-result entry))))
         captured))
 
-(declare decode-query-result decode-pull-result pull-selector read-declarations)
+(declare decode-query-result decode-pull-result read-declarations)
+
+(defn- pull-plan-with-evidence
+  [& arguments]
+  (apply (requiring-resolve 'datahike.pull-api/pull-plan-with-evidence)
+         arguments))
+
+(defn- pull-many-plan-with-evidence
+  [& arguments]
+  (apply (requiring-resolve
+          'datahike.pull-api/pull-many-plan-with-evidence)
+         arguments))
 
 (defn- replay-read
   [database request]
@@ -378,17 +397,17 @@
 
     :pull
     (let [arguments (:seon.db/pull-arguments request)
-          response (apply d/pull-with-evidence database arguments)]
+          response (apply pull-plan-with-evidence database arguments)]
       (decode-pull-result (read-declarations database)
-                          (pull-selector arguments)
+                          (:datahike.pull/plan response)
                           :datahike.pull/result
                           (:datahike.pull/result response)))
 
     :pull-many
     (let [arguments (:seon.db/pull-arguments request)
-          response (apply d/pull-many-with-evidence database arguments)]
+          response (apply pull-many-plan-with-evidence database arguments)]
       (decode-pull-result (read-declarations database)
-                          (pull-selector arguments)
+                          (:datahike.pull/plan response)
                           :datahike.pull-many/result
                           (:datahike.pull-many/result response)))))
 
@@ -605,13 +624,6 @@
       (update result :ret decode-result)
       (decode-result result))))
 
-(defn- pull-selector
-  [arguments]
-  (let [selector-or-options (first arguments)]
-    (if (map? selector-or-options)
-      (:selector selector-or-options)
-      selector-or-options)))
-
 (defn- pull-output-options
   [spec]
   (into {}
@@ -660,8 +672,8 @@
      entity)))
 
 (defn- decode-pull-result
-  [declarations selector result-key result]
-  (let [spec (pull.parser/parse-pull selector)]
+  [declarations plan result-key result]
+  (let [spec ((requiring-resolve 'datahike.pull-api/pull-plan-spec) plan)]
     (if (= :datahike.pull-many/result result-key)
       (mapv #(when % (decode-pull-entity declarations spec %)) result)
       (when result (decode-pull-entity declarations spec result)))))
@@ -833,9 +845,11 @@
     database
     (try
       (let [response (apply operation database arguments)
-            selector (pull-selector arguments)
-            result (decode-pull-result (read-declarations database) selector result-key
-                                       (get response result-key))]
+            result (decode-pull-result
+                    (read-declarations database)
+                    (:datahike.pull/plan response)
+                    result-key
+                    (get response result-key))]
         (append-pull-evidence! database arguments operation-key response result)
         result)
       (catch Throwable cause
@@ -861,7 +875,7 @@
   ([options]
    (pull-call (current-database-value)
               [options]
-              d/pull-with-evidence
+              pull-plan-with-evidence
               :pull
               :datahike.pull/result))
   ([database-or-selector options-or-eid]
@@ -869,18 +883,18 @@
            (error-value? database-or-selector))
      (pull-call database-or-selector
                 [options-or-eid]
-                d/pull-with-evidence
+                pull-plan-with-evidence
                 :pull
                 :datahike.pull/result)
      (pull-call (current-database-value)
                 [database-or-selector options-or-eid]
-                d/pull-with-evidence
+                pull-plan-with-evidence
                 :pull
                 :datahike.pull/result)))
   ([database selector entity-id]
    (pull-call database
               [selector entity-id]
-              d/pull-with-evidence
+              pull-plan-with-evidence
               :pull
               :datahike.pull/result)))
 
@@ -905,7 +919,7 @@
   ([options]
    (pull-call (current-database-value)
               [options]
-              d/pull-many-with-evidence
+              pull-many-plan-with-evidence
               :pull-many
               :datahike.pull-many/result))
   ([database-or-selector options-or-eids]
@@ -913,18 +927,18 @@
            (error-value? database-or-selector))
      (pull-call database-or-selector
                 [options-or-eids]
-                d/pull-many-with-evidence
+                pull-many-plan-with-evidence
                 :pull-many
                 :datahike.pull-many/result)
      (pull-call (current-database-value)
                 [database-or-selector options-or-eids]
-                d/pull-many-with-evidence
+                pull-many-plan-with-evidence
                 :pull-many
                 :datahike.pull-many/result)))
   ([database selector entity-ids]
    (pull-call database
               [selector entity-ids]
-              d/pull-many-with-evidence
+              pull-many-plan-with-evidence
               :pull-many
               :datahike.pull-many/result)))
 
@@ -934,7 +948,7 @@
   ;; expand recursively and ordinary refs remain plain {:db/id ...} maps.
   (pull-call database
              [['*] entity-id]
-             d/pull-with-evidence
+             pull-plan-with-evidence
              :pull
              :datahike.pull/result))
 
