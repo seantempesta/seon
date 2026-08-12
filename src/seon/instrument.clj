@@ -506,7 +506,9 @@
 (defn- registration-cause-data
   [failure]
   (loop [deepest (ex-data failure)]
-    (if-let [nested (and (map? deepest) (:exception deepest))]
+    (if-let [nested (and (map? deepest)
+                         (or (:exception deepest)
+                             (get-in deepest [:data :exception])))]
       (let [nested-data (ex-data nested)]
         (recur (or nested-data deepest)))
       deepest)))
