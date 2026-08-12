@@ -32,6 +32,16 @@ The runner retained the failed isolated root at
 whether a process, thread, or cache writer outlived its published completion
 still needs a direct probe.
 
+The W1 integration gate reproduced
+`interrupted-launcher-awaits-its-runner-before-retaining-the-root` as its one
+parallel-only error: the fake runner never published readiness
+(`tmp/orchestrator/w1-integration-stdout.log:413122-413161`). A subsequent
+focused `bin/test seon.gen.loop-test` attempt also failed before its selected
+tests while deleting a worker's `test/seon/schema_edn_fixtures/valid` path.
+Both observations remain outside W1's changed owners and reinforce the same
+completion-before-cleanup boundary without attributing the still-unproven
+writer lifetime.
+
 ## Owner
 
 The test-runner interruption/completion boundary and the worker-root cleanup

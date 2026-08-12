@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, agent, runtime, testing]
 ---
@@ -42,3 +42,13 @@ The fixture proves its run identity and frozen form/receipt census exist before
 asserting routing. Setup failure yields one explicit refusal rather than
 settled-by-absence cascades. All three vars exercise their intended durable
 facts.
+
+## Resolution
+
+Commit `ee4f1cd3e` replaced the deleted schema-wall prose discriminator
+(`Agent <id> ...`) with the namespace in W1's first retained REPL prompt,
+using the fixture's one declared agent/namespace relation for both creation and
+provider selection. Before the change each planner reply was misclassified as
+root and froze one form plus one receipt; after it,
+`clojure -M:test` ran `seon.gen.loop-test` as 3 tests / 92 assertions / 0
+failures / 0 errors. The routing and settlement assertions are unchanged.

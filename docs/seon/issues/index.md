@@ -16,12 +16,13 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (34)
+## Blocker (35)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Make the render value floor total over ordinary unqualified-key maps](render-value-floor-refuses-any-map-with-unqualified-keys.md) | blocker | interface-economy W1 total-floor wave |
 | [Publish terminal evidence for every background binary result](background-binary-settlement-does-not-publish-required-event.md) | blocker | background settlement investigation |
+| [Derive a completion reply from the triggering message](message-completion-replies-from-the-wrong-agent-and-duplicates-the-trigger.md) | blocker | message delivery repair wave |
 | [Register the fault committer before the cluster graph can emit](fault-committer-misses-the-first-injected-fault.md) | blocker | fault-facts verification pending W1 integration |
 | [Stop the bootstrap plan's deliberate failures from interrupting the run](bootstrap-teaching-failures-strand-every-new-agent.md) | blocker | agent context repair wave (2026-08-10 audit) |
 | [Every agent prompt is a neighborhood render-walk contract violation](every-agent-prompt-is-a-neighborhood-render-walk-contract-violation.md) | blocker | live-drive context repair wave |
@@ -53,7 +54,7 @@ See `README.md` for the convention.
 | [Settle what arrived when a provider stream closes mid-body](a-mid-stream-provider-disconnect-discards-the-whole-turn.md) | blocker | whole-system arc repair wave |
 | [Await every worker writer before deleting its root](test-runner-cleans-a-worker-root-while-kondo-is-still-writing.md) | blocker | test runner cleanup repair wave |
 
-## Friction (136)
+## Friction (135)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -190,7 +191,6 @@ See `README.md` for the convention.
 | [Admit definitions after dynamically hidden namespace movement](dynamic-in-ns-cannot-persist-definition-namespace.md) | friction | per-run fork context wave |
 | [Preserve the interrupted blob staging artifact until it can be observed](interrupted-blob-staging-leaves-no-observable-artifact.md) | friction | blob staging repair wave |
 | [Reconcile the error-class catalog with declared schemas and renderers](error-class-catalog-and-renderers-disagree.md) | friction | error class contract repair |
-| [Make the generative loop fixture commit the run facts it asserts](generative-loop-fixture-commits-no-run-facts.md) | friction | generative loop fixture repair |
 
 ## Cleanup (13)
 
