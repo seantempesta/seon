@@ -68,7 +68,7 @@
     (str "; Good — a wrong call is an error value, not a crash. Now pin "
          "the behavior with a test others will find as my usage example.")
     :seon.repl/form
-    '(clojure.test/deftest ^{:seon.test/usage true} largest-usage
+    '(clojure.test/deftest largest-usage
        (clojure.test/is
         (= {:example/label "b" :example/amount 9}
            (largest [{:example/label "a" :example/amount 3}

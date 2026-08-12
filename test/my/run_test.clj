@@ -103,6 +103,11 @@
     (is (every? :seon.repl/comment entries))
     (is (= ['defn 'defn 'largest 'clojure.test/deftest 'my.run/complete]
            (mapv first forms)))
+    (is (= [nil true]
+           [(-> forms (nth 3) second meta :seon.test/usage)
+            (-> #'the-lifecycle-walkthrough-is-executable-data
+                meta
+                :seon.test/usage)]))
     (is (= :not-a-row-sequence (second (nth forms 2))))
     (is (= :completed
            (:my.run/disposition
