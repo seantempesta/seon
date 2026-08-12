@@ -76,6 +76,34 @@ back — everywhere, for every agent, with no maintained list of forms.
     already-declared agent-id member), persistent and shared at the cluster;
     never a second environment noun.
 
+## Rulings 24-28 (owner, 2026-08-12 midday — the generated episode)
+
+24. **The opening episode is GENERATED, never authored**: `bootstrap.edn`
+    and the stored form plan are DELETED ("so we don't revert back...
+    force us to fully think through an elegant solution"). The opening is
+    the executed render of the fresh agent's walk: pull -> per-unit render
+    selection -> introduction-ordered (comment, form) vector -> executed in
+    the agent's fork as the ordinary system-authored run, real receipts.
+25. **`(help)` is the agent entity's own declared render** — the walk's
+    root unit; form `(help)`; value = the live situation DATA (a declared
+    shape: id, namespace ref, unread count, open run, protocol namespaces);
+    orientation prose is that shape's /ai render function. First by
+    topology: nothing can precede the root, and every later form's subject
+    is introduced by an earlier value (introduction-ordering IS the
+    causality rule — inbox before read falls out).
+26. **Demonstrations are `^{:seon.test/usage true}` tests**: one walkthrough
+    usage test in my.run is the episode's arc (scratch->contract->error->
+    test->complete), rendered as its ordered forms and executed in the
+    fork. Suite-gated: bin/test goes red before any agent sees a rotten
+    lesson. Demonstrations are uniform — bootstrap is not special.
+27. **The unit render may carry the agent-voice comment**
+    (`{comment, form}` from the form projection, accretion-open): think-
+    then-act is modeled by the render function that owns the unit.
+28. **Strict dogfooding is standing**: no manually assembled context
+    anywhere — every context surface must trace to the walk + declared
+    renders + executed receipts; a hand-assembled prompt fragment found
+    anywhere is a defect.
+
 ## The mechanism (composed from the verified reports)
 
 ### One derivation
