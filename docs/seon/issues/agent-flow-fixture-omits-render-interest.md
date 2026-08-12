@@ -9,10 +9,10 @@ tags: [issue, testing, flow, render]
 
 ## Problem
 
-The agent-flow property fixture constructs `seon.render.web/render-step`
-without the declared `:seon.render.web/interest` reference. Flow therefore
-refuses during proc initialization before either agent conservation property
-can exercise its graph lifecycle.
+The agent-flow property fixture and the loop settings fixture constructed
+`seon.render.web/render-step` without the declared
+`:seon.render.web/interest` reference. Flow therefore refused during proc
+initialization before either fixture could exercise its subject.
 
 ## Evidence
 
@@ -26,15 +26,21 @@ can exercise its graph lifecycle.
   construction boundary. Final property verification is blocked by the
   projection lane's in-flight source population, which currently fails static
   contract indexing with `EOF while reading`.
+- The same missing dependency reproduced in
+  `prompt-and-call-resolve-once-record-settings-and-see-next-turn-config` at
+  `test/seon/cluster/loop_test.clj`; supplying the same `(atom :all)` fixture
+  value closes that member of the class.
 
 ## Owner
 
-The hand-built render graph fixture in
-`test/seon/cluster/agent_test.clj`.
+The hand-built render graph fixtures in `test/seon/cluster/agent_test.clj`
+and `test/seon/cluster/loop_test.clj`.
 
 ## Acceptance
 
 - Both agent conservation properties reach their graph behavior without a
   missing-port refusal.
+- The loop settings fixture reaches its config-acquisition assertions without
+  a missing-port refusal.
 - The focused namespace passes after the protected projection source is
   coherent.
