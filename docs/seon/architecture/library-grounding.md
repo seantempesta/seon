@@ -17,7 +17,7 @@ These are the maintained source revisions verified for this map:
 
 | Dependency | Revision |
 |---|---|
-| Datahike | `15d98da60991b6ded59b15cf0d499a7055a02266` |
+| Datahike | `cdcb5792db8bd599487f099437265d18a31164a5` |
 | Konserve | `07377c27c8288b7484f0aa7b82e8158b415985be` |
 | SCI | `fcbd8862800e638dc0f8f5521111f999279cbcd2` |
 | core.async | `dc35f3e0d7bc2eef502e77982f48641f025c8051` |

@@ -37,7 +37,7 @@ Read `references/fork-maintenance.md` before editing the fork. It maps:
   `seon.datahike-fork-test` acceptance gate.
 
 The root gitlink and checkout currently select
-`15d98da60991b6ded59b15cf0d499a7055a02266`. Verify both before every fork edit;
+`cdcb5792db8bd599487f099437265d18a31164a5`. Verify both before every fork edit;
 the selected identity comes from `git ls-files -s reference-code/datahike` and
 `git -C reference-code/datahike rev-parse HEAD`. The dependency ledger and
 source map are in `references/fork-maintenance.md`. Never treat a historical

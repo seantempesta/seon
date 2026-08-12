@@ -33,7 +33,7 @@ git -C reference-code/datahike rev-parse HEAD
 ```
 
 Both currently select
-`15d98da60991b6ded59b15cf0d499a7055a02266`. Treat `357ffc87` and
+`cdcb5792db8bd599487f099437265d18a31164a5`. Treat `357ffc87` and
 `19f5cdd9` only as repair provenance; neither is the selected revision.
 
 | Mechanism | Selected-revision source | Seon acceptance |
