@@ -1099,18 +1099,28 @@
           (function-row "sample.reach/bridge"
                         [[:seon.fn/sym "sample.reach/target"]])
           (function-row "sample.reach/direct"
-                        [[:seon.fn/sym "sample.reach/target"]])])
+                        [[:seon.fn/sym "sample.reach/target"]])
+          (function-row "sample.reach/untested" nil)])
         (db/transact!
          connection
          [(test-row "sample.reach/direct"
                     {:seon.fn/calls
-                     [[:seon.fn/sym "sample.reach/target"]]})
+                     [[:seon.fn/sym "sample.reach/target"]]
+                     :seon.test/pass-count 0
+                     :seon.test/fail-count 1
+                     :seon.test/error-count 0})
           (test-row "sample.reach/indirect"
                     {:seon.fn/calls
-                     [[:seon.fn/sym "sample.reach/bridge"]]})
+                     [[:seon.fn/sym "sample.reach/bridge"]]
+                     :seon.test/pass-count 1
+                     :seon.test/fail-count 0
+                     :seon.test/error-count 0})
           (test-row "sample.reach/property"
                     {:seon.test/subject
-                     [:seon.fn/sym "sample.reach/bridge"]})])
+                     [:seon.fn/sym "sample.reach/bridge"]
+                     :seon.test/pass-count 1
+                     :seon.test/fail-count 0
+                     :seon.test/error-count 0})])
         (is (not= (:db/id (db/pull @connection [:db/id]
                                    [:seon.fn/sym "sample.reach/direct"]))
                   (:db/id (db/pull @connection [:db/id]
@@ -1124,6 +1134,14 @@
                    (db/pull @connection [:seon.fn/calls]
                             [:seon.test/sym "sample.reach/property"])))
             "the schema-property test reaches its subject without a call edge")
+        (is (= ["sample.reach/target"]
+               (filterv #(str/starts-with? % "sample.reach/")
+                        (seon.fn/currently-failing-functions @connection)))
+            "red latest-result facts derive failing functions through calls")
+        (is (= ["sample.reach/direct" "sample.reach/untested"]
+               (filterv #(str/starts-with? % "sample.reach/")
+                        (seon.fn/functions-without-tests @connection)))
+            "absence is derived from the same test-reach graph")
         (is (= []
                (seon.fn/tests-reaching @connection "sample.reach/absent")))))))
 

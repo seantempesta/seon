@@ -1,8 +1,0 @@
-#:seon.test.failure{:failure
-                    [:map
-                     #:seon.db{:entity true}
-                     [:seon.test.failure/id :seon.test.failure/id]
-                     [:seon.test.failure/message
-                      :seon.test.failure/message]],
-                    :id [:string {:min 1, :seon.db/identity true}],
-                    :message [:string {:min 1}]}

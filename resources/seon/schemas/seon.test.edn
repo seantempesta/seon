@@ -2,9 +2,49 @@
             :source :string,
             :subject :seon.db/ref,
             :usage :boolean,
+            :pass-count [:int {:min 0}],
+            :fail-count [:int {:min 0}],
+            :error-count [:int {:min 0}],
+            :run-basis-t :seon.db/basis-t,
+            :run-at :inst,
+            :failure-identity
+            [:string {:min 64, :max 64, :seon.search/index :exact}],
+            :failing-assertions
+            [:vector {:seon.db/cardinality :many}
+             :seon.test/failure-identity],
+            :failure-message :string,
+            :var
+            [:fn
+             {:error/message "must be a host or SCI Var"
+              :gen/gen seon.test.runner/var-generator}
+             seon.test.runner/var-reference?],
+            :not-runnable :string,
+            :not-runnable-error
+            [:map
+             {:seon.error/class true
+              :seon.render/ai seon.error/render-ai
+              :seon.render/html seon.error/render-html
+              :error/message "must identify the Var with no test function"}
+             [:seon.test/not-runnable :seon.test/not-runnable]
+             [:seon.error/message :seon.error/message]],
             :sym
             [:string
              {:min 1, :seon.db/identity true, :seon.search/index :symbol}],
+            :result
+            [:map
+             [:seon.test/sym :seon.test/sym]
+             [:seon.test/pass-count :seon.test/pass-count]
+             [:seon.test/fail-count :seon.test/fail-count]
+             [:seon.test/error-count :seon.test/error-count]
+             [:seon.test/run-basis-t :seon.test/run-basis-t]
+             [:seon.test/run-at :seon.test/run-at]
+             [:seon.test/failing-assertions
+              {:optional true}
+              :seon.test/failing-assertions]
+             [:seon.test/failure-message
+              {:optional true}
+              :seon.test/failure-message]],
+            :results [:vector :seon.test/result],
             :test
             [:map
              #:seon.db{:entity true}
@@ -16,4 +56,23 @@
              [:seon.fn/calls {:optional true} :seon.fn/calls]
              [:seon.fn/keywords {:optional true} :seon.fn/keywords]
              [:seon.test/usage {:optional true} :seon.test/usage]
-             [:seon.test/subject {:optional true} :seon.test/subject]]}
+             [:seon.test/subject {:optional true} :seon.test/subject]
+             [:seon.test/pass-count
+              {:optional true}
+              :seon.test/pass-count]
+             [:seon.test/fail-count
+              {:optional true}
+              :seon.test/fail-count]
+             [:seon.test/error-count
+              {:optional true}
+              :seon.test/error-count]
+             [:seon.test/run-basis-t
+              {:optional true}
+              :seon.test/run-basis-t]
+             [:seon.test/run-at {:optional true} :seon.test/run-at]
+             [:seon.test/failing-assertions
+              {:optional true}
+              :seon.test/failing-assertions]
+             [:seon.test/failure-message
+              {:optional true}
+              :seon.test/failure-message]]}

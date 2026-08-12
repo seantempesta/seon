@@ -1,11 +1,13 @@
 (ns seon.test-runner-test
-  "The opt-in JVM test-result fact sink."
+  "Declared latest-result facts owned by the JVM test runner."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :as test :refer [deftest is testing]]
             [seon.config :as config]
             [seon.db :as db]
             [seon.cluster.agent :as agent]
+            [seon.env :as env]
+            [seon.sci.eval :as eval]
             [seon.cluster.boot-test]
             [seon.test-runner-failure-fixture]
             [seon.test.runner :as runner]
@@ -139,7 +141,7 @@
     (is (not (#'runner/atomic-namespace-task? namespace-object))
         "each boot test receives a private base clone and can be queued alone")))
 
-(deftest captures-one-pass-or-fail-value-per-test
+(deftest captures-counts-and-failure-identities-per-test
   (let [result (captured-run)
         by-symbol (into {}
                         (map (juxt :seon.test/sym identity))
@@ -149,16 +151,19 @@
                               :fail-count 1
                               :error-count 8}
            (:seon.test.runner/summary result)))
-    (is (= :pass
-           (:seon.test.result/outcome
-            (by-symbol
-             "seon.test-runner-failure-fixture/passing-example"))))
-    (is (= :fail
-           (:seon.test.result/outcome
-            (by-symbol
-             "seon.test-runner-failure-fixture/failing-example"))))
+    (is (= #:seon.test{:pass-count 1 :fail-count 0 :error-count 0}
+           (select-keys
+            (by-symbol "seon.test-runner-failure-fixture/passing-example")
+            [:seon.test/pass-count
+             :seon.test/fail-count
+             :seon.test/error-count])))
+    (is (= 1
+           (count
+            (:seon.test/failing-assertions
+             (by-symbol
+              "seon.test-runner-failure-fixture/failing-example")))))
     (is (str/includes?
-         (:seon.test.failure/message
+         (:seon.test/failure-message
           (by-symbol
            "seon.test-runner-failure-fixture/failing-example"))
          "deliberate broken-test evidence"))))
@@ -169,7 +174,7 @@
                         (map (juxt :seon.test/sym identity))
                         (:seon.test.runner/results result))
         repeated-message
-        (:seon.test.failure/message
+        (:seon.test/failure-message
          (by-symbol
           "seon.test-runner-failure-fixture/repeated-identical-error"))
         repeated-signature (apply str (repeat 64 "a"))
@@ -194,12 +199,23 @@
       (is (= 1 (occurrences repeated-message
                             "the same refusal reached the reporter again"))))))
 
-(deftest result-facts-join-through-test-namespace-to-its-owner
+(deftest result-facts-live-on-the-test-row-and-reruns-replace-them
   (test-support/with-database
     (fn [connection]
-      (let [run-result (captured-run)]
+      (let [run-result (captured-run)
+            basis-t (db/basis-t @connection)
+            completion
+            {:seon.test.runner/results
+             (:seon.test.runner/results run-result)
+             :seon.test/run-basis-t basis-t
+             :seon.test/run-at at}]
         (test-support/seed-cluster! connection "test")
-        (db/transact! connection (runner/record-tx run-result))
+        (let [committed (runner/commit-results! connection completion)]
+          (is (= (:seon.test.runner/results run-result)
+                 (mapv #(dissoc % :seon.test/run-basis-t
+                                :seon.test/run-at)
+                       committed))
+              "the completion value is pulled from the committed test rows"))
         (db/transact!
          connection
          (agent/creation-tx
@@ -209,27 +225,96 @@
         (is
          (= #{["seon.test-runner-failure-fixture/failing-example"
                 "fixture-owner"
-                "the deliberate broken-test evidence\nexpected: (= 5 (+ 2 2))\nactual: (not (= 5 4))"
-                at
-                git-sha]}
+                0 1 0 basis-t at]}
             (db/q
-             '[:find ?test-symbol ?agent-id ?message ?at ?git-sha
+             '[:find ?test-symbol ?agent-id ?passes ?failures ?errors
+               ?basis ?at
                :in $ ?selected-test
                :where
-               [?result :seon.test.result/outcome :fail]
-               [?result :seon.test.result/test ?test]
                [?test :seon.test/sym ?test-symbol]
                [(= ?test-symbol ?selected-test)]
                [?test :seon.test/ns ?namespace]
                [?agent :seon.cluster.agent/namespace ?namespace]
                [?agent :seon.cluster.agent/id ?agent-id]
-               [?result :seon.test.result/failure ?failure]
-               [?failure :seon.test.failure/message ?message]
-               [?result :seon.test.result/run ?run]
-               [?run :seon.test.run/at ?at]
-               [?run :seon.test.run/git-sha ?git-sha]]
+               [?test :seon.test/pass-count ?passes]
+               [?test :seon.test/fail-count ?failures]
+               [?test :seon.test/error-count ?errors]
+               [?test :seon.test/run-basis-t ?basis]
+               [?test :seon.test/run-at ?at]]
              @connection
-             "seon.test-runner-failure-fixture/failing-example")))))))
+             "seon.test-runner-failure-fixture/failing-example")))
+        (let [test-ref
+              [:seon.test/sym
+               "seon.test-runner-failure-fixture/failing-example"]
+              before (db/pull @connection
+                              [:db/id :seon.test/failing-assertions]
+                              test-ref)
+              next-basis (db/basis-t @connection)
+              green
+              (runner/commit-results!
+               connection
+               {:seon.test.runner/results
+                [#:seon.test{:sym (second test-ref)
+                             :pass-count 1
+                             :fail-count 0
+                             :error-count 0}]
+                :seon.test/run-basis-t next-basis
+                :seon.test/run-at (java.util.Date.)})
+              after (db/pull @connection
+                             [:db/id
+                              :seon.test/pass-count
+                              :seon.test/fail-count
+                              :seon.test/error-count
+                              :seon.test/failing-assertions
+                              :seon.test/failure-message]
+                             test-ref)]
+          (is (seq (:seon.test/failing-assertions before))
+              "the red run records its content-addressed failing assertion")
+          (is (= 1 (:seon.test/pass-count (first green))))
+          (is (= (:db/id before) (:db/id after))
+              "a rerun updates the existing indexed test row")
+          (is (= #:seon.test{:pass-count 1 :fail-count 0 :error-count 0}
+                 (select-keys after
+                              [:seon.test/pass-count
+                               :seon.test/fail-count
+                               :seon.test/error-count])))
+          (is (nil? (:seon.test/failing-assertions after)))
+          (is (nil? (:seon.test/failure-message after))))))))
+
+(deftest the-agent-fork-callable-returns-the-committed-projection
+  (test-support/with-database
+    (fn [connection]
+      (let [ctx
+            (env/carry-state
+             (test-support/fork-cluster-ctx connection)
+             (env/environment-state
+              (test-support/environment "test-result-agent" connection)))
+            evaluate
+            (fn [source]
+              (eval/evaluate
+               {:seon.cluster.run.form/source source
+                :seon.cluster.run.form/ns [:seon.ns/name 'user]
+                :seon.sci.eval/ctx ctx
+                :seon.sci.admit/caps
+                (config/result-caps (config/defaults))
+                :seon.sci.eval/time-limit-ms 5000
+                :seon.config/on-core-error :panic}))
+            _ (evaluate
+               "(require '[clojure.test :refer [deftest is]])")
+            _ (evaluate
+               "(deftest agent-fork-example (is (= 4 (+ 2 2))))")
+            result
+            (:seon.sci.admit/value
+             (evaluate "(seon.test/run #'agent-fork-example)"))
+            stored (db/pull @connection
+                            [:seon.test/sym
+                             :seon.test/pass-count
+                             :seon.test/fail-count
+                             :seon.test/error-count
+                             :seon.test/run-basis-t
+                             :seon.test/run-at]
+                            [:seon.test/sym (:seon.test/sym result)])]
+        (is (= result stored))))))
 
 (deftest the-effectful-sink-refuses-the-default-cluster
   (let [refusal

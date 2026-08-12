@@ -2,29 +2,33 @@
                    :fail-count [:int {:min 0}],
                    :namespaces [:vector :symbol],
                    :pass-count [:int {:min 0}],
+                   :captured-result
+                   [:map
+                    [:seon.test/sym :seon.test/sym]
+                    [:seon.test/pass-count :seon.test/pass-count]
+                    [:seon.test/fail-count :seon.test/fail-count]
+                    [:seon.test/error-count :seon.test/error-count]
+                    [:seon.test/failing-assertions
+                     {:optional true}
+                     :seon.test/failing-assertions]
+                    [:seon.test/failure-message
+                     {:optional true}
+                     :seon.test/failure-message]],
+                   :captured-results
+                   [:vector :seon.test.runner/captured-result],
+                   :completion
+                   [:map
+                    [:seon.test.runner/results
+                     :seon.test.runner/captured-results]
+                    [:seon.test/run-basis-t :seon.test/run-basis-t]
+                    [:seon.test/run-at :seon.test/run-at]],
                    :record-request
                    [:map
                     [:seon.test.runner/run-result
                      :seon.test.runner/run-result]
                     [:seon.boot/cluster-name :seon.boot/cluster-name]
                     [:seon.boot/root :seon.boot/root]],
-                   :record-tx [:vector :map],
-                   :recorded
-                   [:map
-                    [:seon.boot/cluster-name :seon.boot/cluster-name]
-                    [:seon.test.run/id :seon.test.run/id]
-                    [:seon.test.runner/recorded-count
-                     [:int {:min 0}]]],
-                   :result
-                   [:map
-                    [:seon.test/sym :seon.test/sym]
-                    [:seon.ns/name :seon.ns/name]
-                    [:seon.test.result/outcome
-                     :seon.test.result/outcome]
-                    [:seon.test.failure/message
-                     {:optional true}
-                     :seon.test.failure/message]],
-                   :results [:vector :seon.test.runner/result],
+                   :record-tx :seon.store/transaction-data,
                    :run-request
                    [:map
                     [:seon.test.runner/namespaces
@@ -40,7 +44,7 @@
                     [:seon.test.runner/summary
                      :seon.test.runner/summary]
                     [:seon.test.runner/results
-                     :seon.test.runner/results]],
+                     :seon.test.runner/captured-results]],
                    :summary
                    [:map
                     [:seon.test.runner/test-count

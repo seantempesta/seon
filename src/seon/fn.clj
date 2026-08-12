@@ -684,7 +684,13 @@
     [(test-reaches ?test ?target)
      [?test :seon.test/sym]
      [?test :seon.test/subject ?subject]
-     (function-reaches ?subject ?target)]])
+     (function-reaches ?subject ?target)]
+    [(test-currently-failing ?test)
+     [?test :seon.test/fail-count ?count]
+     [(pos? ?count)]]
+    [(test-currently-failing ?test)
+     [?test :seon.test/error-count ?count]
+     [(pos? ?count)]]])
 
 (defn tests-reaching
   "Test symbols that directly or transitively reach a function."
@@ -703,6 +709,50 @@
          sort
          vec)
     []))
+
+(defn currently-failing-functions
+  "Function symbols reached by a test whose latest committed result is red.
+
+  A rerun replaces the test row's result facts, so this query answers current
+  state without choosing a latest run from a separate history graph."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:vector :seon.fn/sym]]}
+  [database]
+  (->> (db/q '[:find [?function-symbol ...]
+               :in $ %
+               :where
+               (test-currently-failing ?test)
+               (test-reaches ?test ?function)
+               [?function :seon.fn/sym ?function-symbol]]
+             database test-reach-rules)
+       sort
+       vec))
+
+(defn functions-without-tests
+  "Indexed public functions reached by no indexed test.
+
+  Coverage is the `test-reaches` graph derivation used by `tests-reaching`;
+  this is set difference over query results, never a maintained roster."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:vector :seon.fn/sym]]}
+  [database]
+  (let [public-functions
+        (set (db/q '[:find [?function-symbol ...]
+                    :where
+                    [?function :seon.fn/sym ?function-symbol]
+                    [?function :seon.fn/private? false]]
+                  database))
+        tested-functions
+        (set (db/q '[:find [?function-symbol ...]
+                    :in $ %
+                    :where
+                    (test-reaches ?test ?function)
+                    [?function :seon.fn/sym ?function-symbol]
+                    [?function :seon.fn/private? false]]
+                  database test-reach-rules))]
+    (->> (set/difference public-functions tested-functions)
+         sort
+         vec)))
 
 (defn functions-using
   "Function symbols whose indexed source reads `keyword` literally.

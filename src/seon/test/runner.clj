@@ -5,24 +5,39 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :as test]
+            [clojure.test.check.generators :as gen]
+            [sci.impl.utils :as sci.utils]
             [seon.config :as config]
             [seon.db :as db]
             [seon.schema :as schema]
             [seon.test.selection :as selection])
   (:import (java.io BufferedReader PrintWriter StringWriter)
            (java.lang Process ProcessBuilder$Redirect ProcessHandle Runtime Thread)
+           (java.nio.charset StandardCharsets)
            (java.lang.management ManagementFactory ThreadInfo)
            (java.time Instant)
            (java.util.concurrent Executors LinkedBlockingQueue ThreadFactory
                                  TimeUnit))
   (:gen-class))
 
+(defn var-reference?
+  "True for a host or SCI Var reference."
+  [value]
+  (or (var? value) (sci.utils/var? value)))
+
+(def var-generator
+  "Finite representatives for the closed host/SCI Var representation sum."
+  (gen/elements [#'var-reference? #'var-generator]))
+
+(schema/register-core-predicate! 'seon.test.runner/var-reference?
+                                 var-reference?)
+
 (defn- var-symbol
   [test-var]
   (when test-var
     (let [{:keys [name ns]} (meta test-var)]
       (when (and name ns)
-        (symbol (str (ns-name ns)) (str name))))))
+        (symbol (str ns) (str name))))))
 
 (defn- event-symbol
   [event]
@@ -86,6 +101,25 @@
        (str/join "\n")
        (bounded-text options)))
 
+(defn- failure-identity
+  "Content identity for one normalized failing assertion report.
+
+  SCI reports interpreted tests from generic JVM frames, so a source position
+  would claim precision the reporter does not have. The normalized report is
+  stable across reruns and distinguishes different failing claims."
+  [options test-symbol event]
+  (schema/sha-256
+   [(.getBytes
+     (pr-str [test-symbol
+              (:type event)
+              (:message event)
+              (when (contains? event :expected)
+                (printable options (:expected event)))
+              (when (contains? event :actual)
+                (printable options (:actual event)))
+              (event-signature event)])
+     StandardCharsets/UTF_8)]))
+
 (defn- ensure-result
   [capture test-symbol]
   (if (contains? (::results capture) test-symbol)
@@ -94,10 +128,11 @@
         (update ::order conj test-symbol)
         (assoc-in [::results test-symbol]
                   {:seon.test/sym (str test-symbol)
-                   :seon.ns/name (symbol (namespace test-symbol))
-                   :seon.test.result/outcome :pass
+                   :seon.test/pass-count 0
+                   :seon.test/fail-count 0
+                   :seon.test/error-count 0
                    ::failure-messages []
-                   ::failure-signatures #{}}))))
+                   ::failure-identities #{}}))))
 
 (defn- capture-event!
   [options capture selected-namespaces event]
@@ -106,23 +141,32 @@
       (swap! capture
              (fn [current]
                (let [current (ensure-result current test-symbol)
-                     signature (event-signature event)
-                     seen? (and signature
-                                (contains?
-                                 (get-in current [::results test-symbol
-                                                  ::failure-signatures])
-                                 signature))]
-                 (if (contains? #{:fail :error} (:type event))
-                   (cond-> (assoc-in current
-                                     [::results test-symbol
-                                      :seon.test.result/outcome]
-                                     :fail)
-                     (and signature (not seen?))
-                     (update-in [::results test-symbol ::failure-signatures]
-                                conj signature)
-                     (not seen?)
-                     (update-in [::results test-symbol ::failure-messages]
-                                conj (failure-message options event)))
+                     event-type (:type event)]
+                 (case event-type
+                   :pass
+                   (update-in current [::results test-symbol
+                                       :seon.test/pass-count] inc)
+
+                   (:fail :error)
+                   (let [failure-id
+                         (failure-identity options test-symbol event)
+                         seen? (contains?
+                                (get-in current [::results test-symbol
+                                                 ::failure-identities])
+                                failure-id)]
+                     (cond-> (update-in current
+                                        [::results test-symbol
+                                         (if (= :fail event-type)
+                                           :seon.test/fail-count
+                                           :seon.test/error-count)]
+                                        inc)
+                       (not seen?)
+                       (update-in [::results test-symbol
+                                   ::failure-identities] conj failure-id)
+                       (not seen?)
+                       (update-in [::results test-symbol ::failure-messages]
+                                  conj (failure-message options event))))
+
                    current)))))))
 
 (defn- report-error!
@@ -367,11 +411,46 @@
   (mapv
    (fn [test-symbol]
      (let [result (get results test-symbol)
-           messages (::failure-messages result)]
-       (cond-> (dissoc result ::failure-messages ::failure-signatures)
+           messages (::failure-messages result)
+           identities (::failure-identities result)]
+       (cond-> (dissoc result ::failure-messages ::failure-identities)
+         (seq identities)
+         (assoc :seon.test/failing-assertions (vec (sort identities)))
          (seq messages)
-         (assoc :seon.test.failure/message (str/join "\n\n" messages)))))
+         (assoc :seon.test/failure-message (str/join "\n\n" messages)))))
    order))
+
+(defn run-var!
+  "Run one host or SCI test Var and return its captured assertion result.
+
+  This is the same capture and reporter path used by `bin/test`; it performs
+  no database write. `commit-results!` is the sole completion writer."
+  {:malli/schema
+   [:=> [:cat :seon.test/var]
+    [:or :seon.test.runner/captured-result
+     :seon.test/not-runnable-error]]}
+  [test-var]
+  (if-not (ifn? (:test (meta test-var)))
+    {:seon.error/kind ::not-runnable
+     :seon.test/not-runnable (str test-var)
+     :seon.error/message "The supplied Var has no clojure.test function."}
+    (let [test-symbol (var-symbol test-var)
+          selected-namespaces #{(symbol (namespace test-symbol))}
+          options (select-keys
+                   (config/defaults)
+                   [:seon.config.eval.result/blob-threshold
+                    :seon.print/length
+                    :seon.print/level])
+          capture (atom {::order [] ::results {}})
+          reported-signatures (atom #{})
+          default-report test/report]
+      (binding [test/report
+                (fn [event]
+                  (capture-event! options capture selected-namespaces event)
+                  (report-event! options default-report
+                                 reported-signatures event))]
+        (test/test-vars [test-var]))
+      (first (captured-results @capture)))))
 
 (defn- test-vars-in
   [namespaces]
@@ -643,26 +722,36 @@
                ::task-results (captured-results @capture)
                ::task-output (bounded-text options (str output))))
       (catch Throwable failure
-        (assoc task
-               ::task-started-at (str started-at)
-               ::task-ended-at (str (Instant/now))
-               ::task-elapsed-ms
-               (quot (- (System/nanoTime) started-nanos) 1000000)
-               ::task-summary {::test-count 0 ::pass-count 0
-                               ::fail-count 0 ::error-count 1}
-               ::task-results
-               [{:seon.test/sym (first (::task-symbols task))
-                 :seon.ns/name namespace-name
-                 :seon.test.result/outcome :fail
-                 :seon.test.failure/message
-                 (bounded-text options
-                               (str "Worker task failed outside a test Var: "
-                                    (.getName (class failure)) ": "
-                                    (or (ex-message failure) "")))}]
-               ::task-output
-               (bounded-text options
-                             (str output "\n" (throwable-face options failure
-                                                               (throwable-signature failure)))))))))
+        (let [test-symbol (first (::task-symbols task))
+              message
+              (bounded-text options
+                            (str "Worker task failed outside a test Var: "
+                                 (.getName (class failure)) ": "
+                                 (or (ex-message failure) "")))
+              failure-id
+              (schema/sha-256
+               [(.getBytes (pr-str [test-symbol :worker-task message])
+                           StandardCharsets/UTF_8)])]
+          (assoc task
+                 ::task-started-at (str started-at)
+                 ::task-ended-at (str (Instant/now))
+                 ::task-elapsed-ms
+                 (quot (- (System/nanoTime) started-nanos) 1000000)
+                 ::task-summary {::test-count 0 ::pass-count 0
+                                 ::fail-count 0 ::error-count 1}
+                 ::task-results
+                 [#:seon.test{:sym test-symbol
+                              :pass-count 0
+                              :fail-count 0
+                              :error-count 1
+                              :failing-assertions [failure-id]
+                              :failure-message message}]
+                 ::task-output
+                 (bounded-text
+                  options
+                  (str output "\n" (throwable-face
+                                     options failure
+                                     (throwable-signature failure))))))))))
 
 (def ^:private protocol-prefix
   "SEON_TEST_WORKER_EDN ")
@@ -755,70 +844,77 @@
                 nil
                 nil))
 
-(defn- namespace-tempid
-  [namespace-name]
-  (str "namespace:" namespace-name))
-
-(defn- test-tempid
-  [test-symbol]
-  (str "test:" test-symbol))
-
-(defn- result-id
-  [run-id test-symbol]
-  (str run-id ":" test-symbol))
-
 (defn record-tx
-  "Transaction data for one captured run and its exact test refs."
-  {:malli/schema [:=> [:cat :seon.test.runner/run-result]
+  "Transaction data replacing each test row's complete latest result.
+
+  The attribute retractions make the update total: a later green run removes
+  every stale failure identity and message in the same transaction."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.test.runner/completion]
                   :seon.test.runner/record-tx]}
-  [{run-id :seon.test.run/id
-    at :seon.test.run/at
-    git-sha :seon.test.run/git-sha
-    results :seon.test.runner/results}]
-  (let [namespace-names (distinct (map :seon.ns/name results))
-        namespace-rows
-        (mapv (fn [namespace-name]
-                {:db/id (namespace-tempid namespace-name)
-                 :seon.ns/name namespace-name})
-              namespace-names)
-        test-rows
-        (mapv (fn [{test-symbol :seon.test/sym
-                    namespace-name :seon.ns/name}]
-                {:db/id (test-tempid test-symbol)
-                 :seon.test/sym test-symbol
-                 :seon.test/ns (namespace-tempid namespace-name)})
-              results)
-        run-tempid (str "run:" run-id)
-        run-row {:db/id run-tempid
-                 :seon.test.run/id run-id
-                 :seon.test.run/at at
-                 :seon.test.run/git-sha git-sha}
-        failure-rows
-        (into []
-              (keep
-               (fn [{test-symbol :seon.test/sym
-                     message :seon.test.failure/message}]
-                 (when message
-                   {:db/id (str "failure:" (result-id run-id test-symbol))
-                    :seon.test.failure/id
-                    (str (result-id run-id test-symbol) ":failure")
-                    :seon.test.failure/message message})))
-              results)
-        result-rows
-        (mapv
-         (fn [{test-symbol :seon.test/sym
-               outcome :seon.test.result/outcome
-               message :seon.test.failure/message}]
-           (cond-> {:seon.test.result/id (result-id run-id test-symbol)
-                    :seon.test.result/test (test-tempid test-symbol)
-                    :seon.test.result/run run-tempid
-                    :seon.test.result/outcome outcome}
-             message
-             (assoc :seon.test.result/failure
-                    (str "failure:" (result-id run-id test-symbol)))))
-         results)]
-    (into namespace-rows
-          (concat test-rows [run-row] failure-rows result-rows))))
+  [database
+   {results :seon.test.runner/results
+    basis-t :seon.test/run-basis-t
+    at :seon.test/run-at}]
+  (let [namespace-names
+        (distinct
+         (map #(symbol (namespace (symbol (:seon.test/sym %)))) results))
+        namespace-tempid #(str "test-result-namespace:" %)]
+    (into
+     (mapv (fn [namespace-name]
+             {:db/id (namespace-tempid namespace-name)
+              :seon.ns/name namespace-name})
+           namespace-names)
+     (mapcat
+      (fn [{test-symbol :seon.test/sym :as result}]
+        (let [namespace-name (symbol (namespace (symbol test-symbol)))
+              test-ref [:seon.test/sym test-symbol]
+              exists? (some? (db/pull database [:db/id] test-ref))
+              result-row
+              (cond-> (assoc result
+                             :seon.test/run-basis-t basis-t
+                             :seon.test/run-at at)
+                (not exists?)
+                (assoc :seon.test/ns (namespace-tempid namespace-name)))]
+          (cond-> []
+            exists?
+            (conj [:db.fn/retractAttribute test-ref
+                   :seon.test/failing-assertions]
+                  [:db.fn/retractAttribute test-ref
+                   :seon.test/failure-message])
+            true (conj result-row))))
+      results))))
+
+(def ^:private result-selector
+  [:seon.test/sym
+   :seon.test/pass-count
+   :seon.test/fail-count
+   :seon.test/error-count
+   :seon.test/run-basis-t
+   :seon.test/run-at
+   :seon.test/failing-assertions
+   :seon.test/failure-message])
+
+(defn commit-results!
+  "Commit captured test results and return those exact committed facts."
+  {:malli/schema
+   [:=> [:cat :seon.db/connection :seon.test.runner/completion]
+    [:or :seon.test/results :seon.error/value]]}
+  [connection {results :seon.test.runner/results :as completion}]
+  (let [database (db/db connection)
+        transaction-report
+        (if (:seon.error/kind database)
+          database
+          (db/transact! connection (record-tx database completion)))]
+    (if (:seon.error/kind transaction-report)
+      transaction-report
+      (mapv (fn [{test-symbol :seon.test/sym}]
+              (dissoc
+               (db/pull (:db-after transaction-report)
+                        result-selector
+                        [:seon.test/sym test-symbol])
+               :db/id))
+            results))))
 
 (defn- start-cluster!
   [cluster-name root]
@@ -833,9 +929,9 @@
         (throw failure)))))
 
 (defn record!
-  "Commit one run into an explicitly named, non-default cluster."
+  "Commit one runner completion into an explicitly named, non-default cluster."
   {:malli/schema [:=> [:cat :seon.test.runner/record-request]
-                  :seon.test.runner/recorded]}
+                  [:or :seon.test/results :seon.error/value]]}
   [{run-result :seon.test.runner/run-result
     cluster-name :seon.boot/cluster-name
     root :seon.boot/root}]
@@ -847,18 +943,13 @@
        :seon.boot/cluster-name cluster-name})))
   (let [instance (start-cluster! cluster-name root)]
     (try
-      (let [result
-            (db/transact!
-             (:seon.boot/cluster-connection instance)
-             (record-tx run-result))]
-        (when (:seon.error/kind result)
-          (throw
-           (ex-info "The test result transaction was refused."
-                    {:seon.test.runner/refusal result}))))
-      {:seon.boot/cluster-name cluster-name
-       :seon.test.run/id (:seon.test.run/id run-result)
-       :seon.test.runner/recorded-count
-      (count (:seon.test.runner/results run-result))}
+      (let [connection (:seon.boot/cluster-connection instance)
+            completion
+            {:seon.test.runner/results
+             (:seon.test.runner/results run-result)
+             :seon.test/run-basis-t (db/basis-t (db/db connection))
+             :seon.test/run-at (:seon.test.run/at run-result)}]
+        (commit-results! connection completion))
       (finally
         ((requiring-resolve 'seon.cluster/stop!) instance)))))
 
@@ -1381,7 +1472,8 @@
                           :seon.boot/root root}))
             green? (zero? (+ (::fail-count summary) (::error-count summary)))
             failures (->> (:seon.test.runner/results run-result)
-                          (filter #(= :fail (:seon.test.result/outcome %)))
+                          (filter #(pos? (+ (:seon.test/fail-count %)
+                                           (:seon.test/error-count %))))
                           (map :seon.test/sym)
                           sort)]
           (println)

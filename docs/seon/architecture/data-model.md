@@ -108,10 +108,15 @@ entity. The architecture's durable natural keys are:
 | maintenance receipt | `:seon.maintenance.receipt/id` |
 | maintenance result | `:seon.maintenance.result/id` |
 
-The test-observation families add `:seon.test.run/id`,
-`:seon.test.result/id`, and `:seon.test.failure/id`. No durable identity exists
-for a turn, route, browser session, interaction, restore record, or
-any compatibility agent/eval family.
+The test runner writes current counts, basis transaction, instant, and failing
+assertion content identities directly onto each `:seon.test/sym` row. A rerun
+replaces that complete projection, so current failures are ordinary queries
+and stale failures cannot remain attached to a green test.
+`seon.fn/currently-failing-functions` follows those red rows through the
+program graph; `seon.fn/functions-without-tests` derives the complement of the
+same `test-reaches` relation. No durable identity exists for a turn, route,
+browser session, interaction, restore record, or any compatibility agent/eval
+family.
 
 ### Plain and component refs
 
