@@ -191,6 +191,34 @@ runner frame. The runner must acquire the packaged test projection once and
 hand it across namespace load and execution. No test-runner file was edited by
 this lane.
 
+## 2026-08-12 test-runner carrier status
+
+Commit `c9ef4741b` acquires one packaged test projection at each runner-process
+entry and hands it through the existing `schema/call-with-projection` carrier
+for the complete coordinator and worker lifetime. A focused real runner over
+`my.fs-test` and `my.message-test` passed 7 tests / 61 assertions with zero
+failures, errors, declaration fallbacks, or missing-projection refusals.
+
+The first changed-path checkpoint loaded all 123 test namespaces with zero
+fallback/refusal lines. Its retained root proved exactly one acquisition in
+each of nine pool JVMs, the fail-closed serial JVM, and three one-shot
+confirmation JVMs; the coordinator also acquired exactly once.
+
+That checkpoint stopped in the platform tier at 71 tests / 383 assertions / 4
+failures / 1 error. The carrier makes three older class proofs' deliberately
+unhanded premise false:
+
+- `seon.db.declaration-population-test/a-read-resolves-the-declaration-population-at-most-once`;
+- `seon.schema.declaration-population-test/an-unhanded-declaration-projection-refuses-without-reading-resources`; and
+- `seon.sci.admit.declaration-population-test/an-admission-resolves-the-declaration-population-at-most-once`.
+
+Each failure reproduced in its isolated confirmation JVM. Those proof files
+are protected by the runner assignment, so the carrier remains landed and the
+issue remains open until the proofs explicitly construct their unhanded
+subject instead of depending on runner absence. The subsequent `bin/test
+--all` checkpoint has not run because every tiered invocation would stop on
+the same red platform boundary.
+
 This issue therefore remains open for that test carrier and the separately
 recorded process-global Malli instrumentation facade, whose owner and falsifier are
 [instrumentation compiles under one cluster's projection](instrumentation-compiles-under-one-clusters-projection.md).

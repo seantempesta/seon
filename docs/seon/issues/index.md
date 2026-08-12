@@ -45,7 +45,7 @@ See `README.md` for the convention.
 | [Instrument each cluster under its own projection, not the anchor's](instrumentation-compiles-under-one-clusters-projection.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Resolve the declaration population once per admission, not once per node](value-admission-resolves-the-declaration-population-per-node.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Re-root the foreign-write custody fence on the environment](foreign-write-fence-reads-only-the-dynamic-var.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
-| [Make the schema environment an explicit argument, not an ambient binding](schema-environment-is-ambient-not-explicit.md) | blocker | environment-as-a-value design session |
+| [Make the schema environment an explicit argument, not an ambient binding](schema-environment-is-ambient-not-explicit.md) | blocker | test runner explicit-unhanded proof conversion |
 | [Pass ordered entity ids to transcript `pull-many`](transcript-about-lookup-passes-a-set-to-pull-many.md) | blocker | live-drive render repair wave |
 | [Observe and claim every deletable directory](deletable-directories-have-no-claim-or-size-facts.md) | blocker | operator directory-claim governor wave |
 | [Prevent ranged collection from deleting resurrected branch data](ranged-store-collection-can-delete-live-segments-via-branch-resurrection.md) | blocker | exclusive sweep implementation wave |
