@@ -140,6 +140,19 @@ back — everywhere, for every agent, with no maintained list of forms.
     (only the delta since the shown basis generates). Generation is the
     derivative of the graph, never re-integration.
 
+## Ruling 35 (owner, 2026-08-12 — render contract coherence)
+
+35. **A render declaration must be contract-coherent at admission**: a
+    schema X declaring `{:seon.render/ai fn-B}` (or /html, /form) is
+    admissible only when fn-B's declared `:malli/schema` input accepts X —
+    with the optional `:seon.db/database-value` argument permitted for
+    call-preparation supply (its reads are captured as render-call
+    evidence, which is what keeps invalidation correct). Checked at
+    publication with a loud refusal naming both sides; a mismatched or
+    schema-less declared render function becomes unrepresentable. The
+    contract-fit selection path already enforces this by construction;
+    this extends the same coherence to explicit declarations.
+
 ## The mechanism (composed from the verified reports)
 
 ### One derivation
