@@ -62,6 +62,7 @@
             pages-channel (async/chan (async/sliding-buffer 1))
             stream-channel (async/chan (async/sliding-buffer 1))
             completion (async/promise-chan)
+            interest (atom :all)
             ctx (support/fork-cluster-ctx connection)
             graph
             (flow.core/create-flow
@@ -76,6 +77,7 @@
                   :seon.render.web/pages-channel pages-channel
                   :seon.render.web/registration (atom {})
                   :seon.render.web/latest-packages (atom {})
+                  :seon.render.web/interest interest
                   :seon.render.web/completion completion
                   :seon.render.web/root-agent-id "walker"
                   :seon.cluster.loop/cluster
@@ -190,6 +192,84 @@
            (is (pos? after-first))
            (is (= after-first @invocations)
                "an identical context performs zero second-pass renderer invocations")))))))
+
+(deftest unchanged-acquisition-performs-zero-database-door-reads
+  (planted
+   (fn [connection context-channel]
+     (prompt/prompt @connection (request connection context-channel))
+     (let [reads (atom 0)
+           counted (fn [f]
+                     (fn [& arguments]
+                       (swap! reads inc)
+                       (apply f arguments)))]
+       (with-redefs [db/q (counted db/q)
+                     db/pull (counted db/pull)
+                     db/pull-many (counted db/pull-many)
+                     db/entity (counted db/entity)
+                     db/datoms (counted db/datoms)]
+         (prompt/prompt @connection (request connection context-channel)))
+       (is (zero? @reads)
+           "unchanged acquisition returns retained bytes without a db read")))))
+
+(deftest semantically-equal-replay-advances-and-does-not-append
+  (planted
+   (fn [connection context-channel]
+     (let [request (request connection context-channel)
+           before (:seon.cluster.prompt/text (prompt/prompt @connection request))]
+       (db/transact! connection
+                     [{:seon.cluster.message/id "unrelated-same-attribute"
+                       :seon.cluster.message/content "outside the neighborhood"
+                       :seon.cluster.message/at (Date. 1700000003000)}])
+       (let [replays (atom 0)
+             appended (atom [])
+             replay db/read-evidence-current?
+             append web/append-history
+             after (with-redefs [db/read-evidence-current?
+                                 (fn [& arguments]
+                                   (swap! replays inc)
+                                   (apply replay arguments))
+                                 web/append-history
+                                 (fn [entries observations]
+                                   (swap! appended conj (count observations))
+                                   (append entries observations))]
+                     (:seon.cluster.prompt/text
+                      (prompt/prompt @connection request)))
+             first-replays @replays
+             unchanged (with-redefs [db/read-evidence-current?
+                                     (fn [& arguments]
+                                       (swap! replays inc)
+                                       (apply replay arguments))]
+                         (:seon.cluster.prompt/text
+                          (prompt/prompt @connection request)))]
+         (is (= before after) "equal replay appends no observation")
+         (is (= [0] @appended) "equal replay crosses append with zero entries")
+         (is (= 1 first-replays) "exactly the root read replays")
+         (is (= first-replays @replays)
+             "the consumed revision makes the next acquisition read-free")
+         (is (= after unchanged)))))))
+
+(deftest one-new-message-appends-exactly-one-entry
+  (planted
+   (fn [connection context-channel]
+     (let [request (request connection context-channel)
+           before (:seon.cluster.prompt/text (prompt/prompt @connection request))
+           appended (atom [])
+           append web/append-history]
+       (db/transact! connection
+                     [{:seon.cluster.message/id "one-new-message"
+                       :seon.cluster.message/to
+                       [:seon.cluster.agent/id "walker"]
+                       :seon.cluster.message/content "one appended entry"
+                       :seon.cluster.message/at (Date. 1700000004000)}])
+       (let [after (with-redefs [web/append-history
+                                 (fn [entries observations]
+                                   (swap! appended conj (count observations))
+                                   (append entries observations))]
+                     (:seon.cluster.prompt/text
+                      (prompt/prompt @connection request)))]
+         (is (str/starts-with? after before) "all prior bytes are retained")
+         (is (= [1] @appended)
+             "one new message crosses append with exactly one entry"))))))
 
 (deftest basis-only-transactions-do-not-append-history
   (planted
