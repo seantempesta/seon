@@ -140,18 +140,25 @@
   [store commit-id]
   (some? (head-record (konserve-store store) commit-id)))
 
-(defn- branch-connected?
-  "True when THIS process already holds a connection to `branch`.
-  The same `[store-id branch]` connection-id lookup `open-branch!` uses
-  (`src/seon/cluster/store.clj:354,360`); Datahike reference-counts a
-  second connect into the SAME connection, so presence here is the only
-  honest answer to \"is anyone still holding it\"."
-  [store branch]
+(defn active-branch-connection
+  "The active connection to `:seon.store/branch`, or nil when absent.
+  Borrows Datahike's registered connection without acquiring an owning
+  reference; the caller must never release it. The registry entry is the
+  process-local custody fact for the `[store-id branch]` writer."
+  {:malli/schema [:=> [:cat :seon.cluster.registry/branch-commit-request]
+                  [:maybe :seon.db/connection]]}
+  [{:keys [:seon.store/store :seon.store/branch]}]
   (let [configuration (assoc (store/datahike-configuration
                               (:seon.store/dir store))
                              :branch branch)]
-    (contains? @connections/*connections*
-               (datahike.store/connection-id configuration))))
+    (connections/active-connection
+     (datahike.store/connection-id configuration))))
+
+(defn- branch-connected?
+  "True when THIS process already holds a connection to `branch`."
+  [store branch]
+  (some? (active-branch-connection {:seon.store/store store
+                                    :seon.store/branch branch})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Branch lifecycle — the one owner

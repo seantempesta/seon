@@ -24,10 +24,13 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [datahike.connections :as connections]
+            [datahike.store :as datahike.store]
             [seon.db :as db]
             [konserve.core :as k]
             [konserve.filestore :as filestore]
             [seon.cluster.export :as export]
+            [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.schema]
             [seon.test-support :as test-support]))
@@ -139,6 +142,56 @@
                 (refusal #(export/export!
                            {:seon.store/store store
                             :seon.export/parent-dir parent})))))))))
+
+(deftest fallback-reuses-an-already-connected-branch
+  (with-populated-store
+    (fn [{:keys [root store]}]
+      (let [parent (str root "/fallback-export")
+            live-connection (store/open-branch! store other-branch)
+            connection-id
+            (datahike.store/connection-id
+             (assoc (store/datahike-configuration (:seon.store/dir store))
+                    :branch other-branch))
+            maximum-reference-count (atom 1)
+            watch-key ::fallback-connection-count
+            clone-var (ns-resolve 'seon.cluster.export 'clone!)]
+        (add-watch connections/*connections* watch-key
+                   (fn [_ _ _ registered]
+                     (swap! maximum-reference-count
+                            max
+                            (get-in registered [connection-id :count] 0))))
+        (try
+          (is (identical?
+               live-connection
+               (registry/active-branch-connection
+                {:seon.store/store store
+                 :seon.store/branch other-branch}))
+              "the registry returns the held writer without acquiring it")
+          (let [path
+                (with-redefs-fn
+                  {clone-var (fn [_source _target] false)}
+                  #(export/export!
+                    {:seon.store/store store
+                     :seon.export/parent-dir parent}))
+                exported (store/open-store! {:seon.store/dir path})]
+            (is (= 1 @maximum-reference-count)
+                "fallback never acquires a second branch reference")
+            (is (= 1 (get-in @connections/*connections*
+                             [connection-id :count])))
+            (is (identical? live-connection
+                            (connections/active-connection connection-id))
+                "fallback neither replaces nor releases the held writer")
+            (try
+              (let [connection (store/open-branch! exported other-branch)]
+                (try
+                  (is (= #{"on-main" "on-branch"} (markers connection)))
+                  (finally
+                    (d/release connection))))
+              (finally
+                (store/release-store! exported))))
+          (finally
+            (remove-watch connections/*connections* watch-key)
+            (d/release live-connection)))))))
 
 (deftest failed-export-cleanup-never-follows-a-symlink
   (with-populated-store

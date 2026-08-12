@@ -65,6 +65,7 @@
             [datahike.migrate :as migrate]
             [konserve.core :as k]
             [konserve.filestore :as filestore]
+            [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.fs :as fs]
             [seon.schema.edn :as schema.edn])
@@ -147,13 +148,21 @@
             (d/branch! target-main :db branch))
           (doseq [branch (cons :db others)]
             (let [file (io/file datoms-dir (str (name branch) ".cbor"))
-                  reader (if (= :db branch)
-                           source-connection
-                           (store/open-branch! store branch))]
+                  active-reader
+                  (when-not (= :db branch)
+                    (registry/active-branch-connection
+                     {:seon.store/store store
+                      :seon.store/branch branch}))
+                  reader (or active-reader
+                             (when-not (= :db branch)
+                               (store/open-branch! store branch))
+                             source-connection)
+                  opened-reader? (and (not= :db branch)
+                                      (nil? active-reader))]
               (try
                 (migrate/export-db reader (.getPath file))
                 (finally
-                  (when-not (= :db branch)
+                  (when opened-reader?
                     (d/release reader))))
               (let [writer (if (= :db branch)
                              target-main
