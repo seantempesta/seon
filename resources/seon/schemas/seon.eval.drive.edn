@@ -2,7 +2,7 @@
  :seon.eval.drive/value :seon.schema/value
  :seon.eval.drive/run-ids [:vector :seon.cluster.run/id]
  :seon.eval.drive/run-cap [:int {:min 1}]
- :seon.eval.drive/outcome [:enum :completed :capped :stopped]
+ :seon.eval.drive/outcome [:enum :completed :capped :stopped :undisposed]
  :seon.eval.drive/terminal-state
  [:map
   [:seon.eval.drive/outcome :seon.eval.drive/outcome]

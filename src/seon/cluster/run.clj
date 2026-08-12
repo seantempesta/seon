@@ -499,7 +499,9 @@
   {:malli/schema [:=> [:cat [:map
                              [::id ::id]
                              [::process ::process]
-                             [::closed-at ::closed-at]]]
+                             [::closed-at ::closed-at]
+                             [::undisposed-at {:optional true}
+                              ::undisposed-at]]]
                   [:vector :some]]}
   [request]
   [[:db.fn/call #'close-call request]])
@@ -517,7 +519,9 @@
                        [:map
                         [::id ::id]
                         [::process ::process]
-                        [::closed-at ::closed-at]]]
+                        [::closed-at ::closed-at]
+                        [::undisposed-at {:optional true}
+                         ::undisposed-at]]]
                   [:vector :some]]}
   [db request]
   (let [run (held-run db `close-call request)
@@ -528,9 +532,12 @@
                  (db/pull db [:seon.cluster.agent/run] agent-eid))]
     (when-not (= (:db/id run) (:db/id pointer))
       (refuse! `close-call ::agent-pointer-broken request))
-    (conj (retract-custody run)
-          [:db/add (:db/id run) ::closed-at (::closed-at request)]
-          [:db/retract agent-eid :seon.cluster.agent/run (:db/id run)])))
+    (cond-> (conj (retract-custody run)
+                  [:db/add (:db/id run) ::closed-at (::closed-at request)]
+                  [:db/retract agent-eid :seon.cluster.agent/run (:db/id run)])
+      (::undisposed-at request)
+      (conj [:db/add (:db/id run) ::undisposed-at
+             (::undisposed-at request)]))))
 
 (defn- plan-tx-for-author
   [author request]
@@ -1669,6 +1676,10 @@
                    "nothing was retried.")
 
               note (str "It paused, leaving this note: " note)
+
+              (::undisposed-at unit)
+              (str "It ended without my.run/complete or my.run/wait. "
+                   "Its trigger remains unanswered; nothing was retried.")
 
               (some? (::closed-at unit)) "It completed."
               (some? (::process unit)) (str "It is running now, held by "

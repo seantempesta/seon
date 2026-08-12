@@ -60,6 +60,9 @@
                     [:seon.cluster.run/interrupted-at
                      {:optional true}
                      :seon.cluster.run/interrupted-at]
+                    [:seon.cluster.run/undisposed-at
+                     {:optional true}
+                     :seon.cluster.run/undisposed-at]
                     [:seon.cluster.run/process
                      {:optional true}
                      :seon.cluster.run/process]
@@ -70,6 +73,10 @@
                      {:optional true}
                      :seon.cluster.run/error]],
                    :trigger [:and #:seon.db{:index true} :seon.db/ref],
+                   ;; PRESENCE IS THE STATE: the run loop asserts this in
+                   ;; the same transaction that closes the last clean form
+                   ;; exactly when no complete/wait disposition was returned.
+                   :undisposed-at :inst,
                    :rule :keyword,
                    :transition :keyword,
                    :refused :seon.cluster.run/rule

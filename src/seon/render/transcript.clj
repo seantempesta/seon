@@ -13,6 +13,7 @@
             [seon.blob :as blob]
             [seon.bootstrap :as bootstrap]
             [seon.context :as context]
+            [seon.cluster.run :as run]
             [seon.print :as print]
             [seon.render :as render]
             [seon.render.agent :as agent]
@@ -72,6 +73,14 @@
       [:db/id
        :seon.cluster.agent/id
        {:seon.cluster.agent/namespace [:db/id :seon.ns/name]}]}]}])
+
+(def ^:private undisposed-run-selector
+  [:db/id
+   :seon.cluster.run/id
+   :seon.cluster.run/opened-at
+   :seon.cluster.run/closed-at
+   :seon.cluster.run/plan-digest
+   :seon.cluster.run/undisposed-at])
 
 (def ^:private reasoning-attempt-selector
   [:db/id
@@ -147,7 +156,15 @@
   (if (and db agent-id)
     (+ (message-count db agent-id)
        (receipt-count db agent-id)
-       (count (comment-form-rows db agent-id)))
+       (count (comment-form-rows db agent-id))
+       (or (db/q '[:find (count ?run) .
+                   :in $ ?agent-id
+                   :where
+                   [?agent :seon.cluster.agent/id ?agent-id]
+                   [?run :seon.cluster.run/agent ?agent]
+                   [?run :seon.cluster.run/undisposed-at _]]
+                 db agent-id)
+           0))
     0))
 
 (defn- recent-message-rows
@@ -187,6 +204,20 @@
   [db agent-id limit]
   (take limit (comment-form-rows db agent-id)))
 
+(defn- recent-undisposed-run-rows
+  [db agent-id limit]
+  (db/q {:query
+         '[:find ?run ?at ?id
+           :in $ ?agent-id
+           :where
+           [?agent :seon.cluster.agent/id ?agent-id]
+           [?run :seon.cluster.run/agent ?agent]
+           [?run :seon.cluster.run/undisposed-at ?at]
+           [?run :seon.cluster.run/id ?id]]
+         :args [db agent-id]
+         :order-by '[?at :desc ?id :desc]
+         :limit limit}))
+
 (defn- pinned-receipt-ids
   [db agent-id]
   (db/q '[:find [?receipt ...]
@@ -207,10 +238,12 @@
               (map #(into [:eval] %)
                    (recent-receipt-rows db agent-id limit))
               (map (fn [[form at id _source]] [:input form at id])
-                   (recent-comment-rows db agent-id limit)))
+                   (recent-comment-rows db agent-id limit))
+              (map #(into [:run] %)
+                   (recent-undisposed-run-rows db agent-id limit)))
              (sort-by (fn [[kind _ at id]]
                         [(.getTime ^java.util.Date at)
-                         (case kind :message 0 :input 1 :eval 2)
+                         (case kind :message 0 :input 1 :eval 2 :run 3)
                          id])
                       #(compare %2 %1))
              (take limit)
@@ -397,6 +430,15 @@
                      :seon.ns/name])
        'user)})
 
+(defn- undisposed-run-entry
+  [run]
+  {::kind :run
+   ::entity run
+   ::id (:seon.cluster.run/id run)
+   ::at (:seon.cluster.run/undisposed-at run)
+   ::run-id (:seon.cluster.run/id run)
+   ::run-opened-at (:seon.cluster.run/opened-at run)})
+
 (defn- entry-order
   [entry]
   (let [at (.getTime ^java.util.Date (::at entry))]
@@ -413,7 +455,11 @@
       :eval [at 3
              (.getTime ^java.util.Date (::run-opened-at entry))
              (::ordinal entry)
-             (::id entry)])))
+             (::id entry)]
+      :run [at 4
+            (.getTime ^java.util.Date (::run-opened-at entry))
+            nil
+            (::id entry)])))
 
 (defn- entry-root
   "The durable identity every value this entry renders is rooted at.
@@ -435,6 +481,8 @@
         messages (pulled-many db message-selector (:message ids))
         receipts (pulled-many db receipt-selector (:eval ids))
         inputs (pulled-many db form-selector (:input ids))
+        undisposed-runs
+        (pulled-many db undisposed-run-selector (:run ids))
         identities (about-identities db messages)
         identity-attrs (identity-attributes db)
         message-orders (message-order-facts db (:message ids))
@@ -443,7 +491,8 @@
                                identities message-orders)
                       messages)
                  (map input-entry inputs)
-                 (map (partial receipt-entry sources) receipts))
+                 (map (partial receipt-entry sources) receipts)
+                 (map undisposed-run-entry undisposed-runs))
          (map (fn [entry]
                 (assoc entry
                        ::root (entry-root identity-attrs entry)
@@ -574,6 +623,15 @@
     (str (prompted-source entry)
          (when (seq result) (str "\n" result)))))
 
+(defn- undisposed-run-text
+  [_unit entry _detail]
+  (let [form (list 'db/pull 'db
+                   [:seon.cluster.run/undisposed-at]
+                   [:seon.cluster.run/id (::id entry)])
+        result (run/render-ai (::entity entry))]
+    (str "system=> " (pr-str form)
+         (when (seq result) (str "\n" result)))))
+
 (defn- entry-name
   [entry]
   (keyword (str "seon.transcript." (name (::kind entry))) (::id entry)))
@@ -596,7 +654,8 @@
      ::text (case (::kind entry)
               :message (message-text unit entry detail)
               :input (input-text unit entry detail)
-              :eval (receipt-text unit entry detail))}))
+              :eval (receipt-text unit entry detail)
+              :run (undisposed-run-text unit entry detail))}))
 
 (defn reasoning-disclosure
   "A collapsed, exact reasoning display shared by live and settled HTML."
@@ -809,9 +868,9 @@
 (defn history-entries
   "Return one agent's durable transcript as immutable REPL entries.
 
-   Stored form source remains byte-faithful. The sole synthesized form is the
-   honest message read; values come from settled facts and declared renderers,
-   never from executing the displayed form."
+   Stored form source remains byte-faithful. Synthesized forms are honest
+   reads of durable message and undisposed-run facts; values come from settled
+   facts and declared renderers, never from executing the displayed form."
   {:malli/schema [:=> [:cat :seon.render/unit] [:vector :map]]}
   [unit]
   (let [db (:seon.db/db unit)
@@ -837,12 +896,16 @@
          (fn [entry]
            (let [form (case (::kind entry)
                         :message (message-form (::entity entry))
+                        :run (list 'db/pull 'db
+                                   [:seon.cluster.run/undisposed-at]
+                                   [:seon.cluster.run/id (::id entry)])
                         (::source entry))
                  printed-value
                  (case (::kind entry)
                    :message (rendered-family unit (::entity entry) 1)
                    :input nil
-                   :eval (receipt-printed-value unit entry))]
+                   :eval (receipt-printed-value unit entry)
+                   :run (run/render-ai (::entity entry)))]
              {:seon.render.history/call-id
               [:seon.render.transcript/entry (::kind entry) (::id entry)]
               :seon.render.history/basis-transaction (entry-basis db entry)

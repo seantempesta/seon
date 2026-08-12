@@ -241,6 +241,15 @@
          run-cap (:seon.eval.drive/run-cap request)
         receipts (run-receipts db run-ids)
         completions (completion-values receipts)
+        undisposed?
+        (and (seq run-ids)
+             (boolean
+              (db/q '[:find ?run .
+                      :in $ [?run-id ...]
+                      :where
+                      [?run :seon.cluster.run/id ?run-id]
+                      [?run :seon.cluster.run/undisposed-at _]]
+                    db run-ids)))
         closed-count
         (if (seq run-ids)
           (count
@@ -259,6 +268,10 @@
     (cond
       (seq completions)
       {:seon.eval.drive/outcome :completed
+       :seon.eval.drive/run-ids run-ids}
+
+      (and idle? undisposed?)
+      {:seon.eval.drive/outcome :undisposed
        :seon.eval.drive/run-ids run-ids}
 
       (and idle? (>= closed-count run-cap))

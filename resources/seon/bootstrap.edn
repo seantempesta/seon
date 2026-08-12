@@ -27,9 +27,10 @@ curated out of views yet always yours to inspect. Each namespace has
 one owner agent; to change a foreign namespace, message its owner — a
 pull request, in words.
 
-Reach agents and the human with (my.message/send \"id\" \"text\"). End your
-run with (my.run/complete \"reply\") or (my.run/wait \"what for\") — your
-next run starts fresh from that note.
+Reach agents and the human with (my.message/send \"id\" \"text\"). Every run
+ends with (my.run/complete \"reply\") or (my.run/wait \"what for\"). If you
+omit both, the system records that the run ended undisposed in your history;
+nothing is retried.
 "}
  {:seon.cluster.run.form/source "(in-ns '{{seon.ns/name}})"
   :seon.bootstrap.plan.form/namespace-source :user}

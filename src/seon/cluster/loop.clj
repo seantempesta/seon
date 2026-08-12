@@ -405,6 +405,31 @@
     trigger :seon.cluster.message/trigger}]
   (let [database @(get cluster :seon.db/connection)
         settled (disposition (:seon.sci.admit/value evaluation))
+        last-ordinal
+        (db/q '[:find (max ?ordinal) .
+                :in $ ?run-id
+                :where
+                [?run :seon.cluster.run/id ?run-id]
+                [?form :seon.cluster.run.form/run ?run]
+                [?form :seon.cluster.run.form/ordinal ?ordinal]]
+              database run-id)
+        triggered-agent-form?
+        (boolean
+         (db/q '[:find ?form .
+                 :in $ ?run-id ?ordinal
+                 :where
+                 [?run :seon.cluster.run/id ?run-id]
+                 [?run :seon.cluster.run/trigger _]
+                 [?form :seon.cluster.run.form/run ?run]
+                 [?form :seon.cluster.run.form/ordinal ?ordinal]
+                 [?form :seon.cluster.run.form/author :agent]]
+               database run-id ordinal))
+        undisposed?
+        (and (nil? settled)
+             triggered-agent-form?
+             (= ordinal last-ordinal)
+             (nil? (:seon.cluster.eval/error evaluation))
+             (nil? (:seon.cluster.eval/interrupted-at evaluation)))
         asked (asked-value
                (cond-> {:seon.db/db database
                         :seon.sci.eval/evaluation evaluation
@@ -439,15 +464,19 @@
         tx-data
         (into (run/receipt-settle-tx database receipt)
               (concat
-               (when (contains? #{:completed :wait}
-                                 (:my.run/disposition settled))
+               (when (or undisposed?
+                         (contains? #{:completed :wait}
+                                    (:my.run/disposition settled)))
                  (run/close-tx
-                  {:seon.cluster.run/id run-id
-                   :seon.cluster.run/process process
-                   :seon.cluster.run/closed-at now}))
+                  (cond-> {:seon.cluster.run/id run-id
+                           :seon.cluster.run/process process
+                           :seon.cluster.run/closed-at now}
+                    undisposed?
+                    (assoc :seon.cluster.run/undisposed-at now))))
                (:seon.cluster.message/rows delivery)
                (:seon.error/values-tx delivery)))]
     {::settled settled
+     ::undisposed? undisposed?
      ::evaluation evaluation
      ::receipt receipt
      :seon.blob/staged-writes settlement-stages
@@ -1410,6 +1439,7 @@
                                 refused? (some? (::refused-outcome terminal))
                                 failure (::failure terminal)
                                 settled (::settled terminal)
+                                undisposed? (::undisposed? terminal)
                                 _
                                 (when (and (:seon.program/row evaluation)
                                            (not refused?))
@@ -1426,7 +1456,7 @@
                                       :seon.program/row row})))
                                 ran (inc ran)
                                 next-ordinal
-                                (when-not (or settled failure refused?)
+                                (when-not (or settled undisposed? failure refused?)
                                   (:seon.cluster.run.form/ordinal
                                    (work/next-agent-work
                                     @connection
@@ -1436,6 +1466,7 @@
                               refused? (report :error ran)
                               failure (report :error ran)
                               settled (report :closed ran)
+                              undisposed? (report :closed ran)
                               next-ordinal
                               (recur next-ordinal ran
                                      (or (:seon.sci.eval/ending-ns evaluation)

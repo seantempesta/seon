@@ -18,6 +18,7 @@
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow.core]
             [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.db :as db]
@@ -31,7 +32,9 @@
             [seon.cluster.wake :as wake]
             [seon.cluster.work :as work]
             [seon.flow :as seon.flow]
+            [seon.eval.drive :as eval.drive]
             [seon.problems :as problems]
+            [seon.render.transcript :as transcript]
             [seon.render.web :as web]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -909,6 +912,110 @@
                    {:my.run/disposition :completed}]]
       (is (nil? (cluster.loop/disposition value))
           (str "must not read as a disposition: " (pr-str value))))))
+
+(deftest a-clean-last-form-without-a-disposition-is-loud-terminal-evidence
+  (test-support/with-database
+    (fn [connection]
+      (let [agent-id "undisposed-agent"
+            run-id "undisposed-run"
+            message-id "undisposed-trigger"
+            terminal-data (private-loop-fn 'evaluation-terminal-data)]
+        (db/transact!
+         connection
+         [{:seon.ns/name 'my.agents.undisposed-agent}
+          {:seon.cluster.agent/id agent-id
+           :seon.cluster.agent/namespace
+           [:seon.ns/name 'my.agents.undisposed-agent]}
+          {:seon.cluster.message/id message-id
+           :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+           :seon.cluster.message/content "prove the contract"
+           :seon.cluster.message/at now}])
+        (db/transact!
+         connection
+         (into [] cat
+               [(run/open-tx
+                 {::run/id run-id
+                  ::run/agent [:seon.cluster.agent/id agent-id]
+                  ::run/trigger [:seon.cluster.message/id message-id]
+                  ::run/opened-at now})
+                (run/claim-tx
+                 {::run/id run-id
+                  ::run/process process
+                  ::run/live-processes #{process}
+                  ::run/now now})
+                (run/plan-tx
+                 {::run/id run-id
+                  ::run/process process
+                  ::run/plan-digest "recorded-three-form-reply"
+                  ::run/sources
+                  [{:seon.cluster.run.form/source
+                    "(defn answer-count [] 2)"}
+                   {:seon.cluster.run.form/source "(answer-count)"}
+                   {:seon.cluster.run.form/source
+                    "(+ (answer-count) 1)"}]})]))
+        (doseq [[ordinal value] [[0 "#'my.agents.undisposed-agent/answer-count"]
+                                 [1 "2"]]]
+          (db/transact!
+           connection
+           (into (run/receipt-start-tx
+                  {::run/id run-id
+                   :seon.cluster.eval/ordinal ordinal
+                   :seon.cluster.eval/at now})
+                 (run/receipt-settle-tx
+                  {::run/id run-id
+                   :seon.cluster.eval/ordinal ordinal
+                   :seon.cluster.eval/result-edn value}))))
+        (db/transact!
+         connection
+         (run/receipt-start-tx
+          {::run/id run-id
+           :seon.cluster.eval/ordinal 2
+           :seon.cluster.eval/at now}))
+        (let [prepared
+              (terminal-data
+               {:seon.cluster.loop/cluster
+                {:seon.db/connection connection}
+                :seon.cluster.loop/now now
+                :seon.cluster.agent/id agent-id
+                :seon.cluster.run/id run-id
+                :seon.cluster.run/process process
+                :seon.cluster.run.form/ordinal 2
+                :seon.sci.eval/evaluation
+                {:seon.cluster.eval/result-edn "3"
+                 :seon.sci.admit/value 3}
+                :seon.cluster.message/trigger message-id})]
+          (db/transact! connection (:seon.db/tx-data prepared)))
+        (let [terminal
+              (eval.drive/terminal-state @connection agent-id process
+                                         message-id 6)
+              rendered
+              (transcript/render-ai
+               {:seon.db/db @connection
+                :seon.sci.eval/ctx (sci.eval/cluster-ctx @connection)
+                :seon.sci.eval/time-limit-ms 1000
+                :seon.config/on-core-error :record
+                :seon.sci.admit/caps
+                {:seon.config.eval.result/max-depth 12
+                 :seon.config.eval.result/max-collection 64
+                 :seon.config.eval.result/max-string 4096
+                 :seon.config.eval.result/max-nodes 4096}
+                :seon.cluster.agent/id agent-id
+                :seon.render.transcript/token-budget 100000})]
+          (is (inst?
+               (db/q '[:find ?at .
+                       :in $ ?run-id
+                       :where
+                       [?run :seon.cluster.run/id ?run-id]
+                       [?run :seon.cluster.run/undisposed-at ?at]]
+                     @connection run-id))
+              "the last clean receipt and undisposed close commit together")
+          (is (= {:seon.eval.drive/outcome :undisposed
+                  :seon.eval.drive/run-ids [run-id]}
+                 terminal)
+              "the episode verdict names the missing disposition")
+          (is (str/includes? rendered
+                             "ended without my.run/complete or my.run/wait")
+              "the following history carries the system-authored notice"))))))
 
 ;;; THE CLASS-KILLER: what boot installs must cover what the loop writes
 ;;;
