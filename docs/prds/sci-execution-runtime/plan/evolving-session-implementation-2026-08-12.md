@@ -8,8 +8,8 @@ tags: [prd, render, agent, context, runtime]
 
 This is the implementation companion to
 [the evolving-session decision record](evolving-session-prd-2026-08-12.md).
-It preserves D1, D2, and T2 exactly and applies them under rulings 24–48 of
-[the self-generating-context PRD](self-generating-context-prd-2026-08-11.md).
+It preserves D1, D2, and T2 exactly and applies them under rulings 24–50 of
+[the self-generating-context PRD](self-generating-context-prd-2026-08-11.md#owner-rulings-1-50).
 Only the surviving history/storage/printing grammar comes from
 [the transcript PRD](repl-transcript-context-prd-2026-08-10.md). This revision
 also applies every finding in
@@ -22,24 +22,24 @@ Uncommitted shared-tree changes are not cited as landed evidence.
 Status labels are literal:
 
 - `[landed]` exists at this document's HEAD;
-- `[in flight]` is owned by another lane and must be replaced by that lane's
-  commit citation when it lands; and
+- `[landed]` may cite a commit newer than the original source baseline when a
+  declared prerequisite returns during this documentation revision; and
 - `[target]` names the exact enabling change still required.
 
 There are no remaining owner choices in this document. Ruling 40's
-test-results-as-facts dependency is `[in flight]`; no evolving-session source
-phase starts until its lane lands and this document cites that commit.
+test-results-as-facts dependency landed in commit `9648aed33`; the integration
+gate is now the next boundary before an evolving-session source phase starts.
 
 ## Binding reconciliation
 
 The following rules remove the apparent conflicts among the parent PRDs.
 
 1. **Ruling 29 subsumes ruling 14.** The explained-set fixed point in
-   [ruling 29](self-generating-context-prd-2026-08-11.md#rulings-29-31-owner-2026-08-12-afternoon--the-expansion-frame)
+   [ruling 29](self-generating-context-prd-2026-08-11.md#owner-rulings-1-50)
    governs whether an entry is dependency-ready: every non-core symbol must
    already be introduced, recursively, before the dependent entry may emit.
    The define-before-use rule and stable alphabetical clause in
-   [ruling 14](self-generating-context-prd-2026-08-11.md#rulings-appended-after-w0-markup-owner-same-session)
+   [ruling 14](self-generating-context-prd-2026-08-11.md#owner-rulings-1-50)
    govern only the total order among entries that are already ready under
    ruling 29. Ruling 14 never admits an unexplained entry; ruling 29 never
    supplies an arbitrary tie-break.
@@ -89,8 +89,17 @@ The following rules remove the apparent conflicts among the parent PRDs.
     current facts plus empty history must produce a compact valid episode;
     functions, declared renders, and green test-result facts close their own
     teaching gaps. Anything that must survive is a fact with a declared
-    render. The plan dependency below therefore requires fact-backed statuses
-    and a current-state render, never history replay or prose recovery.
+    render. Durable task state therefore requires facts plus a current-state
+    render, never history replay or prose recovery.
+11. **Ruling 49 retires `my.plan` unbuilt.** The todo is the one task system:
+    derived obligations union with authored item facts, and its declared
+    current-state render omits completed items. No agent-plan relationship,
+    plan-status family, or `my.plan` implementation phase survives.
+12. **Ruling 50 makes effect replay stale by default.** An effectful value in
+    a reborn episode renders from its last receipt and is explicitly old, not
+    current. Re-execution remains forbidden unless a capability leaf later
+    declares the pre-approved read-only metadata tag and lands the never-lie
+    falsifier with its first use.
 
 ## Current HEAD and dependency ledger
 
@@ -106,7 +115,7 @@ The following rules remove the apparent conflicts among the parent PRDs.
 | Delta reads | `[landed]` `seon.db/since` returns a database value and accepts `(since basis)` or `(since database basis)`; `pull` accepts the current-database two-argument form or explicit three-argument form ([`src/seon/db.clj:859-899`](../../../../src/seon/db.clj#L859), [`src/seon/db.clj:1107-1119`](../../../../src/seon/db.clj#L1107)). | A since database is queried for numeric entity ids; each id is then pulled from the current database. |
 | Observation basis | `[landed]` render calls record the database value's basis transaction, and derived history entries expose it ([`src/seon/render.clj:549-554`](../../../../src/seon/render.clj#L549), [`src/seon/render/walk.clj:775-824`](../../../../src/seon/render/walk.clj#L775)). | Durable delta cursors still need the receipt member named below. Settlement time is never the cursor. |
 | Usage authority | `[landed]` the canonical source row is `my.run-test/the-lifecycle-walkthrough-is-executable-data` ([`test/my/run_test.clj:99-114`](../../../../test/my/run_test.clj#L99)). | The symbol remains stable while its namespace-render content and byte fixture are retargeted. |
-| Test-result facts | `[in flight -> cite its commit when you land]` Ruling 40 requires the one runner to commit declared test-run/result facts before this build. | This is an external prerequisite, not a stub or a target owned by any phase below. The demonstration's test exchange, problems list, and after-change auto-runs consume the landed facts. |
+| Test-result facts | `[landed]` commit `9648aed33` makes `commit-results!` the one completion writer, stores current counts/failure identities/bounded messages, retracts stale failures on green rerun, and returns the committed projection from `seon.test/run`. | The integration gate must now review the returned diff and its foreign `seon.fn-test` red before later phases consume these facts. No stub survives. |
 
 ## One generator, one entry at a time
 
@@ -256,26 +265,13 @@ that is absent from the current database emits no per-id pull. Supporting
 removed membership would require a history database and is outside ruling
 43's one-since-mechanism contract. No callable gains a delta arity.
 
-After the separately owned plan relationship lands, the exact provenance
-query is:
-
-```clojure
-(let [changes-db (seon.db/since 536871041)]
-  (->> (seon.db/q
-        changes-db
-        '[:find ?agent ?tx ?user ?process
-          :where
-          [?agent :seon.cluster.agent/plan _ ?tx]
-          [?tx :seon.db/user ?user]
-          [?tx :seon.db/process ?process]])
-       (sort-by (juxt second first))
-       vec))
-```
-
-The since query yields numeric `?agent` ids and their transaction ids. Each
-numeric id is then pulled separately from the **current** database. No lookup
-ref is resolved inside the since database, because its identity datom may
-predate the cursor.
+Ruling 49 deletes the proposed agent-plan relationship and its provenance
+query. The todo phase applies this same since/current-pull boundary to the
+declared authored-item facts it lands; derived obligations remain queries over
+messages, runs, and test-result facts. The since query yields numeric entity
+ids and transaction ids. Each numeric id is then pulled separately from the
+**current** database. No lookup ref is resolved inside the since database,
+because its identity datom may predate the cursor.
 
 ## Situation and wake law
 
@@ -406,7 +402,8 @@ suite gate.
 
 ### Explained-set acceptance trace
 
-Core forms and the injected `help` and `dir` are in the initial explained set.
+Core forms and the generated `help` and `dir` entries are in the initial
+explained set.
 The pulled namespace relationships introduce `my.run` and `clojure.test`; the
 namespace forms explain their public members before the demonstration. A
 definition introduces its own subject. Every other non-core symbol must appear
@@ -414,7 +411,7 @@ in the “satisfied before” column.
 
 | Entry | Parsed non-core symbols | Satisfied before | Introduced after |
 |---:|---|---|---|
-| 1 | `help` | injected root form | situation refs and protocol namespace subjects |
+| 1 | `help` | generated root form | situation refs and protocol namespace subjects |
 | 2 | `my.run` | pulled namespace relationship | public `my.run/*`, including `my.run/complete` |
 | 3 | `clojure.test` | pulled namespace relationship | public test symbols, including `clojure.test/deftest` and `clojure.test/is` |
 | 4 | `render-namespace-ai` | definition introduces itself; `:seon.ns/ns` and `:seon.render/ai` are acquired named specs | local renderer |
@@ -463,16 +460,14 @@ query; the pulls use the current database supplied by call preparation. The
 query is additions-only. Each listing and pull settles at consecutive
 ordinals before a model call.
 
-The plan portion is `[target: external plan-model dependency]`. It awaits a declared
-`:seon.cluster.agent/plan` relationship and referenced plan shape; the current
-registry has neither
-([`docs/seon/issues/agent-plan-has-no-declared-database-relationship.md:12-22`](../../../seon/issues/agent-plan-has-no-declared-database-relationship.md#L12)).
-This is a separately owned missing data model, not an evolving-session owner
-choice or permission to invent the relationship in Phase 4.
-After that declaration, the provenance query in
-[Delta basis and provenance](#delta-basis-and-provenance) runs, then the
-numeric agent id is pulled from the current database. No
-`:seon.cluster.agent/instructions` fact may be called a plan.
+The todo portion is `[target: Phase 5]`. Ruling 49 retires the unbuilt
+`my.plan` proposal and the nonexistent `:seon.cluster.agent/plan`
+relationship. Phase 5 first queries the merged schema registry, then declares
+only the missing authored-item facts and their current-state render; derived
+obligations come directly from unanswered messages, open runs, and failing
+test-result facts. Completed authored items are omitted. No
+`:seon.cluster.agent/instructions` fact may be called a todo item, and no
+plan-status family may be invented.
 
 Acceptance is structural: prompt N remains a byte prefix of prompt N+1; the
 provenance comment derives from the joined transaction facts; already
@@ -512,6 +507,15 @@ newest-basis selection wins in blocks. Evolving sessions never call
 `refresh-tx`, write apology/meta entries, mutate an entry, or introduce a
 second correction mechanism.
 
+## Effectful values are old by default
+
+Ruling 50 applies before any rebirth proof: an effectful value is represented
+from its last receipt and explicitly marked old/not-current. Generation does
+not re-execute it merely to make an opening look fresh. The future declared
+read-only metadata tag is an accretion point, not a current dependency; its
+first capability-leaf declaration must land with a regression proving that
+only tagged reads re-execute and every untagged effect stays receipt-backed.
+
 ## Phase ownership and dependency order
 
 One phase has one lane owner, but an owner may need several files to close one
@@ -519,12 +523,12 @@ mechanism. Overlapping paths serialize explicitly.
 
 | Phase | Exact owned paths | Exit and ordering |
 |---|---|---|
-| 0. Test-result facts prerequisite | No paths in this PRD; ruling 40's separate lane owns the runner and result declarations. | `[in flight -> cite its commit when you land]`. The one runner commits declared result facts. No later phase builds a stub or starts before this dependency lands. |
+| 0. Test-result facts prerequisite | Landed externally in commit `9648aed33`; no paths remain owned by this PRD. | `[landed]`. Integration review and the queued gate are required before Phase 1; no later phase builds a stub. |
 | 1. Generation state + ordering | `resources/seon/schemas/seon.bootstrap.edn`; `resources/seon/schemas/seon.config.bootstrap.edn`; `config/default.edn`; `src/seon/bootstrap.clj`; `src/seon/render/walk.clj`; `test/seon/bootstrap_test.clj` | Ruling 43: one pull per generation invocation, one-entry incremental state, ruling-29 closure plus ruling-14 ready tie-break, exact `1024`-token beyond-closure admission, and flat prefix drift. Starts only after protected bootstrap/walk owners are clear. |
 | 2. Demonstration retarget | `src/seon/bootstrap.clj`; `src/seon/cluster/agent.clj`; `src/my/run.clj`; `test/seon/bootstrap_test.clj`; `test/seon/cluster/agent_namespace_test.clj`; `test/my/run_test.clj` | Stable usage-test symbol pins the complete T0 bytes; the task message is retargeted; `clojure.test` becomes a declared required namespace so its landed namespace form is derivable; the spec-first owning-namespace renderer replaces `largest`; source row alone retains usage metadata and ruling 40's result facts report actual runs. Serial after Phase 1 because it shares bootstrap owners. |
 | 3. Generate→call integration | `resources/seon/schemas/seon.cluster.run.edn`; `src/seon/cluster/run.clj`; `src/seon/cluster/work.clj`; `src/seon/cluster/loop.clj`; focused run/work/turn tests | Consumes landed commit `7d036203e`. Fresh fork per generated entry; provider ordinals follow the generated prefix. |
 | 4. Durable shown basis + T1 | `resources/seon/schemas/seon.cluster.eval.edn`; `src/seon/cluster/run.clj`; `src/seon/cluster/loop.clj`; `src/seon/bootstrap.clj`; focused eval/bootstrap tests | Ruling 43: exact since query, additions-only deltas, numeric current pulls, zero new callable arities, provenance, and no emission for gaps already closed by retained history. Serial after Phases 1 and 3 because it shares their owners. |
-| 5. Plan relationship dependency | No paths in this PRD; the linked plan-model issue owns the declaration and its proof. | Not an owner choice. Ruling 47 requires a real `:seon.cluster.agent/plan` ref, fact-backed statuses, and a separately identified plan shape whose declared render derives current state; instructions, plan digests, and history replay remain forbidden substitutes. |
+| 5. Todo facts and current-state render | Schema-discovery result chooses the one existing owner; if absent, `resources/seon/schemas/seon.todo.edn`, its one function namespace, and focused tests are the bounded owner. | Ruling 49: union derived obligations with authored item facts, omit completed items, and remove every `my.plan`, agent-plan relationship, and plan-status assertion. Ruling 47 still forbids prose/history as durable task state. |
 | 6. Budget settlement | `resources/seon/schemas/my.run.edn`; `resources/seon/schemas/seon.cluster.run.edn`; `resources/seon/schemas/seon.cluster.loop.edn`; `src/my/run.clj`; `src/seon/cluster/run.clj`; `src/seon/cluster/loop.clj`; `test/my/run_test.clj`; `test/seon/cluster/run_test.clj`; `test/seon/cluster/turn_test.clj` | Ruling 41: `force-budget-wait-call` appends and settles the typed `:wait`, delivers it, and closes without a provider call. Both zero-before-open and zero-after-form transitions pass. Serial after Phase 3 because it shares run/loop. |
 | 7. Corrections | `src/seon/bootstrap.clj`; `src/seon/render/walk.clj`; `test/seon/bootstrap_test.clj`; `test/seon/render/history_test.clj` | Ruling 42: the next message/error wake re-observes the same stale read at a newer basis; newest basis wins and old bytes remain. Serial after Phases 1 and 4; no `refresh-tx`, passive T2 append, meta-entry, or second correction mechanism survives. |
 | 8. Integration + drive | Focused gates; one research evidence file; no new production owner | Complete example fixture, markdown/citation gate, one model drive, independent observer, remeasured MINIMUM, ruling 39 root preview from the same gap closure with no preview-depth constant, and a real ruling-45 reborn episode beside its original queryable history. |
@@ -565,6 +569,11 @@ sets overlap. There is no blanket “parallelize after Phase 1” claim.
   valid; demonstrated functions, declared renders, and green tests are not
   retaught, current fact renders preserve durable meaning, and the superseded
   history remains queryable.
+- The todo render unions derived obligations with authored item facts, omits
+  completed items, and no `my.plan`, agent-plan relationship, or plan-status
+  family remains.
+- Effectful values in a reborn episode are receipt-backed and visibly old by
+  default; no untagged effect re-executes.
 - The generate→call dependency and its focused regressions are landed in
   commit `7d036203e`; executing that source lane's cluster gate is outside
   this documentation revision's verification boundary.
