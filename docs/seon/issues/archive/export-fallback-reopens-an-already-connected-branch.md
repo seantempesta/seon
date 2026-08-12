@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, operator, database]
 ---
@@ -36,3 +36,27 @@ this only if its prepared export work reaches the same connection owner.
   same branch.
 - The exported database opens and answers the test query.
 - A genuinely occupied destination still refuses before mutation.
+
+## Resolution
+
+Commit `302580cc9` adds `seon.cluster.registry/active-branch-connection`,
+which borrows Datahike's registered `[store-id branch]` connection without
+acquiring or releasing an owning reference. The export fallback uses that
+connection when present and releases only branch readers it opened itself.
+
+The pre-fix forced-fallback probe reproduced
+`:seon.cluster.export/clone-unsupported` with fallback cause `branch
+:cluster-live already has a connection in this process`; the held connection
+remained identical at registry reference count one. The class regression then
+forced the same fallback while watching `datahike.connections/*connections*`,
+proved the count never exceeded one, and reopened and queried the exported
+branch.
+
+Verification on 2026-08-11:
+
+- `bin/test seon.cluster.export-test`: 6 tests, 27 assertions, green.
+- `bin/test seon.dev.fresh-operator-export-test`: 1 test, 13 assertions,
+  green; this retains the event-driven conversion from `b5846ea65`.
+- `bin/test --changed src/seon/cluster/export.clj --changed
+  src/seon/cluster/registry.clj --changed test/seon/cluster/export_test.clj`:
+  108 tests, 604 assertions, green.

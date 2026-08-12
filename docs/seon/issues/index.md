@@ -16,14 +16,13 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (35)
+## Blocker (34)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Make the render value floor total over ordinary unqualified-key maps](render-value-floor-refuses-any-map-with-unqualified-keys.md) | blocker | interface-economy W1 total-floor wave |
 | [Publish terminal evidence for every background binary result](background-binary-settlement-does-not-publish-required-event.md) | blocker | background settlement investigation |
 | [Register the fault committer before the cluster graph can emit](fault-committer-misses-the-first-injected-fault.md) | blocker | fault-facts verification pending W1 integration |
-| [Rebuild an export without reopening an already-connected branch](export-fallback-reopens-an-already-connected-branch.md) | blocker | suite-speed-tail / export owner |
 | [Stop the bootstrap plan's deliberate failures from interrupting the run](bootstrap-teaching-failures-strand-every-new-agent.md) | blocker | agent context repair wave (2026-08-10 audit) |
 | [Every agent prompt is a neighborhood render-walk contract violation](every-agent-prompt-is-a-neighborhood-render-walk-contract-violation.md) | blocker | live-drive context repair wave |
 | [Settle a receipt for every recorded run form](a-runs-last-form-can-close-without-a-receipt.md) | blocker | live-drive context repair wave |
