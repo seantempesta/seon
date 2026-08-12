@@ -2075,6 +2075,8 @@
              ;; process-local ports and structural dials, which are not
              ;; environment members.
              :seon.env/environment (env/of ctx)
+             :seon.sci.eval/projection-state
+             (:seon.sci.eval/projection-state ctx)
              :seon.db/connection connection
               :seon.cluster/name cluster-name
               :seon.cluster.run/process process
@@ -2445,6 +2447,7 @@
               :seon.db/connection connection
               :seon.schema/projection
               (:seon.schema/projection @projection-state)
+              :seon.db/basis-t (:seon.db/basis-t @projection-state)
               :seon.sci.admit/caps (config/result-caps boot-dials)
               :seon.config/on-core-error
               (:seon.config/on-core-error boot-dials)}))
@@ -2461,6 +2464,7 @@
             (env/boot-environment
              (assoc pre-graph-environment
                     :seon.flow/work-launcher work-launcher)))
+           _ (env/replace-environment! projection-state environment)
            ;; The environment rides the ctx by `assoc` — never through
            ;; `sci/init` options, which silently drop unknown keys. Every
            ;; per-turn `sci/fork` and every closure built inside it then
@@ -2468,7 +2472,9 @@
            ;; construction.
            instance (publish!
                      (assoc instance :seon.sci.eval/ctx
-                            (env/carry bare-ctx environment)))
+                            (-> bare-ctx
+                                (env/carry environment)
+                                (env/carry-state projection-state))))
            instance (publish!
                      (assoc instance :seon.flow/work-launcher work-launcher))
            instance (publish!

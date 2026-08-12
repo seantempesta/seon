@@ -13,7 +13,8 @@
                  seon.sci.eval/ctx?],
                 :projection-state
                 [:fn
-                 {:error/message "must be a cluster-owned projection state"
+                 {:error/message
+                  "must hold one immutable replacement environment"
                   :gen/gen seon.sci.eval/projection-state-generator}
                  seon.sci.eval/projection-state?],
                 :ending-ns :symbol,

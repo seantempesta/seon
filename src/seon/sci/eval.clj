@@ -144,16 +144,15 @@
 (schema/register-core-predicate! 'seon.sci.eval/ctx? ctx?)
 
 (defn projection-state?
-  "True for the atom advancing one cluster's schema projection by basis."
+  "True for the replacement reference holding one immutable environment."
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
-  (instance? clojure.lang.IAtom value))
+  (env/environment-state? value))
 
 (schema/register-core-predicate! 'seon.sci.eval/projection-state?
                                  projection-state?)
 
-(def projection-state-generator
-  (gen/fmap atom (gen/return {})))
+(def projection-state-generator env/environment-state-generator)
 
 (defonce ^:private generator-ctx
   (delay (sci/init {})))
@@ -165,13 +164,16 @@
 (schema.edn/load! {})
 
 (defn projection-state
-  "Create the schema projection state owned by one cluster context and writer."
+  "Create a cluster context's immutable environment replacement reference."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.schema/projection]
     :seon.sci.eval/projection-state]}
   [db projection]
-  (atom {::basis-transaction (db/basis-t db)
-         :seon.schema/projection projection}))
+  (env/environment-state
+   (env/refuse-incomplete-environment!
+    (env/environment {:seon.boot/cluster-name "current-src"
+                      :seon.db/basis-t (db/basis-t db)
+                      :seon.schema/projection projection}))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The base context
@@ -568,9 +570,7 @@
 (defn- context-projection
   "The latest schema projection held by one live cluster context."
   [ctx]
-  (or (some-> (::projection-state ctx)
-              deref
-              :seon.schema/projection)
+  (or (some-> (env/of ctx) :seon.schema/projection)
       (:seon.schema/projection ctx)))
 
 (defn- evaluation-projection
@@ -581,16 +581,8 @@
 (defn- advance-context-projection!
   "Advance a live context's projection at the database's basis transaction."
   [ctx db projection]
-  (when-let [state (::projection-state ctx)]
-    (let [basis-transaction (db/basis-t db)]
-      (swap! state
-             (fn [current]
-               (if (<= (long (or (::basis-transaction current)
-                                  Long/MIN_VALUE))
-                       basis-transaction)
-                 {::basis-transaction basis-transaction
-                  :seon.schema/projection projection}
-                 current)))))
+  (when-let [state (get ctx env/state-carrier)]
+    (env/advance-projection! state (db/basis-t db) projection))
   projection)
 
 (defn- instrumentation-config
@@ -1520,10 +1512,9 @@
          projection-state (or supplied-projection-state
                               (projection-state db projection))
          ctx (call-preparation/install
-              (assoc ctx
-                     :seon.schema/projection projection
-                     ::projection-state
-                     projection-state))]
+              (env/carry-state
+               (assoc ctx :seon.schema/projection projection)
+               projection-state))]
      ;; The listener is the optimizer, never the correctness boundary —
      ;; an idle cluster notices a new supplied-default row without
      ;; waiting for the next call's basis comparison. It needs the live
@@ -1557,14 +1548,15 @@
          projection-state (or supplied-projection-state
                               (projection-state db projection))
          ctx (call-preparation/install
-              (assoc (sci/fork base-ctx)
-                     ::kernel/installed-functions
-                     (atom @(::kernel/installed-functions base-ctx))
-                     ::kernel/program-snapshot
-                     (atom @(::kernel/program-snapshot base-ctx))
-                     ::custody {:seon.db/connection connection}
-                     :seon.schema/projection projection
-                     ::projection-state projection-state))]
+              (env/carry-state
+               (assoc (sci/fork base-ctx)
+                      ::kernel/installed-functions
+                      (atom @(::kernel/installed-functions base-ctx))
+                      ::kernel/program-snapshot
+                      (atom @(::kernel/program-snapshot base-ctx))
+                      ::custody {:seon.db/connection connection}
+                      :seon.schema/projection projection)
+               projection-state))]
      (when connection
        (call-preparation/watch!
         (get ctx call-preparation/carrier) connection projection))

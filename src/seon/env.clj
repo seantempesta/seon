@@ -60,6 +60,63 @@
               (map->Environment {:seon.boot/cluster-name cluster-name}))
             (gen/not-empty gen/string-alphanumeric)))
 
+(def environment-state-generator
+  (gen/fmap (fn [cluster-name]
+              (atom (map->Environment
+                     {:seon.boot/cluster-name cluster-name})))
+            (gen/not-empty gen/string-alphanumeric)))
+
+(defn environment-state?
+  "True for a cluster-owned reference whose value is one immutable environment."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (and (instance? clojure.lang.IAtom value)
+       (environment? @value)))
+
+(defn environment-state
+  "Create the one replacement reference for a cluster's immutable environment."
+  {:malli/schema
+   [:=> [:cat :seon.env/environment] :seon.sci.eval/projection-state]}
+  [environment]
+  (when-not (environment? environment)
+    (throw
+     (ex-info "Environment state requires a complete environment value."
+              {:seon.error/kind ::invalid-environment-state
+               :seon.env/supplied (str (type environment))})))
+  (atom environment))
+
+(defn replace-environment!
+  "Atomically replace a cluster's environment with another immutable value."
+  {:malli/schema
+   [:=> [:cat :seon.sci.eval/projection-state :seon.env/environment]
+    :seon.env/environment]}
+  [state environment]
+  (when-not (environment? environment)
+    (throw
+     (ex-info "Environment replacement requires an environment value."
+              {:seon.error/kind ::invalid-environment-replacement
+               :seon.env/supplied (str (type environment))})))
+  (reset! state environment))
+
+(defn advance-projection!
+  "Replace the environment's projection at a non-older database basis."
+  {:malli/schema
+   [:=> [:cat :seon.sci.eval/projection-state :seon.db/basis-t
+         :seon.schema/projection]
+    :seon.env/environment]}
+  [state basis-t projection]
+  (swap! state
+         (fn [environment]
+           (if (<= (long (or (:seon.db/basis-t environment)
+                             Long/MIN_VALUE))
+                   basis-t)
+             (map->Environment
+              (assoc environment
+                     :seon.db/basis-t basis-t
+                     :seon.schema/projection projection))
+             environment)))
+  @state)
+
 (schema.edn/load! {})
 
 ;;; ---------------------------------------------------------------------------
@@ -222,14 +279,21 @@
   `:args`, on a web request map, and on a sci ctx."
   :seon.env/environment)
 
+(def state-carrier
+  "The ctx/cluster-handle key for the current immutable environment reference."
+  :seon.sci.eval/projection-state)
+
 (defn of
   "The environment carried by a ctx, submission, proc args, or request."
   {:malli/schema
    [:=> [:cat [:maybe :map]] [:maybe :seon.env/environment]]}
   [carrier-map]
-  (let [value (get carrier-map carrier)]
-    (when (environment? value)
-      value)))
+  (let [value (get carrier-map carrier)
+        state (get carrier-map state-carrier)]
+    (cond
+      (environment-state? state) @state
+      (environment? value) value
+      :else nil)))
 
 (defn require-environment
   "Return the carried environment or a flat error naming the boundary."
@@ -282,3 +346,15 @@
   (cond-> target
     (environment? carried)
     (assoc carrier carried)))
+
+(defn carry-state
+  "Attach one cluster's replacement reference to a long-lived owner."
+  {:malli/schema
+   [:=> [:cat :map :seon.sci.eval/projection-state] :map]}
+  [target state]
+  (if (environment-state? state)
+    (assoc target state-carrier state)
+    (throw
+     (ex-info "A long-lived environment owner requires environment state."
+              {:seon.error/kind ::invalid-environment-state
+               :seon.env/supplied (str (type state))}))))
