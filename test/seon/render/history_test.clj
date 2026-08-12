@@ -86,7 +86,10 @@
                form (render/render-form-value
                      (render-request database ctx agent-entity))]
            (is (= 'seon.cluster.agent/situation-form producer))
-           (is (= '(help) form))))
+           (is (= {:seon.repl/comment
+                   "; A new run just opened. Why am I awake — do I have messages?"
+                   :seon.repl/form '(help)}
+                  form))))
        (testing "the attribute floor is a listing query"
          (let [request (assoc (render-request database ctx namespace-entity)
                               :seon.render.walk/attribute :seon.ns/requires)
@@ -95,6 +98,18 @@
            (is (= 'seon.render/render-form producer))
            (is (= 'db/q (first form)))
            (is (str/includes? (pr-str form) ":seon.ns/requires"))))))))
+
+(deftest form-output-validation-is-the-declared-open-shape
+  (let [valid? #'render/valid-projection?
+        entry {:seon.repl/comment "; think"
+               :seon.repl/form '(help)}]
+    (is (valid? :seon.render/form '(help)))
+    (is (valid? :seon.render/form entry))
+    (is (valid? :seon.render/form [entry {:seon.repl/form '(dir 'my.run)}]))
+    (is (not (valid? :seon.render/form {:seon.repl/comment "; no act"})))
+    (is (valid? :seon.render/form
+                {:seon.error/kind :seon.render/failure
+                 :seon.error/message "failed"}))))
 
 (defn- settled-node
   [value]

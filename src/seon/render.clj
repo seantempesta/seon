@@ -282,10 +282,7 @@
 (defn- valid-projection?
   [output value]
   (or (:seon.error/kind value)
-      (case output
-        :seon.render/ai (string? value)
-        :seon.render/html (hiccup/hiccup? value)
-        :seon.render/form (sequential? value))))
+      (schema/valid-candidate-value? output value)))
 
 (declare project-node*)
 
@@ -461,7 +458,7 @@
   [request]
   (let [rendered (invoke-producer request :seon.render/form
                                   :seon.render/form)]
-    (if (or (sequential? rendered) (:seon.error/kind rendered))
+    (if (valid-projection? :seon.render/form rendered)
       rendered
       {:seon.error/kind ::invalid-form-output
        :seon.error/message "The selected form renderer did not return a form."
