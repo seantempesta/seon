@@ -81,15 +81,21 @@
         :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
         :seon.cluster.run/opened-at (java.util.Date.)})})
     (let [ctx (sci/fork (eval/cluster-ctx @connection connection))
-          sources ["(def helper (fn [x] (inc x)))"
+          wrapper-calls (atom 0)
+          probe-ns (sci/create-ns 'desk.probe)
+          _ (sci/add-namespace!
+             ctx 'desk.probe
+             {'touch! (sci/new-var 'touch!
+                                   (fn [] (swap! wrapper-calls inc))
+                                   {:ns probe-ns})})
+          sources ["(def helper (let [captured (desk.probe/touch!)] (fn [x] (+ captured x))))"
                    "(def data {:answer 42})"
                    "(def scratch (atom 1))"
                    "(swap! scratch + 6)"
-                   (str "(def lost (do (.toUpperCase \"x\") "
-                        "(fn [] 1)))")]]
+                   "(def lost (let [state (atom 1)] (fn [] @state)))"]]
       (doseq [[ordinal source] (map-indexed vector sources)]
-        (settle! connection ordinal (evaluation ctx source))))
-    (write-result! ready-path :committed)
+        (settle! connection ordinal (evaluation ctx source)))
+      (write-result! ready-path {:wrapper-calls @wrapper-calls}))
     @(promise)))
 
 (defn- read-and-clear-desk!
@@ -97,18 +103,25 @@
   (let [connection (d/connect configuration)]
     (try
       (let [base (eval/cluster-ctx @connection connection)
+            eval-form-calls (atom 0)
+            original-eval-form sci/eval-form
             restored
-            (eval/fork-for-turn
-             {:seon.sci.eval/ctx base
-              :seon.db/db @connection
-              :seon.db/connection connection
-              :seon.cluster.agent/id agent-id})
+            (with-redefs [sci/eval-form
+                          (fn [& args]
+                            (swap! eval-form-calls inc)
+                            (apply original-eval-form args))]
+              (eval/fork-for-turn
+               {:seon.sci.eval/ctx base
+                :seon.db/db @connection
+                :seon.db/connection connection
+                :seon.cluster.agent/id agent-id}))
             ctx (:seon.sci.eval/ctx restored)
             root #(some-> (sci/resolve ctx %) deref)
             before-clear
             {:helper ((root 'my.agents.desk-crash/helper) 4)
              :data (root 'my.agents.desk-crash/data)
              :atom @(root 'my.agents.desk-crash/scratch)
+             :eval-form-calls @eval-form-calls
              :notices (:seon.sci.eval/desk-notices restored)}]
         (db/transact!
          connection

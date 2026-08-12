@@ -473,43 +473,19 @@
 ;; 7461-7468, 7548-7555, 7947-7954; SCI's system clock and `time` expansion are
 ;; namespaces.cljc:1377-1417. SCI's io bindings at namespaces.cljc:1489-1525
 ;; establish the mutable input/output calls.
-(def ^:private nondeterministic-built-in-calls
-  '#{clojure.core/gensym
-     clojure.core/hash
-     clojure.core/hash-ordered-coll
-     clojure.core/hash-unordered-coll
-     clojure.core/rand
-     clojure.core/rand-int
-     clojure.core/rand-nth
-     clojure.core/random-sample
-     clojure.core/random-uuid
-     clojure.core/shuffle
-     clojure.core/system-time})
-
-(def ^:private impure-built-in-calls
-  '#{clojure.core/flush
-     clojure.core/newline
-     clojure.core/pr
-     clojure.core/print
-     clojure.core/printf
-     clojure.core/prn
-     clojure.core/println
-     clojure.core/read
-     clojure.core/read-line})
-
-(defn- built-in-replay-risks
-  [observed-built-in-calls]
-  {:seon.sci.eval/nondeterministic-calls
-   (into #{} (filter nondeterministic-built-in-calls)
-         observed-built-in-calls)
-   :seon.sci.eval/impure-calls
-   (into #{} (filter impure-built-in-calls)
-         observed-built-in-calls)})
+(defn- durable-function-root
+  [ctx qualified]
+  (let [root-data (first (sci/var-root-data ctx [qualified]))]
+    (if (blob/store-faithful-edn root-data)
+      root-data
+      (assoc (select-keys root-data
+                          [:sci.root/version :sci.root/ns :sci.root/name])
+             :sci.root/unrestorable-reason
+             "The SCI function root contains a value without a faithful stored representation."))))
 
 (defn- desk-defs
-  [ctx namespace-name before source form observed-built-in-calls]
-  (let [after (turn-intern-values ctx)
-        replay-risks (built-in-replay-risks observed-built-in-calls)]
+  [ctx namespace-name before _source form _observed-built-in-calls]
+  (let [after (turn-intern-values ctx)]
     (into []
           (comp
            (remove (fn [[qualified value]]
@@ -518,21 +494,28 @@
                               (same-intern-value?
                                (get before qualified absent-intern) value)))))
            (map (fn [[qualified value]]
-                  (let [atom? (instance? clojure.lang.Atom value)]
-                    (merge
-                     (cond->
-                      {:seon.def/id (str qualified)
-                       :seon.def/ns
-                       [:seon.ns/name (symbol (namespace qualified))]
-                       :seon.def/name (symbol (name qualified))
-                       :seon.def/source source
-                       :seon.sci.eval/value (if atom? @value value)
-                       :seon.sci.eval/referenced-vars
-                       (resolved-form-vars ctx namespace-name form)
-                       :seon.sci.eval/unproven-called-vars
-                       (unproven-called-vars ctx namespace-name form)}
-                       atom? (assoc :seon.def/atom? true))
-                     replay-risks)))))
+                  (let [atom? (instance? clojure.lang.Atom value)
+                        function? (fn? value)
+                        intern-name (symbol (name qualified))]
+                    (cond->
+                     {:seon.def/id (str qualified (when function? "#root"))
+                      :seon.def/ns
+                      [:seon.ns/name (symbol (namespace qualified))]
+                      :seon.def/name
+                      (if function?
+                        (symbol (str intern-name "#root"))
+                        intern-name)
+                      :seon.sci.eval/value
+                      (cond
+                        atom? @value
+                        function?
+                        (durable-function-root ctx qualified)
+                        :else value)
+                      :seon.sci.eval/referenced-vars
+                      (resolved-form-vars ctx namespace-name form)
+                      :seon.sci.eval/unproven-called-vars
+                      (unproven-called-vars ctx namespace-name form)}
+                      atom? (assoc :seon.def/atom? true))))))
           after)))
 
 (defn- deleted-schema-key
@@ -701,6 +684,97 @@
         function-symbol spec-edn projection on-core-error caps @sci-var))))
   nil)
 
+(defn- desk-value
+  [connection {value-edn :seon.def/value-edn
+               digest :seon.def/blob}]
+  (let [serialized
+        (cond
+          (some? value-edn) value-edn
+          (and connection digest) (blob/get connection digest)
+          :else
+          (throw
+           (ex-info "Desk row has no available stored value."
+                    {:seon.error/kind ::desk-blob-unavailable
+                     :seon.blob/digest digest})))]
+    (edn/read-string serialized)))
+
+(defn- desk-root-row
+  [db function-symbol]
+  (let [namespace-name (symbol (namespace function-symbol))
+        intern-name (symbol (str (name function-symbol) "#root"))
+        entry (db/q '[:find ?entry .
+                      :in $ ?namespace ?name
+                      :where
+                      [?ns :seon.ns/name ?namespace]
+                      [?entry :seon.def/ns ?ns]
+                      [?entry :seon.def/name ?name]]
+                    db namespace-name intern-name)]
+    (when entry
+      (db/pull db '[* {:seon.def/ns [:seon.ns/name]}] entry))))
+
+(defn- install-root-row!
+  [ctx connection function-symbol row]
+  (let [root-data (desk-value connection row)
+        descriptor-symbol
+        (symbol (str (:sci.root/ns root-data))
+                (str (:sci.root/name root-data)))]
+    (cond
+      (not= function-symbol descriptor-symbol)
+      (throw
+       (ex-info "Stored function root descriptor names a different Var."
+                {:seon.error/kind ::function-root-identity-mismatch
+                 :seon.fn/sym (str function-symbol)
+                 :sci.root/sym (str descriptor-symbol)
+                 :seon.def/id (:seon.def/id row)}))
+
+      (:sci.root/function root-data)
+      (do
+        (sci/install-var-roots! ctx [root-data])
+        true)
+
+      :else
+      (let [reason
+            (or (:sci.root/unrestorable-reason root-data)
+                "The stored value is not a function-root descriptor.")]
+        (sci/intern ctx (:sci.root/ns root-data) (:sci.root/name root-data)
+                    {:seon.def/id (:seon.def/id row)
+                     :seon.def/unrestorable-reason reason})
+        false))))
+
+(defn- install-function-from-database!
+  "Install one selected function from the acquired database snapshot."
+  [ctx db function-symbol]
+  (let [{source ::function-source
+         namespace-name ::function-namespace}
+        (kernel/program-function ctx function-symbol)
+        namespace-row
+        (kernel/program-namespace ctx namespace-name)]
+    (when-not source
+      (throw
+       (ex-info "Selected function has no durable program row."
+                {:seon.error/kind ::missing-function-row
+                 :seon.fn/sym (str function-symbol)})))
+    (sci/install-namespace-bindings!
+       ctx namespace-name (assoc (row-bindings namespace-row) :refers {}))
+      (sci/install-namespace-bindings! ctx namespace-name
+                                       (row-bindings namespace-row))
+      (let [function-installed?
+            (if-let [row (desk-root-row db function-symbol)]
+              (install-root-row! ctx (:seon.db/connection (::custody ctx))
+                                 function-symbol row)
+              (throw
+               (ex-info "Selected function has no durable root descriptor."
+                        {:seon.error/kind ::unrestorable-function-root
+                         :seon.fn/sym (str function-symbol)
+                         :seon.def/unrestorable-reason
+                         "No fact-backed SCI function root was found."})))]
+        (when function-installed?
+          (install-function-contract!
+           ctx (db/pull db '[*] [:seon.fn/sym (str function-symbol)])
+           (context-projection ctx) db)))
+    (kernel/mark-installed! ctx function-symbol)
+    function-symbol))
+
 (defn install-row!
   "Install one declaration from the terminal transaction's db-after.
   The exact committed row is resolved by identity. Receipts are never
@@ -748,23 +822,23 @@
       :seon.fn/sym
       (let [namespace-name (second (:seon.fn/ns row))
             function-symbol (symbol (:seon.fn/sym committed))
-            event (when-not (::evaluated? row)
-                    (one-event (:seon.fn/source committed)
-                               namespace-name ctx))
             next-projection
             (schema/projection-from-database db projection)]
-        (when event
-          (sci/binding [sci/ns (sci/create-ns namespace-name)]
-            (sci/eval-form ctx (:seon.sci.reader/form event))))
         (kernel/cache-function!
          ctx function-symbol
          {::function-source (:seon.fn/source committed)
           ::function-namespace namespace-name
           ::function-private? (:seon.fn/private? committed)
           ::agent-authored? true})
-        (kernel/mark-installed! ctx function-symbol)
-        (when-not (::skip-contract-install? row)
-          (install-function-contract! ctx committed next-projection db))
+        (cond
+          (::evaluated? row)
+          (do
+            (kernel/mark-installed! ctx function-symbol)
+            (when-not (::skip-contract-install? row)
+              (install-function-contract! ctx committed next-projection db)))
+
+          (not (::skip-contract-install? row))
+          (install-function-from-database! ctx db function-symbol))
         {:seon.schema/projection next-projection
          :seon.sci.eval/installed
          (if (::skip-contract-install? row) 0 1)})
@@ -1364,66 +1438,36 @@
        functions-installed
        namespace-order)))))))
 
-(defn- install-function-from-database!
-  "Install one selected function from the acquired database snapshot."
-  [ctx _db function-symbol]
-  (let [{source ::function-source
-         namespace-name ::function-namespace
-         agent-authored? ::agent-authored?}
-        (kernel/program-function ctx function-symbol)
-        namespace-row
-        (kernel/program-namespace ctx namespace-name)]
-    (when-not source
-      (throw
-       (ex-info "Selected function has no durable program row."
-                {:seon.error/kind ::missing-function-row
-                 :seon.fn/sym (str function-symbol)})))
-    (let [required-names
-          (into #{} (map :seon.ns/name) (:seon.ns/requires namespace-row))]
-      (when-not agent-authored?
-        (require namespace-name)
-        (doseq [required-name required-names
-                :let [host-namespace (find-ns required-name)]
-                :when host-namespace]
-          (install-host-namespace! ctx required-name
-                                   (ns-publics host-namespace)))
-        (install-host-namespace! ctx namespace-name
-                                 (ns-interns (find-ns namespace-name))))
-      (install-declared-classes! ctx [namespace-row])
-      (sci/install-namespace-bindings!
-       ctx namespace-name (assoc (row-bindings namespace-row) :refers {}))
-      (sci/install-namespace-bindings! ctx namespace-name
-                                       (row-bindings namespace-row))
-      (let [event (one-event source namespace-name ctx)]
-        (sci/binding [sci/ns (sci/create-ns namespace-name)]
-          (sci/eval-form ctx (:seon.sci.reader/form event))))
-      (kernel/mark-installed! ctx function-symbol)))
-  function-symbol)
-
-(defn- desk-value
-  [connection {value-edn :seon.def/value-edn
-               digest :seon.def/blob}]
-  (let [serialized
-        (cond
-          (some? value-edn) value-edn
-          (and connection digest) (blob/get connection digest)
-          :else
-          (throw
-           (ex-info "Desk row has no available stored value."
-                    {:seon.error/kind ::desk-blob-unavailable
-                     :seon.blob/digest digest})))]
-    (edn/read-string serialized)))
-
 (defn- desk-restore-notice
   [intern-name reason]
   (str "could not restore `" intern-name "`: " reason))
 
 (defn- restorable-desk-row?
-  [{:seon.def/keys [atom? blob source unrestorable-reason value-edn]}]
+  [{:seon.def/keys [blob unrestorable-reason value-edn]}]
   (and (nil? unrestorable-reason)
-       (if atom?
-         (or (some? value-edn) (some? blob))
-         (or (some? source) (some? value-edn) (some? blob)))))
+       (or (some? value-edn) (some? blob))))
+
+(defn- unrestorable-desk-value
+  [row reason]
+  {:seon.def/id (:seon.def/id row)
+   :seon.def/unrestorable-reason reason})
+
+(defn- desk-entry
+  [connection row]
+  (if (or (:seon.def/value-edn row) (:seon.def/blob row))
+    (try
+      [row (desk-value connection row) nil]
+      (catch Throwable failure
+        [row nil failure]))
+    [row nil nil]))
+
+(defn- desk-target
+  [{namespace-ref :seon.def/ns
+    intern-name :seon.def/name}
+   value]
+  (if (and (map? value) (contains? value :sci.root/version))
+    [(:sci.root/ns value) (:sci.root/name value)]
+    [(:seon.ns/name namespace-ref) intern-name]))
 
 (defn fork-for-turn
   "Fork the live base and rehydrate only the selected agent's desk facts."
@@ -1447,25 +1491,33 @@
                            entry-ids)
              (sort-by (juxt :seon.def/ordinal :seon.def/key))
              vec)
+        entries (mapv #(desk-entry connection %) rows)
         notices (transient [])]
-    (doseq [{namespace-ref :seon.def/ns
-             intern-name :seon.def/name
-             :as row} rows
-            :when (restorable-desk-row? row)]
-      (let [namespace-name (:seon.ns/name namespace-ref)]
+    (doseq [[row value] entries]
+      (let [[namespace-name intern-name] (desk-target row value)]
         (when-not (sci/find-ns ctx namespace-name)
           (sci/add-namespace! ctx namespace-name {}))
-        (sci/intern ctx namespace-name intern-name)))
-    (doseq [{namespace-ref :seon.def/ns
-             intern-name :seon.def/name
-             source :seon.def/source
-             atom? :seon.def/atom?
-             reason :seon.def/unrestorable-reason
-             :as row} rows]
-      (let [namespace-name (:seon.ns/name namespace-ref)]
+        (when (or (:seon.def/unrestorable-reason row)
+                  (restorable-desk-row? row))
+          (sci/intern ctx namespace-name intern-name))))
+    (doseq [[{intern-name :seon.def/name
+              atom? :seon.def/atom?
+              reason :seon.def/unrestorable-reason
+              :as row}
+             value failure] entries]
+      (let [[namespace-name target-name] (desk-target row value)]
         (cond
+          failure
+          (let [reason (.getMessage ^Throwable failure)]
+            (sci/intern ctx namespace-name target-name
+                        (unrestorable-desk-value row reason))
+            (conj! notices (desk-restore-notice target-name reason)))
+
           reason
-          (conj! notices (desk-restore-notice intern-name reason))
+          (do
+            (sci/intern ctx namespace-name target-name
+                        (unrestorable-desk-value row reason))
+            (conj! notices (desk-restore-notice target-name reason)))
 
           (not (restorable-desk-row? row))
           (conj! notices
@@ -1473,32 +1525,23 @@
                   intern-name "desk row has no defining form or stored value"))
 
           atom?
-          (try
-            (sci/intern ctx namespace-name intern-name
-                        (atom (desk-value connection row)))
+          (do
+            (sci/intern ctx namespace-name target-name (atom value))
             (conj! notices
-                   (str "restored `" intern-name
-                        "` from its last settled value"))
-            (catch Throwable failure
-              (conj! notices
-                     (desk-restore-notice intern-name (.getMessage failure)))))
-
-          source
-          (try
-            (let [event (one-event source namespace-name ctx)]
-              (sci/binding [sci/ns (sci/create-ns namespace-name)]
-                (sci/eval-form ctx (:seon.sci.reader/form event))))
-            (catch Throwable failure
-              (conj! notices
-                     (desk-restore-notice intern-name (.getMessage failure)))))
+                   (str "restored `" target-name
+                        "` from its last settled value")))
 
           (or (:seon.def/value-edn row) (:seon.def/blob row))
           (try
-            (sci/intern ctx namespace-name intern-name
-                        (desk-value connection row))
+            (if (:sci.root/function value)
+              (sci/install-var-roots! ctx [value])
+              (sci/intern ctx namespace-name target-name value))
             (catch Throwable failure
-              (conj! notices
-                     (desk-restore-notice intern-name (.getMessage failure))))))))
+              (let [reason (.getMessage failure)]
+                (sci/intern ctx namespace-name target-name
+                            (unrestorable-desk-value row reason))
+                (conj! notices
+                       (desk-restore-notice target-name reason))))))))
     {:seon.sci.eval/ctx ctx
      :seon.sci.eval/desk-notices (persistent! notices)}))
 

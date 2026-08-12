@@ -1098,21 +1098,44 @@
 (deftest an-acquired-function-uses-the-current-evaluation-limit
   (test-support/with-database
     (fn [connection]
-      (db/transact!
-       connection
-       [{:seon.ns/name 'authored.interrupt
-         :seon.ns/source "(ns authored.interrupt)"}])
-      (db/transact!
-       connection
-       [{:seon.fn/sym "authored.interrupt/spin"
-         :seon.fn/ns [:seon.ns/name 'authored.interrupt]
-         :seon.fn/source
-         (str "(defn ^{:malli/schema [:=> [:cat] :int]} spin [] "
-              "(loop [i 0] (recur (inc i))))")
-         :seon.fn/arglists "([])"
-         :seon.fn/private? false
-         :seon.fn/spec "[:=> [:cat] :int]"}])
-      (let [ctx (eval/build-base-ctx)
+      (let [source
+            (str "(defn ^{:malli/schema [:=> [:cat] :int]} spin [] "
+                 "(loop [i 0] (recur (inc i))))")
+            authored-ctx (eval/build-base-ctx)
+            _ (sci/add-namespace! authored-ctx 'authored.interrupt {})
+            _ (sci/binding [sci/ns (sci/create-ns 'authored.interrupt)]
+                (sci/eval-string* authored-ctx source))
+            root-edn
+            (binding [*print-meta* true]
+              (pr-str
+               (first
+                (sci/var-root-data authored-ctx
+                                   ['authored.interrupt/spin]))))
+            _
+            (db/transact!
+             connection
+             [{:seon.cluster.agent/id "interrupt-author"
+               :seon.cluster.agent/namespace
+               {:seon.ns/name 'authored.interrupt
+                :seon.ns/source "(ns authored.interrupt)"}}
+              {:seon.fn/sym "authored.interrupt/spin"
+               :seon.schema.admission/source :agent
+               :seon.fn/ns [:seon.ns/name 'authored.interrupt]
+               :seon.fn/source source
+               :seon.fn/arglists "([])"
+               :seon.fn/private? false
+               :seon.fn/spec "[:=> [:cat] :int]"}
+              {:seon.def/key
+               (pr-str ["interrupt-author" "authored.interrupt/spin#root"])
+               :seon.def/id "authored.interrupt/spin#root"
+               :seon.def/agent
+               [:seon.cluster.agent/id "interrupt-author"]
+               :seon.def/ns [:seon.ns/name 'authored.interrupt]
+               :seon.def/name 'spin#root
+               :seon.def/value-edn root-edn
+               :seon.def/ordinal 0
+               :seon.schema.admission/source :agent}])
+            ctx (eval/build-base-ctx)
             acquired (eval/acquire! {:seon.sci.eval/ctx ctx
                                      :seon.db/db @connection})
             evaluation
@@ -1127,25 +1150,47 @@
 (deftest agent-contracts-apply-on-acquire-and-cold-recovery
   (test-support/with-database
     (fn [connection]
-      (db/transact!
-       connection
-       [(:seon.config/desired-row
-         (config/compile-manifest
-          {:seon.boot/cluster-name "contract-acquire"
-           :seon.config/manifest
-           (assoc caps :seon.config/on-core-error :panic)}))
-        {:seon.ns/name 'authored.contract
-         :seon.ns/source "(ns authored.contract)"}
-        {:seon.fn/sym "authored.contract/accept"
-         :seon.schema.admission/source :agent
-         :seon.fn/ns [:seon.ns/name 'authored.contract]
-         :seon.fn/source
-         (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
-              "accept [x] x)")
-         :seon.fn/arglists "([x])"
-         :seon.fn/private? false
-         :seon.fn/spec "[:=> [:cat :int] :int]"}])
-      (let [assert-violation
+      (let [source
+            (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+                 "accept [x] x)")
+            authored-ctx (eval/build-base-ctx)
+            _ (sci/add-namespace! authored-ctx 'authored.contract {})
+            _ (sci/binding [sci/ns (sci/create-ns 'authored.contract)]
+                (sci/eval-string* authored-ctx source))
+            root-edn
+            (binding [*print-meta* true]
+              (pr-str
+               (first
+                (sci/var-root-data authored-ctx
+                                   ['authored.contract/accept]))))]
+        (db/transact!
+         connection
+         [(:seon.config/desired-row
+           (config/compile-manifest
+            {:seon.boot/cluster-name "contract-acquire"
+             :seon.config/manifest
+             (assoc caps :seon.config/on-core-error :panic)}))
+          {:seon.cluster.agent/id "contract-author"
+           :seon.cluster.agent/namespace
+           {:seon.ns/name 'authored.contract
+            :seon.ns/source "(ns authored.contract)"}}
+          {:seon.fn/sym "authored.contract/accept"
+           :seon.schema.admission/source :agent
+           :seon.fn/ns [:seon.ns/name 'authored.contract]
+           :seon.fn/source source
+           :seon.fn/arglists "([x])"
+           :seon.fn/private? false
+           :seon.fn/spec "[:=> [:cat :int] :int]"}
+          {:seon.def/key
+           (pr-str ["contract-author" "authored.contract/accept#root"])
+           :seon.def/id "authored.contract/accept#root"
+           :seon.def/agent [:seon.cluster.agent/id "contract-author"]
+           :seon.def/ns [:seon.ns/name 'authored.contract]
+           :seon.def/name 'accept#root
+           :seon.def/value-edn root-edn
+           :seon.def/ordinal 0
+           :seon.schema.admission/source :agent}])
+        (let [assert-violation
             (fn [ctx moment]
               (let [evaluation
                     (run-in ctx "(authored.contract/accept \"wrong\")" 2000)
@@ -1156,12 +1201,12 @@
                        (get-in failure
                                [:seon.error/data :seon.instrument/fn]))
                     moment)))
-            acquired-ctx (eval/build-base-ctx)]
-        (eval/acquire! {:seon.sci.eval/ctx acquired-ctx
-                        :seon.db/db @connection})
-        (assert-violation acquired-ctx "boot acquire!")
-        (assert-violation (eval/cluster-ctx @connection)
-                          "cold crash recovery")))))
+              acquired-ctx (eval/build-base-ctx)]
+          (eval/acquire! {:seon.sci.eval/ctx acquired-ctx
+                          :seon.db/db @connection})
+          (assert-violation acquired-ctx "boot acquire!")
+          (assert-violation (eval/cluster-ctx @connection)
+                            "cold crash recovery"))))))
 
 (deftest acquisition-uses-the-effective-config-projection-when-instrumented
   (test-support/with-database

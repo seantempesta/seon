@@ -14,6 +14,7 @@
            [java.util.concurrent TimeUnit]))
 
 (def ^:private caps (config/result-caps (config/defaults)))
+(def ^:private child-backstop-seconds 180)
 
 (defn- start-child!
   [mode database-path store-id output-path log-path]
@@ -35,12 +36,13 @@
     (cond
       (.exists (File. path)) true
       (not (.isAlive process)) false
-      (< attempt 2400) (do (Thread/sleep 25) (recur (inc attempt)))
+      (< attempt (* child-backstop-seconds 40))
+      (do (Thread/sleep 25) (recur (inc attempt)))
       :else false)))
 
 (defn- assert-child-exit!
   [process mode log-path]
-  (when-not (.waitFor process 90 TimeUnit/SECONDS)
+  (when-not (.waitFor process child-backstop-seconds TimeUnit/SECONDS)
     (.destroyForcibly process)
     (throw (ex-info "Desk proof child exceeded its backstop."
                     {:seon.sci.desk/mode mode})))
@@ -72,6 +74,18 @@
       :seon.def/ordinal 0
       :seon.schema.admission/source :agent}
      attributes)))
+
+(defn- function-root-edn
+  [namespace-name source]
+  (let [ctx (sci/init {})]
+    (sci/add-namespace! ctx namespace-name {})
+    (sci/binding [sci/ns (sci/create-ns namespace-name)]
+      (sci/eval-string* ctx source))
+    (binding [*print-meta* true]
+      (pr-str
+       (first
+        (sci/var-root-data
+         ctx [(symbol (str namespace-name) "helper")]))))))
 
 (defn- settle!
   [connection agent-id run-id ordinal evaluated]
@@ -163,15 +177,15 @@
          (settle! connection agent-id run-id 1 authored)
          (is (= [{:seon.def/id
                   "my.agents.desk-attribution/own-value"
-                  :seon.def/source authored-source
+                  :seon.def/value-edn "42"
                   :seon.schema.admission/source :agent}]
                 (db/q '[:find [(pull ?desk
                                      [:seon.def/id
-                                      :seon.def/source
+                                      :seon.def/value-edn
                                       :seon.schema.admission/source]) ...]
                         :where [?desk :seon.def/agent]]
                       @connection))
-             "the defining form and agent attribution persist exactly once"))))))
+             "the settled value and agent attribution persist exactly once"))))))
 
 (deftest preexisting-bad-desk-rows-do-not-block-the-next-turn
   (test-support/with-database
@@ -244,8 +258,10 @@
           {:seon.cluster.agent/id agent-b
            :seon.cluster.agent/namespace
            {:seon.ns/name 'my.agents.other}}
-          (desk-row agent-a namespace-name 'helper
-                    {:seon.def/source "(def helper (fn [x] (inc x)))"})
+          (desk-row agent-a namespace-name 'helper#root
+                    {:seon.def/value-edn
+                     (function-root-edn
+                      namespace-name "(def helper (fn [x] (inc x)))")})
           (desk-row agent-a namespace-name 'data
                     {:seon.def/value-edn "{:answer 42}"})
           (desk-row agent-a namespace-name 'scratch
@@ -255,18 +271,41 @@
           (desk-row agent-b 'my.agents.other 'data
                     {:seon.def/value-edn "99"})]})
        (let [base (eval/cluster-ctx @connection connection)
-             a (eval/fork-for-turn
-                {:seon.sci.eval/ctx base
-                 :seon.db/db @connection
-                 :seon.db/connection connection
-                 :seon.cluster.agent/id agent-a})
+             eval-form-calls (atom 0)
+             original-eval-form sci/eval-form
+             a (with-redefs [sci/eval-form
+                             (fn [& args]
+                               (swap! eval-form-calls inc)
+                               (apply original-eval-form args))]
+                 (eval/fork-for-turn
+                  {:seon.sci.eval/ctx base
+                   :seon.db/db @connection
+                   :seon.db/connection connection
+                   :seon.cluster.agent/id agent-a}))
              ctx (:seon.sci.eval/ctx a)
              resolve-root #(some-> (sci/resolve ctx %) deref)]
+         (is (zero? @eval-form-calls)
+             "fact rehydration performs zero authored-form evaluations")
          (is (nil? (sci/resolve base 'my.agents.desk/data))
              "the live base remains program-only")
          (is (= 5 ((resolve-root 'my.agents.desk/helper) 4)))
          (is (= {:answer 42} (resolve-root 'my.agents.desk/data)))
          (is (= 7 @(resolve-root 'my.agents.desk/scratch)))
+         (is (= {:seon.def/id "my.agents.desk/lost"
+                 :seon.def/unrestorable-reason "not store-faithful"}
+                (resolve-root 'my.agents.desk/lost))
+             "unsupported roots install one flat unrestorable value")
+         (swap! (resolve-root 'my.agents.desk/scratch) inc)
+         (let [next-fork
+               (eval/fork-for-turn
+                {:seon.sci.eval/ctx base
+                 :seon.db/db @connection
+                 :seon.db/connection connection
+                 :seon.cluster.agent/id agent-a})]
+           (is (= 7 @(some-> (sci/resolve (:seon.sci.eval/ctx next-fork)
+                                         'my.agents.desk/scratch)
+                             deref))
+               "each fork receives a fresh atom at the settled snapshot"))
          (is (= ["could not restore `lost`: not store-faithful"
                  "restored `scratch` from its last settled value"]
                 (:seon.sci.eval/desk-notices a))))
@@ -286,7 +325,7 @@
                                   'my.agents.desk/data)))
            (is (empty? (:seon.sci.eval/desk-notices after-clear)))))))))
 
-(deftest restore-ladder-prefers-a-pure-form-and-forces-atom-snapshots
+(deftest restore-ladder-retains-facts-and-forces-atom-snapshots
   (test-support/with-database
    (fn [connection]
      (db/transact! connection
@@ -322,8 +361,8 @@
                                                    stored-ordinary 0))
            atom-row (first (#'loop/desk-rows @connection "agent"
                                                stored-atom 1))]
-       (is (contains? ordinary-row :seon.def/source))
-       (is (not (contains? ordinary-row :seon.def/value-edn)))
+       (is (= "{:answer 42}" (:seon.def/value-edn ordinary-row)))
+       (is (not (contains? ordinary-row :seon.def/source)))
        (is (true? (:seon.def/atom? atom-row)))
        (is (= "9" (:seon.def/value-edn atom-row)))
        (is (not (contains? atom-row :seon.def/source)))))))
@@ -351,7 +390,9 @@
                     {:seon.sci.desk/output
                      (when (.exists (File. writer-log))
                        (slurp writer-log))})))
-        (is (= :committed (edn/read-string (slurp ready-path))))
+        (is (= {:wrapper-calls 1}
+               (edn/read-string (slurp ready-path)))
+            "the authored wrapper executed exactly once")
         (.destroyForcibly writer)
         (is (.waitFor writer 30 TimeUnit/SECONDS))
         (is (not (.isAlive writer)) "the exact writer JVM was forcibly killed"))
@@ -361,8 +402,9 @@
       (is (= {:helper 5
               :data {:answer 42}
               :atom 7
+              :eval-form-calls 0
               :notices
-              ["could not restore `lost`: Defining form touched host interop."
+              ["could not restore `lost`: The SCI function root contains a value without a faithful stored representation."
                "restored `scratch` from its last settled value"]
               :desk-count 0
               :data-after-clear nil

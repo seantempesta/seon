@@ -189,45 +189,12 @@
       (seq rows) (assoc :seon.def/rows rows)
       value (assoc :my.run/value value))))
 
-(defn- capability-free-references?
-  "True when no referenced program-graph function reaches a capability leaf.
-  A called SCI Var absent from the program graph fails closed; SCI's
-  independent host-interop observation closes the host-resolution side."
-  [db roots unproven-called-vars]
-  (let [row
-        (fn [function-symbol]
-          (db/pull db
-                  [:seon.fn/sym :seon.effect/capability
-                   {:seon.fn/calls [:seon.fn/sym]}]
-                  [:seon.fn/sym (str function-symbol)]))]
-    (if (some #(nil? (:seon.fn/sym (row %)))
-              unproven-called-vars)
-      false
-      (loop [pending (seq (sort-by str roots))
-             visited #{}]
-        (if-let [function-symbol (first pending)]
-          (if (contains? visited function-symbol)
-            (recur (next pending) visited)
-            (let [row (row function-symbol)
-                  called (map (comp symbol :seon.fn/sym)
-                              (:seon.fn/calls row))]
-              (if (:seon.effect/capability row)
-                false
-                (recur (concat (next pending) called)
-                       (conj visited function-symbol)))))
-          true)))))
-
 (defn- desk-rows
   "Restore-ladder rows admitted by the terminal receipt transaction."
-  [db agent-id evaluation ordinal]
+  [_db agent-id evaluation ordinal]
   (let [successful-evaluation?
         (= :ok (get-in evaluation
                        [:seon.sci.admit/record :seon.eval/outcome]))
-        host-clean?
-        (zero? (get-in evaluation
-                       [:seon.sci.admit/record
-                        :seon.eval/host-interop-count]
-                       0))
         row-base
         (fn [candidate]
           (-> candidate
@@ -248,30 +215,15 @@
            (let [stored? (or (:seon.def/value-edn candidate)
                              (:seon.def/blob candidate))
                  atom? (:seon.def/atom? candidate)
-                 unproven-called-vars
-                 (:seon.sci.eval/unproven-called-vars candidate)
-                 nondeterministic-calls
-                 (:seon.sci.eval/nondeterministic-calls candidate)
-                 impure-calls (:seon.sci.eval/impure-calls candidate)
-                 pure? (and host-clean?
-                            (empty? impure-calls)
-                            (capability-free-references?
-                             db
-                             (:seon.sci.eval/referenced-vars candidate)
-                             unproven-called-vars))
-                 deterministic? (empty? nondeterministic-calls)]
+                 root-data (:seon.sci.eval/value candidate)
+                 root-reason (:sci.root/unrestorable-reason root-data)]
              (cond
-               (and atom? stored?)
+               root-reason
                (-> (row-base candidate)
-                   (dissoc :seon.def/source
-                           :seon.def/unrestorable-reason))
+                   (dissoc :seon.def/source)
+                   (assoc :seon.def/unrestorable-reason root-reason))
 
-               (and (not atom?) successful-evaluation? pure? deterministic?)
-               (-> (row-base candidate)
-                   (dissoc :seon.def/value-edn :seon.def/blob
-                           :seon.def/size :seon.def/unrestorable-reason))
-
-               (and (not atom?) stored?)
+               stored?
                (-> (row-base candidate)
                    (dissoc :seon.def/source
                            :seon.def/unrestorable-reason))
@@ -287,21 +239,8 @@
 
                             (not successful-evaluation?)
                             "Defining evaluation did not complete successfully."
-
-                            (not host-clean?)
-                            "Defining form touched host interop."
-
-                            (seq impure-calls)
-                            "Defining form called an effectful SCI built-in."
-
-                            (seq nondeterministic-calls)
-                            "Defining form called a nondeterministic SCI built-in."
-
-                            (seq unproven-called-vars)
-                            "Defining form calls a Var absent from the program graph."
-
                             :else
-                            "Defining form reaches a capability leaf."))))))
+                            "The settled root is not store-faithful."))))))
          (:seon.sci.eval/desk-defs evaluation))]
     rows))
 
