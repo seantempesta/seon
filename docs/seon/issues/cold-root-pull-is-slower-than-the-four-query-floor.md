@@ -193,3 +193,12 @@ The gate was interrupted at that named owner and retained under
 protected test runner. This second real-runner observation strengthens the
 existing compiled-plan acceptance criterion rather than creating another
 issue.
+
+## Owner ruling 2026-08-12 (morning)
+
+Option 1 is ruled: compile the concrete pull once at the Datahike owner.
+Parse at selector generation (schema publication), retain one immutable
+compiled plan per schema-generation/profile key, and hand that parsed value
+to evidence derivation, execution, and Seon decoding — the same
+derived-state-rides-the-value pattern as the environment projection. The
+W2 one-read membership contract is unchanged.
