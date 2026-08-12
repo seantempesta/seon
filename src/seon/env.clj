@@ -144,7 +144,9 @@
   ;; packaged declaration: exact-key redefinition is refused at admission,
   ;; so this value cannot change while the process lives.
   (delay
-    (let [definition (schema/schema-definition :seon.env/environment)]
+    (let [definition (schema/schema-definition
+                      (schema.edn/packaged-forms)
+                      :seon.env/environment)]
       (when-not definition
         (throw
          (ex-info
