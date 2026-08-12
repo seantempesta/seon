@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, operator, repl, mcp]
 ---
@@ -55,3 +55,11 @@ inventory.
   the recorded-process fallback.
 - Failure remains loud: a genuinely unreachable recorded JVM still refuses an
   offline flock contender and explains why the roster is unavailable.
+
+## Resolution
+
+Commit `4fea58d50` derives reachability and persisted-roster availability from
+one selected reachable JVM observation. A reachable prepl with unavailable
+roster evidence now reports typed `:seon.error/unknown`; it cannot fall into
+the recorded-process `prepl is unreachable` branch. The focused operator
+regression covers that transition predicate directly.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, schema, runtime]
 ---
@@ -63,3 +63,10 @@ depends on the error saying what to fix.
 
 Found while merging the two guarded SCI entrances (2026-08-03), as consumer
 friction rather than by audit.
+
+## Resolution
+
+Commit `fef44a5a8` gives the remaining two predicate declarations explicit
+`:error/message` properties, adds the registry-wide query proof, and makes the
+instrumentation humanizer omit Malli's invented `unknown error` string while
+retaining the bounded schema form as diagnostic expectation.

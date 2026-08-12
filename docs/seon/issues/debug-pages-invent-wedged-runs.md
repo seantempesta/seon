@@ -36,3 +36,13 @@ ordinary namespace pages.
 A debug page receives the observed live set or omits it and renders the honest
 missing-input state. A held live run and a held dead run are both falsified
 through the debug route.
+
+## N5 disposition — deferred 2026-08-12
+
+`src/seon/render/web.clj` is protected by the compiled-pull-plan lane. After
+handoff, remove the literal `#{}` supplied by `debug-page-of` and pass the
+identical live-process observation used by the ordinary namespace-page
+transition. If that observation is unavailable, omit the set and construct the
+missing-input diagnostic with `seon.error/diagnostic`; its evidence is
+`:seon.error/unknown`, never an empty set. Add focused debug-route cases for
+one held live run and one held dead run.

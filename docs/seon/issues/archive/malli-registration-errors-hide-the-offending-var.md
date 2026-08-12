@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, schema, diagnostics]
 ---
@@ -36,3 +36,11 @@ function contracts.
 - The diagnostic retains Malli's specific cause and offending nested schema.
 - A regression drives the real instrumentation collection boundary and fails
   if the qualified Var is absent from the visible error.
+
+## Resolution
+
+Commit `fef44a5a8` makes registration Var-local: the exact Var and its authored
+contract remain beside Malli's registration operation, and a failure is built
+with `seon.error/diagnostic` from the deepest Malli cause. The focused
+`seon.instrument-test/registration-failure-names-the-var-and-authored-contract`
+regression passes.

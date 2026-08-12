@@ -47,3 +47,14 @@ With no recorded capture, the AI pane renders the agent's CURRENT
 prospective walk and labels it as prospective rather than captured, so the
 two are never confused. An agent's context is inspectable before its first
 turn. One regression covers a freshly created agent with no capture.
+
+## N5 disposition — deferred 2026-08-12
+
+Do not edit while the compiled-pull-plan and half-as-shipped history lanes own
+this seam. After they land, change `seon.render.web/debug-page-of` so the
+absence of a capture invokes the same acquired prospective-walk query used for
+the next transition. Feed that query result to `seon.error/diagnostic` as
+`:seon.error/diagnostic-evidence`; use `:seon.error/unknown` only when the query
+itself is unavailable, never when it returns an empty walk. Label the pane
+`prospective`. Add the focused `seon.render.web-test` case named in the class
+issue before closing this member.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, dependency, agent]
 ---
@@ -51,3 +51,10 @@ agent sees.
   prose.
 - Or the SCI commit is dropped from the fork as unused — but it may not stay
   in both states.
+
+## Resolution
+
+Commit `43242effb` reads SCI's existing `:sci.impl/symbol` at the guarded
+failure boundary and records it both as the diagnostic's offending member and
+as `:seon.sci.eval/symbol`. The focused unresolved-symbol regression asserts
+the symbol as data without matching prose.

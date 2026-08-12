@@ -177,3 +177,7 @@ Wrong number of args (0) passed to: my.agents.root/largest; declared arglists: (
 and carried `:seon.instrument/arglists ([rows])`. The SCI namespace was never
 resolved through `clojure.core/find-var`, and the inverted bootstrap lesson is
 gone.
+
+Commit `fef44a5a8` subsequently converts that query result to the one
+evidence-complete diagnostic constructor; the focused arity regression asserts
+the query status and arglists as structured evidence.

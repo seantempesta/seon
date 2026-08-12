@@ -63,3 +63,16 @@ bounded public-operation error without serialized print-node internals.
   shape without dependency implementation symbols.
 - Error data remains structured and bounded; it does not duplicate the bad
   value inside serialized print-node strings.
+
+## N5 disposition — partially converted and deferred 2026-08-12
+
+The instrumentation face now uses `seon.error/diagnostic` and bounded semantic
+values rather than duplicate serialized print nodes. `src/seon/db.clj` remains
+protected by its live lane. After handoff, validate the already parsed public
+argument map before dependency dispatch: `q` requires `:query`, `pull`
+requires `:selector`, and `transact!` requires `:tx-data`. For a Datalog clause,
+carry the parsed offending clause and Datahike's accepted parsed shape. Each
+refusal calls `seon.error/diagnostic` with the public Var as operation and the
+missing key or malformed clause as member; its evidence is the same parsed
+request used for dispatch. Add the four focused `seon.db-test` cases in
+Acceptance.

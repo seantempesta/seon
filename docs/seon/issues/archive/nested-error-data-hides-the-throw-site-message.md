@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, sci, error, repl, diagnostics]
 ---
@@ -59,3 +59,10 @@ carrying a bounded structured cause that identifies the throw-site message.
 No recursive error object or unbounded throwable tree reaches the agent face,
 and a lazy-result realization regression proves both sentences remain
 available as data.
+
+## Resolution
+
+Commit `43242effb` routes `seon.sci.kernel/failure-value` through the flat
+diagnostic constructor. It preserves the nested refusal's agent-facing message
+and records the throw site's sentence under
+`:seon.error/throw-site-message`. The focused SCI eval regression passes.

@@ -208,3 +208,11 @@ Recurring proof:
 The issue remains open only for its independently reopened runtime-health
 contract case above. A newly started MCP bridge process is still required for
 live client proof; existing clients retain the old script definition.
+
+## N5 disposition — converted 2026-08-12
+
+Commit `4fea58d50` routes the cluster-side JVM exception and nil-deref faces
+through `seon.error/diagnostic`, retaining the root frame as the owning
+observation. The remaining open runtime-health output-contract case is not a
+diagnostic-construction member of N5; it remains here because it still owns
+this MCP surface.
