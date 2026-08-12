@@ -153,6 +153,17 @@ back — everywhere, for every agent, with no maintained list of forms.
     contract-fit selection path already enforces this by construction;
     this extends the same coherence to explicit declarations.
 
+## Ruling 36 (owner, 2026-08-12 evening — work starts with a message)
+
+36. **Updating an agent's data never starts its work — a MESSAGE does.**
+    If root updates an agent's plan, root explicitly messages the agent
+    ("implement the plan") to wake it; the plan change itself appends
+    passively to context (rulings 6/32) and is seen whenever the agent next
+    turns. The messaging wake is the one work kick-off. Evolving-session
+    implementation (gap-closure T1/T2 mechanics) is GATED on owner review
+    of the forthcoming PRD — exploration first, document, iterate, then
+    build.
+
 ## The mechanism (composed from the verified reports)
 
 ### One derivation
