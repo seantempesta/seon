@@ -42,7 +42,9 @@
                [:seon.db/db :seon.db/database-value]
                [:seon.render/namespace :seon.render/namespace]
                [:seon.error/value :seon.error/value]],
-              :form [:or :seon.repl/expression :seon.repl/entry],
+              :form
+              [:or :seon.repl/expression :seon.repl/entry
+               :seon.repl/entries],
               :hiccup
               [:fn
                {:error/message

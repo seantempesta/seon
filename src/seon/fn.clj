@@ -336,6 +336,8 @@
       (cond-> {:seon.test/sym (str qualified)
                :seon.test/ns [:seon.ns/name namespace-name]
                :seon.test/source source}
+        (true? (:seon.test/usage metadata))
+        (assoc :seon.test/usage true)
         (seq (get calls-by-caller (str qualified)))
         (assoc :seon.fn/calls
                (mapv (fn [target] [:seon.fn/sym target])

@@ -47,7 +47,7 @@
     (is (string? (:seon.error/message (run/wait wrong))))))
 
 (deftest the-lifecycle-surface-has-two-actions-and-its-own-presentation
-  (is (= #{'wait 'complete 'render-namespace-ai}
+  (is (= #{'wait 'complete 'render-namespace-ai 'walkthrough 'usage-form}
          (set (keys (ns-publics 'my.run)))))
   (is (str/includes? (:doc (meta (the-ns 'my.run)))
                      "Every run ends by calling `complete` or `wait`"))
@@ -79,3 +79,15 @@
               :seon.config/on-core-error :record}
              :seon.render/ai :seon.render/ai)]
         (is (= 'my.run/render-namespace-ai selected))))))
+
+(deftest ^{:seon.test/usage true} the-lifecycle-walkthrough-is-executable-data
+  (let [entries (run/walkthrough)
+        forms (mapv :seon.repl/form entries)]
+    (is (= 5 (count entries)))
+    (is (every? :seon.repl/comment entries))
+    (is (= ['defn 'defn 'largest 'clojure.test/deftest 'my.run/complete]
+           (mapv first forms)))
+    (is (= :not-a-row-sequence (second (nth forms 2))))
+    (is (= :completed
+           (:my.run/disposition
+            (eval (last forms)))))))

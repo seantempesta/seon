@@ -16,7 +16,7 @@
 
 (defn render-namespace-ai
   "Present my.run as the lifecycle protocol, in use order."
-  {:malli/schema [:=> [:cat :my.run/namespace-unit] [:maybe :string]]}
+  {:malli/schema [:=> [:cat :my.run/namespace-unit] :string]}
   [unit]
   (let [database (:seon.db/db unit)
         docs
@@ -37,6 +37,56 @@
          "\n\n2. wait — "
          (or (get docs "my.run/wait")
              "Finish paused work with the condition needed to continue."))))
+
+(defn walkthrough
+  "The executable lifecycle walkthrough used by the opening episode."
+  {:malli/schema [:=> [:cat] :seon.repl/entries]}
+  []
+  [{:seon.repl/comment
+    "; My namespace is empty — this function will be its first resident."
+    :seon.repl/form
+    '(defn largest [rows]
+       (or (last (sort-by :example/amount rows)) {}))}
+   {:seon.repl/comment
+    (str "; Works. But without a :malli/schema it stays my scratch — "
+         "nobody else can rely on it.")
+    :seon.repl/form
+    '(defn ^{:malli/schema
+             [:=>
+              [:cat [:sequential
+                     [:map [:example/label :string]
+                      [:example/amount :int]]]]
+              [:map [:example/label {:optional true} :string]
+               [:example/amount {:optional true} :int]]]}
+       largest
+       [rows]
+       (or (last (sort-by :example/amount rows)) {}))}
+   {:seon.repl/comment
+    "; Is the contract actually enforced? Try to break it once."
+    :seon.repl/form '(largest :not-a-row-sequence)}
+   {:seon.repl/comment
+    (str "; Good — a wrong call is an error value, not a crash. Now pin "
+         "the behavior with a test others will find as my usage example.")
+    :seon.repl/form
+    '(clojure.test/deftest ^{:seon.test/usage true} largest-usage
+       (clojure.test/is
+        (= {:example/label "b" :example/amount 9}
+           (largest [{:example/label "a" :example/amount 3}
+                     {:example/label "b" :example/amount 9}])))
+       (clojure.test/is (= {} (largest []))))}
+   {:seon.repl/comment
+    "; Defined, contracted, proven. Report back and close this run."
+    :seon.repl/form
+    '(my.run/complete
+      (str "Built largest: a contracted function returning the row with "
+           "the greatest :example/amount, or {} for empty input; its usage "
+           "test is green."))}])
+
+(defn usage-form
+  "Render the canonical usage test as its executable walkthrough."
+  {:malli/schema [:=> [:cat :my.run/usage-unit] :seon.repl/entries]}
+  [_unit]
+  (walkthrough))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The two dispositions

@@ -15,6 +15,7 @@
              [:seon.repl/subject
               {:optional true}
               :seon.render.walk/lookup]],
+            :entries [:vector {:min 1} :seon.repl/entry],
             :key :seon.schema/value,
             :subject :seon.render.walk/lookup,
             :candidate
