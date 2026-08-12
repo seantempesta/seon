@@ -1734,6 +1734,32 @@
     (assoc :seon.cluster.eval/output
            (evaluation-output output-prefix printed caps))))
 
+(defn- arity-exception
+  [throwable]
+  (loop [candidate throwable]
+    (when candidate
+      (if (instance? clojure.lang.ArityException candidate)
+        candidate
+        (recur (ex-cause candidate))))))
+
+(defn- interpreted-arity-message
+  "The named SCI function identity for one arity failure, when present."
+  [throwable]
+  (let [arity-failure (arity-exception throwable)
+        callstack (some-> throwable ex-data :sci.impl/callstack deref)
+        function-meta (:f-meta (last callstack))]
+    (when (and arity-failure
+               (contains? function-meta :sci/generation)
+               (:ns function-meta)
+               (:name function-meta))
+      (let [actual (.actual ^clojure.lang.ArityException arity-failure)
+            function-symbol
+            (symbol (str (sci/ns-name (:ns function-meta)))
+                    (str (:name function-meta)))]
+        (str "Wrong number of args ("
+             (if (<= actual 20) actual "> 20")
+             ") passed to: " function-symbol)))))
+
 (defn unrun-evaluation
   "The evaluation value for a form the runtime settled WITHOUT running it.
 
@@ -2013,10 +2039,14 @@
                   (desk-defs
                    failed-ctx namespace-name before source failed-form
                    (built-in-calls)))
-                value (kernel/failure-value
-                       {::kernel/time-limit-kind ::time-limit
-                        ::kernel/failure-kind ::evaluation-failed}
-                       throwable record)
+                arity-message (interpreted-arity-message throwable)
+                value (cond->
+                          (kernel/failure-value
+                           {::kernel/time-limit-kind ::time-limit
+                            ::kernel/failure-kind ::evaluation-failed}
+                           throwable record)
+                        arity-message
+                        (assoc :seon.error/message arity-message))
                 admitted
                 (admit/admit
                  {:seon.sci.admit/value value

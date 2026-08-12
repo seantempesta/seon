@@ -399,8 +399,7 @@
               (re-matches #"#object\[clojure\.lang\.Atom 0x[0-9a-f]+(?: .*)?\]"
                           printed)))))
 
-(defparity "B11" :known-divergence
-  ;; Print-path residual: the emitted name still exposes sci.impl.fns/fun.
+(defparity "B11" :passing
   (let [printed (:printed (first (repl-session ["(fn [] 1)"])))]
     (checked "a #object face with a demunged function name"
              printed
