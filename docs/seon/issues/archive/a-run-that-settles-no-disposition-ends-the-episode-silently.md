@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, agent, live-drive]
 ---
@@ -76,3 +76,25 @@ episode verdict it derives.
   nothing at all.
 - One regression drives a reply whose forms are all clean and carry no
   disposition, and asserts the fact exists and the episode terminal names it.
+
+## Resolution
+
+Closed by the path-limited implementation commit recorded in Git history.
+
+The run loop now derives the last ordinal from the frozen plan before settling
+each clean receipt. When that last value is neither `my.run/complete` nor
+`my.run/wait`, the receipt, close, custody release, and
+`:seon.cluster.run/undisposed-at` presence fact commit in one transaction. An
+explicit disposition omits the fact, so the notice erases itself by
+construction. No form is re-executed and no wake is manufactured.
+
+The existing transcript owner now admits only runs carrying that presence fact
+as system-authored read entries. Their value comes from the run's declared
+renderer, so the following turn reads that the trigger remains unanswered.
+`seon.eval.drive/terminal-state` derives `:undisposed` before the generic
+`:capped`/`:stopped` fallbacks.
+
+The alternative was a synthetic system-authored form plus receipt. It was
+rejected because it would record an evaluation that never happened and add a
+second terminal mechanism. The presence fact plus the existing history
+projection preserves the honest-replay guarantee with fewer moving parts.

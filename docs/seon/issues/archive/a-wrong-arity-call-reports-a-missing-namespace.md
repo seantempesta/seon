@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, runtime, agent, repl, live-drive]
 ---
@@ -37,8 +37,7 @@ substituting a namespace-resolution message for it.
 
 ## Owner
 
-`seon.sci.eval` error projection, plus whatever maps sci's
-`IllegalArgumentException` to a flat `:seon.error` value.
+`seon.instrument/violation`, using the calling environment's program graph.
 
 ## Acceptance
 
@@ -130,10 +129,10 @@ namespace claim. Nothing is substituting a message: the reporter dies before
 it can return one.
 
 The class is a diagnostic reaching into JVM Var space for a function that
-lives in SCI. The arglists are already available without `find-var` — the
-declared arities are `:seon.fn.arity/*` facts in the program graph, and
-malli's own report data names the function. A fix that keeps `find-var`
-under a `try` would suppress the class rather than remove it.
+lives in SCI. The arglists are already available without `find-var` as the
+stored `:seon.fn/arglists` program-graph fact, and malli's own report data
+names the function. A fix that keeps `find-var` as the primary lookup under a
+`try` would suppress the class rather than remove it.
 
 Reproduced again on 2026-08-12 on two fresh isolated roots
 (`tmp/ablate-half3`, `tmp/ablate-half4`), verbatim receipt error for both
@@ -145,3 +144,36 @@ No such namespace: my.agents.w1-history-proof-5
 
 with `:seon.error/data {:seon.sci.eval/throwable "java.lang.IllegalArgumentException"}`,
 immediately followed by a clean `(largest [])` returning `{}`.
+
+## Resolution, 2026-08-12
+
+Commit `115ac4e9d2af9ad7bd01134127a379f6a5d696ac` fixes the class at
+`seon.instrument/violation`. Arity diagnostics now query the immutable
+database value reached through the supplied environment for the function's
+stored `:seon.fn/arglists`. JVM Var metadata is only a fallback when the
+program graph proves the function is not indexed or no program graph is
+available. A failed program-graph query, stored-arglist parse, JVM lookup, or
+any other diagnostic construction step returns the already-built base
+violation without arglists; it cannot replace the original error.
+
+The regression was red before the source change: the SCI-only
+`my.agents.reporter/largest` call returned the raw
+`IllegalArgumentException` and no violation data. It is green after the
+change, with this message:
+
+```text
+Wrong number of args (0) passed to: my.agents.reporter/largest; declared arglists: ([rows])
+```
+
+`bin/test seon.instrument-test` passes 17 tests and 143 assertions. A fresh
+isolated root at `tmp/lanes/arity-diagnostic` published current source and
+evaluated `(largest)` through `seon.sci.eval/evaluate` with the live cluster
+environment. The resulting flat error said:
+
+```text
+Wrong number of args (0) passed to: my.agents.root/largest; declared arglists: ([rows])
+```
+
+and carried `:seon.instrument/arglists ([rows])`. The SCI namespace was never
+resolved through `clojure.core/find-var`, and the inverted bootstrap lesson is
+gone.
