@@ -1325,7 +1325,10 @@
            (str "contract projection started: "
                 (count schema-forms) " schemas, "
                 (count function-contracts) " functions"))
-        projection (schema/build-projection schema-forms function-contracts)
+        projection
+        (schema/build-projection
+         schema-forms function-contracts
+         {:seon.schema/validate-render-contracts? true})
         _ (report-index-progress! progress! "contract projection complete")
         compile-options (:seon.schema.projection/compile-options projection)
         predicate-functions

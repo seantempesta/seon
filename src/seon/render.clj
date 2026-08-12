@@ -206,6 +206,16 @@
             schema.form/attr-form-properties
             (get output))))
 
+(defn- render-invocation-argument
+  "Supply an attribute declaration with that attribute's value."
+  [projection request selected]
+  (let [attribute (:seon.render.walk/attribute request)
+        declared (when attribute
+                   (attribute-producer projection request :seon.render/form))]
+    (if (= selected declared)
+      (get (render.value/transacted (render-value request)) attribute)
+      (render-argument request))))
+
 (defn- declared-producer
   [projection request value output]
   (if (and (= :seon.render/form output)
@@ -237,11 +247,15 @@
 
 (defn- call-static-evidence
   [request selected]
-  (let [argument (dissoc (render-argument request)
-                         :seon.db/db
-                         :seon.sci.eval/ctx
-                         :seon.db/connection)
-        value (:seon.render/value argument)]
+  (let [projection (sci.kernel/context-projection (:seon.sci.eval/ctx request))
+        argument (render-invocation-argument projection request selected)
+        argument (if (map? argument)
+                   (dissoc argument
+                           :seon.db/db
+                           :seon.sci.eval/ctx
+                           :seon.db/connection)
+                   argument)
+        value (when (map? argument) (:seon.render/value argument))]
     {:seon.render.call/producer selected
      :seon.render.call/declaration-row
      (sci.kernel/program-function (:seon.sci.eval/ctx request) selected)
@@ -257,7 +271,8 @@
     on-core-error :seon.config/on-core-error
     :as request}
    selected]
-  (let [;; RECORD WHAT IS RENDERING. A producer may hand its own value
+  (let [projection (sci.kernel/context-projection ctx)
+        ;; RECORD WHAT IS RENDERING. A producer may hand its own value
         ;; to another producer — the value floor is the common case —
         ;; so the producers already on this chain travel with the
         ;; argument. `project-node*` refuses to select one that is
@@ -271,7 +286,8 @@
        {:seon.sci.eval/ctx ctx
         :seon.db/db (:seon.db/db request)
         :seon.fn/sym (str selected)
-        :seon.sci.eval/args [(render-argument request)]
+        :seon.sci.eval/args
+        [(render-invocation-argument projection request selected)]
         :seon.sci.eval/time-limit-ms time-limit-ms
         :seon.sci.admit/caps caps
         :seon.config/on-core-error on-core-error}

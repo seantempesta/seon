@@ -78,7 +78,14 @@
        (testing "an attribute declaration precedes the landed entity shape"
          (is (= 'seon.render.transcript/inbox-form
                 (selected message :seon.cluster.message/to)))
-         (is (= '(my.message/inbox) (transcript/inbox-form message))))
+         (is (= '(my.message/inbox)
+                (transcript/inbox-form
+                 (:seon.cluster.message/to (render/transacted message)))))
+         (is (= '(my.message/inbox)
+                (render/render-form-value
+                 (assoc (render-request database ctx message)
+                        :seon.render.walk/attribute
+                        :seon.cluster.message/to)))))
        (testing "the entity floor uses the projection's declared identity"
          (let [agent-entity (db/pull database '[*]
                                      [:seon.cluster.agent/id "history-agent"])

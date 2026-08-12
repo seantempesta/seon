@@ -370,6 +370,96 @@
          :seon.schema/admission
          {:seon.schema.admission/source :agent}}))))
 
+(deftest render-declarations-require-a-contract-that-accepts-their-shape
+  ;; CLASS: an explicit render declaration could name any contracted function,
+  ;; so the mismatch survived publication and failed only when a value reached
+  ;; the renderer. Publication now makes that state unrepresentable from the
+  ;; stored schema and function facts alone. Attribute declarations use the
+  ;; attribute's value shape; entity/value declarations use their own shape.
+  (let [shape :seon.schema-test/rendered
+        other :seon.schema-test/other
+        attribute :seon.schema-test/rendered-attribute
+        renderer 'seon.schema-test/render-rendered
+        plain-shape [:map [:seon.schema-test/id :string]]
+        plain-attribute :string
+        forms {shape plain-shape
+               other [:map [:seon.schema-test/other :string]]
+               attribute plain-attribute
+               :seon.db/database-value :map}
+        admission {:seon.schema.admission/source :agent}
+        admit (fn [schema-key definition contract]
+                (schema/projection-with-schema
+                 (schema/build-projection forms {renderer contract})
+                 schema-key definition admission))
+        mismatch
+        (refusal
+         #(admit shape
+                 [:map {:seon.render/ai renderer}
+                  [:seon.schema-test/id :string]]
+                 [:=> [:cat other] :string]))
+        mismatch-data (ex-data mismatch)]
+    (testing "a mismatch refuses with both declared sides and the reason"
+      (is (instance? clojure.lang.ExceptionInfo mismatch))
+      (is (= :seon.schema/render-contract-incoherent
+             (:seon.error/kind mismatch-data)))
+      (is (= shape
+             (get-in mismatch-data
+                     [:seon.error/data :seon.error/diagnostic-expected])))
+      (is (= shape
+             (get-in mismatch-data
+                     [:seon.error/data :seon.error/diagnostic-member])))
+      (is (= 'seon.schema/render-contract-coherence
+             (get-in mismatch-data
+                     [:seon.error/data :seon.error/diagnostic-operation])))
+      (is (= renderer
+             (get-in mismatch-data
+                     [:seon.error/data :seon.error/diagnostic-offending])))
+      (is (= other
+             (get-in mismatch-data
+                     [:seon.error/data :seon.error/diagnostic-evidence
+                      :seon.fn/input])))
+      (is (= :seon.schema/render-input-does-not-accept-declaring-shape
+             (get-in mismatch-data
+                     [:seon.error/data :seon.error/diagnostic-cause]))))
+    (testing "a coherent declaration admits"
+      (is (= renderer
+             (get-in
+              (admit shape
+                     [:map {:seon.render/ai renderer}
+                      [:seon.schema-test/id :string]]
+                     [:=> [:cat shape] :string])
+              [:seon.schema.projection/shape-rows shape :seon.render/ai]))))
+    (testing "an attribute declaration is checked against its value shape"
+      (is (= renderer
+             (get-in
+              (admit attribute
+                     [:and {:seon.render/form renderer} plain-attribute]
+                     [:=> [:cat attribute] :string])
+              [:seon.schema.projection/forms attribute 1
+               :seon.render/form]))))
+    (testing "call preparation may supply an additional database value"
+      (is (= renderer
+             (get-in
+              (admit shape
+                     [:map {:seon.render/ai renderer}
+                      [:seon.schema-test/id :string]]
+                     [:=> [:cat shape :seon.db/database-value] :string])
+              [:seon.schema.projection/shape-rows shape :seon.render/ai]))))
+    (testing "additional declared arguments and keys preserve accretion"
+      (is (= renderer
+             (get-in
+              (admit shape
+                     [:map {:seon.render/ai renderer}
+                      [:seon.schema-test/id :string]]
+                     [:=>
+                      [:cat
+                       [:map
+                        [:seon.schema-test/id :string]
+                        [:seon.schema-test/extra {:optional true} :int]]
+                       :string]
+                      :string])
+              [:seon.schema.projection/shape-rows shape :seon.render/ai]))))))
+
 (deftest one-declaration-validates-only-its-dependency-closure
   (let [unrelated
         (into {}

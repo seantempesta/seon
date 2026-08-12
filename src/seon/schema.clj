@@ -1359,6 +1359,212 @@
 
 (declare compose-projection-data materialize-projection)
 
+(def ^:private render-declaration-properties
+  [:seon.render/ai :seon.render/html :seon.render/form])
+
+(defn- render-declarations-in
+  "Named render declarations carried by the selected schema forms."
+  [forms schema-keys]
+  (into []
+        (mapcat
+         (fn [schema-key]
+           (let [definition (get forms schema-key)
+                 properties
+                 (some->> definition
+                          (internal/with-entity-id-attr forms)
+                          form/attr-form-properties)]
+             (keep (fn [property]
+                     (let [renderer (get properties property)]
+                       (when (qualified-symbol? renderer)
+                         {:seon.schema/key schema-key
+                          :seon.schema/definition definition
+                          :seon.render/property property
+                          :seon.render/function renderer})))
+                   render-declaration-properties))))
+        (sort-by str schema-keys)))
+
+(defn- map-shaped-schema?
+  [compiled]
+  (let [compiled (m/deref compiled)]
+    (case (m/type compiled)
+      :map true
+      :and (boolean (some map-shaped-schema? (m/children compiled)))
+      :or (every? map-shaped-schema? (m/children compiled))
+      false)))
+
+(defn- required-map-entries
+  [compiled]
+  (let [compiled (m/deref compiled)]
+    (case (m/type compiled)
+      :map
+      (into {}
+            (keep (fn [[entry-key properties child]]
+                    (when-not (:optional properties)
+                      [entry-key child])))
+            (m/children compiled))
+
+      :and
+      (reduce merge {} (map required-map-entries (m/children compiled)))
+
+      {})))
+
+(declare schema-accepts-schema?)
+
+(defn- map-schema-accepts-schema?
+  [input declaring]
+  (let [required-inputs (required-map-entries input)
+        required-declarations (required-map-entries declaring)]
+    (every? (fn [[entry-key input-child]]
+              (when-let [declaring-child (get required-declarations entry-key)]
+                (schema-accepts-schema? input-child declaring-child)))
+            required-inputs)))
+
+(defn- schema-accepts-schema?
+  "Whether `input` structurally accepts every value in `declaring`.
+
+   Maps are open: required input members must be guaranteed by the declaring
+   shape, while optional input members and additional declaring members do not
+   affect coherence. Unknown predicate implication fails closed."
+  [input declaring]
+  (let [input-form (m/form input)
+        declaring-form (m/form declaring)
+        input (m/deref input)
+        declaring (m/deref declaring)]
+    (cond
+      (= input-form declaring-form) true
+      (= :any (m/type input)) true
+
+      (= :or (m/type declaring))
+      (every? #(schema-accepts-schema? input %) (m/children declaring))
+
+      (= :or (m/type input))
+      (boolean
+       (some #(schema-accepts-schema? % declaring) (m/children input)))
+
+      (= :and (m/type input))
+      (every? #(schema-accepts-schema? % declaring) (m/children input))
+
+      (and (= :map (m/type input))
+           (map-shaped-schema? declaring))
+      (map-schema-accepts-schema? input declaring)
+
+      :else false)))
+
+(defn- function-arities
+  [contract]
+  (case (first contract)
+    :=> [contract]
+    :function (vec (rest contract))
+    []))
+
+(defn- arity-render-input-form
+  [arity]
+  (let [input (second arity)
+        arguments (rest input)
+        arguments (if (map? (first arguments)) (rest arguments) arguments)
+        arguments (if (= :catn (first input))
+                    (map (fn [[_ properties child]]
+                           (if child child properties))
+                         arguments)
+                    arguments)]
+    (first (remove #(= :seon.db/database-value %) arguments))))
+
+(defn- render-contract-observation
+  "Check a named render function against the declaration it serves.
+
+   An attribute-level declaration describes the attribute value, so its first
+   function input must accept that value schema. Entity and value declarations
+   use their declaring schema. Additional declared arguments, including the
+   call-prepared database value, are accretive and do not make the first input
+   incoherent."
+  [projection schema-key renderer]
+  (if-let [contract
+           (get (:seon.schema.projection/function-contracts projection)
+                renderer)]
+    (let [declaring
+          (m/schema schema-key
+                    (:seon.schema.projection/compile-options projection))
+          arities (function-arities contract)
+          accepted
+          (some (fn [arity]
+                  (when-let [input-form (arity-render-input-form arity)]
+                    (let [input
+                          (m/schema
+                           (compilable-form
+                            input-form
+                            (:seon.schema.projection/predicate-functions
+                             projection))
+                           (:seon.schema.projection/compile-options projection))]
+                      (when (or (= input-form schema-key)
+                                (= input-form :seon.schema/value)
+                                (and (= input-form :seon.render/unit)
+                                     (map-shaped-schema? declaring))
+                                (schema-accepts-schema? input declaring))
+                        input-form))))
+                arities)]
+      {:seon.schema/render-contract contract
+       :seon.schema/render-input
+       (or accepted (some arity-render-input-form arities))
+       :seon.schema/render-contract-coherent? (boolean accepted)
+       :seon.schema/render-contract-cause
+       (when-not accepted
+         :seon.schema/render-input-does-not-accept-declaring-shape)})
+    {:seon.schema/render-contract nil
+     :seon.schema/render-input nil
+     :seon.schema/render-contract-coherent? false
+     :seon.schema/render-contract-cause
+     :seon.schema/render-function-has-no-declared-contract}))
+
+(defn- render-contract-refusal!
+  [{schema-key :seon.schema/key
+    property :seon.render/property
+    renderer :seon.render/function}
+   {:seon.schema/keys [render-contract render-input render-contract-cause]}]
+  (let [diagnostic
+        ((requiring-resolve 'seon.error/diagnostic)
+         {:seon.error/kind :seon.schema/render-contract-incoherent
+          :seon.error/message
+          (str "Schema publication refused " schema-key ": " property
+               " names " renderer " whose declared input "
+               (pr-str render-input) " does not accept the declaring shape.")
+          :seon.error/diagnostic-layer :schema-admission
+          :seon.error/diagnostic-operation
+          'seon.schema/render-contract-coherence
+          :seon.error/diagnostic-member schema-key
+          :seon.error/diagnostic-expected schema-key
+          :seon.error/diagnostic-offending renderer
+          :seon.error/diagnostic-cause render-contract-cause
+          :seon.error/diagnostic-evidence
+          {:seon.schema/key schema-key
+           :seon.render/property property
+           :seon.render/function renderer
+           :seon.fn/spec render-contract
+           :seon.fn/input render-input}})]
+    (throw (ex-info (:seon.error/message diagnostic) diagnostic))))
+
+(defn- assert-render-contracts!
+  [projection schema-keys]
+  (doseq [{schema-key :seon.schema/key
+           renderer :seon.render/function
+           :as declaration}
+          (render-declarations-in
+           (:seon.schema.projection/forms projection) schema-keys)
+          :let [observation
+                (render-contract-observation projection schema-key renderer)]
+          :when (not (:seon.schema/render-contract-coherent? observation))]
+    (render-contract-refusal! declaration observation))
+  projection)
+
+(defn- schemas-rendered-by
+  [projection renderer]
+  (into #{}
+        (comp
+         (filter #(= renderer (:seon.render/function %)))
+         (map :seon.schema/key))
+        (render-declarations-in
+         (:seon.schema.projection/forms projection)
+         (keys (:seon.schema.projection/forms projection)))))
+
 (defn- shape-row-in
   [forms schema-key definition]
   (let [form (internal/with-entity-id-attr forms definition)
@@ -1406,7 +1612,8 @@
   ([forms function-contracts
     {:seon.schema/keys [schema-admissions function-admissions
                         function-source-admissions artifact-exports
-                        pure-predicate-symbols predicate-functions]
+                        pure-predicate-symbols predicate-functions
+                        validate-render-contracts?]
      :or {schema-admissions {}
           function-admissions {}
           function-source-admissions {}
@@ -1606,8 +1813,9 @@
         fingerprint
         (projection-fingerprint
          forms function-contracts schema-admissions function-admissions
-         function-source-admissions artifact-exports pure-predicate-symbols)]
-    {:seon.schema.projection/forms forms
+         function-source-admissions artifact-exports pure-predicate-symbols)
+        projection
+        {:seon.schema.projection/forms forms
      :seon.schema.projection/registry registry
      :seon.schema.projection/compile-options options
      :seon.schema.projection/schema-admissions schema-admissions
@@ -1629,9 +1837,12 @@
      :seon.schema.projection/shape-index shape-index
      :seon.schema.projection/shape-rows shape-rows
      :seon.schema.projection/catalog catalog
-     :seon.schema.projection/fingerprint-version
-     projection-fingerprint-version
-     :seon.schema.projection/fingerprint fingerprint})))))
+         :seon.schema.projection/fingerprint-version
+         projection-fingerprint-version
+         :seon.schema.projection/fingerprint fingerprint}]
+    (when validate-render-contracts?
+      (assert-render-contracts! projection (keys forms)))
+    projection)))))
 
 (def ^:private projection-runtime-keys
   #{:seon.schema.projection/registry
@@ -2179,9 +2390,10 @@
          {:seon.schema/schema-admissions schema-admissions
           :seon.schema/function-admissions function-admissions
           :seon.schema/function-source-admissions source-admissions
-          :seon.schema/artifact-exports artifact-exports
+         :seon.schema/artifact-exports artifact-exports
           :seon.schema/pure-predicate-symbols pure-predicate-symbols
-          :seon.schema/predicate-functions {}})))))))
+          :seon.schema/predicate-functions {}
+          :seon.schema/validate-render-contracts? true})))))))
 
 (defn projection-from-database
   "Build the immutable program projection at exactly `db`.
@@ -2313,12 +2525,15 @@
              (get (:seon.schema.projection/schema-admissions projection)
                   schema-key ::absent)
              admission))]
-    (with-compiled-cache
-     (merge candidate shape-data
-            {:seon.schema.projection/shape-rows shape-rows
-             :seon.schema.projection/fingerprint-version
-             projection-fingerprint-version
-             :seon.schema.projection/fingerprint fingerprint}))))
+    (let [result
+          (with-compiled-cache
+           (merge candidate shape-data
+                  {:seon.schema.projection/shape-rows shape-rows
+                   :seon.schema.projection/fingerprint-version
+                   projection-fingerprint-version
+                   :seon.schema.projection/fingerprint fingerprint}))]
+      (assert-render-contracts! result affected-schema-keys)
+      result)))
 
 (defn projection-without-schema
   "Validate the projection produced by removing one unused schema.
@@ -2358,7 +2573,8 @@
       :seon.schema/pure-predicate-symbols
       (:seon.schema.projection/pure-predicate-symbols projection)
       :seon.schema/predicate-functions
-      (:seon.schema.projection/predicate-functions projection)})))
+      (:seon.schema.projection/predicate-functions projection)
+      :seon.schema/validate-render-contracts? true})))
 
 (defn projection-with-function-contract
   "Validate the projection produced by one function-contract replacement."
@@ -2414,6 +2630,8 @@
                  projection)
                 function-symbol old-dependencies dependencies))
         _ (validate-one-contract! candidate function-symbol definition admission)
+        _ (assert-render-contracts!
+           candidate (schemas-rendered-by candidate function-symbol))
         fingerprint
         (-> (reusable-projection-fingerprint projection)
             (replace-fingerprint-entry

@@ -852,8 +852,8 @@
 
 (defn inbox-form
   "Return the ordinary inbox listing form for messages reached through `to`."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
-  [_unit]
+  {:malli/schema [:=> [:cat :seon.cluster.message/to] :seon.render/form]}
+  [_recipient]
   (list 'my.message/inbox))
 
 (defn- receipt-printed-value
