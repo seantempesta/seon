@@ -1978,7 +1978,11 @@
                             changed-paths)
         cold-source (gensym "source")
         cold-store (gensym "store")
-        publish? (or (seq changed-paths) (not name) publish-before-fork?)
+        ;; `publish?` is spliced into syntax-quoted `(when ~publish? ...)`
+        ;; templates below, so it must be a literal-safe boolean: a retained
+        ;; path seq would generate `(when ("path" ...))` and call the string.
+        publish? (boolean (or (seq changed-paths) (not name)
+                              publish-before-fork?))
         operation
         (cond
           (seq changed-paths)
