@@ -910,7 +910,8 @@
                                 :seon.sci.admit/caps caps}))
           (let [evaluation (run-in ctx "(my.message/send)" 2000)
                 failure (:seon.sci.admit/value evaluation)]
-            (is (= "Wrong number of args (0) passed to: my.message/send"
+            (is (= (str "Wrong number of args (0) passed to: my.message/send"
+                        "; declared arglists: ([to content] [to content about])")
                    (:seon.error/message failure)
                    (:seon.cluster.eval/error evaluation)))
             (is (= :seon.instrument/contract-violated

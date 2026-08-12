@@ -162,6 +162,12 @@
     (or (when (map? value) (get value output))
         (get request output))))
 
+(defn transacted
+  "Restore a pulled entity to the transaction shape used for selection."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [entity]
+  (render.value/transacted entity))
+
 (defn- schema-producer
   [projection value output]
   (when (map? value)

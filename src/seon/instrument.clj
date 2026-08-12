@@ -503,6 +503,14 @@
   (let [{namespace-object :ns var-name :name} (meta candidate-var)]
     (symbol (str (ns-name namespace-object)) (str var-name))))
 
+(defn- registration-cause-data
+  [failure]
+  (loop [deepest (ex-data failure)]
+    (if-let [nested (and (map? deepest) (:exception deepest))]
+      (let [nested-data (ex-data nested)]
+        (recur (or nested-data deepest)))
+      deepest)))
+
 (defn- collect-contracts!
   "Register the same public Vars Malli collects, one Var at a time.
 
@@ -521,7 +529,8 @@
                  (catch Throwable failure
                    (let [function-symbol (var-symbol candidate-var)
                          failure-data (ex-data failure)
-                         root-data (or (error/refusal failure) failure-data)
+                         root-data (or (registration-cause-data failure)
+                                       failure-data)
                          nested-schema
                          (or (:schema root-data)
                              (get-in root-data [:data :schema])
