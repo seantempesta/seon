@@ -716,9 +716,9 @@
   subject. Resolve means teach; a subject or symbol with no candidate in the
   bounded pull fails closed by leaving the dependent form ungenerated.
 
-  The pull decides membership and introductions decide order. A reference
-  outside the pulled neighborhood grows no context. Alphabetical form spelling
-  breaks every ready tie.
+  The pull decides membership and carries fact order; introductions decide
+  readiness without re-sorting that order. A reference outside the pulled
+  neighborhood grows no context.
 
   The returned vector contains the settled prefix plus at most one next entry
   awaiting execution. Calling this pure function again with that entry's
@@ -731,11 +731,7 @@
   (let [settled-by-key
         (into {} (map (juxt :seon.repl/key
                             :seon.sci.admit/print-node)) settled)
-        ordered-candidates
-        (sort-by (juxt #(pr-str (get-in % [:seon.repl/entry
-                                           :seon.repl/form]))
-                       #(pr-str (:seon.repl/key %)))
-                 candidates)]
+        ordered-candidates (vec candidates)]
     (loop [remaining ordered-candidates
            frontier #{}
            explained #{}

@@ -178,10 +178,7 @@
                  (when (seq (walk/form-symbols (:seon.repl/form entry)))
                    {:seon.repl/key [(:seon.render.walk/lookup unit)
                                     :listing index]
-                    :seon.repl/subject
-                    (first (sort-by str
-                                    (walk/form-symbols
-                                     (:seon.repl/form entry))))
+                    :seon.repl/subject (:seon.render.walk/lookup unit)
                     :seon.repl/entry entry}))
                rendered-entries)))))
         (walk/neighborhood
@@ -201,11 +198,8 @@
     {:seon.repl/root-key
      [(first (:seon.render.walk/order acquisition)) 0]
      :seon.repl/candidates
-     (->> (concat (direct-candidates request acquisition)
-                  (listing-candidates request acquisition))
-          (sort-by (juxt (comp pr-str :seon.repl/key)
-                         (comp pr-str :seon.repl/entry)))
-          vec)
+     (into (direct-candidates request acquisition)
+           (listing-candidates request acquisition))
      :seon.print/identity-attributes identities}))
 
 (defn- root-candidate

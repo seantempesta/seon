@@ -187,10 +187,10 @@
         candidates episode-candidates
         result (walk/ordered-episode (episode-request candidates settled))
         episode-keys (mapv :seon.repl/key result)]
-    (is (= [:root :message-namespace :run-namespace :inbox-doc :read-doc
-            :complete-doc :inbox :message]
+    (is (= [:root :run-namespace :complete-doc :message-namespace
+            :inbox-doc :read-doc :inbox :message]
            episode-keys)
-        "listings and docs explain each later use, with stable ties")
+        "listings and docs explain each later use in carried fact order")
     (is (< (.indexOf episode-keys :inbox) (.indexOf episode-keys :message))
         "an entity id must appear in the inbox value before its read")
     (is (not (some #(= '(dir (quote outside.ns))

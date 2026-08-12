@@ -98,7 +98,8 @@
         (is (not-any? #(= 'outside.pull (:seon.repl/subject %))
                       (:seon.repl/candidates pull))
             "membership comes only from the bounded pull")
-        (let [situation (bootstrap/situation @connection agent-id)
+        (let [opening-source (bootstrap/entry-source (first first-pass))
+              situation (bootstrap/situation @connection agent-id)
               node (:seon.sci.admit/print-node
                     (admit/admit-value
                      {:seon.sci.admit/value situation
@@ -115,19 +116,37 @@
              :seon.cluster.eval/ordinal 0
              :seon.cluster.eval/at (java.util.Date.)
              :seon.cluster.eval/result-edn (pr-str node)}])
-          (is (map?
-               (with-redefs
-                [bootstrap/pull-result
-                 (constantly
-                  (update pull :seon.repl/candidates
-                          #(filterv (fn [candidate]
-                                      (not= (:seon.repl/root-key pull)
-                                            (:seon.repl/key candidate)))
-                                    %)))]
-                 (bootstrap/next-entry
-                  (generator-request connection)
-                  (bootstrap/run-id agent-id))))
-              "the root candidate remains stable after its run ref changes"))))))
+          (let [post-receipt-pull
+                (bootstrap/pull-result (generator-request connection))
+                listing-candidates
+                (filter #(= :listing (second (:seon.repl/key %)))
+                        (:seon.repl/candidates post-receipt-pull))
+                next-entry
+                (bootstrap/next-entry
+                 (generator-request connection)
+                 (bootstrap/run-id agent-id))]
+            (is (= opening-source
+                   (db/q '[:find ?source .
+                           :in $ ?run-id
+                           :where
+                           [?run :seon.cluster.run/id ?run-id]
+                           [?form :seon.cluster.run.form/run ?run]
+                           [?form :seon.cluster.run.form/ordinal 0]
+                           [?form :seon.cluster.run.form/source ?source]]
+                         @connection (bootstrap/run-id agent-id)))
+                "the first derived entry remains byte-identical in history")
+            (is (every? #(= (first (:seon.repl/key %))
+                            (:seon.repl/subject %))
+                        listing-candidates)
+                "listing subjects are their pulled stable identities")
+            (is (map? next-entry)
+                "the live post-receipt pull appends one next entry")
+            (is (not= opening-source (bootstrap/entry-source next-entry)))
+            (is (= next-entry
+                   (bootstrap/next-entry
+                    (generator-request connection)
+                    (bootstrap/run-id agent-id)))
+                "same post-receipt state derives byte-identical data")))))))
 
 (deftest authored-plan-machinery-is-deleted
   (is (nil? (io/resource "seon/bootstrap.edn")))
