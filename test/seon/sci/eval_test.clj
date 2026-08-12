@@ -1265,10 +1265,11 @@
               :seon.config/on-core-error :panic})
             external (run-in ctx "(datahike.api/q '[:find ?e :where [?e]])"
                              2000)]
-        (is (identical? #'eval/agent-namespace
-                        (get-in (sci/namespace-state ctx)
-                                ['seon.sci.eval 'agent-namespace]))
-            "the host binding is the live compiled Var, never a copied root")
+        (let [installed
+              (get-in (sci/namespace-state ctx)
+                      ['seon.sci.eval 'agent-namespace])]
+          (is (identical? #'eval/agent-namespace @installed)
+              "the installed SCI Var forwards to the live compiled Var"))
         (is (ok? evaluation))
         (is (= assigned-namespace (:seon.sci.admit/value evaluation)))
         (is (= assigned-namespace

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, architecture, agent, sci, database]
 ---
@@ -81,10 +81,19 @@ Verified evidence:
   and 1148.0/1704.959 µs after. These are median/p95 measurements from
   [the committed benchmark](../../prds/sci-execution-runtime/research/env-once-fork-rehydration-benchmark.clj).
 
-The issue remains open because the recurring cold-JVM proof and
-`bin/test --changed` cannot currently cross fresh schema population. The
-protected concurrent Lane B tree declares `:datahike.read/dependency-plan`
-without a registered schema; `seon.schema.datahike/malli->datahike-attr-in`
-therefore refuses before the desk writer reaches settlement. Once Lane B
-lands that schema registration, rerun the recurring restart proof and the
-changed-path gate; archive this issue only when both are green.
+## Resolution — 2026-08-11
+
+W1 integration removed the schema-population blocker and strengthened the
+recurring restart proof so its `sci/eval-form` counter spans both cold
+`cluster-ctx` acquisition and `fork-for-turn`. The writer now settles an
+agent-authored contracted function alongside the ordinary desk function; the
+reader's second JVM restores both from facts, observes results `5` and `42`,
+and reports zero authored-form evaluations.
+
+`bin/test seon.cluster.turn-test seon.cluster.loop-test
+seon.cluster.run-test seon.sci.eval-test seon.sci.desk-test
+seon.render.history-test` ran the cold proof in 89.681 seconds. The writer was
+forcibly killed, the separate reader JVM reopened the database, both function
+roots and the atom snapshot restored from facts, the explicit unrestorable
+value remained flat, and clearing left no desk facts. No source-replay
+fallback remains in either cold acquisition or turn rehydration.

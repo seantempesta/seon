@@ -89,6 +89,7 @@
                                    (fn [] (swap! wrapper-calls inc))
                                    {:ns probe-ns})})
           sources ["(def helper (let [captured (desk.probe/touch!)] (fn [x] (+ captured x))))"
+                   "(defn ^{:malli/schema [:=> [:cat :int] :int]} contracted [x] (+ x 2))"
                    "(def data {:answer 42})"
                    "(def scratch (atom 1))"
                    "(swap! scratch + 6)"
@@ -102,23 +103,26 @@
   [configuration result-path]
   (let [connection (d/connect configuration)]
     (try
-      (let [base (eval/cluster-ctx @connection connection)
-            eval-form-calls (atom 0)
+      (let [eval-form-calls (atom 0)
             original-eval-form sci/eval-form
-            restored
+            {:keys [base restored]}
             (with-redefs [sci/eval-form
                           (fn [& args]
                             (swap! eval-form-calls inc)
                             (apply original-eval-form args))]
-              (eval/fork-for-turn
-               {:seon.sci.eval/ctx base
-                :seon.db/db @connection
-                :seon.db/connection connection
-                :seon.cluster.agent/id agent-id}))
+              (let [base (eval/cluster-ctx @connection connection)]
+                {:base base
+                 :restored
+                 (eval/fork-for-turn
+                  {:seon.sci.eval/ctx base
+                   :seon.db/db @connection
+                   :seon.db/connection connection
+                   :seon.cluster.agent/id agent-id})}))
             ctx (:seon.sci.eval/ctx restored)
             root #(some-> (sci/resolve ctx %) deref)
             before-clear
             {:helper ((root 'my.agents.desk-crash/helper) 4)
+             :contracted ((root 'my.agents.desk-crash/contracted) 40)
              :data (root 'my.agents.desk-crash/data)
              :atom @(root 'my.agents.desk-crash/scratch)
              :eval-form-calls @eval-form-calls

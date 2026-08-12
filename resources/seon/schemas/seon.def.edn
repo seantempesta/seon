@@ -23,9 +23,6 @@
             [:seon.def/size
              {:optional true}
              :seon.def/size]
-            [:seon.def/source
-             {:optional true}
-             :seon.def/source]
             [:seon.def/unrestorable-reason
              {:optional true}
              :seon.def/unrestorable-reason]
@@ -40,6 +37,5 @@
            :ordinal [:int {:min 0}],
            :rows [:vector :seon.def/def],
            :size [:int {:min 0}],
-           :source [:string {:min 1}],
            :unrestorable-reason [:string {:min 1}],
            :value-edn :string}

@@ -413,66 +413,6 @@
            (= (meta left) (meta right))
            (= left right))))
 
-(defn- resolved-var?
-  [value]
-  (or (sci.utils/var? value)
-      (var? value)))
-
-(defn- resolved-var-symbol
-  [candidate resolved]
-  (let [{var-namespace :ns var-name :name} (meta resolved)]
-    (if (and var-namespace var-name)
-      ;; SCI's implementation uses only these two metadata fields, so the
-      ;; same projection is valid for both sci.lang.Var and clojure.lang.Var.
-      (sci/var->symbol resolved)
-      candidate)))
-
-(defn- resolved-form-vars
-  "Every Var a form mentions, resolved after the form changed its ctx.
-  Over-approximation is deliberate: a shadowed local can only make purity
-  fail closed; a qualified or macro-expanded host touch is independently
-  observed by SCI's analyzer."
-  [ctx namespace-name form]
-  (sci/binding [sci/ns (sci/create-ns namespace-name)]
-    (into #{}
-          (comp
-           (filter symbol?)
-           (keep (fn [candidate]
-                   (try
-                     (let [resolved (sci/resolve ctx candidate)]
-                       (when (resolved-var? resolved)
-                         (resolved-var-symbol candidate resolved)))
-                     (catch Throwable _ nil)))))
-          (tree-seq coll? seq form))))
-
-(defn- unproven-called-vars
-  "Non-builtin Vars occurring in call position. A missing program row for one
-  is not silently pure: this is the fail-closed edge for session macros and
-  other process-local callables outside :seon.fn."
-  [ctx namespace-name form]
-  (sci/binding [sci/ns (sci/create-ns namespace-name)]
-    (into #{}
-          (keep
-           (fn [expression]
-             (when (seq? expression)
-               (let [candidate (first expression)]
-                 (when (symbol? candidate)
-                   (try
-                     (let [resolved (sci/resolve ctx candidate)]
-                       (when (and (resolved-var? resolved)
-                                  (not (:sci/built-in (meta resolved))))
-                         (resolved-var-symbol candidate resolved)))
-                     (catch Throwable _ nil)))))))
-          (tree-seq coll? seq form))))
-
-;; SCI marks built-ins but carries no purity or determinism provenance. These
-;; are therefore the small closed exception sets permitted by ruling #32,
-;; applied to calls SCI observed actually executing (not symbols merely present
-;; in a delayed function body). Clojure's sources establish the random/time/
-;; identity-hash reads: core.clj:606-613, 5056-5068, 5301-5337, 7008-7013,
-;; 7461-7468, 7548-7555, 7947-7954; SCI's system clock and `time` expansion are
-;; namespaces.cljc:1377-1417. SCI's io bindings at namespaces.cljc:1489-1525
-;; establish the mutable input/output calls.
 (defn- durable-function-root
   [ctx qualified]
   (let [root-data (first (sci/var-root-data ctx [qualified]))]
@@ -484,7 +424,7 @@
              "The SCI function root contains a value without a faithful stored representation."))))
 
 (defn- desk-defs
-  [ctx namespace-name before _source form _observed-built-in-calls]
+  [ctx _namespace-name before _source _form _observed-built-in-calls]
   (let [after (turn-intern-values ctx)]
     (into []
           (comp
@@ -510,11 +450,7 @@
                         atom? @value
                         function?
                         (durable-function-root ctx qualified)
-                        :else value)
-                      :seon.sci.eval/referenced-vars
-                      (resolved-form-vars ctx namespace-name form)
-                      :seon.sci.eval/unproven-called-vars
-                      (unproven-called-vars ctx namespace-name form)}
+                        :else value)}
                       atom? (assoc :seon.def/atom? true))))))
           after)))
 
@@ -976,12 +912,11 @@
   Namespace membership is the core-provenanced program rows THIS PROCESS CAN
   SERVE, loaded here when the JVM has not required them yet rather than
   intersected with whatever happens to be loaded already. Existing public
-  bindings remain
-  available, and every indexed function Var is added regardless of its
-  `:seon.fn/private?` attribute. Direct bindings retain those Vars; a target
-  named by a declared refer becomes an SCI Var whose root is the real Var,
-  because SCI's resolver requires that shape. Both paths therefore observe a
-  re-evaluated `defn` without reacquisition. Privacy is a rendering and
+  bindings remain available, and every indexed function Var is added
+  regardless of its `:seon.fn/private?` attribute. Indexed functions and
+  declared refer targets become SCI Vars whose roots are the real Vars,
+  because guarded invocation and SCI's resolver require that shape. They
+  therefore observe a re-evaluated `defn` without reacquisition. Privacy is a rendering and
   curation fact, never an execution boundary; non-function private Vars remain
   outside publication.
 
@@ -1012,22 +947,33 @@
     (doseq [namespace-name (sort-by str first-party-names)
             :let [host-namespace (host-namespace! namespace-name)]
             :when host-namespace]
-      (let [sci-namespace (sci/create-ns namespace-name)]
+      (let [sci-namespace (sci/create-ns namespace-name)
+            indexed-names (get indexed-function-names namespace-name)
+            host-bindings
+            (select-keys
+             (ns-interns host-namespace)
+             (into (set (keys (ns-publics host-namespace))) indexed-names))]
         (sci/add-namespace!
          ctx namespace-name
          (into {}
                (map
                 (fn [[local-name host-var]]
                   [local-name
-                   (if (contains?
-                        referred-symbols
-                        (symbol (str namespace-name) (str local-name)))
+                   (if (or (contains? indexed-names local-name)
+                           (contains?
+                            referred-symbols
+                            (symbol (str namespace-name) (str local-name))))
                      (forwarding-host-var host-var sci-namespace)
                      host-var)]))
-               (select-keys
-                (ns-interns host-namespace)
-                (into (set (keys (ns-publics host-namespace)))
-                      (get indexed-function-names namespace-name)))))))))
+               host-bindings))
+        ;; These are already the current compiled host Vars. Record that fact
+        ;; at the same seam that installs them so lazy invocation can never
+        ;; mistake a first-party function for an agent-authored function that
+        ;; requires a fact-backed SCI root descriptor.
+        (doseq [local-name indexed-names
+                :when (contains? host-bindings local-name)]
+          (kernel/mark-installed!
+           ctx (symbol (str namespace-name) (str local-name))))))))
 
 (defn- install-host-namespace!
   [ctx namespace-name intern-map]

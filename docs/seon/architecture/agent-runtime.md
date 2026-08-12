@@ -179,16 +179,16 @@ Namespace resolver inputs persist as `:seon.ns` plus owned alias/import/refer
 bindings. Uncontracted REPL definitions persist under `:seon.def`, keyed by
 agent plus qualified name:
 
-- a proven replay-safe defining form uses `/source`;
-- an effectful but faithful value uses `/value-edn` or `/blob` plus `/size`;
+- a faithful value uses `/value-edn` or `/blob` plus `/size`;
+- a supported function root uses the same fact-safe value representation;
 - a value that cannot be restored uses `/unrestorable-reason`;
 - an atom stores its last settled value and `/atom?`; and
 - `/ordinal` supplies deterministic restore order.
 
-Restore binds faithful values, re-evaluates only forms whose purity is proven
-from analysis and capability reachability, recreates atoms around their last
-settled values with one honest REPL notice, and states every unrestorable
-name. Nothing effectful re-executes during recovery. Exact desk replacement
+Restore binds faithful values and supported function roots directly from
+facts, recreates atoms around their last settled values with one honest REPL
+notice, and states every unrestorable name. No agent-authored form re-executes
+during recovery. Exact desk replacement
 shares the terminal receipt transaction; clearing is explicit and agent-local.
 Namespace ownership is `:seon.cluster.agent/namespace`; it coordinates who
 should edit a namespace and never gates callability.

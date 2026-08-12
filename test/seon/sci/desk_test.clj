@@ -335,12 +335,7 @@
             [{:seon.def/id "user/data"
               :seon.def/ns [:seon.ns/name 'user]
               :seon.def/name 'data
-              :seon.def/source "(def data {:answer 42})"
-              :seon.sci.eval/value {:answer 42}
-              :seon.sci.eval/referenced-vars #{}
-              :seon.sci.eval/unproven-called-vars #{}
-              :seon.sci.eval/nondeterministic-calls #{}
-              :seon.sci.eval/impure-calls #{}}]
+              :seon.sci.eval/value {:answer 42}}]
             :seon.sci.admit/record
             {:seon.eval/outcome :ok :seon.eval/host-interop-count 0}}
            atom-evaluation
@@ -362,10 +357,8 @@
            atom-row (first (#'loop/desk-rows @connection "agent"
                                                stored-atom 1))]
        (is (= "{:answer 42}" (:seon.def/value-edn ordinary-row)))
-       (is (not (contains? ordinary-row :seon.def/source)))
        (is (true? (:seon.def/atom? atom-row)))
-       (is (= "9" (:seon.def/value-edn atom-row)))
-       (is (not (contains? atom-row :seon.def/source)))))))
+       (is (= "9" (:seon.def/value-edn atom-row)))))))
 
 (deftest ^{:seon.test/long
            "80.213 s pool: settle defs, SIGKILL the writer JVM, restart, restore, and explicitly clear."}
@@ -400,6 +393,7 @@
                                  result-path reader-log)]
         (assert-child-exit! reader "read-clear" reader-log))
       (is (= {:helper 5
+              :contracted 42
               :data {:answer 42}
               :atom 7
               :eval-form-calls 0
