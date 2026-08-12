@@ -783,20 +783,49 @@
     [(assoc state ::packages packages ::fragments fragments ::calls calls)
      (when changed? packages)]))
 
+(defn append-history
+  "Append observations that have not appeared in this prompt generation.
+
+   The logical call and the basis at which it was invoked identify an
+   observation. Existing entries are returned byte-for-byte and in place."
+  {:malli/schema [:=> [:cat [:vector :map] [:vector :map]] [:vector :map]]}
+  [entries observations]
+  (let [seen (into #{}
+                   (map (juxt :seon.render.history/call-id
+                              :seon.render.history/basis-transaction))
+                   entries)]
+    (into entries
+          (remove (fn [entry]
+                    (contains?
+                     seen
+                     [(:seon.render.history/call-id entry)
+                      (:seon.render.history/basis-transaction entry)])))
+          observations)))
+
+(defn- history-text
+  [entries]
+  (str/join "\n\n" (map :seon.render.history/bytes entries)))
+
 (defn- context-pass
   [state message]
   (let [request (:seon.render.context/request message)
         agent-id (:seon.cluster.agent/id request)
         captured-calls (atom {})
-        text
-        (render/call-with-walk-context
-         (assoc request
-                :seon.render/retained-calls
-                (get-in state [::ai-calls agent-id] {})
-                :seon.render/captured-calls captured-calls)
-         #(render/walk {:depth (long (:seon.render/distance request 2))}))]
-    [(assoc-in state [::ai-calls agent-id] @captured-calls)
-     {:seon.cluster.prompt/text text
+        render-request
+        (assoc request
+               :seon.render.walk/lookup [:seon.cluster.agent/id agent-id]
+               :seon.render/distance
+               (long (:seon.render/distance request 2))
+               :seon.render/retained-calls
+               (get-in state [::ai-calls agent-id] {})
+               :seon.render/captured-calls captured-calls)
+        observations (render.walk/history render-request)
+        entries (append-history (get-in state [::ai-entries agent-id] [])
+                                observations)]
+    [(-> state
+         (assoc-in [::ai-calls agent-id] @captured-calls)
+         (assoc-in [::ai-entries agent-id] entries))
+     {:seon.cluster.prompt/text (history-text entries)
       :seon.db/db (:seon.db/db request)}]))
 
 (defn render-step
@@ -876,6 +905,7 @@
           ::fragments {}
           ::calls {}
           ::ai-calls {}
+          ::ai-entries {}
           ::streams {}
           ::passes 0
           ::watched 0

@@ -436,6 +436,8 @@
                                            render-distance
                                            :seon.render.call/id
                                            [output lookup render-distance])
+                              attribute
+                              (assoc :seon.render.walk/attribute attribute)
                               owner (assoc :seon.render/namespace owner))
                             rendered
                             (render/render-call render-request)
@@ -688,3 +690,159 @@
                                rendered-visible))
            text (str/join "\n" lines)]
        (when-not (str/blank? text) text)))))
+
+;;; ---------------------------------------------------------------------------
+;;; The agent's history
+;;; ---------------------------------------------------------------------------
+
+(def ^:private initially-introduced-symbols
+  #{'db/pull 'db/q 'my.message/read 'my.message/inbox})
+
+(defn- unquoted
+  [form]
+  (if (and (seq? form) (= 'quote (first form)))
+    (second form)
+    form))
+
+(defn form-introductions
+  "Symbols introduced by one parsed history form."
+  {:malli/schema [:=> [:cat [:or :seon.render/form :nil]] [:set :symbol]]}
+  [form]
+  (let [operation (when (seq? form) (first form))
+        target (some-> (second form) unquoted)]
+    (case operation
+      require
+      (into #{}
+            (mapcat (fn [spec]
+                      (let [spec (unquoted spec)
+                            namespace-name (if (vector? spec) (first spec) spec)
+                            alias-name (when (vector? spec)
+                                    (some (fn [[option-key value]]
+                                            (when (= :as option-key) value))
+                                          (partition 2 (rest spec))))]
+                        (cond-> [namespace-name]
+                          alias-name (conj alias-name)))))
+            (rest form))
+
+      dir (if (symbol? target) #{target} #{})
+      doc (if (symbol? target) #{target} #{})
+      def (if (symbol? target) #{target} #{})
+      defn (if (symbol? target) #{target} #{})
+      #{})))
+
+(defn form-references
+  "Qualified symbols one parsed history form requires beforehand."
+  {:malli/schema [:=> [:cat [:or :seon.render/form :nil]] [:set :symbol]]}
+  [form]
+  (let [operation (when (seq? form) (first form))
+        target (some-> (second form) unquoted)]
+    (cond
+      (contains? #{'require 'dir 'def 'defn} operation) #{}
+      (= 'doc operation)
+      (if (and (symbol? target) (namespace target))
+        #{(symbol (namespace target))}
+        #{})
+      (and (symbol? operation) (namespace operation)) #{operation}
+      :else #{})))
+
+(defn- entry-form
+  [entry]
+  (let [form (:seon.render.history/form entry)]
+    (if (string? form)
+      (try (read-string form) (catch Throwable _ nil))
+      form)))
+
+(defn order-history
+  "Topologically order parsed forms with alphabetical ties.
+
+   Each selected entry extends the introduced-symbol set before the next
+   selection. Entries whose references cannot be introduced remain in stable
+   alphabetical order at the tail, where the class regression exposes them."
+  {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
+  [entries]
+  (loop [remaining (mapv (fn [entry]
+                           (let [form (entry-form entry)]
+                             (assoc entry
+                                    :seon.render.history/introduces
+                                    (form-introductions form)
+                                    :seon.render.history/references
+                                    (form-references form))))
+                         entries)
+         introduced initially-introduced-symbols
+         ordered []]
+    (if (empty? remaining)
+      ordered
+      (let [eligible (->> remaining
+                          (filter #(every? introduced
+                                           (:seon.render.history/references %)))
+                          (sort-by #(pr-str (:seon.render.history/form %))))
+            selected (or (first eligible)
+                         (first (sort-by #(pr-str (:seon.render.history/form %))
+                                         remaining)))]
+        (recur (into [] (remove #(identical? selected %) remaining))
+               (into introduced (:seon.render.history/introduces selected))
+               (conj ordered selected))))))
+
+(defn- observation-basis
+  [captured call-id fallback]
+  (long (or (get-in @captured
+                    [call-id :seon.render.call/basis-transaction])
+            fallback)))
+
+(defn- generic-history-entries
+  [request form-units value-units captured]
+  (let [values (into {}
+                     (map (fn [unit]
+                            [[(:seon.render.walk/lookup unit)
+                              (:seon.render.walk/path unit)] unit]))
+                     value-units)
+        basis (db/basis-t (:seon.db/db request))]
+    (into []
+          (keep
+           (fn [form-unit]
+             (let [entry-key [(:seon.render.walk/lookup form-unit)
+                              (:seon.render.walk/path form-unit)]
+                   value-unit (get values entry-key)
+                   form (:seon.render/output form-unit)
+                   printed-value (or (:seon.render/output value-unit)
+                                     (get-in value-unit
+                                             [:seon.error/value
+                                              :seon.error/message]))
+                   distance (:seon.render/distance form-unit)
+                   form-call [:seon.render/form
+                              (:seon.render.walk/lookup form-unit) distance]
+                   value-call [:seon.render/ai
+                               (:seon.render.walk/lookup form-unit) distance]
+                   observed-basis
+                   (max (observation-basis captured form-call basis)
+                        (observation-basis captured value-call basis))]
+               (when (and (seq? form) (string? printed-value))
+                 {:seon.render.history/call-id entry-key
+                  :seon.render.history/basis-transaction observed-basis
+                  :seon.render.history/form form
+                  :seon.render.history/printed-value printed-value
+                  :seon.render.history/bytes
+                  (str (pr-str form) "\n" printed-value)}))))
+          form-units)))
+
+(defn history
+  "Derive ordered form/printed-value entries for one agent from one walk."
+  {:malli/schema [:=> [:cat :seon.render.walk/request] [:vector :map]]}
+  [{captured :seon.render/captured-calls
+    :as request}]
+  (let [captured (or captured (atom {}))
+        request (assoc request :seon.render/captured-calls captured)
+        form-units (neighborhood (assoc request :seon.render/output
+                                        :seon.render/form))
+        value-units (neighborhood (assoc request :seon.render/output
+                                         :seon.render/ai))
+        transcript-entries
+        ((requiring-resolve 'seon.render.transcript/history-entries)
+         request)
+        root-lookup (:seon.render.walk/lookup request)
+        generic (->> (generic-history-entries request form-units value-units
+                                               captured)
+                     (remove #(= root-lookup
+                                 (first (:seon.render.history/call-id %))))
+                     vec)]
+    (order-history (into transcript-entries generic))))

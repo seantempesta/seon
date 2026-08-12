@@ -616,6 +616,24 @@
 ;;; Family defaults
 ;;; ---------------------------------------------------------------------------
 
+(defn namespace-form
+  "Return the ordinary `dir` form for a namespace entity."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  [unit]
+  (list 'dir (list 'quote (:seon.ns/name unit))))
+
+(defn function-form
+  "Return the ordinary `doc` form for a function entity."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  [unit]
+  (list 'doc (list 'quote (symbol (:seon.fn/sym unit)))))
+
+(defn schema-form
+  "Return the ordinary `doc` form for a schema entity."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  [unit]
+  (list 'doc (:seon.schema/key unit)))
+
 (defn render-ai
   "Render a namespace as valid, distance-sensitive Clojure."
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}

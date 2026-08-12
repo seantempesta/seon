@@ -45,7 +45,8 @@
               :predicate :qualified-symbol,
               :schema
               [:map
-               #:seon.db{:entity true}
+               {:seon.db/entity true,
+                :seon.render/form seon.render.ns/schema-form}
                [:seon.schema/key :seon.schema/key]
                [:seon.schema.admission/source
                 :seon.schema.admission/source]

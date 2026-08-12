@@ -51,7 +51,9 @@
                          :seon.render/ai
                          seon.cluster.message/render-ai,
                          :seon.render/html
-                         seon.cluster.message/render-html}
+                         seon.cluster.message/render-html,
+                         :seon.render/form
+                         seon.render.transcript/message-form}
                         [:seon.cluster.message/id
                          :seon.cluster.message/id]
                         [:seon.cluster.message/to
@@ -82,7 +84,11 @@
                         [:seon.cluster.message/trigger
                          {:optional true}
                          :seon.cluster.message/id]],
-                       :to :seon.db/ref,
+                       :to
+                       [:and
+                        {:seon.render/form
+                         seon.render.transcript/inbox-form}
+                        :seon.db/ref],
                        :size [:int {:min 0}],
                        :limit [:int {:min 0}],
                        :unknown-recipient :seon.cluster.agent/id

@@ -18,7 +18,8 @@
                 :seon.sci.eval/time-limit-ms]
                [:seon.config/on-core-error :seon.config/on-core-error]
                [:seon.render/ai {:optional true} :qualified-symbol]
-               [:seon.render/html {:optional true} :qualified-symbol]],
+               [:seon.render/html {:optional true} :qualified-symbol]
+               [:seon.render/form {:optional true} :qualified-symbol]],
               :candidate-request
               [:map
                [:seon.db/db :seon.db/database-value]
@@ -41,6 +42,14 @@
                [:seon.db/db :seon.db/database-value]
                [:seon.render/namespace :seon.render/namespace]
                [:seon.error/value :seon.error/value]],
+              :form
+              [:or
+               :qualified-symbol
+               [:fn
+                {:error/message "must be a Clojure list form"
+                 :gen/schema
+                 [:enum (help) (dir (quote clojure.core))]}
+                clojure.core/seq?]],
               :hiccup
               [:fn
                {:error/message
@@ -49,8 +58,9 @@
                seon.render.hiccup/hiccup?],
               :html [:or :qualified-symbol :seon.render/hiccup],
               :namespace :symbol,
-              :output [:enum :seon.render/ai :seon.render/html],
-              :rendered [:or :string :seon.render/hiccup],
+              :output
+              [:enum :seon.render/ai :seon.render/html :seon.render/form],
+              :rendered [:or :string :seon.render/hiccup :seon.render/form],
               :profile :seon.render.profile/profile,
               :output-schema :qualified-keyword,
               :package

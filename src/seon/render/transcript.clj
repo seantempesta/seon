@@ -764,6 +764,87 @@
   (let [{::keys [pinned entries elided]} (projection unit)]
     (ai-output pinned entries elided)))
 
+(defn message-form
+  "Return the ordinary message read form for one message entity."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  [unit]
+  (list 'my.message/read (:seon.cluster.message/id unit)))
+
+(defn inbox-form
+  "Return the ordinary inbox listing form for messages reached through `to`."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  [_unit]
+  (list 'my.message/inbox))
+
+(defn- receipt-printed-value
+  [unit entry]
+  (let [text (receipt-text unit entry :full)
+        prompt (prompted-source entry)]
+    (when (< (count prompt) (count text))
+      (subs text (inc (count prompt))))))
+
+(defn- entry-bytes
+  [namespace-name form printed-value]
+  (str (or namespace-name 'user) "=> "
+       (if (string? form) form (pr-str form))
+       (when (seq printed-value) (str "\n" printed-value))))
+
+(defn history-entries
+  "Return one agent's durable transcript as immutable REPL entries.
+
+   Stored form source remains byte-faithful. The sole synthesized form is the
+   honest message read; values come from settled facts and declared renderers,
+   never from executing the displayed form."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:vector :map]]}
+  [unit]
+  (let [db (:seon.db/db unit)
+        agent-id (:seon.cluster.agent/id unit)
+        namespace-name
+        (db/q '[:find ?name .
+                :in $ ?agent-id
+                :where
+                [?agent :seon.cluster.agent/id ?agent-id]
+                [?agent :seon.cluster.agent/namespace ?namespace]
+                [?namespace :seon.ns/name ?name]]
+              db agent-id)
+        budget (long (or (get-in unit [:seon.render/profile
+                                       :seon.render.profile/token-budget])
+                         (get-in unit [:seon.sci.admit/caps
+                                       :seon.config.eval.result/max-string])
+                         0))
+        candidates
+        (history db (:seon.cluster.run/id unit) agent-id
+                 (int (min Integer/MAX_VALUE (max recent-entry-count budget))))
+        entries
+        (mapv
+         (fn [entry]
+           (let [form (case (::kind entry)
+                        :message (message-form (::entity entry))
+                        (::source entry))
+                 printed-value
+                 (case (::kind entry)
+                   :message (rendered-family unit (::entity entry) 1)
+                   :input nil
+                   :eval (receipt-printed-value unit entry))]
+             {:seon.render.history/call-id
+              [:seon.render.transcript/entry (::kind entry) (::id entry)]
+              :seon.render.history/basis-transaction 0
+              :seon.render.history/form form
+              :seon.render.history/printed-value printed-value
+              :seon.render.history/bytes
+              (entry-bytes (or (::namespace entry) namespace-name)
+                           form printed-value)}))
+         candidates)]
+    (loop [remaining entries
+           spent 0
+           fitted []]
+      (if-let [entry (first remaining)]
+        (let [cost (tokens/estimate (:seon.render.history/bytes entry))]
+          (if (<= (+ spent cost) budget)
+            (recur (next remaining) (+ spent cost) (conj fitted entry))
+            fitted))
+        fitted))))
+
 (defn render-html
   "Render the same bounded transcript with stable block and entry ids."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}

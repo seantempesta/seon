@@ -17,6 +17,7 @@
             [seon.render.hiccup :as hiccup]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
+            [seon.schema.form :as schema.form]
             [seon.sci.admit :as admit]
             [seon.sci.kernel :as sci.kernel]))
 
@@ -95,6 +96,7 @@
                               :seon.cluster.eval/result-blob
                               :seon.render.data/total
                               :seon.render/distance
+                              :seon.render.walk/attribute
                               :seon.cluster.run/live-processes
                               :seon.ai/partial
                               ;; the producers already rendering this
@@ -206,6 +208,19 @@
         (> (count producers) 1)
         (ambiguity nil output producers)))))
 
+(defn- attribute-producer
+  [projection request output]
+  (when-let [attribute (:seon.render.walk/attribute request)]
+    (some-> (get-in projection [:seon.schema.projection/forms attribute])
+            schema.form/attr-form-properties
+            (get output))))
+
+(defn- declared-producer
+  [projection request value output]
+  (or (when (= :seon.render/form output)
+        (attribute-producer projection request output))
+      (schema-producer projection value output)))
+
 (defn- producer
   [{ctx :seon.sci.eval/ctx
     namespace-name :seon.render/namespace
@@ -221,9 +236,10 @@
         (cond
           (= 1 (count fits)) (symbol (first fits))
           (> (count fits) 1) (ambiguity namespace-name output fits)
-          :else (or (schema-producer projection value output)
-                    (if (= output :seon.render/html)
-                      'seon.render.value/render-html
+          :else (or (declared-producer projection request value output)
+                    (case output
+                      :seon.render/form 'seon.render/render-form
+                      :seon.render/html 'seon.render.value/render-html
                       'seon.render.value/render-ai)))))))
 
 (defn- call-static-evidence
@@ -275,7 +291,8 @@
   (or (:seon.error/kind value)
       (case output
         :seon.render/ai (string? value)
-        :seon.render/html (hiccup/hiccup? value))))
+        :seon.render/html (hiccup/hiccup? value)
+        :seon.render/form (sequential? value))))
 
 (declare project-node*)
 
@@ -328,7 +345,7 @@
         rendering (:seon.render/rendering request #{})
         selected (when (map? value)
                    (or (get value output)
-                       (schema-producer projection value output)))
+                       (declared-producer projection request value output)))
         selected (when-not (contains? rendering selected) selected)]
     (cond
       (:seon.error/kind selected) (bounded-error-node request selected)
@@ -413,10 +430,55 @@
        :seon.error/message "The selected HTML renderer did not return Hiccup."
        :seon.error/data {:seon.render/output rendered}})))
 
+(defn- entity-lookup
+  [projection entity]
+  (let [identity-attribute
+        (->> (:seon.schema.projection/shape-rows projection)
+             vals
+             (keep :seon.entity/id-attr)
+             distinct
+             (filter #(contains? entity %))
+             (sort-by str)
+             first)]
+    (if identity-attribute
+      [identity-attribute (get entity identity-attribute)]
+      (:db/id entity))))
+
+(defn render-form
+  "Spell the structural read that reproduces one reached database value."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  [unit]
+  (if-let [attribute (:seon.render.walk/attribute unit)]
+    (list 'db/q
+          (list 'quote
+                [:find [(list 'pull '?entity '[*]) '...]
+                 :where ['?entity attribute]])
+          'db)
+    (list 'db/pull
+          'db
+          (list 'quote '[*])
+          (entity-lookup (sci.kernel/context-projection
+                          (:seon.sci.eval/ctx unit))
+                         (:seon.render/value unit)))))
+
+(defn render-form-value
+  "Render one value as the Clojure form that reads it."
+  {:malli/schema [:=> [:cat :seon.render/call-request]
+                  [:or :seon.render/form :seon.error/value]]}
+  [request]
+  (let [rendered (invoke-producer request :seon.render/form
+                                  :seon.render/form)]
+    (if (or (sequential? rendered) (:seon.error/kind rendered))
+      rendered
+      {:seon.error/kind ::invalid-form-output
+       :seon.error/message "The selected form renderer did not return a form."
+       :seon.error/data {:seon.render/output rendered}})))
+
 (defn render-call
   "Reuse one retained projection while its input, code, and reads are current."
   {:malli/schema [:=> [:cat :seon.render/call-request]
-                  [:or :nil :string :seon.render/hiccup :seon.error/value]]}
+                  [:or :nil :string :seon.render/hiccup
+                   :seon.render/form :seon.error/value]]}
   [{database :seon.db/db
     output :seon.render/output
     call-id :seon.render.call/id
@@ -425,7 +487,8 @@
     :as request}]
   (let [output-schema (case output
                         :seon.render/ai :seon.render/ai
-                        :seon.render/html :seon.render/html)
+                        :seon.render/html :seon.render/html
+                        :seon.render/form :seon.render/form)
         selected (producer request output output-schema)]
     (if (:seon.error/kind selected)
       selected
@@ -448,7 +511,8 @@
                              rendered
                              ((case output
                                 :seon.render/ai render-ai
-                                :seon.render/html render-html)
+                                :seon.render/html render-html
+                                :seon.render/form render-form-value)
                               prepared-request)]
                          rendered))
             entry (if reusable?
@@ -456,6 +520,8 @@
                     {:seon.render.call/static-evidence static-evidence
                      :seon.render.call/read-evidence
                      (db/read-evidence @captured)
+                     :seon.render.call/basis-transaction
+                     (db/basis-t database)
                      :seon.render.call/output rendered})]
         (when (and call-id captured-calls)
           (swap! captured-calls assoc call-id entry))
