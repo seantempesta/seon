@@ -1,6 +1,7 @@
 #:seon.test{:ns :seon.db/ref,
             :source :string,
             :subject :seon.db/ref,
+            :usage :boolean,
             :sym
             [:string
              {:min 1, :seon.db/identity true, :seon.search/index :symbol}],
@@ -14,4 +15,5 @@
              [:seon.test/source {:optional true} :seon.test/source]
              [:seon.fn/calls {:optional true} :seon.fn/calls]
              [:seon.fn/keywords {:optional true} :seon.fn/keywords]
+             [:seon.test/usage {:optional true} :seon.test/usage]
              [:seon.test/subject {:optional true} :seon.test/subject]]}

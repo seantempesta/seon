@@ -41,7 +41,7 @@
     :seon.program/source-attribute :seon.test/source
     :seon.program/owned-attributes
     [:seon.test/sym :seon.test/ns :seon.test/source :seon.fn/calls
-     :seon.fn/keywords :seon.test/subject
+     :seon.fn/keywords :seon.test/usage :seon.test/subject
      :seon.schema.admission/source]}})
 
 (defn shape

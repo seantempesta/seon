@@ -42,14 +42,7 @@
                [:seon.db/db :seon.db/database-value]
                [:seon.render/namespace :seon.render/namespace]
                [:seon.error/value :seon.error/value]],
-              :form
-              [:or
-               :qualified-symbol
-               [:fn
-                {:error/message "must be a Clojure list form"
-                 :gen/schema
-                 [:enum (help) (dir (quote clojure.core))]}
-                clojure.core/seq?]],
+              :form [:or :seon.repl/expression :seon.repl/entry],
               :hiccup
               [:fn
                {:error/message

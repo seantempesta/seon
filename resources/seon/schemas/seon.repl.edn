@@ -1,0 +1,13 @@
+#:seon.repl{:comment [:string {:min 1}],
+            :expression
+            [:or
+             :qualified-symbol
+             [:fn
+              {:error/message "must be a Clojure list form"
+               :gen/schema [:enum (help) (dir (quote clojure.core))]}
+              clojure.core/seq?]],
+            :form :seon.repl/expression,
+            :entry
+            [:map
+             [:seon.repl/comment {:optional true} :seon.repl/comment]
+             [:seon.repl/form :seon.repl/form]]}

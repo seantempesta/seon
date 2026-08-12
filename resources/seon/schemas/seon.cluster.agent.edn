@@ -2,9 +2,11 @@
                      [:map
                       {:seon.db/entity true,
                        :seon.render/ai
-                       seon.render.transcript/render-session-ai,
+                       seon.cluster.agent/render-situation-ai,
                        :seon.render/html
-                       seon.render.transcript/render-session-html}
+                       seon.render.transcript/render-session-html,
+                       :seon.render/form
+                       seon.cluster.agent/situation-form}
                       [:seon.cluster.agent/id :seon.cluster.agent/id]
                       [:seon.cluster.agent/namespace
                        {:optional true}
@@ -78,6 +80,31 @@
                        :gen/gen seon.flow/atom-reference-generator}
                       seon.flow/atom-reference?],
                      :run :seon.db/ref,
+                     ;; The live value returned by `(help)`. These are
+                     ;; projections of current facts, never attributes stored
+                     ;; on the agent. Adding a member here is how the generated
+                     ;; opening grows: its printed value introduces another
+                     ;; reference to the symbol-driven frontier.
+                     :namespace-ref :seon.db/ref,
+                     :unread-message-count [:int {:min 0}],
+                     :open-run-ref :seon.db/ref,
+                     :protocol-namespaces [:vector :seon.ns/name],
+                     :situation
+                     [:map
+                      {:seon.render/ai
+                       seon.cluster.agent/render-situation-ai,
+                       :seon.render/form
+                       seon.cluster.agent/situation-form}
+                      [:seon.cluster.agent/id :seon.cluster.agent/id]
+                      [:seon.cluster.agent/namespace-ref
+                       :seon.cluster.agent/namespace-ref]
+                      [:seon.cluster.agent/unread-message-count
+                       :seon.cluster.agent/unread-message-count]
+                      [:seon.cluster.agent/open-run-ref
+                       {:optional true}
+                       :seon.cluster.agent/open-run-ref]
+                      [:seon.cluster.agent/protocol-namespaces
+                       :seon.cluster.agent/protocol-namespaces]],
                      :no-such-agent :seon.cluster.agent/id
                      :no-such-agent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the requested agent that does not exist"} [:seon.cluster.agent/no-such-agent :seon.cluster.agent/no-such-agent] [:seon.error/message :seon.error/message]]
                      :turn-completion-backstop :seon.cluster.agent/id
