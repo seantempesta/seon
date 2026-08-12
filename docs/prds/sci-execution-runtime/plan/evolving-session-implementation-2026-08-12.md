@@ -120,15 +120,25 @@ Phase 1 therefore cannot truthfully own only `bootstrap.clj`.
 
 Prefix drift is currently a thrown `ExceptionInfo`, not a flat refusal
 ([`src/seon/bootstrap.clj:256-281`](../../../../src/seon/bootstrap.clj#L256)).
-`[target]` `:seon.bootstrap/prefix-drift-error` declares this value:
+`[target]` `:seon.bootstrap/prefix-drift-error` declares this value as a
+class-marked error shape (`:seon.error/class` with its class-specific
+members — the presence-not-kind model the scheduled kind migration installs
+everywhere; see
+[error-class-catalog-and-renderers-disagree](../../../seon/issues/error-class-catalog-and-renderers-disagree.md)):
 
 ```clojure
-{:seon.error/kind :seon.bootstrap/prefix-drift
- :seon.error/message "The generated prefix differs from its settled receipts."
+{:seon.error/message "The generated prefix differs from its settled receipts."
  :seon.cluster.run/id "bootstrap:task-agent-9"
- :seon.bootstrap/expected ["expected source"]
- :seon.bootstrap/actual ["settled source"]}
+ :seon.bootstrap/prefix-drift {:seon.bootstrap/expected ["expected source"]
+                               :seon.bootstrap/actual ["settled source"]}}
 ```
+
+Until the migration lands, the constructor may additionally carry the
+current `:seon.error/kind` member for existing consumers (accretion — extra
+key ignored after the migration deletes its readers), but NO regression in
+this document may assert on `kind`: assertions dispatch on the declared
+class shape (`:seon.bootstrap/prefix-drift` presence), so the migration
+deletes the member without touching a single evolving-session test.
 
 `begin-generation` returns that value, and the loop settles it through its
 existing phase/error boundary. The direct uncaught call is deleted.
