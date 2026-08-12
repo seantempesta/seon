@@ -184,3 +184,20 @@ Per the foreign-lane boundary rule, this issue stays open. The remaining exit
 is a fresh isolated-root one-call proof after the projection owner restores
 root acquisition, plus a completed green `bin/test --changed` verdict; neither
 requires another AI implementation change.
+
+### Spine blocker repaired — 2026-08-12
+
+The pre-provider boundary is repaired at its two owners. Commit `66bf3fca3`
+makes root acquisition's declared request projection-neutral; commit
+`305be0b29` supplies the database-derived schema forms throughout transaction
+encoding so an instrumentation fault commits even on a Flow thread with no
+ambient projection. The focused proof passed four owner tests with 83
+assertions and zero failures/errors.
+
+The retained 61-minute changed-path run was independently attributed to the
+already-open root-pull parsing/allocation defect, not to the test runner. Its
+virtual-thread-aware dumps and heap evidence are recorded in
+[cold root pull is slower than the four-query floor](cold-root-pull-is-slower-than-the-four-query-floor.md).
+This AI issue remains open only for its paid one-call provider proof and final
+changed-path gate; the missing-output and unrecordable-fault blockers are
+closed in their archived issue records.

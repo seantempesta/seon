@@ -50,6 +50,23 @@ runner remains extremely slow for the prompt namespace. A virtual-thread-aware
 dump taken during that run showed no `join-error-fanout!`, `stop!`, render, or
 flow frame; the suspected foreign flow wedge was not observed.
 
+## Live prompt contract repair — 2026-08-12
+
+The W2 fixture supplied `:seon.render/output` to `root-acquisition`, but the
+live prompt and HTML acquisition paths correctly do not select a projection at
+that stage. Development instrumentation exposed the overly broad contract on
+an isolated-root message before any AI attempt was created.
+
+Commit `66bf3fca3` declares the projection-neutral
+`:seon.render.walk/acquisition-request` at the acquisition owner; the
+projection-specific neighborhood request is unchanged. Its focused regression
+validates and invokes acquisition without an output selector. Commit
+`305be0b29` separately repairs the fault recorder exposed by the same live
+drive: transaction encoding now supplies its handed schema forms to registered
+predicates throughout the operation, so the instrumentation fault itself can
+be committed. Four focused owner tests passed with 83 assertions and no
+failures or errors.
+
 ## Interpretation
 
 Correctness and incremental cost after the first acquisition meet W2's stated
