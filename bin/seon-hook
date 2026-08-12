@@ -455,14 +455,16 @@
 ;;; Markdown File Detection
 ;;; ---------------------------------------------------------------------------
 
-(defn- docs-markdown-file?
-  "Returns true if file-path is a .md file under docs/."
+(defn- authority-markdown-file?
+  "Returns true for Markdown under docs or the curated skills tree."
   [file-path]
   (when file-path
     (let [lower-path (clojure.string/lower-case file-path)]
       (and (clojure.string/ends-with? lower-path ".md")
            (or (clojure.string/starts-with? lower-path "docs/")
-               (clojure.string/includes? lower-path "/docs/"))))))
+               (clojure.string/includes? lower-path "/docs/")
+               (clojure.string/starts-with? lower-path ".agents/skills/")
+               (clojure.string/includes? lower-path "/.agents/skills/"))))))
 
 (defn- clojure-source-file? [file-path]
   (when file-path
@@ -486,11 +488,13 @@
 (defn- markdown-feedback [event config]
   (when (and (= (:hook_event_name event) "PostToolUse")
              (get-in config [:markdown-lint :enabled] true)
-             (docs-markdown-file? (get-file-path event)))
+             (authority-markdown-file? (get-file-path event)))
     (try
       (load-direct-check! 'seon.dev.markdown)
       (let [file-path (absolute-file-path (get-file-path event))
             validate-file (requiring-resolve 'seon.dev.markdown/validate-file)
+            validate-repository-pins
+            (requiring-resolve 'seon.dev.markdown/validate-repository-pins)
             fix (requiring-resolve 'seon.dev.markdown/fix)
             format-violations (requiring-resolve 'seon.dev.markdown/format-violations)
             request {:seon.dev.markdown/file-path file-path
@@ -500,15 +504,21 @@
                 (let [fixed (fix {:seon.dev.markdown/content (slurp file-path)})]
                   (when (pos? (:seon.dev.markdown/fixed-count fixed))
                     (spit file-path (:seon.dev.markdown/content fixed)))))
-            final (if (:seon.dev.markdown/valid? initial)
-                    initial
-                    (validate-file request))]
-        (when-not (:seon.dev.markdown/valid? final)
+            final-file (if (:seon.dev.markdown/valid? initial)
+                         initial
+                         (validate-file request))
+            pin-result
+            (validate-repository-pins
+             {:seon.dev.markdown/repository-root repo-root})
+            violations
+            (into (:seon.dev.markdown/violations final-file)
+                  (:seon.dev.markdown/violations pin-result))]
+        (when (seq violations)
           (clip-feedback
            config
            (:seon.dev.markdown/formatted
             (format-violations
-             {:seon.dev.markdown/violations (:seon.dev.markdown/violations final)
+             {:seon.dev.markdown/violations violations
               :seon.dev.markdown/max-length Long/MAX_VALUE})))))
       (catch Exception e
         (log! "MARKDOWN_LINT_ERROR" (.getMessage e))

@@ -162,6 +162,63 @@
                                ::md/rules #{:required-fields}})]
       (is (::md/valid? result)))))
 
+(deftest dependency-pin-current-rule-test
+  (let [current "407e9328851ccce318148188f1d284646eb64132"
+        stale "10540578248eaa686c1f88a7fe57644ee4c9f993"
+        request {::md/file-path "docs/example.md"
+                 ::md/gitlinks {"reference-code/datahike" current}
+                 ::md/rules #{:dependency-pin-current}}
+        stale-result
+        (md/validate
+         (assoc request ::md/content
+                (str "Datahike source: `reference-code/datahike` at `"
+                     stale "`.\n")))
+        current-result
+        (md/validate
+         (assoc request ::md/content
+                (str "Datahike source: `reference-code/datahike` at `"
+                     current "`.\n")))
+        violation (first (::md/violations stale-result))]
+    (testing "a stale exact pin fails with complete structural evidence"
+      (is (false? (::md/valid? stale-result)))
+      (is (= :dependency-pin-current (::md/rule violation)))
+      (is (= :error (::md/severity violation)))
+      (is (= "docs/example.md" (::md/file-path violation)))
+      (is (str/includes? (::md/message violation) stale))
+      (is (str/includes? (::md/message violation) current)))
+
+    (testing "the current gitlink passes"
+      (is (true? (::md/valid? current-result))))
+
+    (testing "non-pin commit abbreviations and longer digests are ignored"
+      (let [result
+            (md/validate
+             (assoc request ::md/content
+                    (str "Historical `10540578248e`; digest `"
+                         stale "abcd` beside `reference-code/datahike`.\n")))]
+        (is (true? (::md/valid? result)))))))
+
+(deftest repository-dependency-pins-are-current-test
+  (let [result
+        (md/validate-repository-pins
+         {::md/repository-root (System/getProperty "user.dir")})]
+    (is (true? (::md/valid? result))
+        (str "Dependency pin violations: "
+             (pr-str (::md/violations result))))))
+
+(deftest repository-dependency-pin-evidence-fails-closed-test
+  (let [result
+        (md/validate-repository-pins
+         {::md/repository-root
+          (str (io/file (System/getProperty "user.dir")
+                        "tmp" "no-such-repository"))})
+        violation (first (::md/violations result))]
+    (is (false? (::md/valid? result)))
+    (is (= :dependency-pin-git-evidence (::md/rule violation)))
+    (is (= :error (::md/severity violation)))
+    (is (str/includes? (::md/message violation)
+                       "could not derive repository evidence"))))
+
 (deftest historical-prd-authority-rule-test
   (let [active-content (str "---\n"
                             "type: orchestrator\n"

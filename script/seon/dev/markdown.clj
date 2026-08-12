@@ -11,6 +11,7 @@
      (parse {::content \"# Title\\n...\"})
      (validate {::content \"...\" ::rules #{:has-frontmatter}})
      (validate-file {::file-path \"docs/foo.md\" ::vault-root \"docs\"})
+     (validate-repository-pins {::repository-root \".\"})
      (format-violations {::violations [...] ::max-length 800})
      (fix {::content \"...\"})"
   (:require [clojure.java.io :as io]
@@ -53,6 +54,10 @@
   [:map
    [::rule :keyword]
    [::severity [:enum :error :warning :info]]
+   [::file-path {:optional true} :string]
+   [::dependency-path {:optional true} :string]
+   [::cited-sha {:optional true} :string]
+   [::current-sha {:optional true} :string]
    [::line {:optional true} [:int {:min 1}]]
    [::message :string]
    [::fix {:optional true} :string]])
@@ -65,6 +70,7 @@
   [:map
    [::content :string]
    [::rules {:optional true} [:set :keyword]]
+   [::gitlinks {:optional true} [:map-of :string :string]]
    [::vault-root {:optional true} [:string {:min 1}]]
    [::file-path {:optional true} [:string {:min 1}]]])
 
@@ -78,6 +84,14 @@
   [:map
    [::file-path [:string {:min 1}]]
    [::vault-root {:optional true} [:string {:min 1}]]])
+
+(def ^:private validate-repository-pins-request-schema
+  [:map [::repository-root [:string {:min 1}]]])
+
+(def ^:private validate-repository-pins-response-schema
+  [:map
+   [::valid? :boolean]
+   [::violations #'violations-schema]])
 
 (def ^:private format-violations-request-schema
   [:map
@@ -605,6 +619,187 @@
                    ::fix "Wrap in markdown link: [text](url)"})))
         links))
 
+(def ^:private dependency-pin-line-radius
+  "Maximum line distance between an exact pin and its dependency citation."
+  5)
+
+(defn- hex-digit? [character]
+  (some? (str/index-of "0123456789abcdefABCDEF" (str character))))
+
+(defn- exact-sha-tokens
+  "Maximal hexadecimal runs of exactly 40 characters in one line."
+  [line line-index]
+  (loop [index 0, tokens []]
+    (if (= index (count line))
+      tokens
+      (if-not (hex-digit? (.charAt line index))
+        (recur (inc index) tokens)
+        (let [end (loop [cursor index]
+                    (if (and (< cursor (count line))
+                             (hex-digit? (.charAt line cursor)))
+                      (recur (inc cursor))
+                      cursor))
+              token (subs line index end)]
+          (recur end
+                 (cond-> tokens
+                   (= 40 (count token))
+                   (conj {::line-index line-index
+                          ::column index
+                          ::cited-sha (str/lower-case token)}))))))))
+
+(defn- occurrences
+  "Start indexes of `needle` in `value`, including overlapping occurrences."
+  [value needle]
+  (loop [from 0, indexes []]
+    (if-let [index (str/index-of value needle from)]
+      (recur (inc index) (conj indexes index))
+      indexes)))
+
+(defn- dependency-path-boundary? [line end]
+  (or (= end (count line))
+      (let [character (.charAt line end)]
+        (or (= character \/)
+            (not (or (Character/isLetterOrDigit character)
+                     (= character \.)
+                     (= character \-)
+                     (= character \_)))))))
+
+(defn- dependency-path-occurrences [line line-index dependency-paths]
+  (into []
+        (keep
+         (fn [column]
+           (when-let [path
+                      (some
+                       (fn [candidate]
+                         (let [end (+ column (count candidate))]
+                           (when (and (<= end (count line))
+                                      (.startsWith ^String line candidate column)
+                                      (dependency-path-boundary? line end))
+                             candidate)))
+                       dependency-paths)]
+             {::line-index line-index
+              ::column column
+              ::dependency-path path})))
+        (occurrences line "reference-code/")))
+
+(defn- split-on-character [value delimiter]
+  (loop [start 0, index 0, parts []]
+    (if (= index (count value))
+      (conj parts (subs value start index))
+      (if (= delimiter (.charAt value index))
+        (recur (inc index) (inc index) (conj parts (subs value start index)))
+        (recur start (inc index) parts)))))
+
+(defn- dependency-name [path]
+  (subs path (inc (str/last-index-of path "/"))))
+
+(defn- table-row? [line]
+  (and (str/starts-with? (str/trim line) "|")
+       (str/ends-with? (str/trim line) "|")))
+
+(defn- table-dependency-reference [line line-index dependencies-by-name]
+  (when (table-row? line)
+    (let [matches
+          (into []
+                (comp
+                 (map str/trim)
+                 (map #(str/replace % "`" ""))
+                 (map str/lower-case)
+                 (mapcat #(get dependencies-by-name %)))
+                (split-on-character line \|))]
+      (when (= 1 (count (distinct matches)))
+        {::line-index line-index
+         ::column 0
+         ::dependency-path (first matches)}))))
+
+(defn- nearest-dependency-reference [token references]
+  (let [rank
+        (fn [reference]
+          [(abs (- (::line-index token) (::line-index reference)))
+           (if (= (::line-index token) (::line-index reference))
+             (abs (- (::column token) (::column reference)))
+             (::column reference))
+           (::dependency-path reference)])]
+    (reduce
+     (fn [nearest reference]
+       (if (and
+            (<= (abs (- (::line-index token) (::line-index reference)))
+                dependency-pin-line-radius)
+            (or (nil? nearest)
+                (neg? (compare (rank reference) (rank nearest)))))
+         reference
+         nearest))
+     nil
+     references)))
+
+(defn- rule-dependency-pin-current
+  "Exact dependency pins near citations must equal the repository gitlink.
+
+   The mechanical boundary is a maximal 40-hex token within five lines of a
+   `reference-code/<dep>` path, or on a table row whose cell exactly names a
+   gitlink basename. The nearest citation wins. Historical commits use an
+   abbreviated identity when they are not a claim about the selected pin."
+  [lines file-path gitlinks]
+  (when (seq gitlinks)
+    (let [dependency-paths (sort-by (comp - count) (keys gitlinks))
+          dependencies-by-name
+          (group-by (comp str/lower-case dependency-name) dependency-paths)
+          references
+          (into []
+                (mapcat
+                 (fn [[line-index line]]
+                   (let [table-reference
+                         (table-dependency-reference
+                          line line-index dependencies-by-name)]
+                     (cond-> (vec (dependency-path-occurrences
+                                   line line-index dependency-paths))
+                       table-reference (conj table-reference)))))
+                (map-indexed vector lines))
+          candidate-line-indexes
+          (into #{}
+                (mapcat
+                 (fn [reference]
+                   (range
+                    (max 0 (- (::line-index reference)
+                              dependency-pin-line-radius))
+                    (min (count lines)
+                         (+ (::line-index reference)
+                            dependency-pin-line-radius
+                            1)))))
+                references)]
+      (into []
+            (comp
+             (filter (fn [[line-index _]]
+                       (contains? candidate-line-indexes line-index)))
+             (mapcat (fn [[line-index line]]
+                       (exact-sha-tokens line line-index)))
+             (keep
+              (fn [token]
+                (let [token-line (nth lines (::line-index token))
+                      eligible-references
+                      (if (table-row? token-line)
+                        (filter #(= (::line-index token) (::line-index %))
+                                references)
+                        references)]
+                  (when-let [reference
+                             (nearest-dependency-reference
+                              token eligible-references)]
+                  (let [path (::dependency-path reference)
+                        cited (::cited-sha token)
+                        current (get gitlinks path)]
+                    (when-not (= cited current)
+                      {::rule :dependency-pin-current
+                       ::severity :error
+                       ::file-path file-path
+                       ::dependency-path path
+                       ::cited-sha cited
+                       ::current-sha current
+                       ::line (inc (::line-index token))
+                       ::message
+                       (str file-path " cites " cited " for " path
+                            "; current gitlink is " current)})))))))
+            (map-indexed vector lines)))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; All Rules
 ;;; ---------------------------------------------------------------------------
@@ -620,7 +815,8 @@
 
 (defn- run-rules
   "Run selected rules against parsed data. Returns vector of violations."
-  [{:keys [content lines code-lines headings links frontmatter vault-root rules fm-end-line]}]
+  [{:keys [content lines code-lines headings links frontmatter gitlinks
+           vault-root rules fm-end-line file-path]}]
   (let [active (or rules all-rules)
         run? (fn [r] (contains? active r))
         fm-end (or fm-end-line 1)]
@@ -641,7 +837,9 @@
            (when (run? :valid-tags) (rule-valid-tags frontmatter vault-root))
            (when (run? :valid-type) (rule-valid-type frontmatter vault-root))
            (when (run? :wikilink-target-exists) (rule-wikilink-target-exists links vault-root))
-           (when (run? :no-bare-urls) (rule-no-bare-urls links))])))
+           (when (run? :no-bare-urls) (rule-no-bare-urls links))
+           (when (run? :dependency-pin-current)
+             (rule-dependency-pin-current lines file-path gitlinks))])))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Auto-Fix
@@ -741,6 +939,71 @@
         (str joined "\n")
         joined)))
 
+(defn- run-git [repository-root arguments]
+  (let [command (into ["git" "-C" repository-root] arguments)
+        process (.start (ProcessBuilder. ^java.util.List command))
+        output (future (slurp (.getInputStream process)))
+        error-output (future (slurp (.getErrorStream process)))
+        exit (.waitFor process)]
+    {::exit exit
+     ::output @output
+     ::error-output @error-output
+     ::command command}))
+
+(defn- successful-git-output [repository-root arguments]
+  (let [{::keys [exit output error-output command]}
+        (run-git repository-root arguments)]
+    (if (zero? exit)
+      output
+      (throw
+       (ex-info
+        "Git could not provide Markdown dependency-pin evidence."
+        {::command command
+         ::exit exit
+         ::error-output (str/trim error-output)})))))
+
+(defn- parse-index-record [record]
+  (let [mode-end (str/index-of record " ")
+        sha-end (when mode-end (str/index-of record " " (inc mode-end)))
+        stage-end (when sha-end (str/index-of record "\t" (inc sha-end)))]
+    (when-not (and mode-end sha-end stage-end)
+      (throw (ex-info "Malformed git index record." {::record record})))
+    (let [mode (subs record 0 mode-end)
+          sha (subs record (inc mode-end) sha-end)
+          stage (subs record (inc sha-end) stage-end)
+          path (subs record (inc stage-end))]
+      (when-not (= "0" stage)
+        (throw (ex-info "Unmerged reference-code index entry."
+                        {::record record ::file-path path ::stage stage})))
+      {::mode mode ::sha sha ::stage stage ::file-path path})))
+
+(defn- repository-gitlinks [repository-root]
+  (let [records
+        (->> (successful-git-output
+              repository-root
+              ["ls-files" "--stage" "-z" "--" "reference-code"])
+             (#(split-on-character % \u0000))
+             (remove str/blank?)
+             (map parse-index-record))
+        gitlinks
+        (into (sorted-map)
+              (comp
+               (filter #(= "160000" (::mode %)))
+               (map (juxt ::file-path ::sha)))
+              records)]
+    (when (empty? gitlinks)
+      (throw (ex-info "No reference-code gitlinks were discovered."
+                      {::repository-root repository-root})))
+    gitlinks))
+
+(defn- repository-markdown-paths [repository-root]
+  (->> (successful-git-output
+        repository-root
+        ["ls-files" "-z" "--" "docs" ".agents/skills"])
+       (#(split-on-character % \u0000))
+       (filter #(str/ends-with? % ".md"))
+       sort))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Public API
 ;;; ---------------------------------------------------------------------------
@@ -779,8 +1042,10 @@
   "Run rules against markdown content, collect violations.
 
    Request keys:
-     ::content    - Raw markdown string
-     ::rules      - Optional set of rule keywords to check (default: all)
+    ::content    - Raw markdown string
+    ::rules      - Optional set of rule keywords to check (default: all)
+     ::gitlinks   - Optional repository gitlink map for dependency-pin checks
+     ::file-path  - Optional path reported by file-specific violations
      ::vault-root - Optional vault root for wikilink resolution
 
    Response keys:
@@ -793,7 +1058,7 @@
      ;; => {::valid? false ::violations [...] ::document {...}}"
   {:malli/schema
    [:=> [:cat #'validate-request-schema] #'validate-response-schema]}
-  [{::keys [content rules vault-root file-path]}]
+  [{::keys [content rules gitlinks vault-root file-path]}]
   (let [[_fm _remaining fm-end-line] (parse-frontmatter content)
         document (parse {::content content})
         lines (str/split-lines content)
@@ -804,6 +1069,7 @@
                                :headings (::headings document)
                                :links (::links document)
                                :frontmatter (::frontmatter document)
+                               :gitlinks gitlinks
                                :vault-root vault-root
                                :rules rules
                                :fm-end-line (or fm-end-line 1)
@@ -841,6 +1107,41 @@
                    ::headings []
                    ::links []
                    ::sections []}})))
+
+(defn validate-repository-pins
+  "Validate every dependency pin in tracked docs and curated skills."
+  {:malli/schema
+   [:=>
+    [:cat #'validate-repository-pins-request-schema]
+    #'validate-repository-pins-response-schema]}
+  [{::keys [repository-root]}]
+  (try
+    (let [gitlinks (repository-gitlinks repository-root)
+          paths (vec (repository-markdown-paths repository-root))]
+      (when (empty? paths)
+        (throw (ex-info "No Markdown pin subjects were discovered."
+                        {::repository-root repository-root})))
+      (let [violations
+            (into []
+                  (mapcat
+                   (fn [path]
+                     (rule-dependency-pin-current
+                      (str/split-lines
+                       (slurp (io/file repository-root path)))
+                      path
+                      gitlinks)))
+                  paths)]
+        {::valid? (empty? violations)
+         ::violations violations}))
+    (catch Exception error
+      {::valid? false
+       ::violations
+       [{::rule :dependency-pin-git-evidence
+         ::severity :error
+         ::file-path repository-root
+         ::message
+         (str "Dependency pin validation could not derive repository evidence: "
+              (ex-message error))}]})))
 
 (defn format-violations
   "Format violations for human-readable hook feedback.

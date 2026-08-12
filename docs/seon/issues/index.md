@@ -54,11 +54,10 @@ See `README.md` for the convention.
 | [Settle what arrived when a provider stream closes mid-body](a-mid-stream-provider-disconnect-discards-the-whole-turn.md) | blocker | whole-system arc repair wave |
 | [Await every worker writer before deleting its root](test-runner-cleans-a-worker-root-while-kondo-is-still-writing.md) | blocker | test runner cleanup repair wave |
 
-## Friction (135)
+## Friction (134)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [Stop the Datahike pin statements drifting again](datahike-current-pin-statements-drifted-again.md) | friction | docs pass (this session) |
 | [Record posh's cardinality-one pull-analysis arity defect](posh-cardinality-one-pull-analysis-has-an-arity-defect.md) | friction | upstream-delta sweep |
 | [Read terminal failure from the settlement key its producer writes](loop-settlement-consumer-reads-a-key-no-producer-writes.md) | friction | loop settlement contract wave |
 | [Derive the oversight fleet proof from the live proc roster](oversight-fleet-test-pins-a-stale-proc-roster.md) | friction | oversight test repair |
