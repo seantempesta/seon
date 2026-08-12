@@ -77,6 +77,67 @@
            :seon.sci.admit/caps caps}
           extra)))
 
+(deftest diagnostic-construction-is-evidence-complete
+  (let [complete
+        (error/diagnostic
+         {:seon.error/kind :seon.error-test/invalid-call
+          :seon.error/message "The call was invalid."
+          :seon.error/diagnostic-layer :agent-boundary
+          :seon.error/diagnostic-operation 'seon.error-test/check
+          :seon.error/diagnostic-member :seon.error-test/value
+          :seon.error/diagnostic-expected :int
+          :seon.error/diagnostic-offending "not-an-int"
+          :seon.error/diagnostic-cause :seon.error-test/schema-mismatch
+          :seon.error/diagnostic-evidence {:seon.error-test/path [0]}
+          :seon.error/data {:seon.error-test/context :kept}})
+        unavailable
+        (error/diagnostic
+         {:seon.error/kind :seon.error-test/unavailable
+          :seon.error/message "The evidence could not be observed."
+          :seon.error/diagnostic-layer nil
+          :seon.error/diagnostic-operation nil
+          :seon.error/diagnostic-member nil
+          :seon.error/diagnostic-expected nil
+          :seon.error/diagnostic-offending nil
+          :seon.error/diagnostic-cause nil
+          :seon.error/diagnostic-evidence nil
+          :seon.error/data
+          {:seon.error/diagnostic-layer :cannot-replace
+           :seon.error/diagnostic-evidence-availability :cannot-replace
+           :seon.error-test/context :kept}})]
+    (is (schema/valid-candidate-value? :seon.error/value complete))
+    (is (= {:seon.error-test/context :kept
+            :seon.error/diagnostic-layer :agent-boundary
+            :seon.error/diagnostic-operation 'seon.error-test/check
+            :seon.error/diagnostic-member :seon.error-test/value
+            :seon.error/diagnostic-expected :int
+            :seon.error/diagnostic-offending "not-an-int"
+            :seon.error/diagnostic-cause :seon.error-test/schema-mismatch
+            :seon.error/diagnostic-evidence-availability :seon.error/known
+            :seon.error/diagnostic-evidence {:seon.error-test/path [0]}}
+           (:seon.error/data complete)))
+    (is (= :kept (get-in unavailable
+                          [:seon.error/data :seon.error-test/context])))
+    (is (= (zipmap [:seon.error/diagnostic-layer
+                    :seon.error/diagnostic-operation
+                    :seon.error/diagnostic-member
+                    :seon.error/diagnostic-expected
+                    :seon.error/diagnostic-offending
+                    :seon.error/diagnostic-cause
+                    :seon.error/diagnostic-evidence-availability
+                    :seon.error/diagnostic-evidence]
+                   (repeat :seon.error/unknown))
+           (select-keys (:seon.error/data unavailable)
+                        [:seon.error/diagnostic-layer
+                         :seon.error/diagnostic-operation
+                         :seon.error/diagnostic-member
+                         :seon.error/diagnostic-expected
+                         :seon.error/diagnostic-offending
+                         :seon.error/diagnostic-cause
+                         :seon.error/diagnostic-evidence-availability
+                         :seon.error/diagnostic-evidence]))
+        "unavailable evidence is typed and boundary context cannot replace it")))
+
 (defn- cyclic-state
   "A proc state shaped like the run loop's, holding a live-object stand-in
   that CANNOT be printed: an atom holding the map that holds it.

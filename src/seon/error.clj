@@ -258,6 +258,66 @@
                               "UTF-8")]))
 
 ;;; ---------------------------------------------------------------------------
+;;; Flat diagnostics — one evidence-complete construction
+;;; ---------------------------------------------------------------------------
+
+(defn- known-or-unknown
+  [value]
+  (if (nil? value) ::unknown value))
+
+(defn diagnostic
+  "An evidence-complete flat diagnostic from one boundary observation.
+
+  Every diagnostic carries the same layer, operation, member, expected value,
+  offending value or identity, cause, and evidence fields. A boundary that
+  cannot observe one of them gets the typed `:seon.error/unknown` value rather
+  than omitting the field or inventing success, failure, or absence. Evidence
+  availability is derived from the evidence supplied by the owning query:
+  present evidence is `:seon.error/known`; absent evidence is
+  `:seon.error/unknown`.
+
+  Optional `:seon.error/data` is additional boundary context. It is merged
+  first, so it cannot replace or drop the constructor-owned diagnostic fields."
+  {:malli/schema
+   [:=>
+    [:cat
+     [:map
+      [:seon.error/kind :seon.error/kind]
+      [:seon.error/message :seon.error/message]
+      [:seon.error/diagnostic-layer :seon.schema/value]
+      [:seon.error/diagnostic-operation :seon.schema/value]
+      [:seon.error/diagnostic-member :seon.schema/value]
+      [:seon.error/diagnostic-expected :seon.schema/value]
+      [:seon.error/diagnostic-offending :seon.schema/value]
+      [:seon.error/diagnostic-cause :seon.schema/value]
+      [:seon.error/diagnostic-evidence :seon.schema/value]
+      [:seon.error/data {:optional true} :map]]]
+    :seon.error/value]}
+  [{:seon.error/keys [kind message data
+                      diagnostic-layer diagnostic-operation diagnostic-member
+                      diagnostic-expected diagnostic-offending diagnostic-cause
+                      diagnostic-evidence]
+    :as request}]
+  (let [evidence-known? (and (contains? request ::diagnostic-evidence)
+                             (some? diagnostic-evidence))]
+    {:seon.error/kind (or kind unclassified)
+     :seon.error/message
+     (if (and (string? message) (not-empty message))
+       message
+       "A diagnostic was constructed without a message.")
+     :seon.error/data
+     (merge
+      (or data {})
+      {::diagnostic-layer (known-or-unknown diagnostic-layer)
+       ::diagnostic-operation (known-or-unknown diagnostic-operation)
+       ::diagnostic-member (known-or-unknown diagnostic-member)
+       ::diagnostic-expected (known-or-unknown diagnostic-expected)
+       ::diagnostic-offending (known-or-unknown diagnostic-offending)
+       ::diagnostic-cause (known-or-unknown diagnostic-cause)
+       ::diagnostic-evidence-availability (if evidence-known? ::known ::unknown)
+       ::diagnostic-evidence (known-or-unknown diagnostic-evidence)})}))
+
+;;; ---------------------------------------------------------------------------
 ;;; The normalizer
 ;;; ---------------------------------------------------------------------------
 
