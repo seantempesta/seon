@@ -85,6 +85,7 @@
    :seon.cluster.run/interrupted-at
    :seon.cluster.run/process
    :seon.cluster.run/plan-digest
+   :seon.cluster.work/situation
    :seon.cluster.run/starting-ns
    :seon.cluster.run/forms
    :seon.cluster.run.form/id
@@ -353,6 +354,74 @@
                     :order-by '[?ordinal :asc]})))
       (is (nil? (::run/plan-digest
                  (run-entity connection "generated-run")))))))
+
+(deftest an-agent-plan-appends-after-the-settled-generated-prefix
+  (with-model-database
+    (fn [connection]
+      (db/transact!
+       connection
+       [{:seon.ns/name 'my.agents.appended}
+        {:seon.cluster.agent/id "appended-agent"
+         :seon.cluster.agent/namespace
+         [:seon.ns/name 'my.agents.appended]}])
+      (db/transact!
+       connection
+       (run/generated-run-tx
+        @connection
+        {:seon.cluster.agent/id "appended-agent"
+         ::run/id "appended-run"
+         ::run/process "appended-process"
+         ::run/opened-at t0
+         ::run/starting-ns [:seon.ns/name 'my.agents.appended]
+         :seon.cluster.run.form/source "(help)"}))
+      (db/transact!
+       connection
+       (run/receipt-start-tx
+        {::run/id "appended-run"
+         :seon.cluster.eval/ordinal 0
+         :seon.cluster.eval/at t0}))
+      (db/transact!
+       connection
+       (run/receipt-settle-tx
+        {::run/id "appended-run"
+         :seon.cluster.eval/ordinal 0
+         :seon.cluster.eval/result-edn "{:introduced 'my.run}"}))
+      (db/transact!
+       connection
+       (run/generation-complete-tx
+        {::run/id "appended-run"
+         ::run/process "appended-process"}))
+      (is (= ::committed
+             (transact-or-refusal
+              connection
+              (run/plan-tx
+               {::run/id "appended-run"
+                ::run/process "appended-process"
+                ::run/plan-digest "agent-reply-digest"
+                ::run/sources
+                [{:seon.cluster.run.form/source "(+ 1 2)"}
+                 {:seon.cluster.run.form/source "(+ 3 4)"}]}))))
+      (is (= [[0 :system "(help)"]
+              [1 :agent "(+ 1 2)"]
+              [2 :agent "(+ 3 4)"]]
+             (db/q {:query
+                    '[:find ?ordinal ?author ?source
+                      :where
+                      [?run :seon.cluster.run/id "appended-run"]
+                      [?form :seon.cluster.run.form/run ?run]
+                      [?form :seon.cluster.run.form/ordinal ?ordinal]
+                      [?form :seon.cluster.run.form/author ?author]
+                      [?form :seon.cluster.run.form/source ?source]]
+                    :args [@connection]
+                    :order-by '[?ordinal :asc]})))
+      (is (= {:seon.cluster.eval/result-edn "{:introduced 'my.run}"
+              :seon.cluster.run/plan-digest "agent-reply-digest"}
+             (merge
+              (db/pull @connection [:seon.cluster.eval/result-edn]
+                       [:seon.cluster.eval/id
+                        (run/receipt-identity "appended-run" 0)])
+              (db/pull @connection [::run/plan-digest]
+                       [::run/id "appended-run"])))))))
 
 (deftest run-records-its-opening-commit-and-starting-namespace
   (with-model-database

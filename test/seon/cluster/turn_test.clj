@@ -20,6 +20,7 @@
             [my.message :as my.message]
             [my.run :as my.run]
             [seon.ai :as ai]
+            [seon.bootstrap :as bootstrap]
             [seon.flow :as seon.flow]
             [seon.render.web :as web]
             [seon.cluster :as cluster]
@@ -36,6 +37,8 @@
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]
+            [seon.schema.form :as schema.form]
             [seon.test-support :as test-support])
   (:import [java.util Date]))
 
@@ -3069,15 +3072,98 @@
                 "later work remains claimable without recovery or a restart;
                  the durable fault notice may correctly be older")))))))
 
-(def ^:private run-phases
-  [:claim :fork :prompt :freeze :evaluate :delivery])
+(deftest singleton-enum-uses-are-members-of-their-declared-enums
+  (let [forms (schema.edn/packaged-forms)
+        declared
+        (into {}
+              (keep (fn [[schema-key definition]]
+                      (when (and (vector? definition)
+                                 (= :enum (first definition)))
+                        [schema-key (set (schema.form/enum-members definition))])))
+              forms)
+        used
+        (into #{}
+              (comp
+               (mapcat #(tree-seq coll? seq %))
+               (filter vector?)
+               (keep (fn [entry]
+                       (let [enum-key (first entry)
+                             constraint (last entry)]
+                         (when (and (contains? declared enum-key)
+                                    (vector? constraint)
+                                    (= := (first constraint))
+                                    (keyword? (second constraint)))
+                           [enum-key (second constraint)])))))
+              (vals forms))]
+    (is (seq used) "the registry exposes actual singleton enum uses")
+    (is (every? (fn [[enum-key member]]
+                  (contains? (get declared enum-key) member))
+                used)
+        (pr-str used))))
+
+(deftest generated-fixed-point-advances-the-run-to-call
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.db/connection cluster)
+            run-id "generated-fixed-point"]
+        (db/transact!
+         connection
+         (run/generated-run-tx
+          @connection
+          {:seon.cluster.agent/id "agent-a"
+           :seon.cluster.run/id run-id
+           :seon.cluster.run/process process
+           :seon.cluster.run/opened-at now
+           :seon.cluster.run/starting-ns
+           [:seon.ns/name 'my.agents.agent-a]
+           :seon.cluster.run.form/source "(help)"}))
+        (db/transact!
+         connection
+         (run/receipt-start-tx
+          {:seon.cluster.run/id run-id
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/at now}))
+        (db/transact!
+         connection
+         (run/receipt-settle-tx
+          {:seon.cluster.run/id run-id
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/result-edn "{:introduced 'my.run}"}))
+        (let [request {:seon.cluster.agent/id "agent-a"
+                       :seon.cluster.run/process process}
+              generated (work/next-agent-work @connection request)
+              report
+              (with-redefs [bootstrap/next-entry (constantly nil)]
+                (cluster.loop/turn
+                 {:seon.cluster.loop/cluster cluster
+                  :seon.cluster.work/next generated}
+                 now))]
+          (is (= :released (:seon.cluster.loop/outcome report)))
+          (is (= :call
+                 (:seon.cluster.work/situation
+                  (db/pull @connection [:seon.cluster.work/situation]
+                           [:seon.cluster.run/id run-id]))))
+          (is (= {:seon.cluster.work/situation :call
+                  :seon.cluster.run/id run-id
+                  :seon.cluster.agent/id "agent-a"}
+                 (work/next-agent-work @connection request)))
+          (is (= :system
+                 (db/q '[:find ?author .
+                         :in $ ?run-id
+                         :where
+                         [?run :seon.cluster.run/id ?run-id]
+                         [?form :seon.cluster.run.form/run ?run]
+                         [?form :seon.cluster.run.form/ordinal 0]
+                         [?form :seon.cluster.run.form/author ?author]]
+                       @connection run-id))))))))
 
 (deftest generated-phase-failures-converge-through-one-terminal-exit
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             sequence-number (atom 0)
-            cluster (assoc cluster :seon.config.error/escalate-to "root")]
+            cluster (assoc cluster :seon.config.error/escalate-to "root")
+            run-phases (schema/enum-members :seon.cluster.loop/phase)]
         (db/transact! connection [(agent-row "root")])
         (test-support/assert-check!
          (tc/quick-check

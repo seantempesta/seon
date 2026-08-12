@@ -73,6 +73,7 @@
                       :seon.print/options]],
                     :forms-run [:int {:min 0}],
                     :now :inst,
+                    :phase [:enum :claim :fork :prompt :freeze :evaluate :delivery],
                     :outcome
                     [:enum :closed :released :error :interrupted],
                     :commit-outcome
@@ -197,7 +198,7 @@
                       :seon.cluster.work/situation]
                      [:seon.cluster.loop/forms-run [:int {:min 0}]]
                      [:seon.cluster.loop/outcome
-                      [:enum :closed :released :error :interrupted]]],
+                      :seon.cluster.loop/outcome]],
                     :turn-request
                     [:map
                      [:seon.cluster.loop/cluster

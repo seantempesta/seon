@@ -14,6 +14,10 @@
                     [:seon.cluster.run.form/source
                      :seon.cluster.run.form/source]
                     [:seon.ns/name :seon.ns/name]],
+                   :generation-complete-request
+                   [:map
+                    [:seon.cluster.run/id :seon.cluster.run/id]
+                    [:seon.cluster.run/process :seon.cluster.run/process]],
                    ;; PRESENCE IS THE STATE: a run carries this exactly
                    ;; when a dead process's custody of it was recovered.
                    ;; The receipt-level twin says which FORM was cut; a
@@ -89,6 +93,9 @@
                     [:seon.cluster.run/plan-digest
                      {:optional true}
                      :seon.cluster.run/plan-digest]
+                    [:seon.cluster.work/situation
+                     {:optional true}
+                     :seon.cluster.work/situation]
                     [:seon.cluster.run/error
                      {:optional true}
                      :seon.cluster.run/error]],

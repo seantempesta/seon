@@ -74,6 +74,7 @@
                        (assoc :seon.cluster.run/trigger
                               [:seon.cluster.message/id message-id])
                        holder (assoc :seon.cluster.run/process holder)
+                       true (assoc :seon.cluster.work/situation :call)
                        planned? (assoc :seon.cluster.run/plan-digest digest))
                      {:seon.cluster.agent/id agent-id
                       :seon.cluster.agent/run [:seon.cluster.run/id run-id]}]
@@ -326,7 +327,11 @@
       (open-run! connection {:holder process})
       (db/transact!
        connection
-       [{:seon.cluster.run.form/id "generated-form-0"
+       [[:db/retract [:seon.cluster.run/id run-id]
+         :seon.cluster.work/situation :call]
+        [:db/add [:seon.cluster.run/id run-id]
+         :seon.cluster.work/situation :generate]
+        {:seon.cluster.run.form/id "generated-form-0"
          :seon.cluster.run.form/run [:seon.cluster.run/id run-id]
          :seon.cluster.run.form/ordinal 0
          :seon.cluster.run.form/author :system

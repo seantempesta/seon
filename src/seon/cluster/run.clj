@@ -363,7 +363,7 @@
 ;; behavior immediately — the flow-dynamics live-update pattern.
 (declare claim-call release-call close-call plan-call refresh-call
          open-call receipt-start-call receipt-settle-call
-         recover-call clear-defs-call)
+         recover-call clear-defs-call generation-complete-call)
 
 (defn- unanswered-background-results
   [db agent-eid]
@@ -415,6 +415,7 @@
       :else [(cond-> {:db/id run-tempid
                       ::id id
                       ::agent agent-eid
+                      :seon.cluster.work/situation :call
                       ::opening-commit-id
                       (or opening-commit-id (db/commit-id db))
                       ::opened-at opened-at}
@@ -635,9 +636,19 @@
           starting-ns (:seon.ns/name
                        (db/pull db [:seon.ns/name] starting-ns)))
         starting-namespace
-        (or requested-starting-namespace agent-namespace)]
+        (or requested-starting-namespace agent-namespace)
+        existing-form-count
+        (long
+         (or (db/q '[:find (count ?form) .
+                    :in $ ?run
+                    :where
+                    [?form :seon.cluster.run.form/run ?run]]
+                  db run-eid)
+             0))]
     (when (some? (::plan-digest run))
       (refuse! `plan-call ::plan-frozen request))
+    (when-not (= :call (:seon.cluster.work/situation run))
+      (refuse! `plan-call ::not-call-situation request))
     (when-not starting-namespace
       (refuse! `plan-call ::starting-namespace-missing request))
     (let [;; THE PARSE-TIME NAMESPACE IS PROJECTED, NEVER DERIVED HERE.
@@ -659,8 +670,10 @@
                            (cons {:seon.ns/name starting-namespace} sources))
           forms (into []
                       (map-indexed
-                       (fn [ordinal form]
-                         (let [form-id (form-identity id ordinal)
+                       (fn [reply-ordinal form]
+                         (let [ordinal (long (+ existing-form-count
+                                                reply-ordinal))
+                               form-id (form-identity id ordinal)
                                namespace-name (or (:seon.ns/name form)
                                                   starting-namespace)]
                            (cond-> {:db/id form-id
@@ -772,6 +785,9 @@
                   db run-eid (dec ordinal))))]
     (when (some? (::plan-digest held))
       (refuse! `append-generated-call ::plan-frozen request))
+    (when-not (= (if (zero? ordinal) :call :generate)
+                 (:seon.cluster.work/situation held))
+      (refuse! `append-generated-call ::not-generate-situation request))
     (when-not (= expected ordinal)
       (refuse! `append-generated-call ::generated-ordinal request))
     (when-not prior-terminal?
@@ -788,7 +804,9 @@
                 :seon.cluster.run.form/ns namespace-id}
                [:db/add run-eid ::forms form-id]]
         (zero? ordinal)
-        (into [[:db/add run-eid ::starting-ns namespace-id]])))))
+        (into [[:db/retract run-eid :seon.cluster.work/situation :call]
+               [:db/add run-eid :seon.cluster.work/situation :generate]
+               [:db/add run-eid ::starting-ns namespace-id]])))))
 
 (defn append-generated-tx
   "Transaction data appending one dependency-ready generated form."
@@ -796,6 +814,54 @@
                   :seon.store/transaction-data]}
   [request]
   [[:db.fn/call #'append-generated-call request]])
+
+(defn generation-complete-call
+  "Advance a held generated run to its model-call situation.
+
+  The generated prefix must be non-empty and terminal through its final
+  ordinal. The dedicated transition has no caller-supplied from/to values, so
+  no other situation edge can be requested or accidentally constructed."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.run/generation-complete-request]
+                  [:vector :some]]}
+  [db request]
+  (let [run (held-run db `generation-complete-call request)
+        run-eid (:db/id run)
+        form-count
+        (long
+         (or (db/q '[:find (count ?form) .
+                    :in $ ?run
+                    :where
+                    [?form :seon.cluster.run.form/run ?run]]
+                  db run-eid)
+             0))
+        final-ordinal (dec form-count)
+        final-terminal?
+        (and (pos? form-count)
+             (some?
+              (db/q '[:find ?receipt .
+                     :in $ ?run ?ordinal
+                     :where
+                     [?receipt :seon.cluster.eval/run ?run]
+                     [?receipt :seon.cluster.eval/ordinal ?ordinal]
+                     (or [?receipt :seon.cluster.eval/result-edn _]
+                         [?receipt :seon.cluster.eval/error _]
+                         [?receipt :seon.cluster.eval/interrupted-at _])]
+                   db run-eid final-ordinal)))]
+    (when-not (= :generate (:seon.cluster.work/situation run))
+      (refuse! `generation-complete-call ::not-generate-situation request))
+    (when-not final-terminal?
+      (refuse! `generation-complete-call ::generated-prefix-unsettled request))
+    [[:db/retract run-eid :seon.cluster.work/situation :generate]
+     [:db/add run-eid :seon.cluster.work/situation :call]]))
+
+(defn generation-complete-tx
+  "Transaction data advancing a generated run to its model call."
+  {:malli/schema
+   [:=> [:cat :seon.cluster.run/generation-complete-request]
+    :seon.store/transaction-data]}
+  [request]
+  [[:db.fn/call #'generation-complete-call request]])
 
 (defn generated-run-tx
   "Open, claim, and append the first form of a generated system run."

@@ -567,17 +567,6 @@
        :seon.cluster.run/id run-id
        :seon.cluster.agent/id agent-id})))
 
-(defn- generated-run?
-  [db run-id]
-  (some?
-   (db/q '[:find ?form .
-          :in $ ?run-id
-          :where
-          [?run :seon.cluster.run/id ?run-id]
-          [?form :seon.cluster.run.form/run ?run]
-          [?form :seon.cluster.run.form/author :system]]
-        db run-id)))
-
 (defn- resume-or-generate
   [db run agent-id]
   (let [run-id (:seon.cluster.run/id run)]
@@ -632,13 +621,15 @@
         (:seon.cluster.run/plan-digest run)
         (fold-or-close db run agent-id)
 
-        (generated-run? db (:seon.cluster.run/id run))
+        (= :generate (:seon.cluster.work/situation run))
         (resume-or-generate db run agent-id)
 
-        :else
+        (= :call (:seon.cluster.work/situation run))
         {:seon.cluster.work/situation :call
          :seon.cluster.run/id (:seon.cluster.run/id run)
-         :seon.cluster.agent/id agent-id})
+         :seon.cluster.agent/id agent-id}
+
+        :else nil)
 
       ;; An unheld run is interruption wreckage, never work. Boot
       ;; recovery normally closes it before any graph is armed; keeping
