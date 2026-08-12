@@ -1860,10 +1860,26 @@
     namespace-ref :seon.cluster.run.form/ns
     time-limit-ms :seon.sci.eval/time-limit-ms
     on-core-error :seon.config/on-core-error}]
-  (let [;; a supplied ctx is used AS GIVEN — forking it here would
-        ;; discard the caller's accumulated defs, which is the bug this
-        ;; contract exists to not repeat
-        evaluation-ctx (or ctx (build-base-ctx))
+  (let [;; A supplied ctx keeps its accumulated defs. The only replacement is
+        ;; the environment state: each form receives a turn-scoped immutable
+        ;; value, so call preparation cannot read the long-lived cluster value
+        ;; and silently omit the agent/run/form members.
+        base-evaluation-ctx (or ctx (build-base-ctx))
+        turn-members (cond-> {}
+                       agent-id
+                       (assoc :seon.cluster.agent/id agent-id)
+                       run-id
+                       (assoc :seon.cluster.run/id run-id)
+                       (some? form-ordinal)
+                       (assoc :seon.cluster.run.form/ordinal form-ordinal))
+        turn-environment
+        (some-> (env/of base-evaluation-ctx)
+                (env/scope turn-members))
+        evaluation-ctx
+        (if (env/environment? turn-environment)
+          (env/carry-state base-evaluation-ctx
+                           (env/environment-state turn-environment))
+          base-evaluation-ctx)
         ;; ARMING HAPPENS INSIDE THE BOUNDARY, and these reach it through
         ;; one volatile. `kernel/arm` refuses a DIFFERENT context already
         ;; armed on this thread, and a refusal at an agent-facing operation

@@ -18,11 +18,13 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.pull-api :as pull-api]
+            [seon.call-preparation :as call-preparation]
             [seon.config :as config]
             [seon.cluster.agent :as agent]
             [seon.cluster.work :as work]
             [seon.blob :as blob]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.fn :as seon.fn]
             [seon.instrument :as instrument]
             [sci.addons.future :as sci.future]
@@ -1289,6 +1291,39 @@
             "an evaluation without an explicit form namespace opens at the assignment")
         (is (failed? external)
             "loaded dependencies are not first-party merely because loaded")))))
+
+(deftest call-preparation-receives-the-form-scoped-environment
+  (test-support/with-database
+    (fn [connection]
+      (let [seen (atom [])
+            ctx
+            (with-redefs [call-preparation/hook
+                          (fn [runtime-ctx _callee arguments]
+                            (swap! seen conj (env/of runtime-ctx))
+                            arguments)]
+              (eval/cluster-ctx @connection connection))
+            evaluation
+            (eval/evaluate
+             {:seon.sci.eval/ctx ctx
+              :seon.cluster.agent/id "scoped-agent"
+              :seon.cluster.run/id "scoped-run"
+              :seon.cluster.run.form/ordinal 7
+              :seon.cluster.run.form/source "(my.run/complete \"done\")"
+              :seon.sci.admit/caps caps
+              :seon.sci.eval/time-limit-ms 2000
+              :seon.config/on-core-error :panic})]
+        (is (= {:my.run/disposition :completed
+                :my.run/result "done"}
+               (:seon.sci.admit/value evaluation)))
+        (is (some #(= {:seon.cluster.agent/id "scoped-agent"
+                       :seon.cluster.run/id "scoped-run"
+                       :seon.cluster.run.form/ordinal 7}
+                      (select-keys %
+                                   [:seon.cluster.agent/id
+                                    :seon.cluster.run/id
+                                    :seon.cluster.run.form/ordinal]))
+                  @seen)
+            "SCI's actual call-preparation hook sees this form's turn members")))))
 
 (deftest evaluation-custody-is-derived-only-from-the-cluster-context
   (test-support/with-database

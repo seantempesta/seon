@@ -1599,6 +1599,7 @@
           :seon.sci.eval/time-limit-ms
           (:seon.config.eval/time-limit-ms cluster)
           :seon.config/on-core-error (:seon.config/on-core-error cluster)
+          :seon.render/output :seon.render/form
           :seon.render/distance 3}
          run-id)]
     (if-not entry
