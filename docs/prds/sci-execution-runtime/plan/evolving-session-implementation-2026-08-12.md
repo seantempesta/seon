@@ -16,8 +16,8 @@ also applies every finding in
 [the independent critique](evolving-session-implementation-critique-2026-08-12.md).
 
 All source `file:line` claims in this revision are verified against committed
-HEAD `316fce6ec`. Uncommitted shared-tree changes are not cited as landed
-evidence.
+source baseline `316fce6ec`, the parent of this documentation revision.
+Uncommitted shared-tree changes are not cited as landed evidence.
 
 Status labels are literal:
 
