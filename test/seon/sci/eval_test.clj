@@ -970,7 +970,9 @@
             giant-output (:seon.cluster.eval/output giant-doc)]
         (is (= "decline\nsend\n"
                (:seon.cluster.eval/output directory)))
-        (is (nil? (:seon.sci.admit/value directory)))
+        (is (= ['my.message/decline 'my.message/send]
+               (:seon.sci.admit/value directory))
+            "dir's settled value introduces the qualified symbols it lists")
         (testing "one contracted function resolves both sides of its contract"
           (is (every? #(str/includes? read-output %)
                       ["my.fs/read"
@@ -1026,10 +1028,14 @@
                         % "       :seon.error/value  [:map")
                       (str/split-lines
                        (:seon.cluster.eval/output nonstandard-doc))))
-            (is (nil? (:seon.sci.admit/value nonstandard-doc)))))
-        (is (every? nil?
-                    (map :seon.sci.admit/value
-                         [read-doc multi-doc uncontracted-doc giant-doc])))))))
+            (is (= 'my.fs/read
+                   (get-in nonstandard-doc
+                           [:seon.sci.admit/value :seon.fn/sym])))))
+        (is (= ['my.fs/read 'my.message/send
+                'fixture.doc/uncontracted 'fixture.doc/giant]
+               (mapv #(get-in % [:seon.sci.admit/value :seon.fn/sym])
+                     [read-doc multi-doc uncontracted-doc giant-doc]))
+            "doc returns the same acquired facts it prints")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The armed boundary — time is the only limit

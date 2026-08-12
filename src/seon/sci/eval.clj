@@ -1098,7 +1098,7 @@
                 db program-documentation-selector))))
 
 (defn- program-doc-var
-  "An SCI `doc` macro whose printed function facts came from acquisition."
+  "An SCI `doc` macro whose printed and returned facts came from acquisition."
   [ctx documentation]
   (let [repl-ns (sci/create-ns 'clojure.repl)
         fallback @(sci/resolve ctx 'clojure.repl/doc)]
@@ -1113,11 +1113,39 @@
                                arglists]
                print-doc (list 'clojure.core/println " " doc)]
            (cons 'do
-                 (concat (map #(list 'clojure.core/println %) ordinary-lines)
-                         [print-doc]
-                         (map #(list 'clojure.core/println %) contract-lines)
-                         [nil])))
+                 (concat
+                  (map #(list 'clojure.core/println %) ordinary-lines)
+                  [print-doc]
+                  (map #(list 'clojure.core/println %) contract-lines)
+                  [(list 'quote
+                         {:seon.fn/sym function-symbol
+                          :seon.fn/doc doc
+                          :seon.fn/arglists arglists
+                          :seon.fn/contract-lines contract-lines})])))
          (fallback form env function-symbol)))
+     {:ns repl-ns})))
+
+(defn- program-dir-var
+  "An SCI `dir` macro whose value introduces every acquired public symbol."
+  [ctx documentation]
+  (let [repl-ns (sci/create-ns 'clojure.repl)
+        fallback @(sci/resolve ctx 'clojure.repl/dir)
+        symbols-by-namespace
+        (reduce
+         (fn [by-namespace function-symbol]
+           (update by-namespace (symbol (namespace function-symbol))
+                   (fnil conj []) function-symbol))
+         {}
+         (sort (map symbol (keys documentation))))]
+    (sci/new-macro-var
+     'dir
+     (fn [form env namespace-name]
+       (if-let [qualified-symbols (seq (get symbols-by-namespace namespace-name))]
+         (cons 'do
+               (concat
+                (map #(list 'clojure.core/println (name %)) qualified-symbols)
+                [(list 'quote (vec qualified-symbols))]))
+         (fallback form env namespace-name)))
      {:ns repl-ns})))
 
 (defn- install-program-doc!
@@ -1126,11 +1154,14 @@
   (schema/call-with-projection
    projection
    (fn []
-     (let [doc-var (program-doc-var ctx (program-documentation db projection))]
-       ;; Preserve qualified `clojure.repl/doc` and expose the same macro bare
-       ;; through every namespace's ordinary clojure.core refer.
+     (let [documentation (program-documentation db projection)
+           doc-var (program-doc-var ctx documentation)
+           dir-var (program-dir-var ctx documentation)]
+       ;; Preserve qualified `clojure.repl/doc`/`dir` and expose the same
+       ;; acquired macros bare through every namespace's clojure.core refer.
        (sci/add-namespace! ctx 'clojure.repl {'doc doc-var})
-       (sci/add-namespace! ctx 'clojure.core {'doc doc-var})
+       (sci/add-namespace! ctx 'clojure.repl {'dir dir-var})
+       (sci/add-namespace! ctx 'clojure.core {'doc doc-var 'dir dir-var})
        ctx))))
 
 (defn- install-declared-classes!
