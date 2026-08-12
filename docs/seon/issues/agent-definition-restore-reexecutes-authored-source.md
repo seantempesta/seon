@@ -55,3 +55,36 @@ shared by `seon.cluster.loop`, `seon.sci.eval`, and the maintained SCI fork.
   source-replay fallback exists.
 - One recurring restart regression covers both an agent's desk definition and
   an agent-authored contracted function.
+
+## W1 Lane C progress — 2026-08-11
+
+Implementation commit `9623a26d6` removes both source-replay restore arms.
+Ordinary roots and fresh atom snapshots install directly from `:seon.def`
+facts; function roots use SCI's native fact-safe projection and installation
+seam. The maintained SCI fork commit is
+`fcbd8862800e638dc0f8f5521111f999279cbcd2`.
+
+Verified evidence:
+
+- SCI's focused root-data regression passes with 5 assertions, and
+  `script/test/jvm sci.namespaces-test` passes on Clojure 1.10.3 and 1.11.1
+  with 41 tests and 165 assertions on each version.
+- The Seon zero-`sci/eval-form`, fresh-atom, flat-unrestorable, and cold
+  contracted-function regressions pass when selected directly.
+- A load-only proof of `seon.sci.eval` and `seon.cluster.loop` exits zero.
+- The committed fork benchmark was run before and after on OpenJDK 26.0.1.
+  At 10 aliases/10 definitions, fact installation was 21.416 µs median and
+  49.625 µs p95 before, versus 24.084 µs and 74.292 µs after; source replay
+  was 343.792 µs and 1239.458 µs before, versus 290.833 µs and 1093.917 µs
+  after. At 25/50, fact installation was 78.5/109.625 µs before and
+  59.208/91.166 µs after, while source replay was 1371.541/1829.666 µs before
+  and 1148.0/1704.959 µs after. These are median/p95 measurements from
+  [the committed benchmark](../../prds/sci-execution-runtime/research/env-once-fork-rehydration-benchmark.clj).
+
+The issue remains open because the recurring cold-JVM proof and
+`bin/test --changed` cannot currently cross fresh schema population. The
+protected concurrent Lane B tree declares `:datahike.read/dependency-plan`
+without a registered schema; `seon.schema.datahike/malli->datahike-attr-in`
+therefore refuses before the desk writer reaches settlement. Once Lane B
+lands that schema registration, rerun the recurring restart proof and the
+changed-path gate; archive this issue only when both are green.
