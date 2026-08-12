@@ -46,7 +46,28 @@ generated (`src/seon/cluster/work.clj:570-591`) — the state transition must
 become `generate → call`; and plan publication must append after the
 existing prefix instead of ordinal zero (`src/seon/cluster/loop.clj:1604-1614`).
 
-## Proposed rulings for your markup (D1–D6)
+## Owner rulings on this document (2026-08-12 evening round)
+
+- **D1 RULED — pure closure, with the declared-render gate for growth**: V1
+  generates the task arc's explained closure only. Any context beyond the
+  closure is admitted by ONE derived signal: the shape carries a declared
+  render function (the existing "important schemas declare their renders"
+  ruling used as selection), nearest-first to the cap. No hand lists;
+  "check messages" derives from the run's trigger fact. Context grows by
+  the agent ACTING (requiring namespaces generates their dirs next wake).
+- **D2 RULED — the demonstration is the agent authoring a render function
+  for its own namespace-state** (schema + defn + render declaration + its
+  output appearing in context, feeding root's tiles): real, wanted, unique
+  per agent, nothing to retract; the my.run usage test stays the
+  suite-gated source of the arc's SHAPE, retargeted to this content.
+  Discipline is taught by comments narrating intent ("; scratch first";
+  "; schemas as metadata make it a program fact") — never staged mistakes;
+  the ONE real error exchange remains the wrong-call contract violation
+  (errors-as-values, live). Deliberate-failure theater stays dead.
+- **T2 RULED — pending page, settle at wake**: the page pulls for the user
+  now; the agent pulls at wake; ruling 36 intact.
+
+## Remaining decisions for markup (D3–D5)
 
 - **D1 — Demand-pull generation (Fable's principal divergence,
   recommended).** Invert the landed supply-push (emit every dependency-ready
