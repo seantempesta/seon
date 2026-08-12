@@ -677,14 +677,36 @@
   [frontier subject]
   (boolean (some frontier (reference-keys subject))))
 
+(defn form-symbols
+  "Qualified and namespace symbols structurally present in one form."
+  {:malli/schema [:=> [:cat :seon.repl/form] [:set :symbol]]}
+  [form]
+  (into #{}
+        (filter (fn [value]
+                  (and (symbol? value)
+                       (or (namespace value)
+                           (str/includes? (str value) ".")))))
+        (tree-seq coll? seq form)))
+
+(defn- explained-symbol?
+  [explained subject candidate-symbol]
+  (or (some explained (reference-keys candidate-symbol))
+      (some (reference-keys subject) (reference-keys candidate-symbol))))
+
 (defn ordered-episode
   "Derive the deterministic executable prefix from one bounded pull result.
 
-  The root candidate is first. Thereafter a candidate is dependency-ready
-  only when its subject appeared structurally in an earlier settled value's
-  print node. Only candidates present in this pull result can be selected, so
-  a reference outside the pulled neighborhood grows no context. Alphabetical
-  form spelling breaks every ready tie.
+  Generation is macroexpansion to a teaching fixed point: before emitting a
+  form, recursively select explanations for every qualified or namespace
+  symbol it contains. A candidate is ready only when its subject appeared in
+  an earlier settled value and every other symbol in its form has already been
+  explained by a settled candidate. The explanation form may name its own
+  subject. Resolve means teach; a subject or symbol with no candidate in the
+  bounded pull fails closed by leaving the dependent form ungenerated.
+
+  The pull decides membership and introductions decide order. A reference
+  outside the pulled neighborhood grows no context. Alphabetical form spelling
+  breaks every ready tie.
 
   The returned vector contains the settled prefix plus at most one next entry
   awaiting execution. Calling this pure function again with that entry's
@@ -704,13 +726,21 @@
                  candidates)]
     (loop [remaining ordered-candidates
            frontier #{}
+           explained #{}
            episode []]
       (let [selected
             (if (empty? episode)
               (some #(when (= root-key (:seon.repl/key %)) %) remaining)
-              (first (filter #(introduced-subject?
-                               frontier (:seon.repl/subject %))
-                             remaining)))]
+              (first
+               (filter
+                (fn [{subject :seon.repl/subject entry :seon.repl/entry
+                      previous-key :seon.repl/previous-key}]
+                  (and (introduced-subject? frontier subject)
+                       (or (nil? previous-key)
+                           (some #(= previous-key (:seon.repl/key %)) episode))
+                       (every? #(explained-symbol? explained subject %)
+                               (form-symbols (:seon.repl/form entry)))))
+                remaining)))]
         (if-not selected
           episode
           (let [entry (assoc (:seon.repl/entry selected)
@@ -726,6 +756,8 @@
                      (into frontier
                            (mapcat reference-keys)
                            (print/references identity-attributes settled-node))
+                     (into explained
+                           (reference-keys (:seon.repl/subject selected)))
                      episode))))))))
 
 ;;; ---------------------------------------------------------------------------

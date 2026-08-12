@@ -130,8 +130,17 @@
    {:seon.repl/key :complete-doc
     :seon.repl/subject 'my.run/complete
     :seon.repl/entry {:seon.repl/form '(doc (quote my.run/complete))}}
-   {:seon.repl/key :inbox
+   {:seon.repl/key :message-namespace
     :seon.repl/subject 'my.message
+    :seon.repl/entry {:seon.repl/form '(dir (quote my.message))}}
+   {:seon.repl/key :inbox-doc
+    :seon.repl/subject 'my.message/inbox
+    :seon.repl/entry {:seon.repl/form '(doc (quote my.message/inbox))}}
+   {:seon.repl/key :read-doc
+    :seon.repl/subject 'my.message/read
+    :seon.repl/entry {:seon.repl/form '(doc (quote my.message/read))}}
+   {:seon.repl/key :inbox
+    :seon.repl/subject 'my.message/inbox
     :seon.repl/entry {:seon.repl/form '(my.message/inbox)}}
    {:seon.repl/key :message
     :seon.repl/subject [:seon.cluster.message/id "task-1"]
@@ -156,7 +165,14 @@
          {:seon.repl/key :run-namespace
           :seon.sci.admit/print-node
           (settled-node ['my.run/complete 'my.run/wait])}
+         {:seon.repl/key :message-namespace
+          :seon.sci.admit/print-node
+          (settled-node ['my.message/inbox 'my.message/read])}
          {:seon.repl/key :complete-doc
+          :seon.sci.admit/print-node (settled-node nil)}
+         {:seon.repl/key :inbox-doc
+          :seon.sci.admit/print-node (settled-node nil)}
+         {:seon.repl/key :read-doc
           :seon.sci.admit/print-node (settled-node nil)}
          {:seon.repl/key :inbox
           :seon.sci.admit/print-node
@@ -164,8 +180,10 @@
         candidates episode-candidates
         result (walk/ordered-episode (episode-request candidates settled))
         episode-keys (mapv :seon.repl/key result)]
-    (is (= [:root :run-namespace :complete-doc :inbox :message] episode-keys)
-        "a listing value introduces each later lookup, with stable ties")
+    (is (= [:root :message-namespace :inbox-doc :inbox :read-doc :message
+            :run-namespace :complete-doc]
+           episode-keys)
+        "listings and docs explain each later use, with stable ties")
     (is (< (.indexOf episode-keys :inbox) (.indexOf episode-keys :message))
         "an entity id must appear in the inbox value before its read")
     (is (not (some #(= '(dir (quote outside.ns))
@@ -175,6 +193,31 @@
     (is (= result
            (walk/ordered-episode (episode-request candidates settled)))
         "the same pull and settled values derive byte-identical data")))
+
+(deftest every-emitted-form-is-at-the-explained-set-fixed-point
+  (let [settled
+        [{:seon.repl/key :root
+          :seon.sci.admit/print-node
+          (settled-node {:seon.cluster.agent/protocol-namespaces
+                         ['my.message]})}
+         {:seon.repl/key :message-namespace
+          :seon.sci.admit/print-node
+          (settled-node ['my.message/inbox 'my.message/read])}
+         {:seon.repl/key :inbox-doc
+          :seon.sci.admit/print-node (settled-node nil)}
+         {:seon.repl/key :inbox
+          :seon.sci.admit/print-node
+          (settled-node [{:seon.cluster.message/id "task-1"}])}
+         {:seon.repl/key :read-doc
+          :seon.sci.admit/print-node (settled-node nil)}]
+        candidates (remove #(contains? #{:run-namespace :complete-doc}
+                                       (:seon.repl/key %))
+                           episode-candidates)
+        episode (walk/ordered-episode (episode-request candidates settled))]
+    (is (= [:root :message-namespace :inbox-doc :inbox :read-doc :message]
+           (mapv :seon.repl/key episode)))
+    (is (= '(my.message/read "task-1")
+           (:seon.repl/form (peek episode))))))
 
 (deftest the-generated-prefix-stops-at-the-first-unsettled-entry
   (let [root-settled
