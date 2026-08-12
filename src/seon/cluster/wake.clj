@@ -40,9 +40,9 @@
     list (L8, L17). The routed set is `wake-attributes`; a turn commits
     `:seon.cluster.run/*`, `:seon.cluster.run.form/*`,
     `:seon.cluster.eval/*`, `:seon.cluster.agent/run`. The RENDER wake
-    is deliberately outside that property: it is per-report and
-    unconditional, and its consumer derives pages rather than work, so
-    it cannot make an idle cluster do anything;
+    is deliberately outside that property: its interest is the union
+    of retained reads' attributes, and its consumer derives pages
+    rather than work, so it cannot make an idle cluster do anything;
   - an unchanged value emits no datom, so it emits no wake. Naming a
     routed attribute whose value is idempotently re-asserted produces
     ZERO wakes, silently. Both routed attributes are safe because a new
@@ -177,13 +177,14 @@
     wake: `offer!` to the armer, whose pass derives
     (agents in facts) − (armed set) and arms each.
 
-  THE THIRD DELIVERY (F2 §1.4) is per REPORT, not per datom: one
-  payload-free wake into the render channel, UNCONDITIONALLY. Every
-  commit is render interest — receipts, replies, and problems are all
-  page content — so matching would be a hand-list of read attributes
-  (the class F2 R6 refuses until the program graph can compute it).
-  One line under the same two prohibitions, and one listener per
-  cluster instead of resurrecting a second registration.
+  THE THIRD DELIVERY (W2) is decided per REPORT, not delivered per
+  datom. `:seon.render.web/interest` is one process-local projection
+  of retained reads' dependency-plan attributes: `:all` before the
+  first complete derivation, otherwise the concrete attribute union.
+  The existing datom pass records whether any changed attribute
+  intersects that value, then offers at most one payload-free render
+  wake. There is no query, report payload, call-id routing, or second
+  registration.
 
   A route refusing delivery is a FAULT fact, exactly as in
   `listen!` — a swallowed failure nobody hears about is an invisible
@@ -199,6 +200,7 @@
   [{:keys [:seon.cluster.wake/connection :seon.cluster.wake/channels
            :seon.cluster.wake/fenced?
            :seon.cluster.wake/armer-channel :seon.cluster.wake/render-channel
+           :seon.render.web/interest
            :seon.cluster.wake/search-channel
            :seon.cluster.wake/fault-channel :seon.cluster.wake/key]}]
   (d/listen
@@ -206,47 +208,53 @@
    key
    (fn [report]
      (try
-       ;; the render wake FIRST and once for the whole report: a page
-       ;; is derived from facts, so the pass wants only "look" — and
-       ;; putting it ahead of the routing keeps it unconditional by
-       ;; construction rather than by a reviewer checking every arm
-       (deliver! fault-channel key ::render render-channel (constantly false))
-       ;; Search needs the report's exact db-before/db-after bases. The
-       ;; sliding-1 channel may coalesce reports; its proc detects that gap
-       ;; and rebuilds from the newest database value instead of guessing.
-       (when search-channel
-         (when-not (true? (async/offer! search-channel report))
-           (async/offer!
-            fault-channel
-            (ex-info "The derived search index refused a transaction report."
-                     {:seon.cluster.wake/key key
-                      :seon.cluster.wake/route ::search}))))
-       (doseq [datom (:tx-data report)]
-         (case (nth datom 1)
-           :seon.cluster.agent/id
-           (async/offer! armer-channel ::wake)
+       (let [published-interest @interest
+             render? (volatile! (= :all published-interest))]
+         ;; Search needs the report's exact db-before/db-after bases. The
+         ;; sliding-1 channel may coalesce reports; its proc detects that gap
+         ;; and rebuilds from the newest database value instead of guessing.
+         (when search-channel
+           (when-not (true? (async/offer! search-channel report))
+             (async/offer!
+              fault-channel
+              (ex-info
+               "The derived search index refused a transaction report."
+               {:seon.cluster.wake/key key
+                :seon.cluster.wake/route ::search}))))
+         (doseq [datom (:tx-data report)]
+           (let [attribute (nth datom 1)]
+             (when (and (not @render?)
+                        (contains? published-interest attribute))
+               (vreset! render? true))
+             (case attribute
+               :seon.cluster.agent/id
+               (async/offer! armer-channel ::wake)
 
-           :seon.cluster.message/to
-           (if-let [channel (get (channels) (nth datom 2))]
-             (let [agent-eid (nth datom 2)]
-               (deliver! fault-channel key ::mailbox channel
-                         #(fenced? agent-eid channel)))
-             (async/offer! armer-channel ::wake))
+               :seon.cluster.message/to
+               (if-let [channel (get (channels) (nth datom 2))]
+                 (let [agent-eid (nth datom 2)]
+                   (deliver! fault-channel key ::mailbox channel
+                             #(fenced? agent-eid channel)))
+                 (async/offer! armer-channel ::wake))
 
-           :seon.effect/to
-           (if-let [channel (get (channels) (nth datom 2))]
-             (let [agent-eid (nth datom 2)]
-               (deliver! fault-channel key ::mailbox channel
-                         #(fenced? agent-eid channel)))
-             (async/offer! armer-channel ::wake))
+               :seon.effect/to
+               (if-let [channel (get (channels) (nth datom 2))]
+                 (let [agent-eid (nth datom 2)]
+                   (deliver! fault-channel key ::mailbox channel
+                             #(fenced? agent-eid channel)))
+                 (async/offer! armer-channel ::wake))
 
-           nil))
+               nil)))
+         (when @render?
+           (deliver! fault-channel key ::render render-channel
+                     (constantly false))))
        (catch Throwable failure
          (async/offer! fault-channel failure)))))
   key)
 
 (defn unlisten!
-  "Remove the wake handler. Idempotent — removing an absent listener is
+  "Remove the wake handler.
+  Idempotent — removing an absent listener is
   a no-op, because `::flow/stop` may arrive after a store release."
   {:malli/schema [:=> [:cat :seon.cluster.wake/unlisten-request] :nil]}
   [{:keys [:seon.cluster.wake/connection :seon.cluster.wake/key]}]

@@ -4,8 +4,9 @@
   RE-GROUNDED AT F2 §3.3. `listen!`'s one-global-channel delivery and
   its `wake?` predicate are deleted; the six classes they proved are
   proved here against routing delivery instead — wake-on-routed-set
-  only, C2 disjointness between two COMPUTED sets, one delivery per
-  commit, drop-never-park, fault-never-hang, and unlisten idempotence.
+  only, C2 disjointness between two COMPUTED sets, one interested
+  delivery per commit, drop-never-park, fault-never-hang, and unlisten
+  idempotence.
   Not one oracle is looser than it was; each now runs against the
   listener production actually registers.
 
@@ -64,8 +65,12 @@
   ([connection mailbox]
    (route-probe! connection mailbox (fn [_ _] false)))
   ([connection mailbox fenced?]
+   (route-probe! connection mailbox fenced? (atom :all)))
+  ([connection mailbox fenced? interest]
+   (route-probe! connection mailbox fenced? interest
+                 (async/chan (async/sliding-buffer 1))))
+  ([connection mailbox fenced? interest render]
    (let [armer (async/chan (async/sliding-buffer 1))
-         render (async/chan (async/sliding-buffer 1))
          search (async/chan (async/sliding-buffer 1))
          faults (async/chan (async/sliding-buffer 1))]
      {:mailbox mailbox
@@ -79,6 +84,7 @@
                          :seon.cluster.wake/fenced? fenced?
                          :seon.cluster.wake/armer-channel armer
                          :seon.cluster.wake/render-channel render
+                         :seon.render.web/interest interest
                          :seon.cluster.wake/search-channel search
                          :seon.cluster.wake/fault-channel faults
                          :seon.cluster.wake/key ::probe})})))
@@ -108,9 +114,8 @@
           (testing "a transaction instant is in EVERY report and routes
                     nowhere by itself"
             ;; the run commit above carried one, and the mailbox stayed
-            ;; empty; the RENDER wake is the deliberate exception — it
-            ;; is per-report and unconditional, and it derives pages
-            ;; rather than work
+            ;; empty; this probe publishes cold `:all` render interest,
+            ;; so its passive render consumer accepts the report
             (is (some? (async/poll! render))
                 "every commit is render interest"))
           (finally
@@ -146,6 +151,37 @@
           (db/transact! connection [{:seon.cluster.agent/id "agent-b"}])
           (is (some? (test-support/await-event! armer "armer wake"))
               "the armer derives (agents in facts) − (armed set)")
+          (finally
+            (wake/unlisten! {:seon.cluster.wake/connection connection
+                             :seon.cluster.wake/key key})))))))
+
+(deftest render-wake-intersects-the-current-published-interest
+  (with-connection
+    (fn [connection]
+      (let [mailbox (async/chan (async/sliding-buffer 1))
+            interest (atom #{:seon.cluster.message/content})
+            counting-render (async/chan 8)
+            {:keys [render key]}
+            (route-probe! connection mailbox (fn [_ _] false)
+                          interest counting-render)]
+        (try
+          (testing "an irrelevant commit completes without a render wake"
+            (db/transact! connection (run-tx "irrelevant-run"))
+            ;; Datahike delivers the transaction report only after the
+            ;; listener returns. `poll!` is therefore an ordering assertion,
+            ;; not a timing verdict about a possibly pending callback.
+            (is (nil? (async/poll! render))))
+          (testing "one intersecting report offers exactly one wake"
+            (db/transact! connection (message-tx "relevant-message"))
+            (is (some? (test-support/await-event! render "render wake")))
+            (is (nil? (async/poll! render))
+                "several matching datoms still produce one report wake"))
+          (testing "the cold `:all` sentinel accepts every changed attribute"
+            (reset! interest :all)
+            (db/transact! connection (run-tx "cold-run"))
+            (is (some? (test-support/await-event! render
+                                                   "cold render wake")))
+            (is (nil? (async/poll! render))))
           (finally
             (wake/unlisten! {:seon.cluster.wake/connection connection
                              :seon.cluster.wake/key key})))))))
@@ -303,10 +339,10 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest route-render-wake-and-disjointness-property
-  ;; ORACLE: over generated commit batches — the render channel receives
-  ;; a wake for EVERY report, unconditionally; mailbox routing is
-  ;; unchanged by the added delivery; and the C2 property holds over the
-  ;; re-grounded COMPUTED sets, with the message/to delivery asserted
+  ;; ORACLE: over generated commit batches — cold `:all` interest makes
+  ;; the render channel receive a wake for every report; mailbox routing
+  ;; is unchanged by the added delivery; and the C2 property holds over
+  ;; the re-grounded COMPUTED sets, with the message/to delivery asserted
   ;; from the other direction (an attribute that routes to a mailbox is
   ;; one no turn commits).
   (let [check
@@ -332,6 +368,7 @@
                           :seon.cluster.wake/fenced? (fn [_ _] false)
                           :seon.cluster.wake/armer-channel armer
                           :seon.cluster.wake/render-channel render
+                          :seon.render.web/interest (atom :all)
                           :seon.cluster.wake/fault-channel faults
                           :seon.cluster.wake/key ::property})]
                 (try
