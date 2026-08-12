@@ -152,3 +152,36 @@ snapshot site (cluster.clj:2426-2456), the publication advance
 render/web.clj), and the remaining direct fallback consumers
 (schema/datahike.clj, sci/admit.clj, reconcile.cljc, call_preparation.clj)
 once w1-gate-triage releases the held files.
+
+## 2026-08-12 Phase 3 implementation and proof
+
+The ruled immutable-environment replacement is implemented. Each environment
+now carries `:seon.schema/projection` with `:seon.db/basis-t`; the cluster owns
+one replacement reference, and publication replaces that environment at the
+committed `db-after` basis. New cluster forks reuse the projection of the exact
+published commit, sovereign branches derive once from their own database
+value, and subsequent reads consume what the operation was handed. Admission
+requests now receive that projection explicitly.
+
+The sideways declaration reach is loud. With no projection, projection state,
+or explicitly packaged bootstrap forms in hand, `declaration-population`
+throws `:seon.schema/missing-projection`, names the first-party caller, and
+performs zero schema-resource reads. The class regression is
+`test/seon/schema/declaration_population_test.clj`'s
+`an-unhanded-declaration-projection-refuses-without-reading-resources`.
+
+Measured on 10,000 operations in a fresh JVM:
+
+- before: 15.188 ms and 152 schema-resource reads per fallback resolution;
+- handed projection: 0.000327 ms per operation;
+- loud unhanded refusal: 0.523 ms and zero schema-resource reads.
+
+The final isolated operator cycle completed `bin/seon init` in 61.54 s,
+`init carrier-proof --force` in 118.66 s, and `start carrier-proof` in 30.09 s.
+The cluster was alive and the complete publication, refork, start, status, and
+cluster log set contained zero `DECLARATION POPULATION FALLBACK` lines.
+
+This closes Phase 3's silent classpath-resolution path. This issue remains open
+only for the separately recorded process-global Malli instrumentation facade,
+whose owner and falsifier are
+[instrumentation compiles under one cluster's projection](instrumentation-compiles-under-one-clusters-projection.md).

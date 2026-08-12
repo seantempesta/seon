@@ -468,3 +468,18 @@ requested distance cap; there were zero renderer failures. The earlier “59 of
 calls, so it did not reveal a failing render function or schema declaration.
 The same census contained zero raw numeric lookups and therefore zero
 identityless residue after the separately tested declared-identity repair.
+
+## 2026-08-12 Phase 3 carrier completion
+
+The broader carrier work now makes the admission repair structural rather than
+dependent on caller-local dynamic bindings. `seon.sci.admit` accepts the
+operation's explicit `:seon.schema/projection`; evaluation success, evaluation
+failure, and MCP projection hand it the projection carried by the immutable
+environment. Database decode operations reuse the projection handed at their
+entry, deriving from the exact database value only when no environment exists.
+
+The ambient declaration fallback is now a flat
+`:seon.schema/missing-projection` refusal with zero schema-resource reads. The
+final isolated publication/refork/start cycle produced zero fallback lines.
+Together with the walk regression and measurements above, this closes the
+per-node admission-resolution class.

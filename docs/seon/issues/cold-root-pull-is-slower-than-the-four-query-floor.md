@@ -36,3 +36,18 @@ Full measurement context is recorded in
 ## Owner
 
 Render acquisition performance after W2.
+
+## 2026-08-12 post-ambient-resolution measurement
+
+The hypothesis that W2's 1,795.387292 ms cold pull was dominated by ambient
+schema resolution is falsified. A fresh JVM and fresh in-memory branch used the
+recorded W2 fixture, constructed the request before the clock, and timed only
+`seon.render.walk/root-acquisition`:
+
+`{:seon.render.walk/cold-pull-ms 1673.052083,
+  :seon.render.walk/member-count 1,
+  :seon.render.walk/four-query-floor-ms 46.0}`
+
+That is 122.335209 ms (6.8%) faster than the recorded before value, but still
+36.37× the four-query floor. The ambient conversion did not collapse this
+cost; the residue is real and this issue remains open for its own profile.
