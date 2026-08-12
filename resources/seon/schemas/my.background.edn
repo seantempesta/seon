@@ -20,7 +20,7 @@
                 :result
                 [:tuple [:= :seon.effect/id] :seon.effect/id],
                 :invalid-call [:= true]
-                :invalid-call-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an invalid background call"} [:my.background/invalid-call :my.background/invalid-call] [:seon.error/message :seon.error/message]]
+                :invalid-call-error [:map {:seon.error/class true :seon.render/ai "background needs exactly one direct capability call with one request value, optionally preceded by an options map." :seon.render/html [:p "background needs exactly one direct capability call with one request value, optionally preceded by an options map."] :error/message "must mark an invalid background call"} [:my.background/invalid-call :my.background/invalid-call] [:seon.error/message :seon.error/message]]
                 :invalid-result [:= true]
                 :invalid-result-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an invalid background result"} [:my.background/invalid-result :my.background/invalid-result] [:seon.error/message :seon.error/message]]
                 :missing-result [:= true]

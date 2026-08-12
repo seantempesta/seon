@@ -7,6 +7,7 @@
             [seon.fn :as seon.fn]
             [seon.fn.analyzer :as analyzer]
             [seon.program :as program]
+            [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
 
 (def ^:private boot-process
@@ -954,6 +955,7 @@
     (with-redefs [analyzer/analyze
                   (fn [_]
                     (throw (ex-info "analysis must not run" {})))
+                  schema.edn/packaged-forms (constantly {})
                   db/q (fn [& _] nil)
                   db/transact!
                   (fn [_ request]
@@ -985,7 +987,8 @@
                (-> @transactions (nth 4) :tx-data)))))
     (let [attempts (atom 0)
           result
-          (with-redefs [db/q (fn [& _] nil)
+          (with-redefs [schema.edn/packaged-forms (constantly {})
+                        db/q (fn [& _] nil)
                         db/transact!
                         (fn [& _]
                           (swap! attempts inc)
@@ -1286,9 +1289,10 @@
                    "(ns fresh.core)\n(defn value [] 1)\n")
     (test-support/with-database
       (fn [connection]
-        (is (thrown-with-msg?
-             clojure.lang.ExceptionInfo
-             #"fresh source scratch"
-             (seon.fn/index! {:seon.db/connection connection
-                              :seon.db/process boot-process
-                              :seon.fn/roots [(.getPath root)]})))))))
+        (with-redefs [schema.edn/packaged-forms (constantly {})]
+          (is (thrown-with-msg?
+               clojure.lang.ExceptionInfo
+               #"fresh source scratch"
+               (seon.fn/index! {:seon.db/connection connection
+                                :seon.db/process boot-process
+                                :seon.fn/roots [(.getPath root)]}))))))))
