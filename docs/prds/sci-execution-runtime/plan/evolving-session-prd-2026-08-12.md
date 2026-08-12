@@ -14,8 +14,11 @@ converged without seeing each other:
 defects filed) and
 [Fable's fresh-context review](../research/evolving-session-fable-review-2026-08-12.md)
 (the eight named unknowns answered; verdict: the design is sound). Parent
-design: [self-generating-context-prd-2026-08-11.md](self-generating-context-prd-2026-08-11.md)
-(rulings 1–48).
+design: [self-generating-context-prd-2026-08-11.md](self-generating-context-prd-2026-08-11.md#owner-rulings-1-50)
+(rulings 1–50). The executable source ownership, dependencies, and acceptance
+gates live in
+[the implementation companion](evolving-session-implementation-2026-08-12.md);
+where this decision record's earlier wording differs, that companion governs.
 
 ## The model in one paragraph
 
@@ -86,8 +89,8 @@ ordinals by the existing generated-form count
   depth survives.
 - **Ruling 40 — test results become facts before this build.** The one runner
   commits the declared test-run/result attributes. Dependency status:
-  `[in flight -> cite its commit when you land]`; evolving-session phases do
-  not build on a stub.
+  `[landed]` in commit `9648aed33`; the integration gate now reviews that
+  return before evolving-session phases consume it. No phase builds on a stub.
 - **Ruling 41 / D3 — zero turns force-settles `:wait`.** A distinct typed
   budget-exhausted condition is delivered to the requester, the run closes
   without a provider call, the agent stays alive, and the next wake shows why
@@ -102,19 +105,28 @@ ordinals by the existing generated-form count
 - **Ruling 44 — errors wake.** Messages and errors addressed to the agent open
   runs; every other data change remains passive until the next wake.
 
-## Subsequent parent rulings (45–48)
+## Subsequent parent rulings (45–50)
 
 - **Rulings 45–46 — rebirth and fact-closed gaps.** Generation from current
   facts plus empty history must produce a compact valid episode beside the
   still-queryable old history. Functions, declared renders, and green tests
   in the agent's namespace demonstrate their lesson and suppress reteaching.
-- **Ruling 47 — survivable meaning is fact-backed.** A plan must have stored
-  statuses and a declared render of current state; prose and history replay
-  are not recovery mechanisms.
+- **Ruling 47 — survivable meaning is fact-backed.** Durable task meaning must
+  be facts with a declared current-state render; prose and history replay are
+  not recovery mechanisms. Ruling 49 supersedes the earlier plan-status
+  example.
 - **Ruling 48 — rebirth-first is universal.** Every new shape must render its
   compact present meaning from current facts alone. The evolving-session
   drive therefore includes a real reborn episode, not only an incremental
   wake.
+- **Ruling 49 — the todo is the one task system.** Derived obligations union
+  with authored item facts, and the declared current-state render omits
+  completed items. `my.plan`, an agent-plan relationship, and a plan-status
+  family are retired unbuilt.
+- **Ruling 50 — effectful values are old by default.** Rebirth represents an
+  effectful value from its last receipt and marks it old/not-current. Only a
+  future declared read-only metadata tag may authorize re-execution, with the
+  never-lie falsifier landing alongside its first declaration.
 
 ## What you'll read in the reports (the evidence)
 
@@ -125,15 +137,13 @@ passive change. Fable's report argues each unknown to ground. Eight defects
 are filed from Sol's probes; the printer identity-hash residue and the
 stale-pin pair it met are already known classes.
 
-## Implementation order after the final rulings
+## Implementation authority
 
-Ruling 40's in-flight lane lands first and its commit replaces the status
-marker above. Then ruling 43's incremental state and D1's inversion land
-together in the generator owner; the already-landed `generate → call`
-transition and prefix-append seam enable T1; ruling 41's typed budget wait and
-ruling 42's next-wake re-observation serialize through their shared run/
-generator owners; the T2 page-pending block rides W3's tiles. The drive then
-re-runs on the demand-pull episode, including error wakes and root's derived
-preview, and remeasures MINIMUM.
-It also proves a compact reborn episode from current facts and empty history
-beside the original queryable history.
+The design is ruled complete: 50 rulings, zero open owner choices. The one
+current ordering is maintained in
+[the program plan](README.md#the-plan-2026-07-26--this-section-owns-implementation-order),
+and the exact phase owners and exits live in
+[the implementation companion](evolving-session-implementation-2026-08-12.md#phase-ownership-and-dependency-order).
+This parent record adds no second sequence. Ruling 40's test-result facts,
+the integration gate, rebirth proof, live drive, and the implementation
+phases remain implementation work rather than design questions.
