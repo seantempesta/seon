@@ -129,6 +129,7 @@
               :seon.render.web/render-channel render-channel
               :seon.render/context-channel context-channel
               :seon.render.web/pages-channel pages-channel
+              :seon.render.web/interest (atom :all)
               :seon.render.web/registration (atom {})
               :seon.render.web/latest-packages (atom {})
               :seon.render.web/completion completion
