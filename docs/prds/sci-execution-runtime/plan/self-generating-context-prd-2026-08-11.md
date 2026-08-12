@@ -214,6 +214,23 @@ back — everywhere, for every agent, with no maintained list of forms.
     (messages, and errors recorded against it) open runs; everything else
     is passive until the next wake.
 
+## Rulings 45-46 (owner, 2026-08-12 night — capabilities, not schedules)
+
+45. **Rebirth must be a capability of the design** (no timing/trigger ruled):
+    generate(current-facts, empty-history) at any episode boundary must
+    produce a valid compact context — deltas collapsed into current reads,
+    errors and scaffolding absent, the agent's authored journey present as
+    its RESULTS (its namespace's dir/docs) — adoptable via the existing run
+    supersedes link with the old history queryable forever. This is a
+    VERIFICATION obligation on the design, to be proven with a real
+    reborn episode beside its original history.
+46. **Facts close gaps**: teaching whose lesson the agent's own artifacts
+    demonstrate (functions, declared renders, green tests in its namespace
+    — derivable from the program graph and ruling 40's result facts) is
+    skipped in ANY generation. "Already known" supersedes "already shown";
+    an agent that discovers something is never re-taught it after a
+    rebirth.
+
 ## The mechanism (composed from the verified reports)
 
 ### One derivation
