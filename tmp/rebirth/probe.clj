@@ -168,8 +168,8 @@
    "(seon.schema/register! :probe.rebirth.plan.item/completed-at :inst)\n"
    "(defn ^{:malli/schema [:=> [:cat " plan-map "] [:vector " item-map "]]} current-items [plan] (->> (:probe.rebirth.plan/items plan) (remove #(= :done (:probe.rebirth.plan.item/status %))) (sort-by :probe.rebirth.plan.item/id) vec))\n"
    "(defn ^{:malli/schema [:=> [:cat " plan-map "] :seon.render/ai]} render-plan-ai [plan] (let [items (:probe.rebirth.plan/items plan) remaining (current-items plan) completed (->> items (filter #(= :done (:probe.rebirth.plan.item/status %))) (sort-by :probe.rebirth.plan.item/completed-at #(compare %2 %1))) recent (take 2 completed) older (drop 2 completed)] (str \"Plan \" (:probe.rebirth.plan/title plan) \".\\nRemaining:\\n\" (apply str (map #(str \"- \" (:probe.rebirth.plan.item/id %) \" — \" (:probe.rebirth.plan.item/text %) \"\\n\") remaining)) \"Recent completions:\\n\" (apply str (map #(str \"- \" (:probe.rebirth.plan.item/id %) \" — \" (:probe.rebirth.plan.item/text %) \"\\n\") recent)) (when (seq older) (str \"... \" (count older) \" older completions; requery with (db/q '[:find ?id ?at :where [?item :probe.rebirth.plan.item/id ?id] [?item :probe.rebirth.plan.item/status :done] [?item :probe.rebirth.plan.item/completed-at ?at]] (db/db)).\")))))\n"
-   "(defn ^{:malli/schema [:=> [:cat :probe.rebirth.namespace/unit] :seon.render/ai]} render-namespace-ai [unit] (str \"Namespace \" (:seon.ns/name unit) \" owns a fact-backed plan, current-items, render-plan-ai, and plan-current-state-test.\"))\n"
-   "(seon.schema/register! :probe.rebirth.namespace/unit [:map {:seon.db/entity true :seon.render/ai my.agents.rebirth/render-namespace-ai} [:seon.ns/name :seon.ns/name]])\n"
+   "(defn ^{:malli/schema [:=> [:cat :my.agents.rebirth/namespace-unit] :seon.render/ai]} render-namespace-ai [unit] (str \"Namespace \" (:seon.ns/name unit) \" owns a fact-backed plan, current-items, render-plan-ai, and plan-current-state-test.\"))\n"
+   "(seon.schema/register! :my.agents.rebirth/namespace-unit [:map {:seon.render/ai my.agents.rebirth/render-namespace-ai} [:seon.ns/name [:= my.agents.rebirth]] [:seon.ns/doc {:optional true} :seon.ns/doc]])\n"
    "(seon.schema/register! :probe.rebirth.plan/plan [:map {:seon.db/entity true :seon.render/ai my.agents.rebirth/render-plan-ai} [:probe.rebirth.plan/id :probe.rebirth.plan/id] [:probe.rebirth.plan/title :probe.rebirth.plan/title] [:probe.rebirth.plan/agent :probe.rebirth.plan/agent] [:probe.rebirth.plan/items [:vector " item-map "]]])\n"
    "(clojure.test/deftest ^{:seon.test/usage true} plan-current-state-test (clojure.test/is (= [\"remaining\"] (mapv :probe.rebirth.plan.item/id (current-items {:probe.rebirth.plan/id \"sample\" :probe.rebirth.plan/title \"sample\" :probe.rebirth.plan/agent 1 :probe.rebirth.plan/items [{:probe.rebirth.plan.item/id \"done\" :probe.rebirth.plan.item/text \"done\" :probe.rebirth.plan.item/status :done :probe.rebirth.plan.item/completed-at #inst \"2026-08-12T00:00:00.000-00:00\"} {:probe.rebirth.plan.item/id \"remaining\" :probe.rebirth.plan.item/text \"remaining\" :probe.rebirth.plan.item/status :pending}]})))))\n"
    "(seon.test/run #'plan-current-state-test)\n"
@@ -334,7 +334,7 @@
            [?schema :seon.schema/key ?schema-key]
            [?schema :seon.schema/form ?form]]
          database
-         [:probe.rebirth.plan/plan :probe.rebirth.namespace/unit])})
+         [:probe.rebirth.plan/plan :my.agents.rebirth/namespace-unit])})
 
 (defn- supersedes-evidence [database]
   {:rebirth.probe/installed?
