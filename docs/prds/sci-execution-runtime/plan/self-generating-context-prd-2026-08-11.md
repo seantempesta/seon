@@ -69,6 +69,9 @@ back — everywhere, for every agent, with no maintained list of forms.
     agent's behalf only when it would be true AND the agent didn't already do
     it. An agent that batches defn + schema + test + run gets nothing
     injected. Injections-per-turn is the measurable learning curve.
+    **SUBSUMED (2026-08-12):** ruling 32 makes self-erasure a theorem of
+    gap-closure generation from `(pull, retained history)`, so there is no
+    injection mechanism to look for.
 12. **Agent-authored forms NEVER re-execute** — made structural, not policy
     (the authorship fence below). Only system-authored pure reads refresh.
 13. **The env, not "bootstrap forms"**: the agent's opening context is an
@@ -312,6 +315,9 @@ slated by the transcript PRD.
     detail sharpening (`:seon.fn/calls` from run forms shortening effective
     distance) — is the eventual design, deferred until a live V1 history is
     measured.
+    **SUPERSEDED (2026-08-12):** D1 replaces concise-until-cap: arc closure
+    selects content; the cap bounds only declared-render admission beyond that
+    closure, while profiles still fit and never select (rulings 3/16).
 17. **Agent-authored functions, schemas, and tests get index parity**:
     settlement commits them through the same analysis as shipped source —
     same calls/keywords/subject edges, same tests-reaching derivation. One
@@ -390,6 +396,9 @@ boundary is stable subject/key selection for the post-receipt live pull.
     purpose. The episode shape is the agent's remembered behavior, never
     described prose. All existing mechanisms (bootstrap is an ordinary run;
     the demo message is a real fact).
+    **SUPERSEDED (2026-08-12):** the arc shape stands, but the stale HALF
+    `dir`-listing content itemization does not; content is governed by rulings
+    37/D2.
 23. **Core-tooling presentation rides two rungs**: protocol-carrying ns/fn
     docstrings first (zero mechanism — `:seon.ns/doc` already renders
     through every dir), then a declared namespace render function owned by
@@ -402,6 +411,9 @@ boundary is stable subject/key selection for the post-receipt live pull.
     contracted-defn demonstration, and the task message (drive evidence: two
     replicates, identical durable results to FULL at 46% tokens). The
     demonstration is the load-bearing teaching.
+    **SUPERSEDED (2026-08-12):** D1/D2 arc closure plus declared-render
+    admission replaces the fixed content roster; the ~7k-token scale and its
+    load-bearing worked-demonstration evidence remain the surviving lesson.
 19. **Tiles are live windows by default; pins override.** HTML renders exist
     for the USER's eyes; each tile shows the agent's newest-basis block; the
     user may star/pin any block and the pinned block holds the tile instead
