@@ -4,24 +4,22 @@
   "The class regression for per-attribute declaration resolution at DB reads.
 
   Every `seon.db` read that may contain an EDN-backed attribute asks the
-  declarations whether an attribute is EDN-encoded. With no projection,
-  projection state, or candidate overlay supplied on the calling thread, that
-  question re-reads and re-merges all 152 schema resources from the classpath
-  — 14 ms each. Asked once per attribute, per pulled key, and per datom, it
-  wedged `seon.reconcile-test` and `seon.config-application-test` at the 300 s
-  liveness backstop and cost one `seon.config/effective` 84,664 resource reads
+  declarations whether an attribute is EDN-encoded. The repaired read derives
+  the exact projection from its database value when none was handed and does
+  not read packaged schema resources. Before that repair, the question
+  re-read all 152 resources once per attribute, pulled key, and datom; it
+  wedged two suites and cost one `seon.config/effective` 84,664 resource reads
   (2026-08-07), all of them inside `db/pull '[*]`.
 
   The class is dead when ONE read operation performs AT MOST ONE resolution,
-  whatever its attribute, key, or datom count. These tests count reads at the
-  one read seam and assert exactly that, so a caller that reintroduces the
-  per-item shape fails here rather than in a wedged suite.
+  whatever its attribute, key, or datom count. These tests explicitly clear
+  the runner's packaged projection, count reads at the one resource seam, and
+  exercise real EDN decoding so a future per-item shape cannot pass vacuously.
 
   Issue: docs/seon/issues/db-read-decoding-resolves-declarations-per-attribute.md"
   (:require [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.db :as db]
-            [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]))
 
@@ -56,9 +54,20 @@
   [thunk]
   (first (resource-reads thunk)))
 
+(def ^:private carrier-symbols
+  '[*candidate-forms-overlay* *projection* *projection-state* *packaged-forms*])
+
+(defn- without-handed-projection
+  "Call `thunk` after explicitly clearing every schema projection carrier."
+  [thunk]
+  (with-bindings
+    (into {} (map (fn [sym] [(ns-resolve 'seon.schema sym) nil]))
+          carrier-symbols)
+    (thunk)))
+
 (defn- one-population-reads
   []
-  (reads-of schema/declaration-population))
+  (reads-of schema.edn/packaged-forms))
 
 (defn- with-database
   "Call `body` with a bare in-memory connection and NO population supplied."
@@ -77,44 +86,46 @@
 
 (deftest a-read-resolves-the-declaration-population-at-most-once
   (let [one (one-population-reads)]
-    (testing "one unbound resolution reads every schema resource"
+    (testing "one explicit packaged acquisition reads every schema resource"
       (is (pos? one)
-          "the fallback must actually read resources, or this test is vacuous"))
-    (with-database
-      wide-attributes
-      (fn [connection]
-        (db/transact! connection
-                      [{:seon.cluster.agent/id "agent-a"
-                        :seon.cluster.registry/from :core
-                        :seon.cluster.message/id "message-1"
-                        :seon.cluster.message/to "agent-a"
-                        :seon.cluster.message/content "hello"
-                        :seon.cluster.message/at (java.util.Date.)
-                        :seon.cluster.run/id "run-1"
-                        :seon.cluster.run/opened-at (java.util.Date.)
-                        :seon.cluster.run/plan-digest
-                        (apply str (repeat 64 "a"))}])
-        (dotimes [index 8]
+          "the acquisition measurement must read resources, or it is vacuous"))
+    (without-handed-projection
+     (fn []
+       (with-database
+        wide-attributes
+        (fn [connection]
           (db/transact! connection
-                        [{:seon.cluster.message/id (str "extra-" index)
-                          :seon.cluster.message/content "x"}]))
-        (let [database (db/db connection)
-              agent-ref [:seon.cluster.agent/id "agent-a"]]
-          (doseq [[operation thunk]
-                  [["pull '[*]" #(db/pull database '[*] agent-ref)]
-                   ["pull-many '[*]"
-                    #(db/pull-many database '[*] [agent-ref])]
-                   ["entity" #(db/entity database agent-ref)]
-                   ["q decoding a find element"
-                    #(db/q '[:find ?from .
-                             :where [_ :seon.cluster.registry/from ?from]]
-                           database)]
-                   ["datoms :eavt" #(db/datoms database :eavt)]]]
-            (testing operation
-              (is (= one (reads-of thunk))
-                  (str operation
-                       " must resolve the declarations ONCE, not once per "
-                       "attribute, pulled key, or datom")))))))))
+                        [{:seon.cluster.agent/id "agent-a"
+                          :seon.cluster.registry/from :core
+                          :seon.cluster.message/id "message-1"
+                          :seon.cluster.message/to "agent-a"
+                          :seon.cluster.message/content "hello"
+                          :seon.cluster.message/at (java.util.Date.)
+                          :seon.cluster.run/id "run-1"
+                          :seon.cluster.run/opened-at (java.util.Date.)
+                          :seon.cluster.run/plan-digest
+                          (apply str (repeat 64 "a"))}])
+          (dotimes [index 8]
+            (db/transact! connection
+                          [{:seon.cluster.message/id (str "extra-" index)
+                            :seon.cluster.message/content "x"}]))
+          (let [database (db/db connection)
+                agent-ref [:seon.cluster.agent/id "agent-a"]]
+            (doseq [[operation thunk]
+                    [["pull '[*]" #(db/pull database '[*] agent-ref)]
+                     ["pull-many '[*]"
+                      #(db/pull-many database '[*] [agent-ref])]
+                     ["entity" #(db/entity database agent-ref)]
+                     ["q decoding a find element"
+                      #(db/q '[:find ?from .
+                               :where [_ :seon.cluster.registry/from ?from]]
+                             database)]
+                     ["datoms :eavt" #(db/datoms database :eavt)]]]
+              (testing operation
+                (is (<= (reads-of thunk) one)
+                    (str operation
+                         " must resolve declarations at most once, never once "
+                         "per attribute, pulled key, or datom")))))))))))
 
 (deftest a-read-that-decodes-nothing-resolves-nothing
   (testing "a query with no decodable find element reads no schema resource"

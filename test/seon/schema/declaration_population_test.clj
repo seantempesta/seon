@@ -3,9 +3,10 @@
     seon.schema.declaration-population-test
   "The class regression for per-item declaration resolution.
 
-  With no projection, projection state, or candidate overlay supplied,
-  resolving the declaration population re-reads and re-merges every schema
-  resource on disk. An operation that asks a per-item question —
+  An unhanded declaration operation now refuses loudly without reading a
+  schema resource. An explicit packaged acquisition reads and merges every
+  schema resource once. Before the repair, an operation asking a per-item
+  question —
   `schema/schema-definition` per config key, per print option, or
   `schema/identity-attr?` per registry key — therefore performs one complete
   resource population PER ITEM. Measured 2026-08-07 before the repair:
@@ -13,9 +14,9 @@
   reads; `seon.config`'s registration defaults cost 1,003 ms and 12,464.
 
   The class is dead when an operation performs ONE resource population,
-  whatever the item count. These tests count reads at the one read seam and
-  assert exactly that, so a future caller that reintroduces the per-item shape
-  fails here rather than in a wedged suite.
+  whatever the item count, and an unhanded operation refuses. These tests
+  explicitly clear the runner's carrier for the refusal, count reads at the
+  resource seam, and assert the refusal's caller so neither rail is vacuous.
 
   Issue: docs/seon/issues/packaged-forms-rereads-every-schema-resource-per-call.md"
   (:require [clojure.string :as str]
@@ -37,6 +38,17 @@
 
 (defn- one-population-reads []
   (resource-reads schema.edn/packaged-forms))
+
+(def ^:private carrier-symbols
+  '[*candidate-forms-overlay* *projection* *projection-state* *packaged-forms*])
+
+(defn- without-handed-projection
+  "Call `thunk` after explicitly clearing every schema projection carrier."
+  [thunk]
+  (with-bindings
+    (into {} (map (fn [sym] [(ns-resolve 'seon.schema sym) nil]))
+          carrier-symbols)
+    (thunk)))
 
 (deftest an-operation-resolves-the-declaration-population-once
   (let [one (one-population-reads)]
@@ -68,10 +80,11 @@
         failure
         (with-redefs [schema.edn/read-schema-resource
                       (fn [resource] (swap! reads inc) (read-one resource))]
-          (try
-            (schema/declaration-projection)
-            nil
-            (catch clojure.lang.ExceptionInfo exception exception)))]
+          (without-handed-projection
+           #(try
+              (schema/declaration-projection)
+              nil
+              (catch clojure.lang.ExceptionInfo exception exception))))]
     (is (some? failure))
     (is (= :seon.schema/missing-projection
            (:seon.error/kind (ex-data failure))))
