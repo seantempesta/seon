@@ -33,7 +33,7 @@ current function contract. Current `seon.bootstrap/next-entry` is
 `(next-entry request run-id) -> [:maybe :seon.repl/entry]`; `request` is a
 `:seon.render.walk/request`. It pulls, reconstructs settled rows, derives the
 episode, validates the prefix, and returns exactly one entry
-([`src/seon/bootstrap.clj:220-282`](../../../../src/seon/bootstrap.clj#L220)).
+([`src/seon/bootstrap.clj:220-284`](../../../../src/seon/bootstrap.clj#L220)).
 None of `:seon.bootstrap/pull`, `history`, `fold`, `explained`, `shown`, or
 `frontier` is declared in the current schema population
 ([`resources/seon/schemas/seon.render.walk.edn:35-53`](../../../../resources/seon/schemas/seon.render.walk.edn#L35)).
@@ -43,8 +43,8 @@ The proposed lifetime is also undecidable. “Derivable from history” and
 to one function call, proc state between single-entry calls, or stored state.
 Current `generate-turn` appends one entry and invokes `resume-turn`; each
 `resume-turn` creates a fresh fork
-([`src/seon/cluster/loop.clj:1321-1345`](../../../../src/seon/cluster/loop.clj#L1321),
-[`src/seon/cluster/loop.clj:1576-1642`](../../../../src/seon/cluster/loop.clj#L1576)).
+([`src/seon/cluster/loop.clj:1329-1353`](../../../../src/seon/cluster/loop.clj#L1329),
+[`src/seon/cluster/loop.clj:1584-1650`](../../../../src/seon/cluster/loop.clj#L1584)).
 Current `append-generated-call` intentionally prevents generation ahead of
 execution ([`src/seon/cluster/run.clj:747-816`](../../../../src/seon/cluster/run.clj#L747)).
 Therefore “emit the ready suffix in one pass,” “execute at ordinals `0..n`,”
@@ -78,7 +78,9 @@ task message, while the subject says “no namespace tours” and admits a new
 declared-render frontier. A generator admission cap is content selection; it
 must not be disguised as a render profile, because ruling 3 says profiles fit
 content and never select it
-([self-generating rulings 3, 16, and 18](self-generating-context-prd-2026-08-11.md#L37)).
+([ruling 3](self-generating-context-prd-2026-08-11.md#L36),
+[ruling 16](self-generating-context-prd-2026-08-11.md#L369), and
+[ruling 18](self-generating-context-prd-2026-08-11.md#L466)).
 
 **Exact fix:** specify the initial ordered seed vector as data: situation root
 `(help)`; the open run's trigger reached through
@@ -96,7 +98,7 @@ content roster or preserve it.
 
 The subject requires “fact-owned ties ... never string/hash.” Ruling 14
 requires “stable alphabetical tie-breaks”
-([`self-generating-context-prd-2026-08-11.md:263-271`](self-generating-context-prd-2026-08-11.md#L263)).
+([ruling 14](self-generating-context-prd-2026-08-11.md#L360)).
 Current code instead preserves the pull's candidate-vector order through the
 ready filter; it has no explicit ready-set tie key
 ([`src/seon/render/walk.clj:708-769`](../../../../src/seon/render/walk.clj#L708)).
@@ -154,8 +156,9 @@ uses `message/inbox`, `message/read`, `db/q`, `run/complete`, bare `register!`,
 `deftest`, `is`, and `seon.test/run`. Explaining `my.message/inbox` does not
 introduce the different symbol `message/inbox`. Rulings 14, 22, and 29 require
 namespace/alias introduction and recursive explanation before use
-([`self-generating-context-prd-2026-08-11.md:109-114`](self-generating-context-prd-2026-08-11.md#L109),
-[`self-generating-context-prd-2026-08-11.md:245-252`](self-generating-context-prd-2026-08-11.md#L245)).
+([ruling 14](self-generating-context-prd-2026-08-11.md#L360),
+[ruling 22](self-generating-context-prd-2026-08-11.md#L453), and
+[ruling 29](self-generating-context-prd-2026-08-11.md#L112)).
 
 **Exact fix:** add the exact generated `(in-ns
 'my.agents.task-agent-9)` and `require` forms, then use
@@ -191,8 +194,8 @@ The subject and immediate parent say a passive fact change creates no settled
 history entry until the next wake. Earlier ruling 6 says passive refresh means
 “blocks update, history appends, page morphs,” and ruling 36 says the plan
 change “appends passively to context”
-([`self-generating-context-prd-2026-08-11.md:48-54`](self-generating-context-prd-2026-08-11.md#L48),
-[`self-generating-context-prd-2026-08-11.md:156-165`](self-generating-context-prd-2026-08-11.md#L156)).
+([ruling 6](self-generating-context-prd-2026-08-11.md#L46),
+[ruling 36](self-generating-context-prd-2026-08-11.md#L159)).
 An implementer can validly build either passive durable append or pending-only
 display. The subject also says only a message opens work, while ruling 6 keeps
 addressed errors as wakes.
@@ -389,8 +392,8 @@ change that owner. Do not state the narrower T1 law as the general run law.
 The subject calls `:seon.bootstrap/prefix-drift` a loud refusal that “stays.”
 Current `next-entry` throws `ExceptionInfo`, and the direct call from
 `generate-turn` is not wrapped by `phase`
-([`src/seon/bootstrap.clj:256-282`](../../../../src/seon/bootstrap.clj#L256),
-[`src/seon/cluster/loop.clj:1592-1604`](../../../../src/seon/cluster/loop.clj#L1592)).
+([`src/seon/bootstrap.clj:256-284`](../../../../src/seon/bootstrap.clj#L256),
+[`src/seon/cluster/loop.clj:1600-1612`](../../../../src/seon/cluster/loop.clj#L1600)).
 
 **Exact fix:** either describe the current thrown invariant honestly or add an
 explicit error schema and catch/settlement boundary to the phase inventory.
@@ -426,7 +429,7 @@ guard the first append and terminal transition
 dispatch `:generate` and `:call` from stored facts
 ([`src/seon/cluster/work.clj:570-650`](../../../../src/seon/cluster/work.clj#L570)),
 and invoke the transition at the generator fixed point
-([`src/seon/cluster/loop.clj:1576-1642`](../../../../src/seon/cluster/loop.clj#L1576)).
+([`src/seon/cluster/loop.clj:1584-1650`](../../../../src/seon/cluster/loop.clj#L1584)).
 
 **Exact fix:** replace the historical line claims with those committed
 function/contract names and commit id, cite the landed focused regressions,
@@ -501,26 +504,27 @@ identity used by the generator.
 
 Applied to
 [the revised implementation contract](evolving-session-implementation-2026-08-12.md).
-“Owner” means the question is now a crisp marked choice in that document's
-Open assumptions section; it is no longer left to an implementer.
+The final ruling round removes every owner-choice marker; the only external
+statuses left are a separately owned plan data-model dependency and ruling
+40's test-result-facts lane.
 
 | Finding | Disposition |
 |---|---|
-| BA-1 | Replaced the fictitious one-pass response with an explicit `[target]` invocation-local generation-state interface. It performs one pull, derives one next entry, appends and executes under the existing fence, advances from the real receipt, and uses a fresh fork per entry. D5 approval remains with the owner. |
-| BA-2 | Declared the ordered seed vector: `(help)`, the run trigger, and exactly one usage row calling `my.run/walkthrough`; zero/multiple rows refuse loudly, and only the source row retains `:seon.test/usage`. D1/D2 explicitly supersede ruling 18's fixed roster. The exact beyond-closure CAP is moved to owner markup with a `1024` estimated-token recommendation and whole-entry/distance/tie rules. |
+| BA-1 | Replaced the fictitious one-pass response with an explicit `[target]` invocation-local generation-state interface. It performs one pull, derives one next entry, appends and executes under the existing fence, advances from the real receipt, and uses a fresh fork per entry. Ruling 43 now makes that interface binding and deletes the per-form re-pull. |
+| BA-2 | Declared the ordered seed vector: `(help)`, the run trigger, and exactly one usage row calling `my.run/walkthrough`; zero/multiple rows refuse loudly, and only the source row retains `:seon.test/usage`. D1/D2 explicitly supersede ruling 18's fixed roster. The V1 beyond-closure cap is now the exact `:seon.config.bootstrap/beyond-closure-token-budget` dial with `1024` estimated tokens, whole-entry admission, and distance/total-key order. |
 | BA-3 | States that ruling 29 subsumes ruling 14: 29 governs dependency readiness; 14 governs only the stable alphabetical order among already-ready entries. Adds one total key with direction and missing-fact refusal. |
 | BA-4 | Replaced Example A with HEAD-valid form spellings and the admissible order: scratch call, contracted renderer, quoted-symbol registration, contracted database-supplied status, wrong call, test declaration, explicit renderer output, completion. The replica test is not claimed green. |
 | BA-5 | Adds `in-ns`, explicit requires, qualified calls, `dir`/`doc` introductions, and a 23-row referenced-symbol before/after acceptance trace consumed by the regression. |
 | BA-6 | Establishes one boundary: `my.run-test/the-lifecycle-walkthrough-is-executable-data` and its recurring rendered fixture own every demonstration byte; the PRD owns only the derivation frame. |
-| BA-7 | Explicitly makes T2 supersede ruling 6's “history appends” and ruling 36's “appends passively to context.” Passive change creates no run/form/receipt/history entry. Addressed-error wake scope is moved to owner choice ERROR-WAKE with a recommendation. |
+| BA-7 | Explicitly makes T2 supersede ruling 6's “history appends” and ruling 36's “appends passively to context.” Passive change creates no run/form/receipt/history entry. Ruling 44 preserves addressed errors as wakes alongside messages. |
 | BA-8 | Defines `shown` as the listing execution database's basis, proposes the exact durable receipt member `:seon.cluster.eval/read-basis-transaction`, supplies the since/provenance query, and separates numeric current-database pulls. Additions, retractions, and add-then-retract behavior are explicit. |
-| BA-9 | Moved to owner choice D3. The recommended distinct `:my.run/budget-wait` arm names the value, receipt location, delivery, and zero-before-open/zero-after-form transitions; implementation stays blocked until the owner chooses the arm and transaction composition. |
-| BA-10 | Moved to owner choice D4. Recommendation is re-observation inside the next qualifying addressed run, with read-evidence/program-generation staleness and no evolving-session `refresh-tx`; the alternative must name its event owner. |
+| BA-9 | Ruling 41 settles D3. The distinct `:my.run/budget-wait` arm carries the presence-marked budget-exhausted condition; the pure constructor, one in-transaction force-settlement owner, ordinary receipt/delivery path, and zero-before-open/zero-after-form transitions are now named. |
+| BA-10 | Ruling 42 settles D4 as re-observation inside the next message/error run. Read-evidence or program-generation staleness emits the same read at a newer basis; no evolving-session `refresh-tx`, meta-entry, or mutation survives. |
 | TM-1 | Replaced all four wrong situation keys with the landed keys and exact deterministic fixture ids. The fixture's unread `1` is explained by one additional unanswered message because the open trigger is excluded. |
 | TM-2 | Removed nonexistent `my.message/inbox`, `my.message/read`, aliases, bare `register!`, and `seon.test/run`. Uses current `seon.db` forms plus qualified `seon.schema/register!`, `clojure.test/deftest`, and `clojure.test/is`; ruling 8 explicitly supersedes DOC-1 and the current `doc` keys are named. |
 | TM-3 | Uses the landed completion disposition/result/delivery shape and agent-id string. The reply says the replica test is declared, not green; no accretion note remains. |
 | TM-4 | Example B binds the positional `seon.db/since` result, queries numeric ids, and pulls those ids from the current database with the landed `pull` arity. It is explicitly additions-only. |
-| TM-5 | Example B's plan arm is `[target: owner decision PLAN]`; owner markup recommends a new declared plan ref/shape and forbids instructions-as-plan. |
+| TM-5 | Example B's plan arm is `[target: external plan-model dependency]`, not owner markup in this PRD. The linked issue must land a real ref and separately identified shape before the example consumes it; instructions-as-plan remains forbidden. |
 | TM-6 | Narrows the law to evolving-session gap-closure wakes and explicitly preserves unanswered-background-result runs. |
 | TM-7 | Describes the current thrown prefix drift honestly and names the target flat error schema plus loop settlement boundary. |
 | TM-8 | Replaces false one-file/parallel claims with exact multi-file ownership and explicit serialization across shared bootstrap, walk, run, work, and loop owners. |
@@ -543,3 +547,25 @@ The suite/PRD byte-authority boundary from BA-6 remains unchanged.
 | OR-4 — retain the real exchanges | Kept one wrong-call exchange and pinned its class assertion to `:seon.instrument/contract-violated`, never temporary `:seon.error/kind`; kept the declared usage test, successful AI value, and one-argument `my.run/complete`. The settled result includes `:my.run/delivered-to "root"`. |
 | OR-5 — D2 and phase ownership | Reconciled D2 in both evolving-session documents to ruling 37. Phase 2 now owns the bootstrap required-namespace change and regression as well as `my.run` and its usage test, and therefore serializes after Phase 1 instead of claiming false disjointness. |
 | OR-6 — two byte authorities | Preserved BA-6's boundary: the recurring usage test and rendered fixture pin every demonstration byte; the implementation document pins only the derivation frame and enabling source changes. |
+
+## Final ruling and supersession round disposition
+
+This round read rulings 38–44 and commits `174898321`, `5a01449de`,
+`aeb70b1cc`, and `e0b64758a` end to end before revising the subject. It then
+reconciled the later current-HEAD rulings 45–48 from commits `13a8c8519`,
+`fd0fb1892`, and `316fce6ec`.
+
+| Authority | Final disposition |
+|---|---|
+| Ruling 38 — environment carriage | The implementation and decision record now say `seon.env` carries only derivation inputs. Opening context is derived per agent from the walk and is never stored in or on the environment. |
+| Ruling 39 — derived root preview | Root's preview is explicitly the same gap closure over the agent. The phase and graduation gates contain no fixed preview-depth constant or second preview mechanism. |
+| Ruling 40 — test-result facts | Added a hard external prerequisite in the dependency ledger and Phase 0: `[in flight → cite its commit when it lands]`. No evolving-session phase owns a stub or may begin before that lane lands. |
+| Ruling 41 / D3 | Deleted the owner choice. Phase 6 now names the typed budget-wait value, pure constructor, one in-transaction force-settlement owner, ordinary receipt/delivery path, and both zero transitions. |
+| Ruling 42 / D4 | Deleted the owner choice and rejected refresh runs. Phase 7 re-observes the same read on the next message/error wake, appends at the newer basis, preserves old bytes, and adds no meta-entry. |
+| Ruling 43 / D5+D6 | Deleted both owner choices. Phases 1 and 4 now require the one-pass invocation-local state, deletion of per-form re-pulls, additions-only `since` deltas, per-new-id current pulls, and zero new callable arities. |
+| Ruling 44 / error wakes | Removed ERROR-WAKE markup. Messages and errors addressed to the agent wake it; all other changes remain passive. |
+| Rulings 45–46 / rebirth and known facts | Added the real reborn-episode graduation proof. Current facts plus empty history must yield compact valid context; functions, declared renders, and green test-result facts suppress teaching they already demonstrate. |
+| Ruling 47 / survivable plans | Strengthened the external plan dependency: fact-backed statuses and a declared current-state render are required; history replay and prose are not substitutes. |
+| Ruling 48 / universal rebirth-first check | Made compact rendering from current facts alone an integration acceptance criterion rather than a plan-only concern. |
+| Rulings 11/16/18/22 sweep | The binding reconciliation retains only the surviving lessons: gap closure subsumes injection, the demonstration remains load-bearing, and the complete action arc stands. It deletes standing-form, HALF-roster, concise-until-cap, and stale itemization claims. |
+| Transcript supersession sweep | The transcript PRD now contributes only surviving history/storage/printing grammar. Ordering bands, pinned bootstrap bytes, HUMAN-2 synthesized reads, and identity-hash prints are explicitly non-authoritative. |

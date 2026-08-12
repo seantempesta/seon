@@ -8,25 +8,27 @@ tags: [prd, render, agent, context, runtime]
 
 This is the implementation companion to
 [the evolving-session decision record](evolving-session-prd-2026-08-12.md).
-It preserves D1, D2, and T2 exactly and applies them under rulings 24–37 of
+It preserves D1, D2, and T2 exactly and applies them under rulings 24–48 of
 [the self-generating-context PRD](self-generating-context-prd-2026-08-11.md).
-The inherited REPL grammar comes from
+Only the surviving history/storage/printing grammar comes from
 [the transcript PRD](repl-transcript-context-prd-2026-08-10.md). This revision
 also applies every finding in
 [the independent critique](evolving-session-implementation-critique-2026-08-12.md).
 
 All source `file:line` claims in this revision are verified against committed
-baseline `18019f218`. That baseline is authoritative where the shared working
-tree contains a later lane's uncommitted edits.
+HEAD `316fce6ec`. Uncommitted shared-tree changes are not cited as landed
+evidence.
 
 Status labels are literal:
 
 - `[landed]` exists at this document's HEAD;
+- `[in flight]` is owned by another lane and must be replaced by that lane's
+  commit citation when it lands; and
 - `[target]` names the exact enabling change still required.
 
-The implementation remains blocked on the choices under
-[Open assumptions awaiting owner markup](#open-assumptions-awaiting-owner-markup).
-No implementer may choose one silently.
+There are no remaining owner choices in this document. Ruling 40's
+test-results-as-facts dependency is `[in flight]`; no evolving-session source
+phase starts until its lane lands and this document cites that commit.
 
 ## Binding reconciliation
 
@@ -41,25 +43,33 @@ The following rules remove the apparent conflicts among the parent PRDs.
    govern only the total order among entries that are already ready under
    ruling 29. Ruling 14 never admits an unexplained entry; ruling 29 never
    supplies an arbitrary tie-break.
-2. **D1 and D2 replace ruling 18's fixed content roster.** Ruling 18's
-   measured lesson—that the worked demonstration is load-bearing—survives.
-   Its fixed HALF list no longer selects content. The action arc, explained
-   closure, one canonical usage row, and declared-render admission in D1/D2
-   are the selectors. A render profile still fits selected content and never
-   selects it, preserving rulings 3 and 16.
-3. **Ruling 8 supersedes transcript DOC-1.** Bare `doc` both prints the
+2. **Ruling 32 subsumes ruling 11's injection language.** Gap-closure from
+   `(pull, retained history)` emits a true missing form or emits nothing. No
+   injection mechanism, injection counter, or standing-form roster survives.
+3. **D1, D2, and ruling 37 replace the fixed content itemizations in rulings
+   16, 18, and 22.** The action arc, explained closure, one canonical usage
+   row, and declared-render admission select content. Ruling 18's measured
+   lesson—that the worked demonstration is load-bearing—and ruling 22's
+   complete-episode arc survive; the HALF roster and concise-until-cap rule do
+   not. A render profile fits selected content and never selects it, as ruling
+   3 requires.
+4. **Ruling 8 supersedes transcript DOC-1.** Bare `doc` both prints the
    familiar Clojure lines and returns the acquired map with keys
    `:seon.fn/sym`, `:seon.fn/doc`, `:seon.fn/arglists`, and
    `:seon.fn/contract-lines`; the landed macro does so at
    [`src/seon/sci/eval.clj:1069-1125`](../../../../src/seon/sci/eval.clj#L1069).
-4. **T2 supersedes two earlier phrases.** A passive fact change does not
+5. **The transcript PRD contributes no opening mechanics.** Its ordering-key
+   bands, pinned bootstrap candidate, HUMAN-2 synthesized read, and
+   identity-hash object prints are superseded. Generated episodes,
+   explained-set ordering, and the stable printer are authoritative.
+6. **T2 supersedes two earlier phrases, and ruling 44 settles wake scope.** A
+   passive fact change does not
    append settled history. T2 replaces “history appends” in ruling 6 and
    “appends passively to context” in ruling 36. A disposable pending page
    block may change; no run, form, receipt, or settled-history entry is
-   created. The next qualifying addressed wake runs `:generate` and settles
-   the delta. Whether an addressed error remains such a wake is an owner
-   choice below.
-5. **Ruling 37 governs D2's demonstration shape.** It supersedes D2's earlier
+   created. The next message or error addressed to the agent runs `:generate`
+   and settles the delta; all other changes stay passive.
+7. **Ruling 37 governs D2's demonstration shape.** It supersedes D2's earlier
    scratch-first and namespace-state/status wording, but preserves D2's ruled
    purpose: the demonstration teaches a durable, visible contribution. The
    contribution is the existing render-selection mechanism—one function in
@@ -67,6 +77,20 @@ The following rules remove the apparent conflicts among the parent PRDs.
    returning `:seon.render/ai`. The named input and output specs precede the
    function; the function is written once. There is no new status family,
    schema registration, or redefinition arc.
+8. **Ruling 38 makes the environment carriage-only.** `seon.env` carries the
+   projection, database basis and connection, and agent scope needed by the
+   derivation. Opening context is derived per agent from the walk; it is never
+   stored in or on the environment.
+9. **Ruling 39 removes fixed preview depth.** Root's preview of an agent is
+   root's own gap-closure walk over that agent. The newest block remains in
+   membership and unshown messages appear by their retained shown basis; no
+   separate preview-depth constant or phase exists.
+10. **Rulings 45–48 make rebirth an acceptance property.** Generation from
+    current facts plus empty history must produce a compact valid episode;
+    functions, declared renders, and green test-result facts close their own
+    teaching gaps. Anything that must survive is a fact with a declared
+    render. The plan dependency below therefore requires fact-backed statuses
+    and a current-state render, never history replay or prose recovery.
 
 ## Current HEAD and dependency ledger
 
@@ -76,21 +100,22 @@ The following rules remove the apparent conflicts among the parent PRDs.
 | Entry source | `[landed]` one entry owns one optional comment and one form; `entry-source` joins them into one reader source ([`src/seon/bootstrap.clj:115-120`](../../../../src/seon/bootstrap.clj#L115), [`resources/seon/schemas/seon.repl.edn:10-17`](../../../../resources/seon/schemas/seon.repl.edn#L10)). | A comment never receives its own REPL prompt. |
 | Generated append | `[landed]` `append-generated-call` permits exactly one next ordinal after the previous terminal receipt ([`src/seon/cluster/run.clj:747-816`](../../../../src/seon/cluster/run.clj#L747)). | Generation never gets ahead of execution. |
 | Generate→call | `[landed]` commit `7d036203e` stores `:call`, changes it to `:generate` on the first append, changes it back through the guarded `generation-complete-call`, dispatches both situations from facts, and offsets provider-reply ordinals by the generated form count ([`src/seon/cluster/run.clj:640-698`](../../../../src/seon/cluster/run.clj#L640), [`src/seon/cluster/run.clj:747-864`](../../../../src/seon/cluster/run.clj#L747), [`src/seon/cluster/work.clj:570-650`](../../../../src/seon/cluster/work.clj#L570), [`src/seon/cluster/loop.clj:1584-1650`](../../../../src/seon/cluster/loop.clj#L1584)). | Phase 3 consumes this committed contract and its landed focused regressions. |
-| Fork lifetime | `[landed]` each `resume-turn` creates a fresh turn fork ([`src/seon/cluster/loop.clj:1329-1353`](../../../../src/seon/cluster/loop.clj#L1329)); each committed program row is installed for later turns. | Generated forms and the provider reply do **not** share one fork. Each generated form gets a fresh fork rehydrated from committed program rows and the agent's defs; the later provider reply gets another. |
+| Fork lifetime | `[landed]` each `resume-turn` creates a fresh turn fork ([`src/seon/cluster/loop.clj:1329-1353`](../../../../src/seon/cluster/loop.clj#L1329)); each committed program row is installed for later turns ([`src/seon/cluster/loop.clj:1499-1511`](../../../../src/seon/cluster/loop.clj#L1499)). | Generated forms and the provider reply do **not** share one fork. Each generated form gets a fresh fork rehydrated from committed program rows and the agent's defs; the later provider reply gets another. |
 | Owning-namespace render selection | `[landed]` each walked member carries its explicitly acquired owning namespace into the render request ([`src/seon/render/walk.clj:427-462`](../../../../src/seon/render/walk.clj#L427), [`src/seon/render/walk.clj:508-528`](../../../../src/seon/render/walk.clj#L508)). The selector then chooses a unique public function in that namespace whose input accepts the actual render argument and whose output fits the requested projection, before consulting the schema declaration or floor ([`src/seon/render.clj:120-147`](../../../../src/seon/render.clj#L120), [`src/seon/render.clj:227-246`](../../../../src/seon/render.clj#L227)). | The demonstration defines one function accepting the existing `:seon.ns/ns` unit and returning `:seon.render/ai`; no schema registration or invented status value exists. |
 | Completion | `[landed]` `my.run/complete` returns disposition/result ([`src/my/run.clj:133-149`](../../../../src/my/run.clj#L133)); settlement adds `:my.run/delivered-to` as an agent-id string or `:outside` ([`src/seon/cluster/loop.clj:398-425`](../../../../src/seon/cluster/loop.clj#L398), [`resources/seon/schemas/my.run.edn:1-25`](../../../../resources/seon/schemas/my.run.edn#L1)). | No completion-shape accretion is required. |
 | Delta reads | `[landed]` `seon.db/since` returns a database value and accepts `(since basis)` or `(since database basis)`; `pull` accepts the current-database two-argument form or explicit three-argument form ([`src/seon/db.clj:859-899`](../../../../src/seon/db.clj#L859), [`src/seon/db.clj:1107-1119`](../../../../src/seon/db.clj#L1107)). | A since database is queried for numeric entity ids; each id is then pulled from the current database. |
 | Observation basis | `[landed]` render calls record the database value's basis transaction, and derived history entries expose it ([`src/seon/render.clj:549-554`](../../../../src/seon/render.clj#L549), [`src/seon/render/walk.clj:775-824`](../../../../src/seon/render/walk.clj#L775)). | Durable delta cursors still need the receipt member named below. Settlement time is never the cursor. |
 | Usage authority | `[landed]` the canonical source row is `my.run-test/the-lifecycle-walkthrough-is-executable-data` ([`test/my/run_test.clj:99-114`](../../../../test/my/run_test.clj#L99)). | The symbol remains stable while its namespace-render content and byte fixture are retargeted. |
+| Test-result facts | `[in flight → cite its commit when it lands]` Ruling 40 requires the one runner to commit declared test-run/result facts before this build. | This is an external prerequisite, not a stub or a target owned by any phase below. The demonstration's test exchange, problems list, and after-change auto-runs consume the landed facts. |
 
 ## One generator, one entry at a time
 
-An evolving-session gap-closure run opens on a qualifying addressed wake. This
-is not the general run law: existing unanswered-background-result runs remain
-valid and may open without a message
+An evolving-session gap-closure run opens on a message or error addressed to
+the agent, as ruling 44 confirms. This is not the general run law: existing
+unanswered-background-result runs remain valid and may open without either
 ([`src/seon/cluster/work.clj:582-650`](../../../../src/seon/cluster/work.clj#L582)).
 
-The recommended D5 mechanism is explicit and cross-owner:
+Ruling 43 makes the one-pass D5 mechanism explicit and cross-owner:
 
 ```clojure
 (seon.bootstrap/begin-generation request run-id)
@@ -197,8 +222,12 @@ is replaced. `sort-by str` remains valid only for ruling 14's qualified-symbol
 slot; `pr-str` and hashes are not tie-breaks.
 
 Beyond closure, only a shape with a declared render function is eligible,
-nearest first. The exact admission cap is an owner choice below; it is a
-content-selection dial, not a render profile.
+nearest first. `[target]`
+`:seon.config.bootstrap/beyond-closure-token-budget` is the one database
+content-selection dial, with V1 default `1024` estimated tokens. Phase 1
+counts with `seon.ai.tokens/estimate`, admits whole entries only, and stops
+before the first entry that would exceed the cap. It never aliases a render
+profile budget.
 
 Determinism is over all four immutable inputs: database commit ID and basis
 transaction, retained history identities and bytes, acquired program
@@ -219,15 +248,16 @@ evaluation database value's `seon.db/basis-t` into the same terminal
 transaction. `shown` is then
 `{collection-key :seon.cluster.eval/read-basis-transaction}`.
 
-The V1 D6 recommendation is additions-only because Datahike `since` contains
-only datoms added after the time point
+Ruling 43 makes the V1 D6 contract additions-only because Datahike `since`
+contains only datoms added after the time point
 ([`reference-code/datahike/src/datahike/api/specification.cljc:886-900`](../../../../reference-code/datahike/src/datahike/api/specification.cljc#L886)).
 A retraction of an older datom emits no delta row. An add followed by retract
 that is absent from the current database emits no per-id pull. Supporting
-removed membership would require a history database and is outside D6's “one
-since mechanism” choice.
+removed membership would require a history database and is outside ruling
+43's one-since-mechanism contract. No callable gains a delta arity.
 
-After the owner declares the plan relationship, the exact provenance query is:
+After the separately owned plan relationship lands, the exact provenance
+query is:
 
 ```clojure
 (let [changes-db (seon.db/since 536871041)]
@@ -270,7 +300,7 @@ excluded from that count by the query at
 
 This corrects the retired `namespace`, `message/unread`, `run/open`, and
 `repl/protocol` spellings. “An evolving-session gap-closure run opens on a
-qualifying addressed wake” never means “all runs require a message”;
+message or error addressed to the agent” never means every run requires one;
 background-result runs remain untouched.
 
 ## Worked example A — executable frame, suite-owned bytes
@@ -433,10 +463,12 @@ query; the pulls use the current database supplied by call preparation. The
 query is additions-only. Each listing and pull settles at consecutive
 ordinals before a model call.
 
-The plan portion is `[target: owner decision PLAN]`. It awaits a declared
+The plan portion is `[target: external plan-model dependency]`. It awaits a declared
 `:seon.cluster.agent/plan` relationship and referenced plan shape; the current
 registry has neither
 ([`docs/seon/issues/agent-plan-has-no-declared-database-relationship.md:12-22`](../../../seon/issues/agent-plan-has-no-declared-database-relationship.md#L12)).
+This is a separately owned missing data model, not an evolving-session owner
+choice or permission to invent the relationship in Phase 4.
 After that declaration, the provenance query in
 [Delta basis and provenance](#delta-basis-and-provenance) runs, then the
 numeric agent id is pulled from the current database. No
@@ -447,6 +479,39 @@ provenance comment derives from the joined transaction facts; already
 explained symbols generate no teaching; and every generated entry has a real
 terminal receipt before the provider call.
 
+## Budget exhaustion is a typed wait
+
+Ruling 41 force-settles `:wait` when turns remaining reaches zero. `[target]`
+`:my.run/budget-exhausted` is a presence marker (`[:= true]`), and
+`:my.run/budget-wait` is a distinct arm of `:my.run/value`:
+
+```clojure
+{:my.run/disposition :wait
+ :my.run/budget-exhausted true
+ :seon.cluster.run/turns-remaining 0}
+```
+
+`[target]` the pure zero-argument `my.run/budget-exhausted` constructor
+returns that ordinary value. The one in-transaction
+`seon.cluster.run/force-budget-wait-call` owns both zero transitions: before
+open it opens and claims the generated run and appends the constructor at
+ordinal 0; after a terminal generated form it appends the constructor at the
+next ordinal. The loop evaluates and settles that form through the ordinary
+receipt path, delivery adds `:my.run/delivered-to`, and the run closes without
+a provider call. The requester therefore sees the typed condition; the agent
+stays alive and its next addressed wake includes the prior condition in the
+retained history.
+
+## Corrections are re-observations
+
+Ruling 42 makes correction the same read at a newer database basis. At the
+next message or error addressed to the agent, stale read evidence or a newer
+acquired program generation makes the gap generator emit that read again. Its
+new terminal receipt appends; the prior entry and bytes remain unchanged;
+newest-basis selection wins in blocks. Evolving sessions never call
+`refresh-tx`, write apology/meta entries, mutate an entry, or introduce a
+second correction mechanism.
+
 ## Phase ownership and dependency order
 
 One phase has one lane owner, but an owner may need several files to close one
@@ -454,50 +519,52 @@ mechanism. Overlapping paths serialize explicitly.
 
 | Phase | Exact owned paths | Exit and ordering |
 |---|---|---|
-| 0. Owner markup | This PRD only | Resolve CAP, ERROR-WAKE, PLAN, and D3–D6. No production work starts before it. |
-| 1. Generation state + ordering | `resources/seon/schemas/seon.bootstrap.edn`; `resources/seon/schemas/seon.config.bootstrap.edn`; `config/default.edn`; `src/seon/bootstrap.clj`; `src/seon/render/walk.clj`; `test/seon/bootstrap_test.clj` | One pull per generation invocation; ruling-29 closure plus ruling-14 ready tie-break; prefix drift is flat. Starts only after protected bootstrap/walk owners are clear. |
-| 2. Demonstration retarget | `src/seon/bootstrap.clj`; `src/seon/cluster/agent.clj`; `src/my/run.clj`; `test/seon/bootstrap_test.clj`; `test/seon/cluster/agent_namespace_test.clj`; `test/my/run_test.clj` | Stable usage-test symbol pins the complete T0 bytes; the task message is retargeted; `clojure.test` becomes a declared required namespace so its landed namespace form is derivable; the spec-first owning-namespace renderer replaces `largest`; source row alone retains usage metadata. Serial after Phase 1 because it shares bootstrap owners. |
+| 0. Test-result facts prerequisite | No paths in this PRD; ruling 40's separate lane owns the runner and result declarations. | `[in flight → cite its commit when it lands]`. The one runner commits declared result facts. No later phase builds a stub or starts before this dependency lands. |
+| 1. Generation state + ordering | `resources/seon/schemas/seon.bootstrap.edn`; `resources/seon/schemas/seon.config.bootstrap.edn`; `config/default.edn`; `src/seon/bootstrap.clj`; `src/seon/render/walk.clj`; `test/seon/bootstrap_test.clj` | Ruling 43: one pull per generation invocation, one-entry incremental state, ruling-29 closure plus ruling-14 ready tie-break, exact `1024`-token beyond-closure admission, and flat prefix drift. Starts only after protected bootstrap/walk owners are clear. |
+| 2. Demonstration retarget | `src/seon/bootstrap.clj`; `src/seon/cluster/agent.clj`; `src/my/run.clj`; `test/seon/bootstrap_test.clj`; `test/seon/cluster/agent_namespace_test.clj`; `test/my/run_test.clj` | Stable usage-test symbol pins the complete T0 bytes; the task message is retargeted; `clojure.test` becomes a declared required namespace so its landed namespace form is derivable; the spec-first owning-namespace renderer replaces `largest`; source row alone retains usage metadata and ruling 40's result facts report actual runs. Serial after Phase 1 because it shares bootstrap owners. |
 | 3. Generate→call integration | `resources/seon/schemas/seon.cluster.run.edn`; `src/seon/cluster/run.clj`; `src/seon/cluster/work.clj`; `src/seon/cluster/loop.clj`; focused run/work/turn tests | Consumes landed commit `7d036203e`. Fresh fork per generated entry; provider ordinals follow the generated prefix. |
-| 4. Durable shown basis + T1 | `resources/seon/schemas/seon.cluster.eval.edn`; `src/seon/cluster/run.clj`; `src/seon/cluster/loop.clj`; `src/seon/bootstrap.clj`; focused eval/bootstrap tests | Serial after Phases 1 and 3 because it shares their owners. Exact since query, numeric current pulls, provenance, and self-erasure pass. |
-| 5. Plan relationship | Recommendation: `resources/seon/schemas/seon.agent.plan.edn`; `resources/seon/schemas/seon.cluster.agent.edn`; `test/seon/schema_test.clj`; `test/seon/bootstrap_test.clj` | Blocked on PLAN. No instructions-as-plan substitution. If the owner removes plan from V1, this phase is deleted. |
-| 6. Budget settlement | `resources/seon/schemas/my.run.edn`; `resources/seon/schemas/seon.cluster.run.edn`; `resources/seon/schemas/seon.cluster.loop.edn`; `src/my/run.clj`; `src/seon/cluster/run.clj`; `src/seon/cluster/loop.clj`; `test/my/run_test.clj`; `test/seon/cluster/run_test.clj`; `test/seon/cluster/turn_test.clj` | Blocked on D3; serial after Phase 3 because it shares run/loop. Both zero-before-open and zero-after-form transitions pass. |
-| 7. Corrections | Recommendation: `src/seon/bootstrap.clj`; `src/seon/render/walk.clj`; `test/seon/bootstrap_test.clj`; `test/seon/render/history_test.clj` | Blocked on D4 and serial after Phases 1 and 4. If the owner chooses refresh runs, replace this path set with the ruled event owner plus `src/seon/cluster/run.clj`; no passive T2 append and no second correction mechanism may survive. |
-| 8. Integration + drive | Focused gates; one research evidence file; no new production owner | Complete example fixture, markdown/citation gate, one model drive, independent observer, and remeasured MINIMUM. |
+| 4. Durable shown basis + T1 | `resources/seon/schemas/seon.cluster.eval.edn`; `src/seon/cluster/run.clj`; `src/seon/cluster/loop.clj`; `src/seon/bootstrap.clj`; focused eval/bootstrap tests | Ruling 43: exact since query, additions-only deltas, numeric current pulls, zero new callable arities, provenance, and no emission for gaps already closed by retained history. Serial after Phases 1 and 3 because it shares their owners. |
+| 5. Plan relationship dependency | No paths in this PRD; the linked plan-model issue owns the declaration and its proof. | Not an owner choice. Ruling 47 requires a real `:seon.cluster.agent/plan` ref, fact-backed statuses, and a separately identified plan shape whose declared render derives current state; instructions, plan digests, and history replay remain forbidden substitutes. |
+| 6. Budget settlement | `resources/seon/schemas/my.run.edn`; `resources/seon/schemas/seon.cluster.run.edn`; `resources/seon/schemas/seon.cluster.loop.edn`; `src/my/run.clj`; `src/seon/cluster/run.clj`; `src/seon/cluster/loop.clj`; `test/my/run_test.clj`; `test/seon/cluster/run_test.clj`; `test/seon/cluster/turn_test.clj` | Ruling 41: `force-budget-wait-call` appends and settles the typed `:wait`, delivers it, and closes without a provider call. Both zero-before-open and zero-after-form transitions pass. Serial after Phase 3 because it shares run/loop. |
+| 7. Corrections | `src/seon/bootstrap.clj`; `src/seon/render/walk.clj`; `test/seon/bootstrap_test.clj`; `test/seon/render/history_test.clj` | Ruling 42: the next message/error wake re-observes the same stale read at a newer basis; newest basis wins and old bytes remain. Serial after Phases 1 and 4; no `refresh-tx`, passive T2 append, meta-entry, or second correction mechanism survives. |
+| 8. Integration + drive | Focused gates; one research evidence file; no new production owner | Complete example fixture, markdown/citation gate, one model drive, independent observer, remeasured MINIMUM, ruling 39 root preview from the same gap closure with no preview-depth constant, and a real ruling-45 reborn episode beside its original queryable history. |
 
 Phase 2 serializes after Phase 1 because both own bootstrap derivation and its
 regression. Phases 3, 4, 6, and 7 likewise serialize where their exact path
 sets overlap. There is no blanket “parallelize after Phase 1” claim.
 
-## Open assumptions awaiting owner markup
-
-These are owner choices, not implementer details. The recommendation is first
-in each row.
-
-| ID | Crisp choice and recommendation | What changes after the ruling |
-|---|---|---|
-| CAP | **Recommend:** declare `:seon.config.bootstrap/beyond-closure-token-budget` as a database config dial with V1 value `1024` estimated tokens. Count with `seon.ai.tokens/estimate`; admit whole entries only; stop before the first entry that would exceed the cap; order by graph distance then the total key above. Alternative: no beyond-closure admission in V1. | Recommendation adds the config schema/default and Phase 1 consumption. This is content selection and never aliases `:seon.config.render.agent/token-budget`. |
-| ERROR-WAKE | **Recommend:** preserve addressed errors as existing operational wakes and state that ruling 36's message-only law governs evolving-session gap-closure caused by ordinary data changes. Alternative: revoke error wakes and require their owner to send a message. | The alternative changes the wake owner and requires a separate source phase; the recommendation changes only this PRD's scope wording. |
-| PLAN | **Recommend:** declare a new `:seon.cluster.agent/plan` ref and a separately identified plan shape; do not reuse instructions or run plan-digest. Alternative: remove plan from the V1 delta example and prove provenance on another already-declared relationship. | Recommendation unblocks Phase 5 only after the plan's meaning and ordered item model are ruled. |
-| D3 | **Recommend:** add a distinct `:my.run/budget-wait` arm to `:my.run/value`, preserving `:my.run/disposition :wait` but replacing the explicit wait note with `{:my.run.condition/kind :my.run.condition/budget-exhausted, :seon.cluster.run/turns-remaining 0}`. The loop appends and evaluates one system-authored pure constructor form, so the existing terminal receipt stores the ordinary value in `:seon.cluster.eval/result-edn` and completion delivery adds `:my.run/delivered-to`. Alternative: make exhaustion a run error, not a wait. | **Zero before open:** open/claim a generated run, append the budget form at ordinal 0, settle, deliver, close; no provider call. **Zero after a form:** append it at the next ordinal after the terminal receipt, settle, deliver, close. Phase 6 must name the constructor and transaction composition after the owner selects the arm. |
-| D4 | **Recommend:** correction is re-observation inside the next qualifying addressed run; evolving sessions never invoke `refresh-tx`. Staleness is retained read evidence no longer current or retained program generation differing from the acquired one. Alternative: a program-generation event invokes `refresh-tx`, creating a correction run. | Recommendation keeps T2's no-passive-history rule and deletes the standalone correction phase; Phase 7 becomes a next-wake generator regression. The alternative must name the event owner and why it is not a second passive mechanism. |
-| D5 | **Recommend:** approve the invocation-local, one-entry-at-a-time state machine specified above. Alternative: keep the landed per-entry re-pull until measurement proves it unacceptable. | Recommendation enables Phases 1 and 3. It does not emit an atomic suffix and never retains a fork. |
-| D6 | **Recommend:** approve additions-only `since` deltas, durable read-basis receipt facts, and current-database numeric-id pulls; retractions are not V1 delta entries. Alternative: admit a history-database mechanism and broaden the ruling. | Recommendation enables Phase 4 without a new callable arity. The alternative reopens the data/query design and must be ruled before implementation. |
-
 ## Graduation gates
 
+- Ruling 40's test-result-facts lane has landed and this document cites its
+  commit; no stubbed result path remains.
 - The retargeted usage test owns all T0 bytes and passes through `bin/test`.
 - The explained-set trace passes for every emitted entry; ruling 29 readiness
   and ruling 14 ready ordering are separately asserted.
 - One generation invocation performs one membership pull, appends one entry at
-  a time, and creates a fresh fork per entry.
+  a time, creates a fresh fork per entry, and never performs the deleted
+  per-form re-pull.
 - Prefix drift settles as the declared flat error; no generator exception
   escapes the loop.
 - T1 uses the listing execution basis, an additions-only since database,
-  numeric current pulls, and joined tx-meta provenance.
+  numeric current pulls, joined tx-meta provenance, and zero new callable
+  arities.
 - A passive T2 change creates no run, form, receipt, or settled-history entry.
+- Messages and errors addressed to the agent both wake it; unrelated data
+  changes remain passive.
+- Zero turns force-settles and delivers the typed budget-exhausted `:wait` in
+  both zero-before-open and zero-after-form cases, without a provider call.
+- A correction appends the same read at a newer basis, keeps the old bytes
+  unchanged, and creates no refresh run or meta-entry.
 - Example A's namespace unit selects the agent-authored AI render by explicit
   owning namespace plus unique input/output contract fit; another agent's walk
   sees those bytes, and the replica test is not falsely reported as executed.
+- Root's preview is the same gap closure over the agent; no fixed preview depth
+  or second preview mechanism exists.
+- The environment carries derivation inputs and contains no opening context.
+- From current facts and empty history, a real reborn episode is compact and
+  valid; demonstrated functions, declared renders, and green tests are not
+  retaught, current fact renders preserve durable meaning, and the superseded
+  history remains queryable.
 - The generate→call dependency and its focused regressions are landed in
   commit `7d036203e`; executing that source lane's cluster gate is outside
   this documentation revision's verification boundary.
