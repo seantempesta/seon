@@ -231,6 +231,21 @@ back — everywhere, for every agent, with no maintained list of forms.
     an agent that discovers something is never re-taught it after a
     rebirth.
 
+## Ruling 47 (owner, 2026-08-12 night — the survivability law)
+
+47. **What must survive rebirth must be a fact with a declared render;
+    prose-only reasoning dies at episode boundaries by design** — the
+    transport law applied to cognition (rebirth IS recovery of context).
+    Consequences: an evolving plan collapses at rebirth into its CURRENT
+    state because the plan shape's declared render shows recent
+    completions + remaining items (older completions elide with requery)
+    — compaction of stateful domain shapes is their render function's
+    job, never a separate algorithm; my.plan must be fact-backed with
+    statuses and such a render (implementation deltas named by the
+    capability proof if weaker today); and the teaching steers agents
+    into survivable habits ("if it matters past this episode, make it a
+    fact") — true mechanically, not advisory.
+
 ## The mechanism (composed from the verified reports)
 
 ### One derivation
