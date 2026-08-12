@@ -9,8 +9,8 @@
   configured depth, width, string, and node caps. Reference values with a
   registry-declared identity projection admit only that identity; other
   reference types and arrays are never entered. That registry question is
-  asked against ONE declaration projection resolved for the whole admission,
-  never once per node.
+  asked against ONE declaration projection handed with the admission, never
+  reached process-sideways and never once per node.
 
   `admit-value` returns the one bounded print node and its derived semantic
   value without constructing a print sink. `admit` adds
@@ -72,8 +72,6 @@
   (when (instance? sci.impl.types.SciTypeInstance value)
     (str (sci.types/-get-type value))))
 
-(declare safe-description)
-
 (defn- class-name
   [value]
   (let [class-name* (.getName (class value))]
@@ -82,15 +80,15 @@
       class-name*)))
 
 (defn- object-node
-  [value caps]
-  (let [description (safe-description value caps)
-        description (if (and description (ifn? value))
-                      (sci.namespaces/demunge description)
-                      description)]
-    (cond-> {::print/face ::print/object
-             ::print/class (class-name value)
-             ::print/address (format "0x%x" (System/identityHashCode value))}
-      description (assoc ::print/rep (pr-str description)))))
+  [value]
+  (cond-> {::print/face ::print/object
+           ::print/class (class-name value)}
+    ;; SCI's maintained Namespace type owns a stable symbolic name. Generic
+    ;; host `toString` values commonly include the same process identity that
+    ;; this projection exists to exclude, so no other object description is
+    ;; admitted into an agent-facing print node.
+    (instance? sci.lang.Namespace value)
+    (assoc ::print/rep (pr-str (str (sci.types/getName value))))))
 
 (defn- take-node!
   "Consume one node from the budget; false when it is exhausted."
@@ -118,57 +116,14 @@
   (vreset! (:capped? state) true)
   (node ::print/pruned))
 
-(defn- safe-description
-  "A bounded `str` of `value`, when taking one cannot hurt.
-  Reference types are never dereferenced and sequential things are
-  never realized — `str` on a lazy sequence walks it, and a host call
-  cannot be interrupted. Anything else gets one truncated toString,
-  guarded, because a description that throws is not a description."
-  [value caps]
-  (when-not (or (instance? clojure.lang.IDeref value)
-                (instance? clojure.lang.Seqable value)
-                (instance? java.util.Collection value)
-                (instance? clojure.lang.IPending value)
-                (some-> value class .isArray))
-    (try
-      (let [described (str value)
-            limit (:seon.config.eval.result/max-string caps)]
-        (if (<= (count described) limit)
-          described
-          nil))
-      (catch Throwable _ nil))))
-
 (declare project)
-
-(defn- admission-declarations
-  "ONE declaration projection for the whole admission.
-
-  A `delay`, not a value, for the same reason `seon.db/read-declarations`
-  is one: the commonest admission is a scalar or a string, which asks no
-  identity question at all, and resolving eagerly would make every result
-  pay one complete classpath population (152 resource reads, ~14 ms) for a
-  question it never asks.
-
-  Asking per NODE instead of per ADMISSION was the defect this replaces:
-  `{:rows [20 small maps]}` resolved the population 22 times — 374 ms of
-  re-reading schema resources for one twenty-one-map value, and 54,884
-  fallbacks from this one line in an hour of an ordinary cluster
-  (`docs/seon/issues/value-admission-resolves-the-declaration-population-per-node.md`).
-
-  A projection supplied on the calling thread is used as-is, which is what
-  makes this free rather than merely bounded: it is the same object across
-  admissions, so the descriptors compiled from it are reused too."
-  []
-  (delay (or (schema/current-projection)
-             (schema/declaration-projection))))
 
 (defn- identity-only-node
   [value child-depth state]
-  (when-let [projection (schema/identity-only-projection-in
-                         @(:declarations state)
-                         value)]
+  (when-let [projection (some-> (:projection state)
+                                (schema/identity-only-projection-in value))]
     (if (take-node! state)
-      (assoc (object-node value (:caps state))
+      (assoc (object-node value)
              ::print/value
              (project (:seon.schema/identity-value projection)
                       child-depth state))
@@ -320,8 +275,8 @@
 
       ;; reference types and arrays: named, never entered. This is what
       ;; makes a cycle unrepresentable rather than detected.
-      (instance? clojure.lang.IDeref value) (object-node value (:caps state))
-      (some-> value class .isArray) (object-node value (:caps state))
+      (instance? clojure.lang.IDeref value) (object-node value)
+      (some-> value class .isArray) (object-node value)
 
       ;; a record IS map-like; it keeps its fields and the name sci gives
       ;; it. The tag rides at the same level as the fields so the
@@ -378,7 +333,7 @@
       ;; a sci type instance that is neither map- nor collection-like
       ;; (a deftype) is named by sci, not by its host class
       :else
-      (object-node value (:caps state)))))
+      (object-node value))))
 
 (defn- project
   "One node: call the interrupt-fn, then project — or mark and move on."
@@ -494,13 +449,14 @@
 
 (defn- admit*
   [{::keys [value interrupt-fn caps record]
+    projection :seon.schema/projection
     on-core-error :seon.config/on-core-error}]
   (let [state {:interrupt-fn interrupt-fn
                :caps caps
                :on-core-error on-core-error
-               ;; ONE for the whole walk, forced only if an identity
-               ;; question is actually asked
-               :declarations (admission-declarations)
+               ;; Identity projection is handed by the operation boundary.
+               ;; Ordinary scalar/collection admissions never require it.
+               :projection projection
                ;; the root is a node like any other
                :nodes (volatile! (dec (long (:seon.config.eval.result/max-nodes
                                              caps))))

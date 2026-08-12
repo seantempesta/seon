@@ -148,7 +148,6 @@
                                [:seon.print/face
                                 [:= :seon.print/object]]
                                [:seon.print/class :string]
-                               [:seon.print/address :string]
                                [:seon.print/rep
                                 {:optional true}
                                 :string]]]

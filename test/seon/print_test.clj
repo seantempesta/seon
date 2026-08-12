@@ -1,6 +1,7 @@
 (ns seon.print-test
   "Generative laws for the one admitted-value emitter."
   (:require [clojure.edn :as edn]
+            [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [clojure.walk :as walk]
@@ -241,13 +242,10 @@
                         no-cuts)
         atom-node (admitted-node (atom {:private/value 42}))
         atom-text (print/emit-text atom-node no-cuts)
-        coincidental-identity-node
-        (assoc atom-node :seon.print/address "0x1f42ab")
         function-text (print/emit-text
                        (admitted-node (sci-value "(fn named_face [] 1)"))
                        no-cuts)]
-    (is (re-matches #"#object\[sci\.lang\.Namespace 0x[0-9a-f]+ \"face\.ns\"\]"
-                    namespace-text))
+    (is (= "#object[sci.lang.Namespace \"face.ns\"]" namespace-text))
     (is (= "#'user/face_var"
            (print/emit-text
             (admitted-node (sci-value "(def face_var 1) #'face_var"))
@@ -259,21 +257,77 @@
             (admitted-node
              (sci-value "(defrecord FaceRecord [a]) (->FaceRecord 1)"))
             no-cuts)))
-    (is (= #{:seon.print/face :seon.print/class :seon.print/address}
+    (is (= #{:seon.print/face :seon.print/class}
            (set (keys atom-node)))
-        "an IDeref is represented only by its object marker, type, and identity")
+        "an IDeref is represented only by its object marker and stable type")
     (is (= :seon.print/object (:seon.print/face atom-node)))
     (is (= "clojure.lang.Atom" (:seon.print/class atom-node)))
-    (is (re-matches #"0x[0-9a-f]+" (:seon.print/address atom-node)))
-    (is (= (str "#object[" (:seon.print/class atom-node) " "
-                (:seon.print/address atom-node) "]")
-           atom-text))
-    (is (= "#object[clojure.lang.Atom 0x1f42ab]"
-           (print/emit-text coincidental-identity-node no-cuts))
-        "value-like digits inside a permitted identity remain identity bytes")
+    (is (= "#object[clojure.lang.Atom]" atom-text))
     (is (str/starts-with? function-text "#object["))
+    (is (not (str/includes? function-text "@"))
+        "generic host toString identity never reaches the print node")
     (is (not (str/includes? function-text "$"))
         "function class names are demunged")))
+
+(deftest agent-facing-object-faces-are-byte-stable-across-processes
+  (let [expression
+        (str "(require '[sci.core :as sci] '[seon.print :as print] "
+             "'[seon.sci.admit :as admit]) "
+             "(let [values [(sci/eval-string \"(create-ns 'stable.ns)\") "
+             "(atom 1)] rendered "
+             "(mapv (fn [value] "
+             "(let [node (:seon.sci.admit/print-node "
+             "(admit/admit-value {:seon.sci.admit/value value "
+             ":seon.sci.admit/interrupt-fn (fn []) "
+             ":seon.sci.admit/caps "
+             "{:seon.config.eval.result/max-depth 8 "
+             ":seon.config.eval.result/max-collection 32 "
+             ":seon.config.eval.result/max-string 4096 "
+             ":seon.config.eval.result/max-nodes 4096} "
+             ":seon.config/on-core-error :record}))] "
+             "(print/emit-text node " (pr-str no-cuts) "))) values)] "
+             "(print (pr-str rendered)))")
+        run #(shell/sh "java" "-cp" (System/getProperty "java.class.path")
+                       "clojure.main" "-e" expression)
+        left (run)
+        right (run)
+        left-rendered (last (str/split-lines (:out left)))
+        right-rendered (last (str/split-lines (:out right)))]
+    (is (zero? (:exit left)) (:err left))
+    (is (zero? (:exit right)) (:err right))
+    (is (= (pr-str ["#object[sci.lang.Namespace \"stable.ns\"]"
+                    "#object[clojure.lang.Atom]"])
+           left-rendered))
+    (is (= left-rendered right-rendered))))
+
+(deftest refitting-a-truncated-collection-preserves-its-honest-elision
+  (let [total 210
+        node {:seon.print/face :seon.print/vector
+              :seon.print/items
+              [{:seon.print/face :seon.print/symbol
+                :seon.print/value 'seon.bootstrap}
+               {:seon.print/face :seon.print/elided
+                :seon.print/omitted (dec total)
+                :seon.print/elision-unit :children
+                :seon.render.data/total total
+                :seon.render.data/path []
+                :seon.render.data/next-offset 1
+                :seon.render.profile/id :seon.render.profile/agent
+                :seon.print/requery-id [:seon.db/query :requires]}]}
+        fitted (print/fit
+                node
+                {:seon.render.profile/id :seon.render.profile/agent
+                 :seon.render.profile/token-budget 10000
+                 :seon.render.profile/max-depth 8
+                 :seon.render.profile/max-children 1
+                 :seon.render.profile/composition :multiline})
+        items (:seon.print/items fitted)
+        elision (peek items)
+        rendered (dec (count items))]
+    (is (= :seon.print/elided (:seon.print/face elision)))
+    (is (= total (:seon.render.data/total elision)))
+    (is (= (- total rendered) (:seon.print/omitted elision)))
+    (is (= [:seon.db/query :requires] (:seon.print/requery-id elision)))))
 
 (deftest throwable-face-is-readable-error-data
   (let [failure (ex-info "outer" {:outer true}

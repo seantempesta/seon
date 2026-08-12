@@ -393,17 +393,16 @@
 
 (defparity "B10" :passing
   (let [printed (:printed (first (repl-session ["(atom 1)"])))]
-    (checked "#object[clojure.lang.Atom 0x…]"
+    (checked "#object[clojure.lang.Atom]"
              printed
-             (boolean
-              (re-matches #"#object\[clojure\.lang\.Atom 0x[0-9a-f]+(?: .*)?\]"
-                          printed)))))
+             (= "#object[clojure.lang.Atom]" printed))))
 
 (defparity "B11" :passing
   (let [printed (:printed (first (repl-session ["(fn [] 1)"])))]
     (checked "a #object face with a demunged function name"
              printed
              (and (str/starts-with? printed "#object[")
+                  (not (str/includes? printed "@"))
                   (not (str/includes? printed "$"))
                   (not (str/includes? printed "sci.impl"))))))
 

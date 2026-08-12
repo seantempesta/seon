@@ -179,15 +179,12 @@
   (let [projection (value/prepare (unit (atom {:private/value 42})))
         tree (:seon.render.value/tree projection)
         text (value/render-ai-data projection)]
-    (is (= #{:seon.print/face :seon.print/class :seon.print/address}
+    (is (= #{:seon.print/face :seon.print/class}
            (set (keys tree)))
         "an opaque reference carries no value or representation field")
     (is (= :seon.print/object (:seon.print/face tree)))
     (is (= "clojure.lang.Atom" (:seon.print/class tree)))
-    (is (re-matches #"0x[0-9a-f]+" (:seon.print/address tree)))
-    (is (= (str "#object[" (:seon.print/class tree) " "
-                (:seon.print/address tree) "]")
-           text))))
+    (is (= "#object[clojure.lang.Atom]" text))))
 
 (deftest routed-page-size-is-separate-from-print-length
   ;; a configured window of N shows N items — the lookahead slot detects

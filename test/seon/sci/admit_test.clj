@@ -61,6 +61,10 @@
 (def ^:private caps
   (config/result-caps (config/defaults)))
 
+(def ^:private packaged-projection
+  (delay (schema/declaration-projection
+          ((requiring-resolve 'seon.schema.edn/packaged-forms)))))
+
 (defn- request
   ([value] (request value (:interrupt-fn (armed))))
   ([value interrupt-fn] (request value interrupt-fn caps))
@@ -68,6 +72,7 @@
    {:seon.sci.admit/value value
     :seon.sci.admit/interrupt-fn interrupt-fn
     :seon.sci.admit/caps caps
+    :seon.schema/projection @packaged-projection
     ;; production disposition by default: these trials are about the
     ;; codec, and the panic case has its own test
     :seon.config/on-core-error :record
@@ -187,8 +192,8 @@
         reference (->IdentityOnlyRecord 41 payload)
         projection (projection-with-identity-only-record)
         admitted
-        (with-redefs [schema/current-projection (constantly projection)]
-          (admit/admit (request {:outer [{:reference reference}]})))
+        (admit/admit (assoc (request {:outer [{:reference reference}]})
+                            :seon.schema/projection projection))
         semantic (:seon.sci.admit/value admitted)
         print-node (:seon.sci.admit/print-node admitted)
         object-nodes

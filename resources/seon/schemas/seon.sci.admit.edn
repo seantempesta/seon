@@ -43,6 +43,9 @@
                   [:seon.sci.admit/caps :seon.sci.admit/caps]
                   [:seon.config/on-core-error
                    :seon.config/on-core-error]
+                  [:seon.schema/projection
+                   {:optional true}
+                   :seon.schema/projection]
                   [:seon.sci.admit/record
                    {:optional true}
                    :seon.sci.admit/record]],

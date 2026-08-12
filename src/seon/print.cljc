@@ -221,6 +221,22 @@
 
     :else nil))
 
+(def ^:private shipped-option-defaults
+  (delay
+    (let [forms #?(:clj (schema.edn/packaged-forms)
+                   :cljs {})]
+      (into {}
+            (keep
+             (fn [entry]
+               (when (vector? entry)
+                 (let [attribute (first entry)
+                       properties
+                       (schema.form/attr-form-properties
+                        (get forms attribute))]
+                   (when (contains? properties ::default)
+                     [attribute (::default properties)])))))
+            (get forms ::options)))))
+
 (defn- option-defaults
   []
   ;; Every emit resolves these defaults, so the declaration population is read
@@ -229,17 +245,7 @@
   ;; resource per option (measured 2026-08-07: 67.9 ms / 912 resource reads for
   ;; one call with no projection supplied — issue
   ;; packaged-forms-rereads-every-schema-resource-per-call).
-  (let [forms (schema/declaration-population)]
-    (into {}
-          (keep
-           (fn [entry]
-             (when (vector? entry)
-               (let [attribute (first entry)
-                     properties
-                     (schema.form/attr-form-properties (get forms attribute))]
-                 (when (contains? properties ::default)
-                   [attribute (::default properties)])))))
-          (get forms ::options))))
+  @shipped-option-defaults)
 
 (defn default-options
   "The complete shipped print options derived from their declarations."
@@ -512,7 +518,7 @@
 (defmethod emit ::object
   [node sink _ _ _]
   (-token sink ::object
-          (str "#object[" (::class node) " " (::address node)
+          (str "#object[" (::class node)
                (when-some [rep (::rep node)] (str " " rep)) "]")))
 
 (defmethod emit ::truncated-string
@@ -522,7 +528,7 @@
 (defmethod emit ::failed
   [node sink _ _ _]
   (-token sink ::object
-          (str "#object[" (::class node) " 0x0 "
+          (str "#object[" (::class node) " "
                (pr-str (str "projection failed: " (::message node))) "]")))
 
 (defmethod emit ::throwable
@@ -695,23 +701,31 @@
 (defn- fit-children
   [children profile depth path child-limit string-limit child-fit]
   (let [children (vec children)
-        children (if (= ::elided (::face (peek children)))
-                   (pop children)
-                   children)
+        carried-elision (when (= ::elided (::face (peek children)))
+                          (peek children))
+        children (if carried-elision (pop children) children)
         admitted-total (count children)
         total (or (when (empty? path)
                     (:seon.render.data/total profile))
+                  (:seon.render.data/total carried-elision)
+                  (when-some [omitted (::omitted carried-elision)]
+                    (+ admitted-total omitted))
                   admitted-total)
-        retained (min child-limit admitted-total)]
+        retained (min child-limit admitted-total)
+        fitted-elision
+        (when (< retained total)
+          (merge
+           (elision-node profile path retained (- total retained) total
+                         :children nil)
+           (select-keys carried-elision [::requery-id ::requery-refusal])))]
     (cond->
      (mapv (fn [index child]
              (child-fit child profile (inc depth) (conj path index)
                         child-limit string-limit))
            (range retained)
            (subvec children 0 retained))
-      (< retained total)
-      (conj (elision-node profile path retained (- total retained) total
-                          :children nil)))))
+      fitted-elision
+      (conj fitted-elision))))
 
 (defn- fit-string
   [node profile path string-limit]
