@@ -67,23 +67,8 @@ existing prefix instead of ordinal zero (`src/seon/cluster/loop.clj:1604-1614`).
 - **T2 RULED — pending page, settle at wake**: the page pulls for the user
   now; the agent pulls at wake; ruling 36 intact.
 
-## Remaining decisions for markup (D3–D5)
+## Remaining decisions for markup (D3–D6)
 
-- **D1 — Demand-pull generation (Fable's principal divergence,
-  recommended).** Invert the landed supply-push (emit every dependency-ready
-  candidate in the pull) to: fix the ACTION ARC first (the task message →
-  the demonstration → the disposition), emit only ITS explained-set closure.
-  One inversion = the survey-loop fix + the lean-context fix + a cost fix;
-  the ablation evidence (demonstration load-bearing; discovery-only variants
-  never acted) supports it. Discovery beyond the arc's closure stays
-  one doc away, never pre-paid.
-- **D2 — Demo artifacts are real work; the usage flag must not replicate.**
-  Embrace the walkthrough's defns as system-authored facts with provenance
-  (never retracted, never sandboxed) — but Fable caught the landed demo
-  stamping `^{:seon.test/usage true}` into EVERY agent's namespace,
-  advertising a canonical demonstration per agent nobody declared.
-  Recommended: the usage flag lives only on the shipped my.run walkthrough
-  test; the per-agent replica carries plain deftest metadata.
 - **D3 — Zero turns force-settles `:wait` with a typed budget-exhausted
   condition** (Fable's unknown-4 answer): the episode ends loudly as data,
   the requester sees why, nothing silently stops. Currently derivation-side
