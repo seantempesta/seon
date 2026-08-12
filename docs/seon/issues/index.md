@@ -16,10 +16,19 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (36)
+## Blocker (42)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Make outward values unable to bypass one total render contract](class-outward-values-bypass-total-render-contract.md) | blocker | class-kill queue |
+| [Give every loaded artifact enforced source identity](class-loaded-artifacts-lack-source-identity.md) | blocker | class-kill queue |
+| [Make mutable resources carry their root and lifetime](class-mutable-resources-lack-explicit-root-and-lifetime.md) | blocker | class-kill queue |
+| [Make accepted work require terminal evidence](class-accepted-work-can-end-without-terminal-evidence.md) | blocker | class-kill queue |
+| [Make destructive reachability changes atomic](class-destructive-reachability-changes-are-not-atomic.md) | blocker | class-kill queue |
+| [Emit an elision value when a collection render drops results](collection-render-drops-209-of-210-results-without-an-elision-value.md) | blocker | render/print prefix-stability wave |
+| [Record a call edge when an agent form calls a core function](agent-form-calls-to-core-namespaces-are-not-indexed.md) | blocker | program-graph indexing wave |
+| [Stop emitting object identity addresses into agent context](object-identity-addresses-break-prompt-prefix-stability.md) | blocker | render/print prefix-stability wave |
+| [Replace the unregistered `:ifn` schema that breaks source publication](unregistered-ifn-malli-schema-breaks-source-publication.md) | blocker | flow graph-construction lane (working-tree edit) |
 | [Make the render value floor total over ordinary unqualified-key maps](render-value-floor-refuses-any-map-with-unqualified-keys.md) | blocker | interface-economy W1 total-floor wave |
 | [Publish terminal evidence for every background binary result](background-binary-settlement-does-not-publish-required-event.md) | blocker | background settlement investigation |
 | [Derive a completion reply from the triggering message](message-completion-replies-from-the-wrong-agent-and-duplicates-the-trigger.md) | blocker | message delivery repair wave |
@@ -55,10 +64,17 @@ See `README.md` for the convention.
 | [Settle what arrived when a provider stream closes mid-body](a-mid-stream-provider-disconnect-discards-the-whole-turn.md) | blocker | whole-system arc repair wave |
 | [Await every worker writer before deleting its root](test-runner-cleans-a-worker-root-while-kondo-is-still-writing.md) | blocker | test runner cleanup repair wave |
 
-## Friction (135)
+## Friction (140)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Make proofs unable to pass without exercising their premise](class-proofs-pass-without-exercising-their-premise.md) | friction | class-kill queue |
+| [Prevent diagnostics from collapsing evidence into noise or absence](class-diagnostics-collapse-evidence-into-noise-or-absence.md) | friction | class-kill queue |
+| [Make every durable contract predicate identifiable](class-anonymous-contracts-cannot-survive-publication.md) | friction | class-kill queue |
+| [Make classification query facts instead of text and hand lists](class-classification-is-inferred-from-hand-lists.md) | friction | class-kill queue |
+| [Make domain order come only from recorded order facts](class-domain-order-falls-through-to-strings-and-hashes.md) | friction | class-kill queue |
+| [Make local updates unable to recompute global projections](class-local-updates-recompute-global-projections.md) | friction | class-kill queue |
+| [Translate dependency representations once at their boundary](class-dependency-representations-leak-past-boundaries.md) | friction | class-kill queue |
 | [Preserve per-agent credential selection through provider resolution](provider-descriptor-overwrites-per-agent-credential-selection.md) | friction | AI provider settings precedence wave |
 | [Record posh's cardinality-one pull-analysis arity defect](posh-cardinality-one-pull-analysis-has-an-arity-defect.md) | friction | upstream-delta sweep |
 | [Read terminal failure from the settlement key its producer writes](loop-settlement-consumer-reads-a-key-no-producer-writes.md) | friction | loop settlement contract wave |
@@ -193,10 +209,12 @@ See `README.md` for the convention.
 | [Preserve the interrupted blob staging artifact until it can be observed](interrupted-blob-staging-leaves-no-observable-artifact.md) | friction | blob staging repair wave |
 | [Reconcile the error-class catalog with declared schemas and renderers](error-class-catalog-and-renderers-disagree.md) | friction | error class contract repair |
 
-## Cleanup (13)
+## Cleanup (15)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Reject readerless rows and duplicate mechanisms at publication](class-readerless-duplicate-mechanisms-survive-cuts.md) | cleanup | class-kill queue |
+| [Derive callable shape documentation from executable contracts](class-documentation-restates-executable-contracts.md) | cleanup | class-kill queue |
 | [Carry schema source provenance as immutable admission data](schema-source-provenance-accumulates-in-a-global-atom.md) | cleanup | schema admission cleanup wave |
 | [Make fresh CLJC namespaces portable or name them CLJ](fresh-cljc-files-are-jvm-only.md) | cleanup | fresh portability cleanup wave |
 | [Select duplicate-identity refusal evidence deterministically](duplicate-identity-refusal-evidence-is-unordered.md) | cleanup | reconcile evidence cleanup wave |
