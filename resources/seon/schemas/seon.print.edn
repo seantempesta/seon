@@ -25,6 +25,9 @@
               :seon.print/elided
               :seon.print/projected
               :seon.print/pruned],
+             :reference [:or :symbol :seon.db/ref],
+             :references [:set :seon.print/reference],
+             :identity-attributes [:set :qualified-keyword],
              :length
              [:int
               {:min 0,

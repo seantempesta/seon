@@ -49,6 +49,29 @@
                   :seon.sci.admit/caps admission-caps
                   :seon.config/on-core-error :record}))))
 
+(deftest print-nodes-expose-symbols-and-entity-identities-without-shape-rules
+  (let [node (admitted-node
+              {:frontier/symbol 'my.run/complete
+               :frontier/namespace 'my.message
+               :frontier/entity
+               {:seon.cluster.message/id "task-1"
+                :frontier/nested
+                [[:seon.ns/name 'my.run]
+                 {:seon.cluster.agent/id "worker"}]}})]
+    (is (= #{'my.run/complete
+             'my.message
+             'my.run
+             [:seon.cluster.message/id "task-1"]
+             [:seon.ns/name 'my.run]
+             [:seon.cluster.agent/id "worker"]}
+           (print/references
+            #{:seon.cluster.message/id :seon.ns/name
+              :seon.cluster.agent/id}
+            node)))
+    (is (not (contains? (print/references #{} node)
+                        [:seon.cluster.message/id "task-1"]))
+        "identity recognition comes only from schema-derived attributes")))
+
 (defn- sci-value
   [source]
   (sci/eval-string source))

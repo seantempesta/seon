@@ -557,6 +557,71 @@
                   {:seon.error/kind ::unknown-face
                    ::face (::face node)})))
 
+(defn- scalar-node-value
+  [node]
+  (when (contains? #{::nil ::boolean ::number ::keyword ::symbol ::char
+                     ::string ::inst ::uuid}
+                   (::face node))
+    (::value node)))
+
+(defn- lookup-reference
+  [identity-attributes node]
+  (when (and (= ::vector (::face node))
+             (= 2 (count (::items node))))
+    (let [[attribute-node value-node] (::items node)
+          attribute (scalar-node-value attribute-node)
+          value (scalar-node-value value-node)]
+      (when (and (contains? identity-attributes attribute)
+                 (some? value))
+        [attribute value]))))
+
+(defn- entity-references
+  [identity-attributes node]
+  (when (contains? #{::map ::record} (::face node))
+    (into #{}
+          (keep (fn [entry]
+                  (when (vector? entry)
+                    (let [[attribute-node value-node] entry
+                          attribute (scalar-node-value attribute-node)
+                          value (scalar-node-value value-node)]
+                      (when (and (contains? identity-attributes attribute)
+                                 (some? value))
+                        [attribute value])))))
+          (::entries node))))
+
+(defn- child-nodes
+  [node]
+  (case (::face node)
+    (::vector ::list ::set) (::items node)
+    (::map ::record) (mapcat #(if (vector? %) % [%]) (::entries node))
+    ::throwable [(::value node)]
+    []))
+
+(defn references
+  "Return every symbol and entity identity structurally present in a print node.
+
+  The caller supplies the schema-derived identity attributes. This walker has
+  no knowledge of agent, message, namespace, or other domain shapes: a symbol
+  in a value is a reference, and a lookup ref or identity-bearing map in a
+  value is an entity reference. The generated-opening pull applies membership
+  after this walk; this function only reports what the settled value exposed."
+  {:malli/schema [:=> [:cat :seon.print/identity-attributes
+                       :seon.print/node]
+                  :seon.print/references]}
+  [identity-attributes node]
+  (loop [pending [node]
+         found #{}]
+    (if-let [current (peek pending)]
+      (let [symbol-value (when (= ::symbol (::face current))
+                           (::value current))
+            lookup (lookup-reference identity-attributes current)
+            entity-refs (entity-references identity-attributes current)]
+        (recur (into (pop pending) (child-nodes current))
+               (cond-> (into found entity-refs)
+                 symbol-value (conj symbol-value)
+                 lookup (conj lookup))))
+      found)))
+
 (defn- emit-node
   [node sink options depth path]
   (if (and (contains? #{::vector ::list} (::face node))
