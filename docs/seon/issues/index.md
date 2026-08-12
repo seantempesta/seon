@@ -16,10 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (43)
+## Blocker (44)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Store the model's raw reply as a durable fact even when it parses to no forms](prose-only-model-replies-are-not-durable-facts.md) | blocker | reply-durability fix (overnight queue) |
 | [Make outward values unable to bypass one total render contract](class-outward-values-bypass-total-render-contract.md) | blocker | class-kill queue |
 | [Give every loaded artifact enforced source identity](class-loaded-artifacts-lack-source-identity.md) | blocker | class-kill queue |
 | [Make mutable resources carry their root and lifetime](class-mutable-resources-lack-explicit-root-and-lifetime.md) | blocker | class-kill queue |
