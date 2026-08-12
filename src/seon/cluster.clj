@@ -272,20 +272,23 @@
         message (if nil-deref?
                   "The evaluated form dereferenced nil."
                   (str (or (:cause value) (:message cause-entry))))]
-    (error/diagnostic
-     {:seon.error/kind kind
-      :seon.error/message message
-      :seon.error/diagnostic-layer :development-mcp
-      :seon.error/diagnostic-operation :evaluate-jvm
-      :seon.error/diagnostic-member :exception
-      :seon.error/diagnostic-expected :successful-prepl-evaluation
-      :seon.error/diagnostic-offending (str (:type cause-entry))
-      :seon.error/diagnostic-cause message
-      :seon.error/diagnostic-evidence
-      (when frame {:seon.dev.mcp/frame frame})
-      :seon.error/data
-      (cond-> {:seon.dev.mcp/exception-class (str (:type cause-entry))}
-        frame (assoc :seon.dev.mcp/frame frame))})))
+    (cond->
+     (error/diagnostic
+      {:seon.error/kind kind
+       :seon.error/message message
+       :seon.error/diagnostic-layer :development-mcp
+       :seon.error/diagnostic-operation :evaluate-jvm
+       :seon.error/diagnostic-member :exception
+       :seon.error/diagnostic-expected :successful-prepl-evaluation
+       :seon.error/diagnostic-offending (str (:type cause-entry))
+       :seon.error/diagnostic-cause message
+       :seon.error/diagnostic-evidence
+       (when frame {:seon.dev.mcp/frame frame})
+       :seon.error/data
+       (cond-> {:seon.dev.mcp/exception-class (str (:type cause-entry))}
+         frame (assoc :seon.dev.mcp/frame frame))})
+      true (assoc :seon.dev.mcp/exception-class (str (:type cause-entry)))
+      frame (assoc :seon.dev.mcp/frame frame))))
 
 (defn- mcp-project
   [cluster-name bootstrap-effective value]
