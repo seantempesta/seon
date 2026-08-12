@@ -20,6 +20,7 @@
             [sci.interrupt :as sci.interrupt]
             [seon.call-preparation :as call-preparation]
             [seon.db :as db]
+            [seon.error :as error]
             [seon.error.refusal :as error.refusal]
             [seon.schema :as schema]
             [seon.sci.admit :as admit])
@@ -473,27 +474,38 @@
                           :seon.sci.admit/record diagnostic-record}
                    subject (assoc :seon.fn/sym subject))
         existing (error.refusal/refusal throwable)]
-    (if (:seon.error/kind existing)
-      (cond-> (update existing :seon.error/data merge evidence)
-        ;; A refusal is raised as ex-info data that need not repeat the
-        ;; message, but an error VALUE must always say what happened —
-        ;; the run loop reads its presence as the failed state, and a
-        ;; refusal preserved without one stored a nil there.
-        (not (:seon.error/message existing))
-        (assoc :seon.error/message
-               (or (ex-message throwable) (.getName (class throwable)))))
-      (cond-> {:seon.error/kind (if timed-out? time-limit-kind failure-kind)
-               :seon.error/message
-               (cond->> (if timed-out?
-                          (str "Ran out of time after "
-                               (:seon.eval/duration-ms diagnostic-record) "ms.")
-                          (or (ex-message throwable)
-                              (.getName (class throwable))))
-                 subject (str "Invocation of " subject " failed: "))
-               :seon.error/data evidence}
+    (error/diagnostic
+     {:seon.error/kind
+      (or (:seon.error/kind existing)
+          (if timed-out? time-limit-kind failure-kind))
+      :seon.error/message
+      (or (:seon.error/message existing)
+          (cond->> (if timed-out?
+                     (str "Ran out of time after "
+                          (:seon.eval/duration-ms diagnostic-record) "ms.")
+                     (or (ex-message throwable)
+                         (.getName (class throwable))))
+            subject (str "Invocation of " subject " failed: ")))
+      :seon.error/diagnostic-layer :sci
+      :seon.error/diagnostic-operation (or subject :evaluation)
+      :seon.error/diagnostic-member
+      (if (:seon.error/kind existing) :nested-refusal :throwable)
+      :seon.error/diagnostic-expected :successful-evaluation
+      :seon.error/diagnostic-offending
+      (or (:sci.impl/symbol (ex-data throwable)) subject)
+      :seon.error/diagnostic-cause
+      (or (ex-message throwable) (.getName (class throwable)))
+      :seon.error/diagnostic-evidence diagnostic-record
+      :seon.error/data
+      (cond-> (merge (:seon.error/data existing) evidence)
         (ex-data throwable)
-        (assoc-in [:seon.error/data :seon.sci.eval/data]
-                  (ex-data throwable))))))
+        (assoc :seon.sci.eval/data (ex-data throwable))
+
+        (:sci.impl/symbol (ex-data throwable))
+        (assoc :seon.sci.eval/symbol (:sci.impl/symbol (ex-data throwable)))
+
+        (and (:seon.error/message existing) (ex-message throwable))
+        (assoc :seon.error/throw-site-message (ex-message throwable)))})))
 
 (defn unarmed-record
   "The diagnostic record for a failure that never reached an arm."

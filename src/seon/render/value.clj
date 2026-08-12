@@ -9,6 +9,23 @@
 
 (schema.edn/load! {})
 
+(defn transacted
+  "Restore a pulled entity to the transaction shape used for selection."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [entity]
+  (into {}
+        (map (fn [[attribute value]]
+               [attribute
+                (cond
+                  (and (map? value) (contains? value :db/id)) (:db/id value)
+                  (and (sequential? value)
+                       (seq value)
+                       (every? #(and (map? %) (contains? % :db/id)) value))
+                  (into #{} (map :db/id) value)
+                  (sequential? value) (set value)
+                  :else value)]))
+        (dissoc entity :db/id)))
+
 (defn render-database-identity-ai
   "Readable identity face for an admitted immutable database value."
   {:malli/schema [:=> [:cat :seon.render/unit] :string]}

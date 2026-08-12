@@ -1674,6 +1674,33 @@
                        (:seon.sci.admit/record
                         (:seon.error/data invoked-cut))))))))))
 
+(deftest nested-refusal-keeps-the-throw-site-message-as-structured-evidence
+  (let [failure
+        (kernel/failure-value
+         {::kernel/time-limit-kind :probe/time-limit
+          ::kernel/failure-kind :probe/failure}
+         (ex-info "result renderer exploded"
+                  {:seon.error/kind :probe/inner
+                   :seon.error/message "inner failure"})
+         {:seon.eval/fn-entries 1
+          :seon.eval/host-interop-count 0
+          :seon.eval/duration-ms 1
+          :seon.eval/allocated-bytes 0
+          :seon.eval/outcome :error})]
+    (is (= "inner failure" (:seon.error/message failure)))
+    (is (= "result renderer exploded"
+           (:seon.error/throw-site-message (:seon.error/data failure))))
+    (is (= :nested-refusal
+           (:seon.error/diagnostic-member (:seon.error/data failure))))))
+
+(deftest analysis-failure-exposes-scis-unresolved-symbol-as-data
+  (let [failure (:seon.sci.admit/value
+                 (run "unresolved-diagnostic-member"))]
+    (is (= 'unresolved-diagnostic-member
+           (:seon.sci.eval/symbol (:seon.error/data failure))))
+    (is (= 'unresolved-diagnostic-member
+           (:seon.error/diagnostic-offending (:seon.error/data failure))))))
+
 (deftest a-refusal-keeps-its-own-kind-at-both-entrances
   ;; A refusal our own guarded machinery raised already says what went
   ;; wrong. One classifier means neither entrance can flatten it into a

@@ -15,6 +15,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.render.hiccup :as hiccup]
+            [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.schema.form :as schema.form]
@@ -161,28 +162,11 @@
     (or (when (map? value) (get value output))
         (get request output))))
 
-(defn transacted
-  "Restore a pulled entity to the transaction shape used for selection."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [entity]
-  (into {}
-        (map (fn [[attribute value]]
-               [attribute
-                (cond
-                  (and (map? value) (contains? value :db/id)) (:db/id value)
-                  (and (sequential? value)
-                       (seq value)
-                       (every? #(and (map? %) (contains? % :db/id)) value))
-                  (into #{} (map :db/id) value)
-                  (sequential? value) (set value)
-                  :else value)]))
-        (dissoc entity :db/id)))
-
 (defn- schema-producer
   [projection value output]
   (when (map? value)
     (let [transacted-matches
-          (schema/matching-shapes-in projection (transacted value))
+          (schema/matching-shapes-in projection (render.value/transacted value))
           ;; A pull has two honest shapes. Refs and cardinality-many values
           ;; validate in transaction form, while tuple/vector value attributes
           ;; validate exactly as pulled. `:seon.schema/entity?` is the declared

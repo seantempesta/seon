@@ -143,8 +143,8 @@
             [clojure.string :as str]
             [seon.db :as db]
             [seon.error.refusal :as error.refusal]
-            [seon.render :as render]
             [seon.render.route :as render.route]
+            [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.schema.form :as schema.form]
@@ -952,7 +952,7 @@
   (let [value (if (map? (:seon.render/value unit))
                 (:seon.render/value unit)
                 unit)]
-    (render/transacted value)))
+    (render.value/transacted value)))
 
 (defn- class-properties
   [forms schema-key]
@@ -1045,7 +1045,7 @@
   its existing notice prose until slice 2 converts the fact emission path.
 
   `d/pull` wraps refs as `{:db/id N}` and adds `:db/id`, neither of
-  which the fact schema admits — `seon.render/transacted` is the
+  which the fact schema admits — `seon.render.value/transacted` is the
   one place that unwrapping is written."
   {:malli/schema [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
   [unit]
