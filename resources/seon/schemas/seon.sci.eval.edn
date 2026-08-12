@@ -34,6 +34,9 @@
                  [:seon.cluster.eval/output
                   {:optional true}
                   :seon.cluster.eval/output]
+                 [:seon.cluster.eval/read-evidence
+                  {:optional true}
+                  [:vector :seon.db/read-evidence]]
                  [:seon.cluster.eval/ns :seon.cluster.eval/ns]
                  [:seon.sci.eval/ending-ns :seon.sci.eval/ending-ns]
                  [:seon.program/row
@@ -53,7 +56,6 @@
                  [:seon.cluster.eval/interrupted-at
                   {:optional true}
                   :seon.cluster.eval/interrupted-at]],
-                :impure-calls [:set :symbol],
                 :install-request
                 [:map
                  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
@@ -80,7 +82,6 @@
                  [:seon.sci.admit/value :any]
                  [:seon.sci.admit/capped? :seon.sci.admit/capped?]
                  [:seon.sci.admit/record :seon.sci.admit/record]],
-                :nondeterministic-calls [:set :symbol],
                 :referenced-vars [:set :symbol],
                 :request
                 [:map
@@ -117,17 +118,8 @@
                  [:seon.def/id :seon.def/id]
                  [:seon.def/ns :seon.def/ns]
                  [:seon.def/name :seon.def/name]
-                 [:seon.def/source :seon.def/source]
                  [:seon.def/atom? {:optional true} :seon.def/atom?]
-                 [:seon.sci.eval/value :any]
-                 [:seon.sci.eval/referenced-vars
-                  :seon.sci.eval/referenced-vars]
-                 [:seon.sci.eval/unproven-called-vars
-                  :seon.sci.eval/unproven-called-vars]
-                 [:seon.sci.eval/nondeterministic-calls
-                  :seon.sci.eval/nondeterministic-calls]
-                 [:seon.sci.eval/impure-calls
-                  :seon.sci.eval/impure-calls]],
+                 [:seon.sci.eval/value :any]],
                 :desk-defs [:vector :seon.sci.eval/desk-def],
                 :desk-fork-request
                 [:map
@@ -144,7 +136,6 @@
                   :seon.sci.eval/desk-notices]],
                 :desk-notices [:vector :string],
                 :time-limit-ms [:int {:min 1}],
-                :unproven-called-vars [:set :symbol],
                 :install-mismatch [:= true]
                 :install-mismatch-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the function whose installed source or deletion mismatched"} [:seon.sci.eval/install-mismatch :seon.sci.eval/install-mismatch] [:seon.error/message :seon.error/message]]
                 :missing-function-row :qualified-symbol

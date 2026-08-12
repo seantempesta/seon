@@ -83,8 +83,8 @@
                      [:seon.cluster.run/id :seon.cluster.run/id]
                      [:seon.cluster.run/process
                       :seon.cluster.run/process]
-                     [:seon.cluster.run.form/ordinal
-                      :seon.cluster.run.form/ordinal]
+                     [:seon.cluster.eval/ordinal
+                      :seon.cluster.eval/ordinal]
                      [:seon.cluster.eval/result-edn
                       {:optional true}
                       :seon.cluster.eval/result-edn]

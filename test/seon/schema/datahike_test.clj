@@ -235,3 +235,22 @@
         (schema.datahike/encode-transaction {:tx-data [wide nested]})
         (is (= 1 @resolutions)
             "resolution count is per transaction, never per entity")))))
+
+(deftest edn-backed-attributes-round-trip-reader-inexpressible-identifiers
+  (let [projection (schema/declaration-projection)
+        branch (keyword "seon.test-support.fixture" "0")
+        revision
+        {:datahike.cache/connection-id [(random-uuid) branch]
+         :datahike.cache/generation (random-uuid)
+         :datahike.read/attributes #{:seon.cluster.agent/id}
+         :datahike.cache/attribute-revisions
+         {:seon.cluster.agent/id (random-uuid)}}
+        encoded
+        (get (first
+              (schema.datahike/encode-transaction-in
+               projection [{:datahike.read/revision revision}]))
+             :datahike.read/revision)]
+    (is (= revision
+           (schema.datahike/decode-attribute-value-in
+            projection :datahike.read/revision encoded))
+        "numeric branch keywords remain exact across the string storage seam")))

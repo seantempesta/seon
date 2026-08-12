@@ -1330,16 +1330,23 @@
 
 (defn- receipt-read-evidence-tx
   "Component read-evidence rows owned by one terminal receipt."
-  [receipt request]
+  [db receipt request]
   (when-let [evidence (seq (:seon.cluster.eval/read-evidence request))]
-    [{:db/id (:db/id receipt)
-      :seon.cluster.eval/read-evidence
-      (mapv (fn [ordinal entry]
-              (assoc entry :db/id
-                     (str "seon.cluster.eval/read-evidence/"
-                          (:seon.cluster.eval/id receipt) "/" ordinal)))
-            (range)
-            evidence)}]))
+    ;; This transaction data is produced inside Datahike's transaction
+    ;; function, after seon.db's outer encode seam has already run. Encode the
+    ;; component rows here against the same database-derived declarations so
+    ;; heterogeneous dependency plans and revisions reach Datahike in their
+    ;; declared EDN-string representation.
+    (schema.datahike/encode-transaction-in
+     (schema/projection-from-database db)
+     [{:db/id (:db/id receipt)
+       :seon.cluster.eval/read-evidence
+       (mapv (fn [ordinal entry]
+               (assoc entry :db/id
+                      (str "seon.cluster.eval/read-evidence/"
+                           (:seon.cluster.eval/id receipt) "/" ordinal)))
+             (range)
+             evidence)}])))
 
 (defn receipt-settle-call
   "Settle one running receipt, inside the transaction.
@@ -1406,7 +1413,7 @@
                            (or (:seon.def/rows request) [])
                            contracted-id)
              (contracted-desk-retractions db agent-eid contracted-id)
-             (receipt-read-evidence-tx receipt request)
+             (receipt-read-evidence-tx db receipt request)
              (receipt-terminal-assertions receipt request)]))))
 
 (defn clear-desk-tx

@@ -323,7 +323,9 @@
         (with-redefs [ai/complete
                       (fn [_] {:seon.ai/text
                                (str "(def widgets (map inc (range 3)))\n"
-                                    "widgets\n"
+                                    "(do (seon.db/q '[:find [?id ...] "
+                                    ":where [_ :seon.cluster.agent/id ?id]]) "
+                                    "widgets)\n"
                                     "(my.run/complete (str \"counted \" "
                                     "(reduce + widgets)))")})]
           (let [reports (drive! cluster 10)]
@@ -353,6 +355,23 @@
                 (is (= (my.run/complete "counted 6")
                        (get results 2))
                     "and the disposition round-tripped through admission")))
+            (testing "the real settlement retains queryable read evidence"
+              (let [evidence-eid
+                    (db/q '[:find ?evidence .
+                            :where
+                            [?receipt :seon.cluster.eval/ordinal 1]
+                            [?receipt :seon.cluster.eval/read-evidence
+                             ?evidence]]
+                          @connection)
+                    evidence
+                    (db/pull @connection
+                             '[:seon.db/source-argument-position
+                               :datahike.read/dependency-plan
+                               :datahike.read/revision]
+                             evidence-eid)]
+                (is (int? (:seon.db/source-argument-position evidence)))
+                (is (contains? evidence :datahike.read/dependency-plan))
+                (is (map? (:datahike.read/revision evidence)))))
             (testing "every receipt settled clean — no interrupt, no error"
               (is (= 3 (count (db/q '[:find ?e :where
                                      [?e :seon.cluster.eval/result-edn _]]
@@ -1490,15 +1509,17 @@
           (is (nil? (db/pull @connection [:db/id]
                             [:seon.fn/sym function-sym]))
               "the refused terminal transaction persists no function row")
-          (is (= function-sym
-                 (db/q '[:find ?definition .
-                         :in $ ?agent
-                         :where
-                         [?agent-eid :seon.cluster.agent/id ?agent]
-                         [?desk :seon.def/agent ?agent-eid]
-                         [?desk :seon.def/id ?definition]]
-                       @connection "agent-a"))
-              "the refused shared definition settles into the agent's desk")
+          (is (contains?
+               (set
+                (db/q '[:find [?definition ...]
+                        :in $ ?agent
+                        :where
+                        [?agent-eid :seon.cluster.agent/id ?agent]
+                        [?desk :seon.def/agent ?agent-eid]
+                        [?desk :seon.def/id ?definition]]
+                      @connection "agent-a"))
+               (str function-sym "#root"))
+              "the refused shared definition's executable root stays in the desk")
           (db/transact!
            connection
            [{:seon.cluster.message/id "m-agent-a-after-refusal"
@@ -1516,9 +1537,38 @@
 (deftest acquisition-orders-agent-authored-refer-targets-and-ignores-alias-cycles
   (test-support/with-database
     (fn [connection]
-      (db/transact!
-       connection
-       [{:seon.ns/name 'authored.target
+      (let [target-source
+            (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+                 "increment [x] (inc x))")
+            consumer-source
+            (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+                 "call-plus [x] (plus (target/increment x)))")
+            authored-ctx (sci.eval/build-base-ctx)
+            _ (sci.core/add-namespace! authored-ctx 'authored.target {})
+            _ (sci.core/add-namespace! authored-ctx 'authored.consumer {})
+            _ (sci.core/binding [sci.core/ns
+                                 (sci.core/create-ns 'authored.target)]
+                (sci.core/eval-string* authored-ctx target-source))
+            _ (sci.core/install-namespace-bindings!
+               authored-ctx 'authored.consumer
+               {:aliases {'target 'authored.target}
+                :refers {'plus 'authored.target/increment}})
+            _ (sci.core/binding [sci.core/ns
+                                 (sci.core/create-ns 'authored.consumer)]
+                (sci.core/eval-string* authored-ctx consumer-source))
+            root-edn
+            (fn [function-symbol]
+              (binding [*print-meta* true]
+                (pr-str
+                 (first (sci.core/var-root-data authored-ctx
+                                                [function-symbol])))))]
+        (db/transact!
+         connection
+         [{:seon.cluster.agent/id "authored-order"
+           :seon.cluster.agent/namespace
+           {:seon.ns/name 'authored.target
+            :seon.ns/source "(ns authored.target)"}}
+          {:seon.ns/name 'authored.target
          :seon.ns/source "(ns authored.target)"}
         {:seon.ns/name 'authored.consumer
          :seon.ns/source "(ns authored.consumer)"
@@ -1542,24 +1592,40 @@
          :seon.ns/aliases
          [{:seon.ns.alias/local 'a
            :seon.ns.alias/target-ns 'alias.cycle-a}]}])
-      (db/transact!
-       connection
-       [{:seon.fn/sym "authored.target/increment"
+        (db/transact!
+         connection
+         [{:seon.fn/sym "authored.target/increment"
+         :seon.schema.admission/source :agent
          :seon.fn/ns [:seon.ns/name 'authored.target]
-         :seon.fn/source
-         (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
-              "increment [x] (inc x))")
+         :seon.fn/source target-source
          :seon.fn/arglists "([x])"
          :seon.fn/private? false
          :seon.fn/spec "[:=> [:cat :int] :int]"}
         {:seon.fn/sym "authored.consumer/call-plus"
+         :seon.schema.admission/source :agent
          :seon.fn/ns [:seon.ns/name 'authored.consumer]
-         :seon.fn/source
-         (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
-              "call-plus [x] (plus (target/increment x)))")
+         :seon.fn/source consumer-source
          :seon.fn/arglists "([x])"
          :seon.fn/private? false
-         :seon.fn/spec "[:=> [:cat :int] :int]"}])
+         :seon.fn/spec "[:=> [:cat :int] :int]"}
+        {:seon.def/key (pr-str ["authored-order"
+                                "authored.target/increment#root"])
+         :seon.def/id "authored.target/increment#root"
+         :seon.def/agent [:seon.cluster.agent/id "authored-order"]
+         :seon.def/ns [:seon.ns/name 'authored.target]
+         :seon.def/name 'increment#root
+         :seon.def/value-edn (root-edn 'authored.target/increment)
+         :seon.def/ordinal 0
+         :seon.schema.admission/source :agent}
+        {:seon.def/key (pr-str ["authored-order"
+                                "authored.consumer/call-plus#root"])
+         :seon.def/id "authored.consumer/call-plus#root"
+         :seon.def/agent [:seon.cluster.agent/id "authored-order"]
+         :seon.def/ns [:seon.ns/name 'authored.consumer]
+         :seon.def/name 'call-plus#root
+         :seon.def/value-edn (root-edn 'authored.consumer/call-plus)
+         :seon.def/ordinal 0
+         :seon.schema.admission/source :agent}])
       (let [ctx (sci.eval/build-base-ctx)
             acquired
             (sci.eval/acquire!
@@ -1580,7 +1646,7 @@
                (get-in (sci.core/namespace-bindings ctx 'alias.cycle-a)
                        [:aliases 'ghost]))
             "an effective as-alias target need not be loaded")
-        (is (= 6 (:seon.sci.eval/installed acquired)))))))
+        (is (= 6 (:seon.sci.eval/installed acquired))))))))
 
 (deftest a-settled-orphan-stops-wedging-the-agent
   ;; The crash drill's headline: a process died holding a claimed,
@@ -1896,8 +1962,13 @@
             reply-text (str "(+ 1 2)\n"
                             "(defn broken [x]\n"
                             "  (+ x 1)")
-            usage {"prompt_tokens" 10665
-                   "completion_tokens" 1229}
+            ;; The attempt's usage participates in the prompt calibration.
+            ;; Keep this fixture representative so the assertion below tests
+            ;; unreadable-reply history rather than manufacturing a
+            ;; 0.06-characters-per-token calibration that cannot admit the
+            ;; mandatory bootstrap transcript at any render distance.
+            usage {"prompt_tokens" 106
+                   "completion_tokens" 12}
             reports
             (with-redefs [ai/complete
                           (fn [_]
@@ -3141,7 +3212,8 @@
                                (Date.)))
           (let [prompt-a (:seon.ai/prompt (first @requests))]
             (is (str/includes? prompt-a "count the widgets"))
-            (is (str/includes? prompt-a "Current run instruction:"))
+            (is (str/includes? prompt-a "(my.message/read \"m-1\")")
+                "the opening message appears as its real REPL read form")
             (is (not (str/includes? prompt-a "message B"))
                 "a message committed after run A opened is absent by
                  construction from A's opening database value"))
@@ -3173,7 +3245,8 @@
           (let [prompt-b (:seon.ai/prompt (second @requests))]
             (is (str/includes? prompt-b "message B")
                 "B is visible in the opening database value of its own run")
-            (is (str/includes? prompt-b "Current run instruction:"))))))))
+            (is (str/includes? prompt-b "(my.message/read \"m-2\")")
+                "the next opening message also appears as a real read")))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The F2 sealed suite — streaming rides channels, the database keeps facts

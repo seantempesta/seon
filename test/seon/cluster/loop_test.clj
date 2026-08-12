@@ -56,35 +56,6 @@
   [function-name]
   (deref (ns-resolve 'seon.cluster.loop function-name)))
 
-(deftest session-purity-is-derived-from-capabilities-not-workload
-  (let [rows
-        {'sample/pure-io
-         {:seon.fn/sym "sample/pure-io"
-          :seon.fn/workload :io}
-         'sample/capability
-         {:seon.fn/sym "sample/capability"
-          :seon.fn/workload :io
-          :seon.effect/capability 'sample.jvm/handler}
-         'sample/compute
-         {:seon.fn/sym "sample/compute"
-          :seon.fn/workload :compute}
-         'sample/mixed-caller
-         {:seon.fn/sym "sample/mixed-caller"
-          :seon.fn/calls [{:seon.fn/sym "sample/capability"}
-                          {:seon.fn/sym "sample/compute"}]}}
-        capability-free? (private-loop-fn 'capability-free-references?)]
-    (with-redefs [db/pull
-                  (fn [_db _selector lookup-ref]
-                    (get rows (symbol (second lookup-ref))))]
-      (is (true? (capability-free? :db #{'sample/pure-io} #{}))
-          "a blocking pure helper remains restorable")
-      (is (false? (capability-free? :db #{'sample/capability} #{})))
-      (is (false? (capability-free? :db #{'sample/mixed-caller} #{}))
-          "compute reachability never hides the separate capability fact")
-      (is (false? (capability-free? :db #{'sample/absent}
-                                    #{'sample/absent}))
-          "an unresolved called Var still fails closed"))))
-
 (deftest attempt-evidence-prefers-completion-and-falls-back-to-error-data
   (let [project (private-loop-fn 'attempt-evidence)]
     (is (= {:seon.ai.model/last-latency-ms 42

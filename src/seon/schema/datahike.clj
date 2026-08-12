@@ -6,6 +6,7 @@
    schema maps out. Pure derivation: no connection, no session, no
   transaction. The store owner transacts the returned declarations."
   (:require [clojure.edn :as edn]
+            [clojure.walk :as walk]
             [seon.schema :as schema]
             [seon.schema.form :as schema.form]))
 
@@ -354,11 +355,46 @@
 
 (declare encode-entity-in)
 
+(def ^:private storage-readers
+  {'seon.schema.datahike/keyword
+   (fn [[namespace-name local-name]]
+     (keyword namespace-name local-name))
+   'seon.schema.datahike/symbol
+   (fn [[namespace-name local-name]]
+     (symbol namespace-name local-name))})
+
+(defn- reader-round-trips?
+  [value]
+  (try
+    (= value (edn/read-string (pr-str value)))
+    (catch Throwable _ false)))
+
+(defn- storage-data
+  "Replace reader-inexpressible identifiers with explicit EDN tagged values."
+  [value]
+  (walk/postwalk
+   (fn [element]
+     (cond
+       (and (keyword? element) (not (reader-round-trips? element)))
+       (tagged-literal 'seon.schema.datahike/keyword
+                       [(namespace element) (name element)])
+
+       (and (symbol? element) (not (reader-round-trips? element)))
+       (tagged-literal 'seon.schema.datahike/symbol
+                       [(namespace element) (name element)])
+
+       :else element))
+   value))
+
+(defn- storage-string
+  [value]
+  (pr-str (storage-data value)))
+
 (defn- encode-value-in
   [projection attr value]
   (cond
     (edn-encoded-attr-in? projection attr)
-    (pr-str (validate-logical-slot-in! projection attr value))
+    (storage-string (validate-logical-slot-in! projection attr value))
 
     (map? value)
     (encode-entity-in projection value)
@@ -394,7 +430,7 @@
             (= :db/add (first operation))
             (edn-encoded-attr-in? projection (nth operation 2 nil)))
        (update operation 3
-               #(pr-str
+               #(storage-string
                  (validate-logical-slot-in!
                   projection (nth operation 2) %)))
 
@@ -437,10 +473,10 @@
         (refuse-slot! ::storage-not-string attr value))
       (let [decoded
             (try
-              (edn/read-string value)
+              (edn/read-string {:readers storage-readers} value)
               (catch Throwable _
                 (refuse-slot! ::malformed-edn attr value)))]
-        (when-not (= value (pr-str decoded))
+        (when-not (= value (storage-string decoded))
           (refuse-slot! ::noncanonical-edn attr value))
         (validate-logical-slot-in! projection attr decoded)))))
 

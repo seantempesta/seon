@@ -178,6 +178,9 @@
       (:seon.cluster.eval/output evaluation)
       (assoc :seon.cluster.eval/output
              (:seon.cluster.eval/output evaluation))
+      (seq (:seon.cluster.eval/read-evidence evaluation))
+      (assoc :seon.cluster.eval/read-evidence
+             (:seon.cluster.eval/read-evidence evaluation))
       (:seon.cluster.eval/ns evaluation)
       (assoc :seon.cluster.eval/ns (:seon.cluster.eval/ns evaluation))
       (:seon.sci.eval/ending-ns evaluation)
@@ -198,11 +201,7 @@
         row-base
         (fn [candidate]
           (-> candidate
-              (dissoc :seon.sci.eval/value
-                      :seon.sci.eval/referenced-vars
-                      :seon.sci.eval/unproven-called-vars
-                      :seon.sci.eval/nondeterministic-calls
-                      :seon.sci.eval/impure-calls)
+              (dissoc :seon.sci.eval/value)
               (assoc :seon.def/key
                      (pr-str [agent-id (:seon.def/id candidate)])
                      :seon.def/agent
@@ -219,19 +218,15 @@
                  root-reason (:sci.root/unrestorable-reason root-data)]
              (cond
                root-reason
-               (-> (row-base candidate)
-                   (dissoc :seon.def/source)
-                   (assoc :seon.def/unrestorable-reason root-reason))
+               (assoc (row-base candidate)
+                      :seon.def/unrestorable-reason root-reason)
 
                stored?
-               (-> (row-base candidate)
-                   (dissoc :seon.def/source
-                           :seon.def/unrestorable-reason))
+               (dissoc (row-base candidate) :seon.def/unrestorable-reason)
 
                :else
                (-> (row-base candidate)
-                   (dissoc :seon.def/source :seon.def/value-edn
-                           :seon.def/blob :seon.def/size)
+                   (dissoc :seon.def/value-edn :seon.def/blob :seon.def/size)
                    (assoc :seon.def/unrestorable-reason
                           (cond
                             (and atom? (not stored?))
@@ -442,7 +437,7 @@
            problem (assoc :seon.problems/form-problem problem)
            settled (assoc :my.run/value settled)))
         tx-data
-        (into (run/receipt-settle-tx receipt)
+        (into (run/receipt-settle-tx database receipt)
               (concat
                (when (contains? #{:completed :wait}
                                  (:my.run/disposition settled))
@@ -1291,17 +1286,23 @@
           :else
           (let [evaluate
                 (fn [request]
-                  (render/call-with-walk-context
-                   {:seon.db/db @connection
-                    :seon.db/connection connection
-                    :seon.cluster.agent/id agent-id
-                    :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
-                    :seon.sci.eval/ctx ctx
-                    :seon.sci.eval/time-limit-ms
-                    (:seon.config.eval/time-limit-ms cluster)
-                    :seon.config/on-core-error
-                    (:seon.config/on-core-error cluster)}
-                   #(compiled-evaluate request)))]
+                  (let [read-evidence-sink (atom [])
+                        evaluation
+                        (binding [db/*read-evidence-sink* read-evidence-sink]
+                          (render/call-with-walk-context
+                           {:seon.db/db @connection
+                            :seon.db/connection connection
+                            :seon.cluster.agent/id agent-id
+                            :seon.sci.admit/caps
+                            (:seon.sci.admit/caps cluster)
+                            :seon.sci.eval/ctx ctx
+                            :seon.sci.eval/time-limit-ms
+                            (:seon.config.eval/time-limit-ms cluster)
+                            :seon.config/on-core-error
+                            (:seon.config/on-core-error cluster)}
+                           #(compiled-evaluate request)))]
+                    (assoc evaluation :seon.cluster.eval/read-evidence
+                           (db/read-evidence @read-evidence-sink))))]
             (loop [ordinal (:seon.cluster.run.form/ordinal work)
                    ran 0
                    namespace-name

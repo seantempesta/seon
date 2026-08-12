@@ -45,7 +45,13 @@
            [:map
             [:seon.db/read-operation [:enum :pull :pull-many]]
             [:seon.db/pull-arguments :seon.db/pull-arguments]]],
-          :read-result :seon.schema/value,
+          ;; Retained replay evidence is ordinary admitted data, so its
+          ;; logical contract stays polymorphic. Once Lane B made it a receipt
+          ;; component attribute it also needed one concrete Datahike storage
+          ;; representation. The heterogeneous union selects the bridge's
+          ;; canonical EDN-string codec while preserving the existing value
+          ;; validator on decode.
+          :read-result [:or :seon.schema/value :string],
           ;; A read's source is identified exactly as Datahike identifies its
           ;; own query-cache key (query.cljc:2658-2671): a committed raw DB by
           ;; its cache context, an as-of view by the ORIGIN's context plus its

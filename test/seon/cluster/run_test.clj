@@ -115,7 +115,6 @@
    :seon.def/value-edn
    :seon.def/blob
    :seon.def/size
-   :seon.def/source
    :seon.def/unrestorable-reason
    :seon.def/atom?
    :seon.def/ordinal
