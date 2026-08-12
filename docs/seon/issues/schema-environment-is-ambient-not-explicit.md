@@ -181,7 +181,16 @@ The final isolated operator cycle completed `bin/seon init` in 61.54 s,
 The cluster was alive and the complete publication, refork, start, status, and
 cluster log set contained zero `DECLARATION POPULATION FALLBACK` lines.
 
-This closes Phase 3's silent classpath-resolution path. This issue remains open
-only for the separately recorded process-global Malli instrumentation facade,
-whose owner and falsifier are
+This closes Phase 3's production boot path. The changed test gate exposed one
+additional carrier boundary outside this issue's owned paths:
+`seon.test.runner/coordinator-main!` loads and executes contract tests without
+an environment or explicit packaged projection. The loud refusal first fires
+at `my.fs-test:26` and `my.message-test:82`, with the boundary named as
+`runner.clj:1297`; one legacy silent convenience reach also reports that same
+runner frame. The runner must acquire the packaged test projection once and
+hand it across namespace load and execution. No test-runner file was edited by
+this lane.
+
+This issue therefore remains open for that test carrier and the separately
+recorded process-global Malli instrumentation facade, whose owner and falsifier are
 [instrumentation compiles under one cluster's projection](instrumentation-compiles-under-one-clusters-projection.md).
