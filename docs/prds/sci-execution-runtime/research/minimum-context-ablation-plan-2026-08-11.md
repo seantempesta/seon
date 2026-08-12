@@ -8,6 +8,10 @@ tags: [research, agent, context]
 
 ## Decision and scope
 
+The four drives were subsequently run and are recorded in
+[Results](#results) below; this section is the preparation lane's original
+scope.
+
 Prepare four prompt variants now; run no experimental drives in this lane.
 Every later drive uses `deepseek-v4-flash`, thinking disabled, and a fresh
 isolated operator root. The task, grader, and agent id are identical across
