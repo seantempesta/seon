@@ -42,7 +42,8 @@
             [seon.effect :as effect]
             [seon.render :as render]
             [seon.schema :as schema]
-            [seon.schema.edn :as schema.edn]))
+            [seon.schema.edn :as schema.edn]
+            [seon.sci.kernel :as sci.kernel]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -309,13 +310,20 @@
   [{database :seon.db/db
     lookup :seon.render.walk/lookup
     caps :seon.sci.admit/caps
+    ctx :seon.sci.eval/ctx
     :as request}]
-  (let [distance (long (get request :seon.render/distance 1))
-        selector (root-selector database distance caps)
-        root (db/pull database selector lookup)]
-    (merge {:seon.render.walk/selector selector
-            :seon.render.walk/root root}
-           (acquisition-members database root distance caps))))
+  (let [projection (or (sci.kernel/context-projection ctx)
+                       (schema/current-projection)
+                       {})]
+    (schema/call-with-projection
+     projection
+     (fn []
+       (let [distance (long (get request :seon.render/distance 1))
+             selector (root-selector database distance caps)
+             root (db/pull database selector lookup)]
+         (merge {:seon.render.walk/selector selector
+                 :seon.render.walk/root root}
+                (acquisition-members database root distance caps)))))))
 
 (defn membership-diff
   "Changed, added, and removed members between two root acquisitions."
@@ -416,11 +424,9 @@
     output :seon.render/output
     lookup :seon.render.walk/lookup
     :as request}]
-  (let [reusable-projection (or (:seon.schema/projection ctx) {})
-        projection (schema/call-with-projection
-                    reusable-projection
-                    #(schema/projection-from-database database
-                                                      reusable-projection))]
+  (let [projection (or (sci.kernel/context-projection ctx)
+                       (schema/current-projection)
+                       {})]
     (schema/call-with-projection
      projection
      (fn []

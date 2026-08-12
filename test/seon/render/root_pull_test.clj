@@ -6,6 +6,7 @@
             [seon.db :as db]
             [seon.render.walk :as walk]
             [seon.render.web :as web]
+            [seon.sci.kernel :as sci.kernel]
             [seon.test-support :as support]))
 
 (def ^:private root-pull-schema
@@ -70,13 +71,18 @@
                     {:db/id "component"
                      ::node-id "component"
                      ::value "before"}])
-     (let [pull-count (atom 0)
+     (let [reads (atom [])
            pull db/pull
+           count-read (fn [operation f]
+                        (fn [& arguments]
+                          (swap! reads conj operation)
+                          (apply f arguments)))
            acquisition
-           (with-redefs [db/pull
-                         (fn [& arguments]
-                           (swap! pull-count inc)
-                           (apply pull arguments))]
+           (with-redefs [db/q (count-read :q db/q)
+                         db/pull (count-read :pull pull)
+                         db/pull-many (count-read :pull-many db/pull-many)
+                         db/entity (count-read :entity db/entity)
+                         db/datoms (count-read :datoms db/datoms)]
              (acquire connection))
            selector (:seon.render.walk/selector acquisition)
            selector-values (tree-seq coll? seq selector)
@@ -86,8 +92,8 @@
            plan (:datahike.read/dependency-plan
                  (d/pull-with-evidence @connection selector [::root-id "root"]))
            attributes (d/dependency-plan-attributes plan 0)]
-       (is (= 1 @pull-count)
-           "root acquisition enters the database read door exactly once")
+       (is (= [:pull] @reads)
+           "cold root acquisition is exactly one pull and no other read")
        (is (not-any? #{'* :* "*"} selector-values)
            "the selector never widens its dependency fingerprint")
        (is (contains? selector-map-keys
@@ -184,7 +190,30 @@
           (assoc render-request
                  :seon.render.walk/root-acquisition acquisition))
          (is (zero? @reads)
-             "a supplied acquisition replaces every membership query"))))))
+             "neighborhood consumes the acquisition without discovery")
+         (walk/history
+          (assoc render-request
+                 :seon.cluster.agent/id "root"
+                 :seon.render.walk/root-acquisition acquisition
+                 :seon.render/captured-calls (atom {})))
+         (is (zero? @reads)
+             "history shares the acquisition without a second discovery"))))))
+
+(deftest declared-identity-precedes-a-lexically-earlier-database-unique
+  (support/with-database
+   {:seon.test-support/extra-schema root-pull-schema}
+   (fn [connection]
+     (db/transact! connection
+                   [{::root-id "root" ::forward "both"}
+                    {:db/id "both" ::root-id "lexical" ::node-id "declared"}])
+     (with-redefs [sci.kernel/context-projection
+                   (constantly
+                    {:seon.schema.projection/shape-rows
+                     {::declared {:seon.entity/id-attr ::node-id}}})]
+       (let [acquisition (acquire connection)]
+         (is (contains? (:seon.render.walk/members acquisition)
+                        [::node-id "declared"])
+             "production acquisition chooses the declared identity"))))))
 
 (deftest as-of-revision-comparison-uses-the-database-read-owner
   (support/with-database
@@ -201,3 +230,16 @@
        (is (empty? (#'web/candidate-call-ids
                     {::root call} fixed))
            "an opening as-of database compares through seon.db revisions")))))
+
+(deftest cold-root-pull-records-an-informational-latency-sample
+  (support/with-database
+   {:seon.test-support/extra-schema root-pull-schema}
+   (fn [connection]
+     (db/transact! connection [{::root-id "root" ::value "sample"}])
+     (let [started (System/nanoTime)
+           acquisition (acquire connection)
+           elapsed-ms (/ (double (- (System/nanoTime) started)) 1000000.0)]
+       (println (pr-str {:seon.render.walk/cold-pull-ms elapsed-ms
+                         :seon.render.walk/four-query-floor-ms 46.0}))
+       (is (seq (:seon.render.walk/order acquisition))
+           "latency is recorded while correctness remains the verdict")))))
