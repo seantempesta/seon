@@ -24,7 +24,7 @@ registry includes later accretion such as the `my.web/*` classes,
 `:seon.search/unavailable-error`.
 
 The catalog names `:seon.sci.eval/session-blob-unavailable-error`; the declared
-class is now `:seon.sci.eval/desk-blob-unavailable-error`. The catalog also says
+class is now `:seon.sci.eval/agent defs-blob-unavailable-error`. The catalog also says
 there are eleven refusal classes but enumerates ten, and the registry query
 likewise returns ten.
 

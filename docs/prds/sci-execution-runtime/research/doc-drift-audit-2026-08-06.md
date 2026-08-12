@@ -21,7 +21,7 @@ Four drift clusters can directly cause an agent to rebuild a rejected system:
    maintenance as an unbuilt message path.
 
 The live code consistently implements the surviving model: one program-only
-base, a fresh fork per turn, one selected agent's `:seon.def/*` desk, every
+base, a fresh fork per turn, one selected agent's `:seon.def/*` agent defs, every
 indexed function callable, private/public as render curation, direct
 turn-free scheduled maintenance receipts, `resources/seon/schemas/`,
 `seon.db`, `seon.effect`, and process claims under `data/operator/claims/`.
@@ -62,8 +62,8 @@ or orientation.
 
 | Contract | Current evidence |
 |---|---|
-| Turn context and desk | `src/seon/sci/eval.clj:1309-1367` forks the base and reads only the selected agent's `:seon.def/*`; `src/seon/cluster/loop.clj:1493-1514,1643-1658` creates that fork per turn and settles desk rows with the terminal receipt. |
-| Desk declaration | `resources/seon/schemas/seon.def.edn:1-45` declares the current family. |
+| Turn context and agent defs | `src/seon/sci/eval.clj:1309-1367` forks the base and reads only the selected agent's `:seon.def/*`; `src/seon/cluster/loop.clj:1493-1514,1643-1658` creates that fork per turn and settles rows for the agent's defs with the terminal receipt. |
+| agent defs declaration | `resources/seon/schemas/seon.def.edn:1-45` declares the current family. |
 | Callability and privacy | `src/seon/sci/eval.clj:803-859` installs indexed functions regardless of `:seon.fn/private?`; `src/seon/render/ns.clj:289-314` filters private functions only for foreign namespace rendering. |
 | Schema population | `src/seon/schema/edn.clj:1-15,49-51` loads the directory-backed `resources/seon/schemas/` population. |
 | Database and effects | `src/seon/db.clj:1-14` is the one Datahike namespace for reads and writes; `src/seon/effect.clj:1-19` is the one system-side capability request owner. |
@@ -82,10 +82,10 @@ ordinary stale paragraph.
 
 | Current authority | What it claims | Current code/ruling |
 |---|---|---|
-| `.agents/skills/seon-flow-architecture/SKILL.md:74-86,478-492` | Boot restores a durable session image into one shared context; supplied context is mutated across evaluations. | `src/seon/sci/eval.clj:1309-1367` creates a fresh turn fork and rehydrates one desk; `src/seon/cluster/loop.clj:1493-1514` uses it per turn. |
-| `.agents/skills/repl/SKILL.md:15-21,50-61` | Shared context is current; a fresh per-run fork is an unbuilt target; cross-run state is a session image. | The per-turn fork and desk are current source, not target. |
-| `.agents/skills/datahike/SKILL.md:256-259,633-634` | Program state ends in a session image and is tested by `session_image_test.clj`. | `resources/seon/schemas/seon.def.edn:1-45` and `test/seon/sci/desk_test.clj` are the surviving owners; the named test is absent. |
-| `.agents/skills/data-modeling/SKILL.md:243-247` | The fourth program-state boundary is a session image. | Its own linked `program-state.md:27-62` correctly says per-turn fork plus desk. |
+| `.agents/skills/seon-flow-architecture/SKILL.md:74-86,478-492` | Boot restores a durable session image into one shared context; supplied context is mutated across evaluations. | `src/seon/sci/eval.clj:1309-1367` creates a fresh turn fork and rehydrates one agent defs; `src/seon/cluster/loop.clj:1493-1514` uses it per turn. |
+| `.agents/skills/repl/SKILL.md:15-21,50-61` | Shared context is current; a fresh per-run fork is an unbuilt target; cross-run state is a session image. | The per-turn fork and agent defs are current source, not target. |
+| `.agents/skills/datahike/SKILL.md:256-259,633-634` | Program state ends in a session image and is tested by `session_image_test.clj`. | `resources/seon/schemas/seon.def.edn:1-45` and `test/seon/sci/defs_test.clj` are the surviving owners; the named test is absent. |
+| `.agents/skills/data-modeling/SKILL.md:243-247` | The fourth program-state boundary is a session image. | Its own linked `program-state.md:27-62` correctly says per-turn fork plus agent defs. |
 | `.agents/skills/data-modeling/SKILL.md:45-54`; `.agents/skills/datahike/SKILL.md:221-234`; `.agents/skills/llm-providers/SKILL.md:17-29,94-98,145-148`; `.agents/skills/seon-context-config/SKILL.md:2-27` | Schema work begins in `resources/seon/schema.edn`. | `src/seon/schema/edn.clj:49-51` names `seon/schemas`; the monolith is absent. |
 | `.agents/skills/clojurescript/SKILL.md:3,13-14,48-61`; `.agents/skills/data-oriented-clojure/SKILL.md:19-22`; `.agents/skills/seon-context-config/SKILL.md:19-20` | Readers should open `src-old/` as quarry. | Root `AGENTS.md:250-254` requires `git show`/`git log`; the directories are absent. |
 
@@ -103,9 +103,9 @@ reader gets the opposite signal.
 | Current authority | What it claims | Current code/ruling |
 |---|---|---|
 | `plan/seondb-facade-contract-spec.md:1-13,67-103` | Active read facade; writes remain with another owner. | `src/seon/db.clj:1-14` owns reads and writes; “facade” is explicitly rejected vocabulary. |
-| `plan/stateless-resume-design-2026-08-01.md:1-20,84-106` | Active session-image implementation plan. | Desk facts and per-turn rehydration replaced it. |
-| `plan/repl-session-context-2026-08-01.md:1-14,32-55` | Active shared REPL-session design with a stored prompt and old agent namespace convention. | The 2026-08-05 desk and namespace-page rulings supersede those mechanics. |
-| `plan/refactor-wave-2026-08-01.md:120,348,602,732-754` | Active implementation inventory around `install-session-image!` and shared-context isolation. | The named owner is deleted; `fork-for-turn` and desk settlement survive. |
+| `plan/stateless-resume-design-2026-08-01.md:1-20,84-106` | Active session-image implementation plan. | facts for the agent's defs and per-turn rehydration replaced it. |
+| `plan/repl-session-context-2026-08-01.md:1-14,32-55` | Active shared REPL-session design with a stored prompt and old agent namespace convention. | The 2026-08-05 agent defs and namespace-page rulings supersede those mechanics. |
+| `plan/refactor-wave-2026-08-01.md:120,348,602,732-754` | Active implementation inventory around `install-session-image!` and shared-context isolation. | The named owner is deleted; `fork-for-turn` and agent defs settlement survive. |
 | `plan/ambient-injection-prd-2026-08-05-r2-draft.md:1-24` | Both ruled/graduated and unruled/draft. | The 2026-08-05 ruling batch settles the r2 seam; status and preamble disagree. |
 
 The failure is lifecycle, not forbidden historical spelling. These documents
@@ -121,7 +121,7 @@ instructions, so its dated handoff outranks later truths for a new reader.
 |---|---|---|
 | `docs/TRANSFER_PROMPT.md:35-43,133-146` | `src-old/` remains readable and should be opened. | Root `AGENTS.md:250-254`: Git history only. |
 | `docs/TRANSFER_PROMPT.md:161-170` | Bare `bin/test` is the full suite. | `docs/conventions.md:492-505`: bare is fast/non-long; `--full` is complete. |
-| `docs/TRANSFER_PROMPT.md:201-224` | August 2 addendum/rulings are current; one shared context and session restoration are built truth. | `plan/unsettled.md:19-60` records the 2026-08-05 desk/per-turn fork landing. |
+| `docs/TRANSFER_PROMPT.md:201-224` | August 2 addendum/rulings are current; one shared context and session restoration are built truth. | `plan/unsettled.md:19-60` records the 2026-08-05 agent defs/per-turn fork landing. |
 | `docs/TRANSFER_PROMPT.md:247-249` | One `resources/seon/schema.edn`; family files and globbing are gone. | `src/seon/schema/edn.clj:49-51` loads `resources/seon/schemas/`. |
 | `docs/TRANSFER_PROMPT.md:299-312` | Agents use `store/transact!`; `seon.effect` does not exist. | `src/seon/db.clj:1-14` and `src/seon/effect.clj:1-19` are the current owners. |
 
@@ -162,7 +162,7 @@ not the rejected ordinary-message design.
 
 `docs/seon/architecture/laws.md:93-100` says the base forks once per run. The
 correct target is already stated in `docs/seon/architecture/agent-runtime.md:18-22,164-193`:
-fresh per-turn fork plus selected agent desk. Live evidence is
+fresh per-turn fork plus the selected agent's defs. Live evidence is
 `src/seon/cluster/loop.clj:1493-1514`.
 
 ### D7 — High: the PRD authority map does not account for nine active roots
@@ -229,9 +229,9 @@ third producer arm.
 | File | Result |
 |---|---|
 | `architecture.md` | Drift: elevated grant, agent-view primacy, Hiccup producer arm, missing `my.branch`. Accurate: lines 529-534 state ruling #20 exactly. |
-| `agent-runtime.md` | Drift: maintenance target/message path and `session restore` source wording. Accurate: lines 18-22 and 164-193 are the best current desk/context account. |
+| `agent-runtime.md` | Drift: maintenance target/message path and `session restore` source wording. Accurate: lines 18-22 and 164-193 are the best current agent defs/context account. |
 | `context.md` | Drift: monolithic schema path only. Accurate: root overlay is explicitly context, never a grant; config acquisition semantics match current owners. |
-| `data-model.md` | Drift: denies shipped schedule identities. Accurate: open maps and `:seon.def/key` desk identity. |
+| `data-model.md` | Drift: denies shipped schedule identities. Accurate: open maps and `:seon.def/key` agent defs identity. |
 | `laws.md` | Drift: per-run fork. The channel transport and consumer-fit laws remain accurate. |
 | `library-grounding.md` | Drift: four pins, schema monolith, shared-eval seam. The core.async/Malli/clj-kondo/Reitit pins and route source map are accurate. |
 | `observability.md` | Verified accurate for the audited rename/runtime boundary; “durable session definitions” is imprecise but does not specify the deleted mechanism. |
@@ -277,9 +277,9 @@ lifecycle.
 | Folder | Last touch | Active inbound | Classification | Recommendation |
 |---|---:|---|---|---|
 | `docs/prds/accretion-testing/` | 2026-08-03 | None from current edge | **ACTIVE, queued but underlinked**; green-to-install remains a live goal, but candidate-context language predates the current SCI pin. | Keep; refresh evidence and add to the authority map if still queued. |
-| `docs/prds/agent-bootstrap/` | 2026-08-03 | None | **STALE**; the append-only session/readline design predates the 08-05 desk and current grader→bootstrap design session. | Archive after extracting any still-ruled form-series decisions into the new bootstrap brief. |
+| `docs/prds/agent-bootstrap/` | 2026-08-03 | None | **STALE**; the append-only session/readline design predates the 08-05 agent defs and current grader→bootstrap design session. | Archive after extracting any still-ruled form-series decisions into the new bootstrap brief. |
 | `docs/prds/background-work/` | 2026-08-03 | None from current edge; older working-edge blocks call it approved | **ACTIVE, queued**; effect/receipt work remains relevant and does not depend on the deleted pod. | Keep, but add an explicit current dependency edge or mark paused. |
-| `docs/prds/error-model/` | 2026-08-03 | `plan/unsettled.md:85` | **ACTIVE**; explicitly next behind desk/P17 and grounded in the split schema layout. | Keep. |
+| `docs/prds/error-model/` | 2026-08-03 | `plan/unsettled.md:85` | **ACTIVE**; explicitly next behind agent defs/P17 and grounded in the split schema layout. | Keep. |
 | `docs/prds/generate-code/` | 2026-08-02 | Historical link only | **COMPLETE/SUPERSEDED**; both runbook and roadmap already say superseded. | Archive now; current historical inbound already labels it quarry. |
 | `docs/prds/in-server-tests/` | 2026-08-03 | None | **ACTIVE, orphaned successor**; its one-runner goal remains plausible, but no current ledger names it. | Keep only if explicitly queued; otherwise archive until re-carved from current source. |
 | `docs/prds/mcp-surface/` | 2026-08-05 | None from current edge | **COMPLETE/SUPERSEDED**; README records Tier 3B landed, while remaining defects have their own issue owners; shared-context statements are stale. | Archive; leave follow-up work in issues/new PRDs. |
@@ -373,7 +373,7 @@ This audit was not a spelling purge. The following authorities were checked
 against source and are accurate enough to preserve:
 
 - `docs/seon/architecture/agent-runtime.md:18-22,164-193` correctly explains
-  base, per-turn fork, program publication, and agent desk.
+  base, per-turn fork, program publication, and the agent's defs.
 - `docs/seon/architecture/architecture.md:529-534` and
   `docs/seon/architecture/toolkit.md:63-69` correctly state ruling #20; repairs
   should remove contradictory earlier paragraphs, not weaken these.
@@ -387,7 +387,7 @@ against source and are accurate enough to preserve:
 - `docs/conventions.md:492-505` correctly distinguishes fast and full test
   tiers.
 - `.agents/skills/data-oriented-clojure/references/program-state.md:27-62`
-  correctly distinguishes the base, turn fork, and desk; it should be the
+  correctly distinguishes the base, turn fork, and agent defs; it should be the
   shared replacement source for stale skill prose.
 - `.agents/skills/clojure-testing/SKILL.md`,
   `.agents/skills/datastar-web-ui/SKILL.md`, and

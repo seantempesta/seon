@@ -9,7 +9,7 @@ tags: [issue, sci, database, errors]
 
 The deleted session-image path stored a derived English replay refusal while
 discarding the observations that produced it. The 2026-08-05 owner ruling
-superseded that mechanism: the agent desk's restore ladder deliberately stores
+superseded that mechanism: the agent's defs' restore ladder deliberately stores
 one honest `:seon.def/unrestorable-reason` only after both pure source and a
 store-faithful value are unavailable.
 

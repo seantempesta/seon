@@ -612,23 +612,23 @@
                  unrepresentable: an ordinal that ever had a receipt
                  refuses forever, across any custody change")))))))
 
-(deftest receipt-settlement-owns-agent-scoped-desk-facts
+(deftest receipt-settlement-owns-agent-scoped-def-facts
   (with-model-database
     (fn [connection]
-      (let [namespace-name 'my.desk.shared
-            agent-a "desk-agent-a"
-            agent-b "desk-agent-b"
-            run-a "desk-run-a"
-            run-b "desk-run-b"
-            qualified-id "my.desk.shared/scratch"
+      (let [namespace-name 'my.defs.shared
+            agent-a "def-agent-a"
+            agent-b "def-agent-b"
+            run-a "defs-run-a"
+            run-b "defs-run-b"
+            qualified-id "my.defs.shared/scratch"
             agent-ref (fn [agent-id]
                         [:seon.cluster.agent/id agent-id])
-            desk-key (fn [agent-id id]
+            def-key (fn [agent-id id]
                        (pr-str [agent-id id]))
-            desk-row
+            def-row
             (fn [agent-id value]
               (merge
-               {:seon.def/key (desk-key agent-id qualified-id)
+               {:seon.def/key (def-key agent-id qualified-id)
                 :seon.def/id qualified-id
                 :seon.def/agent (agent-ref agent-id)
                 :seon.schema.admission/source :agent
@@ -648,11 +648,11 @@
                :seon.fn/spec "[:=> [:cat] :int]"})
             rows-for
             (fn [agent-id]
-              (->> (db/q '[:find [?desk ...]
+              (->> (db/q '[:find [?definition ...]
                            :in $ ?agent-id
                            :where
                            [?agent :seon.cluster.agent/id ?agent-id]
-                           [?desk :seon.def/agent ?agent]]
+                           [?definition :seon.def/agent ?agent]]
                          (db/db connection) agent-id)
                    (mapv #(db/pull (db/db connection) '[*] %))))
             start!
@@ -691,12 +691,12 @@
           (is (= ::committed
                  (settle! run-a 0
                           {:seon.def/rows
-                           [(desk-row agent-a
+                           [(def-row agent-a
                                       {:seon.def/value-edn "1"})]})))
           (is (= ::committed
                  (settle! run-b 0
                           {:seon.def/rows
-                           [(desk-row agent-b
+                           [(def-row agent-b
                                       {:seon.def/value-edn "2"})]})))
           (is (= ["1"] (mapv :seon.def/value-edn (rows-for agent-a))))
           (is (= ["2"] (mapv :seon.def/value-edn (rows-for agent-b)))))
@@ -706,7 +706,7 @@
           (is (= ::committed
                  (settle! run-a 1
                           {:seon.def/rows
-                           [(desk-row
+                           [(def-row
                              agent-a
                              {:seon.def/unrestorable-reason
                               "host value has no faithful representation"})]})))
@@ -715,22 +715,22 @@
             (is (= "host value has no faithful representation"
                    (:seon.def/unrestorable-reason row)))))
 
-        (testing "a receipt cannot write another agent's desk"
+        (testing "a receipt cannot write another agent's defs"
           (start! run-a 2)
           (let [before (rows-for agent-b)
                 refusal
                 (settle! run-a 2
                          {:seon.def/rows
-                          [(desk-row agent-b
+                          [(def-row agent-b
                                      {:seon.def/value-edn "stolen"})]})]
-            (is (= ::run/desk-agent-mismatch (::run/rule refusal)))
+            (is (= ::run/def-agent-mismatch (::run/rule refusal)))
             (is (= before (rows-for agent-b)))
             (is (not (run/terminal?
                       (db/pull
                        (db/db connection) '[*]
                        [:seon.cluster.eval/id (pr-str [run-a 2])]))))))
 
-        (testing "a contracted function retracts only its agent's desk fact"
+        (testing "a contracted function retracts only its agent's matching def"
           (start! run-a 3)
           (is (= ::committed
                  (settle!
@@ -760,12 +760,12 @@
           (is (= ::committed
                  (settle! run-a 4
                           {:seon.def/rows
-                           [(desk-row agent-a
+                           [(def-row agent-a
                                       {:seon.def/value-edn "kept"})]})))
           (is (= ::committed
                  (transact-or-refusal
                   connection
-                  (run/clear-desk-tx
+                  (run/clear-defs-tx
                    {:seon.def/agent (agent-ref agent-b)}))))
           (is (empty? (rows-for agent-b)))
           (is (= ["kept"]
@@ -773,7 +773,7 @@
           (is (= ::committed
                  (transact-or-refusal
                   connection
-                  (run/clear-desk-tx
+                  (run/clear-defs-tx
                    {:seon.def/agent (agent-ref agent-b)}))))
           (is (empty? (rows-for agent-b))))))))
 

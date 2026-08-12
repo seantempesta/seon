@@ -253,7 +253,7 @@ A config attribute is declared once under `resources/seon/schemas/`.
 declarations. Never hand-maintain those composite maps or a second dial roster. `config/default.edn` is the
 complete shipped decision document; it is data, not another schema list.
 
-### Program rows, base context, turn fork, and agent desk are distinct
+### Program rows, base context, turn fork, and the agent's defs are distinct
 
 Keep the four states separate; the checked current/target source is
 [`program-state.md`](../data-oriented-clojure/references/program-state.md).
@@ -630,8 +630,8 @@ listener is the sanctioned alternative to polling or a tuned timeout
 | `src/seon/fn.clj` | static first-party rows plus global schema EDN rows; `current-src` publication only |
 | `src/seon/sci/eval.clj` | selective runtime publication of contracted functions, schemas, tests |
 | `src/seon/cluster/loop.clj` | terminal receipt plus exact `:seon.def` reconciliation |
-| `resources/seon/schemas/seon.def.edn` | agent-scoped desk facts and restore-ladder shapes (`:1-45`) |
-| `test/seon/sci/desk_test.clj` | cross-JVM desk rehydration and explicit-clear acceptance (`:184-225`) |
+| `resources/seon/schemas/seon.def.edn` | agent-scoped def facts and restore-ladder shapes (`:1-45`) |
+| `test/seon/sci/defs_test.clj` | cross-JVM restore and explicit clear of the agent's defs (`:363-408`) |
 | `reference-code/datahike/src/datahike/api/impl.cljc` | accepted transact argument shapes |
 | `reference-code/datahike/` | the fork's source — read it, don't guess semantics |
 

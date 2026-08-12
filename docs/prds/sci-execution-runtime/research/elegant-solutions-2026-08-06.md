@@ -19,7 +19,7 @@ the `seon-flow-architecture` skill; the vendored flow source
 and the live seams: `src/seon/cluster/loop.clj` complete (1,906 lines),
 `src/seon/cluster/agent.clj` (turn-step and blueprint),
 `src/seon/cluster/prompt.clj` complete, `src/seon/sci/eval.clj:1290-1430`
-(fork-for-turn/desk), `src/seon/render/web.clj:750-810` (context pass),
+(fork-for-turn/agent defs), `src/seon/render/web.clj:750-810` (context pass),
 `src/seon/flow.clj:60-130` (var-process). Production source was not edited.
 
 ## Verdict in one paragraph
@@ -52,7 +52,7 @@ freeze       reply sources → plan-tx (one transaction)
 reduce       for each ordered form:
                evaluate in the turn fork at the previous step's db-after
                settle: ONE terminal transaction — receipt + disposition
-                       + deliveries + desk rows + error fact if any
+                       + deliveries + rows for the agent's defs + error fact if any
 close        the disposition IS the close; nothing after it
 ```
 
@@ -87,7 +87,7 @@ only exit.
   (admitted result, `:my.run/value`, or error value). Output: **one
   transaction** built by the existing `run/receipt-settle-tx` /
   `run/close-tx` / `error/commit-tx` constructors, carrying receipt (when an
-  evaluation began), close, error fact, desk rows, and delivery rows
+  evaluation began), close, error fact, rows for the agent's defs, and delivery rows
   together. This is `terminal-tx` (:291) generalized to accept the error
   disposition, replacing the other four paths.
 
@@ -185,7 +185,7 @@ Essential (keep, some relocated):
 - **Paid-call fencing** — `call-turn`'s attempt loop, `ai/disposition` as
   the choke point, attempt rows per call, capture-before-provider
   (:1290-1565). This is the best code in the file.
-- **Blob economics** — `settlement-result`, `store-desk-values!`,
+- **Blob economics** — `settlement-result`, `store-def-values!`,
   `result-blob-smaller?` with the measured 743-byte constant (:464-553).
   Essential semantics, wrong home: move to `seon.cluster.run` (or
   `seon.blob`) as the one settlement projection; the loop calls one
@@ -208,7 +208,7 @@ Accidental (delete):
   fix the face, not the pre-pass.)
 - **Pre-commit string-identity plumbing.** `(str (random-uuid))` run ids,
   `(pr-str [run-id ordinal])` receipt ids, `attempt-id`, `problem-id`,
-  desk `pr-str` keys. The eid+commit-id log-identity ruling already kills
+  agent defs `pr-str` keys. The eid+commit-id log-identity ruling already kills
   this shape; receipts/attempts are identified by their `(run, ordinal)`
   connection and their entity id.
 - **Reply-synthesis machinery.** `asked-value`/`delivery-rows` and the

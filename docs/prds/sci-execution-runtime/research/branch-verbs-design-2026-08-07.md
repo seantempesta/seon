@@ -17,7 +17,7 @@ Documents read end to end before designing: the sealed
 [seon.env PRD](../plan/seon-env-prd-2026-08-07.md) (including
 "Current versus pinned database values" and naming ruling 5 — no "ambient",
 no "tower", library or literal names only), the
-[agent desk and checkout PRD](../plan/agent-desk-and-checkout-prd-2026-08-05.md),
+[the agent's defs and checkout PRD](../plan/agent-desk-and-checkout-prd-2026-08-05.md),
 and the `my.branch` `[TARGET]` row in the vocabulary table of
 [CLAUDE.md](../../../../CLAUDE.md). Naming in this document follows ruling 5:
 Datahike's own words for temporality (`d/db` on a connection is CURRENT; a
@@ -172,14 +172,14 @@ verb that teaches the two-world contract every time it renders (checkout PRD
 - this agent's BASIS: the checkout's commit id and `:t`, or the head when the
   agent is a live namespace owner — plus, for a pinned agent, how many commits
   behind it is (a count over the log walk);
-- the desk: which `:seon.def/*` rows are uncommitted session state versus what
+- the agent's defs: which `:seon.def/*` rows are uncommitted session state versus what
   is in the shared program graph — the "working tree" half of the mapping,
   already landed as W-A.
 
 Nothing here is stored. `status` is a query, and if a field cannot be answered
 by query the missing fact is the defect.
 
-`git status` mapping: like `git status`, except "modified files" is your desk
+`git status` mapping: like `git status`, except "modified files" is your agent defs
 (defs and atoms) and "ahead/behind" is measured in transactions.
 
 ### 1.5 `fork` — Datahike `branch!` through the one lifecycle owner
@@ -286,7 +286,7 @@ REQUEST to that owner; it does not carry the capability.
   to be a single provenance fact (the published `current-src` commit records
   the source git SHA), joined by query. Real git on disk stays raw CLI through
   `my.shell`.
-- **No index / staging.** There is no working tree to stage from; the desk is
+- **No index / staging.** There is no working tree to stage from; the agent's defs is
   the working tree and it commits at turn settlement.
 - **No merge — and the source does NOT make it trivial.** `versioning/merge!`
   (`versioning.cljc:734-748`) is explicit: "It is the responsibility of the

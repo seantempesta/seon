@@ -28,7 +28,7 @@ accurate statements elsewhere in the same architecture corpus.
   `src/seon/render/ns.clj:289-314` applies privacy only to foreign rendering.
 - `docs/seon/architecture/laws.md:93-100` says the SCI base forks once per run.
   Current `src/seon/cluster/loop.clj:1493-1514` forks once per turn, and
-  `src/seon/sci/eval.clj:1309-1367` rehydrates the selected agent's desk into
+  `src/seon/sci/eval.clj:1309-1367` rehydrates the selected agent's defs into
   that fork.
 - `docs/seon/architecture/agent-runtime.md:235-247` marks scheduling as an
   unbuilt target where a due fire commits a message. Current
@@ -55,7 +55,7 @@ accurate statements elsewhere in the same architecture corpus.
   every function is callable; public/private shapes only the namespace API
   projection.
 - Context lifetime is base program context → fresh per-turn fork → selected
-  agent desk, with no per-run or shared-mutation residue.
+  the agent's defs, with no per-run or shared-mutation residue.
 - Scheduling and root maintenance describe the shipped turn-free receipt path;
   no message-delivery target remains.
 - The data-model identity table includes the shipped schedule/task/fire and
@@ -67,7 +67,7 @@ accurate statements elsewhere in the same architecture corpus.
 
 Resolved by `d4259aa1e`. The architecture now states unrestricted function
 callability with privacy as curation, public functions as the namespace API,
-fresh per-turn forks rehydrated from the selected agent's desk, shipped
+fresh per-turn forks rehydrated from the selected agent's defs, shipped
 turn-free maintenance, the split schema population, `[TARGET] my.branch`, and
 the current render-producer vocabulary. All twelve changed Markdown files
 passed `seon.dev.markdown/validate-file` and `git diff --check` before the

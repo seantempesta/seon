@@ -53,7 +53,7 @@ run remains deliberately revisable.
 
 ## Acceptance evidence
 
-`receipt-settlement-owns-agent-scoped-desk-facts` opens two runs before either
+`receipt-settlement-owns-agent-scoped-agent defs-facts` opens two runs before either
 publishes the shared function, admits the first source, refuses the second
 run's divergent source, observes the first durable row unchanged, then admits
 the second run's identical declaration as a no-op. Runtime installation is

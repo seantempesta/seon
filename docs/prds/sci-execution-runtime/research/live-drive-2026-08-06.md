@@ -24,7 +24,7 @@ not silently counted as covered.
 
 The live system also exposed independent shipping defects in the problems
 projection, transcript renderer, `/data`, namespace debug page, maintenance
-schema installation, and agent desk attribution. Seven issue notes were filed
+schema installation, and the agent's defs attribution. Seven issue notes were filed
 or updated in the ranked index; every other finding below maps to an existing
 open note.
 
@@ -170,10 +170,10 @@ Full-string census:
 | complete config-literal endings | — | 6 |
 | maintenance request ids | — | 10 |
 | identical `pull-many` renderer failures | — | 5 |
-| false unrestorable desk rows | 0 | 3 |
+| false unrestorable rows for the agent's defs | 0 | 3 |
 
 The second capture places the live-drive message between an entire successful
-DeepSeek attempt/config face and four false desk rows. It also repeats the
+DeepSeek attempt/config face and four false rows for the agent's defs. It also repeats the
 same `seon.db/pull-many` contract error five times. Its tail is mostly unit
 ids/branch paths, ending with the volatile basis/time line.
 
@@ -246,9 +246,9 @@ caret behavior, Datastar console errors, or screenshot appearance.
 ### Dishonest
 
 9. **System runtime atoms are committed and rendered as root's agent-authored
-   desk.** Eids `23683`–`23686` name `held-flocks`, `running-instances`,
+   agent defs.** Eids `23683`–`23686` name `held-flocks`, `running-instances`,
    `root-store-holder`, and `source-analysis-cache`. New blocker:
-   [Keep newly loaded system Vars out of the agent desk](docs/seon/issues/agent-desk-captures-newly-loaded-system-vars.md).
+   [Keep newly loaded system Vars out of the agent's defs](docs/seon/issues/agent-desk-captures-newly-loaded-system-vars.md).
 10. **The bootstrap context teaches stale messaging and comment semantics.**
     Existing owner:
     [Make production docstrings describe the surviving runtime](docs/seon/issues/production-docstrings-teach-deleted-semantics.md),
@@ -305,7 +305,7 @@ caret behavior, Datastar console errors, or screenshot appearance.
   included the fixed message form and canonical debug link.
 - The database made the stop diagnosis possible without touching process
   memory: trigger, run, plan forms, attempt, missing receipts, messages,
-  captures, errors, and desk rows were all queryable facts.
+  captures, errors, and rows for the agent's defs were all queryable facts.
 - The issue authority already contained the exact fresh-maintenance schema
   defect and several render/output owners, preventing duplicate issue notes.
 

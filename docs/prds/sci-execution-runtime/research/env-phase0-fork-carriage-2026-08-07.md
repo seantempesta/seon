@@ -162,7 +162,7 @@ fired for all three. Fork B's own closure resolves fork B.
 This is the design working as specified, and it is precisely why the research
 report's invariant 3 matters: an escaped live fn object does not leak fork B's
 environment into fork A, but it *does* keep fork A's environment alive inside
-fork B's turn, along with fork A's interrupt policy. Desk rehydration, database
+fork B's turn, along with fork A's interrupt policy. rehydrating the agent's defs, database
 blobs, shared atoms and channel payloads must round-trip through **source**
 re-evaluated in the receiving fork. A fn object crossing a turn boundary is the
 bug class; this probe is the demonstration to point at.

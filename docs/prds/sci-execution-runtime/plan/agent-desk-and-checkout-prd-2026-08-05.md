@@ -1,10 +1,10 @@
 ---
 type: prd
 status: active
-tags: [prd, runtime, agent, session, git]
+tags: [prd, runtime, agent, sci, database]
 ---
 
-# The agent desk, the checkout, and the git framing — PRD (2026-08-05)
+# The agent's defs, the checkout, and the git framing — PRD (2026-08-05)
 
 Owner-ruled in conversation on 2026-08-05 (recorded in
 [README.md](README.md) "Third ruling batch"). Implementation waits for
@@ -21,20 +21,20 @@ everything durable to be using the database and writing proper
 functions with schemas and tests… sometimes atoms are good for early
 experimentation so I want to support them in the agents context."
 
-- **The DESK** — the agent's session world: `def`s and atoms, fast,
+- **the agent's defs** — the agent's session world: `def`s and atoms, fast,
   experimentation-first, not durable, not shared. Supported and taught.
 - **The SHARED SYSTEM** — database facts and contracted functions with
   schemas and tests, entering through the ONE admission seam.
 
 This dissolves the recorded tension between ruling #17 (selective
 corpus admission — no scratch litter in the shared program) and ruling
-#28 (stateless resume): #17 governs the shared world, the desk governs
+#28 (stateless resume): #17 governs the shared world, the agent's defs governs
 the agent's own. The bootstrap teaches the contract explicitly.
 
-## 2. Desk facts — `:seon.def/*` (the session-image mechanism dies)
+## 2. The agent's defs — `:seon.def/*`
 
-The separate `:seon.code.def` session-image family and its write path
-are DELETED. The capability survives as agent-scoped **desk facts**
+The separate `:seon.code.def` family and its write path are DELETED. The
+capability survives as agent-scoped **facts in the agent's defs**
 written through the one admission seam:
 
 - **When:** at TURN SETTLEMENT, in the terminal receipt transaction that
@@ -56,12 +56,12 @@ written through the one admission seam:
   settled value is snapshotted at turn settlement; restore re-creates the
   atom bound to it and the REPL prints one honest line ("restored
   `scratch` from its last settled value"). Losing an afternoon's
-  experiment state to a JVM bounce is the frustration the desk exists
+  experiment state to a JVM bounce is the frustration the agent's defs exists
   to prevent; honesty is preserved by saying it.
 - **Rehydration:** each turn's fresh fork = the live cluster base ctx + this
-  agent's desk facts. Turn boundaries, run boundaries, JVM bounces, and
+  agent's def facts. Turn boundaries, run boundaries, JVM bounces, and
   stateless resume are ONE path. There is no second restore machinery.
-- **Session end is EXPLICIT ONLY** (owner-ruled): the desk lives as
+- **Session end is EXPLICIT ONLY** (owner-ruled): the agent's defs lives as
   long as the agent. Clearing = the agent's own act, an operator order,
   or cluster reset/refork. Nothing expires on a timer — "temporary"
   means not-durable-not-shared, never vanishes-silently.
@@ -70,13 +70,13 @@ written through the one admission seam:
 
 New functions, schemas, and tests are visible in context next turn
 (ruling #16 already derives all context fresh per turn). Each turn evaluates
-in a fresh fork of the live base; its desk commits in the terminal receipt
+in a fresh fork of the live base; its defs commit in the terminal receipt
 transaction and rehydrates into the next turn's fork. A direct probe against
 SCI pin `2db3358cba913b6fbbe49c7b5b34d7ac72715924` falsified the prior claim
 that an existing fork sees a Var installed into its base later: the base
 resolved `installed-later` to `42`, while the existing fork reported
 `Unable to resolve symbol: installed-later`. Per-turn forking therefore gives
-both foreign-install freshness and the agent's own desk continuity without an
+both foreign-install freshness and continuity of the agent's defs without an
 SCI fork change. Run custody, receipts, and interrupted-and-adapt semantics
 are unchanged. Only the database value one form reads at its instant is
 pinned — snapshot isolation (L9) is preserved, not weakened.
@@ -111,8 +111,8 @@ exists. The mappings told to agents:
 
 | Seon | Git |
 |---|---|
-| the desk (uncommitted session defs/atoms) | the working tree |
-| turn-settlement desk commit | commit |
+| the agent's defs (uncommitted session defs/atoms) | the working tree |
+| turn-settlement the agent's defs commit | commit |
 | pinned agent (checkout fact) | detached-HEAD checkout |
 | cluster fork from a published commit | `checkout -b` |
 | `current-src` publication (expected-current guard) | `push --force-with-lease` |
@@ -133,7 +133,7 @@ exists. The mappings told to agents:
   matter. Where they meet — publication — the link is ONE provenance
   fact: the published `current-src` commit records the source git SHA
   that produced it, so the two histories join by query.
-- **Context gains git-shaped views, RULED**: a STATUS block (desk vs
+- **Context gains git-shaped views, RULED**: a STATUS block (agent defs vs
   committed — teaches the two-world contract every time it renders) and
   a LOG view (branch history), both ordinary declared renderers over
   existing facts. No new state.
@@ -146,18 +146,18 @@ exists. The mappings told to agents:
 
 ## 6. Wave order (after the rename pass)
 
-1. **W-A — desk facts**: `:seon.def/*` shapes declared; turn-settlement
+1. **W-A — the agent's defs**: `:seon.def/*` shapes declared; turn-settlement
    write path through the terminal admission seam; per-turn fork rehydration; the
    `:seon.code.def` write path and restore machinery deleted in the
    same commit. Proof: define fn + data + atom in turn 1 → JVM kill →
    the next turn sees all three, atom snapshot stated, REPL states anything
-   lost; explicit clear empties the desk.
+   lost; explicit clear empties the agent's defs.
 
    **LANDED 2026-08-05:** commits `190eed2fe`, `c124ffe56`, `f908a5939`,
    `0811e5bc6`, and `55504e6fe`. The recurring proof force-destroys the writer
    JVM after terminal settlement, opens the same file database in a fresh JVM,
    observes the function, data, and atom value with the stated atom and loss
-   notices, explicitly clears the desk, and observes zero remaining rows.
+   notices, explicitly clears the agent's defs, and observes zero remaining rows.
 2. **W-B — checkout**: the agent checkout attribute + per-run override
    resolution in the run loop; pinned-basis ctx build cached by commit
    id. Proof: a pinned agent at commit X does not see a function

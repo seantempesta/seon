@@ -17,7 +17,7 @@ private work queue, turn entity, or runtime status row.
 
 Each cluster owns one acquired base SCI `ctx`, and each turn evaluates in a
 fresh fork of that live base. The fork is turn-private mutable interpreter
-state; the database program graph and each agent's desk facts are the durable
+state; the database program graph and each agent's defs are the durable
 authority. Agents share contracted definitions by committing program facts;
 their uncontracted definitions remain in their own desks.
 
@@ -162,7 +162,7 @@ decides which program and database facts the terminal transaction may commit;
 it does not restrict which functions an agent may call. A `defn` evaluates to
 the Var face, while an execution failure evaluates to its flat error face.
 
-## Live program graph and agent desks
+## Live program graph and the agent's defs
 
 One cluster has one live program graph and acquired base SCI context; no other
 cluster shares either. Every turn forks that live base and begins from the
@@ -170,7 +170,7 @@ run's current namespace. A contracted definition becomes cross-agent visible
 after its facts join the program graph and the terminal transaction installs
 the committed row into the base. The next turn's fork sees that install.
 Boot acquisition rebuilds the program-only base; the same per-turn fork path
-then rehydrates the selected agent's desk across turn boundaries, run
+then rehydrates the selected agent's defs across turn boundaries, run
 boundaries, JVM bounces, and stateless resume.
 
 Contracted functions persist as `:seon.fn` rows. Their canonical `/spec`,
@@ -188,7 +188,7 @@ agent plus qualified name:
 Restore binds faithful values and supported function roots directly from
 facts, recreates atoms around their last settled values with one honest REPL
 notice, and states every unrestorable name. No agent-authored form re-executes
-during recovery. Exact desk replacement
+during recovery. Exact replacement of the agent's defs
 shares the terminal receipt transaction; clearing is explicit and agent-local.
 Namespace ownership is `:seon.cluster.agent/namespace`; it coordinates who
 should edit a namespace and never gates callability.
@@ -298,7 +298,7 @@ platform worker.
 - `src/seon/cluster/{agent,wake,work,loop}.clj*` owns per-agent graph lifecycle,
   wake routing, work derivation, and the fold.
 - `src/seon/sci/eval.clj` owns interruption, live context acquisition, and
-  per-turn fork and desk rehydration.
+  per-turn fork and rehydrating the agent's defs.
 - `src/seon/render/{agent,transcript}.clj` owns the current queries and renders
   over agents, messages, runs, forms, and receipts.
 
@@ -306,5 +306,5 @@ platform worker.
 
 - [[architecture]] — process topology, Flow scheduling, and the effect seam.
 - [[data-model]] — the admitted attribute census.
-- [[context]] — agent context, desk continuity, and the context-capture contract.
+- [[context]] — agent context, continuity of the agent's defs, and the context-capture contract.
 - [[observability]] — forensic use of captures, attempts, receipts, and errors.

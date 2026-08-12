@@ -1,7 +1,7 @@
 ---
 type: prd
 status: active
-tags: [prd, handoff, state, problems, rulings]
+tags: [prd, handoff, state, architecture, rulings]
 ---
 
 # State of the program — 2026-08-05 (full stop, nothing in flight)
@@ -30,7 +30,7 @@ the "WORKING EDGE — 2026-08-05 STEWARDSHIP SESSION" block in
 in [README.md](README.md). Per-problem status after the session:
 
 - **P1** — RULED (exclusive sweep) and design SEALED; implementation
-  queued (gate first, blob-permit slice after desk W-A, then the
+  queued (gate first, blob-permit slice after defs W-A, then the
   reclaim runbook).
 - **P2** — the 245 GB `tmp/` evidence is DELETED (disk 667→911 GiB
   usable); the store reclaim awaits the sweep implementation.
@@ -40,7 +40,7 @@ in [README.md](README.md). Per-problem status after the session:
 - **P5** — still deliberately open.
 - **P6** — unchanged (output-floor ladder steps 3–8).
 - **P7** — curation W3 PARKED until after the implementation wave.
-- **P8** — unchanged; the desk PRD records its coupling to the fork
+- **P8** — unchanged; the agent's defs PRD records its coupling to the fork
   model.
 - **P9** — O4 was a GRADER defect (delegation live-proven working,
   `cdae0bd95`); one grader wave (O4 scoping + O5 predicate + O1
@@ -51,7 +51,7 @@ in [README.md](README.md). Per-problem status after the session:
   graduation proven).
 - **P12/P17** — ambient r2 RULED; P17 hard-blocked on P12, whose
   implementation lane is next.
-- **P13** — SETTLED: the two-world desk
+- **P13** — SETTLED: the two-world model for the agent's defs
   ([agent-desk-and-checkout-prd-2026-08-05.md](agent-desk-and-checkout-prd-2026-08-05.md));
   the session-image mechanism dies into `:seon.def/*` facts.
 - **P14/P15/P16/P18** — unchanged; new ugly-output findings appended to

@@ -241,7 +241,7 @@ every loaded public var carrying `:malli/schema` in development, with no
 namespace allow list. Tests and generators still prove the contract rather
 than relying only on runtime checks.
 
-### Program rows, base context, turn fork, and agent desk
+### Program rows, base context, turn fork, and the agent's defs
 
 Keep the four boundaries distinct. Read the one checked current/target source,
 [`program-state.md`](../data-oriented-clojure/references/program-state.md),

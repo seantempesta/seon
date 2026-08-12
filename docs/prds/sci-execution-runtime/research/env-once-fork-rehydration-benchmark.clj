@@ -29,7 +29,7 @@
 
       :source
       (do
-        ;; This mirrors Seon's current two-pass desk restore: establish every
+        ;; This mirrors Seon's current two-pass restoring the agent's defs: establish every
         ;; Var before evaluating the stored defining forms.
         (doseq [index (range definition-count)]
           (sci/intern ctx 'user (symbol (str "d" index))))

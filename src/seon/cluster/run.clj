@@ -87,7 +87,7 @@
           :where [_ :seon.config.eval.result/blob-threshold ?threshold]]
         db))
 
-(defn- store-desk-values!
+(defn- store-def-values!
   [connection evaluation]
   (let [threshold (result-blob-threshold @connection)]
     (reduce
@@ -99,7 +99,7 @@
                staged (when (and threshold (> size threshold))
                         (blob/stage! connection serialized))]
            (cond->
-            (update projection :seon.sci.eval/desk-defs
+            (update projection :seon.sci.eval/defs
                     conj
                     (cond-> (assoc candidate :seon.def/size size)
                       staged
@@ -108,10 +108,10 @@
                       (or (nil? threshold) (<= size threshold))
                       (assoc :seon.def/value-edn serialized)))
              staged (update :seon.blob/staged-writes conj staged)))
-         (update projection :seon.sci.eval/desk-defs conj candidate)))
-     {:seon.sci.eval/desk-defs []
+         (update projection :seon.sci.eval/defs conj candidate)))
+     {:seon.sci.eval/defs []
       :seon.blob/staged-writes []}
-     (:seon.sci.eval/desk-defs evaluation))))
+     (:seon.sci.eval/defs evaluation))))
 
 (defn- result-window-page-size
   [db]
@@ -158,18 +158,18 @@
     evaluation))
 
 (defn settlement-projection
-  "Project one evaluation into receipt, desk, and staged-blob settlement data."
+  "Project an evaluation into receipt, defs, and staged-blob data."
   {:malli/schema
    [:=> [:cat :seon.cluster.loop/cluster :seon.cluster.loop/evaluation]
     [:tuple :map :map [:vector :seon.blob/staged-write]]]}
   [cluster evaluation]
   (let [receipt (settlement-result cluster evaluation)
-        desk (store-desk-values! (:seon.db/connection cluster) evaluation)]
+        defs (store-def-values! (:seon.db/connection cluster) evaluation)]
     [(dissoc receipt :seon.blob/staged-writes)
      (merge evaluation
-            (dissoc desk :seon.blob/staged-writes))
+            (dissoc defs :seon.blob/staged-writes))
      (into (vec (:seon.blob/staged-writes receipt))
-           (:seon.blob/staged-writes desk))]))
+           (:seon.blob/staged-writes defs))]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure derivations
@@ -363,7 +363,7 @@
 ;; behavior immediately — the flow-dynamics live-update pattern.
 (declare claim-call release-call close-call plan-call refresh-call
          open-call receipt-start-call receipt-settle-call
-         recover-call clear-desk-call)
+         recover-call clear-defs-call)
 
 (defn- unanswered-background-results
   [db agent-eid]
@@ -1227,8 +1227,8 @@
                (relation-assertions [identity identity-value]
                                     relation-row)))))))
 
-(defn- desk-owned-attributes
-  "Attributes declared on one desk fact, derived from its entity schema."
+(defn- def-owned-attributes
+  "Attributes declared on one agent def, derived from its entity schema."
   []
   (into #{}
         (keep (fn [entry]
@@ -1237,11 +1237,11 @@
                   (first entry))))
         (schema.form/map-entries (schema/schema-definition :seon.def/def))))
 
-(defn- desk-row
-  "Validate one agent-owned desk fact and derive its exact identity."
+(defn- def-row
+  "Validate one agent-owned def and derive its exact identity."
   [db request run-agent row]
   (when-not (schema/valid-candidate-value? :seon.def/def row)
-    (refuse! `receipt-settle-call ::desk-row-not-admitted request))
+    (refuse! `receipt-settle-call ::def-row-not-admitted request))
   (let [agent (db/pull db [:db/id :seon.cluster.agent/id]
                        (:seon.def/agent row))
         namespace-row (db/pull db [:db/id :seon.ns/name]
@@ -1252,19 +1252,19 @@
                                    (str (:seon.def/name row)))))
         expected-key (pr-str [agent-id (:seon.def/id row)])]
     (when-not (= (:db/id run-agent) (:db/id agent))
-      (refuse! `receipt-settle-call ::desk-agent-mismatch request))
+      (refuse! `receipt-settle-call ::def-agent-mismatch request))
     (when-not (:db/id namespace-row)
-      (refuse! `receipt-settle-call ::desk-namespace-missing request))
+      (refuse! `receipt-settle-call ::def-namespace-missing request))
     (when-not (= expected-id (:seon.def/id row))
-      (refuse! `receipt-settle-call ::desk-id-mismatch request))
+      (refuse! `receipt-settle-call ::def-id-mismatch request))
     (when-not (= expected-key (:seon.def/key row))
-      (refuse! `receipt-settle-call ::desk-key-mismatch request))
+      (refuse! `receipt-settle-call ::def-key-mismatch request))
     (when-not (= :agent (:seon.schema.admission/source row))
-      (refuse! `receipt-settle-call ::desk-source-not-agent request))
+      (refuse! `receipt-settle-call ::def-source-not-agent request))
     row))
 
-(defn- exact-desk-row-tx
-  "Exactly replace the attributes owned by one admitted desk fact."
+(defn- exact-def-row-tx
+  "Exactly replace the attributes owned by one admitted agent def."
   [db row]
   (let [existing (db/pull db '[*] [:seon.def/key (:seon.def/key row)])
         entity-id (:db/id existing)
@@ -1276,34 +1276,34 @@
                  (filter #(contains? existing %))
                  (map (fn [attribute]
                         [:db/retract entity-id attribute])))
-                (sort (desk-owned-attributes))))]
+                (sort (def-owned-attributes))))]
     (conj (vec retracts)
           (cond-> row entity-id (assoc :db/id entity-id)))))
 
-(defn- desk-rows-tx
-  "Validate and exact-upsert this receipt's agent-scoped desk facts."
+(defn- def-rows-tx
+  "Validate and exact-upsert this receipt's agent-scoped defs."
   [db request run-agent rows contracted-id]
-  (let [rows (mapv #(desk-row db request run-agent %) rows)
+  (let [rows (mapv #(def-row db request run-agent %) rows)
         keys (mapv :seon.def/key rows)]
     (when-not (= (count keys) (count (set keys)))
-      (refuse! `receipt-settle-call ::desk-key-duplicate request))
+      (refuse! `receipt-settle-call ::def-key-duplicate request))
     (into []
           (comp
            (remove #(= contracted-id (:seon.def/id %)))
-           (mapcat #(exact-desk-row-tx db %)))
+           (mapcat #(exact-def-row-tx db %)))
           rows)))
 
-(defn- contracted-desk-retractions
-  "Retract this agent's desk fact superseded by a contracted function."
+(defn- contracted-def-retractions
+  "Retract this agent's def superseded by a contracted function."
   [db agent-eid contracted-id]
   (when contracted-id
     (into []
-          (map (fn [desk-eid] [:db.fn/retractEntity desk-eid]))
-          (db/q '[:find [?desk ...]
+          (map (fn [def-eid] [:db.fn/retractEntity def-eid]))
+          (db/q '[:find [?definition ...]
                   :in $ ?agent ?id
                   :where
-                  [?desk :seon.def/agent ?agent]
-                  [?desk :seon.def/id ?id]]
+                  [?definition :seon.def/agent ?agent]
+                  [?definition :seon.def/id ?id]]
                 db agent-eid contracted-id))))
 
 (def ^:private receipt-terminal-attributes
@@ -1409,34 +1409,34 @@
             [(if program-row (row-tx db request program-row) [])
              (relation-assertions (:db/id (::form-facts request))
                                   (::form-facts request))
-             (desk-rows-tx db request (::agent run)
+             (def-rows-tx db request (::agent run)
                            (or (:seon.def/rows request) [])
                            contracted-id)
-             (contracted-desk-retractions db agent-eid contracted-id)
+             (contracted-def-retractions db agent-eid contracted-id)
              (receipt-read-evidence-tx db receipt request)
              (receipt-terminal-assertions receipt request)]))))
 
-(defn clear-desk-tx
-  "Build transaction data explicitly clearing one agent's desk."
+(defn clear-defs-tx
+  "Build transaction data explicitly clearing one agent's defs."
   {:malli/schema
    [:=> [:cat :seon.def/clear-request] [:vector :some]]}
   [request]
-  [[:db.fn/call #'clear-desk-call request]])
+  [[:db.fn/call #'clear-defs-call request]])
 
-(defn clear-desk-call
-  "Retract every desk fact owned by one declared agent."
+(defn clear-defs-call
+  "Retract every def owned by one declared agent."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.def/clear-request]
     [:vector :some]]}
   [db request]
   (let [agent (db/pull db [:db/id] (:seon.def/agent request))]
     (when-not (:db/id agent)
-      (refuse! `clear-desk-call ::desk-agent-missing request))
+      (refuse! `clear-defs-call ::def-agent-missing request))
     (into []
-          (map (fn [desk-eid] [:db.fn/retractEntity desk-eid]))
-          (db/q '[:find [?desk ...]
+          (map (fn [def-eid] [:db.fn/retractEntity def-eid]))
+          (db/q '[:find [?definition ...]
                   :in $ ?agent
-                  :where [?desk :seon.def/agent ?agent]]
+                  :where [?definition :seon.def/agent ?agent]]
                 db (:db/id agent)))))
 
 (defn recover-tx

@@ -1,6 +1,6 @@
 ---
 name: repl
-description: "Distinguish and probe Seon's agent-reply reader, an agent turn in its fresh SCI fork and rehydrated desk, a cluster io-prepl/MCP eval_clj session, and a raw JVM REPL. Use for reply parsing, prose-vs-code classification, Markdown fences, reader refusals, desk persistence, source fidelity, namespace attribution, private-Var probes, or reload-before-retest work. Do not load it merely for ordinary Clojure syntax or application code that happens to be evaluated at a REPL."
+description: "Distinguish and probe Seon's agent-reply reader, an agent turn in its fresh SCI fork with the agent's defs restored, a cluster io-prepl/MCP eval_clj session, and a raw JVM REPL. Use for reply parsing, prose-vs-code classification, Markdown fences, reader refusals, persistence of the agent's defs, source fidelity, namespace attribution, private-Var probes, or reload-before-retest work. Do not load it merely for ordinary Clojure syntax or application code that happens to be evaluated at a REPL."
 ---
 
 # REPL — distinguish the four surfaces
@@ -14,10 +14,10 @@ Four surfaces share Clojure syntax but not an execution contract:
   (`src/seon/cluster/reply.clj:1-48,310-355`).
 - **An agent turn in SCI** executes frozen sources through
   `seon.sci.eval/evaluate`. Each turn gets a fresh generation-aware fork of the
-  cluster's program-only base, then rehydrates only the selected agent's desk.
+  cluster's program-only base, then rehydrates only the selected agent's defs.
   Every form in that turn shares the fork; the next turn forks the then-current
-  base again (`src/seon/sci/eval.clj:1309-1392`;
-  `src/seon/cluster/loop.clj:1493-1514`).
+  base again (`src/seon/sci/eval.clj:1418-1492`;
+  `src/seon/cluster/loop.clj:1245-1264`).
 - **Cluster `io-prepl` / MCP `eval_clj`** sends a form to the live cluster
   JVM's `clojure.core.server/io-prepl`. It reads, evaluates, and returns a
   structured envelope; a bare value evaluates normally, and the agent-reply
@@ -49,14 +49,14 @@ server exists.
 ### Prove the agent session boundary
 
 Use an actual agent turn when the claim concerns the SCI evaluation context,
-terminal receipt, contracted program publication, or desk facts. A
+terminal receipt, contracted program publication, or the agent's defs. A
 direct `io-prepl` form proves only host-JVM evaluation; it never passes through
 the agent reply reader or the turn's terminal transaction
 (`reference-code/clojure/src/clj/clojure/core/server.clj:228-296`;
-`src/seon/cluster/loop.clj:1493-1670`).
+`src/seon/cluster/loop.clj:1245-1419`).
 
 For the full split between program rows, base context, per-turn fork, and
-agent-scoped desk, read
+agent-scoped defs, read
 [`program-state.md`](../data-oriented-clojure/references/program-state.md).
 
 An evaluation's namespace precedence is explicit form namespace → committed

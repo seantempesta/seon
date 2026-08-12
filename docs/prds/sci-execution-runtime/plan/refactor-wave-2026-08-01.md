@@ -6,7 +6,7 @@ tags: [prd, sci, agent, render, database, architecture]
 
 # The runtime refactor wave — ordered implementation plan (2026-08-01)
 
-> Superseded by [the current working edge](unsettled.md) and [the desk PRD](agent-desk-and-checkout-prd-2026-08-05.md); this August 1 wave is dated archaeology.
+> Superseded by [the current working edge](unsettled.md) and [the agent's defs PRD](agent-desk-and-checkout-prd-2026-08-05.md); this August 1 wave is dated archaeology.
 
 This document sequences the three designed-and-measured slices that are
 queued but unbuilt: the **live per-cluster program graph** (rulings #27,

@@ -103,7 +103,7 @@ agent's behalf.
 
 Receipt identity is run plus ordinal, and `receipt-start-call` refuses an
 existing receipt (`src/seon/cluster/run.clj:712-765`). `receipt-settle-call`
-refuses a second terminal assertion and atomically commits program rows, desk
+refuses a second terminal assertion and atomically commits program rows, agent defs
 rows, and terminal receipt facts (`:1194-1255`). This is exactly the once fence
 needed for an individual form occurrence.
 
@@ -111,14 +111,14 @@ A refreshed derived read must therefore be a **new occurrence**, not a second
 attempt against the old identity. The old receipt remains immutable; the new
 form gets a new run/ordinal identity and its own receipt.
 
-### The desk violates the new rule today
+### the agent's defs violates the new rule today
 
 Current settlement deliberately prefers source for a successful non-atom
 definition and drops its stored value (`src/seon/cluster/loop.clj:220-305`).
-Every fresh turn then queries the selected agent's desk, pre-interns its names,
+Every fresh turn then queries the selected agent's defs, pre-interns its names,
 and calls `sci/eval-form` for every source-backed row
 (`src/seon/sci/eval.clj:1421-1503`). The recurring test explicitly requires
-that behavior (`test/seon/sci/desk_test.clj:232-329`). Cold installation of an
+that behavior (`test/seon/sci/defs_test.clj:232-329`). Cold installation of an
 agent-authored contracted function also calls `sci/eval-form` on the stored
 program source (`src/seon/sci/eval.clj:1367-1400`).
 
@@ -414,11 +414,11 @@ creation and alias installation are already cheap; parsing/analyzing/evaluating
 N source forms is the avoidable per-turn cost.
 
 Warm aliases should normally cost only the bare fork because committed
-namespace bindings are installed into and inherited from the base. Desk roots
+namespace bindings are installed into and inherited from the base. roots in the agent's defs
 remain agent-selected and must be installed into each turn fork. Cache decoded
-root data process-locally by the queried desk row identities and datom
+root data process-locally by the queried row for the agent's defs identities and datom
 transactions; a cache miss reads facts, and a restart rebuilds it. Never store
-a “desk revision” fact.
+a “agent defs revision” fact.
 
 ## Definition rehydration options, simplest first
 
@@ -460,7 +460,7 @@ internals into a second serializer.
 Persist the projected data on the existing `:seon.def/*` row using the current
 inline-EDN/blob split. Use the same native representation for cold acquisition
 of agent-authored contracted function rows; otherwise the “never re-execute”
-guarantee would stop at the desk boundary.
+guarantee would stop at the boundary of the agent's defs.
 
 - **Guarantee:** supported definitions survive turns and cold JVM restart
   without replay; unsupported roots remain loud values.

@@ -1,7 +1,7 @@
 ---
 type: prd
 status: active
-tags: [prd, naming, schema, migration]
+tags: [prd, naming, schema, rulings]
 ---
 
 # The rename + reset + rebuild pass — spec (2026-08-05)
@@ -25,7 +25,7 @@ outright.
    The unit becomes: DECLARE `:seon.db/db` in the registry as the key
    carrying a database value; no 42-file key rename.
 2. **Audit U1/U12 are absorbed**: `:seon.code.*` is retired in favour
-   of `:seon.def/*` (ruled 08-05), and the desk PRD
+   of `:seon.def/*` (ruled 08-05), and the agent's defs PRD
    ([agent-desk-and-checkout-prd-2026-08-05.md](agent-desk-and-checkout-prd-2026-08-05.md))
    later replaces the write path. THIS pass renames the fact family
    `:seon.code.def/*` → `:seon.def/*` including

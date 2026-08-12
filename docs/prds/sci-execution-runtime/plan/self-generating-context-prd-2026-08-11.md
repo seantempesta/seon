@@ -151,7 +151,7 @@ migration; old clusters stay sovereign.
 
 Blocker in current code (filed):
 [agent-definition-restore-reexecutes-authored-source.md](../../../seon/issues/agent-definition-restore-reexecutes-authored-source.md)
-— desk restore re-evaluates stored source every fresh fork; the fix is
+— restoring the agent's defs re-evaluates stored source every fresh fork; the fix is
 fact-reading installation through the native SCI seam. This is IN W1's path.
 
 ### Requires
@@ -202,7 +202,7 @@ slated by the transcript PRD.
 
 - **W0 (this document)** — owner marks up anything that reads wrong.
 - **W1 — the history emits itself**: `:seon.render/form` + floors;
-  append-only entry discipline; authorship; desk fact-reading install (the
+  append-only entry discipline; authorship; the agent's defs fact-reading install (the
   blocker above). EXIT: a fresh scratch agent's prompt is a real REPL history
   — true values, no dumps — byte-prefix-stable across two turns.
 - **W2 — change flows**: interest routing; `read-evidence-current?` replay;
@@ -229,7 +229,7 @@ slated by the transcript PRD.
   without eviction; histories grow unbounded until a live long-lived agent
   forces the decision with evidence. Batched-at-checkpoint remains the
   recorded leaning for when it returns.
-- Overnight rulings 2026-08-11: "the agent's defs" confirmed (desk residue
+- Overnight rulings 2026-08-11: "the agent's defs" confirmed (retired vocabulary
   sweep authorized); unlimited DeepSeek FLASH drives approved for the
   minimum-context ablation and W2 live proofs; pre-existing test failures
   are fixed only when quickly root-caused, else filed.

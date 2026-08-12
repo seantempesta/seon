@@ -1462,7 +1462,7 @@
                                "my.agents.agent-a/strict")
                 "the second agent crossed the one live context-install seam")))))))
 
-(deftest a-refused-definition-stays-in-its-agents-desk
+(deftest a-refused-definition-stays-in-its-agents-defs
   (with-cluster
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
@@ -1515,11 +1515,11 @@
                         :in $ ?agent
                         :where
                         [?agent-eid :seon.cluster.agent/id ?agent]
-                        [?desk :seon.def/agent ?agent-eid]
-                        [?desk :seon.def/id ?definition]]
+                        [?def-eid :seon.def/agent ?agent-eid]
+                        [?def-eid :seon.def/id ?definition]]
                       @connection "agent-a"))
                (str function-sym "#root"))
-              "the refused shared definition's executable root stays in the desk")
+              "the refused shared definition's executable root stays in the agent's defs")
           (db/transact!
            connection
            [{:seon.cluster.message/id "m-agent-a-after-refusal"
@@ -1532,7 +1532,7 @@
                            :where
                            [_ :seon.cluster.eval/result-edn ?result]]
                          @connection))
-              "the refusal is desk state; the originating agent restores it"))))))
+              "the refusal is in the agent's defs; the agent restores it"))))))
 
 (deftest acquisition-orders-agent-authored-refer-targets-and-ignores-alias-cycles
   (test-support/with-database
@@ -2972,7 +2972,7 @@
               report
               (with-redefs [sci.eval/fork-for-turn
                             (fn [_]
-                              (throw (ex-info "desk rehydration failed"
+                              (throw (ex-info "rehydrating the agent's defs failed"
                                               {:fault :rehydration})))]
                 (cluster.loop/turn
                  {:seon.cluster.loop/cluster cluster

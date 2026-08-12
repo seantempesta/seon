@@ -267,13 +267,13 @@ accepted plan FREEZES before receipt zero → root blocked, message never
 claimed. Also: problems projection contract violation kills health +
 root render; transcript pull-many set-arg fault loops into context 14×;
 /data deterministic 500; debug page no first byte in 5 s; system atoms
-committed as root's desk; 44k-token prompt opening with a broken
+committed as root's defs; 44k-token prompt opening with a broken
 renderer line. Six new blockers + one friction filed by the drive.
 FIVE REPAIR LANES RUNNING (all file-disjoint): drive-fix-run-custody
 (freeze + message-leak, loop/work/context), drive-fix-maintenance
 (fresh schema install, the chain's root), drive-fix-problems
 (projection totality), drive-fix-web (transcript pull-many, /data ctx,
-debug first byte), drive-fix-desk (system-Var attribution).
+debug first byte), drive-fix-defs (system-Var attribution).
 drive-observer still watching the frozen run; its report lands
 separately. NEXT after repairs: rerun the drive arc (the untested
 phases are explicitly not-covered), then the messaging wave.
@@ -283,7 +283,7 @@ bare: 1007 tests / 8162 assertions / 0 failures / 0 errors at
 `0e894e533` (log `tmp/bare-gate-2026-08-06d.log`). The gate-fix wave
 that closed it: eight file-disjoint lanes fixed all 12 reds at cause
 (blob publish-order fixture, Datahike rejection data preserved in flat
-errors, refused defs stay desk candidates, pid-reuse fence, flow census
+errors, refused defs stay candidates for the agent's defs, pid-reuse fence, flow census
 fixture, render census + concise config faces, schema alias
 dependency-first admission, bootstrap/search/config-analysis) plus TWO
 integration repairs at the top level (search predicate registration
@@ -363,7 +363,7 @@ tree, five red classes → GREEN BARE GATE (wave exit), grader wave →
 bootstrap design session with the owner, human-accounts design
 session, initial-forms contract (orchestrator-owed, shape ruled:
 per-form ordinal+source entities, most-specific-wins), P17 slices,
-desk W-B/W-C, error-model wave, curation W3.
+defs W-B/W-C, error-model wave, curation W3.
 
 **WORKING EDGE UPDATE — 2026-08-05 LATE (implementation wave nearly
 closed; supersedes the next-actions list in the block below).**
@@ -371,8 +371,8 @@ closed; supersedes the next-actions list in the block below).**
 LANDED SINCE THE BLOCK BELOW (all pushed): the FOUR-LANE WAVE IS
 COMPLETE — ops/maintenance (turn-free fires live-proven; portfolio
 seeds at ROOT CREATION after the ordering fix `152b466ee`; five tasks
-queryable on a fresh READY root), desk W-A (`7ee782871` etc.: per-TURN
-forks, `:seon.def/*` desk settlement, snapshot-stated atoms, kill -9
+queryable on a fresh READY root), defs W-A (`7ee782871` etc.: per-TURN
+forks, `:seon.def/*` settlement, snapshot-stated atoms, kill -9
 drill green 196/731/0, old session-image machinery deleted), sweep
 slices 1+2 (gate + falsifiers + two-sided blob permit + MCP artifact
 fact + `collect!` with dry-run `6eae8b0b7`; konserve 89/1,602 green),
@@ -410,7 +410,7 @@ NEXT SPECS READY FOR LANES (owner said spec ahead):
 episode, O5 predicate, O1 replication, one matrix rerun) and
 [p17-ambient-slices-2026-08-05.md](p17-ambient-slices-2026-08-05.md)
 (S1 providers/plans → S2 SCI hook → S3 doc faces → S4 seon.db
-conversion). Behind them: desk W-B/W-C (checkout + my.branch, PRD §6),
+conversion). Behind them: defs W-B/W-C (checkout + my.branch, PRD §6),
 the error-model wave (docs/prds/error-model/README.md), output-floor
 steps 3-8, curation W3.
 
@@ -440,9 +440,9 @@ RULED (all in README's three 2026-08-05 batches + the sealed docs):
 P1 = EXCLUSIVE SWEEP, design sealed
 ([exclusive-sweep-design-2026-08-05.md](exclusive-sweep-design-2026-08-05.md):
 one reachability gate, loud retryable start refusal, two-sided blob
-permit, MCP durable no-history artifact fact). P13 = THE TWO-WORLD DESK
+permit, MCP durable no-history artifact fact). P13 = THE two-world model for the agent's defs
 ([agent-desk-and-checkout-prd-2026-08-05.md](agent-desk-and-checkout-prd-2026-08-05.md):
-`:seon.def/*` desk facts at turn settlement, snapshot-stated atoms,
+`:seon.def/*` facts for the agent's defs at turn settlement, snapshot-stated atoms,
 explicit-only session end, per-turn freshness, the agent checkout +
 per-run override, the git framing with `my.branch`). Maintenance is
 TURN-FREE with root's green/red report
@@ -464,7 +464,7 @@ pre-rename `401fd300e`), FIXES rename fallout itself, files issues for
 pre-existing classes. NOTE: no green FULL gate has been seen since
 before the 08-04 wave — do not assume the baseline was green.
 
-LANDED: desk W-A (`190eed2fe`, `c124ffe56`, `f908a5939`, `0811e5bc6`,
+LANDED: defs W-A (`190eed2fe`, `c124ffe56`, `f908a5939`, `0811e5bc6`,
 `55504e6fe`) supplies agent-scoped turn-settlement facts, per-turn forks,
 snapshot-stated atoms, explicit clearing, and a recurring two-JVM kill-9
 proof. P12 and ops/maintenance also landed. NEXT, in order (owner-ruled):
@@ -474,7 +474,7 @@ seam (disarm-wait → ops/agent lifecycle; blob staging → sweep; config
 application → ops) and disjoint reds (search apply-report!, web
 credits) as small fix lanes; (3) blob-permit slice after W-A, then the
 dry-run + one-time 357 GiB reclaim per the sweep runbook; (4) the
-grader wave, then rerun the experiment matrix once; (5) desk W-B/W-C
+grader wave, then rerun the experiment matrix once; (5) defs W-B/W-C
 (checkout, my.branch + status/log views), then W-D bootstrap teaching;
 (6) curation W3. THE WAVE EXIT IS A GREEN BARE `bin/test` ON A QUIET
 TREE (owner instruction 2026-08-05: "resolve the test errors and

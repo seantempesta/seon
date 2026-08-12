@@ -78,7 +78,7 @@ body is entirely the named boundary is proof cost, not an inferred wait.
 | `fresh-operator-test/forced-reset-clears-an-exact-dead-process-record` | 92.850 s | Init/start JVM + SIGKILL + exact record fence + reset/republication | **IRREDUCIBLE-FOR-NOW.** Crash/recovery proof; long. |
 | `fresh-operator-test/isolated-cached-boot-reports-refusal-then-reaches-readiness` | 90.430 s | Refused boot + complete init + cached real-JVM boot + phase census | **IRREDUCIBLE-FOR-NOW.** Refusal/readiness protocol proof; long. |
 | `cluster.work-test/situation-totality-property` | 85.506 s | 200 fresh physical databases; canonical-base branches reduce the same 200 trials to 3.025 s | **REDUCIBLE, fixed.** |
-| `sci.desk-test/desk-survives-kill-9-and-explicit-clear` | 80.213 s | Settle defs + SIGKILL writer JVM + restart/restore + explicit clear | **IRREDUCIBLE-FOR-NOW.** Crash persistence is the proof; long. |
+| `sci.agent defs-test/agent defs-survives-kill-9-and-explicit-clear` | 80.213 s | Settle defs + SIGKILL writer JVM + restart/restore + explicit clear | **IRREDUCIBLE-FOR-NOW.** Crash persistence is the proof; long. |
 | `cluster.program-restart-test/an-agent-definition-survives-restart-and-another-agent-calls-it` | 67.758 s | Real stop/restart + second-agent program acquisition/call | **IRREDUCIBLE-FOR-NOW.** Cross-restart program proof; namespace long. |
 | `render.transcript-test/every-generated-history-is-ordered-total-and-token-bounded` | 66.666 s | 40 fresh branches, generated histories, and dual AI/HTML render/budget checks | **IRREDUCIBLE-FOR-NOW.** Cost is the generated render proof; long. |
 | `boot-test/a-dead-holders-run-is-unclaimed-by-the-time-start-returns` | 60.475 s | Real boot + dead-holder wreckage + restart recovery + custody read-back | **IRREDUCIBLE-FOR-NOW.** Recovery boundary; long. |
@@ -275,7 +275,7 @@ share the displayed reason.
 - `seon.render.transcript-test/every-generated-history-is-ordered-total-and-token-bounded`
   — 66.666 s pool: 40 fresh-branch histories with dual AI/HTML ordering and
   token-bound proofs.
-- `seon.sci.desk-test/desk-survives-kill-9-and-explicit-clear` — 80.213 s pool:
+- `seon.sci.defs-test/agent defs-survives-kill-9-and-explicit-clear` — 80.213 s pool:
   settle defs, SIGKILL the writer JVM, restart, restore, and clear.
 - `seon.sci.eval-instrumentation-test/an-instrumented-dev-cluster-completes-one-agent-turn`
   — 233.603 s pool: published-root start, whole-image instrumentation, and one

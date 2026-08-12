@@ -11,9 +11,9 @@ tags: [decision, architecture, runtime, sci]
 
 Each cluster owns one acquired program-only base SCI `ctx`. Every turn evaluates
 in a fresh generation-aware fork of that base and rehydrates only the selected
-agent's desk. Interpreter mutation is private to the turn. Cross-turn sharing
+agent's defs. Interpreter mutation is private to the turn. Cross-turn sharing
 happens through contracted definitions, admission, durable program facts, and
-the agent's desk—not through shared mutable interpreter state.
+the agent's defs—not through shared mutable interpreter state.
 
 Every function in the cluster program graph remains callable. The fork changes
 mutation ownership, not callability.

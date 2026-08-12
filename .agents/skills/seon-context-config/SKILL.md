@@ -102,7 +102,7 @@ source boundary too; the acquisition matrix is:
 | graph-arm-time loop handle | result caps, eval time limit, message-chain limit, recurrence/escalation, core-error mode | `loop-handle` reads one effective map and carries these values into agent graphs (`src/seon/cluster.clj:1607-1646`) |
 | per-episode pass | maximum runs per episode | the work derivation queries the current database value, so the next pass sees the change (`src/seon/cluster/work.clj:441-458`) |
 | per-turn | every registered AI setting plus the agent overlay | provider settings derive from one immutable database value per turn; a config apply or override changes the next turn (`src/seon/cluster/loop.clj:920-934,1243-1259`) |
-| per-terminal evaluation | desk-value blob threshold | `store-desk-values!` reads the threshold immediately before desk rows join the terminal receipt transaction (`src/seon/cluster/loop.clj:464-498,1643-1658`) |
+| per-terminal evaluation | def-value blob threshold | `store-def-values!` reads the threshold before the agent's defs join the terminal receipt transaction (`src/seon/cluster/run.clj:90-114`; `src/seon/cluster/loop.clj:426-440`) |
 | per-render pass | render coalescing | the render proc queries coalescing before each pass (`src/seon/render/web.clj:606-613,861-873`) |
 | per-render request fallback | agent render profile | a request uses its supplied profile or derives the agent profile from current effective config (`src/seon/render.clj:37-74`) |
 | program-row installation | schema projection and result caps | successful acquisition and installation advance the live context from the committed database value (`src/seon/sci/eval.clj:762-788`) |

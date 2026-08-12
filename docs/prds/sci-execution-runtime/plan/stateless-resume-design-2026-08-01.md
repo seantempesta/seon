@@ -6,7 +6,7 @@ tags: [prd, sci, agent, database]
 
 # Stateless resume — an agent session restorable from the database
 
-> Superseded by the per-turn fork and agent-desk contract in [the desk PRD](agent-desk-and-checkout-prd-2026-08-05.md); the session-image design below is dated archaeology.
+> Superseded by the per-turn fork and contract for the agent's defs in [the agent's defs PRD](agent-desk-and-checkout-prd-2026-08-05.md); the session-image design below is dated archaeology.
 
 Design lane, 2026-08-01, on the owner's directive: a hot parked sci ctx is
 acceptable as an optimization, but an agent's full session state must be

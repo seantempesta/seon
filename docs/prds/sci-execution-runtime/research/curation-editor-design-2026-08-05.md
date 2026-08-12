@@ -63,7 +63,7 @@ The current first-party owners inspected are:
   `seon.cluster.run.edn`, `seon.cluster.run.form.edn`,
   `seon.cluster.eval.edn`, `seon.effect.edn`, and
   `seon.cluster.message.edn`; and
-- the current W-A desk owners in `resources/seon/schemas/seon.def.edn`,
+- the current W-A owner of the agent's defs in `resources/seon/schemas/seon.def.edn`,
   `src/seon/sci/eval.clj:1309-1367`, and the terminal settlement seams above.
 
 ## Current facts constrain the design
@@ -76,8 +76,8 @@ The terminal request records an error from either evaluation or a routed form
 problem (`src/seon/cluster/loop.clj:247-289`), so error presence is the correct
 trigger fact; it must not be narrowed to one exception class.
 
-W-A moved the desk into that same settlement. Staged result and desk values,
-exact desk upserts/retractions, terminal receipt facts, delivered messages, and
+W-A moved the agent's defs into that same settlement. Staged result and values in the agent's defs,
+exact agent defs upserts/retractions, terminal receipt facts, delivered messages, and
 a disposition-bearing run close are committed together
 (`src/seon/cluster/loop.clj:1625-1670`; `src/seon/cluster/run.clj:943-1051`).
 An after-commit curation query therefore sees either the complete settled
@@ -109,7 +109,7 @@ query the failed run.
 This separates three histories that the request must never conflate:
 
 1. origin evidence on the live branch: original run, ordered forms, receipts,
-   terminal result, desk/program changes, and delivery evidence;
+   terminal result, defs/program changes, and delivery evidence;
 2. the immutable opening commit used for editor checkout and later proof; and
 3. the editor's writable scratch branch, which is never the proof branch.
 
@@ -165,7 +165,7 @@ to root by convention.
 
 ### Option B — add curation transaction data to every close producer
 
-This can create a request atomically with close and can see receipt and W-A desk
+This can create a request atomically with close and can see receipt and W-A agent defs
 facts earlier in the same transaction. It is rejected because four distinct
 close producers must remember the composition, and `seon.cluster.curate`
 already depends on `seon.cluster.run`. The resulting cycle or copied gate would
@@ -224,13 +224,13 @@ validate their named keys and ignore future extras.
 Before the editor turn, the curation owner:
 
 1. pulls the original run, forms ordered by ordinal, receipts, completed
-   result, declarations, W-A desk changes, and destructive-gate evidence from
+   result, declarations, W-A agent defs changes, and destructive-gate evidence from
    the live database;
 2. forks `scratch-branch` from the original opening commit using the one
    registry/store lifecycle owner;
 3. installs the request evidence as ordinary scratch-branch facts/blob-backed
    data and addresses an ordinary message to the editor; and
-4. uses the desk PRD's checkout resolution: run override, then editor-agent
+4. uses the agent's defs PRD's checkout resolution: run override, then editor-agent
    checkout, then live head. The editor run explicitly selects scratch branch
    plus opening commit, and its SCI base ctx and ambient database value derive
    from that same immutable value.
@@ -242,7 +242,7 @@ The rendered editor block must show, in order:
 - every original form entity ordered by ordinal, with exact source, parse/eval
   namespace, actual result/output/error/triage, and which facts made it fixed;
 - the original terminal outcome and completed value used by proof;
-- declarations and desk consequences committed at settlement; and
+- declarations and agent defs consequences committed at settlement; and
 - the gate evidence and verdict. An automatically unknown span never reaches
   the editor; if the editor recognizes destructiveness beyond an eligible
   receipt verdict, it returns the declared rejection instead of a revision.
@@ -306,7 +306,7 @@ entities, and each entity carries:
 The proof owner queries those entities by revision run and sorts by ordinal.
 It then creates its own fresh proof run at the original opening basis. Adoption
 does the same query and uses the proved run facts. The editor's messy run and
-desk are never replay input.
+agent defs are never replay input.
 
 ### Response options
 

@@ -50,7 +50,7 @@ handoff asserts the opposite of several 2026-08-05 landings.
   it contains no dated “current state” snapshot that silently ages.
 - Quarry instructions use Git history, and test commands distinguish fast from
   full.
-- The runtime synopsis names the program-only base, per-turn fork, desk facts,
+- The runtime synopsis names the program-only base, per-turn fork, facts for the agent's defs,
   split schema population, `seon.db`, and `seon.effect` accurately.
 - Historical lessons remain clearly historical and retain legitimate old-name
   referents.
@@ -58,7 +58,7 @@ handoff asserts the opposite of several 2026-08-05 landings.
 ## Resolution
 
 Resolved by `4648721e3`. The named current-state handoff now describes the
-post-rename runtime, landed agent desk, completed four-lane wave, pending green
+post-rename runtime, landed the agent's defs, completed four-lane wave, pending green
 bare gate, and next grader wave. The two stale quarry statements in
 `docs/conventions.md` now use Git history. Both changed Markdown files passed
 `seon.dev.markdown/validate-file` and `git diff --check` before the path-limited

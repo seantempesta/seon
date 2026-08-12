@@ -37,7 +37,7 @@ I read the following end to end before writing this report:
 - [bootstrap concept graph](../plan/bootstrap-concept-graph-2026-08-04.md);
 - [state of the program](../plan/state-of-the-program-2026-08-05.md), including
   P9 and R6;
-- [agent desk and checkout PRD](../plan/agent-desk-and-checkout-prd-2026-08-05.md),
+- [the agent's defs and checkout PRD](../plan/agent-desk-and-checkout-prd-2026-08-05.md),
   including sections 5–6; and
 - [grader-repair wave](../plan/grader-wave-2026-08-05.md).
 
@@ -60,7 +60,7 @@ It does not pretend to independently re-mine the missing Arm-A transcripts.
 |---|---|---|
 | Seon source | `700b0f65b90e2c4d60c64433e2f6996f1a24f062` | The resource forms; `seon.bootstrap/packaged-forms`, `ordered-sources`, `agent-sources`, `plan-digest`, and `seed-tx`; bootstrap tests |
 | Datahike | `56f1c62105b7` | `reference-code/datahike`; `seon.db/q` and `pull` are the bootstrap's fact-resolution substrate |
-| SCI | `2db3358cba91` | `reference-code/sci`; forms execute in SCI, and the desk PRD's per-turn fork result was probed against this pin |
+| SCI | `2db3358cba91` | `reference-code/sci`; forms execute in SCI, and the agent's defs PRD's per-turn fork result was probed against this pin |
 | Malli | `0.20.0`; vendored source `80138076960e` | `reference-code/malli`; complete durable-function contracts and the `:any` refusal are teaching subjects |
 | Token estimator | Seon source revision above | `seon.ai.tokens/estimate` is exactly integer-floored `chars / 4`; no tokenizer dependency |
 | Experiment harness | Baseline launch `dbef794ab`; current repair spec at source revision above | The old matrix supplies hypotheses only; the queued repair wave supplies the next trustworthy comparison |
@@ -158,7 +158,7 @@ The current result does not license “teaching hurts,” “Malli examples hurt
 
 The strongest prior is therefore deliberately weak: the model likely knows
 ordinary Clojure function work; it likely does not know Seon's queryable
-program graph, admission refusals, desk/shared split, database branch semantics,
+program graph, admission refusals, the agent's defs/shared-program split, database branch semantics,
 or repair ownership.
 
 ## Ruled material absent from the current teaching
@@ -169,7 +169,7 @@ until its owner and renderer exist.
 
 | Material | Current status | Minimal teaching shape | Estimated marginal cost | Feasibility and measurement note |
 |---|---|---|---:|---|
-| Two-world desk contract | Ruled; W-A is landed; current help only distinguishes contracted from uncontracted `defn` and ambiguously says both “what you define here stays” and “your next run starts fresh” | Add two compact help sentences mapping the desk to a working tree and durable work to shared facts/functions; once W-C exists, execute `(my.branch/status)` to show desk versus committed | 0 new forms + ~50 prose tokens; optional status form is 1 form + 4 source tokens + bounded result | The wording must preserve the real nuance: desk facts restore across turns/JVM bounce, remain agent-scoped and non-shared, and disappear only on explicit session/agent clear or reset. “Temporary” must not be taught as “lost next turn.” |
+| Two-world agent defs contract | Ruled; W-A is landed; current help only distinguishes contracted from uncontracted `defn` and ambiguously says both “what you define here stays” and “your next run starts fresh” | Add two compact help sentences mapping the agent's defs to a working tree and durable work to shared facts/functions; once W-C exists, execute `(my.branch/status)` to show agent defs versus committed | 0 new forms + ~50 prose tokens; optional status form is 1 form + 4 source tokens + bounded result | The wording must preserve the real nuance: facts for the agent's defs restore across turns/JVM bounce, remain agent-scoped and non-shared, and disappear only on explicit session/agent clear or reset. “Temporary” must not be taught as “lost next turn.” |
 | Fast-forward-only git framing | Ruled; absent | One short help paragraph: database history has no merge, index, remotes, or conflicts; refusal leads to revision/proof; real disk git remains `my.shell` + git | 0 forms + ~38 prose tokens | This deliberately spends sentences on a strong prior instead of teaching the full ten-row analogy table. Whether `rebase -i` belongs in the minimal paragraph is an owner wording decision. |
 | `my.branch` verbs | Ruled namespace and verbs; W-C is not landed in current source | After W-C, `(dir my.branch)` plus compact prose separating database branches from disk git; `doc` remains on-demand | 1 form + 3 source tokens + estimated 25–80 result tokens; optional prose ~43 | It cannot honestly ship before W-C exists. One `dir` should expose the live surface without freezing a hand list; the actual output must be measured after docstrings land. The PRD lists checkout/log/diff/status; root vocabulary also names fork, so source truth must settle the final live set before teaching. |
 | Errors-I-own repair priority | Ruled; no such query is in the current bootstrap | One bounded query form followed by one compact rule: repair assigned errors first; success is their disappearance on re-query; no acknowledgement | 1 form; source provisionally 40–100 tokens + ~39 prose; result must be profile-bounded | Exact cost is not yet honestly priceable because the owning agent-scoped query and its bounded output face are not settled in the current bootstrap. The existing error facts carry agent refs, but the bootstrap must use the final query owner, not embed a copied Datalog policy. An unbounded error result would be worse than no lesson. |
@@ -252,9 +252,9 @@ repaired `:any` predicate.
 
 | Candidate shape | Contents and trade-off | O1 | O2 | O3 | O4 | O5 |
 |---|---|---:|---:|---:|---:|---:|
-| A. Minimal help + strong priors | One revised help form carrying only loop-external facts, the desk/shared split, ff-only framing, messaging/lifecycle, and errors-first policy. Drop all worked Clojure, query, arity, and refusal forms. Cheapest and cleanest; assumes ordinary function work, Datalog adaptation, and refusal repair are discoverable. | High | Low | Low | Medium | Low |
+| A. Minimal help + strong priors | One revised help form carrying only loop-external facts, the agent's-defs/shared-program split, ff-only framing, messaging/lifecycle, and errors-first policy. Drop all worked Clojure, query, arity, and refusal forms. Cheapest and cleanest; assumes ordinary function work, Datalog adaptation, and refusal repair are discoverable. | High | Low | Low | Medium | Low |
 | B. Task-forced discovery | Revised minimal help, then one first-run orientation task that requires the agent to use `dir`/`doc`/`seon.db/q`, inspect `my.branch/status`, query owned errors, and repair one `:any` refusal without showing a full worked solution. It spends model work rather than a large pinned demonstration and produces receipts the grader can inspect. | High | Medium–high | Medium | Medium | Medium–high |
-| C. Graduated by measured competence | Coarse concept facts and fixed per-model/profile vectors. High-prior Clojure forms are absent; the O2 query and O5 repair remain until untaught controls pass; desk/git/errors lessons enter as their owners land. A failed concept-specific check selects reinforcement for a later fresh attempt, never mutates the current run invisibly. | High | High | Medium | Medium–high | High |
+| C. Graduated by measured competence | Coarse concept facts and fixed per-model/profile vectors. High-prior Clojure forms are absent; the O2 query and O5 repair remain until untaught controls pass; agent defs/git/errors lessons enter as their owners land. A failed concept-specific check selects reinforcement for a later fresh attempt, never mutates the current run invisibly. | High | High | Medium | Medium–high | High |
 
 ### How the repaired matrix selects among them
 

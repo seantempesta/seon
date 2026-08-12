@@ -44,7 +44,7 @@ The architecture still needs the database/program graph, per-agent Flow
 graphs, run loop, SCI evaluation and admission, effect boundary, render/web
 pipeline, operator/bootstrap, source publication, and observability owners.
 Those are the areas where the line bulk actually sits. The 2026-08-05 edge
-also makes the negative bar explicit: no old desk fact family, migration path,
+also makes the negative bar explicit: no old agent defs fact family, migration path,
 preemptible sweep, pod execution tier, or parallel process-record authority.
 
 ## Method
@@ -203,7 +203,7 @@ evidence supports a later boundary decision but not deletion now.
 | `seon.schema.form` | 109 | keep | `src/seon/schema/form.cljc:1`; portable schema form owner |
 | `seon.schema.internal` | 369 | keep | `src/seon/schema/internal.cljc:1`; lower schema owner required by `seon.schema` |
 | `seon.sci.admit` | 540 | keep | `src/seon/sci/admit.clj:1`; one value admission owner |
-| `seon.sci.eval` | 1,807 | keep | `src/seon/sci/eval.clj:1`; current base/fork/eval/desk owner |
+| `seon.sci.eval` | 1,807 | keep | `src/seon/sci/eval.clj:1`; current base/fork/eval/owner of the agent's defs |
 | `seon.sci.kernel` | 387 | keep | `src/seon/sci/kernel.clj:1`; lower SCI kernel owner |
 | `seon.sci.reader` | 638 | keep | `src/seon/sci/reader.cljc:1`; one agent-reply reader |
 | `seon.search` | 447 | keep | `src/seon/search.clj:1`; current database search owner |
@@ -329,8 +329,8 @@ entry-point role rather than pretending the test runner requires it directly.
 | `seon.schema-test` | 233 | keep | `test/seon/schema_test.clj:1`; registry/admission proof |
 | `seon.schema-usage-guard-test` | 401 | keep | `test/seon/schema_usage_guard_test.clj:1`; contract usage guard |
 | `seon.sci.admit-test` | 388 | keep | `test/seon/sci/admit_test.clj:1`; value admission proof |
-| `seon.sci.desk-child` | 147 | keep | `test/seon/sci/desk_child.clj:1`; subprocess desk entry point |
-| `seon.sci.desk-test` | 225 | keep | `test/seon/sci/desk_test.clj:1`; two-world desk proof |
+| `seon.sci.defs-child` | 147 | keep | `test/seon/sci/defs_child.clj:1`; subprocess agent defs entry point |
+| `seon.sci.defs-test` | 225 | keep | `test/seon/sci/defs_test.clj:1`; two-world proof of the agent's defs |
 | `seon.sci.eval-instrumentation-test` | 123 | keep | `test/seon/sci/eval_instrumentation_test.clj:1`; long instrumentation proof |
 | `seon.sci.eval-test` | 1,520 | keep | `test/seon/sci/eval_test.clj:1`; current base/fork/eval proof |
 | `seon.sci.reader-test` | 537 | keep | `test/seon/sci/reader_test.clj:1`; agent-reply reader proof |
@@ -517,7 +517,7 @@ authority.
   `seon.artifact`, `seon.operator`, JVM capability leaves, declared render
   producers, the schema admission executable, and the test runner are not
   dead just because another source namespace does not `require` them.
-- The two-world desk is coherent across `seon.sci.eval`, `seon.cluster.loop`,
+- The two-world agent defs is coherent across `seon.sci.eval`, `seon.cluster.loop`,
   `seon.cluster.run`, `resources/seon/schemas/seon.def.edn`, and its child/live
   tests. No `:seon.code.*` or session-image compatibility path survived.
 - The exclusive sweep design is singular: `src/seon/cluster.clj:1918-1939`

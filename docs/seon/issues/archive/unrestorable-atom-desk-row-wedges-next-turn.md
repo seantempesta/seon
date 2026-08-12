@@ -5,14 +5,14 @@ severity: blocker
 tags: [issue, runtime, sci, agent, live-drive]
 ---
 
-# Skip unrestorable atom desk rows before blob rehydration
+# Skip unrestorable atom rows for the agent's defs before blob rehydration
 
 ## Problem
 
-An agent turn can settle an atom-shaped desk row with an honest
+An agent turn can settle an atom-shaped row for the agent's defs with an honest
 `:seon.def/unrestorable-reason` and neither `:seon.def/value-edn` nor
 `:seon.def/blob`. The next turn's `seon.sci.eval/fork-for-turn` dispatches on
-`:seon.def/atom?` before the unrestorable reason, calls `desk-value`, and then
+`:seon.def/atom?` before the unrestorable reason, calls `def-value`, and then
 calls `seon.blob/get` with a nil digest. The core fault is committed, but the
 run stays open with custody and no eval receipt.
 
@@ -23,7 +23,7 @@ already says why it cannot be restored.
 
 Run eid `23675`, id `f9a0547f-761a-427a-84e1-d81f2764aff7`, settled eval
 receipt eid `23682` at `2026-08-06T17:26:19Z`. Its terminal transaction
-`536871007` committed these agent-scoped desk rows:
+`536871007` committed these agent-scoped rows for the agent's defs:
 
 | eid | `:seon.def/key` | stored state |
 |---:|---|---|
@@ -49,23 +49,23 @@ eval receipts. The database and log were otherwise quiet for more than four
 minutes.
 
 The source order is visible at `src/seon/sci/eval.clj:1329-1359`: the `atom?`
-arm invokes `desk-value` before the later `reason` arm can emit its notice.
+arm invokes `def-value` before the later `reason` arm can emit its notice.
 
 This cause refines, without replacing, the independent symptoms recorded in
-[Keep newly loaded system Vars out of the agent desk](agent-desk-captures-newly-loaded-system-vars.md)
+[Keep newly loaded system Vars out of the agent's defs](agent-desk-captures-newly-loaded-system-vars.md)
 and
 [Settle or refuse a frozen plan's first form](run-freezes-before-first-receipt-after-plan-freeze.md).
 
 ## Owner
 
-The single desk rehydration dispatch in `seon.sci.eval/fork-for-turn`. Blob
+The single restoration dispatch for the agent's defs is `seon.sci.eval/fork-for-turn`. Blob
 storage is not the owner: no blob identity exists or should be read for this
 row.
 
 ## Acceptance
 
 - An atom row carrying `:seon.def/unrestorable-reason` and no value/blob emits
-  the existing honest desk notice without calling `seon.blob/get`.
+  the existing honest agent defs notice without calling `seon.blob/get`.
 - A restorable atom with a value or blob still rehydrates its snapshot state.
 - A turn following an unrestorable atom row reaches and settles its first eval
   receipt; no core-fault fact is committed.
@@ -80,14 +80,14 @@ Resolved by `11ddaba1a`. `fork-for-turn` now handles an explicit
 source/value rows as one honest `could not restore …` REPL notice. Rows with no
 restorable representation are not pre-interned into the fork.
 
-`preexisting-bad-desk-rows-do-not-block-the-next-turn` commits the two
+`preexisting-bad-def-rows-do-not-block-the-next-turn` commits the two
 unrestorable runtime atom shapes and one malformed atom shape before building
 a fresh cluster context. The fork returns three deterministic notices, its
 first form evaluates to `3`, and the real receipt settlement commits the exact
-evaluation result at ordinal zero. The cross-JVM desk proof also passed after
+evaluation result at ordinal zero. The cross-JVM proof of the agent's defs also passed after
 its writer adopted the production per-turn fork boundary.
 
-The complete desk gate passed 6 tests / 24 assertions; the adjacent evaluator
+The complete agent defs gate passed 6 tests / 24 assertions; the adjacent evaluator
 gate passed 52 tests / 245 assertions. Per the lane's explicit safety scope,
 the already-live `default` cluster and its wedged run were not mutated or
 re-driven.

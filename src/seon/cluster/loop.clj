@@ -192,7 +192,7 @@
       (seq rows) (assoc :seon.def/rows rows)
       value (assoc :my.run/value value))))
 
-(defn- desk-rows
+(defn- def-rows
   "Restore-ladder rows admitted by the terminal receipt transaction."
   [_db agent-id evaluation ordinal]
   (let [successful-evaluation?
@@ -236,7 +236,7 @@
                             "Defining evaluation did not complete successfully."
                             :else
                             "The settled root is not store-faithful."))))))
-         (:seon.sci.eval/desk-defs evaluation))]
+         (:seon.sci.eval/defs evaluation))]
     rows))
 
 ;;; ---------------------------------------------------------------------------
@@ -423,9 +423,9 @@
                   ::now now}
            problem (assoc :seon.problems/form-problem problem)
            trigger (assoc :seon.cluster.message/trigger trigger)))
-        [settlement-evaluation desk-evaluation settlement-stages]
+        [settlement-evaluation defs-evaluation settlement-stages]
         (run/settlement-projection cluster evaluation)
-        rows (desk-rows database agent-id desk-evaluation ordinal)
+        rows (def-rows database agent-id defs-evaluation ordinal)
         receipt
         (evaluation-receipt
          (cond-> {:seon.cluster.run/id run-id
@@ -510,8 +510,8 @@
 (defn settle!
   "The sole terminal writer for one run.
 
-  Evaluation settlement commits its receipt, disposition, deliveries, desk
-  rows, and close together. An agent evaluation error stays in that receipt;
+  Evaluation settlement commits its receipt, disposition, deliveries, the
+  agent's defs, and close together. An agent evaluation error stays in that receipt;
   it never enters the durable core-fault family. A phase failure before
   evaluation has no ordinal and therefore commits zero receipts. A refused
   terminal transaction takes one bounded refusal branch; success is the
@@ -1260,7 +1260,7 @@
                   :seon.error/value forked})
         (report :error 0))
       (let [{ctx :seon.sci.eval/ctx
-             desk-notices :seon.sci.eval/desk-notices} forked
+             defs-notices :seon.sci.eval/defs-notices} forked
             compiled-evaluate
             (phase #(requiring-resolve (:seon.cluster.loop/evaluate cluster)))
             trigger (phase #(message/trigger @connection run-id))]
@@ -1359,9 +1359,9 @@
                                   :seon.cluster.agent/id agent-id
                                   :seon.cluster.run/id run-id
                                   :seon.cluster.run.form/ordinal ordinal}
-                                  (and (zero? ran) (seq desk-notices))
+                                  (and (zero? ran) (seq defs-notices))
                                   (assoc :seon.sci.eval/output-prefix
-                                         (str/join "\n" desk-notices))))))]
+                                         (str/join "\n" defs-notices))))))]
                         (if (:seon.error/kind evaluation)
                           (do
                             (settle! {::cluster cluster

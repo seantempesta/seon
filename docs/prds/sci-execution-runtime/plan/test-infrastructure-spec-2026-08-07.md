@@ -263,7 +263,7 @@ boolean. It is invalid when any input that changes that commit or its activation
 closure changes: first-party source/test manifest, admitted schema resources,
 config defaults required by activation, or initialization rows. A sparse
 test-specific config overlay, test datoms, a test-specific schema addition, an
-agent desk, or a failed test does not invalidate it; those live only on the
+the agent's defs, or a failed test does not invalidate it; those live only on the
 fork.
 
 Within one `bin/test` invocation the copied source tree and git SHA are frozen,
@@ -379,7 +379,7 @@ already expresses the complete class.
 | Branch fork | `cluster-forks-are-sovereign-concurrent-and-resettable` | Fork from exact source commit; concurrent roster creation loses nothing; sibling writes do not bleed; reset returns only one branch to source | four `cluster.registry-test` examples/properties |
 | Publication and activation | `publication-seals-complete-activation-before-any-fork` | Missing schema/default/lookup/function prerequisite refuses before fork; successful scratch publication advances one head and retires scratch; an existing cluster remains sovereign | the corresponding `cluster.source-test` and real-boot sovereignty tests |
 | Production Flow construction | `production-constructor-builds-and-stops-every-proc-under-one-projection` | The production graph blueprints are used; every proc has `:io` or `:compute`; the one per-cluster projection reaches proc and submitted IO execution; start/resume/stop publishes completion; Var hot reload still applies | `flow-configuration-test`, the production graph-definition test, the hot-reload control test, and a cross-thread projection regression |
-| Atomic settlement | `settlement-is-terminal-atomic-and-model-equivalent` | Receipt outcome is settle-once; program/schema/desk/delivery facts share the terminal transaction; holder mismatch refuses; a generated transition model agrees | the core `cluster.run-test` settlement examples/property and duplicated turn settlement checks |
+| Atomic settlement | `settlement-is-terminal-atomic-and-model-equivalent` | Receipt outcome is settle-once; program/schema/defs/delivery facts share the terminal transaction; holder mismatch refuses; a generated transition model agrees | the core `cluster.run-test` settlement examples/property and duplicated turn settlement checks |
 | SCI fork and projection | `cluster-sci-forks-are-isolated-current-and-cheap` | Forked Vars are copy-on-write; custody and projection are branch-specific; runtime schema changes advance only that fork; cold recovery gives the same program; timing is reported | the focused fork/projection tests in `sci.eval-test` and the five projection-bite regressions |
 
 These tests prove the tools used by all other tests. They should be small and

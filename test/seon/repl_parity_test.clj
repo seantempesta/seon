@@ -474,18 +474,18 @@
 
 ;;; Family C — REPL session vars
 
-;; Pending: the agent desk does not yet restore *1 across a restart.
+;; Pending: the agent's defs do not yet restore *1 across a restart.
 (defparity "C1" :known-divergence
   (compared 1
             (:value (peek (repl-session ["1" "*1"])))))
 
-;; Pending: the agent desk does not yet restore *1/*2/*3 ordering.
+;; Pending: the agent's defs do not yet restore *1/*2/*3 ordering.
 (defparity "C2" :known-divergence
   (compared [3 2 1]
             (:value
              (peek (repl-session ["1" "2" "3" "[*1 *2 *3]"])))))
 
-;; Pending: the agent desk does not yet restore the last error in *e.
+;; Pending: the agent's defs do not yet restore the last error in *e.
 (defparity "C3" :known-divergence
   (let [results
         (repl-session
@@ -501,7 +501,7 @@
           "(ex-data *e)"])]
     (compared {:a 6} (:value (peek results)))))
 
-;; Pending: pst depends on the agent desk's restored *e.
+;; Pending: pst depends on the agent's defs' restored *e.
 (defparity "C5" :known-divergence
   (let [results
         (repl-session

@@ -190,7 +190,7 @@ generation a fresh gensym (`utils.cljc:356-357`). Two properties matter:
 Net: a fork cannot write a value into a Var that another fork reads. **The
 only cross-fork escape left is a closure or object escaping through something
 outside SCI's Var graph** — a database blob, a shared atom, a channel, a
-returned value stored on the desk. That is the containment obligation.
+returned value stored on the agent's defs. That is the containment obligation.
 
 ## 3. Is there an idiomatic "ctx carries the environment" pattern?
 
@@ -320,7 +320,7 @@ Five falsifiable invariants:
 3. **No closure created in fork A is callable from fork B.** SCI's own Var
    graph guarantees this (copy-on-write, `utils.cljc:362-379`;
    `sci-alter-var-root`, `namespaces.cljc:816-840`; read-only stock Vars,
-   `vars.cljc:282-293`). The gap is outside SCI: desk rehydration, database
+   `vars.cljc:282-293`). The gap is outside SCI: rehydrating the agent's defs, database
    blobs, shared atoms, channel payloads. Every one of those must round-trip
    through *source*, re-evaluated in the receiving fork, never through a live
    function object. A fn object crossing a turn boundary is the bug class.

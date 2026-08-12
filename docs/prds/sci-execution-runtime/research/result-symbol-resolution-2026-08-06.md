@@ -262,7 +262,7 @@ Quote still returns symbol data. Per-form no-handle cost would be zero.
 The cost merely moves to every turn: query every historical receipt, allocate
 one Var per eid, and either load every blob or retain a non-transparent lazy
 placeholder. Eids and receipts are unbounded, while most forms refer to none.
-The fresh fork currently rehydrates only selected agent desk facts at
+The fresh fork currently rehydrates only the selected agent's def facts at
 `src/seon/sci/eval.clj:1309-1367`; adding every result would invert that
 selectivity.
 
@@ -311,7 +311,7 @@ value returns the same result. This is L9 snapshot isolation, not a result
 cache.
 
 Fresh-turn restoration already proves the structural precedent: `fork-for-turn`
-forks the program base, queries desk ids from its explicit database argument,
+forks the program base, queries the agent's def IDs from its explicit database argument,
 and rehydrates values without relying on prior interns at
 `src/seon/sci/eval.clj:1309-1367`. Result preparation uses the same context and
 database-value relationship but creates no durable `:seon.def` row.
@@ -343,7 +343,7 @@ window plus digest and size on the receipt at
 
 Reading the full value is synchronous `konserve/bget`, digest verification,
 UTF-8 decoding, then `edn/read-string`: `src/seon/blob.clj:314-335` plus the
-same parse shape used by desk restoration at
+same parse shape used by restoring the agent's defs at
 `src/seon/sci/eval.clj:1297-1307`. The measured resume precedent records
 7–15 ms for `bget` plus 38–45 ms for `read-string`, or 45–60 ms total for
 1.29 MB.
@@ -357,7 +357,7 @@ Database pull and blob read complete before the form is analyzed.
 Do **not** re-run result admission on ingress. The blob is already the source
 evaluation's bounded semantic value, including explicit elision values where
 caps applied. Re-admission under later caps could change the handle's ordinary
-value and violate same-basis identity. Desk restoration likewise performs
+value and violate same-basis identity. restoring the agent's defs likewise performs
 `blob/get` plus `edn/read-string` and interns directly
 (`src/seon/sci/eval.clj:1297-1307,1338-1361`). The current form's caps still
 apply normally when any value leaves that evaluation at

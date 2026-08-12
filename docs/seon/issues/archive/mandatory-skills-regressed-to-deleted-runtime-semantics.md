@@ -5,7 +5,7 @@ severity: blocker
 tags: [issue, skills, documentation, sci, schema]
 ---
 
-# Re-ground mandatory skills after the desk and schema-directory waves
+# Re-ground mandatory skills after the agent's defs and schema-directory waves
 
 ## Problem
 
@@ -25,7 +25,7 @@ This is a recurrence of the defects previously closed in
   durable session image into one shared live context and says definitions
   accumulate there. Current `src/seon/sci/eval.clj:1309-1367` forks the
   program-only base for each turn and rehydrates only the selected agent's
-  `:seon.def/*` desk; `src/seon/cluster/loop.clj:1493-1514,1643-1658` uses and
+  `:seon.def/*` agent defs; `src/seon/cluster/loop.clj:1493-1514,1643-1658` uses and
   settles that exact path.
 - `.agents/skills/repl/SKILL.md:15-21,50-61` marks the shared context as current
   and the fork as an unbuilt per-run target. That reverses the same current
@@ -34,7 +34,7 @@ This is a recurrence of the defects previously closed in
   `.agents/skills/data-modeling/SKILL.md:243-247` still name a session image;
   the Datahike skill points to deleted
   `test/seon/sci/session_image_test.clj`. Current acceptance is
-  `test/seon/sci/desk_test.clj`, and current facts are declared in
+  `test/seon/sci/defs_test.clj`, and current facts are declared in
   `resources/seon/schemas/seon.def.edn:1-45`.
 - `.agents/skills/data-modeling/SKILL.md:45-54`,
   `.agents/skills/datahike/SKILL.md:221-234`,
@@ -61,7 +61,7 @@ references.
 ## Acceptance
 
 - Every skill distinguishes the program-only base, fresh per-turn fork, and
-  agent-scoped `:seon.def/*` desk using current source citations.
+  agent-scoped `:seon.def/*` agent defs using current source citations.
 - Schema guidance names the directory population and its current loader; no
   maintained skill cites the deleted monolith.
 - Historical quarry instructions use `git show`/`git log`, never an absent
@@ -73,7 +73,7 @@ references.
 ## Resolution
 
 Resolved by `6f2576a18`. The nine affected skill packages now cite the current
-program-only base, per-turn fork, agent desk, split schema population, Git
+program-only base, per-turn fork, the agent's defs, split schema population, Git
 history quarry, and selected dependency sources. All nine packages passed the
 skill creator's `quick_validate.py`, the canonical skill symlinks still resolve
 to `.agents/skills/`, and the changed files passed `git diff --check` before the

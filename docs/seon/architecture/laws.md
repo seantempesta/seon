@@ -92,7 +92,7 @@ sample sizes, and acceptance evidence belong in PRD research and roadmaps.
   settled fact. (`flow-mechanics-2026-07-28.md`.)
 - **Build once, fork everywhere.** Expensive values are derived once and
   forked by consumers — never rebuilt, never shared mutably: the SCI base
-  `ctx` forks once per turn and rehydrates the selected agent's desk; a
+  `ctx` forks once per turn and rehydrates the selected agent's defs; a
   database value at a basis is a free fork
   (`as-of`/`since` are temporal forks); every cluster branch forks from the
   same immutable bootstrap ancestor containing indexed code and initialization

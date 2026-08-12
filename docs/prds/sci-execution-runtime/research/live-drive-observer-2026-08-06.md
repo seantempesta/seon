@@ -21,7 +21,7 @@ minutes, and the run still had zero eval receipts. I did not stop, reset,
 refork, resume, message, or edit the live session.
 
 The observer independently confirms the drive lane's report that the session
-wedged before its first receipt, and narrows the causal boundary to desk
+wedged before its first receipt, and narrows the causal boundary to agent defs
 rehydration. The drive lane's broader narrative and mutation record are in
 [Default-cluster live drive](docs/prds/sci-execution-runtime/research/live-drive-2026-08-06.md).
 
@@ -87,14 +87,14 @@ First-party fact owners inspected were `src/seon/cluster/run.clj`,
 | 17:24:04 | run eid `23670` | Run `bc6b2c7c-8acc-43ae-a642-4aab28095d28` opened and closed with the same provider failure class. |
 | 17:25:50 | message eid `23679` | Inbound message `inbound-536871002-0` arrived with ordinal `0`. |
 | 17:25:22–17:26:19 | run eid `23675` | Run `f9a0547f-761a-427a-84e1-d81f2764aff7` closed; eval receipt eid `23682` settled with result size 2,638. |
-| 17:26:19 | tx `536871007`, eids `23683`–`23685` | Settlement committed three root desk atoms as unrestorable, with no value EDN or blob digest. |
+| 17:26:19 | tx `536871007`, eids `23683`–`23685` | Settlement committed three root atoms in the agent's defs as unrestorable, with no value EDN or blob digest. |
 | 17:26:19 | run eid `23687` | Run `f56667dc-a2ec-4f92-af47-e37cdb06535c` opened with custody `52509-1786036914863`. |
 | after plan freeze | form eids `23698`, `23699` | The run had exactly two ordered forms: a database inspection and `my.run/complete`. Neither acquired an eval receipt. |
 | 17:27:50 | error eid `23700` | Core fault: `seon.blob/get` invalid input, nil digest; signature begins `5980…`. Notice message eid `23701` followed. |
 | 17:34:08 | final render event before quiet | The last new fact was observer-triggered rendering output, not drive progress. |
 | 17:38:47 | basis `536871035` | Run eid `23687` still open with custody and zero eval receipts after 12m28s. Watch ended. |
 
-The three desk rows were:
+The three rows for the agent's defs were:
 
 | eid | `:seon.def/key` | stored state |
 |---:|---|---|
@@ -104,9 +104,9 @@ The three desk rows were:
 
 Each carried `The atom's settled value is not store-faithful.` Source then
 closed the causal chain: `src/seon/sci/eval.clj:1329-1359` tests the `atom?`
-arm and calls `desk-value` before reaching the later unrestorable-reason arm.
+arm and calls `def-value` before reaching the later unrestorable-reason arm.
 The new owner note is
-[Skip unrestorable atom desk rows before blob rehydration](docs/seon/issues/unrestorable-atom-desk-row-wedges-next-turn.md).
+[Skip unrestorable atom rows for the agent's defs before blob rehydration](docs/seon/issues/unrestorable-atom-desk-row-wedges-next-turn.md).
 
 ## Invariant checks
 
@@ -258,9 +258,9 @@ observed; claims beyond those would be invented.
 
 ## Ranked defects and ugly output
 
-1. **Blocker — unrestorable atom desk row wedges the next turn before receipt
+1. **Blocker — unrestorable atom row for the agent's defs wedges the next turn before receipt
    zero.** Newly filed:
-   [Skip unrestorable atom desk rows before blob rehydration](docs/seon/issues/unrestorable-atom-desk-row-wedges-next-turn.md).
+   [Skip unrestorable atom rows for the agent's defs before blob rehydration](docs/seon/issues/unrestorable-atom-desk-row-wedges-next-turn.md).
 2. **Blocker — DOM ids collide within one rendered namespace page.** Newly
    filed:
    [Make every rendered value id unique within its namespace page](docs/seon/issues/rendered-value-ids-collide-within-one-page.md).

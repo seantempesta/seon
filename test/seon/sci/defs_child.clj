@@ -1,5 +1,5 @@
-(ns seon.sci.desk-child
-  "Foreign-JVM halves of the W-A desk crash regression."
+(ns seon.sci.defs-child
+  "Foreign-JVM halves of the W-A defs crash regression."
   (:require [datahike.api :as d]
             [sci.core :as sci]
             [seon.cluster :as cluster]
@@ -10,9 +10,9 @@
             [seon.sci.eval :as eval])
   (:import [java.nio.file Files Path]))
 
-(def ^:private agent-id "desk-crash-agent")
-(def ^:private namespace-name 'my.agents.desk-crash)
-(def ^:private run-id "desk-crash-run")
+(def ^:private agent-id "defs-crash-agent")
+(def ^:private namespace-name 'my.agents.defs-crash)
+(def ^:private run-id "defs-crash-run")
 
 (defn- configuration
   [path store-id]
@@ -42,7 +42,7 @@
                 (run/settlement-projection
                  {:seon.db/connection connection}
                  evaluated))
-        rows (#'loop/desk-rows @connection agent-id stored ordinal)]
+        rows (#'loop/def-rows @connection agent-id stored ordinal)]
     (db/transact!
      connection
      {:tx-data
@@ -60,7 +60,7 @@
         (:seon.cluster.eval/result-edn evaluated)
         :seon.def/rows rows})})))
 
-(defn- write-desk!
+(defn- write-defs!
   [configuration ready-path]
   (d/create-database configuration)
   (let [connection (d/connect configuration)]
@@ -72,7 +72,7 @@
        {:seon.cluster.agent/id agent-id
         :seon.cluster.agent/namespace
         {:seon.ns/name namespace-name
-         :seon.ns/source "(ns my.agents.desk-crash)"}}]})
+         :seon.ns/source "(ns my.agents.defs-crash)"}}]})
     (db/transact!
      connection
      {:tx-data
@@ -82,13 +82,13 @@
         :seon.cluster.run/opened-at (java.util.Date.)})})
     (let [ctx (sci/fork (eval/cluster-ctx @connection connection))
           wrapper-calls (atom 0)
-          probe-ns (sci/create-ns 'desk.probe)
+          probe-ns (sci/create-ns 'defs.probe)
           _ (sci/add-namespace!
-             ctx 'desk.probe
+             ctx 'defs.probe
              {'touch! (sci/new-var 'touch!
                                    (fn [] (swap! wrapper-calls inc))
                                    {:ns probe-ns})})
-          sources ["(def helper (let [captured (desk.probe/touch!)] (fn [x] (+ captured x))))"
+          sources ["(def helper (let [captured (defs.probe/touch!)] (fn [x] (+ captured x))))"
                    "(defn ^{:malli/schema [:=> [:cat :int] :int]} contracted [x] (+ x 2))"
                    "(def data {:answer 42})"
                    "(def scratch (atom 1))"
@@ -99,7 +99,7 @@
       (write-result! ready-path {:wrapper-calls @wrapper-calls}))
     @(promise)))
 
-(defn- read-and-clear-desk!
+(defn- read-and-clear-defs!
   [configuration result-path]
   (let [connection (d/connect configuration)]
     (try
@@ -121,16 +121,16 @@
             ctx (:seon.sci.eval/ctx restored)
             root #(some-> (sci/resolve ctx %) deref)
             before-clear
-            {:helper ((root 'my.agents.desk-crash/helper) 4)
-             :contracted ((root 'my.agents.desk-crash/contracted) 40)
-             :data (root 'my.agents.desk-crash/data)
-             :atom @(root 'my.agents.desk-crash/scratch)
+            {:helper ((root 'my.agents.defs-crash/helper) 4)
+             :contracted ((root 'my.agents.defs-crash/contracted) 40)
+             :data (root 'my.agents.defs-crash/data)
+             :atom @(root 'my.agents.defs-crash/scratch)
              :eval-form-calls @eval-form-calls
-             :notices (:seon.sci.eval/desk-notices restored)}]
+             :notices (:seon.sci.eval/defs-notices restored)}]
         (db/transact!
          connection
          {:tx-data
-          (run/clear-desk-tx
+          (run/clear-defs-tx
            {:seon.def/agent [:seon.cluster.agent/id agent-id]})})
         (let [cleared
               (eval/fork-for-turn
@@ -141,21 +141,21 @@
           (write-result!
            result-path
            (assoc before-clear
-                  :desk-count
+                  :def-count
                   (or
-                   (db/q '[:find (count ?desk) .
+                   (db/q '[:find (count ?definition) .
                            :in $ ?agent-id
                            :where
                            [?agent :seon.cluster.agent/id ?agent-id]
-                           [?desk :seon.def/agent ?agent]]
+                           [?definition :seon.def/agent ?agent]]
                          @connection agent-id)
                    0)
                   :data-after-clear
                   (some-> (sci/resolve (:seon.sci.eval/ctx cleared)
-                                      'my.agents.desk-crash/data)
+                                      'my.agents.defs-crash/data)
                           deref)
                   :notices-after-clear
-                  (:seon.sci.eval/desk-notices cleared)))))
+                  (:seon.sci.eval/defs-notices cleared)))))
       (finally
         (d/release connection)))))
 
@@ -163,5 +163,5 @@
   [mode database-path store-id output-path]
   (let [configuration (configuration database-path store-id)]
     (case mode
-      "write" (write-desk! configuration output-path)
-      "read-clear" (read-and-clear-desk! configuration output-path))))
+      "write" (write-defs! configuration output-path)
+      "read-clear" (read-and-clear-defs! configuration output-path))))

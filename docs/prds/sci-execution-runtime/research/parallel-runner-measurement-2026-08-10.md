@@ -78,7 +78,7 @@ Parallel-only confirmations:
 - `seon.dev.fresh-operator-test/live-init-reloads-schema-runtime-and-moved-predicate-owners-before-admission`;
 - `seon.dev.fresh-operator-test/populated-stopped-cluster-reopens-after-full-operator-restart`;
 - `seon.dev.fresh-operator-test/source-less-root-reset-republishes-and-reforks-default`;
-- `seon.sci.desk-test/desk-survives-kill-9-and-explicit-clear`; and
+- `seon.sci.defs-test/agent defs-survives-kill-9-and-explicit-clear`; and
 - `seon.sci.eval-test/generated-sources-compose-fork-guard-and-admission`.
 
 Reproducible confirmations:

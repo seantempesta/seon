@@ -217,8 +217,8 @@ capability-request owner.
 The four-lane implementation wave is complete:
 
 - operations and maintenance execute turn-free and record queryable receipts;
-- desk W-A landed: each turn uses a fresh fork of the program-only cluster
-  base and rehydrates only the selected agent's `:seon.def/*` desk;
+- defs W-A landed: each turn uses a fresh fork of the program-only cluster
+  base and rehydrates only the selected agent's `:seon.def/*` facts;
 - the exclusive-sweep gate, blob permit, durable MCP artifact fact, and
   `collect!` dry-run landed; and
 - P12 graduated with complete typed argument-address facts, making P17
@@ -227,7 +227,7 @@ The four-lane implementation wave is complete:
 The wave exit is still a green bare `bin/test` on a quiet tree. Finish the
 held verifications and remaining attributed red classes before claiming that
 exit. The grader wave is next; its results feed the bootstrap design session
-with the owner. The later ordered queue remains P17, desk W-B/W-C, the
+with the owner. The later ordered queue remains P17, defs W-B/W-C, the
 error-model wave, and curation W3.
 
 ## The mentality

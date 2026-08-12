@@ -16,7 +16,7 @@ escape a green gate.
 
 | Root | Deepest missing invariant | Decisive witness |
 |---|---|---|
-| R1. Total post-custody settlement | Once a run is held, every exit durably settles, refuses, or releases it | A frozen plan survived a desk-rehydration throw before receipt zero |
+| R1. Total post-custody settlement | Once a run is held, every exit durably settles, refuses, or releases it | A frozen plan survived a agent defs-rehydration throw before receipt zero |
 | R2. Candidate isolation and atomic adoption | A turn's mutations are one isolated candidate; the terminal database transaction chooses the winner; only that winner reaches the live base | Two concurrent definitions/schemas can both report success while one durable row wins |
 | R3. Causal episode identity | The trigger, prompt contents, waits, deliveries, and terminality are projections of one explicit causal closure | An unclaimed human message entered a paid turn held for a maintenance trigger |
 | R4. Total, bounded, identity-preserving projection | Every producer-to-consumer crossing preserves meaning, errors, stable identity, and the consumer's aggregate fit | Ref maps were treated as lookup refs, errors vanished into `nil`, DOM ids collided, and one error face reached 4 MB |
@@ -93,8 +93,8 @@ distinct blocker defects seen today: the original 27 plus those two later
 findings. Three original blockers are archived, so the current index correctly
 contains 26 open blocker rows.
 
-- `11ddaba1a` closes the two observed desk precursors: host/system Vars are no
-  longer attributed to the turn, and unrestorable desk rows no longer abort
+- `11ddaba1a` closes the two observed precursors in the agent's defs: host/system Vars are no
+  longer attributed to the turn, and unrestorable rows for the agent's defs no longer abort
   rehydration. It does **not** establish R1 or R2.
 - `31044d4ac` plus `6f2e9e9bb` close the observed problems projection. The
   wildcard-pull representation class in R4 remains.
@@ -145,7 +145,7 @@ below.
 
 The synthesis cutoff is commit `e6d679387`. Issue lifecycle moved during the
 audit: the source evidence initially described 27 blocker defects; problems
-projection and the two desk issues were subsequently archived; the mutable-
+projection and the two issues in the agent's defs were subsequently archived; the mutable-
 state audit then added two blocker notes. The current index therefore contains
 26 open blocker rows. The coverage tables retain all 29 distinct defects so
 diagnosis does not erase fixed evidence or omit newly discovered classes.
@@ -185,7 +185,7 @@ last.
 `seon.cluster.loop/turn` and republishes only a process-local completion permit
 in `finally`; it does not durably settle an escaped failure
 ([agent turn owner](src/seon/cluster/agent.clj), `turn-step`, lines 230–279).
-On the resume path, `fork-for-turn` and desk rehydration execute before receipt
+On the resume path, `fork-for-turn` and rehydrating the agent's defs execute before receipt
 creation ([run loop](src/seon/cluster/loop.clj), lines 1516–1564). `turn`
 dispatches with no enclosing total value conversion (lines 1782–1812). Thus:
 
@@ -206,7 +206,7 @@ or terminal transaction data can recreate the same wedge.
 ### Defects explained
 
 - [Frozen plan before first receipt](docs/seon/issues/run-freezes-before-first-receipt-after-plan-freeze.md).
-- Resolved trigger: [unrestorable atom desk row](docs/seon/issues/archive/unrestorable-atom-desk-row-wedges-next-turn.md).
+- Resolved trigger: [unrestorable atom row for the agent's defs](docs/seon/issues/archive/unrestorable-atom-desk-row-wedges-next-turn.md).
 - [Cold `acquire!` has no per-row containment](docs/seon/issues/acquire-has-no-per-row-containment.md): one bad activation row can abort the whole acquire boundary rather than produce row evidence and a terminal activation result.
 - [Evaluation errors cannot settle triage receipts](docs/seon/issues/eval-errors-cannot-settle-triage-receipts.md): the terminal transaction does not accept every error disposition the evaluator can produce.
 - The live-drive stop after plan freeze and the observer's “custody held but no
@@ -214,7 +214,7 @@ or terminal transaction data can recreate the same wedge.
 
 ### Current work versus the root
 
-`11ddaba1a` correctly makes desk rehydration row-total and filters desk
+`11ddaba1a` correctly makes rehydrating the agent's defs row-total and filters agent defs
 attribution by SCI generation. That prevents the exact atom-triggered escape.
 It does not wrap the full post-custody path, prove every phase returns a value,
 or guarantee one terminal database transition. The receipt settlement and
@@ -230,7 +230,7 @@ acquire containment issues remain independent witnesses.
 
 ### Owner question
 
-For a failure after a plan is frozen but before SCI begins—desk rehydration is
+For a failure after a plan is frozen but before SCI begins—rehydrating the agent's defs is
 the concrete case—should the database contain **(A)** a run-level refusal and
 zero receipts (**recommended**), or **(B)** a failed ordinal-0 receipt? This
 decides the terminal schema and must precede the loop repair.
@@ -264,14 +264,14 @@ context state, so rebuild logic cannot know which semantic owner to preserve.
 - [Concurrent definition receipt divergence](docs/seon/issues/concurrent-definition-receipts-can-diverge-from-durable-program-row.md).
 - [Concurrent divergent schemas both report success](docs/seon/issues/concurrent-divergent-schema-declarations-falsely-both-succeed.md).
 - [Namespace removal rebuilds the wrong definitions](docs/seon/issues/namespace-removal-does-not-rebuild-contracted-only.md).
-- Resolved witness: [system Vars captured as the agent desk](docs/seon/issues/archive/agent-desk-captures-newly-loaded-system-vars.md).
+- Resolved witness: [system Vars captured as the agent's defs](docs/seon/issues/archive/agent-desk-captures-newly-loaded-system-vars.md).
 - The reachability half of smell seed 3: requiring one host namespace can copy
   host `ns-interns` that are not explicit turn-authored mutations.
 
 ### Current work versus the root
 
-`11ddaba1a` uses SCI generation metadata to close false desk authorship and
-contains malformed desk rows. It is an essential R2 primitive, not atomic
+`11ddaba1a` uses SCI generation metadata to close false agent defs authorship and
+contains malformed rows for the agent's defs. It is an essential R2 primitive, not atomic
 adoption: it does not make a receipt depend on the database winner, isolate
 all program/schema mutation, or define namespace deletion. The current
 per-run fork and schema collision waves are therefore still required.
@@ -280,7 +280,7 @@ per-run fork and schema collision waves are therefore still required.
 
 | Direction | Guarantee | Cost and risk | What we give up |
 |---|---|---|---|
-| **1. Recommended — candidate → terminal CAS/admission → install** | Each run evaluates in one fresh candidate fork. Its proposed desk/program/schema/namespace delta is ordinary data. One terminal database transaction decides success. Only `db-after` rows install into the live base; a loser receives an explicit refusal. | Crosses SCI eval, loop settlement, schema admission, and live installation. Risk is hidden mutation not represented in the candidate delta; requires source/SCI probes for every mutation form. | Success before durable adoption and best-effort post-commit installation. |
+| **1. Recommended — candidate → terminal CAS/admission → install** | Each run evaluates in one fresh candidate fork. Its proposed defs/program/schema/namespace delta is ordinary data. One terminal database transaction decides success. Only `db-after` rows install into the live base; a loser receives an explicit refusal. | Crosses SCI eval, loop settlement, schema admission, and live installation. Risk is hidden mutation not represented in the candidate delta; requires source/SCI probes for every mutation form. | Success before durable adoption and best-effort post-commit installation. |
 | 2. Serialize durable mutation by namespace | At most one durable mutation candidate for a namespace can be active, while non-mutating turns continue concurrently. | Lower implementation risk, but needs a queryable namespace-mutation classification before eval and honest waiting semantics. | Concurrent edits to one namespace. |
 | 3. Restrict durable change to editor/revision/proof adoption | Ordinary turns remain session-only; durable changes enter the already ruled revision/proof workflow, whose adoption transaction is the sole winner. | Strongest model and easiest review, but significantly changes immediate interactive `defn`/schema behavior. | Immediate durable definition from an ordinary agent turn. |
 
@@ -695,13 +695,13 @@ their boundaries to that scenario after messaging settles.
 |---|---|---|
 | Maintenance cannot settle because `:seon.operator.log/path` is not installed | R5 | Open; maintenance schema-install repair |
 | Failed maintenance trigger holds root; human message enters its prompt | R3 | Open; messaging context-causality addition required |
-| Accepted plan freezes before receipt zero | R1 | Exact desk precursor fixed; totality open |
+| Accepted plan freezes before receipt zero | R1 | Exact precursor in the agent's defs fixed; totality open |
 | Problems projection breaks MCP health and root rendering | R4 | Fixed and archived; wildcard-pull class open |
 | Transcript passes a set to `pull-many` and repeats failures | R4 | Fixed instance |
 | `/data` omits SCI context and returns 500 | R4 | Fixed instance; identity follow-up landed |
 | Debug response blocks/recomputes instead of serving exact capture | R4 | Exact captured-prompt/first-byte fix landed; aggregate fit still open |
 | Malformed provider SSE body reaches code path | R4 | Admission class fixed, issue review pending |
-| System atoms are attributed to root's desk | R2, secondarily R5 | Fixed and archived; broader roots open |
+| System atoms are attributed to root's agent defs | R2, secondarily R5 | Fixed and archived; broader roots open |
 | Bootstrap teaches stale messaging/comment semantics | R4 | Messaging M5 + strict REPL display waves remain |
 | 34k/44k-token prompts; repeated config/schema faces | R4 | Open |
 | 519/520 KB pages; repeated errors/raw ids | R4 | Open; some repeated error sources fixed |
@@ -733,14 +733,14 @@ their boundaries to that scenario after messaging settles.
 
 | Blocker defect | Primary root | Current fix versus class |
 |---|---|---|
-| Unrestorable atom desk row wedges next turn | R1/R2 | `11ddaba1a` closes the trigger; R1 remains |
+| Unrestorable atom row for the agent's defs wedges next turn | R1/R2 | `11ddaba1a` closes the trigger; R1 remains |
 | Rendered value ids collide | R4 | Open |
 | Frozen plan before receipt zero | R1 | Open at class level |
 | Unclaimed message enters unrelated prompt | R3 | Open |
 | Problems projection corrupts refs | R4 | Fixed/archived; wildcard class remains |
 | Transcript set passed to `pull-many` | R4 | Fixed instance |
 | Data page lacks SCI context | R4 | Fixed instance |
-| System Vars captured as desk | R2/R5 | Fixed/archived; exact program reachability remains |
+| System Vars captured as agent defs | R2/R5 | Fixed/archived; exact program reachability remains |
 | Isolated runner lacks model schemas | R5 | Open |
 | Deletable directories lack claims/size | R6 | Mostly implemented; scheduled terminal work remains |
 | Ranged GC deletes resurrected data | R6 | Exclusive permit implementation landed; review/issue lifecycle pending |

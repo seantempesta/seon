@@ -101,7 +101,7 @@ entity. The architecture's durable natural keys are:
 | namespace | `:seon.ns/name` |
 | schema | `:seon.schema/key` |
 | test | `:seon.test/sym` |
-| agent desk definition | `:seon.def/key` |
+| definition in the agent's defs | `:seon.def/key` |
 | schedule | `:seon.schedule/id` |
 | scheduled task | `:seon.schedule.task/id` |
 | nominal fire | `:seon.schedule.fire/id` |
@@ -290,7 +290,7 @@ attempt whose evidence justified it. There is no attempt outcome, provider
 role, config digest, outer-timeout, or transport-status mirror. Usage
 normalization and retry disposition derive at read.
 
-### Program graph and agent desks
+### Program graph and the agent's defs
 
 | Entity schema | Persisted attributes |
 |---|---|
@@ -329,10 +329,10 @@ queries derive projected, bypass, and unresolved consumer crossings without a
 hand-maintained sink list.
 
 Namespace alias, import, and refer bindings are owned component rows. They
-preserve SCI's effective resolver inputs. `:seon.def` stores one current desk
+preserve SCI's effective resolver inputs. `:seon.def` stores one current definition
 definition per agent and qualified name: a replay-safe source, a faithful
 inline or blob value, an atom's last settled value, or an honest unrestorable
-reason. Restore order derives from `/ordinal`; the `/agent` ref owns the desk.
+reason. Restore order derives from `/ordinal`; the `/agent` ref owns the agent's defs.
 
 Every program row records `:seon.schema.admission/source` at admission. Static
 source publication writes `:core`; a runtime declaration writes `:agent`.
@@ -341,7 +341,7 @@ ambiguous. It never derives trust from optional temporal history.
 
 The program graph and acquired base context are live per cluster. Every agent
 in one cluster calls the same graph; each turn uses a fresh fork of the live
-base and rehydrates only that agent's desk. Another cluster has another
+base and rehydrates only that agent's defs. Another cluster has another
 database branch and base context. Callability is never stored as an allowlist
 or grant.
 
@@ -380,13 +380,13 @@ their attribute identities:
 - **Agent prompt fact — ruling #24.** The authentic REPL-session design gives
   each agent one durable prompt fact set by an ordinary function.
 - **Per-eval host-interop observation — ruling #32.** Each eval receipt records
-  whether its evaluation touched host interop so desk restore can
+  whether its evaluation touched host interop so restoring the agent's defs can
   distinguish pure replay from a required cold evaluation.
 
 Their schema owners assign globally identified attributes before transaction
 or query code names them.
 
-Ruling #25's blob-backed eval results, rulings #28–#32's agent-owned desk,
+Ruling #25's blob-backed eval results, rulings #28–#32's agent-owned defs,
 ruling #33's parsed function contracts, and ruling #34's
 per-agent AI overlay plus attempt settings use the families above.
 
@@ -396,12 +396,12 @@ per-agent AI overlay plus attempt settings use the families above.
   cluster, configuration, transaction-provenance, and test-observation facts
   in this census. Sections are editorial; every identity is global.
 - `src/seon/cluster/{agent,run,message,loop}.clj*` owns agent creation, run
-  transitions, message derivation, receipt settlement, and desk
+  transitions, message derivation, receipt settlement, and the agent's defs
   persistence.
 - `src/seon/render/{route,transcript,agent,web}.clj` owns the current route
   table and the queries that join agents, messages, runs, forms, and receipts.
 - `src/seon/program.cljc` and `src/seon/sci/eval.clj` own program row identity,
-  parsed contract persistence, cluster acquisition, and desk restoration.
+  parsed contract persistence, cluster acquisition, and restoring the agent's defs.
 
 ## See also
 

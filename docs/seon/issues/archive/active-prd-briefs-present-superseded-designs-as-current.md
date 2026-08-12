@@ -25,7 +25,7 @@ session-image, shared-context, or pod/Bun designs.
   and `plan/repl-session-context-2026-08-01.md:1-14` are active executable
   designs for the deleted session-image/shared-session model. Current
   `src/seon/sci/eval.clj:1309-1367` and
-  `resources/seon/schemas/seon.def.edn:1-45` implement the two-world desk.
+  `resources/seon/schemas/seon.def.edn:1-45` implement the two-world agent defs.
 - `docs/prds/sci-execution-runtime/plan/ambient-injection-prd-2026-08-05-r2-draft.md:1-24`
   says both “RULED / graduated from draft” and “unruled replacement draft,”
   while retaining `status: draft`.

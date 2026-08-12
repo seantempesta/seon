@@ -23,7 +23,7 @@ has no `seon.db` surface at all. Every caller must reach past it to
 `datahike.api/commit-as-db`, and `datahike.api/parent-commit-ids`, or to
 `datahike.versioning/branch-history`. That is exactly the second-path shape
 ruling #41 exists to prevent, and it blocks the `my.branch` verb wave (W-C of
-the [agent desk and checkout PRD](../../prds/sci-execution-runtime/plan/agent-desk-and-checkout-prd-2026-08-05.md)),
+the [agent's defs and checkout PRD](../../prds/sci-execution-runtime/plan/agent-desk-and-checkout-prd-2026-08-05.md)),
 whose `log`, `diff`, and `status` verbs are all cross-branch reads.
 
 ## Evidence

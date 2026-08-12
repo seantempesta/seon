@@ -73,9 +73,9 @@ own readiness (`src/seon/cluster.clj`):
    cluster and root-agent facts (`src/seon/cluster.clj:1943-1969`).
 4. **Context** — boot creates the cluster's one live SCI ctx after recovery
    and config but before any agent graph. `cluster-ctx` acquires only the
-   program graph into that base; desk facts rehydrate later into a fresh turn
+   program graph into that base; the agent's defs restore later into a fresh turn
    fork (`src/seon/cluster.clj:1975-1980`;
-   `src/seon/sci/eval.clj:1309-1392`).
+   `src/seon/sci/eval.clj:1418-1492`).
 5. **Flow** — the work launcher is installed, then the cluster graph and one
    graph per agent are armed, and only then is the web UI served
    (`src/seon/cluster.clj:1989-2005`).
@@ -477,10 +477,10 @@ completion so the `:io` writer **parks** on real backpressure — stock
 
 Agent code runs in a fresh per-turn fork of the program-only cluster base under
 one `:interrupt-fn` with a time limit as the only limit. The selected agent's
-desk rehydrates into that fork; terminal settlement records desk rows, while
+defs restore into that fork; terminal settlement records their rows, while
 committed program rows install into the base for later turns
-(`src/seon/sci/eval.clj:1309-1392`;
-`src/seon/cluster/loop.clj:1493-1514,1643-1658`;
+(`src/seon/sci/eval.clj:1418-1492`;
+`src/seon/cluster/loop.clj:1245-1264,1408-1417`;
 `reference-code/sci/src/sci/core.cljc:331-337`). SCI counts nothing and has no
 step concept; its interrupt hook runs at interpreted function-body entrances,
 while a host call with no interpreted entrance is the known ceiling

@@ -18,7 +18,7 @@ green beside that owner.
 
 This is the old-model shape surviving as fresh code. It enlarges the indexed
 program graph and lets runtime work accidentally cite a test mechanism that
-does not carry current run, desk, capability, or fault semantics.
+does not carry current run, agent defs, capability, or fault semantics.
 
 ## Evidence
 

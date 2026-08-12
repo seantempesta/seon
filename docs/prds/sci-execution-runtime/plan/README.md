@@ -388,7 +388,7 @@ Evidence base: eight paired sol/Opus research lanes (indexed in the PRD).
   agent — sharing moves from the mutable ctx to the durable graph.
   Cross-agent propagation is contracted `defn` → admission → program
   fact → install in the live base → next-turn fork. Live mutations are
-  turn-private and evaporate unless the agent's desk admits them; the
+  turn-private and evaporate unless the agent's defs admits them; the
   "agent A wrecks agent B" class becomes unrepresentable rather than
   detected. Admissible because the pinned generation-aware `sci/fork`
   makes forked Vars copy-on-write (verified 2026-08-04, superseding the
@@ -606,26 +606,26 @@ untracked roots removed, and `src-old/`+`test-old/` deleted
   land**, on a frozen tree, with the boot+query proof bar — before any
   new feature lanes launch.
 
-**Third ruling batch, same session — P13 sealed as the TWO-WORLD DESK,
+**Third ruling batch, same session — P13 sealed as the two-world model for the agent's defs,
 and the GIT FRAMING adopted (conversational, owner-ruled):**
 
 - **P13 IS SETTLED: delete the session-image mechanism, keep the
   capability through the one admission seam.** Two worlds, taught
-  explicitly in the bootstrap: the agent's DESK (session defs and
+  explicitly in the bootstrap: the agent's defs (session defs and
   atoms — fast, experimentation-first, not durable, not shared) and
   the SHARED SYSTEM (database facts, contracted functions with schemas
   and tests, through the one admission seam). At turn settlement the
-  desk commits as agent-scoped `:seon.def/*` session facts: the
+  the agent's defs commits as agent-scoped `:seon.def/*` session facts: the
   provably-pure defining form (re-eval is exact — forms make restore
   STRONG), else the store-faithful value, else honestly unrestorable.
-  Each turn's fresh fork rehydrates from those facts, so the desk
+  Each turn's fresh fork rehydrates from those facts, so the agent's defs
   survives run boundaries and JVM bounces by the same path. ATOMS
   restore by SNAPSHOT, STATED — last settled value rebound, one honest
   REPL line — because losing an afternoon's experiment state to a
-  bounce is the frustration the desk exists to prevent. SESSION END IS
-  EXPLICIT ONLY — the desk lives as long as the agent; nothing expires
+  bounce is the frustration the agent's defs exists to prevent. SESSION END IS
+  EXPLICIT ONLY — the agent's defs lives as long as the agent; nothing expires
   on a timer; clear = agent action, owner order, or reset/refork.
-  `:seon.code.def` dies in the rename pass; `:seon.def/*` is the desk's
+  `:seon.code.def` dies in the rename pass; `:seon.def/*` is the agent's defs'
   fact family.
 - **FRESHNESS IS PER TURN, NOT PER RUN** (owner: "why wait for the
   run?"): new functions/schemas/tests are visible in context next TURN
@@ -646,14 +646,14 @@ and the GIT FRAMING adopted (conversational, owner-ruled):**
 - **THE GIT FRAMING IS ADOPTED for the agent-facing story** (owner:
   "agents know git really well… could we bootstrap internal
   understanding?"): Datahike is genuinely git-shaped, and the sharpest
-  mappings are exact — desk = working tree; turn-settlement commit =
+  mappings are exact — the agent's defs = working tree; turn-settlement commit =
   commit; pinned agent = detached-HEAD checkout; publication with
   expected-current guard = push --force-with-lease; messaging a
   namespace's owner = a pull request; the dependents-test gate = CI;
   curation = rebase -i; single-future adoption = a FAST-FORWARD-ONLY
   repository (merge does not exist here and the bootstrap says so up
   front). RULED: the ff-only + rebase framing is the story agents are
-  told; the context gains git-shaped STATUS (desk vs committed) and
+  told; the context gains git-shaped STATUS (agent defs vs committed) and
   LOG (branch history) views as ordinary declared renderers over
   existing facts. OPEN, owner-flagged: the namespace NAME for the
   agent-facing verbs — "my.git would imply normal git"; the verbs
@@ -740,8 +740,8 @@ and the GIT FRAMING adopted (conversational, owner-ruled):**
   NO-HISTORY ARTIFACT FACT before promising retrievability (root
   maintenance owns explicit retraction; no expiry clock). SEQUENCING:
   post-rename, the sweep-gate + falsifier lane runs in parallel with
-  desk and ops (disjoint owners); the blob-permit slice lands after
-  desk W-A settles the run-settlement seam; the one-time 357 GiB
+  agent defs and ops (disjoint owners); the blob-permit slice lands after
+  defs W-A settles the run-settlement seam; the one-time 357 GiB
   reclaim runs after both slices plus the dry-run measurement, per the
   design's runbook.
 - **THE OPERATIONS/MAINTENANCE SPEC IS SEALED (owner, same day):**
@@ -758,7 +758,7 @@ and the GIT FRAMING adopted (conversational, owner-ruled):**
   its own (pid, start-instant) as the ephemeral owner at claim time
   (the short-lived wrapper never records itself as creator); an
   undeclared root is reported, never reaped. POST-RENAME SEQUENCING:
-  ops/maintenance implementation and the desk/checkout waves run as
+  ops/maintenance implementation and the agent's defs/checkout waves run as
   PARALLEL lanes on the renamed tree (disjoint owners); only
   `collect!` waits for the exclusive-sweep design.
 - **Landed this session:** operator consolidation complete —

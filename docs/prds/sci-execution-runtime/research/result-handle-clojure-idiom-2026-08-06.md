@@ -192,7 +192,7 @@ case, not a system contract:
   message design will receive an admitted value, so metadata has already been
   stripped before that boundary (`src/seon/sci/eval.clj:1701-1755`).
 
-Desk persistence is a deliberately different contract: it prints with
+persistence of the agent's defs is a deliberately different contract: it prints with
 `*print-meta*` true and accepts the value only if value, class, and metadata all
 round-trip (`src/seon/sci/eval.clj:329-340`). That proves metadata can be
 preserved when metadata itself is the contract. It does not make metadata a

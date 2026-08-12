@@ -37,7 +37,7 @@ not test became testable.
 
 **The arc did not complete its own acceptance criteria.** None of the three
 assigned contracted functions exist; no plan was recorded as a durable fact;
-the desk (`:seon.def/*`) is entirely absent from the database; and — the
+the agent's defs (`:seon.def/*`) is entirely absent from the database; and — the
 deviation most worth stating plainly — **root never created the three agents.
 Something outside root's runs did.**
 
@@ -386,7 +386,7 @@ is therefore **not demonstrated on this drive**, and the receipt-gap defect is
 what makes it unfalsifiable.
 
 **"Plans survive the restart" has nothing to test.** No durable plan fact was
-ever recorded, and the `:seon.def/*` desk attributes appear nowhere in the
+ever recorded, and the `:seon.def/*` attributes for the agent's defs appear nowhere in the
 database, before or after. Nothing was lost because nothing was written.
 
 ### (g) Every error fact
@@ -564,7 +564,7 @@ placeholder, both root's.
    close. If a driver report claims the crash model held, that is the clause to
    push back on.
 3. **"Plans survive restart" has no evidence either way.** No durable plan fact
-   was ever written; the `:seon.def/*` desk attributes do not appear anywhere in
+   was ever written; the `:seon.def/*` attributes for the agent's defs do not appear anywhere in
    the database, before or after the restart. There is nothing for a restart to
    preserve, so a successful-looking restart proves nothing about planning or
    memory.

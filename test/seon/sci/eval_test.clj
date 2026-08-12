@@ -727,7 +727,7 @@
   (let [printed (doto (java.io.StringWriter.) (.write "abcdef"))
         record {:seon.eval/outcome :ok}
         row {:seon.fn/sym "user/f"}
-        desk-defs [{:seon.def/id "user/x"}]
+        defs [{:seon.def/id "user/x"}]
         evaluation
         (#'eval/success-evaluation
          {:seon.sci.eval/admitted
@@ -742,7 +742,7 @@
           :seon.sci.eval/namespace-name 'user
           :seon.sci.eval/ending-namespace 'next
           :seon.print/options {:seon.print/length 4}
-          :seon.sci.eval/desk-defs desk-defs
+          :seon.sci.eval/defs defs
           :seon.program/row row})]
     (is (= {:seon.sci.admit/value 7
             :seon.cluster.eval/result-edn "7"
@@ -752,7 +752,7 @@
             :seon.sci.admit/capped? false
             :seon.sci.admit/record record
             :seon.program/row row
-            :seon.sci.eval/desk-defs desk-defs
+            :seon.sci.eval/defs defs
             :seon.cluster.eval/output "res"}
            evaluation))))
 
@@ -765,7 +765,7 @@
         admitted {:seon.sci.admit/value value
                   :seon.cluster.eval/result-edn (pr-str value)
                   :seon.sci.admit/capped? false}
-        desk-defs [{:seon.def/id "user/x"}]
+        defs [{:seon.def/id "user/x"}]
         evaluation
         (#'eval/failed-evaluation
          {:seon.sci.eval/admitted admitted
@@ -775,7 +775,7 @@
           :seon.sci.eval/printed printed
           :seon.sci.eval/namespace-name 'user
           :seon.print/options {:seon.print/level 3}
-          :seon.sci.eval/desk-defs desk-defs
+          :seon.sci.eval/defs defs
           :seon.sci.admit/record record
           :seon.sci.admit/value value
           :seon.cluster.eval/interrupted-at interrupted-at})]
@@ -787,7 +787,7 @@
             :seon.cluster.eval/error "Ran out of time."
             :seon.sci.admit/capped? false
             :seon.sci.admit/record record
-            :seon.sci.eval/desk-defs desk-defs
+            :seon.sci.eval/defs defs
             :seon.cluster.eval/interrupted-at interrupted-at
             :seon.cluster.eval/output "lost\nb"}
            evaluation))))

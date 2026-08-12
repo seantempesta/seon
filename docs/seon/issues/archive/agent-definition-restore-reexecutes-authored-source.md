@@ -19,9 +19,9 @@ model: agent-authored forms execute once and later forks read their results.
 
 - `src/seon/cluster/loop.clj:220-305` deliberately prefers
   `:seon.def/source` over a store-faithful value for a successful definition.
-- `src/seon/sci/eval.clj:1421-1503` queries those desk rows for every turn and
+- `src/seon/sci/eval.clj:1421-1503` queries those rows for the agent's defs for every turn and
   calls `sci/eval-form` when a row has source.
-- `test/seon/sci/desk_test.clj:232-329` pins both behaviors: a fresh turn
+- `test/seon/sci/defs_test.clj:232-329` pins both behaviors: a fresh turn
   restores `(def helper (fn ...))` from source, and the restore ladder asserts
   that an ordinary definition retains source while dropping its admitted
   value.
@@ -53,7 +53,7 @@ shared by `seon.cluster.loop`, `seon.sci.eval`, and the maintained SCI fork.
   source.
 - Unsupported roots settle with one flat, explicit unrestorable reason; no
   source-replay fallback exists.
-- One recurring restart regression covers both an agent's desk definition and
+- One recurring restart regression covers both an agent's agent def and
   an agent-authored contracted function.
 
 ## W1 Lane C progress — 2026-08-11
@@ -86,14 +86,14 @@ Verified evidence:
 W1 integration removed the schema-population blocker and strengthened the
 recurring restart proof so its `sci/eval-form` counter spans both cold
 `cluster-ctx` acquisition and `fork-for-turn`. The writer now settles an
-agent-authored contracted function alongside the ordinary desk function; the
+agent-authored contracted function alongside the ordinary function in the agent's defs; the
 reader's second JVM restores both from facts, observes results `5` and `42`,
 and reports zero authored-form evaluations.
 
 `bin/test seon.cluster.turn-test seon.cluster.loop-test
-seon.cluster.run-test seon.sci.eval-test seon.sci.desk-test
+seon.cluster.run-test seon.sci.eval-test seon.sci.defs-test
 seon.render.history-test` ran the cold proof in 89.681 seconds. The writer was
 forcibly killed, the separate reader JVM reopened the database, both function
 roots and the atom snapshot restored from facts, the explicit unrestorable
-value remained flat, and clearing left no desk facts. No source-replay
+value remained flat, and clearing left no facts for the agent's defs. No source-replay
 fallback remains in either cold acquisition or turn rehydration.

@@ -41,14 +41,14 @@ drive was explicitly required to stop at a foreign in-flight boundary.
 The independent observer narrowed the frozen seam to turn-fork construction,
 not plan publication, work derivation, or wake delivery. Run eid `23687`
 entered `:resume` correctly, then `seon.sci.eval/fork-for-turn` rehydrated
-three atom desk rows that already carried
+three atom rows for the agent's defs that already carried
 `:seon.def/unrestorable-reason` and no value/blob digest. The atom arm called
 `seon.blob/get` with nil before the later unrestorable arm could handle those
 rows. Core fault eid `23700` recorded that contract violation, but the turn
 proc left the held run open with zero receipts.
 
-The desk attribution and rehydration cause is owned separately by
-[Skip unrestorable atom desk rows before blob rehydration](unrestorable-atom-desk-row-wedges-next-turn.md).
+the agent's defs attribution and rehydration cause is owned separately by
+[Skip unrestorable atom rows for the agent's defs before blob rehydration](unrestorable-atom-desk-row-wedges-next-turn.md).
 This issue owns the run-loop guarantee exposed by that fault: every failure
 after an accepted plan and before receipt zero must settle a durable error and
 release custody rather than silently retaining the run.
