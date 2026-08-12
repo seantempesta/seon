@@ -39,7 +39,8 @@
             [seon.db :as db]
             [seon.cluster.run :as run]
             [seon.schema]
-            [seon.schema.datahike :as schema.datahike]))
+            [seon.schema.datahike :as schema.datahike]
+            [seon.test-support :as test-support]))
 
 (deftest receipt-ai-is-only-repl-output
   (is (= "42"
@@ -89,8 +90,10 @@
    :seon.cluster.run.form/id
    :seon.cluster.run.form/run
    :seon.cluster.run.form/ordinal
+   :seon.cluster.run.form/author
    :seon.cluster.run.form/source
    :seon.cluster.run.form/ns
+   :seon.cluster.run.form/refreshes
    :seon.cluster.eval/id
    :seon.cluster.eval/run
    :seon.cluster.eval/ordinal
@@ -101,6 +104,7 @@
    :seon.cluster.eval/result-size
    :seon.cluster.eval/error
    :seon.cluster.eval/triage-edn
+   :seon.cluster.eval/read-evidence
    :seon.error/kind
    :seon.schema.admission/source
    :seon.def/key
@@ -261,6 +265,15 @@
                          (db/db connection) "lesson")
                     (sort-by first)
                     (mapv second)))))
+        (is (= #{:agent}
+               (set
+                (db/q '[:find [?author ...]
+                        :in $ ?run-id
+                        :where
+                        [?run :seon.cluster.run/id ?run-id]
+                        [?form :seon.cluster.run.form/run ?run]
+                        [?form :seon.cluster.run.form/author ?author]]
+                      @connection "lesson"))))
       (testing "close settles the run and retracts the pointer it
                 derived from the run's own agent connection"
         (is (= ::committed
@@ -306,6 +319,13 @@
           (is (uuid? (::run/opening-commit-id run)))
           (is (= 'replay.start
                  (get-in run [::run/starting-ns :seon.ns/name])))))
+      (is (= :system
+             (db/q '[:find ?author .
+                     :where
+                     [?run :seon.cluster.run/id "replay-run"]
+                     [?form :seon.cluster.run.form/run ?run]
+                     [?form :seon.cluster.run.form/author ?author]]
+                   @connection)))
       (is (= 'replay.start
              (db/q '[:find ?namespace-name .
                      :where
@@ -315,6 +335,135 @@
                      [?form :seon.cluster.run.form/ns ?namespace]
                      [?namespace :seon.ns/name ?namespace-name]]
                    @connection))))))
+
+(deftest refreshes-only-terminal-system-reads-once
+  (test-support/with-database
+    (fn [connection]
+      (let [namespace-name 'my.refresh
+            agent-namespace-name 'my.refresh.agent
+            process "refresh-process"
+            evidence
+            [{:seon.db/source-argument-position 0
+              :datahike.read/dependency-plan :all
+              :datahike.read/revision
+              {:datahike.read/attributes :all
+               :datahike.read/cache-eligible? false}}]
+            settle!
+            (fn [run-id]
+              (db/transact!
+               connection
+               (run/receipt-start-tx
+                {::run/id run-id
+                 :seon.cluster.eval/ordinal 0
+                 :seon.cluster.eval/at t0}))
+              (db/transact!
+               connection
+               (run/receipt-settle-tx
+                {::run/id run-id
+                 :seon.cluster.eval/ordinal 0
+                 :seon.cluster.eval/result-edn "42"
+                 :seon.cluster.eval/read-evidence evidence})))
+            close!
+            (fn [run-id]
+              (db/transact!
+               connection
+               (run/close-tx {::run/id run-id
+                              ::run/process process
+                              ::run/closed-at t1})))]
+        (db/transact!
+         connection
+         [{:seon.ns/name namespace-name}
+          {:seon.ns/name agent-namespace-name}
+          {:seon.cluster.agent/id "system-refresh"
+           :seon.cluster.agent/namespace
+           [:seon.ns/name namespace-name]}
+          {:seon.cluster.agent/id "agent-refresh"
+           :seon.cluster.agent/namespace
+           [:seon.ns/name agent-namespace-name]}])
+        (db/transact!
+         connection
+         (run/system-run-tx
+          @connection
+          {:seon.cluster.agent/id "system-refresh"
+           ::run/id "system-source"
+           ::run/process process
+           ::run/opened-at t0
+           ::run/starting-ns [:seon.ns/name namespace-name]
+           ::run/plan-digest "system-source-digest"
+           ::run/sources
+           [{:seon.cluster.run.form/source
+             "{:my.refresh/value 42}"}]}))
+        (settle! "system-source")
+        (close! "system-source")
+        (let [prior-id (run/form-identity "system-source" 0)]
+          (is (= evidence
+                 (mapv #(dissoc % :db/id)
+                       (:seon.cluster.eval/read-evidence
+                        (db/pull @connection
+                                 '[{:seon.cluster.eval/read-evidence [*]}]
+                                 [:seon.cluster.eval/id
+                                  (run/receipt-identity
+                                   "system-source" 0)])))))
+          (is (= ::committed
+                 (transact-or-refusal connection (run/refresh-tx prior-id))))
+          (let [successor
+                (db/pull
+                 @connection
+                 '[:seon.cluster.run.form/source
+                   :seon.cluster.run.form/author
+                   {:seon.cluster.run.form/ns [:seon.ns/name]}
+                   {:seon.cluster.run.form/refreshes
+                    [:seon.cluster.run.form/id]}]
+                 (db/q '[:find ?successor .
+                         :in $ ?prior
+                         :where
+                         [?prior-form :seon.cluster.run.form/id ?prior]
+                         [?successor :seon.cluster.run.form/refreshes
+                          ?prior-form]]
+                       @connection prior-id))]
+            (is (= :system (:seon.cluster.run.form/author successor)))
+            (is (= "{:my.refresh/value 42}"
+                   (:seon.cluster.run.form/source successor)))
+            (is (= namespace-name
+                   (get-in successor
+                           [:seon.cluster.run.form/ns :seon.ns/name])))
+            (is (= prior-id
+                   (get-in successor
+                           [:seon.cluster.run.form/refreshes
+                            :seon.cluster.run.form/id]))))
+          (is (= ::run/refresh-successor-exists
+                 (::run/rule
+                  (transact-or-refusal connection
+                                       (run/refresh-tx prior-id))))))
+        (db/transact!
+         connection
+         (run/open-tx {::run/id "agent-source"
+                       ::run/agent
+                       [:seon.cluster.agent/id "agent-refresh"]
+                       ::run/opened-at t0}))
+        (db/transact!
+         connection
+         (run/claim-tx {::run/id "agent-source"
+                        ::run/process process
+                        ::run/live-processes #{process}
+                        ::run/now t0}))
+        (db/transact!
+         connection
+         (run/plan-tx {::run/id "agent-source"
+                       ::run/process process
+                       ::run/starting-ns
+                       [:seon.ns/name agent-namespace-name]
+                       ::run/plan-digest "agent-source-digest"
+                       ::run/sources
+                       [{:seon.cluster.run.form/source "(+ 1 1)"}]}))
+        (settle! "agent-source")
+        (close! "agent-source")
+        (is (= ::run/refresh-agent-authored
+               (::run/rule
+                (transact-or-refusal
+                 connection
+                 (run/refresh-tx
+                  (run/form-identity "agent-source" 0))))))))))
 
 (deftest a-non-holder-refuses-every-held-run-transition
   ;; the surviving custody assertion, re-expressed from the lease-era

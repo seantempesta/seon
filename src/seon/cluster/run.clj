@@ -63,6 +63,7 @@
             [seon.blob :as blob]
             [seon.db :as db]
             [seon.effect :as effect]
+            [seon.fn :as seon.fn]
             [seon.program :as program]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
@@ -360,7 +361,7 @@
 ;; The *-tx wrappers reference their *-call VARS (#'f): datahike applies
 ;; the var, so redefining a transition against the running system updates
 ;; behavior immediately — the flow-dynamics live-update pattern.
-(declare claim-call release-call close-call plan-call
+(declare claim-call release-call close-call plan-call refresh-call
          open-call receipt-start-call receipt-settle-call
          recover-call clear-desk-call)
 
@@ -531,8 +532,13 @@
           [:db/add (:db/id run) ::closed-at (::closed-at request)]
           [:db/retract agent-eid :seon.cluster.agent/run (:db/id run)])))
 
+(defn- plan-tx-for-author
+  [author request]
+  [[:db.fn/call #'plan-call
+    (assoc request :seon.cluster.run.form/author author)]])
+
 (defn plan-tx
-  "Transaction data freezing one ordered form plan on the held run."
+  "Transaction data freezing one agent-authored form plan on the held run."
   {:malli/schema [:=> [:cat [:map
                              [::id ::id]
                              [::process ::process]
@@ -541,7 +547,12 @@
                              [::sources :seon.cluster.reply/sources]]]
                   [:vector :some]]}
   [request]
-  [[:db.fn/call #'plan-call request]])
+  (plan-tx-for-author :agent request))
+
+(defn- system-plan-tx
+  "Transaction data freezing one system-authored plan on the held run."
+  [request]
+  (plan-tx-for-author :system request))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The two identities a (run, ordinal) pair mints
@@ -595,10 +606,13 @@
                         [::process ::process]
                         [::plan-digest ::plan-digest]
                         [::starting-ns {:optional true} ::starting-ns]
+                        [:seon.cluster.run.form/author
+                         :seon.cluster.run.form/author]
                         [::sources :seon.cluster.reply/sources]]]
                   [:vector :some]]}
   [db request]
-  (let [{::keys [id plan-digest sources starting-ns]} request
+  (let [{::keys [id plan-digest sources starting-ns]
+         author :seon.cluster.run.form/author} request
         run (held-run db `plan-call request)
         run-eid (:db/id run)
         agent-namespace
@@ -646,6 +660,7 @@
                                     :seon.cluster.run.form/id form-id
                                     :seon.cluster.run.form/run run-eid
                                     :seon.cluster.run.form/ordinal ordinal
+                                    :seon.cluster.run.form/author author
                                     :seon.cluster.run.form/source
                                     (:seon.cluster.run.form/source form)}
                              namespace-name
@@ -703,11 +718,99 @@
                       ::process process
                       ::live-processes #{process}
                       ::now opened-at})
-           (plan-tx {::id run-id
-                     ::process process
-                     ::starting-ns starting-ns
-                     ::plan-digest plan-digest
-                     ::sources sources})])))
+           (system-plan-tx {::id run-id
+                            ::process process
+                            ::starting-ns starting-ns
+                            ::plan-digest plan-digest
+                            ::sources sources})])))
+
+(defn refresh-tx
+  "Transaction data refreshing one prior system-authored form."
+  {:malli/schema
+   [:=> [:cat :seon.cluster.run.form/id] [:vector :some]]}
+  [prior-form-id]
+  [[:db.fn/call #'refresh-call prior-form-id]])
+
+(defn- current-transaction-instant
+  "The transaction instant already allocated before a transaction call runs."
+  [db]
+  (:db/txInstant (db/pull db [:db/txInstant] (inc (db/basis-t db)))))
+
+(defn- refresh-run-id
+  [db prior-form-id]
+  (str "refresh:"
+       (schema/sha-256
+        [(.getBytes (pr-str [prior-form-id (db/commit-id db)])
+                    StandardCharsets/UTF_8)])))
+
+(defn refresh-call
+  "Append one ordinary system run from a prior refreshable form."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.cluster.run.form/id]
+    [:vector :some]]}
+  [db prior-form-id]
+  (let [request {:seon.cluster.run.form/id prior-form-id}
+        prior
+        (db/pull db
+                 '[* {:seon.cluster.run.form/run
+                      [:db/id :seon.cluster.run/id
+                       {:seon.cluster.run/agent
+                        [:db/id :seon.cluster.agent/id]}]}
+                   {:seon.cluster.run.form/ns [:db/id :seon.ns/name]}]
+                 [:seon.cluster.run.form/id prior-form-id])]
+    (when-not (:db/id prior)
+      (refuse! `refresh-call ::no-such-form request))
+    (when-not (= :system (:seon.cluster.run.form/author prior))
+      (refuse! `refresh-call ::refresh-agent-authored request))
+    (let [prior-run (:seon.cluster.run.form/run prior)
+          prior-run-id (::id prior-run)
+          ordinal (:seon.cluster.run.form/ordinal prior)
+          receipt
+          (db/pull db
+                   '[* {:seon.cluster.eval/read-evidence [*]}]
+                   [:seon.cluster.eval/id
+                    (receipt-identity prior-run-id ordinal)])
+          successor
+          (db/q '[:find ?successor .
+                  :in $ ?prior
+                  :where
+                  [?successor :seon.cluster.run.form/refreshes ?prior]]
+                db (:db/id prior))]
+      (when-not (and receipt (terminal? receipt))
+        (refuse! `refresh-call ::refresh-receipt-not-terminal request))
+      (when-not (seq (:seon.cluster.eval/read-evidence receipt))
+        (refuse! `refresh-call ::refresh-read-evidence-missing request))
+      (when successor
+        (refuse! `refresh-call ::refresh-successor-exists request))
+      (let [run-id (refresh-run-id db prior-form-id)
+            run-tempid (str "seon.cluster.run/" run-id)
+            form-id (form-identity run-id 0)
+            namespace (:seon.cluster.run.form/ns prior)
+            source (:seon.cluster.run.form/source prior)
+            opened-at (current-transaction-instant db)
+            plan-digest
+            (schema/sha-256
+             [(.getBytes (pr-str [source (:seon.ns/name namespace)])
+                         StandardCharsets/UTF_8)])
+            open-rows
+            (open-call db
+                       {::id run-id
+                        ::agent (:db/id (::agent prior-run))
+                        ::opening-commit-id (db/commit-id db)
+                        ::opened-at opened-at})
+            form {:db/id form-id
+                  :seon.cluster.run.form/id form-id
+                  :seon.cluster.run.form/run run-tempid
+                  :seon.cluster.run.form/ordinal 0
+                  :seon.cluster.run.form/author :system
+                  :seon.cluster.run.form/source source
+                  :seon.cluster.run.form/ns (:db/id namespace)
+                  :seon.cluster.run.form/refreshes (:db/id prior)}]
+        (into open-rows
+              [[:db/add run-tempid ::plan-digest plan-digest]
+               [:db/add run-tempid ::starting-ns (:db/id namespace)]
+               form
+               [:db/add run-tempid ::forms form-id]])))))
 
 (defn- current-receipt
   "The receipt identified by run and ordinal, or nil.
@@ -764,45 +867,60 @@
       :seon.cluster.eval/ordinal ordinal
       :seon.cluster.eval/at at}]))
 
+(defn- settlement-form
+  [database request]
+  (when-let [form-eid
+             (db/q '[:find ?form .
+                     :in $ ?run-id ?ordinal
+                     :where
+                     [?run :seon.cluster.run/id ?run-id]
+                     [?form :seon.cluster.run.form/run ?run]
+                     [?form :seon.cluster.run.form/ordinal ?ordinal]]
+                   database (::id request)
+                   (:seon.cluster.eval/ordinal request))]
+    (let [form
+          (db/pull database
+                   [:db/id :seon.cluster.run.form/source
+                    :seon.cluster.run.form/ns]
+                   form-eid)]
+      (update form :seon.cluster.run.form/ns :db/id))))
+
+(defn- analyze-settlement
+  [database request]
+  (if-let [form (settlement-form database request)]
+    (let [[form-facts program-row]
+          (seon.fn/analyze-form
+           database
+           (:seon.cluster.run.form/source form)
+           (:seon.cluster.run.form/ns form)
+           (:seon.program/row request))]
+      (cond-> (assoc request ::form-facts
+                     (assoc form-facts :db/id (:db/id form)))
+        program-row (assoc :seon.program/row program-row)))
+    request))
+
 (defn receipt-settle-tx
   "Transaction data settling one running receipt exactly once.
   Settling IS asserting terminal facts: `result-edn`, `error`, and/or
   `interrupted-at` — at least one, and there is no status label."
   {:malli/schema
-   [:=> [:cat
-         [:map
-          [::id ::id]
-          [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
-          [:seon.cluster.eval/result-edn {:optional true}
-           :seon.cluster.eval/result-edn]
-          [:seon.cluster.eval/result-blob {:optional true}
-           :seon.cluster.eval/result-blob]
-          [:seon.cluster.eval/result-size {:optional true}
-           :seon.cluster.eval/result-size]
-          [:seon.cluster.eval/error {:optional true}
-           :seon.cluster.eval/error]
-          [:seon.cluster.eval/triage-edn {:optional true}
-           :seon.cluster.eval/triage-edn]
-          [:seon.cluster.eval/interrupted-at {:optional true}
-           :seon.cluster.eval/interrupted-at]
-          [:seon.error/kind {:optional true} :seon.error/kind]
-          [:seon.cluster.eval/output {:optional true}
-           :seon.cluster.eval/output]
-          [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns]
-          [:seon.sci.eval/ending-ns {:optional true}
-           :seon.sci.eval/ending-ns]
-          [:seon.program/row {:optional true}
-           :seon.program/row]
-          [:seon.def/rows {:optional true} :seon.def/rows]]]
-    [:vector :some]]}
-  [request]
-  [[:db.fn/call
-    #'receipt-settle-call
-    (if (and (:seon.cluster.eval/result-edn request)
-             (not (contains? request :seon.cluster.eval/result-size)))
-      (assoc request :seon.cluster.eval/result-size
-             (long (count (:seon.cluster.eval/result-edn request))))
-      request)]])
+   [:function
+    [:=> [:cat :seon.cluster.eval/settle-request]
+     [:vector :some]]
+    [:=> [:cat :seon.db/database-value
+          :seon.cluster.eval/settle-request]
+     [:vector :some]]]}
+  ([request]
+   (receipt-settle-tx nil request))
+  ([database request]
+   (let [request
+         (cond-> request
+           (and (:seon.cluster.eval/result-edn request)
+                (not (contains? request :seon.cluster.eval/result-size)))
+           (assoc :seon.cluster.eval/result-size
+                  (long (count (:seon.cluster.eval/result-edn request))))
+           database (->> (analyze-settlement database)))]
+     [[:db.fn/call #'receipt-settle-call request]])))
 
 (defn- affected-schema-attributes
   "Database attributes derived by the affected schema forms."
@@ -970,6 +1088,20 @@
                    db identity-attribute identity-value run-id)))))
     false))
 
+(def ^:private program-relation-attributes
+  [:seon.fn/calls :seon.fn/keywords :seon.test/subject])
+
+(defn- relation-assertions
+  [entity row]
+  (into []
+        (concat
+         (map (fn [target] [:db/add entity :seon.fn/calls target])
+              (:seon.fn/calls row))
+         (map (fn [used] [:db/add entity :seon.fn/keywords used])
+              (:seon.fn/keywords row))
+         (when-let [subject (:seon.test/subject row)]
+           [[:db/add entity :seon.test/subject subject]]))))
+
 (defn- row-tx
   "Validate and exact-upsert one reader-produced durable declaration."
   [db request row]
@@ -1058,6 +1190,8 @@
                {:seon.schema.admission/source :agent})
 
               nil)
+            relation-row (select-keys row program-relation-attributes)
+            base-row (apply dissoc row program-relation-attributes)
             schema-declarations
             (if (= identity :seon.schema/key)
               (if schema-redefinition?
@@ -1078,17 +1212,20 @@
                   (schema.datahike/malli->datahike-schema-in
                    candidate-projection required)))
               [])]
-        (into
-         schema-declarations
-         (cond
-           (nil? existing)
-           [(assoc row :db/id (str (name identity) ":" identity-value))]
+        (into schema-declarations
+              (concat
+               (cond
+                 (nil? existing)
+                 [(assoc base-row :db/id
+                         (str (name identity) ":" identity-value))]
 
-           (= (declared-content db existing) (declared-content db row))
-           []
+                 (= (declared-content db existing) (declared-content db row))
+                 []
 
-           :else
-           (program/exact-replacement-tx existing row)))))))
+                 :else
+                 (program/exact-replacement-tx existing base-row))
+               (relation-assertions [identity identity-value]
+                                    relation-row)))))))
 
 (defn- desk-owned-attributes
   "Attributes declared on one desk fact, derived from its entity schema."
@@ -1191,6 +1328,19 @@
              [:db/add (:db/id receipt) attribute value])))
    receipt-terminal-attributes))
 
+(defn- receipt-read-evidence-tx
+  "Component read-evidence rows owned by one terminal receipt."
+  [receipt request]
+  (when-let [evidence (seq (:seon.cluster.eval/read-evidence request))]
+    [{:db/id (:db/id receipt)
+      :seon.cluster.eval/read-evidence
+      (mapv (fn [ordinal entry]
+              (assoc entry :db/id
+                     (str "seon.cluster.eval/read-evidence/"
+                          (:seon.cluster.eval/id receipt) "/" ordinal)))
+            (range)
+            evidence)}]))
+
 (defn receipt-settle-call
   "Settle one running receipt, inside the transaction.
   The settle-once fence is PRESENCE: a receipt already carrying any
@@ -1216,6 +1366,8 @@
           [:seon.error/kind {:optional true} :seon.error/kind]
           [:seon.cluster.eval/output {:optional true}
            :seon.cluster.eval/output]
+          [:seon.cluster.eval/read-evidence {:optional true}
+           :seon.cluster.eval/read-evidence]
           [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns]
           [:seon.sci.eval/ending-ns {:optional true}
            :seon.sci.eval/ending-ns]
@@ -1248,10 +1400,13 @@
           agent-eid (:db/id (::agent run))]
       (into [] cat
             [(if program-row (row-tx db request program-row) [])
+             (relation-assertions (:db/id (::form-facts request))
+                                  (::form-facts request))
              (desk-rows-tx db request (::agent run)
                            (or (:seon.def/rows request) [])
                            contracted-id)
              (contracted-desk-retractions db agent-eid contracted-id)
+             (receipt-read-evidence-tx receipt request)
              (receipt-terminal-assertions receipt request)]))))
 
 (defn clear-desk-tx

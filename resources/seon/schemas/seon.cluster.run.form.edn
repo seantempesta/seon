@@ -11,14 +11,31 @@
                           :seon.cluster.run.form/run]
                          [:seon.cluster.run.form/ordinal
                           :seon.cluster.run.form/ordinal]
+                         [:seon.cluster.run.form/author
+                          :seon.cluster.run.form/author]
                          [:seon.cluster.run.form/source
                           :seon.cluster.run.form/source]
                          [:seon.cluster.run.form/ns
                           {:optional true}
-                          :seon.cluster.run.form/ns]],
+                          :seon.cluster.run.form/ns]
+                         [:seon.cluster.run.form/refreshes
+                          {:optional true}
+                          :seon.cluster.run.form/refreshes]
+                         [:seon.fn/calls
+                          {:optional true}
+                          :seon.fn/calls]
+                         [:seon.fn/keywords
+                          {:optional true}
+                          :seon.fn/keywords]
+                         [:seon.test/subject
+                          {:optional true}
+                          :seon.test/subject]],
+                        :author [:enum :agent :system],
                         :id [:string {:min 1, :seon.db/identity true}],
                         :ns :seon.db/ref,
                         :ordinal [:int {:min 0}],
+                        :refreshes
+                        [:and {:seon.db/unique true} :seon.db/ref],
                         :run :seon.db/ref,
                         :source
                         [:string {:min 1, :seon.db/no-history? true}]}

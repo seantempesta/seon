@@ -6,6 +6,23 @@
                     :ordinal [:int {:min 0}],
                     :output
                     [:string {:min 1, :seon.db/no-history? true}],
+                    :read-evidence
+                    [:vector {:seon.db/component true} :seon.db/ref],
+                    :read-evidence-entity
+                    [:map
+                     {:seon.db/entity true}
+                     [:seon.db/source-argument-position
+                      :seon.db/source-argument-position]
+                     [:datahike.read/dependency-plan
+                      :seon.db/read-dependency-plan]
+                     [:datahike.read/revision
+                      :seon.db/dependency-revision]
+                     [:seon.db/read-request
+                      {:optional true}
+                      :seon.db/read-request]
+                     [:seon.db/read-result
+                      {:optional true}
+                      :seon.db/read-result]],
                     :triage-edn [:string {:min 1}],
                     :receipt
                     [:map
@@ -51,8 +68,55 @@
                       :seon.error/kind]
                      [:seon.cluster.eval/output
                       {:optional true}
-                      :seon.cluster.eval/output]],
+                      :seon.cluster.eval/output]
+                     [:seon.cluster.eval/read-evidence
+                      {:optional true}
+                      :seon.cluster.eval/read-evidence]],
                     :result-blob :seon.blob/digest,
                     :result-edn [:string #:seon.db{:no-history? true}],
                     :result-size [:int {:min 0}],
-                    :run :seon.db/ref}
+                    :run :seon.db/ref,
+                    :settle-request
+                    [:map
+                     [:seon.cluster.run/id :seon.cluster.run/id]
+                     [:seon.cluster.eval/ordinal
+                      :seon.cluster.eval/ordinal]
+                     [:seon.cluster.eval/result-edn
+                      {:optional true}
+                      :seon.cluster.eval/result-edn]
+                     [:seon.cluster.eval/result-blob
+                      {:optional true}
+                      :seon.cluster.eval/result-blob]
+                     [:seon.cluster.eval/result-size
+                      {:optional true}
+                      :seon.cluster.eval/result-size]
+                     [:seon.cluster.eval/error
+                      {:optional true}
+                      :seon.cluster.eval/error]
+                     [:seon.cluster.eval/triage-edn
+                      {:optional true}
+                      :seon.cluster.eval/triage-edn]
+                     [:seon.cluster.eval/interrupted-at
+                      {:optional true}
+                      :seon.cluster.eval/interrupted-at]
+                     [:seon.error/kind
+                      {:optional true}
+                      :seon.error/kind]
+                     [:seon.cluster.eval/output
+                      {:optional true}
+                      :seon.cluster.eval/output]
+                     [:seon.cluster.eval/read-evidence
+                      {:optional true}
+                      [:vector :seon.db/read-evidence]]
+                     [:seon.cluster.eval/ns
+                      {:optional true}
+                      :seon.cluster.eval/ns]
+                     [:seon.sci.eval/ending-ns
+                      {:optional true}
+                      :seon.sci.eval/ending-ns]
+                     [:seon.program/row
+                      {:optional true}
+                      :seon.program/row]
+                     [:seon.def/rows
+                      {:optional true}
+                      :seon.def/rows]]}

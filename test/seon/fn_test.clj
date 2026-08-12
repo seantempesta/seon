@@ -3,6 +3,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
+            [seon.cluster.run :as run]
             [seon.fn :as seon.fn]
             [seon.fn.analyzer :as analyzer]
             [seon.program :as program]
@@ -284,6 +285,157 @@
       (is (= #{"first.party/trim"} (into #{} (keep :seon.fn/sym) rows)))
       (is (not-any? #(= "clojure.string/trim" (:seon.fn/sym %)) rows))))
   (is (= ["src" "test"] seon.fn/source-roots)))
+
+(deftest planned-form-authorship-has-exactly-two-first-party-constructors
+  (test-support/with-database
+    (fn [connection]
+      (is (= #{"seon.cluster.run/plan-tx"
+               "seon.cluster.run/system-plan-tx"}
+             (set
+              (db/q '[:find [?caller-symbol ...]
+                      :in $ ?target-symbol
+                      :where
+                      [?target :seon.fn/sym ?target-symbol]
+                      [?caller :seon.fn/calls ?target]
+                      [?caller :seon.fn/sym ?caller-symbol]]
+                    @connection
+                    "seon.cluster.run/plan-tx-for-author")))))))
+
+(deftest settled-agent-form-has-static-index-edge-parity
+  (let [root (fixture-root)
+        namespace-name 'sample.settlement-parity
+        source
+        (str "(defn ^{:malli/schema [:=> [:cat :int] :map]\n"
+             "         :seon.test/subject sample.settlement-parity/helper}\n"
+             "  contracted [value]\n"
+             "  {:sample.settlement-parity/value (helper value)})")
+        file-source
+        (str "(ns sample.settlement-parity)\n"
+             "(defn helper [value] value)\n"
+             source "\n")]
+    (write-source! root "sample/settlement_parity.clj" file-source)
+    (let [rows (seon.fn/rows {:seon.fn/roots [(.getPath root)]})
+          indexed
+          (first (filter #(= "sample.settlement-parity/contracted"
+                             (:seon.fn/sym %))
+                         rows))
+          expected
+          (select-keys indexed
+                       [:seon.fn/calls :seon.fn/keywords
+                        :seon.test/subject])]
+      (test-support/with-database
+        (fn [connection]
+          (db/transact!
+           connection
+           [{:seon.ns/name namespace-name
+             :seon.ns/source "(ns sample.settlement-parity)"}
+            {:seon.fn/sym "sample.settlement-parity/helper"
+             :seon.fn/ns [:seon.ns/name namespace-name]
+             :seon.fn/source "(defn helper [value] value)"
+             :seon.fn/arglists "([value])"
+             :seon.fn/private? false}
+            {:seon.cluster.agent/id "settlement-parity-agent"
+             :seon.cluster.agent/namespace
+             [:seon.ns/name namespace-name]}])
+          (db/transact!
+           connection
+           (run/open-tx
+            {:seon.cluster.run/id "settlement-parity-run"
+             :seon.cluster.run/agent
+             [:seon.cluster.agent/id "settlement-parity-agent"]
+             :seon.cluster.run/opened-at (java.util.Date.)}))
+          (db/transact!
+           connection
+           (run/claim-tx
+            {:seon.cluster.run/id "settlement-parity-run"
+             :seon.cluster.run/process "settlement-parity-process"
+             :seon.cluster.run/live-processes
+             #{"settlement-parity-process"}
+             :seon.cluster.run/now (java.util.Date.)}))
+          (db/transact!
+           connection
+           (run/plan-tx
+            {:seon.cluster.run/id "settlement-parity-run"
+             :seon.cluster.run/process "settlement-parity-process"
+             :seon.cluster.run/starting-ns
+             [:seon.ns/name namespace-name]
+             :seon.cluster.run/plan-digest "settlement-parity-digest"
+             :seon.cluster.run/sources
+             [{:seon.cluster.run.form/source source}]}))
+          (db/transact!
+           connection
+           (run/receipt-start-tx
+            {:seon.cluster.run/id "settlement-parity-run"
+             :seon.cluster.eval/ordinal 0
+             :seon.cluster.eval/at (java.util.Date.)}))
+          (db/transact!
+           connection
+           (run/receipt-settle-tx
+            @connection
+            {:seon.cluster.run/id "settlement-parity-run"
+             :seon.cluster.eval/ordinal 0
+             :seon.cluster.eval/result-edn ":defined"
+             :seon.program/row indexed}))
+          (let [edge-facts
+                (fn [identity-attribute identity-value]
+                  (let [entity
+                        (db/q '[:find ?entity .
+                                :in $ ?attribute ?value
+                                :where [?entity ?attribute ?value]]
+                              @connection identity-attribute identity-value)
+                        calls
+                        (db/q '[:find [?symbol ...]
+                                :in $ ?entity
+                                :where
+                                [?entity :seon.fn/calls ?target]
+                                [?target :seon.fn/sym ?symbol]]
+                              @connection entity)
+                        keywords
+                        (db/q '[:find [?keyword ...]
+                                :in $ ?entity
+                                :where
+                                [?entity :seon.fn/keywords ?keyword]]
+                              @connection entity)
+                        subject
+                        (db/q '[:find ?symbol .
+                                :in $ ?entity
+                                :where
+                                [?entity :seon.test/subject ?target]
+                                [?target :seon.fn/sym ?symbol]]
+                              @connection entity)]
+                    (merge
+                     (when (seq calls)
+                       {:seon.fn/calls
+                        (mapv (fn [function-symbol]
+                                [:seon.fn/sym function-symbol])
+                              (sort calls))})
+                     (when (seq keywords)
+                       {:seon.fn/keywords (set keywords)})
+                     (when subject
+                       {:seon.test/subject [:seon.fn/sym subject]}))))
+                program-facts
+                (edge-facts :seon.fn/sym
+                            "sample.settlement-parity/contracted")
+                form-facts
+                (edge-facts :seon.cluster.run.form/id
+                            (run/form-identity "settlement-parity-run" 0))]
+            (is (= expected program-facts))
+            (is (= (:seon.fn/calls expected)
+                   (:seon.fn/calls form-facts)))
+            (is (= (:seon.test/subject expected)
+                   (:seon.test/subject form-facts)))
+            (is (every? (:seon.fn/keywords form-facts)
+                        (:seon.fn/keywords expected)))
+            (is (= :agent
+                   (db/q '[:find ?author .
+                           :in $ ?form-id
+                           :where
+                           [?form :seon.cluster.run.form/id ?form-id]
+                           [?form :seon.cluster.run.form/author ?author]]
+                         @connection
+                         (run/form-identity
+                          "settlement-parity-run" 0)))
+                "the authored form and its queryable edges settle together")))))))
 
 (deftest requires-resolve-totally
   (test-support/with-database

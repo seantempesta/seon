@@ -281,6 +281,14 @@
   (when-let [used (seq (get keywords-by-holder (str qualified)))]
     (into (sorted-set) used)))
 
+(defn- test-subject
+  [metadata]
+  (when-let [subject (:seon.test/subject metadata)]
+    (when (or (qualified-symbol? subject)
+              (and (string? subject)
+                   (qualified-symbol? (symbol subject))))
+      [:seon.fn/sym (str subject)])))
+
 ;; Emit one fact per keyword. Datahike reads a two-element collection beginning
 ;; with a unique-identity attribute as one lookup ref
 ;; (`reference-code/datahike/src/datahike/db/transaction.cljc:717-735`). The
@@ -333,7 +341,9 @@
                (mapv (fn [target] [:seon.fn/sym target])
                      (sort (get calls-by-caller (str qualified)))))
         (keyword-values used-keywords qualified)
-        (assoc :seon.fn/keywords (keyword-values used-keywords qualified)))
+        (assoc :seon.fn/keywords (keyword-values used-keywords qualified))
+        (test-subject metadata)
+        (assoc :seon.test/subject (test-subject metadata)))
 
       (and (seq (::analyzer/arglist-strs entry))
            (not (::analyzer/macro entry)))
@@ -356,6 +366,8 @@
                      (sort (get calls-by-caller (str qualified)))))
         (keyword-values used-keywords qualified)
         (assoc :seon.fn/keywords (keyword-values used-keywords qualified))
+        (test-subject metadata)
+        (assoc :seon.test/subject (test-subject metadata))
         (contains? #{:io :compute} (:seon.workload metadata))
         (assoc :seon.fn/workload (:seon.workload metadata))
         (contains? #{:ai-visible-text :html-response :codec-storage}
@@ -368,6 +380,204 @@
         (assoc :seon.effect/capability capability))
 
       :else nil)))
+
+(defn- stored-arglists
+  [serialized]
+  (when (string? serialized)
+    (try
+      (let [arglists (edn/read-string serialized)]
+        (when (and (seq arglists) (every? vector? arglists))
+          arglists))
+      (catch Throwable _ nil))))
+
+(defn- analysis-function-stub
+  [{:seon.fn/keys [sym private? arglists]}]
+  (let [qualified (symbol sym)
+        function-name (symbol (name qualified))
+        operation (if private? 'defn- 'defn)
+        arglists (stored-arglists arglists)]
+    (if (= 1 (count arglists))
+      (list operation function-name (first arglists) nil)
+      (list* operation function-name
+             (or (map #(list % nil) arglists)
+                 [(list '[& arguments] nil)])))))
+
+(defn- analysis-program-prelude
+  [function-rows]
+  (->> function-rows
+       (group-by #(some-> (:seon.fn/sym %) symbol namespace symbol))
+       (sort-by (comp str key))
+       (mapcat (fn [[namespace-name rows]]
+                 (cons (list 'ns namespace-name)
+                       (map analysis-function-stub
+                            (sort-by :seon.fn/sym rows)))))
+       (map pr-str)
+       (str/join "\n")))
+
+(defn- runtime-require-specs
+  [{:seon.ns/keys [requires aliases refers]}]
+  (let [aliases-by-target (group-by :seon.ns.alias/target-ns aliases)
+        refers-by-target (group-by :seon.ns.refer/target-ns refers)
+        targets
+        (sort-by str
+                 (into (set (map :seon.ns/name requires))
+                       (concat (keys aliases-by-target)
+                               (keys refers-by-target))))]
+    (mapcat
+     (fn [target]
+       (let [target-aliases
+             (sort-by (comp str :seon.ns.alias/local)
+                      (get aliases-by-target target))
+             referred
+             (->> (get refers-by-target target)
+                  (map :seon.ns.refer/target-name)
+                  distinct
+                  (sort-by str)
+                  vec)
+             base (cond-> [target]
+                    (seq referred) (into [:refer referred]))]
+         (if (seq target-aliases)
+           (map-indexed
+            (fn [index alias-row]
+              (cond-> [target :as (:seon.ns.alias/local alias-row)]
+                (and (zero? index) (seq referred))
+                (into [:refer referred])))
+            target-aliases)
+           [base])))
+     targets)))
+
+(defn- runtime-namespace-form
+  [namespace-name namespace-row]
+  (let [requires (vec (runtime-require-specs namespace-row))
+        imports (->> (:seon.ns/imports namespace-row)
+                     (keep :seon.ns.import/target-class)
+                     (sort-by str)
+                     vec)]
+    (apply list
+           (cond-> ['ns namespace-name]
+             (seq requires) (conj (apply list :require requires))
+             (seq imports) (conj (apply list :import imports))))))
+
+(defn- runtime-function-rows
+  [database]
+  (mapv #(db/pull database
+                  [:seon.fn/sym :seon.fn/private? :seon.fn/arglists]
+                  %)
+        (sort (db/q '[:find [?function ...]
+                      :where [?function :seon.fn/sym]]
+                    database))))
+
+(defn- runtime-analysis
+  [database namespace-name source]
+  (let [namespace-row
+        (db/pull database
+                 '[:seon.ns/name
+                   {:seon.ns/requires [:seon.ns/name]}
+                   {:seon.ns/aliases [*]}
+                   {:seon.ns/imports [*]}
+                   {:seon.ns/refers [*]}]
+                 [:seon.ns/name namespace-name])
+        function-rows (runtime-function-rows database)
+        prelude (analysis-program-prelude function-rows)
+        namespace-source (pr-str (runtime-namespace-form namespace-name
+                                                         namespace-row))
+        prefix (str prelude (when (seq prelude) "\n") namespace-source "\n")
+        first-source-row (inc (count (filter #{\newline} prefix)))
+        analysis
+        (with-in-str (str prefix source)
+          (analyzer/analyze {::analyzer/paths ["-"]}))]
+    {:seon.fn/analysis analysis
+     :seon.fn/first-source-row first-source-row
+     :seon.fn/function-rows function-rows}))
+
+(defn- usage-target
+  [usage]
+  (when (and (contains? usage ::analyzer/arity)
+             (::analyzer/to usage)
+             (::analyzer/name usage))
+    (str (symbol (str (::analyzer/to usage))
+                 (str (::analyzer/name usage))))))
+
+(defn- form-calls
+  [analysis first-source-row first-party-functions]
+  (into (sorted-set)
+        (comp
+         (filter #(>= (long (or (::analyzer/row %) 0)) first-source-row))
+         (keep usage-target)
+         (filter first-party-functions)
+         (map (fn [target] [:seon.fn/sym target])))
+        (::analyzer/var-usages analysis)))
+
+(defn- form-keywords
+  [analysis first-source-row]
+  (into (sorted-set)
+        (comp
+         (filter #(>= (long (or (::analyzer/row %) 0)) first-source-row))
+         (keep (fn [entry]
+                 (when (and (::analyzer/ns entry) (::analyzer/name entry))
+                   (keyword (str (::analyzer/ns entry))
+                            (str (::analyzer/name entry)))))))
+        (::analyzer/keywords analysis)))
+
+(defn analyze-form
+  "Analyze one planned form through the static program-graph owner."
+  {:malli/schema
+   [:=>
+    [:catn
+     [:database :seon.db/database-value]
+     [:source :seon.cluster.run.form/source]
+     [:namespace-ref :seon.cluster.run.form/ns]
+     [:program-row [:maybe :seon.program/row]]]
+    [:tuple
+     [:map
+      [:seon.fn/calls {:optional true} :seon.fn/calls]
+      [:seon.fn/keywords {:optional true} :seon.fn/keywords]
+      [:seon.test/subject {:optional true} :seon.test/subject]]
+     [:maybe :seon.program/row]]]}
+  [database source namespace-ref program-row]
+  (let [namespace-name (:seon.ns/name
+                        (db/pull database [:seon.ns/name] namespace-ref))
+        {:seon.fn/keys [analysis first-source-row function-rows]}
+        (runtime-analysis database namespace-name source)
+        program-symbol (or (:seon.fn/sym program-row)
+                           (:seon.test/sym program-row))
+        first-party-functions
+        (cond-> (into #{} (map :seon.fn/sym) function-rows)
+          program-symbol (conj program-symbol))
+        calls-by-caller
+        (call-targets-by-caller analysis first-party-functions)
+        used-keywords (keywords-by-holder analysis)
+        program-facts
+        (when program-symbol
+          (let [qualified (symbol program-symbol)
+                definition
+                (some #(when (= program-symbol
+                                (str (symbol (str (::analyzer/ns %))
+                                             (str (::analyzer/name %)))))
+                         %)
+                      (::analyzer/var-definitions analysis))
+                subject (or (:seon.test/subject program-row)
+                            (test-subject (::analyzer/meta definition)))]
+            (cond-> {}
+              (seq (get calls-by-caller program-symbol))
+              (assoc :seon.fn/calls
+                     (mapv (fn [target] [:seon.fn/sym target])
+                           (sort (get calls-by-caller program-symbol))))
+              (keyword-values used-keywords qualified)
+              (assoc :seon.fn/keywords
+                     (keyword-values used-keywords qualified))
+              subject (assoc :seon.test/subject subject))))
+        form-facts
+        (cond-> {}
+          (seq (form-calls analysis first-source-row first-party-functions))
+          (assoc :seon.fn/calls
+                 (form-calls analysis first-source-row first-party-functions))
+          (seq (form-keywords analysis first-source-row))
+          (assoc :seon.fn/keywords
+                 (form-keywords analysis first-source-row))
+          (:seon.test/subject program-facts)
+          (assoc :seon.test/subject (:seon.test/subject program-facts)))]
+    [form-facts (when program-row (merge program-row program-facts))]))
 
 (def ^:private load-refusal-finding-types
   #{:syntax

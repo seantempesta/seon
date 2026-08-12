@@ -156,7 +156,9 @@
         :seon.bootstrap.plan/digest digest
         :seon.bootstrap.plan/forms
         (mapv (fn [ordinal form]
-                (assoc form :seon.cluster.run.form/ordinal (long ordinal)))
+                (assoc form
+                       :seon.cluster.run.form/ordinal (long ordinal)
+                       :seon.cluster.run.form/author :system))
               (range)
               forms)}]
 
