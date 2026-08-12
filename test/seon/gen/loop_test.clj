@@ -61,16 +61,19 @@
 ;;; `my.gen.planner` exactly as alpha and beta own theirs, and it is
 ;;; that ownership — not a table in this file — that decides where a
 ;;; red form goes.
+(def ^:private cast-spec
+  [["root" 'my.agents.root]
+   ["planner" 'my.gen.planner]
+   ["alpha" 'my.gen.alpha]
+   ["beta" 'my.gen.beta]])
+
 (def ^:private cast-rows
   (into []
         (mapcat (fn [[agent-id namespace-name]]
                   (agent/creation-tx {:seon.cluster.agent/id agent-id
                                       :seon.cluster/name "generate-code-v0"
                                       :seon.ns/name namespace-name})))
-        [["root" 'my.agents.root]
-         ["planner" 'my.gen.planner]
-         ["alpha" 'my.gen.alpha]
-         ["beta" 'my.gen.beta]]))
+        cast-spec))
 
 (defn- with-render-context-proc
   "Run the production render proc that answers prompt context requests."
@@ -235,15 +238,14 @@
             (recur (inc start))))))))
 
 (defn- prompt-agent-id
-  "The focal agent is the first agent block in its rendered prompt."
+  "The focal agent owns the namespace in the first REPL prompt."
   [prompt]
-  (->> ["planner" "alpha" "beta" "root"]
-       (keep (fn [agent-id]
-               (when-let [index (str/index-of prompt (str "Agent " agent-id " "))]
-                 [index agent-id])))
-       (sort-by first)
-       first
-       second))
+  (when-let [prompt-end (str/index-of prompt "=>")]
+    (let [namespace-name (subs prompt 0 prompt-end)]
+      (some (fn [[agent-id owned-namespace]]
+              (when (= namespace-name (str owned-namespace))
+                agent-id))
+            cast-spec))))
 
 (defn- staged-reply
   "One provider stub for the whole cast, keyed on WHOSE prompt it is."
