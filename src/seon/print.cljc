@@ -624,6 +624,21 @@
    (when (some? prefix) {::prefix prefix})
    (requery-fields profile)))
 
+(defn- preserve-requery
+  [elision carried]
+  (cond
+    (::requery-id carried)
+    (-> elision
+        (dissoc ::requery-refusal)
+        (assoc ::requery-id (::requery-id carried)))
+
+    (::requery-refusal carried)
+    (-> elision
+        (dissoc ::requery-id)
+        (assoc ::requery-refusal (::requery-refusal carried)))
+
+    :else elision))
+
 (declare enrich-node)
 
 (defn- enrich-entry
@@ -714,10 +729,10 @@
         retained (min child-limit admitted-total)
         fitted-elision
         (when (< retained total)
-          (merge
+          (preserve-requery
            (elision-node profile path retained (- total retained) total
                          :children nil)
-           (select-keys carried-elision [::requery-id ::requery-refusal])))]
+           carried-elision))]
     (cond->
      (mapv (fn [index child]
              (child-fit child profile (inc depth) (conj path index)
@@ -746,8 +761,9 @@
                   (when-some [omitted (::omitted carried)]
                     (+ admitted omitted))
                   admitted)]
-    (merge (elision-node profile path 0 (max 1 total) total :subtree nil)
-           (select-keys carried [::requery-id ::requery-refusal]))))
+    (preserve-requery
+     (elision-node profile path 0 (max 1 total) total :subtree nil)
+     carried)))
 
 (defn- fit-node
   [node profile depth path child-limit string-limit]

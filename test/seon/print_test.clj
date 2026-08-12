@@ -327,7 +327,8 @@
     (is (= :seon.print/elided (:seon.print/face elision)))
     (is (= total (:seon.render.data/total elision)))
     (is (= (- total rendered) (:seon.print/omitted elision)))
-    (is (= [:seon.db/query :requires] (:seon.print/requery-id elision)))))
+    (is (= [:seon.db/query :requires] (:seon.print/requery-id elision)))
+    (is (not (contains? elision :seon.print/requery-refusal)))))
 
 (deftest throwable-face-is-readable-error-data
   (let [failure (ex-info "outer" {:outer true}
