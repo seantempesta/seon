@@ -211,8 +211,9 @@ live client proof; existing clients retain the old script definition.
 
 ## N5 disposition — converted 2026-08-12
 
-Commit `4fea58d50` routes the cluster-side JVM exception and nil-deref faces
-through `seon.error/diagnostic`, retaining the root frame as the owning
-observation. The remaining open runtime-health output-contract case is not a
+Commits `4fea58d50` and `98aadec8f` route the cluster-side JVM exception and
+nil-deref faces through `seon.error/diagnostic`, retaining the root frame as
+the owning observation and preserving the existing additive top-level frame
+projection. The remaining open runtime-health output-contract case is not a
 diagnostic-construction member of N5; it remains here because it still owns
 this MCP surface.
