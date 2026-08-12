@@ -796,7 +796,16 @@
                             [[(:seon.render.walk/lookup unit)
                               (:seon.render.walk/path unit)] unit]))
                      value-units)
-        basis (db/basis-t (:seon.db/db request))]
+        database (:seon.db/db request)
+        namespace-name
+        (db/q '[:find ?name .
+                :in $ ?agent-id
+                :where
+                [?agent :seon.cluster.agent/id ?agent-id]
+                [?agent :seon.cluster.agent/namespace ?namespace]
+                [?namespace :seon.ns/name ?name]]
+              database (:seon.cluster.agent/id request))
+        basis (db/basis-t database)]
     (into []
           (keep
            (fn [form-unit]
@@ -822,7 +831,8 @@
                   :seon.render.history/form form
                   :seon.render.history/printed-value printed-value
                   :seon.render.history/bytes
-                  (str (pr-str form) "\n" printed-value)}))))
+                  (str (or namespace-name 'user) "=> " (pr-str form)
+                       "\n" printed-value)}))))
           form-units)))
 
 (defn history
