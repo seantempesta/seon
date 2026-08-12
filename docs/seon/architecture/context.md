@@ -4,31 +4,45 @@ status: active
 tags: [architecture, agent]
 ---
 
-# Context — functions applied to the db
+# Context — the neighborhood renders itself as history
 
 > **Target design** (present tense). The block/render machinery lives in
-> [[ui]]; historical run reconstruction + inspection in [[observability]]; the measured laws
-> that constrain this in [[laws]]. Implementation state lives in [[roadmap]]. This doc keeps
-> to Clojure primitives — `ns`, `defn`, `require`, var metadata, and a db value.
-> A block is the informal name for one render-function call in either
-> projection, never a stored data type.
+> [[ui]]; historical run reconstruction and inspection live in
+> [[observability]]; the measured laws that constrain this live in [[laws]].
+> Implementation state lives in [[roadmap]]. A block is the informal name for
+> one render-function call, never a stored data type.
 
-The prompt is a **flat sequence of render-call units rooted at one agent
-entity**. Schema'd data are renderable values and refs are traversal edges. A
-bounded walk discovers the units from one immutable database value; the
-display projection orders them and joins their AI bytes. Recursive traversal
-state is private to the walk and never becomes another public render envelope.
+The prompt is an **append-only sequence of basis-labelled render entries rooted
+at one agent entity**. One Datahike pull acquires the agent's neighborhood from
+one immutable database value. Its selector is generated from installed schema
+ref declarations: forward refs nest, every stored ref also receives its reverse
+spelling, requested distance determines selector depth, and pull `:limit`
+bounds breadth. The pull result is both the neighborhood and the membership
+index; stable identity exposes arrivals, changes, and removals without a second
+traversal.
 
-Every model call re-derives the walk from one frozen db value. Nothing is accumulated.
-The agent, cluster, current run, namespace, window policy, tool/schema graph,
-plan, event membership, and tree edges are facts or pure queries over that
-value. Rendering the same database value (the same store ID, branch, commit ID,
-and basis transaction), code revision, and explicit render arguments for the
-same agent produces a byte-identical body.
-Filesystem state, process-local cache membership, random ids, and map iteration
-order never leak into it. Which functions are in scope, and in what order, is
-the entire design — and whether that set is **complete** is what makes the agent
-feel stateful.
+Every unit in that result passes through the same render-selection chain for
+three projections:
+
+- `:seon.render/form` is the form that produces the value;
+- `:seon.render/ai` is the value's printed representation for the prompt; and
+- `:seon.render/html` is the same value as Hiccup for the page.
+
+The history orders a parent listing before a child lookup and preserves
+define-before-use: a form never refers to a symbol that an earlier entry has not
+introduced. Stable alphabetical ties make that ordering deterministic; live
+material then follows its arrival order. A prompt entry carries its stable
+logical render-call identity, observed basis transaction and commit ID, form,
+and already serialized AI bytes.
+
+The agent, cluster, current run, namespace, render profile, program graph, plan,
+event membership, and ref edges are facts or pure queries over the selected
+database value. Rendering the same database value (the same store ID, branch,
+commit ID, and basis transaction), code revision, and explicit render arguments
+for the same agent produces byte-identical entries. Filesystem state,
+process-local cache membership, random ids, and map iteration order never leak
+into them. Which functions are in scope, and in what order, is the entire design
+— and whether that set is **complete** is what makes the agent feel stateful.
 
 Read reuse cannot weaken that determinism. Datahike owns immutable eager-result
 entries and their parsed dependency plans at exact database source identities.
@@ -39,11 +53,24 @@ therefore sees the selected database value whether a read computes, joins
 single-flight, or hits cache.
 
 Render reuse belongs to the one render proc package owner. Each process-local
-fragment entry retains its dependency evidence and serialized bytes; the same
-state retains the latest revisioned package. A pass reuses a fragment when its
-evidence is equal, compares newly produced bytes when it is not, and builds the
-keyframe from retained bytes. This is losable performance state, never another
-truth or a second general function cache.
+latest-call entry retains its Datahike read evidence, latest output, and the
+immutable serialized history entry; a reverse projection indexes logical calls
+by the attributes their reads observed. An unchanged prompt acquisition returns
+retained bytes with zero database reads and zero renderer calls.
+
+When an affecting transaction makes a retained read semantically stale, the
+render proc re-derives that logical call exactly once against one current
+database value and appends a new basis-labelled entry. It never edits,
+reserializes, deletes, or reorders an earlier entry. A byte-equal refreshed
+output still records the re-derivation; an arrival appends its first
+observation, and a removal appends an explicit absence observation. Therefore,
+within one retained prompt generation, prompt N+1 is byte-for-byte prompt N plus
+a suffix. The disposable latest-call lookup may advance to the appended entry;
+the ordered history may not be replaced. This is losable performance state,
+never another truth or a second general function cache. After a process crash,
+facts reconstruct the current projection, but the lost process-local prefix is
+not promised to be identical. The sent prompt blob remains the forensic byte
+truth.
 
 Live root telemetry is an ordinary first-party render unit with explicit
 process-local inputs, not a tail outside the block system. It returns an
@@ -55,13 +82,12 @@ value and code revision regenerate the database-derived calls.
 
 ## The projection must be complete — so the agent feels stateful
 
-An agent carries nothing between turns; every turn is a cold start from one db
-value. Yet it must *behave* as though it remembered — resume its work, act on
-what just happened, notice what changed. It can, because a stateless process is
-indistinguishable from a stateful one exactly when its rendered context is a
-**complete and faithful projection of its situation**: everything a continuous
-being would carry forward, re-derived each turn from the db, with no gap left
-for the model to fill.
+An agent carries no mutable interpreter history between turns. Yet it must
+*behave* as though it remembered — resume its work, act on what just happened,
+notice what changed. It can, because its append-only rendered history is a
+**complete and faithful projection of its situation**: retained observations
+preserve what it saw, and affecting facts append refreshed observations before
+its next turn, with no gap left for the model to fill.
 
 **Confabulation is the diagnostic.** When the render omits or garbles part of
 the agent's situation, the model does not fail loudly — it patches the hole
@@ -100,11 +126,10 @@ always renders:
 - **what I learned** — accumulated knowledge (`my.kb`), and *only* knowledge:
   work-tracking that still carries a live lifecycle status is not a settled
   finding and never renders as one.
-- **what changed since I last looked** — the **delta**, derived between the
-  previous model call's context-capture basis and the current database value.
-  New messages, settled delegated work, and new failures are queries over those
-  values, not new stored state. A lineage change renders a reset/diff boundary
-  instead of pretending a bare basis transaction is globally continuous.
+- **what changed since I last looked** — the basis-labelled suffix appended by
+  refreshed system-authored reads. New messages, settled delegated work, and
+  new failures remain ordinary facts; the retained entry and its refreshed
+  successor make the observed change explicit without rewriting history.
 
 **Situation, never the answer.** The projection renders the agent's operational
 situation and the operations available on it — "this open run has no process
@@ -156,23 +181,17 @@ carries event-deltas (a message that arrived is already a line), the delta
 surface is only the *non-event* changes. Additive sections layer on the spine;
 they never contradict it.
 
-**Bounded raw history, never synthetic compaction.** Recent transcript events
-render verbatim within a short working window. Result bodies then decay through
-byte-stable age bands to a useful diagnostic stub, and older eval events share
-one fixed total budget spent newest-first. This makes the transcript approach a
-plateau instead of growing by one permanent stub per eval. The complete event,
-value, source, and error remain database/blob facts reachable by targeted
-reads; leaving an event out of the prompt neither deletes nor summarizes it.
-The runtime never replaces conversation history with a model-written compacted
-story. Long continuity comes from the current plan, schemas, namespace source,
-database facts, and explicit retrieval, so a long-lived agent does not depend
-on transcript archaeology.
+**History entries are immutable observations.** Once an entry joins a prompt
+generation, later fitting never rewrites its form, value, error, or serialized
+bytes. The complete event, value, source, and error remain database/blob facts
+reachable by targeted reads. Long continuity comes from the current plan,
+schemas, namespace source, database facts, and explicit retrieval, so a
+long-lived agent does not depend on transcript archaeology.
 
-The budget is over the bytes that actually render, including form source,
-narration, result, and error envelope. Per-result caps alone are insufficient:
-an unlimited number of individually small stubs is still unbounded context.
-Likewise, transcript clipping is a final guardrail; functions return bounded,
-structured, drillable values and errors before rendering.
+The consumer's render profile bounds the bytes it receives, including form
+source, result, and error envelope. Functions return bounded, structured,
+drillable values and errors before rendering; fitting is a projection of the
+same retained entry, not a mutation of prompt history.
 
 Failure diagnostics retain the database-configured eval cap at every display
 site. A caller may request a larger successful authored-source, stdout, or
@@ -184,25 +203,32 @@ renderer applies that same cap. Exact raw replies and error evidence remain
 separate database/blob facts, so bounded agent context never weakens forensic
 capture.
 
-## The reply grammar is one current instruction
+## The reply grammar is one instruction
 
-The cluster instruction facts teach the grammar implemented by
-`seon.cluster.reply`: a model reply is read to natural completion, split into
+The cluster instruction facts teach the grammar owned by `seon.cluster.reply`:
+a model reply is read to natural completion, split into
 ordered form sources, frozen on the run, and reduced in source order. Each
 attempted form records its actual result or error. The reader never
 regex-rewrites model output, invents a result for an unattempted form, or
 treats a model-authored claim as execution evidence. Provider byte streaming
 is transport behavior and does not select a second evaluation mode.
 
-## A render fn supplies twin projections
+## A render function supplies three projections
 
 A public `defn` whose declared input accepts a render unit and whose declared
-output is one of the two render shapes is a **renderer**:
+output is one of the three render shapes is a **render function**:
 
+- `:seon.render/form` → its Clojure form becomes the history entry's form.
 - `:seon.render/ai` → its string joins the agent's prompt.
 - `:seon.render/html` → its Hiccup is serialized for the agent's page.
-- both declared contracts → twins: the agent's context and the human's screen
-  show the same value through two typed functions.
+- the three declared contracts → the agent's history and the human's page show
+  the same value as a form and its two typed representations.
+
+All three use the one selection chain. The `/form` structural floor is total:
+a unit reached through an attribute uses the listing query for that attribute,
+and an entity uses an identity lookup-ref pull whose identity attribute is
+derived from `:seon.entity/id-attr`. `doc` and `dir` are ordinary `/form`
+declarations for program-graph values, not special context-engine arms.
 
 ### [TARGET] Generalized canvas focus
 
@@ -214,25 +240,36 @@ function identities before any transaction, route, or agent call names them.
 No context-block manifest, captured runtime read-set, or effectful in-eval UI
 helper participates in that design.
 
-These are the block's two renders (`:seon.render/ai` /
-`:seon.render/html`). Its explicit args contain the db value and any other
-declared inputs; hidden walk state never influences output. First-party
-renderers remain pure over those inputs. Every agent-authored renderer executes
-only through the one SCI door. The boundary composes the uncatchable interrupt
-with wrap-and-catch: failed or runaway code becomes a flat `:seon.error` value,
-enters durable problem routing, appears in the running agent's next context,
-and escalates to root. No agent exception crosses into a proc and no failure is
-silently dropped. The historical prompt blob—not a re-executed effect—is the
-byte ground truth.
+These are the block's three projections. Its explicit args contain the database
+value and any other declared inputs; hidden acquisition state never influences
+output. First-party render functions remain pure over those inputs. Every
+agent-authored render function executes only through the one SCI door. The
+boundary composes the uncatchable interrupt with wrap-and-catch: failed or
+runaway code becomes a flat `:seon.error` value, enters durable problem routing,
+appears in the running agent's next context, and escalates to root. No agent
+exception crosses into a proc and no failure is silently dropped. The
+historical prompt blob—not a re-executed effect—is the byte ground truth.
+
+## Only system-authored reads refresh
+
+Every run form receives required authorship from its constructor: `:agent` for
+an agent-authored form and `:system` for a system-authored read. A refreshed
+read points uniquely to the prior form it refreshes. The refresh transition
+accepts only a terminal system-authored predecessor with no existing successor,
+and the receipt owns the read evidence that justified refresh. Consequently an
+agent-authored form cannot enter the refresh path and never re-executes. The
+system injects a form only when it is true and the agent has not already done
+the work; ordinary `require` forms execute once in the turn fork and settlement
+records the resulting namespace facts.
 
 ## Shared view — the agent knows the human sees it
 
-Because the *same* function feeds both the prompt and the surface catalog, the
-agent and the human look at one derived value. An agent working in `my.plan`
-runs its plan-view `defn`: the `:ai` twin puts the full plan in its own
-context, the `:html` twin puts the full plan on the human's page. The agent
-can rely on "my human is seeing this" — it is structurally true, no
-messaging required. Planning in full detail *is* showing the human the plan.
+Because one render call supplies the form, AI, and HTML projections, the agent
+and the human look at one retained artifact at different fits. An agent working
+in `my.plan` receives the plan's form and printed value in its history while the
+HTML projection puts the same plan on the human's page. Root's preview of that
+agent uses the same retained AI bytes. The agent can rely on "my human is
+seeing this" — it is structurally true, no messaging required.
 
 ## How tree values find renderers
 
@@ -255,14 +292,15 @@ owner's context includes current source, dependents, observed calls, failures,
 performance evidence, tests, and incoming change requests. Ownership is a
 distributed collaboration protocol, not a private program copy.
 
-Render membership comes only from the walk. It discovers schema'd values, then
-resolves each through one chain: an explicit producer symbol on the value; the
-unique contract-fitting public function in an explicitly owning namespace; the
-schema-attached default; and the structural floor. Ownership comes only from a
-real ref on the data or traversal edge, never keyword text or the viewer's
-namespace. Without such a ref, resolution proceeds directly to schema metadata
-and then the floor. A namespace renderer is a possible projection for
-discovered data, never membership by itself.
+Render membership comes only from the schema-derived pull rooted at the agent.
+It discovers schema'd values, then resolves each projection through one chain:
+an explicit projection symbol on the value; the unique contract-fitting public
+function in an explicitly owning namespace; the schema-attached default; and
+the structural floor. Ownership comes only from a real ref on the data or pull
+edge, never keyword text or the viewer's namespace. Without such a ref,
+resolution proceeds directly to schema metadata and then the floor. A namespace
+render function is a possible projection for acquired data, never membership by
+itself.
 
 The cluster entity owns the authoritative ref set to
 `:seon.cluster.instruction` rows for the system message, reply grammar,
@@ -272,16 +310,18 @@ its text datom on the same identity: no row versioning or ref repointing.
 Datahike history retains the prior text. Plans, warnings, transcripts, and
 other agent facts are reached from their ordinary refs in the same tree.
 
-Rule: **derive the derivable; an override is data the same walk reads.** One
-walk produces one flat sequence of render-call units—never two rendering systems.
+Rule: **derive the derivable; an override is data the same pull reads.** One
+root acquisition produces one ordered sequence of render calls—never two
+rendering systems.
 
 ## Explicit render inputs
 
 Render and context functions receive ordinary namespaced request data. The
-walk supplies the immutable `:seon.db/db`, the viewing
-`:seon.cluster.agent/id`, admission caps, distance, live-process evidence when
-needed, and the pulled entity. A renderer declares the request it consumes and
-never reaches through an ambient connection or an injectable registry.
+render call supplies the immutable `:seon.db/db`, the viewing
+`:seon.cluster.agent/id`, the selected render profile, live-process evidence
+when needed, and the pulled value. A render function declares the request it
+consumes and never reaches through an ambient connection or an injectable
+registry.
 
 The database value and agent identity describe one render request; they are not
 execution grants. A function's schema remains its complete contract, and
@@ -289,42 +329,33 @@ instrumentation validates it at the SCI or host boundary that invokes it.
 Per-agent domain ownership is expressed by a real ref on the data, not inferred
 from the presence of an injected argument.
 
-## Renderer discovery — the walk queries the program graph
+## Render-function discovery queries the program graph
 
-The walk first discovers schema'd values. For each value with an explicit
-owning-namespace ref, it queries the program graph for the unique
-contract-fitting public function in that namespace and runs the winner through
-the same render boundary. Without an owning ref it proceeds to the schema
-property and floor. Renderer functions consume a unit carrying `:seon.db/db`,
-`:seon.cluster.agent/id`, and their domain values; their presence alone never
-inserts a context unit.
+The root pull first acquires schema'd values. For each value with an explicit
+owning-namespace ref, the selector queries the acquired candidates for the
+unique contract-fitting public function in that namespace and runs the winner
+through the same render boundary. Without an owning ref it proceeds to the
+schema property and floor. Render functions consume a unit carrying
+`:seon.db/db`, `:seon.cluster.agent/id`, and their domain values; their presence
+alone never inserts a context unit.
 
 ### Root is a small specialization of the same mechanism
 
 Root receives one concise role-specific block: understand the fleet, start or
-select an ordinary agent, route/delegate work, and respond to recovery notices.
-It does not receive a broad root manual. Its capabilities appear as compact,
-fully specified namespace cards. This is a RENDERING overlay by namespace
-identity, never a grant: root can call exactly what every other agent can
-call (ruling #20), and the cards only decide what root SEES first. Root-authored
-definitions never land in framework code. The resolved vector is persisted
-with root's home namespace; there is no runtime role registry or renderer
-allowlist. When root moves into an orchestration, database, or UI namespace,
-that namespace becomes current and its source plus applicable same-schema renderers
-enter context through the same walk-and-query rule above. The root canvas's bounded AI twin
-provides current fleet facts through the ordinary canvas block: every agent is
-listed compactly, while running, erroring, and recently active agents receive
-bounded recent-message, failed-eval, and canvas-AI detail. Root itself remains a
-summary-only agent row because its canvas is the fleet view; recursively
-materializing its own surface or canvas-AI detail is forbidden. The fleet is not
-copied into a second context block. Derived root-only warnings still render only
-when their queries return facts.
+select an ordinary agent, route or delegate work, and respond to recovery
+notices. It does not receive a broad root manual. Its capabilities appear as
+compact, fully specified namespace entries. This is a rendering choice, never a
+grant: root can call exactly what every other agent can call, and the entries
+only decide what root sees. When root enters an orchestration, database, or UI
+namespace, that namespace becomes current and its source plus applicable render
+functions enter context through the same root-pull and selection chain.
 
-This is the quality bar for restoring historical root context: keep a statement
-only when it names root's irreducible role or an actual derived state; move
-operational detail into the namespace that owns the functions; delete generic
-advice and duplicated instructions. Behavior is measured before more standing
-text is admitted.
+Each attached agent contributes the retained AI projection of its newest-basis
+block to root's context. The `/` page presents the corresponding HTML projection
+as that agent's live window. These are two fits of the same retained render
+artifact, not cards or a second fleet-summary mechanism. Root itself remains a
+summary-only row so the fleet projection never recursively renders itself.
+Derived root-only warnings render only when their queries return facts.
 
 ### Importing a skill does not inject it
 
@@ -335,63 +366,50 @@ source, state-gated render units, and pull references remain the normal
 discovery path. Explicit selection adds an ordinary schema'd ref reachable from
 the agent entity; it never installs a block or creates a second assembly path.
 
-## Order = last change, so the cache holds
+## Order preserves the prefix and teaches define-before-use
 
-Render units are ordered by **when their bytes last changed** and by nothing
-else. The render proc's retained fragment entry carries the basis at which its
-bytes last transitioned; a no-op reassertion does not move it. Display order is ascending
-across every unit regardless of tree position, so the prompt reads
-longest-unchanged → most-recently-changed and the provider prefix-cache survives
-most turns. Near-equal changes cluster by branch so related units remain
-together; the target does not invent a threshold here. The key is derived by
-the retained fragment state at render time and is never a stored timestamp, stability
-field, or authored priority. Stable render-call identity is the final
-deterministic tie-break within a branch cluster.
+The initial root derivation follows the pull tree: a parent listing precedes a
+child lookup, siblings may derive in parallel, and stable alphabetical ties
+make their emitted order deterministic. Parsed forms enforce define-before-use:
+`require` introduces an alias, `dir` introduces names, `doc` may then name one,
+and a call follows its documentation. Live material follows arrival order.
 
-There are **no bands, no pins, and no hysteresis**. A block that never
-changes — the system message, the role instruction, an imported instruction
-file — reaches the front because its facts are the oldest, not because
-something declared it fixed. A block that changes every turn sinks on its own.
-"Static" is a property of the facts, never a mechanism: everything a prompt
-contains is one block from one render fn over the db, and there is no second
-assembly path for anchors (owner ruling 2026-07-31 — see
-`docs/prds/sci-execution-runtime/plan/README.md`).
+Refresh never moves an old entry. One passive render pass uses one database
+value and appends affected logical call identities in that established root
+order. Newest-basis entries therefore sit nearest the next model turn, while
+the retained prefix remains byte-identical. There are no stored priority,
+stability, band, pin, or hysteresis attributes.
 
-Banding, priority, and hysteresis do not exist in this contract. Every context
-capture records each block's identity, content hash, estimated tokens, and
-position as observability facts, and provider cache-read usage measures real
-reuse. Evidence of oscillation would require a new ordering ruling; it does not
-reserve the retired attributes or a dormant second mechanism.
+The V1 profile is concise-until-cap: render every acquired unit concisely in
+order until the selected token cap, and let every concise value expose the form
+that retrieves its deeper representation. Reference code and retrieval beyond
+the current namespace remain functions the agent calls, not a separately pushed
+context block.
 
-Root-only live telemetry is an ordinary first-party render unit described at
-the top of this document. Its bytes participate in the same last-changed order;
-because its explicit process-local inputs change often, it naturally moves
-toward the end. Delegated-work outcomes remain database facts in the ordinary
-tree, while genuinely live progress may be another explicit process-local
-input to that same bounded unit.
+Every context capture records each entry's logical identity, basis, content
+hash, estimated tokens, and position as observability facts. Provider cache-read
+usage measures actual prefix reuse. Code remains the compounding asset: as an
+agent persists schemas, functions, and tests, those program facts enter its
+neighborhood and render through the same acquisition and history mechanism.
 
-Two content policies survive the retirement of the bands, because they are
-about what a block contains, not where it sits:
+## Work wakes and render refresh are separate
 
-- **the transcript** is acquired newest-first under one total token budget. A
-  fixed recent tail retains full detail when it fits; older entries use their
-  derived summary projection when it fits; everything omitted contributes to
-  one explicit elision count. The same immutable database value and budget
-  produce the same bytes. What must outlive the window is already a database
-  fact or blob, never transcript residue.
-- **relevance retrieval is pull-first, not a block.** Reference code and
-  retrieval beyond the current namespace are explicitly inspected or called
-  when needed. Functions whose *input* specs match the shapes the agent is
-  holding (a graph query — [[think-in-clojure]] §1) and embedding neighbors for
-  the current activity are a search the agent CALLS, not a pushed block. It
-  becomes a recompute-every-step block (a capped token budget, config dial)
-  only if a drive proves the need, and vanishes when its queries return empty.
-  ([[context-rebuild]] §"Deliberately NOT blocks".)
+The one `seon.cluster.wake` listener performs two distinct kinds of routing.
+Agent work wakes only for facts addressed to that agent, such as a message to it
+or an error against it. A render refresh is passive: the listener offers one
+payload-free signal only when transaction attributes intersect the union of
+retained read interests. It never starts a turn. If a fact deserves immediate
+attention, its author sends the agent a message.
 
-Code grows slowly against tokens spent running things, so the code blocks are
-the compounding asset: as the agent persists schemas, fns, and tests, its own
-code becomes the majority of its context — self-reinforcing, cheap, and, being
-the least recently changed, naturally cached at the front.
+The render proc responds to that signal by dereferencing the latest immutable
+database value. Attribute revisions conservatively select candidate logical
+calls; replaying their retained read evidence decides exact semantic staleness.
+An equal replay result stops with no producer call and no append. Stale reads
+re-derive once and append even when the resulting render bytes are equal; HTML
+patch equality may suppress a page morph without suppressing the historical
+observation. Sliding-one signal loss is free because each pass compares retained
+revisions through the latest database value. The listener carries no transaction
+report, changed-attribute payload, render result, or durable invalidation log.
 
 ## Multi-agent context
 
@@ -406,11 +424,11 @@ acknowledgement state.
 ## Inspectability — the human twin of every position
 
 Every agent has a read-only debug view that begins at that agent's entity and
-walks the same tree through the one merged structural floor. It exposes every
-reachable schema'd value—including system apparatus hidden from the curated
-page—preserves identities and refs for drill navigation, and never transacts a
-display choice. The view also shows each unit's AI/HTML projections and their
-source facts. Through [[observability]], the same surface reaches a run's exact
+uses the same root pull and structural floor. It exposes every reachable
+schema'd value—including system apparatus hidden from the curated page—preserves
+identities and refs for drill navigation, and never transacts a display choice.
+The view also shows each unit's form, AI, and HTML projections and their source
+facts. Through [[observability]], the same surface reaches a run's exact
 `:seon.context.capture/prompt`, database basis transaction, ordered
 contributions, AI attempts, forms, eval receipts, and errors.
 
@@ -434,7 +452,8 @@ consumer at its documented acquisition boundary; it does not silently rebuild
 a graph, executor, or web server.
 
 Routes, context membership, instruction imports, and skills are not a config
-manifest. Routes are the canonical Reitit table; context is the visible walk;
+manifest. Routes are the canonical Reitit table; context is the schema-derived
+root pull and retained history;
 instructions are ordinary cluster or agent refs. Configuration contains only
 registered decision attributes from the config section of
 the family declarations under `resources/seon/schemas/`.
@@ -451,16 +470,16 @@ instruction versioning, complete block-tree manifest, or static prepend path.
 The manifest-owned config singleton remains a separate entity reached by
 `:seon.cluster/config`.
 
-Prompt acquisition resolves the system text and the agent's selected context
-inside one compiled acquisition operation over one immutable database value. That one
-ordinary result flows unchanged through context capture, token accounting, every
-retry, the provider adapter, and the debug view. None of those consumers
-re-resolves live config after the prompt database value has been chosen.
+Prompt acquisition resolves the system text and the agent's retained context
+generation under one selected render profile. That one ordinary result flows
+unchanged through context capture, token accounting, every retry, the provider
+adapter, and the debug view. None of those consumers re-resolves live config
+after the prompt database value has been chosen.
 
 ## See also
 
-- [[ui]] — the block, its two renders, the surface catalog, the derived
-  entity walk and its resolution chain, and the live channel.
+- [[ui]] — the block, its three projections, the schema-derived root pull and
+  selection chain, and the live channel.
 - [[data-model]] — admitted context, run, receipt, and program-graph facts.
 - [[observability]] — context captures, attempts, receipts, errors, and blobs.
 - [[laws]] — cache-stability, render-prominence, always-on-beats-skills.
