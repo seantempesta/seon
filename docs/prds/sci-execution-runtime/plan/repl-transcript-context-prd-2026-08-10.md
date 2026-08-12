@@ -6,6 +6,21 @@ tags: [prd, render, agent]
 
 # The agent's REPL history is the context, walk, bootstrap, and live view
 
+## Supersession notice — 2026-08-12
+
+> **SUPERSEDED (2026-08-12):** The ordering-key bands, 12-exchange bootstrap
+> candidate, HUMAN-2 injected read, and identity-hash object prints below are
+> ruled history, replaced by the generated episode in
+> [rulings 24–28](self-generating-context-prd-2026-08-11.md#rulings-24-28-owner-2026-08-12-midday--the-generated-episode)
+> through
+> [ruling 37](self-generating-context-prd-2026-08-11.md#ruling-37-owner-2026-08-12-night--the-demonstration-corrected),
+> introduction ordering under
+> [ruling 29](self-generating-context-prd-2026-08-11.md#rulings-29-31-owner-2026-08-12-afternoon--the-expansion-frame)
+> reconciled with
+> [ruling 14](self-generating-context-prd-2026-08-11.md#rulings-appended-after-w0-markup-owner-same-session),
+> and the stable printer. The core move—history is the context, backed by the
+> storage verification in this document—stands.
+
 This is the line-by-line design for the owner ruling in
 [`agent-interface-economy-2026-08-10.md`](agent-interface-economy-2026-08-10.md).
 It records received rulings and supplies priced options only where the owner
@@ -13,6 +28,8 @@ has not yet ruled, so the remaining lines can be confirmed or marked up before
 production work starts.
 
 ## How this works (read this first)
+
+**SUPERSEDED (2026-08-12):** The bootstrap-plan and injected-read details in this overview yield to generated episodes under rulings 24–37; history-is-context and storage verification stand.
 
 An agent in Seon operates a real Clojure REPL. Every model reply is parsed
 into ordered forms; every form is evaluated; every evaluation settles to a
@@ -99,6 +116,8 @@ this revision applies it without repeating its disposition table.
 
 ## One agent-history owner
 
+**SUPERSEDED (2026-08-12):** The banded ordering contract below is replaced by ruling 29's explained-set readiness, with ruling 14 supplying only the stable tie-break among ready entries.
+
 `seon.render.walk/history` receives an open request map and returns the one
 ordered value consumed by prompt/page/debug/system. Here “the agent's history”
 never means Datahike's `:history` time-axis:
@@ -137,6 +156,8 @@ Runs named by
 (`src/seon/render/transcript.clj:85-91,400-416`).
 
 ## Worked example A — complete fresh-task context
+
+**SUPERSEDED (2026-08-12):** This 12-exchange bootstrap candidate is historical; rulings 24–37 generate the episode, and its identity-hash object bytes yield to the stable printer.
 
 This is the recommended 12-exchange starting candidate. Each exchange first
 explains provenance; the flat block afterward is the byte authority.
@@ -318,6 +339,8 @@ OUT:
 
 ### Exchange 12 — receive the task `[injected — one synthesized form; stored message value]`
 
+**SUPERSEDED (2026-08-12):** HUMAN-2's injected read is replaced by the generated episode's truthful introduction-ordered read under rulings 24–37.
+
 IN (written by the system on the agent's behalf; honest and rerunnable):
 
 ```clojure
@@ -333,6 +356,8 @@ OUT (pulled admitted message row):
 ```
 
 ### What the model literally sees
+
+**SUPERSEDED (2026-08-12):** These candidate bytes retain historical evidence only; generation, introduction ordering, and the stable printer now determine the emitted history.
 
 ```text
 user=> (help)
@@ -394,11 +419,15 @@ found were committed as faults
 
 ## Worked example B — root mid-conversation
 
+**SUPERSEDED (2026-08-12):** HUMAN-2's injected read in this worked example is historical; the generator now emits only the truthful gap-closing form in introduction order.
+
 The human message uses recommended HUMAN-2 *(defined below: inject an honest
 `my.message/read` rather than paste a literal)*. The remaining exchanges are
 target fixtures whose Phase 3 proof must produce these recorded values.
 
 ### Exchange 1 — receive the human message `[injected — synthesized read; stored message value]`
+
+**SUPERSEDED (2026-08-12):** The explicit HUMAN-2 injection mechanism is replaced by generated gap closure under rulings 24–37.
 
 IN:
 
@@ -478,6 +507,8 @@ OUT:
 
 ### What the model literally sees
 
+**SUPERSEDED (2026-08-12):** The injected-read prefix below is historical; generated introduction ordering is authoritative.
+
 ```text
 my.agents.root=> (my.message/read "inbound-536871311-0")
 {:seon.cluster.message/id "inbound-536871311-0",
@@ -517,6 +548,8 @@ cluster (`src/seon/cluster/message.clj:267-269,437-440`). The query result is a
 set because that is Datahike's actual relation shape (`src/seon/db.clj:779-823`).
 
 ## Exact history-entry grammar
+
+**SUPERSEDED (2026-08-12):** The inbound-message synthesized-form and injected-require rows below are historical; generated episode entries obey rulings 24–37 and the explained-set ordering invariant.
 
 There is no stored history-entry discriminator. Attribute presence identifies each
 fact family. The renderer derives the following open maps and hands their
@@ -705,6 +738,8 @@ stays at `src/seon/sci/eval.clj:1016-1122`; pure shapes live in
 
 ### What changes, in one list
 
+**SUPERSEDED (2026-08-12):** Bootstrap replacement and `my.message/read` additions in this inventory are replaced by the generated-episode mechanism; the history unification and deletion findings stand.
+
 **Deleted:** `src/seon/render/transcript.clj` whole; the AI prose/comment
 assembler (`src/seon/render/walk.clj:568-671`); `compact-ai-text` and namespace
 schema-wall closure (`src/seon/render/ns.clj:354-475`); per-family sizes
@@ -730,6 +765,8 @@ SSE package/delta/keyframe delivery; provider captures as forensics; guarded
 producer invocation.
 
 ## Current-state and deletion inventory
+
+**SUPERSEDED (2026-08-12):** The bootstrap-source disposition and banded ordering implications in this inventory are historical; generation with empty history and introduction ordering replace them.
 
 | Current mechanism | Current evidence | Target disposition |
 |---|---|---|
@@ -1037,6 +1074,8 @@ mechanism. (Original options for the record:)
 
 ### HUMAN — form shape for an inbound human message
 
+**SUPERSEDED (2026-08-12):** HUMAN-2's injected-read choice is replaced by the generated episode's gap-closing, introduction-ordered form; the option block remains ruled history.
+
 **Stakes:** highest-frequency injected bytes. Inbound has no `from`; `to` is
 already `[:seon.cluster.agent/id id]`. Only its printed ref-vs-id awaits owner
 confirmation (`resources/seon/schemas/seon.cluster.message.edn:1-73`; `src/seon/cluster/message.clj:258-304`).
@@ -1074,6 +1113,8 @@ meaning while the new bare `docs` returns inspectable data.
 
 ### OPENING — forms pinned in a fresh agent history
 
+**SUPERSEDED (2026-08-12):** No pinned bootstrap plan exists; ruling 24 replaces this option block with generation from empty history.
+
 **Stakes:** the fixed token cost prepaid by every fresh agent.
 
 1. **OPENING-1 — Six forms.** Low cost; help/in-ns/require/two docs/task, but no durable authoring or graph query.
@@ -1081,6 +1122,8 @@ meaning while the new bare `docs` returns inspectable data.
 3. **OPENING-3 — Model-specific.** High cost and premature; gives up one generic prefix before evidence.
 
 ### MINIMUM — experiment and judgment
+
+**SUPERSEDED (2026-08-12):** The fixed 12-form ablation candidate is historical; the demonstration remains load-bearing, while rulings 24–37 generate the episode.
 
 **Stakes:** the experiment that proves which prepaid opening forms earn their
 place.
@@ -1127,6 +1170,8 @@ a second dashboard or delivery path.
 
 ## Measured baselines
 
+**SUPERSEDED (2026-08-12):** The 1,230-token fresh candidate remains scale evidence, not a current bootstrap plan or byte authority; generation and the stable printer now produce the episode.
+
 These are before-values, not targets.
 
 | Surface | Baseline on 2026-08-10 | Evidence |
@@ -1159,6 +1204,8 @@ number is a candidate starting point, not the minimum-context answer.
 
 ## Implementation phases and lane-ready boundaries
 
+**SUPERSEDED (2026-08-12):** Bootstrap-plan, HUMAN-2, and banded-ordering work in these historical phases is replaced by the generated episode and introduction ordering under rulings 24–37.
+
 No production phase begins until the owner confirms the remaining NESTED and
 HUMAN wording plus the unresolved PROSE, DOC, MINIMUM, and PREVIEW blocks. “One
 class regression” below means one recurring test for the structural failure
@@ -1180,6 +1227,8 @@ to bad-output classes surviving Phase 7.
 | 7. Integrate | Focused gates, complete checkpoint, live browser/agent drive | Integrate 1–6. | Any mismatch in bytes, printer stress, nested selection, bounded history, prompt/debug equality, syntax, package targets, ordering, or economics. | Deleted mechanisms have zero callers/declarations; unchanged basis runs zero producers. |
 
 ## Owner markup checklist
+
+**SUPERSEDED (2026-08-12):** HUMAN wording and fixed opening bytes are no longer open markup surfaces; generation and the stable printer own them.
 
 The implementation brief is ready only after the owner marks:
 
