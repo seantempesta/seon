@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (42)
+## Blocker (43)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
