@@ -19,6 +19,9 @@ in the OPEN QUESTIONS section, not silently assumed.
    historical transcript are one walk over the same facts. The
    transcript must work for ALL agents under the same rules; bootstrap
    plus additional standing forms is an acceptable combination.
+   **SUPERSEDED (2026-08-12):** The “bootstrap plus additional standing
+   forms” clause is superseded by ruling 24: no bootstrap plan exists;
+   generation with empty history replaces it.
 2. **Context is a REPL session that teaches.** The initial context is
    the bootstrap rendered as the walk: it looks to the agent like it
    has already issued ~10–20 forms — requires, docs, queries — with
