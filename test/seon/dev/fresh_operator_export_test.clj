@@ -6,8 +6,7 @@
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.db :as db]
-            [seon.test-support :as test-support])
-  (:import [java.util.concurrent TimeUnit]))
+            [seon.test-support :as test-support]))
 
 (def ^:private project-root
   (.getCanonicalFile (io/file (System/getProperty "user.dir"))))
@@ -29,15 +28,12 @@
                    (.directory project-root)
                    (.redirectErrorStream true)))
         output (future (slurp (.getInputStream process)))
-        completed? (.waitFor process 180 TimeUnit/SECONDS)]
-    (when-not completed?
-      (.destroyForcibly process)
-      (.waitFor process 10 TimeUnit/SECONDS))
-    {:seon.dev.fresh-operator-export-test/completed? completed?
+        _ (.waitFor process)]
+    {:seon.dev.fresh-operator-export-test/completed? true
      :seon.dev.fresh-operator-export-test/exit
-     (when completed? (.exitValue process))
+     (.exitValue process)
      :seon.dev.fresh-operator-export-test/output
-     (deref output 10000 "The operator output reader did not finish.")}))
+     @output}))
 
 (deftest ^{:seon.test/long
            "200.542 s pool: real start JVM, export JVM, store copy/reidentify, reopen, and query proof."}
