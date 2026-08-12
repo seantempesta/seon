@@ -306,7 +306,7 @@
   each entity's own attributes and direct ref identities; reverse/nested
   structure supplies membership and paths without making an ancestor appear
   changed when only a descendant changed."
-  {:malli/schema [:=> [:cat :seon.render.walk/request] :map]}
+  {:malli/schema [:=> [:cat :seon.render.walk/acquisition-request] :map]}
   [{database :seon.db/db
     lookup :seon.render.walk/lookup
     caps :seon.sci.admit/caps

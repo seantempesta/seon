@@ -6,6 +6,7 @@
             [seon.db :as db]
             [seon.render.walk :as walk]
             [seon.render.web :as web]
+            [seon.schema :as schema]
             [seon.sci.kernel :as sci.kernel]
             [seon.test-support :as support]))
 
@@ -39,7 +40,6 @@
   {:seon.db/db @connection
    :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
    :seon.render.walk/lookup [::root-id "root"]
-   :seon.render/output :seon.render/ai
    :seon.render/distance 1
    :seon.sci.admit/caps caps
    :seon.sci.eval/time-limit-ms 5000
@@ -56,6 +56,19 @@
 (defn- changed-lookups
   [diff kind]
   (into #{} (map :seon.render.walk/lookup) (get diff kind)))
+
+(deftest root-acquisition-contract-is-projection-neutral
+  (support/with-database
+   {:seon.test-support/extra-schema root-pull-schema}
+   (fn [connection]
+     (db/transact! connection [{::root-id "root" ::value "one"}])
+     (let [acquisition-request (request connection)
+           acquisition (walk/root-acquisition acquisition-request)]
+       (is (not (contains? acquisition-request :seon.render/output)))
+       (is (schema/valid-candidate-value?
+            :seon.render.walk/acquisition-request acquisition-request))
+       (is (= [::root-id "root"]
+              (first (:seon.render.walk/order acquisition))))))))
 
 (defn- reverse-attribute
   [attribute]
@@ -188,6 +201,7 @@
                      db/datoms (count-read db/datoms)]
          (walk/neighborhood
           (assoc render-request
+                 :seon.render/output :seon.render/ai
                  :seon.render.walk/root-acquisition acquisition))
          (is (zero? @reads)
              "neighborhood consumes the acquisition without discovery")
