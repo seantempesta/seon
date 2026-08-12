@@ -282,6 +282,66 @@
                :seon.problems/form-problem {:seon.problems/id :problem}
                :seon.cluster.agent/id "agent-1"}))))))
 
+(deftest one-trigger-cannot-open-a-second-run-after-the-first-closes
+  (test-support/with-database
+    (fn [connection]
+      (let [agent-id "one-answer"
+            trigger-id "one-question"
+            first-run "first-answer"
+            second-run "stale-second-answer"
+            open-trigger-call (private-loop-fn 'open-trigger-call)]
+        (db/transact!
+         connection
+         [{:seon.cluster.agent/id agent-id}
+          {:seon.cluster.message/id trigger-id
+           :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+           :seon.cluster.message/content "answer once"
+           :seon.cluster.message/at now}])
+        (db/transact!
+         connection
+         {:tx-data
+          (into
+           [[:db.fn/call
+             open-trigger-call
+             {:seon.cluster.run/id first-run
+              :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+              :seon.cluster.run/trigger
+              [:seon.cluster.message/id trigger-id]
+              :seon.cluster.run/opened-at now}]]
+           (run/claim-tx
+            {:seon.cluster.run/id first-run
+             :seon.cluster.run/process process
+             :seon.cluster.run/live-processes #{process}
+             :seon.cluster.run/now now}))})
+        (db/transact!
+         connection
+         (run/close-tx
+          {:seon.cluster.run/id first-run
+           :seon.cluster.run/process process
+           :seon.cluster.run/closed-at now}))
+        (let [refused
+              (db/transact!
+               connection
+               [[:db.fn/call
+                 open-trigger-call
+                 {:seon.cluster.run/id second-run
+                  :seon.cluster.run/agent
+                  [:seon.cluster.agent/id agent-id]
+                  :seon.cluster.run/trigger
+                  [:seon.cluster.message/id trigger-id]
+                  :seon.cluster.run/opened-at now}]])]
+          (is (= :seon.cluster.loop/trigger-already-answered
+                 (:seon.error/kind refused)))
+          (is (= [first-run]
+                 (db/q '[:find [?run-id ...]
+                         :in $ ?trigger-id
+                         :where
+                         [?trigger :seon.cluster.message/id ?trigger-id]
+                         [?run :seon.cluster.run/trigger ?trigger]
+                         [?run :seon.cluster.run/id ?run-id]]
+                       @connection trigger-id))
+              "the refused stale open leaves exactly one answering run"))))))
+
 (deftest delivery-rows-projects-rows-and-every-refusal-transaction
   (let [db {:immutable :database-value}
         asked [{:my.message/to "agent-2" :my.message/content "deliver"}

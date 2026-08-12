@@ -943,6 +943,27 @@
                                    :seon.cluster.run/closed-at now}))]
         (not (:seon.error/kind closed))))))
 
+(defn- open-trigger-call
+  "Open a run only while its trigger still has no answering run."
+  [database request]
+  (let [trigger (:seon.cluster.run/trigger request)
+        answering-run
+        (when trigger
+          (db/q '[:find ?run-id .
+                  :in $ ?trigger
+                  :where
+                  [?run :seon.cluster.run/trigger ?trigger]
+                  [?run :seon.cluster.run/id ?run-id]]
+                database trigger))]
+    (if answering-run
+      (throw
+       (ex-info
+        "run opening refused: the trigger already has an answering run"
+        {:seon.error/kind ::trigger-already-answered
+         :seon.cluster.run/trigger trigger
+         :seon.cluster.run/id answering-run}))
+      (run/open-call database request))))
+
 (defn- open-turn
   "Open and claim one run before any paid provider call."
   [{cluster ::cluster work ::work now ::now report ::report}]
@@ -953,28 +974,33 @@
     ;; before the expensive part, and the run records its trigger in
     ;; this same transaction so answeredness is an ordinary fact.
     (let [id (str (random-uuid))
+          open-request
+          (cond->
+           {:seon.cluster.run/id id
+            :seon.cluster.run/agent
+            [:seon.cluster.agent/id agent-id]
+            :seon.cluster.run/opening-commit-id
+            (db/commit-id @connection)
+            :seon.cluster.run/opened-at now}
+            (:seon.cluster.message/id work)
+            (assoc
+             :seon.cluster.run/trigger
+             [:seon.cluster.message/id
+              (:seon.cluster.message/id work)]))
           outcome (db/transact!
                    connection
                    {:tx-data
-                    (into (run/open-tx
-                           (cond->
-                            {:seon.cluster.run/id id
-                             :seon.cluster.run/agent
-                             [:seon.cluster.agent/id agent-id]
-                             :seon.cluster.run/opening-commit-id
-                             (db/commit-id @connection)
-                             :seon.cluster.run/opened-at now}
-                             (:seon.cluster.message/id work)
-                             (assoc
-                              :seon.cluster.run/trigger
-                              [:seon.cluster.message/id
-                               (:seon.cluster.message/id work)])))
+                    (into [[:db.fn/call #'open-trigger-call open-request]]
                           (run/claim-tx {:seon.cluster.run/id id
                                          :seon.cluster.run/process process
                                          :seon.cluster.run/live-processes
                                          #{process}
                                          :seon.cluster.run/now now}))})]
-      (if (:seon.error/kind outcome)
+      (cond
+        (= ::trigger-already-answered (:seon.error/kind outcome))
+        (report :released 0)
+
+        (:seon.error/kind outcome)
         (do
           ;; The open transaction formed no run, so settlement records the
           ;; error and escalation with no run attribution or close.
@@ -983,6 +1009,8 @@
                     :seon.cluster.agent/id agent-id
                     :seon.error/value outcome})
           (report :error 0))
+
+        :else
         (report :released 0)))))
 
 (defn- call-turn
