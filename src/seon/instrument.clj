@@ -88,6 +88,7 @@
             [seon.db :as db]
             [seon.effect :as effect]
             [seon.env :as env]
+            [seon.error :as error]
             [seon.print :as print]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]))
@@ -251,29 +252,48 @@
          stored :seon.fn/arglists}
         (program-graph-arglists function-symbol)]
     (case status
-      :found (try (edn/read-string stored) (catch Throwable _ nil))
+      :found (try
+               {:seon.instrument.lookup/status :found
+                ::arglists (edn/read-string stored)}
+               (catch Throwable failure
+                 {:seon.instrument.lookup/status :failed
+                  :seon.instrument.lookup/cause (ex-message failure)}))
       ;; With a graph, only an established miss reaches JVM metadata. Outside
       ;; an evaluation there is no program graph to consult; that is the
       ;; system-side, compiled-function case this fallback exists for.
-      :missing (jvm-arglists function-symbol)
-      :no-program-graph (jvm-arglists function-symbol)
-      nil)))
+      (:missing :no-program-graph)
+      (if-let [arglists (jvm-arglists function-symbol)]
+        {:seon.instrument.lookup/status :found
+         ::arglists arglists}
+        {:seon.instrument.lookup/status status})
+      {:seon.instrument.lookup/status :failed})))
 
 (defn- minimal-violation
   [kind data]
   (let [function-symbol (:fn-name data)
         arity? (= :malli.core/invalid-arity kind)]
-    {:seon.error/kind ::contract-violated
-     :seon.error/message
-     (if arity?
-       (str "Wrong number of args (" (:arity data) ") passed to: "
-            function-symbol)
-       (str function-symbol " violated its contract (" kind ")."))
-     :seon.error/data
-     (cond-> {::malli kind
-              ::arm (if (= :malli.core/invalid-output kind) :output :input)}
-       arity? (assoc ::arity (:arity data))
-       function-symbol (assoc ::fn (str function-symbol)))}))
+    (error/diagnostic
+     {:seon.error/kind ::contract-violated
+      :seon.error/message
+      (if arity?
+        (str "Wrong number of args (" (:arity data) ") passed to: "
+             function-symbol)
+        (str function-symbol " violated its contract (" kind ")."))
+      :seon.error/diagnostic-layer :instrumentation
+      :seon.error/diagnostic-operation function-symbol
+      :seon.error/diagnostic-member
+      (if (= :malli.core/invalid-output kind) :return :arguments)
+      :seon.error/diagnostic-expected
+      (if arity? ::declared-arglists (or (:output data) (:input data)))
+      :seon.error/diagnostic-offending
+      (if arity? (:arity data) (or (:value data) (:args data)))
+      :seon.error/diagnostic-cause kind
+      :seon.error/diagnostic-evidence nil
+      :seon.error/data
+      (cond-> {::malli kind
+               ::arm (if (= :malli.core/invalid-output kind) :output :input)}
+        arity? (assoc ::arity (:arity data))
+        function-symbol (assoc ::fn (str function-symbol)))})))
 
 (defn- violation
   "One malli report as a flat, bounded, agent-readable value.
@@ -295,8 +315,24 @@
         inner
         (if (= :malli.core/invalid-arity kind)
           (let [function-symbol (:fn-name data)
-                arglists (diagnostic-arglists function-symbol)]
-            (cond-> fallback
+                {status :seon.instrument.lookup/status
+                 arglists ::arglists
+                 cause :seon.instrument.lookup/cause}
+                (diagnostic-arglists function-symbol)]
+            (cond-> (error/diagnostic
+                     {:seon.error/kind ::contract-violated
+                      :seon.error/message (:seon.error/message fallback)
+                      :seon.error/diagnostic-layer :instrumentation
+                      :seon.error/diagnostic-operation function-symbol
+                      :seon.error/diagnostic-member :arity
+                      :seon.error/diagnostic-expected arglists
+                      :seon.error/diagnostic-offending (:arity data)
+                      :seon.error/diagnostic-cause (or cause kind)
+                      :seon.error/diagnostic-evidence
+                      (when arglists
+                        {:seon.instrument.lookup/status status
+                         ::arglists arglists})
+                      :seon.error/data (:seon.error/data fallback)})
               arglists
               (-> (update :seon.error/message
                           str "; declared arglists: " (pr-str arglists))
@@ -319,7 +355,8 @@
           all-problems
           (me/humanize
            (or visible-explanation explanation)
-           {:wrap #(select-keys % [:value :message])})
+           {:unknown false
+            :wrap #(select-keys % [:value :message])})
           problem-face (when bounded-caps
                          (admitted-face bounded-caps all-problems))
           first-problem (first problems)
@@ -336,32 +373,46 @@
                                          (offending-value bounded-caps
                                                           kind
                                                           first-problem)))]
-      (cond-> {:seon.error/kind ::contract-violated
-               ;; A representative problem context goes through the ONE
-               ;; general printer under the construction-time evidence caps.
-               ;; The complete count remains the broken-system signal for
-               ;; warning consumers without retaining every problem value.
-               :seon.error/message
-               (str (:fn-name data) " violated its contract ("
-                    (name kind) "): "
-                    (if caps
-                      (:seon.instrument/text problem-face)
-                      (pr-str all-problems)))
-               :seon.error/data
-               (cond-> {::malli kind
-                        ::arm (if (= :malli.core/invalid-output kind)
-                                :output
-                                :input)
-                        ::schema (if expected-face
-                                   (:seon.instrument/text expected-face)
-                                   (pr-str expected))
-                        ::problem-count problem-count}
-                 (:fn-name data) (assoc ::fn (str (:fn-name data)))
-                 problem-face
-                 (assoc ::problems (:seon.instrument/edn problem-face)))}
+      (cond->
+       (error/diagnostic
+        {:seon.error/kind ::contract-violated
+         ;; A representative problem context goes through the ONE general
+         ;; printer under the construction-time evidence caps. The complete
+         ;; count remains the broken-system signal without retaining every
+         ;; problem value.
+         :seon.error/message
+         (str (:fn-name data) " violated its contract ("
+              (name kind) "): "
+              (if caps
+                (:seon.instrument/text problem-face)
+                (pr-str all-problems)))
+         :seon.error/diagnostic-layer :instrumentation
+         :seon.error/diagnostic-operation (:fn-name data)
+         :seon.error/diagnostic-member
+         (if (= :malli.core/invalid-output kind) :return :arguments)
+         :seon.error/diagnostic-expected
+         (some-> expected-face :seon.instrument/value)
+         :seon.error/diagnostic-offending
+         (some-> argument-face :seon.instrument/value)
+         :seon.error/diagnostic-cause kind
+         :seon.error/diagnostic-evidence
+         (when problem-face
+           {:seon.instrument/problem-count problem-count
+            :seon.instrument/problems
+            (:seon.instrument/value problem-face)})
+         :seon.error/data
+         (cond-> {::malli kind
+                  ::arm (if (= :malli.core/invalid-output kind) :output :input)
+                  ::schema (if expected-face
+                             (:seon.instrument/text expected-face)
+                             (pr-str expected))
+                  ::problem-count problem-count}
+           (:fn-name data) (assoc ::fn (str (:fn-name data)))
+           problem-face
+           (assoc ::problems (:seon.instrument/edn problem-face)))})
         argument-face
-            (update :seon.error/data assoc
-                    ::args (:seon.instrument/value-edn argument-face))))))
+       (update :seon.error/data assoc
+               ::args (:seon.instrument/value-edn argument-face))))))
       (catch Throwable _
         fallback))))
 
@@ -447,6 +498,65 @@
 ;;; The one operation
 ;;; ---------------------------------------------------------------------------
 
+(defn- var-symbol
+  [candidate-var]
+  (let [{namespace-object :ns var-name :name} (meta candidate-var)]
+    (symbol (str (ns-name namespace-object)) (str var-name))))
+
+(defn- collect-contracts!
+  "Register the same public Vars Malli collects, one Var at a time.
+
+  Malli's bulk `clj-collect!` reduces over these Vars but loses the current Var
+  when compilation throws (`malli.instrument/-collect!`). Keeping that value
+  beside its own registration operation makes the authored contract and the
+  exact offending Var inseparable from the diagnostic."
+  [caps]
+  (let [bounded-caps (evidence-caps (or caps contract-evidence-caps))]
+    (into #{}
+          (keep
+           (fn [candidate-var]
+             (when-let [authored-schema (mi/-schema candidate-var)]
+               (try
+                 (mi/-collect! candidate-var)
+                 (catch Throwable failure
+                   (let [function-symbol (var-symbol candidate-var)
+                         failure-data (ex-data failure)
+                         root-data (or (error/refusal failure) failure-data)
+                         nested-schema
+                         (or (:schema root-data)
+                             (get-in root-data [:data :schema])
+                             (get-in root-data [:data :ref]))
+                         diagnostic
+                         (error/diagnostic
+                          {:seon.error/kind ::registration-failed
+                           :seon.error/message
+                           (str "Malli could not register the contract for "
+                                function-symbol ".")
+                           :seon.error/diagnostic-layer :instrumentation
+                           :seon.error/diagnostic-operation
+                           'malli.instrument/-collect!
+                           :seon.error/diagnostic-member function-symbol
+                           :seon.error/diagnostic-expected
+                           (admitted-value bounded-caps authored-schema)
+                           :seon.error/diagnostic-offending
+                           (when nested-schema
+                             (admitted-value bounded-caps nested-schema))
+                           :seon.error/diagnostic-cause
+                           (or (:type root-data)
+                               (some-> failure class .getName))
+                           :seon.error/diagnostic-evidence
+                           (when root-data
+                             (admitted-value bounded-caps root-data))
+                           :seon.error/data
+                           {::fn (str function-symbol)}})]
+                     (throw
+                      (ex-info (:seon.error/message diagnostic)
+                               diagnostic failure)))))))
+           (->> (all-ns)
+                (mapcat ns-publics)
+                (map val)
+                (sort-by (comp str var-symbol)))))))
+
 (defn apply!
   "Collect function schemas and instrument per the dial. IDEMPOTENT.
   `(mi/clj-collect! {:ns (all-ns)})` — the FUNCTION, not the macro,
@@ -472,7 +582,7 @@
   publishes, or replaces schema declarations."
   {:malli/schema [:=> [:cat :seon.instrument/request] :seon.instrument/applied]}
   [{mode :seon.config/on-core-error caps :seon.sci.admit/caps}]
-  (let [registered (count (mi/clj-collect! {:ns (all-ns)}))]
+  (let [registered (count (collect-contracts! caps))]
     (case mode
       :panic
       (do (mi/instrument! {:scope #{:input :output}

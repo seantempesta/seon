@@ -55,8 +55,8 @@
                                 [:= :seon.print/number]]
                                [:seon.print/value
                                 [:fn
-                                 #:gen{:gen
-                                       seon.print/number-generator}
+                                 {:error/message "must be a printable number",
+                                  :gen/gen seon.print/number-generator}
                                  seon.print/print-number?]]]]
                              [:seon.print/keyword
                               [:map
@@ -73,7 +73,8 @@
                                [:seon.print/face [:= :seon.print/char]]
                                [:seon.print/value
                                 [:fn
-                                 #:gen{:gen seon.print/char-generator}
+                                 {:error/message "must be a printable character",
+                                  :gen/gen seon.print/char-generator}
                                  seon.print/print-char?]]]]
                              [:seon.print/string
                               [:map

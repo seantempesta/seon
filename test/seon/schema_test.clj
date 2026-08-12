@@ -2,6 +2,7 @@
   "Regression proofs for the canonical schema registration boundary."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [clojure.walk :as walk]
             [malli.error :as me]
             [seon.db]
             [seon.schema :as schema]
@@ -20,6 +21,21 @@
   []
   (schema/begin-registration-delta
    (schema/build-projection (schema/registered-schemas))))
+
+(deftest every-predicate-schema-declares-what-it-accepts
+  (let [missing (volatile! [])]
+    (walk/postwalk
+     (fn [form]
+       (when (and (vector? form)
+                  (= :fn (first form))
+                  (not (and (map? (second form))
+                            (string? (:error/message (second form)))
+                            (not-empty (:error/message (second form))))))
+         (vswap! missing conj form))
+       form)
+     (schema/registered-schemas))
+    (is (empty? @missing)
+        (str "predicate schemas without :error/message: " (pr-str @missing)))))
 
 (deftest canonical-definition-keeps-admitted-predicate-symbols
   (let [definition

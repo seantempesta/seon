@@ -192,17 +192,31 @@
                              {:seon.env/environment environment}]
                      (try (wrapped)
                           (catch Exception thrown thrown)))]
-       (is (= {:seon.error/kind :seon.instrument/contract-violated
-               :seon.error/message
-               (str "Wrong number of args (0) passed to: " function-symbol
-                    "; declared arglists: ([rows])")
-               :seon.error/data
-               {:seon.instrument/malli :malli.core/invalid-arity
-                :seon.instrument/arm :input
-                :seon.instrument/arity 0
-                :seon.instrument/fn (str function-symbol)
-                :seon.instrument/arglists '([rows])}}
-              (ex-data failure)))))))
+       (let [diagnostic (ex-data failure)]
+         (is (= (str "Wrong number of args (0) passed to: " function-symbol
+                     "; declared arglists: ([rows])")
+                (:seon.error/message diagnostic)))
+         (is (= {:seon.error/diagnostic-layer :instrumentation
+                 :seon.error/diagnostic-operation function-symbol
+                 :seon.error/diagnostic-member :arity
+                 :seon.error/diagnostic-expected '([rows])
+                 :seon.error/diagnostic-offending 0
+                 :seon.error/diagnostic-cause :malli.core/invalid-arity
+                 :seon.error/diagnostic-evidence-availability
+                 :seon.error/known
+                 :seon.error/diagnostic-evidence
+                 {:seon.instrument.lookup/status :found
+                  :seon.instrument/arglists '([rows])}}
+                (select-keys
+                 (:seon.error/data diagnostic)
+                 [:seon.error/diagnostic-layer
+                  :seon.error/diagnostic-operation
+                  :seon.error/diagnostic-member
+                  :seon.error/diagnostic-expected
+                  :seon.error/diagnostic-offending
+                  :seon.error/diagnostic-cause
+                  :seon.error/diagnostic-evidence-availability
+                  :seon.error/diagnostic-evidence]))))))))
 
 (deftest a-violation-carries-bounded-arguments-only-when-it-can
   (let [caps {:seon.config.eval.result/max-depth 4
@@ -379,6 +393,37 @@
        (is (= (instrument/instrumented) (instrument/instrumented))
            "and the second pass wrapped no wrapper: malli unwraps to
             ::original before re-instrumenting")))))
+
+(deftest registration-failure-names-the-var-and-authored-contract
+  (let [namespace-name 'n5.registration.probe
+        namespace-object (create-ns namespace-name)
+        function-symbol 'n5.registration.probe/broken
+        authored-schema [:=> [:cat [:ref :n5/missing]] :int]]
+    (try
+      (intern namespace-object
+              (with-meta 'broken {:malli/schema authored-schema})
+              identity)
+      (let [failure
+            (try
+              (instrument/apply! {:seon.config/on-core-error :panic
+                                  :seon.sci.admit/caps nil})
+              (catch clojure.lang.ExceptionInfo thrown thrown))
+            diagnostic (ex-data failure)]
+        (is (= function-symbol
+               (:seon.error/diagnostic-member
+                (:seon.error/data diagnostic))))
+        (is (= authored-schema
+               (:seon.error/diagnostic-expected
+                (:seon.error/data diagnostic))))
+        (is (= :malli.core/invalid-ref
+               (:seon.error/diagnostic-cause
+                (:seon.error/data diagnostic))))
+        (is (= :n5/missing
+               (:seon.error/diagnostic-offending
+                (:seon.error/data diagnostic)))))
+      (finally
+        (instrument/remove!)
+        (remove-ns namespace-name)))))
 
 (deftest re-evaluating-a-defn-silently-strips-instrumentation
   ;; the measured fact this namespace's discipline exists for
