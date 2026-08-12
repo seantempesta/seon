@@ -2,9 +2,6 @@
   "Class regressions for self-generating, append-only REPL history."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [clojure.test.check :as tc]
-            [clojure.test.check.generators :as gen]
-            [clojure.test.check.properties :as prop]
             [seon.config :as config]
             [seon.db :as db]
             [seon.render :as render]
@@ -13,6 +10,7 @@
             [seon.render.walk :as walk]
             [seon.render.web :as web]
             [seon.schema :as schema]
+            [seon.sci.admit :as admit]
             [seon.test-support :as support]))
 
 (def ^:private caps (config/result-caps (config/defaults)))
@@ -85,11 +83,10 @@
          (let [agent-entity (db/pull database '[*]
                                      [:seon.cluster.agent/id "history-agent"])
                producer (selected agent-entity)
-               form (render/render-form
+               form (render/render-form-value
                      (render-request database ctx agent-entity))]
-           (is (= 'seon.render/render-form producer))
-           (is (= 'db/pull (first form)))
-           (is (= [:seon.cluster.agent/id "history-agent"] (last form)))))
+           (is (= 'seon.cluster.agent/situation-form producer))
+           (is (= '(help) form))))
        (testing "the attribute floor is a listing query"
          (let [request (assoc (render-request database ctx namespace-entity)
                               :seon.render.walk/attribute :seon.ns/requires)
@@ -99,45 +96,80 @@
            (is (= 'db/q (first form)))
            (is (str/includes? (pr-str form) ":seon.ns/requires"))))))))
 
-(defn- scenario-entries
-  [names]
-  (mapcat
-   (fn [suffix]
-     (let [namespace-name (symbol (str "fixture." suffix))
-           function-name (symbol (str namespace-name) "run")]
-       [{:seon.render.history/form (list 'dir (list 'quote namespace-name))}
-        {:seon.render.history/form (list 'doc (list 'quote function-name))}
-        {:seon.render.history/form (list function-name)}]))
-   names))
+(defn- settled-node
+  [value]
+  (:seon.sci.admit/print-node
+   (admit/admit-value
+    {:seon.sci.admit/value value
+     :seon.sci.admit/interrupt-fn (fn [])
+     :seon.sci.admit/caps caps
+     :seon.config/on-core-error :record})))
 
-(defn- define-before-use?
-  [entries]
-  (loop [introduced #{'db/pull 'db/q 'my.message/read 'my.message/inbox}
-         remaining entries]
-    (if-let [entry (first remaining)]
-      (let [references (:seon.render.history/references entry)
-            introductions (:seon.render.history/introduces entry)]
-        (and (every? introduced references)
-             (recur (into introduced introductions) (next remaining))))
-      true)))
+(def ^:private episode-candidates
+  [{:seon.repl/key :root
+    :seon.repl/subject [:seon.cluster.agent/id "worker"]
+    :seon.repl/entry {:seon.repl/form '(help)}}
+   {:seon.repl/key :run-namespace
+    :seon.repl/subject 'my.run
+    :seon.repl/entry {:seon.repl/form '(dir (quote my.run))}}
+   {:seon.repl/key :complete-doc
+    :seon.repl/subject 'my.run/complete
+    :seon.repl/entry {:seon.repl/form '(doc (quote my.run/complete))}}
+   {:seon.repl/key :inbox
+    :seon.repl/subject 'my.message
+    :seon.repl/entry {:seon.repl/form '(my.message/inbox)}}
+   {:seon.repl/key :message
+    :seon.repl/subject [:seon.cluster.message/id "task-1"]
+    :seon.repl/entry {:seon.repl/form '(my.message/read "task-1")}}])
 
-(deftest every-generated-history-defines-before-use
-  (let [result
-        (tc/quick-check
-         100
-         (prop/for-all
-          [names (gen/vector-distinct
-                  (gen/elements ["alpha" "bravo" "charlie" "delta"])
-                  {:min-elements 1 :max-elements 4})
-           rotation gen/nat]
-          (let [entries (vec (scenario-entries names))
-                offset (mod rotation (count entries))
-                shuffled (vec (concat (subvec entries offset)
-                                      (subvec entries 0 offset)))
-                ordered (walk/order-history shuffled)]
-            (define-before-use? ordered)))
-         :seed 2026081101)]
-    (is (true? (:result result)) (pr-str result))))
+(defn- episode-request
+  [candidates settled]
+  {:seon.repl/root-key :root
+   :seon.repl/candidates candidates
+   :seon.repl/settled settled
+   :seon.print/identity-attributes
+   #{:seon.cluster.agent/id :seon.cluster.message/id :seon.ns/name}})
+
+(deftest generated-episodes-have-two-independent-gates
+  (let [settled
+        [{:seon.repl/key :root
+          :seon.sci.admit/print-node
+          (settled-node {:seon.cluster.agent/id "worker"
+                         :seon.cluster.agent/protocol-namespaces
+                         ['my.message 'my.run]
+                         :outside/reference 'outside.ns})}
+         {:seon.repl/key :run-namespace
+          :seon.sci.admit/print-node
+          (settled-node ['my.run/complete 'my.run/wait])}
+         {:seon.repl/key :complete-doc
+          :seon.sci.admit/print-node (settled-node nil)}
+         {:seon.repl/key :inbox
+          :seon.sci.admit/print-node
+          (settled-node [{:seon.cluster.message/id "task-1"}])}]
+        candidates episode-candidates
+        result (walk/ordered-episode (episode-request candidates settled))
+        episode-keys (mapv :seon.repl/key result)]
+    (is (= [:root :run-namespace :complete-doc :inbox :message] episode-keys)
+        "a listing value introduces each later lookup, with stable ties")
+    (is (< (.indexOf episode-keys :inbox) (.indexOf episode-keys :message))
+        "an entity id must appear in the inbox value before its read")
+    (is (not (some #(= '(dir (quote outside.ns))
+                       (:seon.repl/form %))
+                   result))
+        "an introduced symbol with no pulled candidate grows nothing")
+    (is (= result
+           (walk/ordered-episode (episode-request candidates settled)))
+        "the same pull and settled values derive byte-identical data")))
+
+(deftest the-generated-prefix-stops-at-the-first-unsettled-entry
+  (let [root-settled
+        [{:seon.repl/key :root
+          :seon.sci.admit/print-node
+          (settled-node {:seon.cluster.agent/protocol-namespaces ['my.run]})}]
+        result (walk/ordered-episode
+                (episode-request episode-candidates root-settled))]
+    (is (= [:root :run-namespace] (mapv :seon.repl/key result)))
+    (is (= '(dir (quote my.run)) (:seon.repl/form (peek result))))))
 
 (deftest advancing-bases-only-append-to-the-prompt-prefix
   (let [first-entry

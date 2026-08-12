@@ -10,4 +10,30 @@
             :entry
             [:map
              [:seon.repl/comment {:optional true} :seon.repl/comment]
-             [:seon.repl/form :seon.repl/form]]}
+             [:seon.repl/form :seon.repl/form]
+             [:seon.repl/key {:optional true} :seon.schema/value]
+             [:seon.repl/subject
+              {:optional true}
+              :seon.render.walk/lookup]],
+            :key :seon.schema/value,
+            :subject :seon.render.walk/lookup,
+            :candidate
+            [:map
+             [:seon.repl/key :seon.repl/key]
+             [:seon.repl/subject :seon.repl/subject]
+             [:seon.repl/entry :seon.repl/entry]],
+            :settled
+            [:map
+             [:seon.repl/key :seon.repl/key]
+             [:seon.sci.admit/print-node :seon.print/node]],
+            :pull-result
+            [:map
+             [:seon.repl/root-key :seon.repl/key]
+             [:seon.repl/candidates [:vector :seon.repl/candidate]]
+             [:seon.repl/settled [:vector :seon.repl/settled]]
+             [:seon.print/identity-attributes
+              :seon.print/identity-attributes]],
+            :episode [:vector :seon.repl/entry],
+            :root-key :seon.repl/key,
+            :candidates [:vector :seon.repl/candidate],
+            :settled-entries [:vector :seon.repl/settled]}

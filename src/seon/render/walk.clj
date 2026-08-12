@@ -40,6 +40,7 @@
             [seon.db :as db]
             [seon.ai.tokens :as tokens]
             [seon.effect :as effect]
+            [seon.print :as print]
             [seon.render :as render]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -649,96 +650,85 @@
        (when-not (str/blank? text) text)))))
 
 ;;; ---------------------------------------------------------------------------
-;;; The agent's history
+;;; The generated opening episode
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private initially-introduced-symbols
-  #{'db/pull 'db/q 'my.message/read 'my.message/inbox})
+(defn- reference-keys
+  "Comparable spellings of one structural reference.
 
-(defn- unquoted
-  [form]
-  (if (and (seq? form) (= 'quote (first form)))
-    (second form)
-    form))
+  Program identities retain their declared database representation (for
+  example a function identity is stored as a string), while values introduce
+  real Clojure symbols. This generic normalization relates those two spellings
+  without knowing which domain shape supplied either one."
+  [reference]
+  (cond
+    (and (vector? reference) (= 2 (count reference)))
+    (into #{reference} (reference-keys (second reference)))
 
-(defn form-introductions
-  "Symbols introduced by one parsed history form."
-  {:malli/schema [:=> [:cat [:or :seon.render/form :nil]] [:set :symbol]]}
-  [form]
-  (let [operation (when (seq? form) (first form))
-        target (some-> (second form) unquoted)]
-    (case operation
-      require
-      (into #{}
-            (mapcat (fn [spec]
-                      (let [spec (unquoted spec)
-                            namespace-name (if (vector? spec) (first spec) spec)
-                            alias-name (when (vector? spec)
-                                    (some (fn [[option-key value]]
-                                            (when (= :as option-key) value))
-                                          (partition 2 (rest spec))))]
-                        (cond-> [namespace-name]
-                          alias-name (conj alias-name)))))
-            (rest form))
+    (symbol? reference)
+    #{reference (str reference)}
 
-      dir (if (symbol? target) #{target} #{})
-      doc (if (symbol? target) #{target} #{})
-      def (if (symbol? target) #{target} #{})
-      defn (if (symbol? target) #{target} #{})
-      #{})))
+    :else
+    #{reference}))
 
-(defn form-references
-  "Qualified symbols one parsed history form requires beforehand."
-  {:malli/schema [:=> [:cat [:or :seon.render/form :nil]] [:set :symbol]]}
-  [form]
-  (let [operation (when (seq? form) (first form))
-        target (some-> (second form) unquoted)]
-    (cond
-      (contains? #{'require 'dir 'def 'defn} operation) #{}
-      (= 'doc operation)
-      (if (and (symbol? target) (namespace target))
-        #{(symbol (namespace target))}
-        #{})
-      (and (symbol? operation) (namespace operation)) #{operation}
-      :else #{})))
+(defn- introduced-subject?
+  [frontier subject]
+  (boolean (some frontier (reference-keys subject))))
 
-(defn- entry-form
-  [entry]
-  (let [form (:seon.render.history/form entry)]
-    (if (string? form)
-      (try (read-string form) (catch Throwable _ nil))
-      form)))
+(defn ordered-episode
+  "Derive the deterministic executable prefix from one bounded pull result.
 
-(defn order-history
-  "Topologically order parsed forms with alphabetical ties.
+  The root candidate is first. Thereafter a candidate is dependency-ready
+  only when its subject appeared structurally in an earlier settled value's
+  print node. Only candidates present in this pull result can be selected, so
+  a reference outside the pulled neighborhood grows no context. Alphabetical
+  form spelling breaks every ready tie.
 
-   Each selected entry extends the introduced-symbol set before the next
-   selection. Entries whose references cannot be introduced remain in stable
-   alphabetical order at the tail, where the class regression exposes them."
-  {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
-  [entries]
-  (loop [remaining (mapv (fn [entry]
-                           (let [form (entry-form entry)]
-                             (assoc entry
-                                    :seon.render.history/introduces
-                                    (form-introductions form)
-                                    :seon.render.history/references
-                                    (form-references form))))
-                         entries)
-         introduced initially-introduced-symbols
-         ordered []]
-    (if (empty? remaining)
-      ordered
-      (let [eligible (->> remaining
-                          (filter #(every? introduced
-                                           (:seon.render.history/references %)))
-                          (sort-by #(pr-str (:seon.render.history/form %))))
-            selected (or (first eligible)
-                         (first (sort-by #(pr-str (:seon.render.history/form %))
-                                         remaining)))]
-        (recur (into [] (remove #(identical? selected %) remaining))
-               (into introduced (:seon.render.history/introduces selected))
-               (conj ordered selected))))))
+  The returned vector contains the settled prefix plus at most one next entry
+  awaiting execution. Calling this pure function again with that entry's
+  settled print node extends the same byte-stable prefix."
+  {:malli/schema [:=> [:cat :seon.repl/pull-result] :seon.repl/episode]}
+  [{root-key :seon.repl/root-key
+    candidates :seon.repl/candidates
+    settled :seon.repl/settled
+    identity-attributes :seon.print/identity-attributes}]
+  (let [settled-by-key
+        (into {} (map (juxt :seon.repl/key
+                            :seon.sci.admit/print-node)) settled)
+        ordered-candidates
+        (sort-by (juxt #(pr-str (get-in % [:seon.repl/entry
+                                           :seon.repl/form]))
+                       #(pr-str (:seon.repl/key %)))
+                 candidates)]
+    (loop [remaining ordered-candidates
+           frontier #{}
+           episode []]
+      (let [selected
+            (if (empty? episode)
+              (some #(when (= root-key (:seon.repl/key %)) %) remaining)
+              (first (filter #(introduced-subject?
+                               frontier (:seon.repl/subject %))
+                             remaining)))]
+        (if-not selected
+          episode
+          (let [entry (assoc (:seon.repl/entry selected)
+                             :seon.repl/key (:seon.repl/key selected)
+                             :seon.repl/subject (:seon.repl/subject selected))
+                episode (conj episode entry)
+                settled-node (get settled-by-key (:seon.repl/key selected))]
+            (if-not settled-node
+              episode
+              (recur (into [] (remove #(= (:seon.repl/key selected)
+                                           (:seon.repl/key %))
+                                      remaining))
+                     (into frontier
+                           (mapcat reference-keys)
+                           (print/references identity-attributes settled-node))
+                     episode))))))))
+
+;;; ---------------------------------------------------------------------------
+;;; The agent's history
+;;; ---------------------------------------------------------------------------
 
 (defn- observation-basis
   [captured call-id fallback]
@@ -813,4 +803,4 @@
                      (remove #(= root-lookup
                                  (first (:seon.render.history/call-id %))))
                      vec)]
-    (order-history generic)))
+    generic))
