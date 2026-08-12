@@ -114,6 +114,17 @@ from the shipped config instead of imposing a fixture-only 2,000ms limit. The
 held-provider regression proves pending work remains pending until terminal
 database evidence instead of becoming a false property verdict.
 
+The W1 integration gate exposed two more assertions in this same test-local
+clock class. `restamp-recovery-test` observed a pending recovery after its
+approximately five-second polling wall even though the retained run completed
+after 26.288 seconds; `wait-closes-in-terminal-tx-test` likewise read the
+database before its terminal transaction. Commit `5438b8b27` registers a
+database listener before either action and derives the terminal database value
+from the published event. Its focused proof ran 17 tests / 172 assertions with
+no failures or errors. The two stale mutable-history assertions in the former
+test were separately replaced with the exact interruption value and the
+surviving run render; they are not attributed to parallel resource ownership.
+
 This classification leaves the incremental invalidation listener design
 unchanged: its one-listener, nonparking, payload-free wake law was not the
 defect. Its future generative proof must likewise register interest before
