@@ -91,33 +91,33 @@
 
 (schema.edn/load! {})
 
-(defn- attempt-without-reasoning
+(defn- attempt-without-private-provider-data
   [unit]
   (let [attempt (into (sorted-map-by #(compare (str %1) (str %2)))
                       (dissoc (:seon.render/value unit unit)
+                              :seon.ai.attempt/sent-body
                               :seon.ai.attempt/reasoning
                               :seon.ai.attempt/reasoning-blob
                               :seon.ai.attempt/reasoning-size))]
-    ;; The caller counted the value it handed in. Withholding reasoning
-    ;; changes what this producer renders, so it restates the total too —
-    ;; otherwise the elision machinery reports omitted children that the
-    ;; agent projection is never meant to show, and the AI bytes change the
-    ;; moment a provider returns reasoning.
+    ;; The caller counted the value it handed in. Withholding the full provider
+    ;; body and reasoning changes what this producer renders, so it restates
+    ;; the total too — otherwise the elision machinery reports omitted children
+    ;; that the ordinary projection is never meant to show.
     (assoc unit
            :seon.render/value attempt
            :seon.render.data/total (count attempt))))
 
 (defn attempt-ai
-  "Render an attempt without exposing provider reasoning to agent context."
+  "Render an attempt without its prompt-bearing body or provider reasoning."
   {:malli/schema [:=> [:cat :seon.render/unit] :string]}
   [unit]
-  (render.value/render-ai (attempt-without-reasoning unit)))
+  (render.value/render-ai (attempt-without-private-provider-data unit)))
 
 (defn attempt-html
-  "Render an attempt's ordinary facts; reasoning has its own disclosure."
+  "Render ordinary attempt facts; body and reasoning stay queryable only."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
-  (render.value/render-html (attempt-without-reasoning unit)))
+  (render.value/render-html (attempt-without-private-provider-data unit)))
 
 (def ^:private model-pull
   '[*])
@@ -1214,7 +1214,10 @@
            :seon.ai/timeout-ms (:seon.ai/timeout-ms request)
            :seon.ai/stream? (boolean (:seon.ai/stream? request))
            :seon.ai.http/headers (request-headers key)
-           :seon.ai.http/body (json/write-str body)}
+           ;; Serialize once. This exact string is both what the JDK posts and
+           ;; what the attempt records, so observability cannot rebuild a body
+           ;; that differs from the transmitted bytes.
+           :seon.ai.attempt/sent-body (json/write-str body)}
     (:seon.ai/sink request)
     (assoc :seon.ai/sink (:seon.ai/sink request))))
 
@@ -1239,7 +1242,7 @@
   {:seon.fn/external-sink :ai-visible-text
    :seon.fn/projection-boundary :none}
   [{:keys [:seon.ai/endpoint :seon.ai/timeout-ms
-           :seon.ai.http/headers :seon.ai.http/body]
+           :seon.ai.http/headers :seon.ai.attempt/sent-body]
     stream? :seon.ai/stream?
     sink :seon.ai/sink}]
   (let [;; THE one deadline, and it is the HTTP client's own: a request
@@ -1251,7 +1254,7 @@
                          (.header request-builder name value))
                        builder
                        headers)
-            (.POST (HttpRequest$BodyPublishers/ofString body))
+            (.POST (HttpRequest$BodyPublishers/ofString sent-body))
             (.build))]
     (try
       ;; ONE attempt. Synchronous send on the calling thread — the
@@ -1389,8 +1392,12 @@
 
       (or no-auth key)
       (let [started (System/nanoTime)
-            result (send-request (http-request-data request key body))]
-        (assoc result :seon.ai.model/last-latency-ms
+            request-data (http-request-data request key body)
+            result (send-request request-data)]
+        (assoc result
+               :seon.ai.attempt/sent-body
+               (:seon.ai.attempt/sent-body request-data)
+               :seon.ai.model/last-latency-ms
                (long (/ (- (System/nanoTime) started) 1000000))))
 
       :else

@@ -615,6 +615,9 @@
                                 (:seon.error/kind completion))
                          completion))]
     (cond-> {}
+      (:seon.ai.attempt/sent-body completion)
+      (assoc :seon.ai.attempt/sent-body
+             (:seon.ai.attempt/sent-body completion))
       (:seon.ai.model/last-latency-ms completion)
       (assoc :seon.ai.model/last-latency-ms
              (:seon.ai.model/last-latency-ms completion))
@@ -694,6 +697,7 @@
          usage :seon.ai/usage
          latency-ms :seon.ai.model/last-latency-ms
          settings :seon.ai/settings
+         sent-body :seon.ai.attempt/sent-body
          reasoning-content :seon.ai/reasoning-content
          finish-reason :seon.ai/finish-reason
          truncation :seon.ai/truncation
@@ -746,6 +750,8 @@
                      (:db/id (first truncation-recording)))
               settings
               (assoc :seon.ai.attempt/settings-edn (pr-str settings))
+              sent-body
+              (assoc :seon.ai.attempt/sent-body sent-body)
               usage (assoc :seon.ai.attempt/usage-edn (pr-str usage))
               (and reasoning-size (nil? reasoning-blob))
               (assoc :seon.ai.attempt/reasoning reasoning-content)

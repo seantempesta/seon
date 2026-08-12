@@ -12,6 +12,9 @@
            [:seon.ai.attempt/at :seon.ai.attempt/at]
            [:seon.ai/endpoint :seon.ai/endpoint]
            [:seon.ai/model :seon.ai/model]
+           [:seon.ai.attempt/sent-body
+            {:optional true}
+            :seon.ai.attempt/sent-body]
            [:seon.ai.attempt/settings-edn
             :seon.ai.attempt/settings-edn]
            [:seon.ai.attempt/usage-edn

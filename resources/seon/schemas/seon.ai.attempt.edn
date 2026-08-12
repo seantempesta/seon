@@ -9,6 +9,7 @@
                   :reasoning-blob :seon.blob/digest,
                   :reasoning-size [:int {:min 1}],
                   :run [:and #:seon.db{:index true} :seon.db/ref],
+                  :sent-body [:string {:min 1, :seon.db/no-history? true}],
                   :settings-edn [:string #:seon.db{:no-history? true}],
                   :truncation :seon.db/ref,
                   :usage-edn [:string #:seon.db{:no-history? true}]}

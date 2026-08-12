@@ -59,12 +59,15 @@
 (deftest attempt-evidence-prefers-completion-and-falls-back-to-error-data
   (let [project (private-loop-fn 'attempt-evidence)]
     (is (= {:seon.ai.model/last-latency-ms 42
+            :seon.ai.attempt/sent-body "{\"thinking\":{\"type\":\"disabled\"}}"
             :seon.ai/usage {:source :completion}
             :seon.ai/reasoning-content "fallback reasoning"
             :seon.ai/finish-reason "stop"}
            (project
             {:seon.ai/completion
              {:seon.ai/usage {:source :completion}
+              :seon.ai.attempt/sent-body
+              "{\"thinking\":{\"type\":\"disabled\"}}"
               :seon.ai.model/last-latency-ms 42
               :seon.ai/finish-reason "stop"
               :seon.error/data

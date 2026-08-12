@@ -2470,6 +2470,50 @@
           (is (= :seon.ai/token-starvation (:seon.error/kind error-fact))
               "the receipt points at the named starvation error fact"))))))
 
+(deftest reasoning-only-time-limit-persists-its-flat-diagnostic
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.db/connection cluster)
+            requests (atom [])
+            sent-body
+            "{\"thinking\":{\"type\":\"disabled\"},\"stream\":true}"
+            failure
+            {:seon.error/kind :seon.ai/stream-truncated
+             :seon.error/message
+             (str "The provider streamed 8 characters of reasoning but no "
+                  "assistant text before the configured time limit fired.")
+             :seon.error/data
+             {:seon.ai/reasoning-received 8
+              :seon.ai/text-received 0
+              :seon.ai/cause-chain
+              ["java.io.IOException: closed"
+               "java.net.http.HttpTimeoutException: request timed out"]
+              :seon.ai/error-class :response
+              :seon.ai/http-status 200
+              :seon.ai/request-transmitted? true
+              :seon.ai/response-started? true
+              :seon.ai/output-observed? true}
+             :seon.ai.attempt/sent-body sent-body}]
+        (with-redefs [ai/complete (recording-completer requests [failure])]
+          (drive! cluster 10))
+        (let [[row :as rows] (attempt-rows @connection)
+              error-fact (db/pull @connection '[*]
+                                  (:db/id (:seon.ai.attempt/error row)))
+              recorded (semantic-result (:seon.error/data-edn error-fact))]
+          (is (= 1 (count @requests)))
+          (is (= 1 (count rows)))
+          (is (= sent-body (:seon.ai.attempt/sent-body row)))
+          (is (true? (:seon.ai/output-observed? row)))
+          (is (= :seon.ai/stream-truncated (:seon.error/kind error-fact)))
+          (is (= 8 (get-in recorded
+                           [:seon.error/data :seon.ai/reasoning-received])))
+          (is (zero? (get-in recorded
+                             [:seon.error/data :seon.ai/text-received])))
+          (is (str/includes? (:seon.error/message recorded)
+                             "no assistant text"))
+          (is (str/includes? (:seon.error/message recorded)
+                             "configured time limit fired")))))))
+
 (deftest an-unpaid-failure-with-a-backup-makes-exactly-two-calls
   (with-cluster
     (fn [cluster]

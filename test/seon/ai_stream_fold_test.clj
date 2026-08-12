@@ -213,9 +213,12 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- with-provider
-  [{:keys [status body]} run]
+  [{:keys [status body]
+    received-body :seon.ai.test/received-body} run]
   (let [server (http/run-server
-                (fn [_request]
+                (fn [request]
+                  (when received-body
+                    (deliver received-body (slurp (:body request))))
                   {:status (or status 200)
                    :headers {"content-type" "text/event-stream"}
                    :body (or body (str/join "\n" lines))})
@@ -318,12 +321,22 @@
                            "slow down"))))))
 
 (deftest a-real-jdk-provider-status-commits-with-its-attempt
-  (with-provider {:status 502 :body "upstream unavailable"}
+  (let [received-body (promise)]
+    (with-provider {:status 502
+                    :body "upstream unavailable"
+                    :seon.ai.test/received-body received-body}
     (fn [endpoint]
-      (let [target (dissoc (request endpoint {}) :seon.ai/prompt)
+      (let [target (-> (request endpoint {})
+                       (dissoc :seon.ai/prompt)
+                       (assoc :seon.ai/thinking :disabled))
             failure (ai/complete (assoc target :seon.ai/prompt "hello"))
+            sent-body (:seon.ai.attempt/sent-body failure)
             status (:seon.ai/http-status (:seon.error/data failure))]
         (is (= :seon.ai/provider-error (:seon.error/kind failure)))
+        (is (= @received-body sent-body)
+            "the exact string posted by the JDK rides the completion")
+        (is (= "disabled"
+               (get-in (json/read-str sent-body) ["thinking" "type"])))
         (is (instance? Integer status)
             "the JDK value remains an Integer until the transaction boundary")
         (support/with-database
@@ -346,8 +359,10 @@
                   (db/pull @connection '[*]
                           [:seon.ai.attempt/id "status-run-attempt-0"])]
               (is (= 502 (:seon.ai/http-status attempt)))
+              (is (= @received-body (:seon.ai.attempt/sent-body attempt))
+                  "the attempt fact is the exact posted string")
               (is (some? (:seon.ai.attempt/error attempt))
-                  "the provider error and attempt committed together"))))))))
+                  "the provider error and attempt committed together")))))))))
 
 (deftest settled-reasoning-reuses-the-eval-result-inline-blob-split
   (support/with-database
