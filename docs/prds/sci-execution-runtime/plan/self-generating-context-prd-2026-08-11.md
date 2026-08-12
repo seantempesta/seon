@@ -253,6 +253,20 @@ HALF's shape as the V1 minimum; the ablation table lives in
 
 ## Morning rulings 2026-08-12 (owner, second round)
 
+22. **The opening history is one complete episode** (gap-1 closure): help ->
+    a real stored task message -> require/explore -> build -> verify ->
+    `(run/complete ...)` — so an agent wakes MID-LIFE, its own last words the
+    disposition of a finished episode, the fresh addressed message its
+    purpose. The episode shape is the agent's remembered behavior, never
+    described prose. All existing mechanisms (bootstrap is an ordinary run;
+    the demo message is a real fact).
+23. **Core-tooling presentation rides two rungs**: protocol-carrying ns/fn
+    docstrings first (zero mechanism — `:seon.ns/doc` already renders
+    through every dir), then a declared namespace render function owned by
+    the namespace itself (ruling 15) where richer presentation earns it —
+    e.g. my.run presented as a lifecycle in protocol order. No walk changes,
+    no priority lists.
+
 18. **HALF is the V1 minimum opening context**: instructions, own namespace
     in detail, required namespaces as one dir listing each, the worked
     contracted-defn demonstration, and the task message (drive evidence: two
