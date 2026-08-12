@@ -56,6 +56,251 @@
 
 (declare eid-of)
 
+(defn- installed-attributes
+  "Concrete installed attributes and their Datahike properties, ordered."
+  [database]
+  (into (sorted-map-by #(compare (str %1) (str %2)))
+        (filter (comp keyword? key))
+        (:schema database)))
+
+(defn- reverse-attribute
+  [attribute]
+  (keyword (namespace attribute) (str "_" (name attribute))))
+
+(defn- selector-key
+  [attribute width]
+  [attribute :limit (inc (long width))])
+
+(defn root-selector
+  "A concrete bidirectional pull selector for an agent-root distance.
+
+  Every installed scalar attribute is enumerated. Every installed ref is an
+  explicit forward and reverse subpattern, so Datahike records the canonical
+  stored ref in the dependency plan and never widens component expansion to
+  `:all`. The pull asks for one value beyond the collection cap so the walk can
+  emit an exact elision observation without a second read."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.render/distance
+         :seon.sci.admit/caps]
+    :seon.db/pull-selector]}
+  [database distance caps]
+  (let [installed (installed-attributes database)
+        ref-attributes (into []
+                             (keep (fn [[attribute properties]]
+                                     (when (= :db.type/ref
+                                              (:db/valueType properties))
+                                       attribute)))
+                             installed)
+        identity-attributes (into []
+                                  (keep (fn [[attribute properties]]
+                                          (when (= :db.unique/identity
+                                                   (:db/unique properties))
+                                            attribute)))
+                                  installed)
+        scalar-attributes (into []
+                                (keep (fn [[attribute properties]]
+                                        (when (and (not= :db/id attribute)
+                                                   (not= :db.type/ref
+                                                         (:db/valueType
+                                                          properties)))
+                                          attribute)))
+                                installed)
+        width (:seon.config.eval.result/max-collection caps)
+        leaf (into [:db/id] identity-attributes)]
+    (letfn [(selector-at [remaining]
+              (let [nested (if (pos? remaining)
+                             (selector-at (dec remaining))
+                             leaf)]
+                (into (into [:db/id] scalar-attributes)
+                      (concat
+                       (map (fn [attribute]
+                              {(selector-key attribute width) nested})
+                            ref-attributes)
+                       (map (fn [attribute]
+                              {(selector-key (reverse-attribute attribute)
+                                             width)
+                               nested})
+                            ref-attributes)))))]
+      (selector-at (long distance)))))
+
+(defn- installed-identity-attributes
+  [database]
+  (into []
+        (keep (fn [[attribute properties]]
+                (when (= :db.unique/identity (:db/unique properties))
+                  attribute)))
+        (installed-attributes database)))
+
+(defn- stable-lookup
+  [id-attributes entity]
+  (or (some (fn [attribute]
+              (when (contains? entity attribute)
+                [attribute (get entity attribute)]))
+            id-attributes)
+      (:db/id entity)))
+
+(defn- pulled-values
+  [value]
+  (cond
+    (map? value) [value]
+    (sequential? value) value
+    :else []))
+
+(defn- ref-identity
+  [id-attributes entity]
+  (select-keys entity (into [:db/id] id-attributes)))
+
+(defn- shallow-entity
+  [entity ref-attributes id-attributes]
+  (reduce
+   (fn [result attribute]
+     (if-let [value (get result attribute)]
+       (assoc result attribute
+              (cond
+                (map? value) (ref-identity id-attributes value)
+                (sequential? value)
+                (mapv #(ref-identity id-attributes %) value)
+                :else value))
+       result))
+   (apply dissoc entity (map reverse-attribute ref-attributes))
+   ref-attributes))
+
+(defn- acquisition-members
+  [database root distance caps]
+  (let [installed (installed-attributes database)
+        refs (into []
+                   (keep (fn [[attribute properties]]
+                           (when (= :db.type/ref (:db/valueType properties))
+                             attribute)))
+                   installed)
+        identities (installed-identity-attributes database)
+        width (long (:seon.config.eval.result/max-collection caps))]
+    (letfn [(connection-values [entity attribute reverse?]
+              (let [display (if reverse?
+                              (reverse-attribute attribute)
+                              attribute)]
+                (pulled-values (get entity display))))
+            (visit [state entity remaining path reached-by]
+              (if-not (:db/id entity)
+                state
+                (let [lookup (stable-lookup identities entity)]
+                  (if (contains? (:seon.render.walk/members state) lookup)
+                    state
+                    (let [state
+                          (-> state
+                              (assoc-in [:seon.render.walk/members lookup]
+                                        (cond->
+                                         {:seon.render.walk/lookup lookup
+                                          :seon.render.walk/eid (:db/id entity)
+                                          :seon.render.walk/path path
+                                          :seon.render.walk/found-depth
+                                          (- (long distance) remaining)
+                                          :seon.render/value
+                                          (shallow-entity entity refs identities)}
+                                          reached-by
+                                          (assoc :seon.render.walk/attribute
+                                                 reached-by)))
+                              (update :seon.render.walk/order conj lookup))
+                          connections
+                          (into []
+                                (mapcat
+                                 (fn [[attribute reverse?]]
+                                   (let [values (connection-values
+                                                 entity attribute reverse?)
+                                         kept (take width values)
+                                         elided (- (count values)
+                                                   (count kept))]
+                                     (cond->
+                                      (mapv (fn [child]
+                                              {:seon.render.walk/attribute
+                                               attribute
+                                               :seon.render.walk/lookup
+                                               (stable-lookup identities child)
+                                               :seon.render.walk/pulled child})
+                                            kept)
+                                       (pos? elided)
+                                       (conj
+                                        {:seon.render.walk/attribute attribute
+                                         :seon.error/value
+                                         {:seon.error/kind ::elided
+                                          :seon.error/message
+                                          (str "elided " elided " "
+                                               (when reverse? "reverse ")
+                                               attribute " connection"
+                                               (when-not (= 1 elided) "s")
+                                               " at the configured collection cap")
+                                          :seon.error/data
+                                          {:seon.render.walk/attribute attribute
+                                           :seon.render.walk/elided-count
+                                           elided}}}))))
+                                 (concat (map vector refs (repeat false))
+                                         (map vector refs (repeat true)))))]
+                      (if (pos? remaining)
+                        (reduce-kv
+                         (fn [result index connection]
+                           (if-let [child (:seon.render.walk/pulled connection)]
+                             (visit result child (dec remaining)
+                                    (conj path :seon.render.walk/neighbours
+                                          index)
+                                    (:seon.render.walk/attribute connection))
+                             result))
+                         (assoc-in state
+                                   [:seon.render.walk/members lookup
+                                    :seon.render.walk/connections]
+                                   (mapv #(dissoc % :seon.render.walk/pulled)
+                                         connections))
+                         connections)
+                        (assoc-in state
+                                  [:seon.render.walk/members lookup
+                                   :seon.render.walk/connections]
+                                  (mapv #(dissoc % :seon.render.walk/pulled)
+                                        connections))))))))]
+      (if (map? root)
+        (visit {:seon.render.walk/members {}
+                :seon.render.walk/order []}
+               root (long distance) [] nil)
+        {:seon.render.walk/members {}
+         :seon.render.walk/order []}))))
+
+(defn root-acquisition
+  "Pull and index one agent-root neighbourhood by stable entity identity.
+
+  This performs exactly one database read. Its member values contain only
+  each entity's own attributes and direct ref identities; reverse/nested
+  structure supplies membership and paths without making an ancestor appear
+  changed when only a descendant changed."
+  {:malli/schema [:=> [:cat :seon.render.walk/request] :map]}
+  [{database :seon.db/db
+    lookup :seon.render.walk/lookup
+    caps :seon.sci.admit/caps
+    :as request}]
+  (let [distance (long (get request :seon.render/distance 1))
+        selector (root-selector database distance caps)
+        root (db/pull database selector lookup)]
+    (merge {:seon.render.walk/selector selector
+            :seon.render.walk/root root}
+           (acquisition-members database root distance caps))))
+
+(defn membership-diff
+  "Changed, added, and removed members between two root acquisitions."
+  {:malli/schema [:=> [:cat :map :map] :map]}
+  [before after]
+  (let [before-members (:seon.render.walk/members before)
+        after-members (:seon.render.walk/members after)
+        before-order (:seon.render.walk/order before)
+        after-order (:seon.render.walk/order after)
+        added? #(not (contains? before-members %))
+        removed? #(not (contains? after-members %))
+        changed? #(and (contains? before-members %)
+                       (not= (get before-members %)
+                             (get after-members %)))]
+    {:seon.render.walk/changed
+     (into [] (comp (filter changed?) (map after-members)) after-order)
+     :seon.render.walk/added
+     (into [] (comp (filter added?) (map after-members)) after-order)
+     :seon.render.walk/removed
+     (into [] (comp (filter removed?) (map before-members)) before-order)}))
+
 (defn- concrete-entity
   "Pull every attribute the entity actually carries."
   [db eid]
