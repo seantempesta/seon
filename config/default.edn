@@ -437,6 +437,12 @@
    :seon.call-preparation/supplier
    [:seon.fn/sym "seon.db/supplied-connection"]}
 
+  {:seon.call-preparation/key :seon.cluster.agent/id
+   :seon.call-preparation/schema
+   [:seon.schema/key :seon.cluster.agent/id]
+   :seon.call-preparation/supplier
+   [:seon.fn/sym "seon.env/supplied-agent-id"]}
+
   {:seon.ai.model/provider-id "deepseek"
    :seon.config.ai/endpoint "https://api.deepseek.com/chat/completions"
    :seon.config.ai/api-key-variable "DEEPSEEK_API_KEY"

@@ -101,10 +101,47 @@
     cluster-name :seon.cluster/name}]
   (let [namespace-tempid (str "namespace:" namespace-name)]
     [{:db/id namespace-tempid
-      :seon.ns/name namespace-name}
+      :seon.ns/name namespace-name
+      :seon.ns/requires
+      [[:seon.ns/name 'my.message]
+       [:seon.ns/name 'my.run]
+       [:seon.ns/name 'seon.db]]}
      {:seon.cluster.agent/id agent-id
       :seon.cluster.agent/namespace namespace-tempid
       :seon.cluster.agent/cluster [:seon.cluster/name cluster-name]}]))
+
+(defn situation-form
+  "Return the bare root form for an agent or situation unit."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  [_unit]
+  '(help))
+
+(defn render-situation-ai
+  "Render the live situation as concise orientation for the agent.
+
+  When selected for the stored agent entity, derive the same live situation
+  that `(help)` returns. When selected for that returned value, render it
+  directly. Both paths therefore have one orientation value and no stored
+  presentation duplicate."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  [unit]
+  (let [situation
+        (if (contains? unit :seon.cluster.agent/unread-message-count)
+          unit
+          (when (and (:seon.db/db unit) (:seon.cluster.agent/id unit))
+            (bootstrap/situation (:seon.db/db unit)
+                                 (:seon.cluster.agent/id unit))))]
+    (when (and situation (not (:seon.error/kind situation)))
+      (str "You are agent " (:seon.cluster.agent/id situation)
+           " in namespace "
+           (second (:seon.cluster.agent/namespace-ref situation)) ". "
+           "Your opening is generated from live facts. "
+           "You have " (:seon.cluster.agent/unread-message-count situation)
+           " unread message"
+           (when-not (= 1 (:seon.cluster.agent/unread-message-count situation))
+             "s")
+           ". Every run ends with my.run/complete or my.run/wait; "
+           "an undisposed run is unfinished work."))))
 
 (defn render-creation-ai
   "`:seon.render/ai` — the compact result of creating or resuming an agent."

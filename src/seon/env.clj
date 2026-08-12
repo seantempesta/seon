@@ -297,6 +297,23 @@
       (environment? value) value
       :else nil)))
 
+(defn supplied-agent-id
+  "Return the calling agent id carried by this turn's environment.
+
+  This is a declared call-preparation supplier. Functions that need the
+  current agent declare `:seon.cluster.agent/id`; callers may pass one
+  explicitly, while an agent evaluation that omits it receives this value."
+  {:malli/schema
+   [:=> [:cat :seon.env/environment]
+    [:or :seon.cluster.agent/id :seon.error/value]]}
+  [environment]
+  (if-let [agent-id (:seon.cluster.agent/id environment)]
+    agent-id
+    {:seon.error/kind ::agent-id-absent
+     :seon.error/message
+     "This call's environment carries no agent id; pass one explicitly."
+     :seon.error/data {:seon.env/member :seon.cluster.agent/id}}))
+
 (defn require-environment
   "Return the carried environment or a flat error naming the boundary."
   {:malli/schema

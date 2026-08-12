@@ -108,15 +108,65 @@
     forms))
 
 (defn help-text
-  "The prose authored on the shipped help form map."
+  "The legacy authored help payload, retained only until plan deletion."
   {:malli/schema [:=> [:cat] :string]}
   []
   (:seon.bootstrap.plan.form/help-text (first (packaged-forms))))
 
 (defmacro help
-  "Print the one prose guide to the agent REPL."
+  "Read the calling agent's live situation.
+
+  The returned situation is the generated opening's control surface. Its
+  schema members are the seeds: adding a derived member to that shape is how
+  the opening grows. The value is pulled live from current facts; no member is
+  copied onto the agent as stored presentation state."
   []
-  (list 'clojure.core/print (help-text)))
+  (list 'seon.bootstrap/situation))
+
+(defn situation
+  "Derive one agent's live opening seeds from current database facts."
+  {:malli/schema
+   [:=> [:cat :seon.db/db :seon.cluster.agent/id]
+    [:or :seon.cluster.agent/situation :seon.error/value]]}
+  [database agent-id]
+  (let [agent
+        (db/pull database
+                 '[:seon.cluster.agent/id
+                   {:seon.cluster.agent/namespace
+                    [:db/id :seon.ns/name
+                     {:seon.ns/requires [:seon.ns/name]}]}
+                   {:seon.cluster.agent/run [:seon.cluster.run/id]}]
+                 [:seon.cluster.agent/id agent-id])]
+    (if-not (:seon.cluster.agent/id agent)
+      {:seon.error/kind :seon.cluster.agent/no-such-agent
+       :seon.error/message (str "No agent has id " (pr-str agent-id) ".")
+       :seon.error/data {:seon.cluster.agent/id agent-id}}
+      (let [namespace (:seon.cluster.agent/namespace agent)
+            run (:seon.cluster.agent/run agent)
+            unread
+            (or (db/q '[:find (count ?message) .
+                        :in $ ?agent-id
+                        :where
+                        [?agent :seon.cluster.agent/id ?agent-id]
+                        [?message :seon.cluster.message/to ?agent]
+                        (not-join [?message]
+                          [?run :seon.cluster.run/trigger ?message])]
+                      database agent-id)
+                0)]
+        (cond->
+         {:seon.cluster.agent/id agent-id
+          :seon.cluster.agent/namespace-ref
+          [:seon.ns/name (:seon.ns/name namespace)]
+          :seon.cluster.agent/unread-message-count (long unread)
+          :seon.cluster.agent/protocol-namespaces
+          (->> (:seon.ns/requires namespace)
+               (map :seon.ns/name)
+               sort
+               vec)}
+          run
+          (assoc :seon.cluster.agent/open-run-ref
+                 [:seon.cluster.run/id
+                  (:seon.cluster.run/id run)]))))))
 
 (defmacro dir
   "List the public names in namespace-name through Clojure's REPL macro."
