@@ -225,5 +225,11 @@ slated by the transcript PRD.
 - Tile ordering: newest-first vs stable grid + freshness highlight —
   recommendation: stable grid with freshness highlight, newest-first only in
   the column.
-- History compaction when the budget is exceeded (batched compaction = new
-  prompt generation was the leaning; not yet ruled).
+- ~~History compaction~~ RULED 2026-08-11 night: DEFERRED — W2 builds
+  without eviction; histories grow unbounded until a live long-lived agent
+  forces the decision with evidence. Batched-at-checkpoint remains the
+  recorded leaning for when it returns.
+- Overnight rulings 2026-08-11: "the agent's defs" confirmed (desk residue
+  sweep authorized); unlimited DeepSeek FLASH drives approved for the
+  minimum-context ablation and W2 live proofs; pre-existing test failures
+  are fixed only when quickly root-caused, else filed.
