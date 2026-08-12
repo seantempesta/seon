@@ -163,7 +163,7 @@
       (is (::md/valid? result)))))
 
 (deftest dependency-pin-current-rule-test
-  (let [current "407e9328851ccce318148188f1d284646eb64132"
+  (let [current "15d98da60991b6ded59b15cf0d499a7055a02266"
         stale "10540578248eaa686c1f88a7fe57644ee4c9f993"
         request {::md/file-path "docs/example.md"
                  ::md/gitlinks {"reference-code/datahike" current}
