@@ -97,6 +97,7 @@
                               :seon.cluster.eval/result-blob
                               :seon.render.data/total
                               :seon.render/distance
+                              :seon.render/profile
                               :seon.render.walk/attribute
                               :seon.cluster.run/live-processes
                               :seon.ai/partial
@@ -721,10 +722,12 @@
 
          :else
          (let [cluster-name (custody-cluster-name db agent-id)
+               effective (when cluster-name
+                           (config/effective db cluster-name))
                caps (or (:seon.sci.admit/caps *walk-context*)
-                        (when cluster-name
-                          (config/result-caps
-                           (config/effective db cluster-name))))]
+                        (some-> effective config/result-caps))
+               profile (when effective
+                         (agent-render-profile effective))]
            (cond
              (or (empty? caps) (some nil? (vals caps)))
              (walk-error
@@ -742,23 +745,25 @@
                    branch (:branch options)
                    units
                    ((requiring-resolve 'seon.render.walk/neighborhood)
-                    {:seon.db/db db
-                     :seon.sci.eval/ctx (:seon.sci.eval/ctx *walk-context*)
-                     :seon.cluster.agent/id agent-id
-                     :seon.cluster.run/id
-                     (:seon.cluster.run/id *walk-context*)
-                     :seon.render/retained-calls
-                     (:seon.render/retained-calls *walk-context*)
-                     :seon.render/captured-calls
-                     (:seon.render/captured-calls *walk-context*)
-                     :seon.render.walk/lookup root
-                     :seon.render/output :seon.render/ai
-                     :seon.render/distance depth
-                     :seon.sci.admit/caps caps
-                     :seon.sci.eval/time-limit-ms
-                     (:seon.sci.eval/time-limit-ms *walk-context*)
-                     :seon.config/on-core-error
-                     (:seon.config/on-core-error *walk-context*)})
+                    (cond->
+                     {:seon.db/db db
+                      :seon.sci.eval/ctx (:seon.sci.eval/ctx *walk-context*)
+                      :seon.cluster.agent/id agent-id
+                      :seon.cluster.run/id
+                      (:seon.cluster.run/id *walk-context*)
+                      :seon.render/retained-calls
+                      (:seon.render/retained-calls *walk-context*)
+                      :seon.render/captured-calls
+                      (:seon.render/captured-calls *walk-context*)
+                      :seon.render.walk/lookup root
+                      :seon.render/output :seon.render/ai
+                      :seon.render/distance depth
+                      :seon.sci.admit/caps caps
+                      :seon.sci.eval/time-limit-ms
+                      (:seon.sci.eval/time-limit-ms *walk-context*)
+                      :seon.config/on-core-error
+                      (:seon.config/on-core-error *walk-context*)}
+                      profile (assoc :seon.render/profile profile)))
                    selected? (or (not (contains? options :branch))
                                  (some (fn [unit]
                                          (let [path (:seon.render.walk/path unit)]

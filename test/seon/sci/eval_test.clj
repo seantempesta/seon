@@ -17,6 +17,7 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [datahike.pull-api :as pull-api]
             [seon.config :as config]
             [seon.cluster.agent :as agent]
             [seon.cluster.work :as work]
@@ -27,6 +28,8 @@
             [sci.addons.future :as sci.future]
             [sci.core :as sci]
             [seon.render :as render]
+            [seon.render.walk :as render.walk]
+            [seon.render.web :as render.web]
             [seon.schema :as schema]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]
@@ -1374,22 +1377,71 @@
                     :seon.cluster/name "host-walk"
                     :seon.ns/name 'my.agents.host-walker}))
       (let [ctx (eval/cluster-ctx @connection connection)
-            evaluation
-            (render/call-with-walk-context
-             {:seon.db/connection connection
-              :seon.cluster.agent/id "host-walker"
-              :seon.sci.admit/caps caps
-              :seon.sci.eval/ctx ctx
-              :seon.sci.eval/time-limit-ms 5000
-              :seon.config/on-core-error :panic}
-             #(run-in ctx "(seon.render/walk)" 5000))
-            value (:seon.sci.admit/value evaluation)]
-        (is (ok? evaluation))
-        (is (string? value))
-        (is (re-find #"root=\[:seon\.cluster\.agent/id \"host-walker\"\]"
-                     value))
-        (is (false? (:seon.sci.admit/capped? evaluation))
-            "the measured string cap admits the ordinary walk whole")))))
+            request
+            {:seon.db/db @connection
+             :seon.db/connection connection
+             :seon.cluster.agent/id "host-walker"
+             :seon.render.walk/lookup
+             [:seon.cluster.agent/id "host-walker"]
+             :seon.render/output :seon.render/ai
+             :seon.render/distance 2
+             :seon.sci.admit/caps caps
+             :seon.sci.eval/ctx ctx
+             :seon.sci.eval/time-limit-ms 5000
+             :seon.config/on-core-error :panic}
+            root-selector render.walk/root-selector
+            root-selectors (atom [])
+            compile-plan pull-api/compile-pull-plan
+            compilation-count (atom 0)
+            effective-count (atom 0)]
+        (with-redefs [render.walk/root-selector
+                      (fn [database distance supplied-caps]
+                        (let [selector
+                              (root-selector database distance supplied-caps)]
+                          (swap! root-selectors conj selector)
+                          selector))
+                      pull-api/compile-pull-plan
+                      (fn
+                        ([selector-or-plan]
+                         (when (some #(identical? selector-or-plan %)
+                                     @root-selectors)
+                           (swap! compilation-count inc))
+                         (compile-plan selector-or-plan))
+                        ([database selector-or-plan]
+                         (compile-plan database selector-or-plan)))
+                      config/effective
+                      (fn [_database _cluster-name]
+                        (swap! effective-count inc)
+                        (config/defaults))]
+          (let [evaluate-walk
+                #(render/call-with-walk-context
+                  request
+                  (fn [] (run-in ctx "(seon.render/walk)" 5000)))
+                through-sci (evaluate-walk)
+                direct (render.walk/root-acquisition request)
+                web (#'render.web/acquire-root request ::root)
+                value (:seon.sci.admit/value through-sci)
+                allocations
+                (mapv #(get-in % [:seon.sci.admit/record
+                                  :seon.eval/allocated-bytes])
+                      [through-sci])]
+            (is (ok? through-sci))
+            (is (string? value))
+            (is (re-find
+                 #"root=\[:seon\.cluster\.agent/id \"host-walker\"\]"
+                 value))
+            (is (false? (:seon.sci.admit/capped? through-sci))
+                "the measured string cap admits the ordinary walk whole")
+            (is (map? direct))
+            (is (= 2 (count web)))
+            (is (= 1 @compilation-count)
+                "direct, web, and through-SCI paths share one generation plan")
+            (is (= 1 @effective-count)
+                "the through-SCI walk resolves effective config once")
+            (is (every? #(and (int? %) (< % (* 1024 1024 1024)))
+                        allocations)
+                (str "through-SCI allocations must stay below 1 GiB: "
+                     (pr-str allocations)))))))))
 
 (deftest one-context-arms-concurrent-threads-independently
   (let [ctx (eval/build-base-ctx)
