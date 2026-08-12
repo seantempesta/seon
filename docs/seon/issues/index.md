@@ -92,6 +92,8 @@ See `README.md` for the convention.
 | [Stop a failed turn from waking itself through its own fault message](a-failed-turn-wakes-itself-through-its-own-fault-message.md) | friction | live-drive context repair wave |
 | [Make `clojure.pprint` available in the agent's REPL](agent-repl-cannot-require-clojure-pprint.md) | friction | live-drive context repair wave |
 | [Name the arity when an agent calls its own function with the wrong one](a-wrong-arity-call-reports-a-missing-namespace.md) | friction | live-drive context repair wave |
+| [Say something when a run settles neither a completion nor a wait](a-run-that-settles-no-disposition-ends-the-episode-silently.md) | blocker | live-drive context repair wave |
+| [Stop a false `:type-mismatch` from blocking any edit that derefs a connection](type-mismatch-blocks-edits-that-deref-a-connection.md) | friction | dev-loop tooling wave |
 | [Project an MCP value whose map keys are not keywords](mcp-projection-crashes-on-non-keyword-map-keys.md) | friction | whole-system arc repair wave |
 | [Name `index-step`'s predicate so its contract can be made durable](a-search-contract-predicate-cannot-be-made-durable.md) | friction | live-drive context repair wave |
 | [Return `/data` without a five-second stall](data-page-takes-five-and-a-half-seconds-for-three-kilobytes.md) | friction | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |

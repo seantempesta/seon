@@ -19,7 +19,8 @@
       (doseq [run (sort-by :db/id
                            (db/q '[:find [(pull ?run [:db/id
                                                       :seon.cluster.run/id
-                                                      :seon.cluster.run/trigger
+                                                      {:seon.cluster.run/trigger [*]}
+                                                      :seon.cluster.run/opened-at
                                                       :seon.cluster.run/starting-ns
                                                       :seon.cluster.run/closed-at
                                                       :seon.cluster.run/interrupted-at

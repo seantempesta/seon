@@ -335,3 +335,195 @@ Filed with evidence:
   recorded here rather than as a system issue: `complete` takes reply TEXT,
   and the task's `(my.run/complete {…})` wording cost HALF a turn. A rerun of
   this experiment should say “complete with the printed map”.
+
+## HALF re-drive 2026-08-12
+
+I read this document end to end before driving, including the results,
+recommendation, confounds, grading correction, and the defect list.
+
+### What changed before the drive
+
+The 2026-08-11 HALF result was lost to the task text, not to the context.
+`my.run/complete` takes non-blank reply TEXT (`src/my/run.clj:31-46`), and the
+task instructed `(my.run/complete {…})` with a map, which the toolkit refuses.
+The final clause now reads:
+
+> Complete only after all three operations succeed; finish by calling
+> my.run/complete with a plain string reply that names the function, the
+> count, and the contract.
+
+Everything before that clause is byte-identical, so the variants stay
+comparable. Rebuilding shifted every estimate by the four-token difference:
+FULL 13,814, **HALF 7,393**, QUARTER 1,878, FLOOR 1,678. Committed as
+`550949065`.
+
+### Drives
+
+Three drives, each on its own fresh isolated root, `deepseek-v4-flash` only,
+`:seon.config.ai/thinking :disabled`, no other JVM running.
+
+`tmp/ablate-half2` recorded nothing: `DEEPSEEK_API_KEY` is exported from the
+interactive profile and the drive shell is not interactive, so all three runs
+failed with `The environment variable DEEPSEEK_API_KEY is not set.` and zero
+attempts — yet the harness still wrote a graded row of zeroes. That row would
+have read as a measurement. `tmp/ablation/run_variant.clj` now refuses to
+start without the credential and refuses to grade a drive in which no attempt
+recorded a usage document.
+
+`tmp/ablate-half3` and `tmp/ablate-half4` are the two paid HALF drives, run
+with the profile sourced.
+
+| Measure | half3 | half4 |
+|---|---:|---:|
+| Estimated prompt tokens (`seon.ai.tokens/estimate`) | 7,393 | 7,393 |
+| Provider prompt tokens, summed over ALL attempts | 21,444 | 21,444 |
+| DeepSeek `prompt_cache_hit_tokens`, summed | 14,080 | 21,120 |
+| Provider completion tokens | 489 | 675 |
+| Provider reasoning tokens | 0 | 0 |
+| Attempts recording usage | 3 | 3 |
+| Agent runs (excluding bootstrap) | 3 | 3 |
+| — of which the graded agent's | **1** | **1** |
+| Runs with `:seon.cluster.run/error` | 0 | 0 |
+| Steering errors (receipts carrying an eval error) | 0 | 1 |
+| `:seon.fn/spec` fact for the contracted function | `[:=> [:cat] :int]` | `[:=> [:cat] :int]` |
+| Called it | yes | no |
+| Returned the contract | yes | no |
+| Called `my.run/complete` | **no** | **no** |
+| Episode terminal | `:stopped` | `:stopped` |
+
+Each drive's provider prompt tokens are three attempts of 7,148 each. The
+per-attempt estimate is 7,393 against 7,148 actual — the estimator is 3.4%
+high, consistent across all six attempts.
+
+### What the graded agent actually did
+
+half3, run `442bd777-4dcd-4442-8141-7a0f33dc9045`, triggered by message
+`inbound-536870999-0`, opened 09:57:22.397Z, closed 09:57:28.851Z, no run
+error. Three forms, three clean receipts, one turn:
+
+| Ordinal | Form | Receipt |
+|---:|---|---|
+| 0 | `(defn cluster-agent-count …)` carrying `{:malli/schema [:=> [:cat] :int]}` | var `my.agents.w1-history-proof-5/cluster-agent-count` |
+| 1 | `(cluster-agent-count)` | `2` |
+| 2 | `(seon.db/q '[:find ?spec . :in $ ?sym …])` | `"[:=> [:cat] :int]"` |
+
+That is the entire substance of the task — define with a real contract, call,
+read the contract back — done correctly on the first turn, at 7,148 prompt
+tokens, with zero reasoning tokens and zero errors.
+
+It then stopped. No fourth form, no `my.run/complete`, no `my.run/wait`, and
+no `:my.run/*` datom of any kind in the ending database value. Nothing woke
+the agent again, so `seon.eval.drive/terminal-state` found it idle with its
+one run closed and no completion value, and reported `:stopped`.
+
+half4 reproduced the shape with a different partial: form 0 defined the
+function against a nonexistent `seon.db/*db*`, form 1 corrected it, and the
+run closed there — again undisposed, again with no second turn.
+
+The cluster's root agent did the same thing in both roots (runs
+`e826427c-…`, `267bfc1a-…`): it received the intercepted HALF prompt
+(confound 2 from the first round, unchanged), defined the same function, wrote
+`; Then call it and query its spec:`, and stopped. Four independent runs, one
+shape.
+
+### Verdict
+
+**HALF does the work; it does not finish the conversation, and the reason is
+not its context.** Under the corrected task, HALF reached the contract fact,
+the call, and the returned contract on turn one at 46% of FULL's prompt
+tokens. What it never does is spend a turn composing a completion, because it
+never gets a second turn: a run that settles neither a completion nor a wait
+ends silently, and nothing in the system tells the agent or the requester that
+it happened.
+
+For the MINIMUM ruling that means two things.
+
+First, the 2026-08-11 recommendation stands and is now better supported.
+HALF's `partial` in the first table was attributed to a refused completion
+call; with that cause removed, HALF still reaches every durable fact on its
+first turn. The break between HALF and QUARTER — acting versus surveying —
+was never about the completion step, so nothing here disturbs it. HALF remains
+the minimum defensible opening context.
+
+Second, the "Task done" column of that table does not measure context. It
+measures whether the model happened to batch its completion into the same
+reply as its work. FULL "finished" on 2026-08-11 because its second turn put
+the call, the query, and the completion inside one `let`; HALF and both root
+agents split the work across a turn boundary that the system never delivers.
+Until a run that ends undisposed is a fact the next turn can see, any variant
+can lose that column to sequencing luck, and the column should be read as
+"completed in one reply", not as "succeeded".
+
+### Watch items from the assignment
+
+- **Duplicate concurrent runs for one message — did not recur.** Message
+  `inbound-536870999-0` produced exactly one run in each root
+  (`442bd777-…`, `9fe34bd2-…`). The other two runs per root are the root
+  agent's, triggered by two distinct maintenance-error messages
+  (`root/maintenance/compact`, `root/maintenance/process-census`) with
+  different ids and different opened-at instants. No duplication to capture.
+- **Reasoning-only stalls — did not recur.** All six attempts across both
+  roots finished with `"finish_reason" "stop"` and
+  `reasoning_tokens 0`, against three of nine on 2026-08-11.
+- **The namespace object prints stably.** The `(in-ns …)` receipt is, verbatim
+  and identically in both roots and for both agents:
+
+  ```clojure
+  #:seon.print{:face :seon.print/object,
+               :class "sci.lang.Namespace",
+               :rep "\"my.agents.w1-history-proof-5\""}
+  ```
+
+  No identity hash appears anywhere in either root's receipts
+  (`grep -c '0x[0-9a-f]\{6,\}'` → 0 for both). This is the mechanism at
+  `src/seon/sci/admit.clj:86-91` behaving as documented, verified across two
+  independent processes.
+
+### Ugly output met, quoted verbatim
+
+The bootstrap history's deliberate arity lesson is still inverted. Verbatim
+receipt error for `(largest)` in both roots and for both agents:
+
+```text
+No such namespace: my.agents.w1-history-proof-5
+```
+
+immediately followed by a clean `(largest [])` returning `{}` — the agent can
+disprove the message from the next line of its own history. This lane located
+the cause: `seon.instrument/violation` calls
+`(some-> function-symbol find-var meta :arglists)` at
+`src/seon/instrument.clj:223`, and `clojure.core/find-var` THROWS
+`IllegalArgumentException: No such namespace: <ns>` rather than returning nil
+for a namespace that exists only in SCI. `some->` guards a nil input, not a
+throwing call, so the reporter dies before returning the correct
+`Wrong number of args (0) passed to: …` message it had already built. That
+also explains the recorded inconsistency in which `seon.db`, `seon.fn`, and
+`seon.render` agents get the right message: those are real JVM namespaces.
+Appended to
+[the existing issue](../../../seon/issues/a-wrong-arity-call-reports-a-missing-namespace.md).
+
+The steering error half4 produced is by contrast exactly right — flat, loud,
+naming the absent member:
+
+```text
+Unable to resolve symbol: seon.db/*db*
+```
+
+### Defects filed
+
+- [Say something when a run settles neither a completion nor a
+  wait](../../../seon/issues/a-run-that-settles-no-disposition-ends-the-episode-silently.md)
+  — blocker; the finding above, with both roots as evidence.
+- [Name the arity when an agent calls its own function with the wrong
+  one](../../../seon/issues/a-wrong-arity-call-reports-a-missing-namespace.md)
+  — existing issue, root cause located and appended.
+- [Stop a false `:type-mismatch` from blocking any edit that derefs a
+  connection](../../../seon/issues/type-mismatch-blocks-edits-that-deref-a-connection.md)
+  — friction; met while writing this lane's probe.
+
+Two harness defects were fixed in place rather than filed, since
+`tmp/ablation/` is this experiment's own scaffolding: the missing-credential
+refusal and the zero-attempt grading refusal described above, plus
+`tmp/ablation/inspect_episode.clj` pulling `:seon.cluster.eval/error` as a ref
+map when the attribute holds a string, which returned a raw Datahike
+`:entity-id/syntax` failure in place of every receipt.

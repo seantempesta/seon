@@ -103,3 +103,45 @@ my.agents.root`), immediately followed by a successful `(largest [])`.
 Related: these deliberate teaching failures are also committed as core
 faults that interrupt the bootstrap run —
 [bootstrap-teaching-failures-strand-every-new-agent](bootstrap-teaching-failures-strand-every-new-agent.md).
+
+## Root cause located, 2026-08-12 (HALF re-drive lane)
+
+`seon.instrument/violation` builds the correct message and then throws while
+decorating it. `src/seon/instrument.clj:222-224`:
+
+```clojure
+(if (= :malli.core/invalid-arity kind)
+  (let [function-symbol (:fn-name data)
+        arglists (some-> function-symbol find-var meta :arglists)]
+```
+
+`clojure.core/find-var` does not return nil for an absent namespace — it
+THROWS `IllegalArgumentException: No such namespace: <ns>`. `some->` guards
+against a nil input, not against a throwing call, so the throw escapes
+`violation` and replaces the arity message the very next form was about to
+build.
+
+This explains the inconsistency recorded above exactly. `seon.db`,
+`seon.fn`, and `seon.render` are real JVM namespaces, so `find-var` resolves
+and those three agents get `Wrong number of args (0) passed to: …`.
+`my.agents.root`, `my.agents.w1-history-proof-5`, and `arc.inventory` exist
+only as SCI namespaces, so `find-var` throws and those agents get the false
+namespace claim. Nothing is substituting a message: the reporter dies before
+it can return one.
+
+The class is a diagnostic reaching into JVM Var space for a function that
+lives in SCI. The arglists are already available without `find-var` — the
+declared arities are `:seon.fn.arity/*` facts in the program graph, and
+malli's own report data names the function. A fix that keeps `find-var`
+under a `try` would suppress the class rather than remove it.
+
+Reproduced again on 2026-08-12 on two fresh isolated roots
+(`tmp/ablate-half3`, `tmp/ablate-half4`), verbatim receipt error for both
+`bootstrap:root` and `bootstrap:w1-history-proof-5`:
+
+```text
+No such namespace: my.agents.w1-history-proof-5
+```
+
+with `:seon.error/data {:seon.sci.eval/throwable "java.lang.IllegalArgumentException"}`,
+immediately followed by a clean `(largest [])` returning `{}`.

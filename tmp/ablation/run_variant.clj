@@ -84,6 +84,14 @@
   (let [attempts (:seon.eval.drive/model-attempts episode)
         usages (keep usage attempts)
         models (into #{} (map :seon.ai/model) attempts)
+        ;; A drive with no usage document made no usable provider call. The
+        ;; 2026-08-12 HALF re-drive booted a cluster, ran three turns, and
+        ;; wrote a graded row of zeroes because DEEPSEEK_API_KEY was absent
+        ;; from the drive shell. A row of zeroes must never be mistaken for a
+        ;; measurement.
+        _ (assert (seq usages)
+                  (str "No attempt recorded a usage document; the drive made "
+                       "no usable provider call."))
         steering-errors
         (count (filter #(or (seq (:seon.cluster.eval/error %))
                             (not= :seon.eval.drive/absent
@@ -124,6 +132,11 @@
   "Run one isolated paid Flash drive and write its fact-space grades."
   [& [variant-argument root-argument]]
   (let [variant-name (keyword (or variant-argument ""))
+        _ (when (empty? (System/getenv "DEEPSEEK_API_KEY"))
+            (throw (ex-info
+                    "DEEPSEEK_API_KEY is absent; the drive would spend a
+                     cluster boot and record nothing."
+                    {:seon.config.ai/credential "DEEPSEEK_API_KEY"})))
         selected (variant variant-name)
         root (or root-argument
                  (str "tmp/ablation/drive-roots/" (name variant-name) "-"
