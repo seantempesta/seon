@@ -197,16 +197,137 @@ and ending commit. The same facts can be queried while a drive is live:
       db "my.agents.w1-history-proof-5/cluster-agent-count")
 ```
 
-## Results skeleton
-
-| Variant | Estimated prompt tokens | Provider prompt tokens | DeepSeek cache-hit tokens | Turns to completion | Steering errors | Contract fact | Call receipt | Contract query | Success |
-|---|---:|---:|---:|---:|---:|---|---|---|---|
-| FULL | 13,809 | — | — | — | — | — | — | — | — |
-| HALF | 7,389 | — | — | — | — | — | — | — | — |
-| QUARTER | 1,873 | — | — | — | — | — | — | — | — |
-| FLOOR | 1,674 | — | — | — | — | — | — | — | — |
+## Results
 
 Provider cache hits are read from the stored DeepSeek usage document's
 `prompt_cache_hit_tokens`; provider prompt tokens are read from
-`prompt_tokens`. Turns are the objective run count. Nothing in this lane fills
-the table beyond construction-time estimates.
+`prompt_tokens`.
+
+All four variants were driven on 2026-08-12 (UTC) against
+`deepseek-v4-flash` only — every drive asserts the model set and every
+recorded attempt in every root is that one model. Each drive used its own
+fresh operator root under `tmp/ablation/drive-roots/`.
+
+| Variant | Estimated prompt tokens | Provider prompt tokens | DeepSeek cache-hit tokens | Usable attempts | Agent runs | Reasoning tokens | Runs with error | Contract fact | Called it | Returned the contract | Task done |
+|---|---:|---:|---:|---:|---:|---:|---:|---|---|---|---|
+| FULL | 13,809 | 13,585 | 0 | 1 (+1 lost) | 2 | 17,772 | 1 | `[:=> [:cat] :int]` | yes | yes | **yes** |
+| HALF | 7,389 | 21,687 | 7,168 | 3 | 3 | 44,187 | 0 | `[:=> [:cat] :int]` | yes | no (completion refused) | partial |
+| QUARTER (run A) | 1,873 | 3,546 | 3,328 | 2 (+1 lost) | 3 | 5,615 | 1 | absent | no | no | no |
+| QUARTER (run B) | 1,873 | 5,319 | 4,992 | 3 | 3 | 3,521 | 0 | absent | no | no | no |
+| FLOOR | 1,674 | 1,580 | 0 | 1 (+1 lost) | 2 | 955 | 2 | absent | no | no | no |
+
+“Usable attempts” counts attempts that recorded a usage document; “+1 lost”
+is an attempt the provider ended without any assistant text (see the
+reasoning-only defect below), which records no usage at all — so the provider
+token columns UNDERSTATE real spend for FULL, QUARTER run A, and FLOOR.
+
+Per-variant behaviour, read from each drive's ending database value:
+
+- **FULL** — first turn lost to a reasoning-only stream; second turn did the
+  whole task in three forms: `(in-ns …)`, the contracted `defn`, then one
+  `let` that called the function, queried `:seon.fn/spec`, and completed.
+  Settled result: `{:function cluster-agent-count, :count 2, :contract
+  "[:=> [:cat] :int]"}`.
+- **HALF** — defined `cluster-agent-count`, then two helper defs, then called
+  `(my.run/complete {…})` exactly as the task text instructs, which the
+  toolkit refuses: `complete needs the reply text you want delivered, as a
+  string.` The turn was spent on the refusal. A later root run completed with
+  `{:function cluster-agent-count, :count 2, :contract nil}` — the contract
+  step never landed.
+- **QUARTER** — both replicates spent every turn exploring and never wrote
+  the `defn`. Run A: `(keys (ns-publics *ns*))`, `(dir seon.db)`,
+  `pprint`-wrapped `db/q` surveys. Run B, all three turns, verbatim:
+  `(dir seon.db)`, `(doc seon.db/q)`, `(dir seon.schema)`,
+  `(db/q '[:find ?a :where [?e ?a]] db)`; then the same two openers again
+  with `(dir seon.fn)`; then again with `(doc my.run/complete)` and
+  `(ns-publics 'my.agents.w1-history-proof-5)`. Three turns, three
+  restarts of the same survey — the agent re-derives its bearings every
+  turn instead of acting, which is what an opening history without a worked
+  example buys. The episode run cap ended it.
+- **FLOOR** — one turn lost to a reasoning-only stream, one reply that was
+  entirely prose: `The reply carried no Clojure forms — its whole text read
+  as prose.` Nothing ran.
+
+### Recommendation
+
+**HALF is the minimum defensible opening context; FULL is the only variant
+that finished.** The break is not gradual: between HALF and QUARTER the agent
+stops ACTING and starts SURVEYING. The seven distance-2 toolkit namespace
+entries that HALF drops cost nothing observable — HALF still produced the
+correct contracted `defn` on its first turn — but the `dir my.message` /
+`dir my.run` pair plus the worked `defn`-with-`:malli/schema` example that
+QUARTER and FLOOR lack is exactly what the model imitates. QUARTER retains the
+two `dir` entries and still failed, so the load-bearing part of the opening
+history is the WORKED EXAMPLE (a contracted `defn`, its call, its refusal, and
+the `:seon.fn/spec` query in the bootstrap history), not the namespace
+inventory.
+
+Read as cost: HALF is 46% of FULL's estimated prompt tokens and reached the
+same contract fact on its first turn. QUARTER's 1,873 tokens bought nothing —
+it spent MORE provider tokens than FULL's successful turn while producing no
+durable fact, because a model with no example writes surveys.
+
+### Confounds recorded, not hidden
+
+1. FULL and HALF ran concurrently (three JVMs); FLOOR and both QUARTER
+   replicates ran alone. Concurrency correlates with the lost attempts but
+   does not explain FLOOR's, which ran alone.
+2. The interception replaces `seon.cluster.prompt/prompt` for EVERY agent in
+   the drive JVM, so the cluster's root agent also receives the variant
+   prompt and sometimes performs the task in its own namespace. The graded
+   facts are namespace-qualified to `my.agents.w1-history-proof-5`, so this
+   contaminates behaviour, not grades.
+3. Cache-hit tokens are cross-run: DeepSeek served QUARTER run B a 6,720-token
+   prefix hit from run A's identical prefix, and HALF's later turns hit their
+   own first turn. A first-of-its-prefix turn always shows 0.
+
+### Grading correction
+
+The in-drive `success?` conjunction reports FALSE for FULL even though FULL
+finished. Its `contract-query-receipt` clause requires a form carrying the
+LITERAL keyword `:seon.fn/spec` in `:seon.fn/keywords`; FULL reached that
+keyword inside a quoted query vector, which the program graph does not index
+as a form keyword. The same row also counts turns from the episode's own run
+ids and steering errors from episode receipts: FLOOR reported `1` turn and
+`0` steering errors while its database holds two agent runs, both carrying
+`:seon.cluster.run/error`.
+
+`tmp/ablation/grade_root.clj` therefore grades every variant post hoc from
+the ending database value — agent runs, run errors, attempts, usage sums, and
+the contract fact — and the table above uses those derived numbers. The task
+completion itself is read from the settled `:my.run/result`.
+
+### Defects met
+
+Filed with evidence:
+
+- [A reasoning-only provider stream burns the whole time limit and settles
+  nothing](../../../seon/issues/a-reasoning-only-stream-burns-the-whole-time-limit.md)
+  — three of nine attempts, with `:seon.config.ai/thinking :disabled` in the
+  effective settings and 76,249 reasoning characters received.
+- [A collection render drops 209 of 210 results without saying
+  so](../../../seon/issues/collection-render-drops-209-of-210-results-without-an-elision-value.md)
+  — met independently in this lane: the requires-projection entry is a large
+  fraction of the QUARTER and FLOOR prompts, and the only omission notice the
+  agent sees is `;; 28 definitions omitted by the namespace render budget.`
+  while 209 namespaces vanish. Probed on the FLOOR root: 210 namespaces carry
+  `:seon.ns/requires`. The note already existed; this is a second
+  observation, not a second issue.
+- Ugly output met in the agent's own context, quoted verbatim, standing
+  order:
+  - the requires projection above, whose whole collection-level output is one
+    `(ns seon.bootstrap …)` card plus
+    `;; 28 definitions omitted by the namespace render budget.`;
+  - inside that same card, raw schema boilerplate the agent must read past —
+    `; schema :seon.bootstrap/agent-plan-absent-error = [:map {:seon.error/class
+    true, :seon.render/ai seon.error/render-ai, :seon.render/html
+    seon.error/render-html, :error/message "must identify the agent with no
+    bootstrap plan"} …]` — already owned by
+    [namespace units render error schema
+    boilerplate](../../../seon/issues/namespace-units-render-error-schema-boilerplate.md);
+  - the run-level error string for a lost turn, which names a socket rather
+    than the reasoning-only stream that caused it (issue filed above).
+- The fixed ablation task instructs a call `my.run/complete` refuses —
+  recorded here rather than as a system issue: `complete` takes reply TEXT,
+  and the task's `(my.run/complete {…})` wording cost HALF a turn. A rerun of
+  this experiment should say “complete with the printed map”.

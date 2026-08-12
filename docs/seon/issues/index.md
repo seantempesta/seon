@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (44)
+## Blocker (45)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -27,6 +27,7 @@ See `README.md` for the convention.
 | [Make accepted work require terminal evidence](class-accepted-work-can-end-without-terminal-evidence.md) | blocker | class-kill queue |
 | [Make destructive reachability changes atomic](class-destructive-reachability-changes-are-not-atomic.md) | blocker | class-kill queue |
 | [Emit an elision value when a collection render drops results](collection-render-drops-209-of-210-results-without-an-elision-value.md) | blocker | render/print prefix-stability wave |
+| [Settle a turn whose provider stream carries only reasoning](a-reasoning-only-stream-burns-the-whole-time-limit.md) | blocker | live-drive provider wave |
 | [Record a call edge when an agent form calls a core function](agent-form-calls-to-core-namespaces-are-not-indexed.md) | blocker | program-graph indexing wave |
 | [Stop emitting object identity addresses into agent context](object-identity-addresses-break-prompt-prefix-stability.md) | blocker | render/print prefix-stability wave |
 | [Replace the unregistered `:ifn` schema that breaks source publication](unregistered-ifn-malli-schema-breaks-source-publication.md) | blocker | flow graph-construction lane (working-tree edit) |
