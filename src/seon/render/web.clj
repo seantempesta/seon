@@ -374,8 +374,7 @@
                    [:seon.cluster.agent/id root-agent-id]
                    :seon.render.walk/path [::fleet-oversight]
                    :seon.render.walk/found-depth 0
-                   :seon.render/distance 0
-                   :seon.render.walk/changed-at 0}
+                   :seon.render/distance 0}
             (:seon.error/kind fleet-output)
             (assoc :seon.error/value fleet-output
                    :seon.render/output

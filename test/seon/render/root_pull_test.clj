@@ -63,12 +63,21 @@
    (fn [connection]
      (db/transact! connection [{::root-id "root" ::value "one"}])
      (let [acquisition-request (request connection)
-           acquisition (walk/root-acquisition acquisition-request)]
+           acquisition (walk/root-acquisition acquisition-request)
+           units (walk/neighborhood
+                  (assoc acquisition-request
+                         :seon.render/output :seon.render/ai
+                         :seon.sci.eval/time-limit-ms 5000
+                         :seon.config/on-core-error :panic
+                         :seon.render.walk/root-acquisition acquisition))]
        (is (not (contains? acquisition-request :seon.render/output)))
        (is (schema/valid-candidate-value?
             :seon.render.walk/acquisition-request acquisition-request))
        (is (= [::root-id "root"]
-              (first (:seon.render.walk/order acquisition))))))))
+              (first (:seon.render.walk/order acquisition))))
+       (is (schema/valid-candidate-value? :seon.render.walk/units units))
+       (is (every? #(not (contains? % :seon.render.walk/changed-at))
+                   units))))))
 
 (defn- reverse-attribute
   [attribute]

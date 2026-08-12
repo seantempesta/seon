@@ -1,7 +1,6 @@
 #:seon.render.walk{:attribute :qualified-keyword,
                    :back-reference? :boolean,
                    :branch :seon.render.walk/path,
-                   :changed-at [:int {:min 0}],
                    :connection
                    [:map
                     [:seon.render.walk/attribute
@@ -73,8 +72,6 @@
                    [:map
                     [:seon.render.walk/lookup :seon.render.walk/lookup]
                     [:seon.render/distance :seon.render/distance]
-                    [:seon.render.walk/changed-at
-                     :seon.render.walk/changed-at]
                     [:seon.render.walk/path :seon.render.walk/path]
                     [:seon.render.walk/found-depth
                      :seon.render.walk/found-depth]
