@@ -5,6 +5,7 @@
             [seon.db :as db]
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
+            [seon.cluster.agent :as cluster.agent]
             [seon.cluster.work :as work]
             [seon.config :as config]
             [seon.sci.eval :as sci.eval]
@@ -56,33 +57,36 @@
     :args [db cluster-name]
     :order-by '[?ordinal :asc]}))
 
-(deftest shipped-default-is-thirteen-edn-authored-form-maps
+(deftest shipped-default-is-one-complete-half-episode
   (let [forms (bootstrap/packaged-forms)
         texts (mapv :seon.cluster.run.form/source forms)]
-    (is (= 13 (count forms)))
-    (is (= ["(help)"
-            "(in-ns '{{seon.ns/name}})"
-            "(dir my.run)"
-            "(doc my.run/complete)"
-            "(dir my.message)"]
-           (subvec texts 0 5)))
+    (is (= 12 (count forms)))
+    (is (= "(help)" (first texts)))
+    (is (= "(in-ns '{{seon.ns/name}})" (second texts)))
+    (is (str/starts-with? (nth texts 2) "(require "))
+    (is (str/includes? (nth texts 3) ":seon.ns/name"))
+    (is (= ["(dir my.run)" "(dir my.message)" "(dir seon.db)"
+            "(dir seon.bootstrap)"]
+           (subvec texts 4 8)))
     (is (= [:agent :user]
            (mapv :seon.bootstrap.plan.form/namespace-source (take 2 forms))))
     (is (every? #(= :agent (:seon.bootstrap.plan.form/namespace-source %))
                 (cons (first forms) (drop 2 forms))))
     (is (= (bootstrap/help-text)
            (:seon.bootstrap.plan.form/help-text (first forms))))
-    (testing "the undefined contract is followed immediately by its concrete repair"
-      (is (str/includes? (nth texts 7) "[:sequential :any]"))
-      (is (str/includes? (nth texts 8)
-                         "[:map [:label :string] [:amount :int]]"))
+    (testing "the worked demonstration succeeds and closes its own arc"
+      (is (str/includes? (nth texts 8) "(defn largest"))
+      (is (str/includes? (nth texts 8) ":example/amount"))
+      (is (str/includes? (nth texts 9) "(largest ["))
+      (is (str/includes? (nth texts 10) ":seon.fn/spec"))
+      (is (str/starts-with? (nth texts 11) "(run/complete "))
+      (is (not-any? #(str/includes? % "[:sequential :any]") texts))
+      (is (not-any? #{"(largest)" "(largest [])"} texts))
       (is (not-any? #(str/includes? % "{:closed true}")
-                    [(bootstrap/help-text) (nth texts 7) (nth texts 8)])))
+                    (cons (bootstrap/help-text) texts))))
     (is (str/includes? (bootstrap/help-text) "extra keys ignored")
         "the help teaches that open maps admit undeclared keys")
-    (is (= "(largest)" (nth texts 10)))
-    (is (= "(largest [])" (nth texts 11)))
-    (is (str/includes? (nth texts 12) "{{seon.ns/name}}/largest"))
+    (is (str/includes? (nth texts 10) "{{seon.ns/name}}/largest"))
     (is (not-any? #(str/includes? % "my.repl/prompt!") texts))
     (is (nil? (ns-resolve 'seon.bootstrap 'sources))
         "the former code-authored vector is gone")))
@@ -125,6 +129,16 @@
         (is (= (bootstrap/plan-digest @connection "bootstrap")
                (:seon.cluster.run/plan-digest before)))
         (is (= process (:seon.cluster.run/process before)))
+        (is (= (bootstrap/task-message-id agent-id)
+               (:seon.cluster.message/id
+                (db/pull @connection [:seon.cluster.message/id]
+                         (get-in before [:seon.cluster.run/trigger :db/id])))))
+        (is (= (bootstrap/task-message)
+               (:seon.cluster.message/content
+                (db/pull @connection
+                         [:seon.cluster.message/content]
+                         [:seon.cluster.message/id
+                          (bootstrap/task-message-id agent-id)]))))
         (is (= #{['help 'seon.bootstrap 'help]
                  ['dir 'seon.bootstrap 'dir]
                  ['doc 'seon.bootstrap 'doc]}
@@ -215,7 +229,8 @@
           (is (= pre-edit-plan-digest prior-digest))
           (is (not= pre-edit-plan-digest
                     (:seon.cluster.run/plan-digest later)))
-          (is (= 14 (count later-sources)))
+          (is (= (inc (count (bootstrap/packaged-forms)))
+                 (count later-sources)))
           (is (= inserted-source (nth later-sources 1)))
           (is (= edited-source (nth later-sources 3)))
           (is (not-any? #{inserted-source edited-source} prior-sources))
@@ -236,3 +251,47 @@
     (is (nil? (:seon.sci.admit/value evaluation)))
     (is (= (bootstrap/help-text)
            (:seon.cluster.eval/output evaluation)))))
+
+(deftest first-agent-supervision-is-one-self-erasing-system-run
+  (support/with-database
+    (fn [connection]
+      (seed-plan-cluster! connection "supervision")
+      (db/transact!
+       connection
+       (into (cluster.agent/creation-tx
+              {:seon.cluster.agent/id "root"
+               :seon.cluster/name "supervision"
+               :seon.ns/name 'my.agents.root})
+             (cluster.agent/creation-tx
+              {:seon.cluster.agent/id "worker"
+               :seon.cluster/name "supervision"
+               :seon.ns/name 'my.agents.worker})))
+      (let [tx (bootstrap/supervision-tx
+                @connection cluster/boot-process-identity
+                (java.util.Date.) "worker")]
+        (is (seq tx))
+        (db/transact! connection tx)
+        (let [rows
+              (db/q
+               {:query
+                '[:find ?ordinal ?author ?source
+                  :in $ ?run-id
+                  :where
+                  [?run :seon.cluster.run/id ?run-id]
+                  [?form :seon.cluster.run.form/run ?run]
+                  [?form :seon.cluster.run.form/ordinal ?ordinal]
+                  [?form :seon.cluster.run.form/author ?author]
+                  [?form :seon.cluster.run.form/source ?source]]
+                :args [@connection (bootstrap/supervision-run-id)]
+                :order-by '[?ordinal :asc]})]
+          (is (= 2 (count rows)))
+          (is (every? #(= :system (second %)) rows))
+          (is (str/includes? (nth (first rows) 2)
+                             ":seon.cluster.eval/run"))
+          (is (str/includes? (nth (second rows) 2)
+                             "(my.message/send \"worker\""))
+          (is (str/includes? (nth (second rows) 2) "(run/complete"))
+          (is (empty?
+               (bootstrap/supervision-tx
+                @connection cluster/boot-process-identity
+                (java.util.Date.) "worker"))))))))

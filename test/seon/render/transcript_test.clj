@@ -310,6 +310,7 @@
 (defn- seed-pinned-bootstrap-history!
   [connection]
   (let [bootstrap-run-id (bootstrap/run-id agent-id)
+        bootstrap-count (count (bootstrap/packaged-forms))
         bootstrap-receipts
         (mapcat
          (fn [ordinal]
@@ -325,7 +326,7 @@
                :seon.cluster.eval/ordinal ordinal
                :seon.cluster.eval/at (at 0)
                :seon.cluster.eval/result-edn (pr-str ordinal)}]))
-         (range 13))
+         (range bootstrap-count))
         messages
         (concat
          (map (fn [index]
@@ -348,7 +349,12 @@
      (into [{:seon.cluster.agent/id agent-id}
             {:seon.cluster.run/id bootstrap-run-id
              :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-             :seon.cluster.run/opened-at (at 0)}]
+             :seon.cluster.run/opened-at (at 0)}
+            {:seon.cluster.message/id (bootstrap/task-message-id agent-id)
+             :seon.cluster.message/to
+             [:seon.cluster.agent/id agent-id]
+             :seon.cluster.message/content (bootstrap/task-message)
+             :seon.cluster.message/at (at 0)}]
            cat
            [bootstrap-receipts messages]))))
 
@@ -364,20 +370,31 @@
             html (hiccup/->string html-value)
             html-rows (html-entries html-value)
             bootstrap-run-id (bootstrap/run-id agent-id)
-            pinned-ids (mapv #(pr-str [bootstrap-run-id %]) (range 13))
+            bootstrap-count (count (bootstrap/packaged-forms))
+            pinned-ids
+            (mapv #(pr-str [bootstrap-run-id %]) (range bootstrap-count))
+            bootstrap-task-id (bootstrap/task-message-id agent-id)
             newest-ids (mapv #(str "newest-" %) (range 6))
             visible-ids (mapv :id html-rows)
             ai-positions
             (mapv #(.indexOf ai (str "user=> (identity " % ")\n" %))
-                  (range 13))
-            pinned-end (.indexOf ai "user=> (identity 12)\n12")
+                  (range bootstrap-count))
+            task-position
+            (.indexOf ai (str "(my.message/read \"" bootstrap-task-id "\")"))
+            pinned-end
+            (.indexOf ai (str "user=> (identity " (dec bootstrap-count)
+                              ")\n" (dec bootstrap-count)))
             marker-start (.indexOf ai "middle transcript entries elided")
             newest-start (.indexOf ai "newest history 0")]
         (is (pos? (html-elided html-value)))
-        (is (= pinned-ids (subvec visible-ids 0 13)))
+        (is (= (into [(first pinned-ids) bootstrap-task-id]
+                     (rest pinned-ids))
+               (subvec visible-ids 0 (inc bootstrap-count))))
         (is (every? #(<= 0 %) ai-positions))
         (is (apply < ai-positions))
-        (is (every? #(= :full (:detail %)) (take 13 html-rows)))
+        (is (< (first ai-positions) task-position (second ai-positions)))
+        (is (every? #(= :full (:detail %))
+                    (take (inc bootstrap-count) html-rows)))
         (is (= newest-ids (subvec visible-ids (- (count visible-ids) 6))))
         (is (< pinned-end marker-start newest-start))
         (is (str/includes? ai "middle transcript entries elided"))

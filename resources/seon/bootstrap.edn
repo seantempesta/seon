@@ -34,41 +34,37 @@ nothing is retried.
 "}
  {:seon.cluster.run.form/source "(in-ns '{{seon.ns/name}})"
   :seon.bootstrap.plan.form/namespace-source :user}
- {:seon.cluster.run.form/source "(dir my.run)"
+ {:seon.cluster.run.form/source
+  "(require '[my.run :as run] '[my.message :as message] '[seon.db :as db] 'seon.bootstrap)"
   :seon.bootstrap.plan.form/namespace-source :agent}
- {:seon.cluster.run.form/source "(doc my.run/complete)"
+ {:seon.cluster.run.form/source
+  "(db/q '[:find (pull ?namespace [*]) . :in $ ?name :where [?namespace :seon.ns/name ?name]] '{{seon.ns/name}})"
+  :seon.bootstrap.plan.form/namespace-source :agent}
+ {:seon.cluster.run.form/source "(dir my.run)"
   :seon.bootstrap.plan.form/namespace-source :agent}
  {:seon.cluster.run.form/source "(dir my.message)"
   :seon.bootstrap.plan.form/namespace-source :agent}
- {:seon.cluster.run.form/source
-  "(seon.db/q '[:find (count ?f) . :where [?f :seon.fn/sym _]])"
+ {:seon.cluster.run.form/source "(dir seon.db)"
   :seon.bootstrap.plan.form/namespace-source :agent}
- {:seon.cluster.run.form/source
-  "(seon.db/q '[:find ?sym :where [?s :seon.schema/key :my.run/result] [?a :seon.fn.arity/input-refs ?s] [?f :seon.fn/arities ?a] [?f :seon.fn/sym ?sym]])"
-  :seon.bootstrap.plan.form/namespace-source :agent}
- {:seon.cluster.run.form/source
-  "(defn largest
-  \"The row with the largest :amount.\"
-  {:malli/schema [:=> [:cat [:sequential :any]]
-                  [:map [:label :string] [:amount :int]]]}
-  [rows]
-  (last (sort-by :amount rows)))"
+ {:seon.cluster.run.form/source "(dir seon.bootstrap)"
   :seon.bootstrap.plan.form/namespace-source :agent}
  {:seon.cluster.run.form/source
   "(defn largest
-  \"The row with the largest :amount; {} when there are none.\"
-  {:malli/schema [:=> [:cat [:sequential [:map [:label :string] [:amount :int]]]]
-                  [:map [:label {:optional true} :string] [:amount {:optional true} :int]]]}
+  \"Return the row with the largest example amount; {} when rows is empty.\"
+  {:malli/schema [:=> [:cat [:sequential [:map [:example/label :string]
+                                                [:example/amount :int]]]]
+                  [:map [:example/label {:optional true} :string]
+                        [:example/amount {:optional true} :int]]]}
   [rows]
-  (or (last (sort-by :amount rows)) {}))"
+  (or (last (sort-by :example/amount rows)) {}))"
   :seon.bootstrap.plan.form/namespace-source :agent}
  {:seon.cluster.run.form/source
-  "(largest [{:label \"a\" :amount 3} {:label \"b\" :amount 9}])"
-  :seon.bootstrap.plan.form/namespace-source :agent}
- {:seon.cluster.run.form/source "(largest)"
-  :seon.bootstrap.plan.form/namespace-source :agent}
- {:seon.cluster.run.form/source "(largest [])"
+  "(largest [{:example/label \"a\" :example/amount 3}
+          {:example/label \"b\" :example/amount 9}])"
   :seon.bootstrap.plan.form/namespace-source :agent}
  {:seon.cluster.run.form/source
-  "(seon.db/q '[:find ?spec . :in $ ?sym :where [?f :seon.fn/sym ?sym] [?f :seon.fn/spec ?spec]] \"{{seon.ns/name}}/largest\")"
+  "(db/q '[:find ?spec . :in $ ?sym :where [?function :seon.fn/sym ?sym] [?function :seon.fn/spec ?spec]] \"{{seon.ns/name}}/largest\")"
+  :seon.bootstrap.plan.form/namespace-source :agent}
+ {:seon.cluster.run.form/source
+  "(run/complete \"Built largest: a contracted function returning the row with the greatest :example/amount, or {} for empty input; verified by a real call and its stored :seon.fn/spec.\")"
   :seon.bootstrap.plan.form/namespace-source :agent}]

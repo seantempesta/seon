@@ -1,5 +1,9 @@
 (ns my.message
-  "Return message values for the run loop to deliver to other agents."
+  "The inter-agent message protocol.
+
+  A message is a durable addressed fact. Return `send` values from a run form
+  when another agent needs information or work; the run loop records and
+  delivers them through the ordinary message path."
   (:refer-clojure :exclude [send])
   (:require [clojure.string :as str]
             [seon.schema.edn :as schema.edn]))
@@ -46,7 +50,9 @@
 
   Takes the recipient id, message text, and optional identity of the related
   fact. Returns a message value for the run loop to deliver, or a flat error.
-  Use it as a form result; return a vector to send several messages."
+  Use `send` when another agent needs a question, an answer, or a bounded
+  assignment; use it as a form result and return a vector to send several
+  messages."
   {:malli/schema
    [:function
     [:=> [:cat :my.message/to :my.message/content]

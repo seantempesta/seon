@@ -6,9 +6,14 @@
   shapes validate, that they are the ONLY two, and that a bad argument
   comes back as a value an agent can read rather than a throw it
   cannot."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [my.run :as run]
-            [seon.schema]))
+            [seon.config :as config]
+            [seon.db :as db]
+            [seon.render :as render]
+            [seon.schema]
+            [seon.test-support :as support]))
 
 (deftest a-disposition-is-an-ordinary-value
   (testing "wait carries its reason"
@@ -41,8 +46,36 @@
     (is (string? (:seon.error/message (run/complete wrong))))
     (is (string? (:seon.error/message (run/wait wrong))))))
 
-(deftest the-surface-is-exactly-two-functions
-  ;; the ruling is a countable fact: no start!, no pause/resume/terminate
-  ;; until an agent-lifecycle entity exists
-  (is (= #{'wait 'complete}
-         (set (keys (ns-publics 'my.run))))))
+(deftest the-lifecycle-surface-has-two-actions-and-its-own-presentation
+  (is (= #{'wait 'complete 'render-namespace-ai}
+         (set (keys (ns-publics 'my.run)))))
+  (is (str/includes? (:doc (meta (the-ns 'my.run)))
+                     "Every run ends by calling `complete` or `wait`"))
+  (is (str/includes? (:doc (meta #'run/complete)) "Use `complete` when"))
+  (is (str/includes? (:doc (meta #'run/wait)) "Use `wait` when"))
+  (let [rendered
+        (run/render-namespace-ai
+         {:seon.ns/name 'my.run
+          :seon.ns/doc "Every run ends with a disposition."})]
+    (is (< (.indexOf rendered "complete") (.indexOf rendered "wait")))))
+
+(deftest my-run-namespace-selects-its-declared-protocol-renderer
+  (support/with-database
+    (fn [connection]
+      (let [database @connection
+            ctx (support/fork-cluster-ctx connection)
+            namespace-entity
+            (db/pull database '[*] [:seon.ns/name 'my.run])
+            selected
+            (#'render/producer
+             {:seon.db/db database
+              :seon.sci.eval/ctx ctx
+              :seon.render/namespace 'my.run
+              :seon.render/value namespace-entity
+              :seon.render/output :seon.render/ai
+              :seon.sci.admit/caps
+              (config/result-caps (config/defaults))
+              :seon.sci.eval/time-limit-ms 5000
+              :seon.config/on-core-error :record}
+             :seon.render/ai :seon.render/ai)]
+        (is (= 'my.run/render-namespace-ai selected))))))

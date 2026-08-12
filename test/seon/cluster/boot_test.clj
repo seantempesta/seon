@@ -1164,7 +1164,7 @@
                     :seon.boot.phase/web
                     :seon.boot.phase/ready]
                    @phases)))
-          (testing "bootstrap keeps teaching refusals in the agent's session"
+          (testing "bootstrap completes one successful worked episode"
             (let [connection (:seon.boot/cluster-connection instance)
                   run-id (bootstrap/run-id "root")
                   _ (await-bootstrap! connection "root")
@@ -1179,23 +1179,19 @@
                     :seon.render.transcript/token-budget 100000
                     :seon.sci.admit/caps
                     (config/result-caps (config/defaults))})
-                  refusal-index
-                  (.indexOf session "uses :any in an agent-authored contract")
-                  repair-index
-                  (.indexOf session
-                            "The row with the largest :amount; {} when there are none.")]
-              (is (= 13
+                  build-index (.indexOf session "(defn largest")
+                  verify-index (.indexOf session ":seon.fn/spec")
+                  complete-index (.indexOf session "(run/complete")]
+              (is (= (count (bootstrap/packaged-forms))
                      (db/q '[:find (count ?receipt) .
                              :in $ ?run-id
                              :where
                              [?run :seon.cluster.run/id ?run-id]
                              [?receipt :seon.cluster.eval/run ?run]]
                            database run-id))
-                  "every form settles, including both deliberate refusals")
-              (is (<= 0 refusal-index)
-                  "the agent's session retains the teaching refusal")
-              (is (< refusal-index repair-index)
-                  "the repair follows the refusal in the same session")
+                  "every successful form settles with a real receipt")
+              (is (< build-index verify-index complete-index))
+              (is (not (str/includes? session "uses :any")))
               (is (empty?
                    (db/q '[:find ?error
                            :in $ ?run-id

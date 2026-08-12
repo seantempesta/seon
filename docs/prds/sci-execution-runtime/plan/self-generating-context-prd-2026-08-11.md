@@ -251,6 +251,14 @@ the WORKED CONTRACTED-DEFN DEMONSTRATION. Recommendation to the owner: rule
 HALF's shape as the V1 minimum; the ablation table lives in
 [the plan](../research/minimum-context-ablation-plan-2026-08-11.md).
 
+Implementation evidence (2026-08-12): the shipped bootstrap has been replaced
+by one real-message-triggered, system-authored episode with 12 successful
+forms and a terminal `my.run/complete`; the former deliberate teaching
+failures are absent. The final rendered-history token estimate and focused
+drive-free proof remain unrecorded because test-base publication stopped at
+the foreign unresolved `clojure.walk` reference in
+`test/seon/schema_test.clj:26`; no model call was made.
+
 ## Morning rulings 2026-08-12 (owner, second round)
 
 22. **The opening history is one complete episode** (gap-1 closure): help ->
@@ -279,6 +287,15 @@ HALF's shape as the V1 minimum; the ablation table lives in
     glimpse of current work — and the context must TEACH root to query its
     agents' histories or simply message them when an output does not explain
     itself (attention is a taught vocabulary, never a dashboard mechanism).
+    **Implementation note (2026-08-12):** ruling 11 makes a creation-time read
+    of a nonexistent child unwritable, so root opens with plain HALF. The
+    existing first-agent arrival/armer path waits for that agent's bootstrap
+    episode to settle, then opens one ordinary system-authored root run: one
+    database read of the agent's two most recent form/value receipts and one
+    `my.message/send` asking what it is doing, with the latter also completing
+    the run. Each form self-erases independently when root's settled history
+    already proves the corresponding read or sent message; the deterministic
+    run identity prevents reinjection.
 20. **Stable grid + freshness highlight** for tile arrangement; newest-first
     ordering lives only inside an agent's own column.
 21. **Preview depth: newest block + recent messages** per attached agent in

@@ -102,4 +102,8 @@
   ;; Countable, like the disposition ruling: fan-out is the vector, so
   ;; there is no send-many or decline-many, and delivery is the
   ;; driver's, so neither function has a `!`.
-  (is (= #{'decline 'send} (set (keys (ns-publics 'my.message))))))
+  (is (= #{'decline 'send} (set (keys (ns-publics 'my.message)))))
+  (is (.contains ^String (:doc (meta (the-ns 'my.message)))
+                 "inter-agent message protocol"))
+  (is (.contains ^String (:doc (meta #'message/send))
+                 "Use `send` when")))

@@ -68,6 +68,7 @@
             [clojure.core.async.flow :as flow]
             [datahike.api :as d]
             [seon.ai :as ai]
+            [seon.bootstrap :as bootstrap]
             [seon.cluster.loop :as cluster.loop]
             [seon.cluster.work :as work]
             [seon.config :as config]
@@ -658,13 +659,63 @@
      :else
      (let [handle (:seon.cluster.loop/cluster state)
            routing (:seon.cluster.agent/routing state)
-           db @(:seon.db/connection handle)
+           connection (:seon.db/connection handle)
+           db @connection
            agents (db/q '[:find [?id ...]
                          :where [_ :seon.cluster.agent/id ?id]]
                        db)
-           unarmed (remove #(contains? (::armed @routing) %) agents)]
+           unarmed (remove #(contains? (::armed @routing) %) agents)
+           non-root-agents (remove #{"root"} agents)
+           first-agent (when (= 1 (count non-root-agents))
+                         (first non-root-agents))
+           arrived-first? (and first-agent (some #{first-agent} unarmed))]
        (doseq [agent-id (sort unarmed)]
          (arm! {:seon.cluster.loop/cluster handle
                 :seon.cluster.agent/id agent-id
                 :seon.cluster.agent/routing routing}))
+       (when arrived-first?
+         (let [ready (promise)
+               listener-key (random-uuid)
+               ready-db
+               (fn [database]
+                 (let [worker-closed?
+                       (some?
+                        (db/q '[:find ?closed .
+                                :in $ ?run-id
+                                :where
+                                [?run :seon.cluster.run/id ?run-id]
+                                [?run :seon.cluster.run/closed-at ?closed]]
+                              database (bootstrap/run-id first-agent)))
+                       root-idle?
+                       (nil?
+                        (db/q '[:find ?run .
+                                :where
+                                [?root :seon.cluster.agent/id "root"]
+                                [?root :seon.cluster.agent/run ?run]]
+                              database))]
+                   (when (and worker-closed? root-idle?)
+                     (deliver ready database))))]
+           (d/listen connection listener-key
+                     #(ready-db (:db-after %)))
+           (try
+             (ready-db @connection)
+             (let [database @ready
+                   supervision-tx
+                   (bootstrap/supervision-tx
+                    database
+                    (:seon.cluster.run/process handle)
+                    (Date.)
+                    first-agent)]
+               (when (seq supervision-tx)
+                 (let [result (db/transact! connection supervision-tx)]
+                   (when (:seon.error/kind result)
+                     (throw
+                      (ex-info
+                       "Root's first-agent supervision run did not commit."
+                       {:seon.error/kind ::supervision-not-committed
+                        :seon.error/data result}))))
+                 (when-let [root (armed routing "root")]
+                   (async/offer! (:seon.cluster.wake/channel root) ::wake))))
+             (finally
+               (d/unlisten connection listener-key)))))
        [state nil]))))

@@ -4,6 +4,11 @@
           [:my.run/result :my.run/result]],
          :disposition [:enum :wait :completed],
          :note [:string {:min 1}],
+         :namespace-unit
+         [:map
+          [:seon.ns/name [:= my.run]]
+          [:seon.db/db {:optional true} :seon.db/database-value]
+          [:seon.ns/doc {:optional true} :seon.ns/doc]],
          :result [:string {:min 1}],
          :value [:or :my.run/wait :my.run/completed],
          :wait

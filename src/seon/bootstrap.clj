@@ -135,9 +135,143 @@
   [agent-id]
   (str "bootstrap:" agent-id))
 
+(defn task-message-id
+  "The deterministic identity of one agent's real bootstrap task message."
+  {:malli/schema [:=> [:cat :seon.cluster.agent/id]
+                  :seon.cluster.message/id]}
+  [agent-id]
+  (str "bootstrap-task:" agent-id))
+
+(defn task-message
+  "The small real assignment that the shipped bootstrap episode completes."
+  {:malli/schema [:=> [:cat] :seon.cluster.message/content]}
+  []
+  (str "Define a durable contracted function named largest that returns the "
+       "row with the greatest :example/amount, or {} for empty input. Call "
+       "it once, query its stored :seon.fn/spec, then complete with a short "
+       "reply naming what you built and its contract."))
+
 (defn- digest-value
   [value]
   (schema/sha-256 [(.getBytes (pr-str value) "UTF-8")]))
+
+(defn supervision-run-id
+  "The deterministic identity of root's first-agent supervision run."
+  {:malli/schema [:=> [:cat] :seon.cluster.run/id]}
+  []
+  "bootstrap-supervision:root")
+
+(defn- settled-form-sources
+  [database agent-id]
+  (db/q '[:find [?source ...]
+          :in $ ?agent-id
+          :where
+          [?agent :seon.cluster.agent/id ?agent-id]
+          [?run :seon.cluster.run/agent ?agent]
+          [?form :seon.cluster.run.form/run ?run]
+          [?form :seon.cluster.run.form/ordinal ?ordinal]
+          [?form :seon.cluster.run.form/source ?source]
+          [?receipt :seon.cluster.eval/run ?run]
+          [?receipt :seon.cluster.eval/ordinal ?ordinal]]
+        database agent-id))
+
+(defn- calls-symbol?
+  [source called]
+  (try
+    (boolean
+     (some #{called}
+           (tree-seq coll? seq (edn/read-string source))))
+    (catch Throwable _
+      false)))
+
+(defn- contains-history-query?
+  [source]
+  (try
+    (let [elements (set (tree-seq coll? seq (edn/read-string source)))]
+      (and (contains? elements :seon.cluster.eval/run)
+           (contains? elements :seon.cluster.run.form/run)))
+    (catch Throwable _
+      false)))
+
+(defn- root-read-agent-history?
+  [database]
+  (boolean
+   (some #(or (calls-symbol? % 'seon.render.transcript/history-entries)
+              (contains-history-query? %))
+         (settled-form-sources database "root"))))
+
+(defn- root-messaged-agent?
+  [database]
+  (some?
+   (db/q '[:find ?message .
+           :where
+           [?root :seon.cluster.agent/id "root"]
+           [?message :seon.cluster.message/from ?root]]
+         database)))
+
+(defn supervision-tx
+  "Open root's self-erasing two-form lesson when its first agent arrives.
+
+  Each action is omitted when root's durable history already proves it. The
+  returned forms use the ordinary system-run transaction path and therefore
+  acquire ordinary execution receipts."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.run/process
+                       :seon.cluster.run/opened-at
+                       :seon.cluster.agent/id]
+                  :seon.store/transaction-data]}
+  [database process opened-at agent-id]
+  (let [run-id (supervision-run-id)
+        already-open? (some? (db/pull database [:db/id]
+                                      [:seon.cluster.run/id run-id]))
+        read? (not (root-read-agent-history? database))
+        send? (not (root-messaged-agent? database))
+        read-expression
+        (str "(db/q {:query '[:find ?at ?source ?result "
+             ":in $ ?agent-id :where "
+             "[?agent :seon.cluster.agent/id ?agent-id] "
+             "[?run :seon.cluster.run/agent ?agent] "
+             "[?form :seon.cluster.run.form/run ?run] "
+             "[?form :seon.cluster.run.form/ordinal ?ordinal] "
+             "[?form :seon.cluster.run.form/source ?source] "
+             "[?receipt :seon.cluster.eval/run ?run] "
+             "[?receipt :seon.cluster.eval/ordinal ?ordinal] "
+             "[?receipt :seon.cluster.eval/at ?at] "
+             "[?receipt :seon.cluster.eval/result-edn ?result]] "
+             ":args [(db/db) " (pr-str agent-id) "] "
+             ":order-by '[?at :desc] :limit 2})")
+        read-source
+        (if send?
+          read-expression
+          (str "(let [history " read-expression "] "
+               "(assoc (run/complete \"Read " agent-id
+               "'s recent history.\") :my.run/supervision history))"))
+        send-expression
+        (str "(my.message/send " (pr-str agent-id)
+             " \"What are you doing?\")")
+        send-source
+        (str "(merge " send-expression
+             " (run/complete \"Read " agent-id
+             "'s recent history and asked what it is doing.\"))")
+        sources
+        (cond-> []
+          read?
+          (conj {:seon.cluster.run.form/source read-source
+                 :seon.ns/name 'my.agents.root})
+          send?
+          (conj {:seon.cluster.run.form/source send-source
+                 :seon.ns/name 'my.agents.root}))]
+    (if (or already-open? (empty? sources))
+      []
+      (run/system-run-tx
+       database
+       {:seon.cluster.agent/id "root"
+        :seon.cluster.run/id run-id
+        :seon.cluster.run/process process
+        :seon.cluster.run/opened-at opened-at
+        :seon.cluster.run/starting-ns [:seon.ns/name 'my.agents.root]
+        :seon.cluster.run/plan-digest (digest-value sources)
+        :seon.cluster.run/sources sources}))))
 
 (defn population-tx
   "Install the shipped bootstrap plan once on a source database value."
@@ -274,6 +408,7 @@
     process :seon.cluster.run/process
     opened-at :seon.cluster.run/opened-at}]
   (let [id (run-id agent-id)
+        message-id (task-message-id agent-id)
         sources (ordered-sources db cluster-name namespace-name)
         namespace-row
         {:seon.ns/name namespace-name
@@ -290,14 +425,22 @@
            :seon.ns.refer/target-name 'dir}
           {:seon.ns.refer/local 'doc
            :seon.ns.refer/target-ns 'seon.bootstrap
-           :seon.ns.refer/target-name 'doc}]}]
-    (into [namespace-row]
+           :seon.ns.refer/target-name 'doc}]}
+        message-row
+        {:seon.cluster.message/id message-id
+         :seon.cluster.message/ordinal 0
+         :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+         :seon.cluster.message/content (task-message)
+         :seon.cluster.message/at opened-at}]
+    (into [namespace-row message-row]
           (run/system-run-tx
            db
            {:seon.cluster.agent/id agent-id
             :seon.cluster.run/id id
             :seon.cluster.run/process process
             :seon.cluster.run/opened-at opened-at
+            :seon.cluster.run/trigger
+            [:seon.cluster.message/id message-id]
             :seon.cluster.run/starting-ns [:seon.ns/name namespace-name]
             :seon.cluster.run/plan-digest (plan-digest db cluster-name)
             :seon.cluster.run/sources sources}))))

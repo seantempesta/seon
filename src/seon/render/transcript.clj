@@ -369,6 +369,9 @@
       ::about (second (get identities about-eid))
       ::about-ref? (some? about-eid)
       ::reason (:my.message/reason message)}
+     (when (= (bootstrap/task-message-id agent-id)
+              (:seon.cluster.message/id message))
+       {::bootstrap-trigger? true})
      {::custody
       (context/message-custody database run-id agent-id (:db/id message))}
      (get orders (:db/id message)))))
@@ -442,24 +445,32 @@
 (defn- entry-order
   [entry]
   (let [at (.getTime ^java.util.Date (::at entry))]
-    (case (::kind entry)
-      :message [at 0
-                (::transaction entry)
+    (cond
+      (::bootstrap-trigger? entry)
+      [0 2 nil nil (::id entry)]
+
+      (and (::pinned? entry) (= :eval (::kind entry)))
+      [0 (inc (* 2 (::ordinal entry))) nil nil (::id entry)]
+
+      :else
+      (case (::kind entry)
+        :message [1 at 0
+                  (::transaction entry)
+                  (::ordinal entry)
+                  (get-in entry [::entity :db/id])]
+        :attempt [1 at 1 nil nil (::id entry)]
+        :input [1 at 2
+                (.getTime ^java.util.Date (::run-opened-at entry))
                 (::ordinal entry)
-                (get-in entry [::entity :db/id])]
-      :attempt [at 1 nil nil (::id entry)]
-      :input [at 2
+                (::id entry)]
+        :eval [1 at 3
+               (.getTime ^java.util.Date (::run-opened-at entry))
+               (::ordinal entry)
+               (::id entry)]
+        :run [1 at 4
               (.getTime ^java.util.Date (::run-opened-at entry))
-              (::ordinal entry)
-              (::id entry)]
-      :eval [at 3
-             (.getTime ^java.util.Date (::run-opened-at entry))
-             (::ordinal entry)
-             (::id entry)]
-      :run [at 4
-            (.getTime ^java.util.Date (::run-opened-at entry))
-            nil
-            (::id entry)])))
+              nil
+              (::id entry)]))))
 
 (defn- entry-root
   "The durable identity every value this entry renders is rooted at.
