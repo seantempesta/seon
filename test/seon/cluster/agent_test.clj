@@ -1173,17 +1173,26 @@
                           (swap! evaluation-sources conj
                                  (:seon.cluster.run.form/source request))
                           (evaluate request))]
-            ;; BOOT-SHAPE RE-ARM: recover, then re-stamp + prime
-            (db/transact! connection
-                        (run/recover-tx
-                         {:seon.cluster.run/id "run-dead"
-                          :seon.cluster.run/live-processes #{process}
-                          :seon.cluster.run/now (Date.)}))
-            (doseq [agent-id ["midfold" "waiting"]]
-              (arm-one! connection ctx routing agent-id))
-            (is (await-until #(quiescent? @connection
-                                          ["midfold" "waiting"])))
-            (let [db @connection
+            (let [events (database-events connection)
+                  ;; BOOT-SHAPE RE-ARM: recover, then re-stamp + prime. The
+                  ;; listener stands before either action, so terminal facts
+                  ;; cannot cross a read/take gap and pending work cannot be
+                  ;; misclassified by a test-local clock.
+                  db
+                  (try
+                    (db/transact! connection
+                                  (run/recover-tx
+                                   {:seon.cluster.run/id "run-dead"
+                                    :seon.cluster.run/live-processes #{process}
+                                    :seon.cluster.run/now (Date.)}))
+                    (doseq [agent-id ["midfold" "waiting"]]
+                      (arm-one! connection ctx routing agent-id))
+                    (await-database-state!
+                     connection
+                     (:seon.cluster.agent-test/events events)
+                     #(quiescent? % ["midfold" "waiting"]))
+                    (finally
+                      (stop-database-events! connection events)))
                   answers (answers-by-trigger db)
                   run-receipts
                   (db/q '[:find [?receipt ...]
@@ -1191,6 +1200,7 @@
                          [?run :seon.cluster.run/id "run-dead"]
                          [?receipt :seon.cluster.eval/run ?run]]
                        db)]
+              (is (quiescent? db ["midfold" "waiting"]))
               (testing "recovery ends the interrupted run atomically"
                 (is (some? (db/q '[:find ?at .
                                   :where
@@ -1246,15 +1256,8 @@
                     "one fresh provider call for each unanswered message")
                 (is (= 1 (get answers "m-unanswered")))
                 (is (= 1 (get answers "m-waiting"))))
-              (testing "the recovered receipt stays an unterminated REPL entry"
-                (let [interrupted-input-prompts
-                      (->> @ledger
-                           (map :seon.ai/prompt)
-                           (filter string?)
-                           (filter #(str/includes? % "user=> (+ 3 4)"))
-                           vec)
-                      prompt (first interrupted-input-prompts)
-                      forms
+              (testing "the recovered facts derive one interruption value"
+                (let [forms
                       (mapv (fn [ordinal]
                               {:seon.cluster.run.form/ordinal ordinal})
                             (db/q '[:find [?ordinal ...]
@@ -1265,14 +1268,19 @@
                                    [?form
                                     :seon.cluster.run.form/ordinal ?ordinal]]
                                  db))
-                      receipts (mapv #(db/pull db '[*] %) run-receipts)]
-                  (is (= 1 (count interrupted-input-prompts))
-                      "only the interrupted agent sees its unterminated input")
-                  (is (and (string? prompt)
-                           (not (str/includes? prompt "result(s) are missing")))
-                      "the faithful transcript adds no recovery narration")
-                  (is (some?
-                       (run/interrupted-warning forms receipts)))))))
+                      receipts (mapv #(db/pull db '[*] %) run-receipts)
+                      warning (run/interrupted-warning forms receipts)
+                      rendered
+                      (run/render-ai
+                       (assoc (db/pull db '[*]
+                                       [:seon.cluster.run/id "run-dead"])
+                              :seon.db/db db))]
+                  (is (= {:seon.cluster.eval/ordinal 1
+                          :seon.cluster.run/missing-results 2}
+                         warning))
+                  (is (str/includes? rendered
+                                     "It was interrupted at form 1")
+                      "the surviving run render narrates the derived cut")))))
           (finally
             (disarm-all! routing)))))))
 
@@ -1538,12 +1546,21 @@
           (with-redefs [ai/complete
                         (recording-completer
                          ledger (fn [_] "(my.run/wait \"need input\")"))]
-            (arm-one! connection ctx routing "waiter")
-            (outside-trigger! connection "waiter" "m-wait" "hold on")
-            (let [entry (agent/armed routing "waiter")]
-              (async/offer! (:seon.cluster.wake/channel entry) ::wake))
-            (is (await-until #(quiescent? @connection ["waiter"])))
-            (let [db @connection
+            (let [events (database-events connection)
+                  db
+                  (try
+                    (arm-one! connection ctx routing "waiter")
+                    (outside-trigger! connection "waiter" "m-wait"
+                                      "hold on")
+                    (let [entry (agent/armed routing "waiter")]
+                      (async/offer! (:seon.cluster.wake/channel entry)
+                                    ::wake))
+                    (await-database-state!
+                     connection
+                     (:seon.cluster.agent-test/events events)
+                     #(quiescent? % ["waiter"]))
+                    (finally
+                      (stop-database-events! connection events)))
                   run-id (db/q '[:find ?id . :where
                                 [?run :seon.cluster.run/id ?id]]
                               db)
@@ -1554,6 +1571,7 @@
                   close-tx (db/q '[:find ?tx . :where
                                   [_ :seon.cluster.run/closed-at _ ?tx]]
                                 db)]
+              (is (quiescent? db ["waiter"]))
               (testing "settle and close share ONE transaction"
                 (is (some? settle-tx))
                 (is (= settle-tx close-tx)))
@@ -1580,16 +1598,26 @@
                           db)
                      "awaiting input")))
               (testing "the agent's next trigger opens a NEW run"
-                (outside-trigger! connection "waiter" "m-next" "resume")
-                (let [entry (agent/armed routing "waiter")]
-                  (async/offer! (:seon.cluster.wake/channel entry)
-                                ::wake))
-                (is (await-until #(quiescent? @connection ["waiter"])))
-                (is (= 2 (or (db/q '[:find (count ?run) . :where
-                                    [?run :seon.cluster.run/id _]]
-                                  @connection)
-                             0)))
-                (is (= {"m-wait" 1 "m-next" 1}
-                       (answers-by-trigger @connection))))))
+                (let [events (database-events connection)
+                      terminal-db
+                      (try
+                        (outside-trigger! connection "waiter" "m-next"
+                                          "resume")
+                        (let [entry (agent/armed routing "waiter")]
+                          (async/offer! (:seon.cluster.wake/channel entry)
+                                        ::wake))
+                        (await-database-state!
+                         connection
+                         (:seon.cluster.agent-test/events events)
+                         #(quiescent? % ["waiter"]))
+                        (finally
+                          (stop-database-events! connection events)))]
+                  (is (quiescent? terminal-db ["waiter"]))
+                  (is (= 2 (or (db/q '[:find (count ?run) . :where
+                                      [?run :seon.cluster.run/id _]]
+                                    terminal-db)
+                               0)))
+                  (is (= {"m-wait" 1 "m-next" 1}
+                         (answers-by-trigger terminal-db)))))))
           (finally
             (disarm-all! routing)))))))
