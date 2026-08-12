@@ -421,3 +421,50 @@
                                   (:seon.error/kind %))
                               (errors @connection)))
               "and no overflow fact was needed on the way"))))))
+
+(deftest the-first-cluster-proc-fault-at-resume-becomes-a-fact
+  (let [name "first-cluster-fault"
+        root (str "tmp/armed-test/" name)
+        armer-step agent/armer-step
+        injected? (atom false)]
+    (test-support/delete-recursively! root)
+    (test-support/populate-published-root! root)
+    (with-redefs
+      [agent/armer-step
+       (fn
+         ([]
+          (armer-step))
+         ([args]
+          (armer-step args))
+         ([state transition]
+          (if (and (= ::flow/resume transition)
+                   (compare-and-set! injected? false true))
+            (throw
+             (ex-info "first cluster proc fault"
+                      {:seon.error/kind ::first-cluster-proc-fault}))
+            (armer-step state transition)))
+         ([state input message]
+          (armer-step state input message)))]
+      (let [instance (cluster/start! {:seon.boot/cluster-name name
+                                      :seon.boot/root root})]
+        (try
+          (let [connection (:seon.boot/cluster-connection instance)
+                fact
+                (await-fact
+                 connection
+                 (fn [database]
+                   (first
+                    (filter
+                     #(= ::first-cluster-proc-fault
+                         (:seon.error/kind %))
+                     (errors database)))))]
+            (is (true? @injected?)
+                "the fault was injected at the first resume transition")
+            (is (= ::first-cluster-proc-fault (:seon.error/kind fact)))
+            (is (= :seon.cluster.agent/armer (:seon.error/proc fact)))
+            (is (= (:seon.cluster.run/process
+                    (:seon.cluster.loop/cluster instance))
+                   (:seon.error/process fact))
+                "the first fault is durable with cluster provenance"))
+          (finally
+            (cluster/stop! instance)))))))

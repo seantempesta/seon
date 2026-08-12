@@ -2230,7 +2230,6 @@
         graph (flow.core/create-flow
                (cluster-graph-definition handle routing view))
         started (flow.core/start graph)
-        _ (flow.core/resume graph)
         fanout (flow/start-error-fanout!
                 {:seon.env/environment (env/of handle)
                  :seon.flow/graph graph
@@ -2259,7 +2258,11 @@
                    ;; this only for the first occurrence of a signature. The
                    ;; same callback reports a refused durable write once,
                    ;; including in record mode, without a second trace path.
-                   (emit-core-fault! handle reported))})]
+                   (emit-core-fault! handle reported))})
+        ;; Flow starts every proc paused. Install every report/error tap before
+        ;; resume can run a transform or transition that emits into the source
+        ;; channels; core.async mults drop values received with no taps.
+        _ (flow.core/resume graph)]
     ;; the fault channel joins the routing entry so every later arm
     ;; can tap its agent graph's errors into the ONE committer inbox
     (swap! routing assoc :seon.cluster.agent/fault-channel
