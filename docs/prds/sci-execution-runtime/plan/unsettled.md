@@ -16,6 +16,71 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+## WORKING EDGE — 2026-08-12 session wind-down
+
+This block supersedes every older `CURRENT EDGE` and session-close block
+below. A fresh orchestrator reads
+[the program plan's current dependency spine](README.md#current-dependency-spine--2026-08-12-wind-down),
+then this block, then
+[the executable evolving-session contract](evolving-session-implementation-2026-08-12.md).
+Do not restart design: the parent is ruled complete.
+
+**STATE.** W1 and W2 are landed. The evolving-session design has 50 owner
+rulings and zero open decisions. Ruling 40's test-result facts, in flight when
+this wind-down began, landed in commit `9648aed33`; the systems-sweep evidence
+landed in `ffe977307`. Neither return has passed the queued integrated gate.
+The rebirth capability probe exists in `94b387f22`, but the complete isolated
+reborn-episode proof remains pending. This is design completion, not
+implementation graduation.
+
+**Earliest unsettled contract.** Review the test-result-facts diff and run the
+queued integration gate. The lane's focused gate stopped on the foreign
+`:my.background/invalid-call-error` render-contract failure. The earlier
+keystone gate also enumerated ten reproducible foreign failures across five
+owners: test-result/schema publication, context/transcript rendering, turn
+settlement, message/concurrency, and web rendering. The first owner has now
+landed; reclassify the cluster from the new gate instead of preserving its old
+count as truth.
+
+**Integrated proof that closes it.** A green integration gate releases the
+rebirth proof and systems-sweep integration. Those proofs must show current
+facts plus empty history produce a compact valid episode, durable lessons
+close their own gaps, effectful values replay visibly old from receipts unless
+declared read-only, and the todo is the one task system. The subsequent live
+drive records the generated episode and remeasures the pull under named
+conditions. The one canonical order is in README; this block does not create
+a second sequence.
+
+**IN FLIGHT.** No evolving-session source phase is authorized as in flight.
+The former `test-results` lane has returned at `9648aed33`. Systems-sweep
+research has returned at `ffe977307`, with integration review pending. Rebirth
+proof is pending. The integration gate is ready, no longer waiting on the
+test-result commit.
+
+**Dependency-ready portfolio and next refill.** Gate review owns the critical
+path. Rebirth proof and systems-sweep integration are the ready proof work;
+the live drive follows their evidence; implementation then resumes only at
+the exact owners and exits in
+[the implementation PRD](evolving-session-implementation-2026-08-12.md#phase-ownership-and-dependency-order).
+Every refill follows
+[README's one ordering](README.md#current-dependency-spine--2026-08-12-wind-down).
+
+**Known opens.** The generated opening's real pull returned 189 members in
+**24.2 seconds**. Ruling 49 retires `my.plan` unbuilt, but the todo union of
+derived obligations and authored item facts remains an implementation phase.
+The foreign-failure cluster above must be remeasured after the test-result
+return rather than silently attributed or fixed in another owner.
+
+**PENDING THE OWNER.** None. All 50 design rulings are closed. A newly exposed
+semantic choice still follows the owner design gate, but the recorded
+implementation gaps do not reopen this design.
+
+**Final graduation gate.** The program still graduates only at
+[README's live-agent, load, and measured-speed system gate](README.md#the-final-system-gate-owner-2026-07-25-night--read-this-first).
+For a fresh session, derive the worktree and lane state before acting; review
+the two returned commits; do not touch foreign dirty paths; and start at the
+integration gate named above.
+
 **SUITE + PARALLEL RUNNER — 2026-08-10 night.** The suite went 80.5 min
 (80F/10E) → 62.1 min sequential (29F/3E) → **15:33 on the new parallel
 runner** (`be6db44da`..`c6275060c`: nine root-isolated workers, derived
