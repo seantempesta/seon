@@ -269,6 +269,16 @@ back — everywhere, for every agent, with no maintained list of forms.
     vocabulary; agent-authored intentions live as todo items under the
     survivability law.
 
+## Ruling 50 (owner, 2026-08-12 night — declared read-only effects)
+
+50. **Declared read-only effects may refresh at generation.** Capability
+    leaves gain a declared idempotent-read fact (lifted at index time like
+    :seon.workload); generation and rebirth may re-execute exactly those
+    for fresh openings. The declaration must never lie — a declared-read
+    effect observed writing is the loud class, with its falsifier.
+    Undeclared external shapes render from their last RECEIPTS with
+    staleness visible; the agent refreshes deliberately.
+
 ## The mechanism (composed from the verified reports)
 
 ### One derivation
