@@ -16,10 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (50)
+## Blocker (54)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Carry the agent-scoped environment into generated turn forks](generated-turn-fork-omits-the-agent-scoped-environment.md) | blocker | evolving-session implementation phases |
 | [Give background-result wakes a queryable run trigger](background-result-wakes-have-no-run-trigger.md) | blocker | why-awake situation work (generator lane) |
 | [Make wildcard receipt pulls accept stored read dependency plans](wildcard-receipt-pull-refuses-a-stored-dependency-plan.md) | blocker | database codec repair wave |
 | [Store the model's raw reply as a durable fact even when it parses to no forms](prose-only-model-replies-are-not-durable-facts.md) | blocker | reply-durability fix (overnight queue) |
@@ -70,11 +71,16 @@ See `README.md` for the convention.
 | [Reuse one HttpClient so concurrent provider calls stop closing mid-read](concurrent-provider-calls-fail-with-a-closed-response-body.md) | blocker | whole-system arc repair wave |
 | [Settle what arrived when a provider stream closes mid-body](a-mid-stream-provider-disconnect-discards-the-whole-turn.md) | blocker | whole-system arc repair wave |
 | [Await every worker writer before deleting its root](test-runner-cleans-a-worker-root-while-kondo-is-still-writing.md) | blocker | test runner cleanup repair wave |
+| [Supply the generated entry's required render output](generated-turn-omits-the-required-render-output.md) | blocker | generate-call-transition lane (held `loop.clj`) |
+| [Return from the generated opening's second live pull](generated-opening-live-pull-does-not-return-after-help.md) | blocker | prefix-drift bootstrap performance diagnosis (held `bootstrap.clj`) |
+| [Arm an agent created after boot](fresh-agent-created-after-boot-was-not-armed.md) | blocker | first-agent supervision transition design (held loop/run owners) |
 
-## Friction (137)
+## Friction (141)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Stop the opening walkthrough replicating its usage test per agent](opening-walkthrough-replicates-a-usage-test.md) | friction | evolving-session implementation phases |
+| [Accept the operator's own readiness result in status](operator-status-refuses-its-own-readiness-result.md) | friction | operator cleanup wave |
 | [Supply every declared render dependency in the agent-flow fixture](agent-flow-fixture-omits-render-interest.md) | friction | flow join-wedge diagnosis |
 | [Make proofs unable to pass without exercising their premise](class-proofs-pass-without-exercising-their-premise.md) | friction | class-kill queue |
 | [Prevent diagnostics from collapsing evidence into noise or absence](class-diagnostics-collapse-evidence-into-noise-or-absence.md) | friction | class-kill queue |
@@ -210,6 +216,8 @@ See `README.md` for the convention.
 | [Admit definitions after dynamically hidden namespace movement](dynamic-in-ns-cannot-persist-definition-namespace.md) | friction | per-run fork context wave |
 | [Preserve the interrupted blob staging artifact until it can be observed](interrupted-blob-staging-leaves-no-observable-artifact.md) | friction | blob staging repair wave |
 | [Reconcile the error-class catalog with declared schemas and renderers](error-class-catalog-and-renderers-disagree.md) | friction | error class contract repair |
+| [Declare the agent's plan relationship](agent-plan-has-no-declared-database-relationship.md) | friction | evolving-session PRD design gate |
+| [Generate only action-demanded opening candidates](opening-generator-pushes-undemanded-candidates.md) | friction | prefix-drift demand-first generation design (held `bootstrap.clj`) |
 
 ## Cleanup (16)
 
