@@ -24,8 +24,8 @@
    "cluster facts carrying :seon.cluster.agent/id. Call it once. Then query "
    "the program graph for your function's :seon.fn/spec and return that "
    "contract value once. Complete only after all three operations succeed; "
-   "use (my.run/complete {:function 'cluster-agent-count :count <the-count> "
-   ":contract <the-contract>})."))
+   "finish by calling my.run/complete with a plain string reply that names "
+   "the function, the count, and the contract."))
 
 (def ^:private task-entry
   {:seon.render.history/form '(my.message/read "minimum-context-task")
