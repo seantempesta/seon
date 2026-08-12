@@ -246,6 +246,19 @@ back — everywhere, for every agent, with no maintained list of forms.
     into survivable habits ("if it matters past this episode, make it a
     fact") — true mechanically, not advisory.
 
+## Ruling 48 (owner, 2026-08-12 night — rebirth-first design, universal)
+
+48. **Everything is designed to start from existing database state and
+    re-bootstrap the next agent minimally.** Not plan-specific — a
+    UNIVERSAL acceptance criterion on every shape and mechanism, ranked
+    with "important schemas declare their renders": the design question
+    for anything new is "what does this render, compactly, from current
+    facts alone at rebirth?" A design whose meaning requires replaying
+    history to reconstruct is defective by construction; the current
+    state's render IS the design's contract with the future. This
+    propagates into the data-modeling review standards and the
+    schema-review checklist alongside ruling 35's coherence check.
+
 ## The mechanism (composed from the verified reports)
 
 ### One derivation
