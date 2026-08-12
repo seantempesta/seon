@@ -10,10 +10,12 @@
             [datahike.core :as datahike]
             [malli.core :as m]
             [malli.generator :as mg]
+            [malli.instrument :as mi]
             [seon.cluster.loop :as cluster.loop]
             [seon.config :as config]
             [seon.flow :as sut]
             [seon.schema :as schema]
+            [seon.schema.datahike :as schema.datahike]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
   (:import [java.io File]
@@ -794,6 +796,56 @@
               (async/close! monitor-messages)
               (sut/stop-error-fanout! fanout)
               (stop-source-testbed! testbed))))))))
+
+(deftest an-instrumentation-fault-commits-without-an-ambient-projection
+  (let [commit-core-fault!
+        (var-get (ns-resolve 'seon.cluster 'commit-fault!))
+        resolve-var #'schema.datahike/resolve-datahike-form-in
+        resolve-filter (mi/-filter-var #{resolve-var})
+        caps {:seon.config.eval.result/max-depth 8
+              :seon.config.eval.result/max-collection 8
+              :seon.config.eval.result/max-string 256
+              :seon.config.eval.result/max-nodes 64}
+        contract-fault
+        {::flow/pid :render
+         ::flow/op :step
+         ::flow/ex
+         (ex-info
+          "seon.render.walk/root-acquisition violated its contract"
+          {:seon.error/kind :seon.instrument/contract-violated
+           :seon.error/data
+           {:seon.instrument/fn "seon.render.walk/root-acquisition"
+            :seon.instrument/arm :input
+            :seon.instrument/schema
+            ":seon.render.walk/acquisition-request"
+            :seon.instrument/args "[{:seon.render.walk/lookup :root}]"}})}]
+    (test-support/with-database
+      (fn [connection]
+        (try
+          ;; Reproduce the live fault-committer boundary: this public bridge
+          ;; is instrumented, while its Flow thread has no ambient projection.
+          (mi/clj-collect! {:ns ['seon.schema.datahike]})
+          (mi/instrument! {:filters [resolve-filter]})
+          (with-redefs [config/effective
+                        (fn [_database _cluster-name]
+                          {:seon.config.error/recurrence-limit 3
+                           :seon.config.eval.result/blob-threshold 4096})]
+            (let [[fact outcome]
+                  (commit-core-fault! connection "fault-test"
+                                      "process-instrumentation" caps
+                                      contract-fault)
+                  stored
+                  (db/pull @connection
+                           '[*]
+                           [:seon.error/id (:seon.error/id fact)])]
+              (is (= ::sut/committed outcome))
+              (is (= "seon.render.walk/root-acquisition"
+                     (:seon.instrument/fn stored)))
+              (is (= ":seon.render.walk/acquisition-request"
+                     (:seon.instrument/expected stored)))
+              (is (boolean? (:seon.error/capped? stored)))))
+          (finally
+            (mi/unstrument! {:filters [resolve-filter]})))))))
 
 (deftest core-fault-signatures-bound-durable-and-stderr-output
   (let [commit-core-fault!

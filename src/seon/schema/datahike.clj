@@ -445,9 +445,19 @@
   {:malli/schema [:=> [:cat :map :seon.store/transaction]
                   :seon.store/transaction]}
   [projection transaction]
-  (if (map? transaction)
-    (update transaction :tx-data #(encode-transaction-data-in projection %))
-    (encode-transaction-data-in projection transaction)))
+  ;; Passing the projection answers this bridge's explicit lookups. Supplying
+  ;; the same forms answers registered predicates such as `malli-form?`, which
+  ;; Malli invokes with the candidate value alone while encoding each
+  ;; attribute. The fault committer runs on a Flow thread with no ambient
+  ;; projection, so passing without supplying made valid scalar forms such as
+  ;; `:boolean` fail instrumentation before a core fault could be recorded.
+  (schema/call-with-forms
+   (:seon.schema.projection/forms projection)
+   #(if (map? transaction)
+      (update transaction :tx-data
+              (fn [transaction-data]
+                (encode-transaction-data-in projection transaction-data)))
+      (encode-transaction-data-in projection transaction))))
 
 (defn encode-transaction
   "Encode heterogeneous union slots once at the Datahike transaction seam.
