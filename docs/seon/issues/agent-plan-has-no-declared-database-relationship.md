@@ -1,0 +1,44 @@
+---
+type: issue
+status: open
+severity: high
+tags: [issue, agent, data-model, context]
+---
+
+# Agent plan has no declared database relationship
+
+## Problem
+
+The evolving-session T2 exploration requires another database user to update
+an agent's plan and for generation to derive that change and its transaction
+provenance. The current registry has no agent plan attribute or referenced plan
+shape, so that exact fact cannot be transacted or queried.
+
+## Evidence
+
+`resources/seon/schemas/seon.cluster.agent.edn` declares the agent's identity,
+namespace, run, cluster, and instruction refs, but no plan relationship. A
+registry/tree search found only `:seon.cluster.run/plan-digest`, which is the
+frozen model-reply plan and has different semantics.
+
+The exploration used the nearest existing durable relationship,
+`:seon.cluster.agent/instructions`, to falsify the control law. A root-authored
+transaction added one referenced instruction with tx metadata; the provenance
+delta correctly derived `root` and `repl`, while
+`seon.cluster.work/next-agent-work` stayed `nil` before and after. That proves
+the passive-change law, but it does not supply the missing plan fact.
+
+## Owner
+
+The forthcoming evolving-session PRD must define whether "plan" is an
+existing declared shape reached through another connection or a genuinely
+missing attribute. Schema discovery must precede adding one.
+
+## Acceptance
+
+- The intended plan meaning is named and queryable through a declared
+  attribute plus referenced shape.
+- A transaction by another database user is discoverable from the changed
+  datom's transaction metadata.
+- Changing the plan alone derives no agent work; a separate message is the
+  only model-turn wake.
