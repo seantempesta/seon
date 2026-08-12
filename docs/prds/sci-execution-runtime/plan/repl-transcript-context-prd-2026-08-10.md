@@ -11,13 +11,9 @@ tags: [prd, render, agent]
 > **SUPERSEDED (2026-08-12):** The ordering-key bands, 12-exchange bootstrap
 > candidate, HUMAN-2 injected read, and identity-hash object prints below are
 > ruled history, replaced by the generated episode in
-> [rulings 24–28](self-generating-context-prd-2026-08-11.md#rulings-24-28-owner-2026-08-12-midday--the-generated-episode)
-> through
-> [ruling 37](self-generating-context-prd-2026-08-11.md#ruling-37-owner-2026-08-12-night--the-demonstration-corrected),
-> introduction ordering under
-> [ruling 29](self-generating-context-prd-2026-08-11.md#rulings-29-31-owner-2026-08-12-afternoon--the-expansion-frame)
-> reconciled with
-> [ruling 14](self-generating-context-prd-2026-08-11.md#rulings-appended-after-w0-markup-owner-same-session),
+> [the ordered rulings 1–50](self-generating-context-prd-2026-08-11.md#owner-rulings-1-50),
+> especially generated episodes in rulings 24–37 and their introduction
+> ordering in rulings 14/29,
 > and the stable printer. The core move—history is the context, backed by the
 > storage verification in this document—stands.
 
@@ -43,7 +39,8 @@ against the live `default` cluster on 2026-08-10—see
 This PRD makes one move: **the agent's prompt IS its own REPL history, replayed
 from those stored facts.** To build the model's context we do not assemble
 prose, summaries, headers, or schema walls; we query the agent's ordered
-history—bootstrap forms, inbound messages, submitted forms, settled values—and
+history—generated opening entries, addressed-wake entries, submitted forms,
+settled values—and
 print it exactly as REPL scrollback: `namespace=> form`, then the value that
 form actually produced. The web page for the same agent is not a different
 report; it is the same ordered history printed to a second target (HTML Hiccup
@@ -57,15 +54,14 @@ The agent's history is a replay, not a reconstruction:
    printed. The only code that runs during rendering is a declared render
    producer—a pure function whose argument is the value being rendered—and
    the generic value printer beneath it (`src/seon/render.clj:238-265`).
-2. **Exactly one form is synthesized.** Every agent form is verbatim stored
-   source. The single exception is an inbound message: arrival is displayed
-   as an injected `(my.message/read "<id>")` form whose value is the stored
-   message fact—an honest, rerunnable read the system writes on the agent's
-   behalf. Bootstrap is not synthesized either: its forms execute once, for
-   real, when the agent is created, and their receipts are stored like any
-   other run's; every later prompt replays them from facts.
+2. **Gap closure generates truthful forms.** Every stored agent form remains
+   verbatim source. System-authored entries come only from generation over
+   `(pull, retained history)`: the cheapest true missing read emits, executes
+   for real, and settles through the ordinary receipt path. There is no
+   injected inbound-message form, authored bootstrap plan, or standing-form
+   roster (rulings 24 and 32).
 3. **Teaching is demonstrated retrieval.** A fresh agent's opening context is
-   its stored bootstrap history: it looks as if the agent already ran
+   its generated opening episode: it looks as if the agent already ran
    `(help)`, a `require`, a few bare `docs` calls, one successful `defn`, and
    its task-message read—each with the actual value it returned. There is no
    API wall or schema dump; anything deeper is one more `doc` or `docs` call
@@ -75,8 +71,8 @@ Everything else in this document follows from that move: one pure derivation
 (`seon.render.walk/history`) returning ordered form/value entries; two
 independent projection passes (AI text under the agent profile, HTML under the
 page profile) that must agree on entry identities but not bytes; a debug route
-whose pane is byte-equal to the next provider prompt; a `/` system view that
-is the same walk rooted at the cluster under a preview profile; and deletion
+whose pane is byte-equal to the next provider prompt; `/` as root's namespace
+page using root's ordinary gap closure over attached agents (ruling 39); and deletion
 of every mechanism this replaces (the separate history assembler, schema
 wall, comment-framed headers, per-family budgets, and fleet append).
 
@@ -613,10 +609,11 @@ reader tokens, are CSS-themed, and survive SSE; regex/client parsing is banned
 
 ## Concrete schema and API docs
 
-Bare injected `doc` and `docs` query one database projection in the accepted
+Bare `doc` and `docs` query one database projection in the accepted
 implementation home `seon.program`; qualified Vars are plumbing. Both cover
-functions, schemas, tests, and namespaces. `doc` prints one deep result then
-returns `nil`; `docs` returns `:seon.program/doc` values. Function output has
+functions, schemas, tests, and namespaces. Ruling 8 supersedes DOC-1: `doc`
+prints one deep result and returns the acquired documentation map; `docs`
+returns `:seon.program/doc` values. Function output has
 `tests-reaching`, test output `calls`, schema output its three relationship
 directions plus generated example. Schema-key `doc` uses the map arity:
 
@@ -629,7 +626,7 @@ doc-map-input :=
 [:map
  [:seon.program/identity
   [:or :qualified-symbol :qualified-keyword :seon.ns/name]]]
-output := :nil
+output := :seon.program/doc
 ```
 
 ### Current schema wall versus proposed printed representation
@@ -933,89 +930,17 @@ no-target warning class unrepresentable
 Captures remain durable forensics, never the live pane authority
 (`src/seon/context.clj:150-188`).
 
-## Design surface: cluster-root system view
+## Root namespace page and derived preview
 
-### Root and profile
-
-The ruled `/` route includes root's message bar and asks the same walk for:
-
-```clojure
-(seon.render.walk/history
- {:seon.render.walk/root [:seon.cluster/name "default"]
-  :seon.render.walk/profile :seon.render.profile/preview})
-```
-
-`:seon.cluster.agent/cluster` connects every agent to this root
-(`resources/seon/schemas/seon.cluster.agent.edn:37-46`; `src/seon/render/walk.clj:63-137,182-206`).
-For each agent, reduce admitted preview values by greatest derived `changed-at`,
-then least stable path (`src/seon/render/walk.clj:219-225,366-370,535-550`). No
-activity/latest/rank fact exists; reversing insertion order cannot change a tie.
-The walk query yields ordinary `[agent-id stable-path changed-at value]` rows;
-Hiccup is produced only after that deterministic per-agent reduce.
-
-### Root's message bar and current view
-
-`/` is the system view, not root's namespace page. Its fixed bar posts through
-`POST /agent/{id}/message` (`src/seon/render/route.clj:5-27`). Root controls,
-rather than appears inside, the activity-sorted main view. Its one open entity is:
-
-```clojure
-{:seon.render.view/id "default/root"
- :seon.render.view/root [:seon.cluster.agent/id "root"]
- :seon.render.view/subject [:seon.cluster/name "default"]}
-```
-
-`id` is identity; `root` and `subject` are refs. Cluster subject selects the
-system view; agent subject selects that agent's HTML in the same main element.
-Worked example B demonstrates `(my.view/current)`; `(my.view/show
-[:seon.cluster.agent/id "invoice"])` replaces only `subject`, then the current
-listener/render/SSE path morphs the element (`src/seon/cluster/wake.clj:163-228`;
-`src/seon/render/web.clj:596-643,673-784`). Navigation never assigns work.
-
-Preview profile proposal:
-
-```clojure
-{:seon.render.profile/id :seon.render.profile/preview, :seon.render.profile/token-budget 220,
- :seon.render.profile/max-depth 4, :seon.render.profile/max-children 12,
- :seon.render.profile/composition :multiline}
-```
-
-These existing keys yield 12 values plus an elision of 8 at 20 agents; CSS
-cannot change spend, and only the whole profile is configurable
-(`resources/seon/schemas/seon.render.profile.edn:1-18`).
-
-### Four-agent worked example
-
-Everything below is DISPLAY from one cluster-root walk; none is model input.
-At one immutable database value the owner sees:
-
-```text
-default — 4 task agents
-[Message root: Which agents are active, and what changed most recently?]
-
-invoice                                      research
-mid-turn · changed at t=536871319             active · changed at t=536871311
-Latest settled result                        Latest changed canvas
-[["inv-203" :invalid-tax-code]]              Import failure map: tax-code branch highlighted
-
-qa                                           archive
-parked · changed at t=536871280               parked · changed at t=536870901
-Completed                                    Last result
-Focused import regression passes.            {:seon.print/omitted 18,
-                                               :seon.print/elision-unit :children,
-                                               :seon.render.data/total 30,
-                                               :seon.render.data/path [12],
-                                               :seon.render.data/next-offset 12,
-                                               :seon.render.profile/id :seon.render.profile/preview,
-                                               :seon.print/requery-id
-                                               [:seon.cluster.eval/id "[\"archive-run\" 4]"]}
-```
-
-HTML renders each agent's most-recently-changed settled value under PREVIEW-1;
-in-flight tokens are not durable history. Existing multicast sends the
-delta/keyframe—no new feed—and the outside-walk `fleet-call`/table are deleted
-(`src/seon/render/web.clj:336-375,596-643,673-784,1003-1085`;
-`src/seon/oversight.clj:261-301`).
+**SUPERSEDED (2026-08-12):** The cluster-root system view, activity-sorted
+family reduction, fixed preview profile, and `my.view` navigation proposed in
+this PRD do not survive. Current route truth makes `/` root's namespace page.
+Under ruling 39, root previews another agent through root's ordinary gap
+closure over that agent: the newest block remains in membership and unshown
+messages derive from the retained shown basis. No fixed preview depth,
+activity/status family, creation-time supply-push, or second preview mechanism
+exists. The HTML page and AI context remain projections of the same retained
+entries.
 
 ## Live NESTED-2 decision probe
 
@@ -1204,40 +1129,15 @@ number is a candidate starting point, not the minimum-context answer.
 
 ## Implementation phases and lane-ready boundaries
 
-**SUPERSEDED (2026-08-12):** Bootstrap-plan, HUMAN-2, and banded-ordering work in these historical phases is replaced by the generated episode and introduction ordering under rulings 24–37.
-
-No production phase begins until the owner confirms the remaining NESTED and
-HUMAN wording plus the unresolved PROSE, DOC, MINIMUM, and PREVIEW blocks. “One
-class regression” below means one recurring test for the structural failure
-class, not one test per example.
-
-These phases supersede the ruling document's coarse skeleton: skeleton 1 maps
-to Phases 1–2, skeleton 2 to Phase 3, skeleton 3 to Phases 4–6, and skeleton 4
-to bad-output classes surviving Phase 7.
-
-| Phase | Owned files | Changes | Falsifier | One class regression per closed hole |
-|---|---|---|---|---|
-| 0. Freeze | This PRD; `docs/seon/architecture/{context,ui}.md`; one research report | Freeze example bytes, profiles, seeds, and gates. | Two reviewers reconstruct every value or find an unlabeled injection/target. | Preview spend exists only as one profile value. |
-| 1. Bound acquisition | `src/seon/render/{walk,render}.clj`; walk tests | Query bootstrap + profile-bounded recent identities; retain evidence first; elide with continuation. | Candidate query plus cold changed-basis run <1 s versus 3.168 s/3,859 pulls. | 10,000 old forms do not enlarge pulls; unrelated tx executes zero history work. |
-| 2. Producer ABI + floor | `src/seon/{render,render/value}.clj`; `src/seon/print.cljc`; `resources/seon/schemas/seon.render.edn`; 18 producer owners/tests | Add request shape; atomically convert 49 consumers, then delete flattening; add acquired candidates, sorted ambiguity, stack guard, total floor, stress harness. | Zero old consumers; message reads `:seon.render/value`; 1,000 nodes ≤20 ms/target. | Custody cannot collide with domain data; ambiguity cannot fall through; A→B→A cannot re-enter; failures stay values; elisions are requeryable/refuse. |
-| 3. History + docs | `src/seon/render/{walk,ns,agent}.clj`; delete `render/transcript.clj`; `src/seon/{program.cljc,bootstrap.clj}`; `src/seon/sci/eval.clj`; affected schemas/tests | Add `history`, bare injected `doc`/`docs`, `my.message/read`, bootstrap; delete prose/wall/headers/six-entry/family budgets; server token spans; prompt uses text target. | Fixture equals both examples byte-for-byte; HTML tokens reconstruct source. | Stored comments only; one form/receipt; unsettled/superseded rules; one docs query owner; docs errors in position; examples commit-stable; no regex/client parser. |
-| 4. Live debug | `src/seon/render/web.clj`; `resources/public/css/input.css`; web tests | Debug emits current AI text; normal route highlighted HTML; target-owned IDs; retained evidence gates wakes. | Settle with both routes: disjoint targets and debug bytes equal next provider context at one database value. | Zero no-target warnings; same entry IDs; unrelated tx emits nothing; syntax spans survive SSE. |
-| 5. System view | `src/seon/render/{walk,web,route}.clj`; `src/seon/oversight.clj`; `src/my/view.clj`; renderers/schemas/tests | `/` + root bar/current-view; cluster walk; deterministic changed selection; delete fleet append; reuse page feed. | Scrambled four-agent winner stays deterministic; `show` changes one ref/morphs `/`; 20 agents <1 s. | No stored rank/family selector/second SSE; 12 values + elision 8; root/main cannot diverge; navigation cannot assign work. |
-| 6. Minimum | Existing evaluation harness; one research report; no production files | Run MINIMUM-1 at fixed model/settings/basis; record prompts, receipts, tokens, cache, time, calls, outcomes, ablations. | Savings fail if success falls or tokens/repair turns rise. | Final bootstrap/profile is smallest passing condition; marked example remains record. |
-| 7. Integrate | Focused gates, complete checkpoint, live browser/agent drive | Integrate 1–6. | Any mismatch in bytes, printer stress, nested selection, bounded history, prompt/debug equality, syntax, package targets, ordering, or economics. | Deleted mechanisms have zero callers/declarations; unchanged basis runs zero producers. |
+**SUPERSEDED (2026-08-12):** The bootstrap-plan, HUMAN-2, banded-ordering,
+fixed-preview, and system-view phases are historical. The design is ruled
+complete through ruling 50 with zero open choices. Exact current source
+ownership, dependencies, and falsifiers live only in
+[the evolving-session implementation PRD](evolving-session-implementation-2026-08-12.md#phase-ownership-and-dependency-order).
 
 ## Owner markup checklist
 
-**SUPERSEDED (2026-08-12):** HUMAN wording and fixed opening bytes are no longer open markup surfaces; generation and the stable printer own them.
-
-The implementation brief is ready only after the owner marks:
-
-- the exact bytes of Worked examples A and B;
-- the exact debug AI-context and main-view examples;
-- the four-agent system-view example, root message bar, current-view values,
-  and candidate preview profile;
-- the NESTED visit wording and HUMAN recipient printed value;
-- the remaining verdicts in PROSE, DOC, MINIMUM, and PREVIEW;
-- the experiment success thresholds; and
-- the exact demonstrated bare `docs` outputs; its database-binding and pure
-  `seon.program` projection owners are fixed above.
+**CLOSED (2026-08-12):** Rulings 1–50 resolve or supersede every markup item.
+Generated gap closure and the stable printer own opening bytes; ruling 8 owns
+`doc`; ruling 39 owns root preview; ruling 49 retires `my.plan`; ruling 50 owns
+effect replay. This historical PRD has no remaining owner choices.
