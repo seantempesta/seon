@@ -50,4 +50,6 @@ Commit `66bf3fca3` introduced the smaller
 The regression invokes and validates acquisition with no output selector; the
 focused JVM proof passed with the fault-recording regression (2 tests, 79
 assertions, zero failures/errors). The retained live failure was pre-provider,
-so this repair makes no paid call.
+so this repair makes no paid call. Commit `d4e1ec9c6` then removed W2's next
+stale unit-field contract and the full scratch-root proof reached a captured
+non-empty AI request with zero contract-violation facts (1 test, 76 assertions).

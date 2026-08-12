@@ -67,6 +67,14 @@ predicates throughout the operation, so the instrumentation fault itself can
 be committed. Four focused owner tests passed with 83 assertions and no
 failures or errors.
 
+The first live pass through that repaired boundary exposed W2's second stale
+contract: `:seon.render.walk/changed-at` was still required on units although
+the root-pull design had deleted its EAVT scan and replaced it with read
+evidence plus membership diff. Commit `d4e1ec9c6` removes that field and its
+synthetic web zero. A scratch-root message with whole-image instrumentation
+then reached the stubbed AI boundary with a non-empty derived prompt and zero
+contract-violation facts (1 test, 76 assertions, no provider call).
+
 ## Interpretation
 
 Correctness and incremental cost after the first acquisition meet W2's stated

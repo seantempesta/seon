@@ -201,3 +201,9 @@ virtual-thread-aware dumps and heap evidence are recorded in
 This AI issue remains open only for its paid one-call provider proof and final
 changed-path gate; the missing-output and unrecordable-fault blockers are
 closed in their archived issue records.
+
+The no-paid-call acceptance proof subsequently passed at `d4e1ec9c6`: one
+scratch-root message reached a stubbed AI request with a non-empty derived
+prompt and zero contract-violation facts under whole-image instrumentation (1
+test, 76 assertions). This closes the pre-provider spine blocker. It does not
+satisfy this issue's remaining paid one-call provider evidence.
