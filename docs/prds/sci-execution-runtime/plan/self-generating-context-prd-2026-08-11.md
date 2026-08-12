@@ -339,13 +339,16 @@ the WORKED CONTRACTED-DEFN DEMONSTRATION. Recommendation to the owner: rule
 HALF's shape as the V1 minimum; the ablation table lives in
 [the plan](../research/minimum-context-ablation-plan-2026-08-11.md).
 
-Implementation evidence (2026-08-12): the shipped bootstrap has been replaced
-by one real-message-triggered, system-authored episode with 12 successful
-forms and a terminal `my.run/complete`; the former deliberate teaching
-failures are absent. The final rendered-history token estimate and focused
-drive-free proof remain unrecorded because test-base publication stopped at
-the foreign unresolved `clojure.walk` reference in
-`test/seon/schema_test.clj:26`; no model call was made.
+Implementation evidence (2026-08-12): the authored bootstrap resource and
+plan readers are deleted; generation, the declared form-output validator,
+explained-set/determinism regressions, scoped call preparation, and root's
+first-agent hook are committed. Focused integration is green: 96 tests and
+528 assertions across bootstrap, history, my.run, the run loop, and SCI eval.
+A fresh isolated, drive-free boot executes `(help)` once with a real receipt
+and makes zero model attempts, then fails loudly at the second derivation with
+`:seon.bootstrap/prefix-drift` (one form, one receipt, run still open). Thus a
+complete rendered-history token estimate is not yet claimable; the remaining
+boundary is stable subject/key selection for the post-receipt live pull.
 
 ## Morning rulings 2026-08-12 (owner, second round)
 
