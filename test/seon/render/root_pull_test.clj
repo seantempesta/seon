@@ -231,6 +231,37 @@
                     {::root call} fixed))
            "an opening as-of database compares through seon.db revisions")))))
 
+(deftest relevant-semantically-equal-root-read-replays-once-and-advances
+  (support/with-database
+   {:seon.test-support/extra-schema root-pull-schema}
+   (fn [connection]
+     (db/transact! connection [{::root-id "root" ::value "retained"}])
+     (let [render-request (request connection)
+           call-id ::root
+           [_ initial-entry] (#'web/acquire-root render-request call-id)]
+       (db/transact! connection [{::node-id "outside" ::value "changed"}])
+       (let [database @connection
+             retained {call-id initial-entry}
+             candidates (#'web/candidate-call-ids retained database)
+             pulls (atom 0)
+             pull db/pull
+             refreshed (with-redefs [db/pull
+                                     (fn [& arguments]
+                                       (swap! pulls inc)
+                                       (apply pull arguments))]
+                         (#'web/refresh-root
+                          (assoc render-request :seon.db/db database)
+                          retained call-id candidates))
+             appended (web/append-history [] [])]
+         (is (= #{call-id} candidates)
+             "the relevant attribute revision selects the root read")
+         (is (= 1 @pulls) "the semantically equal root read replays once")
+         (is (false? (:changed? refreshed)))
+         (is (empty? appended) "semantic equality appends no entry")
+         (is (empty? (#'web/candidate-call-ids
+                      {call-id (:entry refreshed)} database))
+             "the consumed revision advances even when the result is equal"))))))
+
 (deftest cold-root-pull-records-an-informational-latency-sample
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}

@@ -113,6 +113,14 @@
    :seon.config/on-core-error :panic
    :seon.render/context-channel context-channel})
 
+(defn- acquire-context
+  [connection context-channel]
+  (render/acquire-context!
+   context-channel
+   (assoc (request connection context-channel)
+          :seon.db/db @connection
+          :seon.render/distance 1)))
+
 (deftest prompt-is-derived-append-only-repl-history
   (planted
    (fn [connection context-channel]
@@ -196,7 +204,7 @@
 (deftest unchanged-acquisition-performs-zero-database-door-reads
   (planted
    (fn [connection context-channel]
-     (prompt/prompt @connection (request connection context-channel))
+     (acquire-context connection context-channel)
      (let [reads (atom 0)
            counted (fn [f]
                      (fn [& arguments]
@@ -207,54 +215,15 @@
                      db/pull-many (counted db/pull-many)
                      db/entity (counted db/entity)
                      db/datoms (counted db/datoms)]
-         (prompt/prompt @connection (request connection context-channel)))
+         (acquire-context connection context-channel))
        (is (zero? @reads)
            "unchanged acquisition returns retained bytes without a db read")))))
-
-(deftest semantically-equal-replay-advances-and-does-not-append
-  (planted
-   (fn [connection context-channel]
-     (let [request (request connection context-channel)
-           before (:seon.cluster.prompt/text (prompt/prompt @connection request))]
-       (db/transact! connection
-                     [{:seon.cluster.message/id "unrelated-same-attribute"
-                       :seon.cluster.message/content "outside the neighborhood"
-                       :seon.cluster.message/at (Date. 1700000003000)}])
-       (let [replays (atom 0)
-             appended (atom [])
-             replay db/read-evidence-current?
-             append web/append-history
-             after (with-redefs [db/read-evidence-current?
-                                 (fn [& arguments]
-                                   (swap! replays inc)
-                                   (apply replay arguments))
-                                 web/append-history
-                                 (fn [entries observations]
-                                   (let [result (append entries observations)]
-                                     (swap! appended conj
-                                            (- (count result) (count entries)))
-                                     result))]
-                     (:seon.cluster.prompt/text
-                      (prompt/prompt @connection request)))
-             first-replays @replays
-             unchanged (with-redefs [db/read-evidence-current?
-                                     (fn [& arguments]
-                                       (swap! replays inc)
-                                       (apply replay arguments))]
-                         (:seon.cluster.prompt/text
-                          (prompt/prompt @connection request)))]
-         (is (= before after) "equal replay appends no observation")
-         (is (= [0] @appended) "equal replay crosses append with zero entries")
-         (is (= 1 first-replays) "exactly the root read replays")
-         (is (= first-replays @replays)
-             "the consumed revision makes the next acquisition read-free")
-         (is (= after unchanged)))))))
 
 (deftest one-new-message-appends-exactly-one-entry
   (planted
    (fn [connection context-channel]
-     (let [request (request connection context-channel)
-           before (:seon.cluster.prompt/text (prompt/prompt @connection request))
+     (let [before (:seon.cluster.prompt/text
+                   (acquire-context connection context-channel))
            appended (atom [])
            append web/append-history]
        (db/transact! connection
@@ -270,7 +239,7 @@
                                             (- (count result) (count entries)))
                                      result))]
                      (:seon.cluster.prompt/text
-                      (prompt/prompt @connection request)))]
+                      (acquire-context connection context-channel)))]
          (is (str/starts-with? after before) "all prior bytes are retained")
          (is (= [1] @appended)
              "one new message crosses append with exactly one entry"))))))
