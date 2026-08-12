@@ -66,10 +66,11 @@ See `README.md` for the convention.
 | [Settle what arrived when a provider stream closes mid-body](a-mid-stream-provider-disconnect-discards-the-whole-turn.md) | blocker | whole-system arc repair wave |
 | [Await every worker writer before deleting its root](test-runner-cleans-a-worker-root-while-kondo-is-still-writing.md) | blocker | test runner cleanup repair wave |
 
-## Friction (139)
+## Friction (140)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Supply every declared render dependency in the agent-flow fixture](agent-flow-fixture-omits-render-interest.md) | friction | flow join-wedge diagnosis |
 | [Make proofs unable to pass without exercising their premise](class-proofs-pass-without-exercising-their-premise.md) | friction | class-kill queue |
 | [Prevent diagnostics from collapsing evidence into noise or absence](class-diagnostics-collapse-evidence-into-noise-or-absence.md) | friction | class-kill queue |
 | [Make every durable contract predicate identifiable](class-anonymous-contracts-cannot-survive-publication.md) | friction | class-kill queue |
