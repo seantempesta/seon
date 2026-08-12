@@ -135,3 +135,20 @@ deletion in the same change as the hook consumption.
 - `probe_registry_thread_fallback`, `probe_shape_generation_cache`, and
   `probe_predicate_function_cache` graduate into `test/` as ONE regression per
   class and pass with repetition, and the probe files are deleted.
+
+## Owner ruling 2026-08-11 (carrier selected)
+
+Option 1 — immutable environment replacement — is ruled. The projection rides
+`seon.env` with its basis; publication atomically replaces the environment
+with the projection derived from `db-after`; operations entering with a
+database value derive the exact projection once, using the environment's as
+the reusable candidate. The lane's measured baseline: 15 fallback lines per
+complete boot cycle, 176 resolutions on a bare start JVM (170 from
+db.clj:430), 15.188 ms each, and the live environment's projection
+fingerprint ALREADY diverged from the exact projection state — the
+stale-snapshot class is live, not hypothetical. Ownership expands to the
+snapshot site (cluster.clj:2426-2456), the publication advance
+(sci/eval.clj:581-593,829-830), the turn/web carriers (loop.clj, run.clj,
+render/web.clj), and the remaining direct fallback consumers
+(schema/datahike.clj, sci/admit.clj, reconcile.cljc, call_preparation.clj)
+once w1-gate-triage releases the held files.
