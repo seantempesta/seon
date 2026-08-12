@@ -205,24 +205,50 @@ each of nine pool JVMs, the fail-closed serial JVM, and three one-shot
 confirmation JVMs; the coordinator also acquired exactly once.
 
 That checkpoint stopped in the platform tier at 71 tests / 383 assertions / 4
-failures / 1 error. The carrier makes three older class proofs' deliberately
+failures / 1 error. The carrier made three older class proofs' deliberately
 unhanded premise false:
 
 - `seon.db.declaration-population-test/a-read-resolves-the-declaration-population-at-most-once`;
 - `seon.schema.declaration-population-test/an-unhanded-declaration-projection-refuses-without-reading-resources`; and
 - `seon.sci.admit.declaration-population-test/an-admission-resolves-the-declaration-population-at-most-once`.
 
-Each failure reproduced in its isolated confirmation JVM. Those proof files
-are protected by the runner assignment, so the carrier remains landed and the
-issue remains open until the proofs explicitly construct their unhanded
-subject instead of depending on runner absence. The subsequent `bin/test
---all` checkpoint was run exactly once and stopped on the same platform result:
-71 tests / 383 assertions / 4 failures / 1 error. Its bulk tier therefore did
-not reach either the known message-delivery failure or the worker-root cleanup
-race. It again loaded every namespace with zero fallback/refusal lines and
-recorded exactly one acquisition per coordinator, pool, serial, and
-confirmation JVM.
+Commit `08e219ed3` makes those premises explicit. Each test clears all four
+projection carrier bindings around the subject it means to exercise. The
+schema proof still observes the loud `:seon.schema/missing-projection` refusal
+with zero resource reads. The database proof first proves that explicit
+packaged acquisition reads a positive population, then proves the unhanded
+database read performs at most one resolution. The admission proof explicitly
+acquires and supplies its projection, clears the runner carrier, and proves
+that the nested admission walk performs zero further resource reads. Their
+focused runner passed 9 tests / 36 assertions with zero failures or errors.
 
-This issue therefore remains open for that test carrier and the separately
-recorded process-global Malli instrumentation facade, whose owner and falsifier are
+The exact 16-path changed gate then selected 826 reached tests (71 platform,
+734 bulk, 339 not reached), passed the complete platform tier, and ran the
+bulk tier for 85 minutes without a test assertion failure. It stopped itself
+with exit 124 at the suite's loud five-minute no-reporter-progress backstop.
+The retained root is `tmp/test-runs/run.VIhgKC`; its last active owners were:
+
+- `seon.cluster.agent-test/wake-routing-conservation-property`;
+- `seon.cluster.agent-test/n-agent-parallel-turns-property`;
+- `seon.render.web-test/namespace-routes-admit-by-reader-and-existing-corpus-row`;
+- `seon.render.web-test/the-inbound-route-is-method-discriminated-test`; and
+- `seon.sci.eval-test/the-dispositions-are-callable-and-come-back-as-values`.
+
+The virtual-thread-aware liveness dump is retained at
+`tmp/test-runs/run.VIhgKC/tmp/test-liveness/88932-1786524809325-threads.json`.
+This is a foreign verification boundary: none of those test owners is in this
+issue's runner lane. Per the stop rule, no `--all` run followed the red changed
+gate.
+
+The retained root contains exactly one acquisition in every worker log: nine
+pool JVMs plus the serial JVM (10/10), and exactly one coordinator acquisition.
+Namespace loading produced zero declaration-population fallback or
+missing-projection lines. Two loud fallback lines occurred later during test
+execution, owned by `seon.render.web` (`web.clj:1717`) and `seon.sci.eval`
+(`eval.clj:579`); neither came from runner loading, and neither was quietly
+re-resolved.
+
+The runner carrier and its explicit unhanded regressions are complete. This
+issue remains open only for the separately recorded process-global Malli
+instrumentation facade, whose owner and falsifier are
 [instrumentation compiles under one cluster's projection](instrumentation-compiles-under-one-clusters-projection.md).
