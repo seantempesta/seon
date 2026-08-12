@@ -30,7 +30,7 @@ and digest check live in `tmp/ablation/prepare.clj`.
 
 | Dependency or mechanism | Selected identity | Source boundary used |
 |---|---|---|
-| Datahike | `15d98da60991b6ded59b15cf0d499a7055a02266` | `reference-code/datahike/src/datahike/api/impl.cljc`; queries through `src/seon/db.clj` |
+| Datahike | `15d98da6` (historical) | `reference-code/datahike/src/datahike/api/impl.cljc`; queries through `src/seon/db.clj` |
 | SCI | `fcbd8862800e638dc0f8f5521111f999279cbcd2` | turn facts and calls are produced by `src/seon/sci/eval.clj` and settlement, not by the harness |
 | Prompt acquisition | Seon commit `5d18a27af165d25e93741990ab8dffb0ccd795ed` | `src/seon/cluster/prompt.clj`, `src/seon/render/walk.clj`, `src/seon/render/web.clj`, `src/seon/cluster/loop.clj` |
 | Define-before-use proof | current Seon test | `test/seon/render/history_test.clj:113-140` plus `src/seon/render/walk.clj:698-784` |

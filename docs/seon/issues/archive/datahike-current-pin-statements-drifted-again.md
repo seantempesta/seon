@@ -67,7 +67,7 @@ mechanically abbreviated, while current authorities were updated to the live
 gitlinks. During the same work period Datahike advanced again, proving the
 class in real time:
 
-- `reference-code/datahike` selects `15d98da60991b6ded59b15cf0d499a7055a02266`;
+- `reference-code/datahike` selects `15d98da6` (historical);
 - `reference-code/sci` selects `fcbd8862800e638dc0f8f5521111f999279cbcd2`;
   and
 - `reference-code/malli` selects `3517a3cd9271b2083780ac7be1725493905bca2e`.
