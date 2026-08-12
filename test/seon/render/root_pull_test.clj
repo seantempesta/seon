@@ -5,6 +5,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.render.walk :as walk]
+            [seon.render.web :as web]
             [seon.test-support :as support]))
 
 (def ^:private root-pull-schema
@@ -162,3 +163,41 @@
                     (changed-lookups changed :seon.render.walk/changed)))
              (is (empty? (:seon.render.walk/added changed)))
              (is (empty? (:seon.render.walk/removed changed))))))))))
+
+(deftest supplied-root-acquisition-is-the-only-membership-read
+  (support/with-database
+   {:seon.test-support/extra-schema root-pull-schema}
+   (fn [connection]
+     (db/transact! connection [{::root-id "root" ::value "one"}])
+     (let [render-request (request connection)
+           acquisition (walk/root-acquisition render-request)
+           reads (atom 0)
+           count-read (fn [f]
+                        (fn [& arguments]
+                          (swap! reads inc)
+                          (apply f arguments)))]
+       (with-redefs [db/q (count-read db/q)
+                     db/pull (count-read db/pull)
+                     db/pull-many (count-read db/pull-many)
+                     db/datoms (count-read db/datoms)]
+         (walk/neighborhood
+          (assoc render-request
+                 :seon.render.walk/root-acquisition acquisition))
+         (is (zero? @reads)
+             "a supplied acquisition replaces every membership query"))))))
+
+(deftest as-of-revision-comparison-uses-the-database-read-owner
+  (support/with-database
+   {:seon.test-support/extra-schema root-pull-schema}
+   (fn [connection]
+     (db/transact! connection [{::root-id "root" ::value "one"}])
+     (let [captured (atom [])
+           database @connection
+           acquisition (binding [db/*read-evidence-sink* captured]
+                         (walk/root-acquisition (request connection)))
+           call {:seon.render.call/read-evidence (db/read-evidence @captured)
+                 :seon.render.call/output acquisition}
+           fixed (db/as-of database (db/basis-t database))]
+       (is (empty? (#'web/candidate-call-ids
+                    {::root call} fixed))
+           "an opening as-of database compares through seon.db revisions")))))

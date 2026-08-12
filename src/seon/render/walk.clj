@@ -24,8 +24,8 @@
   holds one forward ref (its open run) and is POINTED AT by everything
   that matters — its runs, the messages sent to it, the errors recorded
   against it. A traversal that followed only forward refs would render an
-  agent as an almost empty entity, so `refs` reads both directions from
-  the same database value. Reverse neighbours are ordered newest-first
+  agent as an almost empty entity, so the root selector pulls both directions
+  from the same database value. Reverse neighbours retain the newest values
   and bounded by the SAME `:seon.sci.admit/caps` collection dial the eval
   door and the generic panel already use; a second width dial here would
   be a magic number and would drift from the first.
@@ -53,8 +53,6 @@
 ;;; ---------------------------------------------------------------------------
 ;;; The connections
 ;;; ---------------------------------------------------------------------------
-
-(declare eid-of)
 
 (defn- installed-attributes
   "Concrete installed attributes and their Datahike properties, ordered."
@@ -110,7 +108,17 @@
     (letfn [(selector-at [remaining]
               (let [nested (if (pos? remaining)
                              (selector-at (dec remaining))
-                             leaf)]
+                             leaf)
+                    asked-for-nested
+                    (if (and (= 1 remaining)
+                             (contains? installed
+                                        :seon.cluster.message/from)
+                             (contains? installed
+                                        :seon.cluster.run/trigger))
+                      (conj nested
+                            {(selector-key :seon.cluster.run/_trigger width)
+                             leaf})
+                      nested)]
                 (into (into [:db/id] scalar-attributes)
                       (concat
                        (map (fn [attribute]
@@ -119,17 +127,29 @@
                        (map (fn [attribute]
                               {(selector-key (reverse-attribute attribute)
                                              width)
-                               nested})
+                               (if (= :seon.cluster.message/from attribute)
+                                 asked-for-nested
+                                 nested)})
                             ref-attributes)))))]
       (selector-at (long distance)))))
 
 (defn- installed-identity-attributes
   [database]
-  (into []
-        (keep (fn [[attribute properties]]
-                (when (= :db.unique/identity (:db/unique properties))
-                  attribute)))
-        (installed-attributes database)))
+  (let [installed (installed-attributes database)
+        declared (->> (vals (:seon.schema.projection/shape-rows
+                             (schema/current-projection)))
+                      (keep :seon.entity/id-attr)
+                      distinct (filter #(contains? installed %))
+                      (sort-by str) vec)
+        declared-set (set declared)
+        database-identities
+        (->> installed
+             (keep (fn [[attribute properties]]
+                     (when (= :db.unique/identity (:db/unique properties))
+                       attribute)))
+             (remove declared-set)
+             (sort-by str))]
+    (into declared database-identities)))
 
 (defn- stable-lookup
   [id-attributes entity]
@@ -201,15 +221,26 @@
                                           (assoc :seon.render.walk/attribute
                                                  reached-by)))
                               (update :seon.render.walk/order conj lookup))
+                          connection-attributes
+                          (if (:seon.ns/name entity)
+                            [[:seon.ns/requires false]
+                             [:seon.ns/requires true]]
+                            (concat (map vector refs (repeat false))
+                                    (map vector refs (repeat true))))
                           connections
                           (into []
                                 (mapcat
                                  (fn [[attribute reverse?]]
                                    (let [values (connection-values
                                                  entity attribute reverse?)
+                                         values (if reverse?
+                                                  (sort-by :db/id > values)
+                                                  values)
                                          kept (take width values)
-                                         elided (- (count values)
-                                                   (count kept))]
+                                         kept (if reverse?
+                                                (sort-by :db/id kept)
+                                                kept)
+                                         elided? (> (count values) width)]
                                      (cond->
                                       (mapv (fn [child]
                                               {:seon.render.walk/attribute
@@ -218,28 +249,33 @@
                                                (stable-lookup identities child)
                                                :seon.render.walk/pulled child})
                                             kept)
-                                       (pos? elided)
+                                       elided?
                                        (conj
                                         {:seon.render.walk/attribute attribute
                                          :seon.error/value
                                          {:seon.error/kind ::elided
                                           :seon.error/message
-                                          (str "elided " elided " "
+                                          (str "elided additional "
                                                (when reverse? "reverse ")
                                                attribute " connection"
-                                               (when-not (= 1 elided) "s")
+                                               "s"
                                                " at the configured collection cap")
                                           :seon.error/data
-                                          {:seon.render.walk/attribute attribute
-                                           :seon.render.walk/elided-count
-                                           elided}}}))))
-                                 (concat (map vector refs (repeat false))
-                                         (map vector refs (repeat true)))))]
-                      (if (pos? remaining)
+                                          {:seon.render.walk/attribute
+                                           attribute}}}))))
+                                 connection-attributes))]
+                      (if (or (pos? remaining)
+                              (and (zero? remaining)
+                                   (= :seon.cluster.message/from reached-by)))
                         (reduce-kv
                          (fn [result index connection]
-                           (if-let [child (:seon.render.walk/pulled connection)]
-                             (visit result child (dec remaining)
+                           (if-let [child
+                                    (when (or (pos? remaining)
+                                              (= :seon.cluster.run/trigger
+                                                 (:seon.render.walk/attribute
+                                                  connection)))
+                                      (:seon.render.walk/pulled connection))]
+                             (visit result child (max 0 (dec remaining))
                                     (conj path :seon.render.walk/neighbours
                                           index)
                                     (:seon.render.walk/attribute connection))
@@ -292,19 +328,14 @@
         added? #(not (contains? before-members %))
         removed? #(not (contains? after-members %))
         changed? #(and (contains? before-members %)
-                       (not= (get before-members %)
-                             (get after-members %)))]
+                       (not= (:seon.render/value (get before-members %))
+                             (:seon.render/value (get after-members %))))]
     {:seon.render.walk/changed
      (into [] (comp (filter changed?) (map after-members)) after-order)
      :seon.render.walk/added
      (into [] (comp (filter added?) (map after-members)) after-order)
      :seon.render.walk/removed
      (into [] (comp (filter removed?) (map before-members)) before-order)}))
-
-(defn- concrete-entity
-  "Pull every attribute the entity actually carries."
-  [db eid]
-  (db/pull db '[*] eid))
 
 (defn- forward-refs
   "`[attribute eid]` for every ref value the entity itself carries."
@@ -324,193 +355,11 @@
                     :else nil)))
         (sort-by (comp str key) (dissoc entity :db/id :seon.db/db))))
 
-(defn- installed-ref-attributes
-  "Every installed ref attribute, derived from the database schema."
-  [db]
-  (into []
-        (comp
-         (filter (comp keyword? key))
-         (filter (fn [[_ properties]]
-                   (= :db.type/ref (:db/valueType properties))))
-         (map key))
-        (sort-by (comp str key) (:schema db))))
-
-(defn- reverse-refs
-  "`[attribute eid]` for every entity that POINTS AT this one.
-
-  Newest first, then bounded, then re-ordered oldest-first for reading:
-  the newest `max-collection` neighbours per attribute are the ones a
-  reader wants, and reading them in the order they happened is how a
-  history reads. Entity id ascending is commit order for facts committed
-  in sequence.
-
-  The bound is the caps' own collection dial. A dedicated neighbourhood
-  width would be a second size dial to keep in step with the first, and
-  inventing a number here is the banned magic constant.
-
-  Each installed ref attribute is one exact AVET slice. Datahike indexes
-  refs by construction, so this is bounded to the named attribute and
-  target without either an unbound Datalog scan or a registered-family
-  membership filter. The installed schema is the complete attribute source."
-  [db eid caps]
-  (let [width (long (:seon.config.eval.result/max-collection caps))]
-    (vec
-     (mapcat
-      (fn [attribute]
-        (let [sources (->> (db/datoms db :avet attribute eid)
-                           (map :e)
-                           distinct
-                           sort
-                           reverse)
-              kept (take width sources)
-              elided (- (count sources) (count kept))]
-          (cond-> (mapv (fn [source]
-                          {:seon.render.walk/attribute attribute
-                           :seon.render.walk/target source})
-                        (sort kept))
-            (pos? elided)
-            (conj
-             {:seon.render.walk/attribute attribute
-              :seon.error/value
-              {:seon.error/kind ::elided
-               :seon.error/message
-               (str "elided " elided " reverse " attribute
-                    " connection" (when-not (= 1 elided) "s")
-                    " at the configured collection cap")
-               :seon.error/data
-               {:seon.render.walk/attribute attribute
-                :seon.render.walk/elided-count elided}}}))))
-      (installed-ref-attributes db)))))
-
-(defn- asked-for-run-edges
-  [db entity caps]
-  (when (:seon.cluster.agent/id entity)
-    (let [agent-eid (:db/id entity)
-          width (long (:seon.config.eval.result/max-collection caps))
-          run-eids (->> (db/q '[:find [?run ...]
-                                :in $ ?agent
-                                :where
-                                [?message :seon.cluster.message/from ?agent]
-                                [?run :seon.cluster.run/trigger ?message]]
-                              db agent-eid)
-                        sort
-                        reverse)
-          kept (take width run-eids)
-          elided (- (count run-eids) (count kept))]
-      (cond->
-       (mapv (fn [run-eid]
-               {:seon.render.walk/attribute
-                :seon.render.walk/asked-for-run
-                :seon.render.walk/target run-eid})
-             (sort kept))
-        (pos? elided)
-        (conj
-         {:seon.render.walk/attribute :seon.render.walk/asked-for-run
-          :seon.error/value
-          {:seon.error/kind ::elided
-           :seon.error/message
-           (str "elided " elided " asked-for run connection"
-                (when-not (= 1 elided) "s")
-                " at the configured collection cap")
-           :seon.error/data
-           {:seon.render.walk/attribute :seon.render.walk/asked-for-run
-            :seon.render.walk/elided-count elided}}})))))
-
-(def ^:private derived-edge-functions
-  [asked-for-run-edges])
-
-(defn- derived-refs
-  [db entity caps]
-  (into []
-        (mapcat (fn [derive-fn] (or (derive-fn db entity caps) [])))
-        derived-edge-functions))
-
-(defn refs
-  "Every connection of the entity at `eid`, both directions, ordered.
-
-  Forward refs first (what this entity says about itself), then reverse
-  refs (what the rest of the database says about it), each attribute
-  group in attribute-name order. Deterministic, because two derivations
-  of one database value must be the same value — the property equality
-  suppression and re-derivable capture both depend on.
-
-  No entity or connection is classified out of the walk. Renderers decide
-  what to omit, and repeated targets through distinct attributes remain
-  distinct connections; traversal turns later visits into explicit
-  back-references."
-  {:malli/schema [:=> [:cat :any :int :seon.sci.admit/caps]
-                  [:vector :seon.render.walk/connection]]}
-  [db eid caps]
-  (let [entity (concrete-entity db eid)]
-    (into []
-          (concat
-           (map (fn [[attribute target]]
-                  {:seon.render.walk/attribute attribute
-                   :seon.render.walk/target target})
-                (forward-refs entity))
-           (reverse-refs db eid caps)
-           (derived-refs db entity caps)))))
-
-;;; ---------------------------------------------------------------------------
-;;; The walk
-;;; ---------------------------------------------------------------------------
-
-(defn- eid-of
-  "The entity id `lookup` names at `db`, or nil when nothing answers."
-  [db lookup]
-  (try
-    (:db/id (db/pull db [:db/id] lookup))
-    (catch Throwable _ nil)))
-
-(defn- entity-last-changed
-  "The newest transaction touching `eid`, derived from this database value."
-  [db eid]
-  (if eid
-    (reduce (fn [latest datom] (max latest (long (:tx datom))))
-            0
-            (db/datoms db :eavt eid))
-    0))
-
-(defn- assigned-namespace-eid
-  [db root-eid]
-  (db/q '[:find ?namespace .
-         :in $ ?agent
-         :where [?agent :seon.cluster.agent/namespace ?namespace]]
-       db root-eid))
-
 (defn- namespace-render-distance
   [root-namespace-eid eid entity traversal-hops]
   (if (contains? entity :seon.ns/name)
     (if (= root-namespace-eid eid) 1 2)
     traversal-hops))
-
-(defn- visible-connections
-  [entity connections]
-  (if (contains? entity :seon.ns/name)
-    (filterv #(= :seon.ns/requires
-                 (:seon.render.walk/attribute %))
-             connections)
-    connections))
-
-(defn- namespace-name-at
-  [db eid]
-  (:seon.ns/name (db/pull db [:seon.ns/name] eid)))
-
-(defn- entity-lookup
-  [db eid]
-  (let [entity (concrete-entity db eid)
-        identity-attribute
-        (->> (:seon.schema.projection/shape-rows
-              (schema/current-projection))
-             vals
-             (keep :seon.entity/id-attr)
-             distinct
-             (filter #(contains? entity %))
-             (sort-by str)
-             first)]
-    (if identity-attribute
-      [identity-attribute (get entity identity-attribute)]
-      eid)))
 
 (defn owning-namespace
   "The one namespace explicitly named by the value or one of its direct refs.
@@ -521,315 +370,132 @@
   {:malli/schema
    [:=> [:cat :seon.db/database-value :map]
     [:or :seon.render/namespace :nil]]}
-  [db entity]
+  [_database entity]
   (let [names (cond-> (into #{}
-                            (keep (fn [[_attribute target]]
-                                    (namespace-name-at db target)))
-                            (forward-refs entity))
+                            (keep (fn [[_attribute value]]
+                                    (cond
+                                      (map? value) (:seon.ns/name value)
+                                      (sequential? value)
+                                      (some :seon.ns/name value))))
+                            entity)
                 (:seon.ns/name entity) (conj (:seon.ns/name entity)))]
     (when (= 1 (count names))
       (first names))))
 
-(declare ^:private units)
+(defn- acquired-namespace-name
+  [acquisition member]
+  (let [eid->member (into {}
+                         (map (juxt :seon.render.walk/eid identity))
+                         (vals (:seon.render.walk/members acquisition)))
+        entity (:seon.render/value member)
+        names (cond->
+               (into #{}
+                     (keep (fn [[_attribute target-eid]]
+                             (get-in eid->member
+                                     [target-eid :seon.render/value
+                                      :seon.ns/name])))
+                     (forward-refs entity))
+                (:seon.ns/name entity) (conj (:seon.ns/name entity)))]
+    (when (= 1 (count names)) (first names))))
+
+(defn- acquired-root-namespace-eid
+  [acquisition]
+  (let [root (get-in acquisition
+                     [:seon.render.walk/members
+                      (first (:seon.render.walk/order acquisition))])
+        namespace-ref (get-in root [:seon.render/value
+                                    :seon.cluster.agent/namespace])]
+    (when (map? namespace-ref) (:db/id namespace-ref))))
 
 (defn neighborhood
-  "One entity and its neighbours as flat rendered units.
-
-  Each unit records its lookup, path, distance, selected output, and the
-  explicit owning namespace derived from the data or traversal edge. AI prose
-  and the HTML page consume this same sequence; no public recursive node
-  envelope sits between traversal and those consumers.
-
-  DISTANCE IS SPENT PER CONNECTION: the root renders at the requested
-  distance, each neighbour one hop cheaper,
-  and a node with no hops left follows nothing. Namespace rendering is
-  root-relative: the root agent's assigned namespace receives distance 1,
-  while every other namespace receives distance 2. Namespace renderers
-  absorb their members; traversal preserves only `:seon.ns/requires` edges.
-  This normalization changes renderer input, never the traversal hop budget.
-
-  Three bounds, none of them a clock: the hop budget (what was asked
-  for), the caps' node budget (the absolute one — a graph that fans out
-  needs a node budget and not merely a loop guard), and the caps' collection
-  budget on each reverse attribute. Every active bound emits a quiet elision
-  node. A per-walk rendered set stops cycles and fan-in from rendering the
-  same entity again; it never silently changes a renderer's input.
-
-  Every failure is a unit carrying a flat `:seon.error/value`. Nothing
-  throws."
+  "Render the root acquisition's stable members without further discovery."
   {:malli/schema [:=> [:cat :seon.render.walk/request] :seon.render.walk/units]}
-  [{:keys [:seon.db/db :seon.sci.admit/caps]
+  [{database :seon.db/db
+    caps :seon.sci.admit/caps
     ctx :seon.sci.eval/ctx
     output :seon.render/output
-    :seon.render.walk/keys [lookup]
+    lookup :seon.render.walk/lookup
     :as request}]
   (let [reusable-projection (or (:seon.schema/projection ctx) {})
-        projection
-        (schema/call-with-projection
-         reusable-projection
-         #(schema/projection-from-database db reusable-projection))]
+        projection (schema/call-with-projection
+                    reusable-projection
+                    #(schema/projection-from-database database
+                                                      reusable-projection))]
     (schema/call-with-projection
      projection
      (fn []
-      (let [hops (long (get request :seon.render/distance 1))
-            root-eid (eid-of db lookup)
-            root-namespace-eid (when root-eid
-                                 (assigned-namespace-eid db root-eid))]
-    ;; The remaining node budget and the rendered-entity set are the
-    ;; walk's RETURN state: every node and child hands `[node state]`
-    ;; back to its parent, so the budget cannot be consumed by a branch
-    ;; the caller never received.
-    (letfn [(elision-node [lookup attribute hops failure]
-              (let [message (:seon.error/message failure)]
-                (cond-> {:seon.render.walk/lookup lookup
-                         :seon.render/distance hops
-                         :seon.render.walk/changed-at 0
-                         :seon.render/output
-                         (if (= output :seon.render/html)
-                           [:span {:class "seon-walk-elision"
-                                   :data-walk-elided "true"}
-                            "… " message]
-                           message)
-                         :seon.error/value failure}
-
-                  attribute (assoc :seon.render.walk/attribute attribute))))
-            (marker [lookup attribute hops failure]
-              (if (= ::elided (:seon.error/kind failure))
-                (elision-node lookup attribute hops failure)
-                (cond-> {:seon.render.walk/lookup lookup
-                         :seon.render/distance hops
-                         :seon.render.walk/changed-at 0
-                         :seon.error/value failure}
-                  attribute (assoc :seon.render.walk/attribute attribute))))
-            (child [state connection hops]
-              (let [{:seon.render.walk/keys [attribute target lookup]
-                     failure :seon.error/value} connection]
-                (cond
-                  failure
-                  [(marker (or lookup attribute) attribute hops failure) state]
-
-                  target
-                  (node state (entity-lookup db target) target attribute hops)
-
-                  lookup
-                  (node state lookup (eid-of db lookup) attribute hops)
-
-                  :else
-                  [(marker attribute attribute hops
-                           {:seon.error/kind ::no-such-entity
-                            :seon.error/message
-                            "A derived connection had no target."})
-                   state])))
-            (children [state connections hops]
-              (reduce
-               (fn [[nodes state] connection]
-                 (let [[child-node state] (child state connection hops)]
-                   [(conj nodes child-node) state]))
-               [[] state]
-               connections))
-            (node [state lookup eid attribute hops]
-              (let [base (cond-> {:seon.render.walk/lookup lookup
-                                  :seon.render/distance hops
-                                  :seon.render.walk/changed-at
-                                  (entity-last-changed db eid)}
-                           attribute
-                           (assoc :seon.render.walk/attribute attribute))
-                    state (update state ::remaining dec)]
-                (cond
-                  (neg? (long (::remaining state)))
-                  [(elision-node lookup attribute hops
-                                 {:seon.error/kind ::elided
-                                  :seon.error/message
-                                  (str "elided — this neighbourhood is larger "
-                                       "than the configured node cap")})
-                   state]
-
-                  (nil? eid)
-                  [(assoc base :seon.error/value
-                          {:seon.error/kind ::no-such-entity
-                           :seon.error/message
-                           (str "Nothing in the database answers to "
-                                (pr-str lookup) ".")})
-                   state]
-
-                  (contains? (::rendered state) eid)
-                  [(assoc base :seon.render.walk/back-reference? true) state]
-
-                  :else
-                  (let [state (update state ::rendered conj eid)
-                        pulled (try
-                                 (concrete-entity db eid)
-                                 (catch Throwable _ nil))]
-                    (if (or (nil? pulled) (nil? (:db/id pulled)))
-                      [(assoc base :seon.error/value
-                              {:seon.error/kind ::no-such-entity
-                               :seon.error/message
-                               (str "Nothing in the database answers to "
-                                    (pr-str lookup) ".")})
-                       state]
-                      (let [render-distance
-                            (namespace-render-distance
-                             root-namespace-eid eid pulled hops)
-                            render-base (assoc base
-                                               :seon.render/distance
-                                               render-distance)
-                            owner (owning-namespace db pulled)
-                            render-request
-                            (cond-> (assoc request
-                                           :seon.render/value pulled
-                                           :seon.render/distance
-                                           render-distance
-                                           :seon.render.call/id
-                                           [output lookup render-distance])
-                              attribute
-                              (assoc :seon.render.walk/attribute attribute)
-                              owner (assoc :seon.render/namespace owner))
-                            rendered
-                            (render/render-call render-request)
-                            rendered-output rendered
-                            render-failure
-                            (when (:seon.error/kind rendered) rendered)
-                            failure-outcome
-                            (when (and render-failure owner)
-                              (render/renderer-failure
-                               {:seon.db/db db
-                                :seon.render/namespace owner
-                                :seon.error/value render-failure}))
-                            failure-output
-                            (when render-failure
-                              (or (get failure-outcome output)
-                                  (if (= output :seon.render/html)
-                                    [:div {:class "seon-render-unavailable"}
-                                     "renderer unavailable"]
-                                    "Renderer unavailable.")))
-                            connections
-                            (visible-connections
-                             pulled
-                             (try (refs db eid caps)
-                                  (catch Throwable failure
-                                    [{:seon.error/value
-                                      {:seon.error/kind
-                                       ::connections-failed
-                                       :seon.error/message
-                                       (str "Could not derive "
-                                            "connections: "
-                                            (.getMessage failure))}}])))
-                            with-render
-                            (cond-> render-base
-                              render-failure
-                              (assoc :seon.error/value render-failure
-                                     :seon.render/output failure-output)
-
-                              (seq (:seon.db/tx-data failure-outcome))
-                              (assoc :seon.db/tx-data
-                                     (:seon.db/tx-data failure-outcome))
-
-                              (not render-failure)
-                              (assoc :seon.render/output rendered-output))]
-                        (cond
-                          (pos? hops)
-                          (let [[neighbours state]
-                                (children state connections (dec hops))]
-                            [(assoc with-render
-                                    :seon.render.walk/neighbours neighbours)
-                             state])
-
-                          (seq connections)
-                          [(assoc with-render :seon.render.walk/neighbours
-                                  [(marker
-                                    lookup nil hops
-                                    {:seon.error/kind ::elided
-                                     :seon.error/message
-                                     "elided connections at the requested distance cap"})])
-                           state]
-
-                          :else [with-render state])))))))]
-      (let [tree
-            (if root-eid
-              (first
-               (node {::remaining
-                      (long (:seon.config.eval.result/max-nodes caps))
-                      ::rendered #{}}
-                     lookup root-eid nil hops))
-              {:seon.render.walk/lookup lookup
-               :seon.render/distance hops
-               :seon.render.walk/changed-at 0
-               :seon.error/value
-               {:seon.error/kind ::no-such-entity
-                :seon.error/message
-                (str "Nothing in the database answers to "
-                     (pr-str lookup) ".")}})]
-        (units tree))))))))
+       (let [distance (long (get request :seon.render/distance 1))
+             acquisition (or (:seon.render.walk/root-acquisition request)
+                             (root-acquisition request))
+             members (:seon.render.walk/members acquisition)
+             order (:seon.render.walk/order acquisition)
+             root-namespace-eid (acquired-root-namespace-eid acquisition)
+             node-limit (long (:seon.config.eval.result/max-nodes caps))]
+         (if (empty? order)
+           [{:seon.render.walk/lookup lookup
+             :seon.render/distance distance
+             :seon.render.walk/path []
+             :seon.render.walk/found-depth 0
+             :seon.error/value
+             {:seon.error/kind ::no-such-entity
+              :seon.error/message
+              (str "Nothing in the database answers to " (pr-str lookup) ".")}}]
+           (into []
+                 (comp
+                  (take node-limit)
+                  (map
+                   (fn [member-lookup]
+                     (let [member (get members member-lookup)
+                           entity (:seon.render/value member)
+                           depth (:seon.render.walk/found-depth member)
+                           remaining (max 0 (- distance depth))
+                           render-distance
+                           (namespace-render-distance
+                            root-namespace-eid (:seon.render.walk/eid member)
+                            entity remaining)
+                           owner (acquired-namespace-name acquisition member)
+                           render-request
+                           (cond-> (assoc request
+                                          :seon.render/value entity
+                                          :seon.render/distance render-distance
+                                          :seon.render.call/id
+                                          [output member-lookup render-distance])
+                             (:seon.render.walk/attribute member)
+                             (assoc :seon.render.walk/attribute
+                                    (:seon.render.walk/attribute member))
+                             owner (assoc :seon.render/namespace owner))
+                           rendered (render/render-call render-request)
+                           failure (when (:seon.error/kind rendered) rendered)
+                           failure-outcome
+                           (when (and failure owner)
+                             (render/renderer-failure
+                              {:seon.db/db database
+                               :seon.render/namespace owner
+                               :seon.error/value failure}))]
+                       (cond->
+                        (-> member
+                            (dissoc :seon.render.walk/eid
+                                    :seon.render.walk/connections
+                                    :seon.render/value)
+                            (assoc :seon.render/distance render-distance))
+                         failure
+                         (assoc :seon.error/value failure
+                                :seon.render/output
+                                (or (get failure-outcome output)
+                                    (if (= output :seon.render/html)
+                                      [:div {:class "seon-render-unavailable"}
+                                       "renderer unavailable"]
+                                      "Renderer unavailable.")))
+                         (seq (:seon.db/tx-data failure-outcome))
+                         (assoc :seon.db/tx-data
+                                (:seon.db/tx-data failure-outcome))
+                         (not failure)
+                         (assoc :seon.render/output rendered))))))
+                 order)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Assembly — the ai kind
 ;;; ---------------------------------------------------------------------------
-
-(defn- units
-  "Flatten a rendered neighbourhood into one deterministically ordered vector.
-
-  Each result is the direct renderer-call unit: address, path, distance,
-  changed basis, output or error. Consumers never unwrap a recursive node.
-  The root is the stable head and ordinary branches retain grouped
-  last-changed order. Repeated logical lookups and back-references contribute
-  no second unit."
-  {:malli/schema
-   [:=> [:cat :map] :seon.render.walk/units]}
-  [node]
-  (letfn [(flatten-units [node path depth branch]
-            (let [failure (:seon.error/value node)
-                  output (:seon.render/output node)
-                  present? (or failure
-                               (and (string? output)
-                                    (not (str/blank? output)))
-                               (and (some? output)
-                                    (not (string? output))))
-                  here (when present?
-                         [(cond->
-                           (assoc (dissoc node :seon.render.walk/neighbours)
-                                  :seon.render.walk/path path
-                                  :seon.render.walk/found-depth depth)
-                            branch
-                            (assoc :seon.render.walk/branch branch)
-                            (nil? failure)
-                            (dissoc :seon.error/value)
-                            (nil? output)
-                            (dissoc :seon.render/output))])]
-              (into (or here [])
-                    (mapcat
-                     (fn [[index child]]
-                       (let [child-path (conj path
-                                              :seon.render.walk/neighbours
-                                              index)]
-                         (flatten-units child child-path (inc depth)
-                                        (or branch child-path))))
-                     (map-indexed vector
-                                  (:seon.render.walk/neighbours node))))))]
-    (letfn [(sort-key [unit]
-              (let [path (:seon.render.walk/path unit)]
-                [(if (empty? path) 0 1)
-                 (:seon.render.walk/changed-at unit)
-                 (:seon.render.walk/branch unit)
-                 path]))
-            (logical-key [unit]
-              (when-not (= ::elided
-                           (get-in unit [:seon.error/value :seon.error/kind]))
-                [:seon.render.walk/lookup
-                 (:seon.render.walk/lookup unit)]))]
-      (->> (flatten-units node [] 0 nil)
-             (remove :seon.render.walk/back-reference?)
-             (sort-by sort-key)
-             (reduce
-              (fn [{seen-values :seen accumulated :units :as state} unit]
-                (let [logical-value (logical-key unit)]
-                  (if (and logical-value
-                           (contains? seen-values logical-value))
-                    state
-                    {:seen (cond-> seen-values
-                             logical-value (conj logical-value))
-                     :units (conj accumulated unit)})))
-              {:seen #{} :units []})
-             :units))))
 
 (defn prose
   "A rendered neighbourhood as text. THE `:seon.render/ai` ASSEMBLY.
@@ -1042,14 +708,14 @@
                               (:seon.render.walk/path unit)] unit]))
                      value-units)
         database (:seon.db/db request)
-        namespace-name
-        (db/q '[:find ?name .
-                :in $ ?agent-id
-                :where
-                [?agent :seon.cluster.agent/id ?agent-id]
-                [?agent :seon.cluster.agent/namespace ?namespace]
-                [?namespace :seon.ns/name ?name]]
-              database (:seon.cluster.agent/id request))
+        acquisition (:seon.render.walk/root-acquisition request)
+        root-member (get-in acquisition
+                            [:seon.render.walk/members
+                             (first (:seon.render.walk/order acquisition))])
+        namespace-name (get-in root-member
+                               [:seon.render/value
+                                :seon.cluster.agent/namespace
+                                :seon.ns/name])
         basis (db/basis-t database)]
     (into []
           (keep
@@ -1086,18 +752,19 @@
   [{captured :seon.render/captured-calls
     :as request}]
   (let [captured (or captured (atom {}))
-        request (assoc request :seon.render/captured-calls captured)
+        acquisition (or (:seon.render.walk/root-acquisition request)
+                        (root-acquisition request))
+        request (assoc request
+                       :seon.render/captured-calls captured
+                       :seon.render.walk/root-acquisition acquisition)
         form-units (neighborhood (assoc request :seon.render/output
                                         :seon.render/form))
         value-units (neighborhood (assoc request :seon.render/output
                                          :seon.render/ai))
-        transcript-entries
-        ((requiring-resolve 'seon.render.transcript/history-entries)
-         request)
         root-lookup (:seon.render.walk/lookup request)
         generic (->> (generic-history-entries request form-units value-units
                                                captured)
                      (remove #(= root-lookup
                                  (first (:seon.render.history/call-id %))))
                      vec)]
-    (order-history (into transcript-entries generic))))
+    (order-history generic)))

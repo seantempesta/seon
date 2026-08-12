@@ -328,10 +328,18 @@
     retained-calls :seon.render/retained-calls
     :as request}]
   (let [captured-calls (atom {})
-        render-request (assoc (walk-request db caps id :seon.render/html
-                                            connection request)
-                              :seon.render/retained-calls retained-calls
-                              :seon.render/captured-calls captured-calls)
+        render-request
+        (cond-> (assoc (walk-request db caps id :seon.render/html
+                                     connection request)
+                       :seon.render/retained-calls retained-calls
+                       :seon.render/captured-calls captured-calls)
+          (:seon.render/candidate-call-ids request)
+          (assoc :seon.render/candidate-call-ids
+                 (:seon.render/candidate-call-ids request))
+
+          (:seon.render.walk/root-acquisition request)
+          (assoc :seon.render.walk/root-acquisition
+                 (:seon.render.walk/root-acquisition request)))
         walked-units (render.walk/neighborhood render-request)
         fleet-call
         (when (= id root-agent-id)
@@ -356,6 +364,9 @@
                          (:seon.render/profile request)))
                 (assoc :seon.render/retained-calls retained-calls
                        :seon.render/captured-calls captured-calls)
+                (cond-> (:seon.render/candidate-call-ids request)
+                  (assoc :seon.render/candidate-call-ids
+                         (:seon.render/candidate-call-ids request)))
                 render/render-call)
         fleet-unit
         (when fleet-call
@@ -646,6 +657,143 @@
 ;;; The render proc — the cluster graph's second proc (F2 §1)
 ;;; ---------------------------------------------------------------------------
 
+(def ^:private root-call ::root-acquisition)
+
+(defn- read-attributes
+  [call]
+  (reduce
+   (fn [attributes evidence]
+     (let [read-attributes
+           (get-in evidence
+                   [:datahike.read/revision :datahike.read/attributes])]
+       (cond
+         (= :all attributes) (reduced :all)
+         (= :all read-attributes) (reduced :all)
+         :else (into attributes read-attributes))))
+   #{}
+   (:seon.render.call/read-evidence call)))
+
+(defn- calls-by-attribute
+  [calls]
+  (reduce-kv
+   (fn [index call-id call]
+     (let [attributes (read-attributes call)]
+       (if (= :all attributes)
+         (update index :all (fnil conj #{}) call-id)
+         (reduce (fn [index attribute]
+                   (update index attribute (fnil conj #{}) call-id))
+                 index
+                 attributes))))
+   {}
+   calls))
+
+(defn- calls-interest
+  [calls]
+  (let [attributes (keys (calls-by-attribute calls))]
+    (if (some #{:all} attributes)
+      :all
+      (into #{} attributes))))
+
+(defn- merge-interest
+  [left right]
+  (if (or (= :all left) (= :all right))
+    :all
+    (into (or left #{}) right)))
+
+(defn- retained-interest
+  [state]
+  (let [calls (concat (vals (::calls state))
+                      (vals (::ai-calls state)))
+        interest (reduce (fn [interest retained]
+                           (merge-interest interest
+                                           (calls-interest retained)))
+                         #{}
+                         calls)]
+    ;; The generic debug page deliberately reads arbitrary attributes. Its
+    ;; honest interest is therefore `:all`, never an incomplete hand list.
+    (if (some vector? (keys (::packages state)))
+      :all
+      interest)))
+
+(defn- current-read-evidence
+  [database retained]
+  (db/read-evidence
+   (mapv (fn [evidence]
+           {:seon.db/db database
+            :seon.db/source-argument-position
+            (:seon.db/source-argument-position evidence)
+            :datahike.read/dependency-plan
+            (:datahike.read/dependency-plan evidence)})
+         retained)))
+
+(defn- evidence-revisions
+  [database call]
+  (mapv :datahike.read/revision
+        (current-read-evidence database
+                               (:seon.render.call/read-evidence call))))
+
+(defn- retained-revisions
+  [call]
+  (mapv :datahike.read/revision (:seon.render.call/read-evidence call)))
+
+(defn- candidate-call-ids
+  [calls database]
+  (into #{}
+        (keep (fn [[call-id call]]
+                (when (not= (retained-revisions call)
+                            (evidence-revisions database call))
+                  call-id)))
+        calls))
+
+(defn- root-call-id
+  [projection registration-key]
+  [root-call projection registration-key])
+
+(defn- acquire-root
+  [request call-id]
+  (let [captured (atom [])
+        acquisition
+        (binding [db/*read-evidence-sink* captured]
+          ((requiring-resolve 'seon.render.walk/root-acquisition) request))]
+    [acquisition
+     {:seon.render.call/static-evidence
+      {:seon.render.call/producer 'seon.render.walk/root-acquisition
+       :seon.render.call/argument
+       (select-keys request [:seon.render.walk/lookup
+                             :seon.render/distance])}
+      :seon.render.call/read-evidence (db/read-evidence @captured)
+      :seon.render.call/basis-transaction
+      (db/basis-t (:seon.db/db request))
+      :seon.render.call/output acquisition
+      :seon.render.call/id call-id}]))
+
+(defn- refresh-root
+  [request retained call-id candidates]
+  (let [previous (get retained call-id)
+        previous-acquisition (:seon.render.call/output previous)]
+    (if (or (nil? previous) (contains? candidates call-id))
+      (let [[acquisition entry] (acquire-root request call-id)]
+        {:acquisition acquisition
+         :entry entry
+         :changed? (not= previous-acquisition acquisition)})
+      {:acquisition previous-acquisition
+       :entry previous
+       :changed? false})))
+
+(defn- publish-interest!
+  [state _database]
+  (let [interest-reference (:seon.render.web/interest state)
+        old-interest @interest-reference
+        new-interest (retained-interest state)
+        replacement-interest (merge-interest old-interest new-interest)]
+    ;; Replacement is a handoff, not an assignment: keep every old route
+    ;; visible while the new index is becoming current.
+    (reset! interest-reference replacement-interest)
+    ;; A commit during the pass observes the union and queues the next wake.
+    ;; After the complete replacement, the new index alone owns routing.
+    (reset! interest-reference new-interest)
+    state))
+
 (defn- coalesce-floor
   "The coalescing floor, read from the config facts at `db` — a live
   dial change applies at the very next pass. 0 when absent."
@@ -670,77 +818,103 @@
            (not-any? #(contains? row %)
                      [::run/plan-digest ::run/error ::run/closed-at])))))
 
+(defn- page-refresh
+  [state database streams profile registration-key derive-all?]
+  (let [handle (:seon.cluster.loop/cluster state)
+        connection (:seon.db/connection handle)
+        caps (:seon.sci.admit/caps handle)
+        debug? (and (vector? registration-key)
+                    (= ::debug-tab (first registration-key)))
+        agent-id (if debug? (second registration-key) registration-key)]
+    (if debug?
+      (when derive-all?
+        (debug-page-result database connection agent-id
+                           (:seon.render.web/root-agent-id state)
+                           caps handle))
+      (let [retained (get-in state [::calls registration-key] {})
+            candidates (candidate-call-ids retained database)
+            call-id (root-call-id :seon.render/html registration-key)
+            request
+            (cond-> {:seon.db/db database
+                     :seon.cluster.agent/id agent-id
+                     :seon.render.web/root-agent-id
+                     (:seon.render.web/root-agent-id state)
+                     :seon.sci.admit/caps caps
+                     :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+                     :seon.config.eval/time-limit-ms
+                     (:seon.config.eval/time-limit-ms handle)
+                     :seon.config/on-core-error
+                     (:seon.config/on-core-error handle)
+                     :seon.render/profile profile
+                     :seon.db/connection connection
+                     :seon.cluster.run/live-processes
+                     #{(:seon.cluster.run/process handle)}
+                     :seon.render.web/retained-fragments
+                     (get-in state [::fragments registration-key] {})
+                     :seon.render/retained-calls retained
+                     :seon.render/candidate-call-ids candidates
+                     :seon.render.walk/lookup
+                     [:seon.cluster.agent/id agent-id]
+                     :seon.render/distance 2}
+              (get-in streams [agent-id :seon.ai/partial])
+              (assoc :seon.ai/partial
+                     (get-in streams [agent-id :seon.ai/partial])))
+            root (refresh-root request retained call-id candidates)
+            derive? (or derive-all?
+                        (:changed? root)
+                        (seq (disj candidates call-id)))]
+        (if derive?
+          (let [result (page-result
+                        (assoc request
+                               :seon.render.walk/root-acquisition
+                               (:acquisition root)))
+                calls (assoc (:seon.render/captured-calls result)
+                             call-id (:entry root))]
+            (assoc result :seon.render/captured-calls calls))
+          (let [calls (assoc retained call-id (:entry root))]
+            {::retained-only? true
+             :seon.render/captured-calls calls}))))))
+
 (defn- render-pass
   "Derive every registered page and retain its serialized package.
 
   Every emitted value is the complete latest-package map, so channel
   displacement loses nothing. A package carries both its predecessor delta
   and a repair keyframe assembled from bytes already serialized by this proc."
-  [{registration :seon.render.web/registration :as state}]
+  ([state]
+   (render-pass state
+                @(-> state :seon.cluster.loop/cluster :seon.db/connection)
+                true))
+  ([state database derive-all?]
   (let [handle (:seon.cluster.loop/cluster state)
-        connection (:seon.db/connection handle)
-        caps (:seon.sci.admit/caps handle)
-        db @connection
+        registration (:seon.render.web/registration state)
         watched (into (sorted-set-by #(compare (pr-str %1) (pr-str %2)))
                       (keep (fn [[registration-key tabs]]
                               (when (pos? (long tabs)) registration-key)))
                       @registration)
-        profile
-        (when (some string? watched)
-          (render/agent-render-profile
-           (config/effective db (:seon.cluster/name handle))))
+        profile (or (::profile state)
+                    (when (some string? watched)
+                      (render/agent-render-profile
+                       (config/effective database
+                                         (:seon.cluster/name handle)))))
         ;; The run id makes each partial self-describing. Keep only
         ;; entries whose run is still unsettled at THIS immutable
         ;; database value; terminal facts supersede and remove them.
         streams (into {}
                       (filter (fn [[_agent-id stream]]
-                                (unsettled-stream? db stream)))
+                                (unsettled-stream? database stream)))
                       (::streams state))
         results
         (into {}
-              (map (fn [registration-key]
-                     (let [debug? (and (vector? registration-key)
-                                       (= ::debug-tab
-                                          (first registration-key)))
-                           agent-id (if debug?
-                                      (second registration-key)
-                                      registration-key)]
-                       [registration-key
-                        (if debug?
-                          (debug-page-result
-                            db connection agent-id
-                            (:seon.render.web/root-agent-id state)
-                            caps handle)
-                          (page-result
-                           (cond-> {:seon.db/db db
-                                    :seon.cluster.agent/id agent-id
-                                    :seon.render.web/root-agent-id
-                                    (:seon.render.web/root-agent-id state)
-                                    :seon.sci.admit/caps caps
-                                    :seon.sci.eval/ctx
-                                    (:seon.sci.eval/ctx handle)
-                                    :seon.config.eval/time-limit-ms
-                                    (:seon.config.eval/time-limit-ms handle)
-                                    :seon.config/on-core-error
-                                    (:seon.config/on-core-error handle)
-                                    :seon.render/profile profile
-                                    :seon.db/connection connection
-                                    :seon.cluster.run/live-processes
-                                    #{(:seon.cluster.run/process handle)}
-                                    :seon.render.web/retained-fragments
-                                    (get-in state [::fragments registration-key] {})
-                                    :seon.render/retained-calls
-                                    (get-in state [::calls registration-key] {})}
-                             (get-in streams [agent-id :seon.ai/partial])
-                             (assoc :seon.ai/partial
-                                    (get-in streams
-                                            [agent-id :seon.ai/partial])))))])))
+              (keep (fn [registration-key]
+                      (when-let [result
+                                 (page-refresh state database streams profile
+                                               registration-key derive-all?)]
+                        [registration-key result])))
               watched)
-        tx-data (into []
-                      (mapcat (comp :seon.db/tx-data val))
-                      results)
-        _ (when (seq tx-data)
-            (db/transact! connection tx-data))
+        paint-results (into {}
+                            (remove (comp ::retained-only? val))
+                            results)
         advanced
         (reduce-kv
          (fn [{latest :packages changed? :changed?}
@@ -752,12 +926,12 @@
                  (next-package
                   (get latest registration-key)
                   (:seon.render.web/page result)
-                  (db/basis-t db)
+                  (db/basis-t database)
                   (boolean (and (not debug?) (get streams agent-id))))]
              {:packages (assoc latest registration-key package)
               :changed? (or changed? package-changed?)}))
          {:packages (::packages state) :changed? false}
-         results)
+         paint-results)
         packages (:packages advanced)
         changed? (:changed? advanced)
         fragments
@@ -766,7 +940,7 @@
            (assoc retained registration-key
                   (:seon.render.web/fragments result)))
          (::fragments state)
-         results)
+         paint-results)
         calls
         (reduce-kv
          (fn [retained registration-key result]
@@ -779,9 +953,13 @@
         state (-> state
                   (update ::passes inc)
                   (assoc ::watched (count watched)
-                         ::streams streams))]
-    [(assoc state ::packages packages ::fragments fragments ::calls calls)
-     (when changed? packages)]))
+                         ::streams streams
+                         ::profile profile))]
+    [(assoc state
+            ::packages packages
+            ::fragments fragments
+            ::calls calls)
+     (when changed? packages)])))
 
 (defn append-history
   "Append observations that have not appeared in this prompt generation.
@@ -810,23 +988,45 @@
   [state message]
   (let [request (:seon.render.context/request message)
         agent-id (:seon.cluster.agent/id request)
-        captured-calls (atom {})
-        render-request
-        (assoc request
-               :seon.render.walk/lookup [:seon.cluster.agent/id agent-id]
-               :seon.render/distance
-               (long (:seon.render/distance request 2))
-               :seon.render/retained-calls
-               (get-in state [::ai-calls agent-id] {})
-               :seon.render/captured-calls captured-calls)
-        observations (render.walk/history render-request)
-        entries (append-history (get-in state [::ai-entries agent-id] [])
-                                observations)]
-    [(-> state
-         (assoc-in [::ai-calls agent-id] @captured-calls)
-         (assoc-in [::ai-entries agent-id] entries))
-     {:seon.cluster.prompt/text (history-text entries)
-      :seon.db/db (:seon.db/db request)}]))
+        database (:seon.db/db request)
+        retained (get-in state [::ai-calls agent-id] {})
+        entries (get-in state [::ai-entries agent-id] [])
+        candidates (candidate-call-ids retained database)
+        call-id (root-call-id :seon.render/ai agent-id)]
+    (if (and (seq entries) (empty? candidates))
+      [state {:seon.cluster.prompt/text (history-text entries)
+              :seon.db/db database}]
+      (let [captured-calls (atom {})
+            render-request
+            (assoc request
+                   :seon.render.walk/lookup
+                   [:seon.cluster.agent/id agent-id]
+                   :seon.render/distance
+                   (long (:seon.render/distance request 2))
+                   :seon.render/retained-calls retained
+                   :seon.render/captured-calls captured-calls
+                   :seon.render/candidate-call-ids candidates)
+            root (refresh-root render-request retained call-id candidates)
+            refresh? (or (empty? entries)
+                         (:changed? root)
+                         (seq (disj candidates call-id)))
+            observations
+            (if refresh?
+              (render.walk/history
+               (assoc render-request
+                      :seon.render.walk/root-acquisition
+                      (:acquisition root)))
+              [])
+            retained-calls
+            (if refresh?
+              (assoc @captured-calls call-id (:entry root))
+              (assoc retained call-id (:entry root)))
+            entries (append-history entries observations)
+            state (-> state
+                      (assoc-in [::ai-calls agent-id] retained-calls)
+                      (assoc-in [::ai-entries agent-id] entries))]
+        [state {:seon.cluster.prompt/text (history-text entries)
+                :seon.db/db database}]))))
 
 (defn render-step
   "The render proc's transform, in Flow's four arities (F2 §1.1).
@@ -886,7 +1086,8 @@
                           (:seon.cluster.loop/cluster args))
                 ::context (:seon.render/context-channel args)
                 ::pages (:seon.render.web/pages-channel args)
-                ::latest-packages (:seon.render.web/latest-packages args)}]
+                ::latest-packages (:seon.render.web/latest-packages args)
+                ::render-interest (:seon.render.web/interest args)}]
      (when-let [missing (seq (sort (keep (fn [[port channel]]
                                            (when-not channel port))
                                          ports)))]
@@ -909,6 +1110,7 @@
           ::streams {}
           ::passes 0
           ::watched 0
+          ::coalesce-ms 0
           ::last-pass-nanos 0))
   ([state transition]
    (when (= ::flow/stop transition)
@@ -921,7 +1123,7 @@
    (if (= ::context input)
      (let [[state response] (context-pass state message)]
        (async/put! (:seon.render.context/reply message) response)
-       [state nil])
+       [(publish-interest! state (:seon.db/db response)) nil])
      (let [settlement
          (when (and (= ::interest input) (map? message))
            (::settlement message))
@@ -938,7 +1140,7 @@
                  state)
          connection (:seon.db/connection
                      (:seon.cluster.loop/cluster state))
-         floor (coalesce-floor @connection)
+         floor (::coalesce-ms state 0)
          elapsed-ms (quot (- (System/nanoTime)
                              (long (::last-pass-nanos state)))
                           1000000)
@@ -948,7 +1150,12 @@
        ;; sliding-1 in-ports coalesce the burst and one derivation
        ;; serves it whole
        (Thread/sleep (long remainder)))
-     (let [[state packages] (render-pass state)
+     (let [database @connection
+           derive-all? (or join? settlement (= ::stream input))
+           [state packages] (render-pass state database derive-all?)
+           state (-> state
+                     (assoc ::coalesce-ms (coalesce-floor database))
+                     (publish-interest! database))
            published (if join? (::packages state) packages)]
        ;; A settlement request rides the same sliding-1 in-port as the
        ;; wakes it fences. Its reply is the pass count produced by this

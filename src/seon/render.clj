@@ -486,6 +486,7 @@
     call-id :seon.render.call/id
     retained-calls :seon.render/retained-calls
     captured-calls :seon.render/captured-calls
+    candidate-call-ids :seon.render/candidate-call-ids
     :as request}]
   (let [output-schema (case output
                         :seon.render/ai :seon.render/ai
@@ -497,12 +498,16 @@
       (let [static-evidence (call-static-evidence request selected)
             previous (when (and call-id retained-calls)
                        (get retained-calls call-id))
+            check-read-evidence?
+            (or (nil? candidate-call-ids)
+                (contains? candidate-call-ids call-id))
             reusable? (and previous
                            (= static-evidence
                               (:seon.render.call/static-evidence previous))
-                           (db/read-evidence-current?
-                            database
-                            (:seon.render.call/read-evidence previous)))
+                           (or (not check-read-evidence?)
+                               (db/read-evidence-current?
+                                database
+                                (:seon.render.call/read-evidence previous))))
             captured (atom [])
             rendered (if reusable?
                        (:seon.render.call/output previous)
@@ -518,7 +523,25 @@
                               prepared-request)]
                          rendered))
             entry (if reusable?
-                    previous
+                    (if check-read-evidence?
+                      (assoc previous :seon.render.call/read-evidence
+                             (mapv (fn [retained current]
+                                     (assoc retained :datahike.read/revision
+                                            (:datahike.read/revision current)))
+                                   (:seon.render.call/read-evidence previous)
+                                   (db/read-evidence
+                                    (mapv
+                                     (fn [evidence]
+                                       {:seon.db/db database
+                                        :seon.db/source-argument-position
+                                        (:seon.db/source-argument-position
+                                         evidence)
+                                        :datahike.read/dependency-plan
+                                        (:datahike.read/dependency-plan
+                                         evidence)})
+                                     (:seon.render.call/read-evidence
+                                      previous)))))
+                      previous)
                     {:seon.render.call/static-evidence static-evidence
                      :seon.render.call/read-evidence
                      (db/read-evidence @captured)

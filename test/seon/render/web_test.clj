@@ -99,6 +99,7 @@
             pages-channel (async/chan (async/sliding-buffer 1))
             registration (atom {})
             latest-packages (atom {})
+            interest (atom :all)
             completion (async/promise-chan)
             fault-channel (async/chan (async/dropping-buffer 8))
             stream-channel (async/chan (async/sliding-buffer 1))
@@ -108,6 +109,7 @@
                   :seon.render.web/pages-channel pages-channel
                   :seon.render.web/registration registration
                   :seon.render.web/latest-packages latest-packages
+                  :seon.render.web/interest interest
                   :seon.render.web/completion completion
                   :seon.render.web/root-agent-id agent-id}
             graph (flow.core/create-flow
@@ -154,6 +156,7 @@
                         :seon.cluster.wake/armer-channel
                         (async/chan (async/sliding-buffer 1))
                         :seon.cluster.wake/render-channel render-channel
+                        :seon.render.web/interest interest
                         :seon.cluster.wake/fault-channel fault-channel
                         :seon.cluster.wake/key ::route})
           (reset! server (web/start!
