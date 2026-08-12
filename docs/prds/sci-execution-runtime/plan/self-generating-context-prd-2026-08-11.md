@@ -201,11 +201,20 @@ slated by the transcript PRD.
 ## Waves (build → drive → learn; design re-litigated only at boundaries)
 
 - **W0 (this document)** — owner marks up anything that reads wrong.
-- **W1 — the history emits itself**: `:seon.render/form` + floors;
+- **W1 — LANDED 2026-08-12** (all four mechanisms, gate triaged to 0/0 on
+  repaired owners; fresh-agent history live-proven; see
+  [w1-integration-summary](../../../../tmp/orchestrator/w1-integration-summary.txt)
+  for the verbatim opening history): `:seon.render/form` + floors;
   append-only entry discipline; authorship; the agent's defs fact-reading install (the
   blocker above). EXIT: a fresh scratch agent's prompt is a real REPL history
   — true values, no dumps — byte-prefix-stable across two turns.
-- **W2 — change flows**: interest routing; `read-evidence-current?` replay;
+- **W2 — LANDED 2026-08-12** at its sealed cost classes (0 reads unchanged /
+  0 wakes irrelevant / 1 replay equal / 1 append per message —
+  [acceptance evidence](../research/w2-change-flow-acceptance-2026-08-12.md));
+  ONE open cost defect: cold pull 1.5–1.8 s, attributed to triple selector
+  parsing (1,013 of 1,525 ms), three carrier options awaiting the owner on
+  [the issue](../../../seon/issues/cold-root-pull-is-slower-than-the-four-query-floor.md).
+  Original scope: interest routing; `read-evidence-current?` replay;
   the schema-derived root pull. EXIT: one message transacted → exactly one
   appended entry, page morphs one block, everything else zero reads.
 - **W3 — both views beautiful**: agent page + `/` tiles from the same entries
@@ -229,6 +238,18 @@ The cold root pull measured **1,795.387292 ms** versus the **46.0 ms**
 four-query floor, a **39.0301585× regression**. W2's correctness and
 incremental change-flow exit is met, but cold performance remains open in
 [cold root pull is slower than the four-query floor](../../../seon/issues/cold-root-pull-is-slower-than-the-four-query-floor.md).
+
+## Morning 2026-08-12 — MINIMUM evidence (drive-proven, ruling pending)
+
+HALF (7,393 tokens, 46% of FULL) produced the contracted defn, called it,
+and queried the contract back in ONE turn across two replicates; the only
+"incomplete" residue was disposition (not calling my.run/complete), which is
+a teaching/mechanism gap fixed the same night (undisposed-at + honest next-
+turn notice, 16672698d), not a context gap. QUARTER/FLOOR — which drop the
+worked demonstration — never attempted the defn. The load-bearing content is
+the WORKED CONTRACTED-DEFN DEMONSTRATION. Recommendation to the owner: rule
+HALF's shape as the V1 minimum; the ablation table lives in
+[the plan](../research/minimum-context-ablation-plan-2026-08-11.md).
 
 ## Open with the owner (not yet ruled)
 
