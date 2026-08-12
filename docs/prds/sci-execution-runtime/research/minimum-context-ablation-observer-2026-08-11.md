@@ -61,6 +61,13 @@ question the PRD asks is untouched by this experiment.
 
 ## Disagreements with the driver's records
 
+At the time I finished, the plan's own results table was still the empty
+skeleton — the driver had not committed a filled table. The driver's records I
+compare against are therefore its four written result values,
+`tmp/ablation/results/{full,half,quarter,floor}.edn`, produced by
+`ablation.run-variant/result`. If a committed table later differs from those
+values, this section applies to the values, not to the prose.
+
 1. **Provider prompt tokens are understated.** For HALF the driver recorded
    `:minimum-context.result/provider-prompt-tokens 7229`; three attempts were
    actually sent and billed, totalling **21 687** prompt tokens and 44 743
