@@ -111,6 +111,43 @@ table).
 hypothesis, not work.** One cut discharged five rows on 2026-07-26, and a step
 carried stale evidence within a day. Re-verify before starting.
 
+### Current dependency spine — 2026-08-12 wind-down
+
+W1 and W2 are landed. The evolving-session design is ruled complete through
+all 50 owner rulings with zero open design choices. The executable contract is
+[the evolving-session implementation PRD](evolving-session-implementation-2026-08-12.md);
+its binding reconciliation governs wherever an older parent records a
+superseded shape. Ruling 40's test-result facts landed during wind-down in
+commit `9648aed33`; the systems sweep landed as evidence in `ffe977307` and
+awaits integration review. Design completion does not satisfy
+[the final system gate](#the-final-system-gate-owner-2026-07-25-night--read-this-first).
+
+The next-session order is:
+
+1. **Gate.** Review the test-result-facts return, reconcile its declared
+   schemas and graph projections, then run the queued integration gate. Stop
+   on any remaining foreign boundary and name its owning cluster exactly.
+2. **Proof.** Complete the rebirth capability proof and integrate the systems
+   sweep against rulings 45–50, including receipt-backed old effect values and
+   the ruling-49 todo union.
+3. **Drive.** Run the real generated opening and evolving-session drive,
+   preserve the episode/history facts, and remeasure the 24.2-second live pull
+   under named conditions.
+4. **Implementation phases.** Execute Phases 1–8 in
+   [the implementation PRD](evolving-session-implementation-2026-08-12.md#phase-ownership-and-dependency-order),
+   preserving its shared-owner serialization and graduation gates.
+
+Known opens carried into that spine:
+
+- the **24.2-second** live pull of 189 members after `(help)`;
+- the ruling-49 `my.plan` retirement and replacement by the one todo system;
+  and
+- the keystone lane's ten reproducible foreign failures across the
+  test-result/schema publication, context/transcript rendering, turn
+  settlement, message/concurrency, and web-render owners. The test-result
+  owner has since landed; the integration gate must classify what remains
+  rather than replay the old tally.
+
 ### Discharged 2026-07-26
 
 | owner | what | discharged by |
