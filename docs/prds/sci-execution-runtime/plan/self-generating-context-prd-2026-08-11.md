@@ -216,6 +216,20 @@ slated by the transcript PRD.
   surface and files every ugly output; injections-per-turn and floor-hit
   counts are the instruments.
 
+## W2 evidence — 2026-08-12
+
+W2 landed in `bc3dfe3fd`, `bdb7b8efc`, `b0a3713d3`, and `291681222`.
+The event-driven acceptance results are recorded in
+[W2 change-flow acceptance evidence](../research/w2-change-flow-acceptance-2026-08-12.md):
+unchanged acquisition made **0 reads**; an irrelevant commit produced **0
+render wakes**; a relevant semantically equal root read made **1 replay** and
+**0 appends**; one new message made **1 append** with prior bytes retained.
+
+The cold root pull measured **1,795.387292 ms** versus the **46.0 ms**
+four-query floor, a **39.0301585× regression**. W2's correctness and
+incremental change-flow exit is met, but cold performance remains open in
+[cold root pull is slower than the four-query floor](../../../seon/issues/cold-root-pull-is-slower-than-the-four-query-floor.md).
+
 ## Open with the owner (not yet ruled)
 
 - Tile content: live window (newest-basis block, whatever shape) vs fixed
