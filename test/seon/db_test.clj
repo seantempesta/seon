@@ -56,6 +56,19 @@
 (def ^:private missing-schema-ref
   [:seon.schema/key :seon.db-test/missing])
 
+(def ^:private component-evidence-schema
+  [{:db/ident ::component-root-id
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one
+    :db/unique :db.unique/identity}
+   {:db/ident ::component-child
+    :db/valueType :db.type/ref
+    :db/cardinality :db.cardinality/one
+    :db/isComponent true}
+   {:db/ident ::component-value
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}])
+
 (deftest edn-backed-reads-return-distinguishable-logical-values
   (test-support/with-database
    {:seon.test-support/extra-schema
@@ -350,6 +363,34 @@
          (db/transact! connection [{:seon.cluster/name "evidence-b"}])
          (is (not (db/read-evidence-current? @connection evidence))
              "a depended attribute revision makes the retained read stale"))))))
+
+(deftest component-expanded-pull-evidence-detects-a-child-only-change
+  (test-support/with-database
+   {:seon.test-support/extra-schema component-evidence-schema}
+   (fn [connection]
+     (db/transact! connection
+                   [{::component-root-id "root"
+                     ::component-child "child"}
+                    {:db/id "child"
+                     ::component-value "before"}])
+     (let [captured (atom [])
+           result (binding [db/*read-evidence-sink* captured]
+                    (db/pull @connection
+                             [::component-child]
+                             [::component-root-id "root"]))
+           child-id (get-in result [::component-child :db/id])
+           evidence (db/read-evidence @captured)]
+       (is (= "before"
+              (get-in result [::component-child ::component-value])))
+       (is (= :all
+              (get-in evidence
+                      [0 :datahike.read/revision
+                       :datahike.read/attributes]))
+           "automatic component expansion retains every attribute read")
+       (db/transact! connection
+                     [[:db/add child-id ::component-value "after"]])
+       (is (false? (db/read-evidence-current? @connection evidence))
+           "a component-child-only change makes the retained pull stale")))))
 
 ;;; THE class regression for "a database value read through a reader that is
 ;;; not total over its shapes" (2026-08-08 live drive, two instances). Datahike
