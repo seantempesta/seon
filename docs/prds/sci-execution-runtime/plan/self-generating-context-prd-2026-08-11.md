@@ -164,6 +164,20 @@ back — everywhere, for every agent, with no maintained list of forms.
     of the forthcoming PRD — exploration first, document, iterate, then
     build.
 
+## Ruling 37 (owner, 2026-08-12 night — the demonstration corrected)
+
+37. **Spec-first, no invented concepts, closest-wins.** The demonstration
+    models schema-first development (data modeling before functions;
+    functions written once against named specs — never scratch-then-
+    overwrite), and its artifact is THE EXISTING MECHANISM: the agent
+    authors the render function for its own namespace's `:seon.ns` unit
+    (input contract the unit per ruling 35; output `:seon.render/ai`),
+    selected by the existing owning-namespace contract fit — closest to
+    the data wins — giving the agent control over how other agents' walks
+    see it. No new shape family, no db-taking status function, no concept
+    that does not already exist. Every form in the worked example must be
+    one the generation machinery genuinely emits.
+
 ## The mechanism (composed from the verified reports)
 
 ### One derivation
