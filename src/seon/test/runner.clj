@@ -7,6 +7,7 @@
             [clojure.test :as test]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.schema :as schema]
             [seon.test.selection :as selection])
   (:import (java.io BufferedReader PrintWriter StringWriter)
            (java.lang Process ProcessBuilder$Redirect ProcessHandle Runtime Thread)
@@ -666,6 +667,18 @@
 (def ^:private protocol-prefix
   "SEON_TEST_WORKER_EDN ")
 
+(defn- packaged-test-projection
+  "Acquire the packaged projection once for one test-runner JVM."
+  [role]
+  (let [projection
+        (schema/declaration-projection
+         ((requiring-resolve 'seon.schema.edn/packaged-forms)))]
+    (binding [*out* *err*]
+      (println "bin/test: PACKAGED TEST PROJECTION ACQUIRED"
+               "pid=" (.pid (ProcessHandle/current))
+               "role=" role))
+    projection))
+
 (defn- write-protocol!
   [^PrintWriter writer value]
   (.println writer (str protocol-prefix (pr-str value)))
@@ -713,13 +726,16 @@
 
 (defn- worker-main!
   [worker-id]
-  (let [protocol-out (PrintWriter. System/out true)
+  (let [projection (packaged-test-projection worker-id)
+        protocol-out (PrintWriter. System/out true)
         reader (io/reader System/in)]
     ;; Only the protocol uses stdout. Test and dependency output goes to the
     ;; worker's attributed stderr log even when a library writes System/out.
     (System/setOut System/err)
     (binding [*out* *err*]
-      (worker-command-loop! worker-id reader protocol-out))))
+      (schema/call-with-projection
+       projection
+       #(worker-command-loop! worker-id reader protocol-out)))))
 
 (defn run!
   "Run namespaces through `clojure.test` and return per-test values.
@@ -1231,7 +1247,7 @@
       {::task-results confirmed
        ::task-summary (summarize-task-results confirmed)})))
 
-(defn- coordinator-main!
+(defn- run-coordinator!
   "Run selected tests with progress and a liveness backstop.
 
   Every tiered invocation runs the declared `:seon.test/platform` moving-part
@@ -1397,6 +1413,14 @@
         (try
           (.removeShutdownHook (Runtime/getRuntime) shutdown-hook)
           (catch IllegalStateException _))))))
+
+(defn- coordinator-main!
+  [cluster-name root git-sha selection-mode namespace-names]
+  (let [projection (packaged-test-projection "coordinator")]
+    (schema/call-with-projection
+     projection
+     #(run-coordinator! cluster-name root git-sha selection-mode
+                        namespace-names))))
 
 (defn -main
   "Run the coordinator, prepare its immutable base, or run one worker."
