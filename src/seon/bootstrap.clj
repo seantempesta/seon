@@ -208,6 +208,21 @@
           vec)
      :seon.print/identity-attributes identities}))
 
+(defn- root-candidate
+  [request]
+  (let [rendered
+        (render/render-call
+         (assoc request
+                :seon.render/value
+                (db/pull (:seon.db/db request) '[*]
+                         (:seon.render.walk/lookup request))
+                :seon.render/output :seon.render/form
+                :seon.render.call/id
+                [:seon.render/form (:seon.render.walk/lookup request)]))]
+    {:seon.repl/key [(:seon.render.walk/lookup request) 0]
+     :seon.repl/subject (:seon.render.walk/lookup request)
+     :seon.repl/entry (first (entries rendered))}))
+
 (defn next-entry
   "Derive the next generated entry from receipts already stored on the run."
   {:malli/schema [:=> [:cat :seon.render.walk/request :seon.cluster.run/id]
@@ -228,15 +243,19 @@
                :args [(:seon.db/db request) run-id]
                :order-by '[?ordinal :asc]})
         pull (pull-result request)
-        candidates (:seon.repl/candidates pull)
+        candidates
+        (let [root (root-candidate request)]
+          (into [root]
+                (remove #(= (:seon.repl/key root) (:seon.repl/key %)))
+                (:seon.repl/candidates pull)))
         candidate-by-source
         (reduce (fn [by-source candidate]
                   (let [source (entry-source (:seon.repl/entry candidate))]
+                    ;; Identical structural reads can explain several pulled
+                    ;; members. Candidate order is already stable; retain its
+                    ;; first subject so receipts have one deterministic key.
                     (if (contains? by-source source)
-                      (throw
-                       (ex-info "Generated forms must have unique source."
-                                {:seon.error/kind ::ambiguous-source
-                                 :seon.cluster.run.form/source source}))
+                      by-source
                       (assoc by-source source candidate))))
                 {}
                 candidates)
@@ -253,7 +272,9 @@
                    :seon.sci.admit/print-node (edn/read-string result)}))
               rows)
         episode
-        (walk/ordered-episode (assoc pull :seon.repl/settled settled))
+        (walk/ordered-episode (assoc pull
+                                     :seon.repl/candidates candidates
+                                     :seon.repl/settled settled))
         index (count rows)
         prior-sources (mapv second rows)
         expected-sources (mapv entry-source (take index episode))]

@@ -10,6 +10,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.render.walk :as walk]
+            [seon.sci.admit :as admit]
             [seon.test-support :as support]))
 
 (def ^:private agent-id "bootstrap-agent")
@@ -96,7 +97,37 @@
             "without the first real receipt no later form can be emitted")
         (is (not-any? #(= 'outside.pull (:seon.repl/subject %))
                       (:seon.repl/candidates pull))
-            "membership comes only from the bounded pull")))))
+            "membership comes only from the bounded pull")
+        (let [situation (bootstrap/situation @connection agent-id)
+              node (:seon.sci.admit/print-node
+                    (admit/admit-value
+                     {:seon.sci.admit/value situation
+                      :seon.sci.admit/interrupt-fn (fn [])
+                      :seon.sci.admit/caps
+                      (config/result-caps (config/defaults))
+                      :seon.config/on-core-error :record}))]
+          (db/transact!
+           connection
+           [{:seon.cluster.eval/id
+             (pr-str [(bootstrap/run-id agent-id) 0])
+             :seon.cluster.eval/run
+             [:seon.cluster.run/id (bootstrap/run-id agent-id)]
+             :seon.cluster.eval/ordinal 0
+             :seon.cluster.eval/at (java.util.Date.)
+             :seon.cluster.eval/result-edn (pr-str node)}])
+          (is (map?
+               (with-redefs
+                [bootstrap/pull-result
+                 (constantly
+                  (update pull :seon.repl/candidates
+                          #(filterv (fn [candidate]
+                                      (not= (:seon.repl/root-key pull)
+                                            (:seon.repl/key candidate)))
+                                    %)))]
+                 (bootstrap/next-entry
+                  (generator-request connection)
+                  (bootstrap/run-id agent-id))))
+              "the root candidate remains stable after its run ref changes"))))))
 
 (deftest authored-plan-machinery-is-deleted
   (is (nil? (io/resource "seon/bootstrap.edn")))
