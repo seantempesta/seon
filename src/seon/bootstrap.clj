@@ -196,14 +196,14 @@
                         (keep :seon.entity/id-attr)
                         set)]
     {:seon.repl/root-key
-     [(:seon.render.walk/lookup request) 0]
+     [(first (:seon.render.walk/order acquisition)) 0]
      :seon.repl/candidates
      (into (direct-candidates request acquisition)
            (listing-candidates request acquisition))
      :seon.print/identity-attributes identities}))
 
 (defn- root-candidate
-  [request]
+  [request root-key]
   (let [rendered
         (render/render-call
          (assoc request
@@ -213,7 +213,7 @@
                 :seon.render/output :seon.render/form
                 :seon.render.call/id
                 [:seon.render/form (:seon.render.walk/lookup request)]))]
-    {:seon.repl/key [(:seon.render.walk/lookup request) 0]
+    {:seon.repl/key root-key
      :seon.repl/subject (:seon.render.walk/lookup request)
      :seon.repl/entry (first (entries rendered))}))
 
@@ -238,7 +238,7 @@
                :order-by '[?ordinal :asc]})
         pull (pull-result request)
         candidates
-        (let [root (root-candidate request)]
+        (let [root (root-candidate request (:seon.repl/root-key pull))]
           (into [root]
                 (remove #(= (:seon.repl/key root) (:seon.repl/key %)))
                 (:seon.repl/candidates pull)))
