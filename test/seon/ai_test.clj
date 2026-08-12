@@ -1111,20 +1111,39 @@
     (is (= [:fail :fail]
            (mapv #(disposed value %) [false true])))))
 
+(defn- refused-loopback-endpoint
+  "An endpoint whose ephemeral loopback listener has already closed."
+  []
+  (with-open [listener
+              (java.net.ServerSocket.
+               0 1 (java.net.InetAddress/getByName "127.0.0.1"))]
+    (str "http://127.0.0.1:" (.getLocalPort listener) "/v1")))
+
 (deftest the-leaf-records-phase-from-the-jdks-own-taxonomy
-  ;; a real call to a port nothing listens on: the JDK raises
-  ;; ConnectException, which PROVES nothing was transmitted
-  (let [value (ai/complete {:seon.ai/endpoint "http://127.0.0.1:1/v1"
+  ;; The fixture asks the OS for a free loopback port, closes its listener,
+  ;; then calls the production boundary. The JDK raises ConnectException,
+  ;; which PROVES nothing was transmitted.
+  (let [value (ai/complete {:seon.ai/endpoint (refused-loopback-endpoint)
                             :seon.ai/model "probe"
-                            :seon.ai/api-key-variable "SEON_AI_TEST_KEY"
+                            :seon.config.ai/no-auth true
                             :seon.ai/prompt "hello"
                             :seon.ai/timeout-ms 500})]
-    (when (= :seon.ai/transport-failure (:seon.error/kind value))
-      (let [evidence (:seon.error/data value)]
-        (is (false? (:seon.ai/request-transmitted? evidence)))
-        (is (= :transport-before-send (:seon.ai/error-class evidence)))
-        (is (= :failover-now (disposed value true))
-            "so a backup is eligible — this is the zero-cost case")))))
+    (is (= :seon.ai/transport-failure (:seon.error/kind value))
+        (str "the production transport boundary must construct the subject: "
+             (pr-str value)))
+    (is (schema/valid-candidate-value? :seon.error/value value)
+        "the derived subject is one complete typed error value")
+    (let [evidence (:seon.error/data value)]
+      (is (false? (:seon.ai/request-transmitted? evidence)))
+      (is (= :transport-before-send (:seon.ai/error-class evidence)))
+      (is (= :failover-now (disposed value true))
+          "so a backup is eligible — this is the zero-cost case")
+      (is (= :fail
+             (disposed
+              (assoc-in value [:seon.error/data :seon.ai/error-class]
+                        :transport-unknown)
+              true))
+          "counterexample: without before-send evidence the proof is false"))))
 
 (deftest a-missing-credential-is-provably-free
   (let [value (ai/complete {:seon.ai/endpoint "http://127.0.0.1:1/v1"
