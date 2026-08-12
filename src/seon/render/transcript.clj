@@ -487,9 +487,10 @@
   [unit family-unit distance]
   (let [db (:seon.db/db unit)
         owner (walk/owning-namespace db family-unit)
-        rendered (render/render-ai
+        rendered (render/render-call
                   (cond-> (assoc unit
                                  :seon.render/value family-unit
+                                 :seon.render/output :seon.render/ai
                                  :seon.render.call/id
                                  [::history-entity (:db/id family-unit)]
                                  :seon.render/distance distance)

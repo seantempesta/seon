@@ -1,5 +1,5 @@
 (ns seon.cluster.prompt-test
-  "Recurring acceptance for one retained walk per prompt."
+  "Recurring acceptance for the prompt's append-only REPL history."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow.core]
             [clojure.string :as str]
@@ -12,6 +12,7 @@
             [seon.cluster.prompt :as prompt]
             [seon.flow :as flow]
             [seon.render :as render]
+            [seon.render.walk :as render.walk]
             [seon.render.web :as web]
             [seon.test-support :as support])
   (:import [java.util Date]))
@@ -110,67 +111,39 @@
    :seon.config/on-core-error :panic
    :seon.render/context-channel context-channel})
 
-(deftest prompt-is-one-retained-labeled-walk
+(deftest prompt-is-derived-append-only-repl-history
   (planted
    (fn [connection context-channel]
      (let [render-request (request connection context-channel)
            rendered (prompt/prompt @connection render-request)
            text (:seon.cluster.prompt/text rendered)
-           direct (render/call-with-walk-context
-                   {:seon.db/db @connection
-                    :seon.cluster.agent/id "walker"
-                    :seon.cluster.run/id "walk-run"
-                    :seon.sci.admit/caps caps
-                    :seon.sci.eval/ctx (:seon.sci.eval/ctx render-request)
-                    :seon.sci.eval/time-limit-ms 2000
-                    :seon.config/on-core-error :panic}
-                   render/walk)
+           entries (render.walk/history
+                    (assoc render-request
+                           :seon.db/db @connection
+                           :seon.render.walk/lookup
+                           [:seon.cluster.agent/id "walker"]
+                           :seon.render/distance 2
+                           :seon.render/captured-calls (atom {})))
+           direct-text
+           (str/join "\n\n" (map :seon.render.history/bytes entries))
            contribution (first (:seon.context/contributions rendered))
-           lines (str/split-lines text)
-           volatile-index
-           (first (keep-indexed
-                   (fn [index line]
-                     (when (str/starts-with?
-                            line ";; Volatile context metadata")
-                       index))
-                   lines))
-           repl-index
-           (first (keep-indexed
-                   (fn [index line]
-                     (when (str/starts-with? line ";; REPL state ")
-                       index))
-                   lines))]
-       (is (= direct text)
-           "prompt assembly calls the same public function agents call")
+           contributions (:seon.context/contributions rendered)]
+       (is (= direct-text text)
+           "prompt assembly derives the same ordered history entries")
        (is (= text (:seon.context.contribution/text contribution)))
+       (is (= 1 (count contributions)))
        (is (= :walk (:seon.render.block/name contribution)))
-       (is (= 1 (count (re-seq #";; \(seon\.render/walk" text)))
-           "assembly opens exactly one walk")
-       (is (re-find #"(?m)^;; d\d+ · " text)
-           "unit labels use the compact depth and provenance form")
+       (is (seq entries))
+       (is (every? (comp seq :seon.render.history/bytes) entries))
        (is (str/includes? text "inspect this walk")
-           "the transcript is a branch inside the walk")
-       (is (str/starts-with?
-            (second lines)
-            ";; Some branches are elided · inspect with ")
-           "load-bearing elision guidance stays beside the walk header")
-       (is (and (some? volatile-index)
-                (some? repl-index)
-                (< volatile-index repl-index))
-           "exact elision metrics join basis and time in one suffix region")
-       (is (str/starts-with? (last lines) ";; REPL state namespace="))
-       (is (str/includes? (last lines) "my.agents.walker"))
+           "the triggering message is an entry in the agent's history")
        (is (str/includes?
-            (render/call-with-walk-context
-             {:seon.db/db @connection
-              :seon.cluster.agent/id "walker"
-              :seon.sci.admit/caps caps
-              :seon.sci.eval/ctx (:seon.sci.eval/ctx render-request)
-              :seon.sci.eval/time-limit-ms 2000
-              :seon.config/on-core-error :panic}
-             #(render/walk {:depth 2 :branch []}))
-            "branch=[]")
-           "branch is the labeled get-in drill handle")
+            text
+            "my.agents.walker=> (my.message/read \"walk-message\")"))
+       (is (not (str/includes? text ";; (seon.render/walk"))
+           "the deleted labeled-walk prompt is not reconstructed")
+       (is (not (str/includes? text ";; REPL state"))
+           "volatile database metadata is not a synthetic history entry")
        (is (empty? (db/q '[:find ?block
                           :where
                           [?agent :seon.cluster.agent/id "walker"]
@@ -218,26 +191,20 @@
            (is (= after-first @invocations)
                "an identical context performs zero second-pass renderer invocations")))))))
 
-(deftest volatile-database-metadata-follows-the-stable-context-prefix
+(deftest basis-only-transactions-do-not-append-history
   (planted
    (fn [connection context-channel]
      (let [before (:seon.cluster.prompt/text
                    (prompt/prompt @connection
-                                  (request connection context-channel)))
-           split-context (fn [text]
-                           (let [marker "\n;; REPL state "
-                                 offset (str/last-index-of text marker)]
-                             [(subs text 0 offset) (subs text (inc offset))]))
-           [before-prefix before-suffix] (split-context before)]
+                                  (request connection context-channel)))]
        (db/transact! connection [])
        (let [after (:seon.cluster.prompt/text
                     (prompt/prompt @connection
-                                   (request connection context-channel)))
-             [after-prefix after-suffix] (split-context after)]
-         (is (= before-prefix after-prefix)
-             "a basis-only transaction leaves the reusable prefix byte-identical")
-         (is (not= before-suffix after-suffix)
-             "basis and transaction time remain visible in the volatile suffix"))))))
+                                   (request connection context-channel)))]
+         (is (= before after)
+             "a basis-only transaction creates no new history observation")
+         (is (not (str/includes? after ";; REPL state"))
+             "the deleted volatile suffix is not reconstructed"))))))
 
 (deftest a-held-run-without-a-trigger-refuses
   (support/with-database
