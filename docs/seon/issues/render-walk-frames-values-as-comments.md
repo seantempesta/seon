@@ -17,10 +17,18 @@ source comments.
 ## Evidence
 
 `seon.render.walk/prose` documents and implements the comment-per-unit contract
-at `src/seon/render/walk.clj:541-640`. The exact `;; d`, call, branch, elision,
-and metadata strings are built at `:593-635`. The superseding ruling is
+at `src/seon/render/walk.clj:549-652`. The exact `;; d`, call, branch, elision,
+and metadata strings are built at `:590-651`. `src/seon/render.clj:777-782`
+then appends a separately assembled REPL-state line. The superseding ruling is
 decision 11 in
 [messaging, state, and reply-norm design](../../prds/sci-execution-runtime/research/messaging-state-design-notes-2026-08-03.md).
+
+The strict-dogfood audit on 2026-08-12 confirms this is also a ruling-28
+context-assembly violation: the comment headers, branch guidance, and volatile
+marker are neither declared render outputs for reached values nor executed
+receipts. The provider path now uses `seon.render.walk/history`, but an agent
+calling the public `seon.render/walk` still receives this manually assembled
+surface.
 
 ## Owner
 

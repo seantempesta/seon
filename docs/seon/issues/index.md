@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (45)
+## Blocker (50)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -37,7 +37,12 @@ See `README.md` for the convention.
 | [Register the fault committer before the cluster graph can emit](fault-committer-misses-the-first-injected-fault.md) | blocker | fault-facts verification pending W1 integration |
 | [Make graph construction attach every declared fanout before resume](graph-construction-leaves-tap-before-resume-to-callers.md) | blocker | CLASS KILL #4 graph-construction owner |
 | [Stop the bootstrap plan's deliberate failures from interrupting the run](bootstrap-teaching-failures-strand-every-new-agent.md) | blocker | agent context repair wave (2026-08-10 audit) |
+| [Delete the hand-authored bootstrap plan from the generated opening](generated-opening-still-reads-a-hand-authored-bootstrap-plan.md) | blocker | generated-opening bootstrap lane |
 | [Every agent prompt is a neighborhood render-walk contract violation](every-agent-prompt-is-a-neighborhood-render-walk-contract-violation.md) | blocker | live-drive context repair wave |
+| [Route failover context through the captured rendered history](failover-adds-an-uncaptured-system-context-fragment.md) | blocker | strict dogfood provider-context repair |
+| [Delete the separate agent transcript assembler](agent-html-still-uses-the-retired-transcript-assembler.md) | blocker | strict dogfood transcript-deletion wave |
+| [Execute generated form projections before they enter history](render-history-serializes-unexecuted-form-projections.md) | blocker | generated-episode receipt integration |
+| [Derive or explain every special SCI base binding](sci-base-context-silently-hand-lists-special-callables.md) | blocker | SCI base-context derivation wave |
 | [Settle a receipt for every recorded run form](a-runs-last-form-can-close-without-a-receipt.md) | blocker | live-drive context repair wave |
 | [Substitute the bootstrap plan's namespace placeholder before it is evaluated](bootstrap-plan-forms-ship-unsubstituted-namespace-placeholders.md) | blocker | live-drive context repair wave |
 | [Boot the co-hosted second cluster without a 63 s stall or a false failure](cohosted-second-boot-is-slow-and-trips-the-silence-backstop.md) | blocker | boot velocity incident (co-hosted second boot) |

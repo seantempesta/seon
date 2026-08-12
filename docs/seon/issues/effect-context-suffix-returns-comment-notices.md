@@ -16,9 +16,15 @@ display stream, so owner decision 11 forbids modeling them as comments.
 ## Evidence
 
 `seon.effect/context-suffix` constructs every notice with a `;;` prefix at
-`src/seon/effect.clj:618-634`; `seon.render.walk/prose` appends that suffix to
-the displayed walk. The superseding ruling is decision 11 in
+`src/seon/effect.clj:690-779`; `seon.render.walk/prose` appends that suffix at
+`src/seon/render/walk.clj:643-650` instead of reaching effect receipts through
+their declared render functions. The superseding ruling is decision 11 in
 [messaging, state, and reply-norm design](../../prds/sci-execution-runtime/research/messaging-state-design-notes-2026-08-03.md).
+
+The strict-dogfood audit on 2026-08-12 also classifies this as a ruling-28
+violation. Pending and completed work are database facts, but this function
+assembles a prompt-only tail rather than letting the neighborhood walk and
+declared effect renders produce ordinary history entries.
 
 ## Owner
 

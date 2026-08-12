@@ -15,10 +15,16 @@ source comments.
 
 ## Evidence
 
-`src/seon/render.clj:375-377` creates the comment-prefixed walk error and
-`:404-408` creates the comment-prefixed REPL-state suffix. The superseding
+`src/seon/render.clj:671-685` creates the comment-prefixed REPL-state suffix;
+`src/seon/render.clj:687-785` appends it to the separately assembled walk prose
+and converts every boundary failure into another text notice. The superseding
 ruling is decision 11 in
 [messaging, state, and reply-norm design](../../prds/sci-execution-runtime/research/messaging-state-design-notes-2026-08-03.md).
+
+The strict-dogfood audit on 2026-08-12 also classifies the suffix as a ruling-28
+violation: namespace, basis, and transaction time are facts or explicit render
+inputs, but the wrapper bypasses declared render selection and writes their
+context line itself.
 
 ## Owner
 
