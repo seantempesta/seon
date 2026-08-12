@@ -419,13 +419,13 @@ pay for the second topology.
 - `test/seon/execution_test.cljs`, `test/seon/execution/host_test.cljs`, and
   `test/seon/execution/runtime_test.cljs` — poisoning, cancellation, exit,
   deadline, source loading, and renderer entrypoint proofs.
-- `reference-code/bun` at `be77b652884b16a103cfaa4af3c1102f72f2dcd3`:
+- `reference-code/bun` at `be77b652884b`:
   `packages/bun-types/bun.d.ts` (`Subprocess`, workers, heap snapshots),
   `packages/bun-types/jsc.d.ts` (structured serialization and heap statistics),
   and `src/js/node/worker_threads.ts` (worker termination/exit lifecycle).
-- `reference-code/sci` at `9e9c78f4f358ede939b94352ff4edc03b0186c7a`:
+- `reference-code/sci` at `9e9c78f4f358`:
   `src/sci/interrupt.cljc` and evaluator internals.
-- `reference-code/core.async` at `b871f3519de6843a9f5ce66cf8d5c6cbe44d3222`:
+- `reference-code/core.async` at `b871f3519de6`:
   CLJS dispatch/timer/channel implementations.
 - `reference-code/superv.async` at
   `3e6ed755f83634c9e9bbb58707f9446420d32ce9`:
@@ -481,4 +481,4 @@ Source: `reference-code/bun/packages/bun-types/bun.d.ts` (`BaseOptions`,
 `SpawnOptions`, and `Subprocess`),
 `reference-code/bun/src/js/node/perf_hooks.ts`, and
 `reference-code/bun/src/js/node/worker_threads.ts` at Bun revision
-`be77b652884b16a103cfaa4af3c1102f72f2dcd3`.
+`be77b652884b`.

@@ -225,10 +225,10 @@ build input until the checkpoint is released.
 ## Dependency ledger
 
 - Bun source: `reference-code/bun` at
-  `be77b652884b16a103cfaa4af3c1102f72f2dcd3`; installed Bun 1.3.14 revision
+  `be77b652884b`; installed Bun 1.3.14 revision
   `0d9b296af` remains a distinct executable identity.
 - Shadow CLJS: selected fork
-  `4e72595f57618f5c43388ad13d5136cd3bede566`; its CommonJS `:node-script`
+  `4e72595f5761`; its CommonJS `:node-script`
   artifact already runs, connects, and hot reloads under Bun.
 - Existing evidence:
   [[../local-performance-graduation/research/bun-production-runtime-integration-audit-2026-07-15]],

@@ -291,7 +291,7 @@ The claim that Inspect is pinned is false at the dependency boundary:
 - `uv.lock:803-805` records only a mutable sibling directory source;
 - the installed `.venv` currently reports `0.1.dev1+g92dd737b9`; while
 - `reference-code/inspect-ai` is currently commit
-  `05322696a0f784ec399ef6abbafd3d2a250ea9cc`, describes itself as
+  `05322696a0f7`, describes itself as
   `0.3.246-dirty`, and has a dirty `_view/ts-mono` entry.
 
 No synchronization was run, because that would destroy the diagnostic state

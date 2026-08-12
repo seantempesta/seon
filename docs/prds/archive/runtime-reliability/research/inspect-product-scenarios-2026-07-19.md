@@ -26,7 +26,7 @@ database value. This is not another agent execution transport.
 ## Dependency ledger
 
 - Inspect AI source is `reference-code/inspect-ai` at
-  `05322696a0f784ec399ef6abbafd3d2a250ea9cc`. The implementation uses its
+  `05322696a0f7`. The implementation uses its
   ordinary `Task`, `MemoryDataset`, custom solver, scorer, `Score`, and native
   accuracy reduction seams.
 - Seon's execution seam is `seon_inspect.solver.pod_run`, which posts to

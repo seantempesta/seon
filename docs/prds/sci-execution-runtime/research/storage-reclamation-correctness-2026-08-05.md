@@ -36,14 +36,14 @@ mechanism that knows which operations change reachability
 
 I read the following current sources end to end, not by keyword extraction:
 
-- Datahike `c15272730e74fb3f8bba91f6361c268492a99ba7`:
+- Datahike `c15272730e74`:
   `reference-code/datahike/src/datahike/gc.cljc`, `gc_guard.cljc`,
   `versioning.cljc`, `writing.cljc`, `writer.cljc`, `api.cljc`, and
   `api/specification.cljc`; `reference-code/datahike/doc/gc.md`; also both
   current reclamation test namespaces,
   `test/datahike/test/gc_test.cljc` and
   `test/datahike/test/background_gc_test.cljc`.
-- Konserve `89795ae1b769aafd47adf4168e2393d7b4721bc2`:
+- Konserve `89795ae1b769`:
   `reference-code/konserve/src/konserve/gc.cljc`, `protocols.cljc`,
   `core.cljc`, `impl/storage_layout.cljc`, `impl/defaults.cljc`,
   `filestore.clj`, and `utils.cljc`.

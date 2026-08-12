@@ -48,18 +48,18 @@ ten-member P0 suite.
   `:seon.fn/agent-facing?` value and omits the attribute when metadata is
   absent.
 - The selected Malli source is recorded at
-  `80138076960e7820523b4cb932c5b5d1936d4e7f` under `reference-code/malli`.
+  `80138076960e` under `reference-code/malli`.
   `src/malli/core.cljc` owns function-schema arities and reference walking;
   Seon's compact renderer consumes the persisted schema form and transitive
   referenced closure. Malli does not decide namespace residency.
 - The repository records Datahike
-  `417649383c65e13f15ea41d394fb1ed742477965`. The local reference checkout is
+  `417649383c65`. The local reference checkout is
   intentionally advanced to `eb3e2239b650635977fdc8e73e7c657b23bf3383`
   under another owner and is not the selected runtime coordinate. Datahike's
   pure `q`, `pull`, and `entity` operations make attribute presence and
   component refs queryable from one immutable database value.
 - Inspect AI is selected at
-  `05322696a0f784ec399ef6abbafd3d2a250ea9cc`. Its existing `Task`, `Sample`,
+  `05322696a0f7`. Its existing `Task`, `Sample`,
   and `Scorer` contracts in `reference-code/inspect-ai/src/inspect_ai/` are
   sufficient for the four fixed development rows. Seon's existing native
   solver, source admission, final-snapshot evidence, and `.eval` read-back

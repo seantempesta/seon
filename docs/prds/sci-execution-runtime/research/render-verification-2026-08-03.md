@@ -29,15 +29,15 @@ spec is [[render-simplification-audit-2026-08-03]].
 
 The dependency sources used to judge the boundaries were:
 
-- SCI `2db3358cba913b6fbbe49c7b5b34d7ac72715924`, especially
+- SCI `2db3358cba91`, especially
   `reference-code/sci/doc/interrupt.md` and
   `reference-code/sci/src/sci/core.cljc`;
 - core.async `dc35f3e0d7bc2eef502e77982f48641f025c8051`, especially
   `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj` and
   `flow/impl.clj`;
-- Datahike `0e8601d7f2f68c01070e13a95483bc82be04cabc`, especially its transaction
+- Datahike `0e8601d7f2f6`, especially its transaction
   and listener implementations; and
-- http-kit `238a85cc555a38892f2f9a7583c9cf5cec0fb201`, for the SSE write-state
+- http-kit `238a85cc555a`, for the SSE write-state
   boundary.
 
 First-party owners were `src/seon/render.clj`, `src/seon/render/walk.clj`,

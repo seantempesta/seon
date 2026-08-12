@@ -30,7 +30,7 @@ consumer callback.
 
 ## Dependency ledger and shortest probes
 
-- Bun `be77b652884b16a103cfaa4af3c1102f72f2dcd3`:
+- Bun `be77b652884b`:
   - `reference-code/bun/packages/bun-types/bun.d.ts:5781-5811` says native
     `Socket.write` is unbuffered and non-blocking, returns the actual number of
     bytes written, and may write less than requested under backpressure.

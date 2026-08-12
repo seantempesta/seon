@@ -14,7 +14,7 @@ development slice freezes, not a model selection.
 ## Dependency ledger
 
 - Inspect AI source is `reference-code/inspect-ai/` at
-  `05322696a0f784ec399ef6abbafd3d2a250ea9cc`. The installed
+  `05322696a0f7`. The installed
   `src-inspect-ai/.venv` distribution is
   `0.3.247.dev0+g05322696a.d20260715`; the source checkout is dirty only at the
   nested `_view/ts-mono` entry.

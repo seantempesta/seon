@@ -60,10 +60,10 @@ Dependency ledger:
 | dependency | selected revision | source read |
 |---|---|---|
 | Clojure | 1.12.5, `deps.edn:15` | the focused JVM probes below |
-| Datahike | `9a7a9ef10a954c32075e60d929f9101a9ac8abd9` | `reference-code/datahike/src/datahike/db/transaction.cljc`, `db.cljc`, `writer.cljc` |
+| Datahike | `9a7a9ef10a95` | `reference-code/datahike/src/datahike/db/transaction.cljc`, `db.cljc`, `writer.cljc` |
 | reitit | `106fc4c7a09290c8e2df2d4ef9570ea1322ab2ab` | `reference-code/reitit/modules/reitit-ring/src/reitit/ring.cljc`, `modules/reitit-core/src/reitit/core.cljc` |
 | Datastar Clojure | `1cef624e9e59a2ea79ffe2f65df2e7b06f8198d2` | the first-party serializer, shell, and feed integration |
-| http-kit | `70432d3ab3c9f23cb4672c7656d94fe8d71726d6` | the existing first-party Ring handler |
+| http-kit | `70432d3ab3c9` | the existing first-party Ring handler |
 | first-party owners | current tree | `src/seon/render/{walk,agent,block,web,hiccup}.clj`, `src/seon/cluster/{message,work,wake}.clj*`, their schemas and focused tests |
 | quarry gate | condemned reference only | `src-old/seon/web/reactive/{call,transform}.cljs` plus its localized `AGENTS.md` |
 

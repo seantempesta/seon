@@ -35,8 +35,8 @@ transaction event and decoded/applied independently by every replica.
 
 | Owner | Selected source | Fact used by this audit |
 |---|---|---|
-| Bun | `reference-code/bun` at `be77b652884b16a103cfaa4af3c1102f72f2dcd3` | `Bun.connect({unix, socket})` is the native Unix client. `Socket.write` returns the accepted byte count and may accept a prefix; `drain` resumes output. The existing session handles both facts directly. |
-| Shadow | `reference-code/shadow-cljs` at `4e72595f57618f5c43388ad13d5136cd3bede566` | `node-script` produces the CommonJS server-JavaScript artifact and sets `cljs.core/*target*` to `"nodejs"`; it does not select the executable. Only `node-test` autorun literally launches `node`, and Seon's runners do not use that autorun. No Shadow fork is needed for this deletion. |
+| Bun | `reference-code/bun` at `be77b652884b` | `Bun.connect({unix, socket})` is the native Unix client. `Socket.write` returns the accepted byte count and may accept a prefix; `drain` resumes output. The existing session handles both facts directly. |
+| Shadow | `reference-code/shadow-cljs` at `4e72595f5761` | `node-script` produces the CommonJS server-JavaScript artifact and sets `cljs.core/*target*` to `"nodejs"`; it does not select the executable. Only `node-test` autorun literally launches `node`, and Seon's runners do not use that autorun. No Shadow fork is needed for this deletion. |
 | Bun session | `src/seon/db/transport/uds.cljs` | One `Bun.connect` session multiplexes bounded requests and addressed Datom/resynchronization events. Its event queue retains at most one event per interest and turns coalescing into explicit resynchronization. |
 | JVM session server | `src/seon/db/transport/uds.clj` | One selector accepts all request sessions and exposes bounded `send!` on the physical connection. The later publisher implementation in the same file is independent legacy code. |
 | Interest owner | `src/seon/db/writer.clj` | `install-interest-locked!` opens Datahike's committed-report source; `deliver-report!` routes matching Datoms; `send-interest-event!` writes through the requesting session; physical close removes its acquisitions and interests. |

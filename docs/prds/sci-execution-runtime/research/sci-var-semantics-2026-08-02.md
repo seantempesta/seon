@@ -33,7 +33,7 @@ and a JVM probe against the repository dependency graph.
 
 ## Dependency ledger and method
 
-- Maintained SCI revision: `6de15683b7520cc973bc9c136aec7ad3f9b3788c`.
+- Maintained SCI revision: `6de15683b752`.
 - Var construction and binding:
   `reference-code/sci/src/sci/core.cljc:41-57,76-136,139-145,259-270`;
   `reference-code/sci/src/sci/impl/copy_vars.cljc:139-165`;

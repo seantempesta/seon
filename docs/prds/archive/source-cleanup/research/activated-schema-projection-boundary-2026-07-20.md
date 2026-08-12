@@ -27,10 +27,10 @@ planned derivation.
 
 | Dependency | Selected revision | Grounding | Current Seon owner or call site |
 |---|---|---|---|
-| Malli | `80138076960e7820523b4cb932c5b5d1936d4e7f` (`0.20.0` runtime dependency) | `reference-code/malli/src/malli/core.cljc:353-361` schema-local cache, `:2582-2603` properties and children, `:2660-2666` explainer reuse; `reference-code/malli/src/malli/error.cljc:344-403` humanized errors and spell checking | `src/seon/schema.cljc:293-375` builds the immutable projection; `:377-419` publishes and reads it; `:537-551` compiles candidate-only validators that the browser must not use |
+| Malli | `80138076960e` (`0.20.0` runtime dependency) | `reference-code/malli/src/malli/core.cljc:353-361` schema-local cache, `:2582-2603` properties and children, `:2660-2666` explainer reuse; `reference-code/malli/src/malli/error.cljc:344-403` humanized errors and spell checking | `src/seon/schema.cljc:293-375` builds the immutable projection; `:377-419` publishes and reads it; `:537-551` compiles candidate-only validators that the browser must not use |
 | Orchard | `c462a25d97988f1af51e8181265c43ec9b7d3d6f` | `reference-code/orchard/src/orchard/inspect.clj:44,96-141,150-200` bounded head-plus-one paging and path descent | Prior art for later drill units; no Orchard state enters this projection |
 | Reveal | `911b7b678b739f3ca19b8f95ed013a669b296c1d` | `reference-code/reveal/` inspector navigation | Prior art only; no second inspector registry or state machine |
-| Datahike | `6f2569087ed31f53e751e7535ef4bf2527912046` | `reference-code/datahike/src/datahike/db.cljc:307-338` immutable database schema value; entity meaning remains attribute presence | No database call belongs in this pure projection unit |
+| Datahike | `6f2569087ed3` | `reference-code/datahike/src/datahike/db.cljc:307-338` immutable database schema value; entity meaning remains attribute presence | No database call belongs in this pure projection unit |
 | Reitit | `106fc4c7a09290c8e2df2d4ef9570ea1322ab2ab` | `reference-code/reitit/` | Route work is deferred |
 | Datastar | `bb9ed6fbe78cf5690f5ad23a5faf86407a44982f` | `reference-code/datastar/` | Morph and hover presentation are deferred |
 | Datastar Clojure | `1cef624e9e59a2ea79ffe2f65df2e7b06f8198d2` | `reference-code/datastar-clojure/` | Morph and hover presentation are deferred |

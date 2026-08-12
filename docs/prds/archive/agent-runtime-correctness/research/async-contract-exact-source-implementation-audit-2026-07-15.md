@@ -11,10 +11,10 @@ tags: [research, agent, cljs, schema]
 The selected compiler boundary is now source-grounded. Fetch the official
 ClojureScript `r1.12.145` tag into `reference-code/clojurescript` and read it
 by revision; do not move that checkout. Its commit is
-`bd23d9a2475d822ea8dfd65deaa6732428b9ed25`. The tag name is authoritative for
+`bd23d9a2475d`. The tag name is authoritative for
 the Maven `1.12.145` release even though the tagged commit message and top
 changelog entry say `1.12.144`. Shadow `3.4.10` is commit
-`d3c04691952aa9ea33f7287ffe9a2b3109c1e510`. This audit was made against Seon
+`d3c04691952a`. This audit was made against Seon
 HEAD `ffdad065fc3c199624c0c99391f90049f652a362`.
 
 Do not add an eval-level Promise validator. Extend the one existing
@@ -26,9 +26,9 @@ then let Malli retain ownership of live-var replacement and restoration.
 
 | Dependency or mechanism | Exact identity | Source read | Constraint |
 |---|---|---|---|
-| ClojureScript | Maven `1.12.145`; official tag `r1.12.145`; commit `bd23d9a2475d822ea8dfd65deaa6732428b9ed25` | `reference-code/clojurescript` at `r1.12.145`: `src/main/clojure/cljs/analyzer.cljc`, `compiler.cljc`, `core.cljc`; `src/main/cljs/cljs/js.cljs`; `src/test/cljs/cljs/async_await_test.cljs` | `^:async` becomes native JavaScript async functions for fixed, multi-arity, and variadic shapes. `await` is legal only when analyzer env carries `:async`. |
-| Shadow CLJS | `3.4.10`; commit `d3c04691952aa9ea33f7287ffe9a2b3109c1e510` | `reference-code/shadow-cljs` at that commit: `project.clj`, `src/main/shadow/build/cljs_hacks.cljc`, `cljs_bridge.clj`, `targets/bootstrap.clj` | Shadow patches invoke/type and other compiler seams, but does not replace `parse 'fn*` or the async function emitters. Bootstrap output serializes the analyzer namespace map rather than inventing a second async model. |
-| Malli | `0.20.0`; tag commit `4c054bd7d042e70d60b83b9f07fb765bc103037f` | `reference-code/malli` at `0.20.0`: `src/malli/core.cljc`, `src/malli/instrument.cljs` | Stock output validation sees the immediately returned Promise. CLJS var surgery distinguishes simple, multi-arity, and pure-variadic functions by the exact properties the compiler emits. |
+| ClojureScript | Maven `1.12.145`; official tag `r1.12.145`; commit `bd23d9a2475d` | `reference-code/clojurescript` at `r1.12.145`: `src/main/clojure/cljs/analyzer.cljc`, `compiler.cljc`, `core.cljc`; `src/main/cljs/cljs/js.cljs`; `src/test/cljs/cljs/async_await_test.cljs` | `^:async` becomes native JavaScript async functions for fixed, multi-arity, and variadic shapes. `await` is legal only when analyzer env carries `:async`. |
+| Shadow CLJS | `3.4.10`; commit `d3c04691952a` | `reference-code/shadow-cljs` at that commit: `project.clj`, `src/main/shadow/build/cljs_hacks.cljc`, `cljs_bridge.clj`, `targets/bootstrap.clj` | Shadow patches invoke/type and other compiler seams, but does not replace `parse 'fn*` or the async function emitters. Bootstrap output serializes the analyzer namespace map rather than inventing a second async model. |
+| Malli | `0.20.0`; tag commit `4c054bd7d042` | `reference-code/malli` at `0.20.0`: `src/malli/core.cljc`, `src/malli/instrument.cljs` | Stock output validation sees the immediately returned Promise. CLJS var surgery distinguishes simple, multi-arity, and pure-variadic functions by the exact properties the compiler emits. |
 | Seon instrumentation owner | current HEAD | `src/seon/instrument.cljc`; `test/seon/instrument_inject_test.cljs`; `test/seon/instrument_smoke_test.cljs` | `injecting-fschema` already owns injection, input validation, resolved-output validation, rejection recording, and fault attribution for a simple `:=>`. Strengthen this owner in place. |
 | Seon analyzer/eval | current HEAD | `src/seon/analyzer_info.cljs`; `src/seon/eval.cljs` | Analyzer facts retain source metadata and function contracts. Eval awaits agent form results, but must not become a second public-function contract authority. |
 
@@ -40,7 +40,7 @@ git -C reference-code/clojurescript rev-parse r1.12.145^{commit}
 
 ```
 
-The command returned `bd23d9a2475d822ea8dfd65deaa6732428b9ed25` and left
+The command returned `bd23d9a2475d` and left
 the reference checkout detached at its prior source snapshot. No dependency
 version, Seon checkout, or worktree changed.
 

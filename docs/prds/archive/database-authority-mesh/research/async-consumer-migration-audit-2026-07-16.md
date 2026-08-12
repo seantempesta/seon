@@ -57,9 +57,9 @@ lifecycle owner, not a serial work queue.
 
 | Dependency or mechanism | Selected source | Relevant interior seam | Existing Seon evidence |
 |---|---|---|---|
-| Maintained Datahike | `reference-code/datahike` at `d21abadb9412f1b828b02ddb3c08ddc81d57c595` | immutable database values, query evidence, committed cache identity, bounded resource weights, pull-many, index pages | `seon.db.writer`, writer integration and admission tests |
-| Bun | `reference-code/bun` at `be77b652884b16a103cfaa4af3c1102f72f2dcd3` | `Bun.connect`, socket write/drain, async context propagation, native HTTP and process APIs | `seon.db.transport.uds` and its CLJS tests |
-| shadow-cljs | `reference-code/shadow-cljs` at `4e72595f57618f5c43388ad13d5136cd3bede566` | `:node-script` emits a runnable server artifact; test autorun alone hard-codes Node | current pod and test build configuration |
+| Maintained Datahike | `reference-code/datahike` at `d21abadb9412` | immutable database values, query evidence, committed cache identity, bounded resource weights, pull-many, index pages | `seon.db.writer`, writer integration and admission tests |
+| Bun | `reference-code/bun` at `be77b652884b` | `Bun.connect`, socket write/drain, async context propagation, native HTTP and process APIs | `seon.db.transport.uds` and its CLJS tests |
+| shadow-cljs | `reference-code/shadow-cljs` at `4e72595f5761` | `:node-script` emits a runnable server artifact; test autorun alone hard-codes Node | current pod and test build configuration |
 | ClojureScript | `1.12.145` | Promises and `^:async` functions at the host boundary | existing `seon.web.reactive.call` await containment |
 | shadow-cljs release | `3.4.10` | Bun runs the emitted Node-targeted JavaScript | package and dependency manifests |
 

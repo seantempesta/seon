@@ -54,8 +54,8 @@ the existing raw-value propagation path unchanged.
 ## Dependency ledger
 
 The selected checkout is `reference-code/datahike` at
-`1296cfc4cb8c9b4868dde8bb6c3f4d4dc523d043` (`Make pull-many ordered for
-missing entities`), pinned by Seon commit `09c6b4755ff84da50cc14e390753953ecccf994b`.
+`1296cfc4cb8c` (`Make pull-many ordered for
+missing entities`), pinned by Seon commit `09c6b4755ff8`.
 All Datahike paths below are relative to that checkout.
 
 | Owner | Exact source | Constraint |

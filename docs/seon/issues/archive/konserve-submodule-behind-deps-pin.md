@@ -36,7 +36,7 @@ unchanged — the pin was already the deliberate truth.
 ## Proof
 
 - `git submodule status reference-code/konserve` reports
-  `b5c99bc02a7175652a610324215288b78551801f`.
+  `b5c99bc02a71`.
 - `bin/test-writer` full suite after the move: 231 tests, 1891 assertions,
   0 failures, 0 errors (the build resolves the same SHA from the git dep,
   so behavior is unchanged by construction).

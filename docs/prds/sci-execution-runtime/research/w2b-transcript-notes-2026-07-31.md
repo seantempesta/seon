@@ -23,7 +23,7 @@ inverts.
 ## Dependency ledger
 
 - Datahike is the maintained `reference-code/datahike` revision
-  `9b3be9d59cb07d9c895af280e60eb074bb57a400`. The implementation uses
+  `9b3be9d59cb0`. The implementation uses
   `datahike.api/q` and `datahike.api/pull-many` with concrete selectors; it
   uses neither wildcard pull nor entity views. Ordered query options are
   grounded in `reference-code/datahike/src/datahike/query.cljc` and its

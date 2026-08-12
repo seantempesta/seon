@@ -39,7 +39,7 @@ dynamic-transcript sections in
 
 - Seon source revision during the probe: `aacba2d29`.
 - Root gitlink and checked-out Datahike revision:
-  `574c5f0f0db9411d1982769f14512cb24ef719da`. Datahike creates a branch from
+  `574c5f0f0db9`. Datahike creates a branch from
   an existing branch or exact commit ID at
   `reference-code/datahike/src/datahike/versioning.cljc:237-270`; a branch
   database value is loaded independently at

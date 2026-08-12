@@ -220,9 +220,9 @@ cluster acquisition measurement. Neither operation belongs on the render path.
 
 | Dependency or mechanism | Selected revision | Source and first-party seam read |
 |---|---|---|
-| SCI | `6de15683b7520cc973bc9c136aec7ad3f9b3788c` | `reference-code/sci/doc/interrupt.md`; `reference-code/sci/src/sci/interrupt.cljc`; live context and invocation owner in `src/seon/sci/eval.clj:156-384,795-850,1212-1237,1396-1597` |
+| SCI | `6de15683b752` | `reference-code/sci/doc/interrupt.md`; `reference-code/sci/src/sci/interrupt.cljc`; live context and invocation owner in `src/seon/sci/eval.clj:156-384,795-850,1212-1237,1396-1597` |
 | core.async + Flow | `dc35f3e0d7bc2eef502e77982f48641f025c8051` | `reference-code/core.async/.../flow.clj`, `flow/impl.clj`, and buffers; bounded submission call in `src/seon/cluster/loop.clj:531-562,1373-1446`; current render proc in `src/seon/render/web.clj:528-690` |
-| Datahike | `0e8601d7f2f68c01070e13a95483bc82be04cabc` | Program rows carry `:seon.fn/sym` and source datoms (`resources/seon/schema.edn:1960-1989`); asserting-transaction provenance is derived by `src/seon/schema.clj:567-593` and already consumed by `src/seon/sci/eval.clj:903-1035` |
+| Datahike | `0e8601d7f2f6` | Program rows carry `:seon.fn/sym` and source datoms (`resources/seon/schema.edn:1960-1989`); asserting-transaction provenance is derived by `src/seon/schema.clj:567-593` and already consumed by `src/seon/sci/eval.clj:903-1035` |
 | Render router and grammar | current tree at this design | JVM-only resolution/invocation in `src/seon/render.clj:282-305,331-382`; block grammar/error boundary in `src/seon/render/block.clj:200-274`; raw/escaping in `src/seon/render/hiccup.clj:61-147`; delivery in `src/seon/render/web.clj:306-370,528-690` |
 | Render pipeline design | `render-pipeline-design-2026-07-29.md` | Shared serialization, current/target distinction, buffer law, frame measurements, and explicit exclusion of SCI timing (`:62-190,192-332,510-588,620-641`) |
 

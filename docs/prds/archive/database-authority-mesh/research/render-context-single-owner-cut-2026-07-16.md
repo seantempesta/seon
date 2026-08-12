@@ -49,10 +49,10 @@ the native-result cut and must not be reintroduced for rendering.
 
 | Dependency or existing owner | Selected source | Constraint used by this cut |
 |---|---|---|
-| Datahike | `reference-code/datahike` at `a464cd887458d2572414a6ea951c477b0981fdae` | One immutable database value owns its indexes and exact query-cache identity. Bun receives ordinary results, never a Datahike object. |
-| Bun | `reference-code/bun` at `be77b652884b16a103cfaa4af3c1102f72f2dcd3` | The existing child host already provides process isolation, deadlines, cancellation, and replacement. No render worker is needed. |
-| Shadow ClojureScript | `reference-code/shadow-cljs` at `4e72595f57618f5c43388ad13d5136cd3bede566` | The execution artifact already includes trusted core functions and the child compiler entrypoint. |
-| SCI | `reference-code/sci` at `b4917436550c857a18b8f6a4a8b5b26356acc2c4` | No retained production render behavior requires a second interpreter once authored functions run in an isolated compiled child. |
+| Datahike | `reference-code/datahike` at `a464cd887458` | One immutable database value owns its indexes and exact query-cache identity. Bun receives ordinary results, never a Datahike object. |
+| Bun | `reference-code/bun` at `be77b652884b` | The existing child host already provides process isolation, deadlines, cancellation, and replacement. No render worker is needed. |
+| Shadow ClojureScript | `reference-code/shadow-cljs` at `4e72595f5761` | The execution artifact already includes trusted core functions and the child compiler entrypoint. |
+| SCI | `reference-code/sci` at `b4917436550c` | No retained production render behavior requires a second interpreter once authored functions run in an isolated compiled child. |
 | Database facade | `src/seon/db.cljs:430-749` | `db`, query, pull, schema, and `execute-many` are asynchronous and return ordinary values or direct `:seon.error/*` maps. `execute-many` returns `::db/results`, not a database coordinate. |
 | Child invocation | `src/seon/execution.cljs:417-468,605-630,705-800` | The parent puts one database value on the invocation. A compiled function marked `::pin-database?` receives it through `db/with-tx-context`; selected calls use `Promise.all` and inherit the same invocation. |
 | Compiled render entrypoints | `src/seon/execution/runtime.cljs:180-424` | `render-prompt!` and `render-agent-view!` already batch outer reads and resolve selected AI/HTML functions in the child. |

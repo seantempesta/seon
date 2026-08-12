@@ -35,7 +35,7 @@ Do not recreate it. Do not reset `default`, and do not use or prune
 | Retained owner selection and lifecycle | `src/seon/execution/host.cljs` | `test/seon/execution/host_test.cljs`; owner is selected from recorded eval-id membership across child/host lanes, not from a fresh tier lookup |
 | JVM retained-value parity | `src/seon/host.clj` | `test/seon/host_conformance_writer_test.clj`; live same-session sampling, widened/incomplete policy refusal before raw lookup, and replacement-session honest unavailability |
 | HTTP authorization and status translation | `src/seon/web/serve.cljs` | `test/seon/web/serve_test.cljs`; missing and cross-agent evals are byte-uniform 404s with zero sampler calls; admitted available/unavailable, policy, and core outcomes map to 200/400/503 |
-| Runtime and paging rulings | Bun `d8ecf098572e2b8265b23e40c04efb4067e516cc`, Transit CLJS `0.8.280`, Orchard `c462a25d97988f1af51e8181265c43ec9b7d3d6f` | `reference-code/bun/docs/runtime/child-process.mdx`, `reference-code/transit-cljs/`, and `reference-code/orchard/src/orchard/inspect.clj` as recorded in [[execution-child-value-sampling-boundary-2026-07-20]] |
+| Runtime and paging rulings | Bun `d8ecf098572e2b8265b23e40c04efb4067e516cc`, Transit CLJS `0.8.280`, Orchard `c462a25d9798` | `reference-code/bun/docs/runtime/child-process.mdx`, `reference-code/transit-cljs/`, and `reference-code/orchard/src/orchard/inspect.clj` as recorded in [[execution-child-value-sampling-boundary-2026-07-20]] |
 
 ## Evidence matrix
 

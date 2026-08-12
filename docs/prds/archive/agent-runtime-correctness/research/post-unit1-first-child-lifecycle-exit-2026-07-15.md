@@ -51,10 +51,10 @@ in the first lifecycle experiment.
 | Unit-1 process owner | final descriptor not yet published to Unit 6 | Unit 6 consumes the exact selected executable, artifact, backend, environment, and parent-death contract. It must not choose Node, Docker, process groups, or packaging independently. |
 | Host Node.js | `v26.4.0`, V8 `14.6.202.34-node.21`, release `2022edf3e32ce28ee08b17f8566243a090dacd95` | `tmp/reference-node-v26.4.0/doc/api/child_process.md` and `lib/internal/child_process.js`: retain the exact `ChildProcess`; `kill()` only sends; `killed` is not death; `close` follows exit plus stdio closure; delayed naked-PID signaling is unsafe. |
 | Packaged Node.js | historical `seon:slice1` uses `v22.23.1` | The old image is not selectable evidence: its Node differs from the audited host, its executable is omitted from `PATH`, and its measured permission mode allowed a listener. The unit-1 descriptor must settle this identity first. |
-| ClojureScript self-host | `1.12.145`, tag `bd23d9a2475d822ea8dfd65deaa6732428b9ed25` | Exact source is available in `reference-code/clojurescript`; compiler/analyzer/result state remains parent process-local. The fixture does not compile or evaluate application forms. |
-| Datahike | `9ada755087228e10cfb179fa5779ce227a6ed220` | Exact maintained source is in `reference-code/datahike`. No connection, writer/feed socket, transaction, or receipt enters this experiment. |
-| Malli | selected `0.20.0`, tag `4c054bd7d042e70d60b83b9f07fb765bc103037f` | Closed parent/child frame schemas reject unknown or authority-bearing fields before dispatch. |
-| SCI | `0.13.53`, tag `b4917436550c857a18b8f6a4a8b5b26356acc2c4` | Existing sandbox semantics remain unchanged and are not claimed as hard containment. |
+| ClojureScript self-host | `1.12.145`, tag `bd23d9a2475d` | Exact source is available in `reference-code/clojurescript`; compiler/analyzer/result state remains parent process-local. The fixture does not compile or evaluate application forms. |
+| Datahike | `9ada75508722` | Exact maintained source is in `reference-code/datahike`. No connection, writer/feed socket, transaction, or receipt enters this experiment. |
+| Malli | selected `0.20.0`, tag `4c054bd7d042` | Closed parent/child frame schemas reject unknown or authority-bearing fields before dispatch. |
+| SCI | `0.13.53`, tag `b4917436550c` | Existing sandbox semantics remain unchanged and are not claimed as hard containment. |
 | Piscina | reference `23a6c2e94735216c6978679fe7b8ea0b5666683b`, not selected | Listener cleanup and rejection patterns are reference material only. Worker limits exclude external memory and cannot supply this boundary. |
 | Inspect AI | reference `05322696`, tag `0.3.246` | Inspect consumes deterministic proof only after the lifecycle gate; it does not own child launch or disposal. |
 

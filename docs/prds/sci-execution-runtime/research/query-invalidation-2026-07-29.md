@@ -18,10 +18,10 @@ falsifier, and the context-walk S4 verdict.
 - Datahike is selected by `deps.edn:21-25` as the local root
   `reference-code/datahike`, excluding its transitive Konserve coordinate.
   The checked-out submodule is
-  `9a7a9ef10a954c32075e60d929f9101a9ac8abd9`
+  `9a7a9ef10a95`
   (`git describe`: `0.8.1729-92-g9a7a9ef1`).
 - Konserve is selected independently by `deps.edn:26-33` at Git SHA
-  `b5c99bc02a7175652a610324215288b78551801f`. The
+  `b5c99bc02a71`. The
   `reference-code/konserve` submodule is at the same SHA. Datahike therefore
   compiles against the maintained Konserve fork selected by the root project,
   not an incidental transitive version.

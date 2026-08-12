@@ -25,7 +25,7 @@ the exact cross-lane stop boundary requested by the owner.
 
 ## Dependency ledger
 
-- Datahike is pinned at `9b3be9d59cb07d9c895af280e60eb074bb57a400`.
+- Datahike is pinned at `9b3be9d59cb0`.
   Transaction argument maps are normalized in
   `reference-code/datahike/src/datahike/api/impl.cljc:30-48`; ref and
   cardinality declarations are derived by

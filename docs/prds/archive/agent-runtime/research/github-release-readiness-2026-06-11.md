@@ -303,7 +303,7 @@ git push origin HEAD:fix/cljs-header-be32           # publishes 32e3c59 + 1fec9b
 # 3. Fix the datahike submodule gitlink (clone-with---recursive safety)
 cd /Users/sean/src/seon/reference-code/datahike
 git fetch https://github.com/seantempesta/datahike feat/cljs-promise-api
-git checkout 1ae3569611ec62c4b0e378ffb902e563bddf57e1
+git checkout 1ae3569611ec
 cd /Users/sean/src/seon
 git add reference-code/datahike                      # gitlink → the sha we run
 

@@ -28,8 +28,8 @@ gap (`bootstrap-vector-design-2026-08-01.md:72-84`).
 
 | Dependency or Seon owner | Selected revision | Source read for this report | Existing use that establishes the seam |
 |---|---|---|---|
-| Datahike | `574c5f0f0db9411d1982769f14512cb24ef719da` (`deps.edn:26-30`) | `reference-code/datahike/src/datahike/versioning.cljc:216-291,323-477`; `reference-code/datahike/src/datahike/writing.cljc:470-552` | `src/seon/cluster/registry.clj:131-198,253-284`; `src/seon/cluster/store.clj:374-405` |
-| Konserve | `89795ae1b769aafd47adf4168e2393d7b4721bc2` (`deps.edn:31-37`) | The key-level branch publication is exercised through Datahike's maintained fork | `src/seon/cluster/registry.clj:123-141` reads branch and commit records through the held store |
+| Datahike | `574c5f0f0db9` (`deps.edn:26-30`) | `reference-code/datahike/src/datahike/versioning.cljc:216-291,323-477`; `reference-code/datahike/src/datahike/writing.cljc:470-552` | `src/seon/cluster/registry.clj:131-198,253-284`; `src/seon/cluster/store.clj:374-405` |
+| Konserve | `89795ae1b769` (`deps.edn:31-37`) | The key-level branch publication is exercised through Datahike's maintained fork | `src/seon/cluster/registry.clj:123-141` reads branch and commit records through the held store |
 | Proximum | `9846d3e79e1aee48474bc876d3d563d7137209c6` (`deps.edn:41-44`) | Branching is delegated by Datahike when secondary indices are present (`versioning.cljc:102-149,276-286`) | The replay design must continue to use `registry/branch!`, never copy only the primary database |
 | Run transitions | repository `HEAD` during the probe | `src/seon/cluster/run.clj:250-537,690-818` | Bootstrap composes `open-tx`, `claim-tx`, and `plan-tx` (`src/seon/bootstrap.clj:254-308`) |
 | Run execution | repository `HEAD` during the probe | `src/seon/cluster/work.clj:552-627`; `src/seon/cluster/loop.clj:1466-1742` | Every agent graph calls the same `cluster.loop/turn` owner (`src/seon/cluster/agent.clj:208-244`) |

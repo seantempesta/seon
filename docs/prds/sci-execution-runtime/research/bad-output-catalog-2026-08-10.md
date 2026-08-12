@@ -69,7 +69,7 @@ case expression.
 | Boot/operator output | `src/seon/cluster.clj:86-95,582-613,1397-1413`; `src/seon/schema.clj:665-818`; `script/seon/fresh_operator.clj:2302-2310,2473-2489` | Existing boot logger/progress and operator terminal boundaries |
 
 The selected dependency revisions are the repository pins at this basis:
-Datahike `56f1c62105b7087f0cac13162f9fd54b1690986e`, the vendored Malli source
+Datahike `56f1c62105b7`, the vendored Malli source
 under `reference-code/malli/`, and core.async Flow under
 `reference-code/core.async/`. This design needs no new writer, event bus,
 browser reporting service, or render registry.

@@ -34,7 +34,7 @@ renderer.
 | Owner | Selected revision | Exact fact used here |
 |---|---|---|
 | Seon | `b5947df4` plus the live Unit 7 working tree | `src/seon/db.cljs` has async `execute-many`, query, pull, and transaction responses carrying `:seon.db/coordinate`; `src/seon/agent/turn.cljs` still assumes a local value. |
-| Datahike | `d21abadb9412f1b828b02ddb3c08ddc81d57c595` | `query/q-with-evidence` returns eager result, dependencies, cache evidence, and resource evidence; `pull_api/pull-many` parses once and preserves missing positions; `resource/shallow-weight-within` certifies counted ordinary structures without serialization. |
+| Datahike | `d21abadb9412` | `query/q-with-evidence` returns eager result, dependencies, cache evidence, and resource evidence; `pull_api/pull-many` parses once and preserves missing positions; `resource/shallow-weight-within` certifies counted ordinary structures without serialization. |
 | Seon protocol | version 7 in `src/seon/db/protocol.cljc` | `execute-many` has 1–64 independent query/pull/pull-many/schema/index members, one coordinate, ordered position identity, and one aggregate result-weight bound. |
 | JVM authority | `src/seon/db/writer.clj` | The outer request retains one exact database value, admits only an eight-position window, and stops later admission when the aggregate retained result cannot fit. |
 | ClojureScript | `946d75f3` | `^:async`/`await` is the honest composition boundary; agent top-level eval resolves Promises to ordinary values. |

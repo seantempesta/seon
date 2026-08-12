@@ -51,14 +51,14 @@ passes the pulled entity unchanged into render selection
 ## Dependency ledger
 
 - Malli 0.20.0 is selected at `deps.edn:13-16`; the vendored source revision
-  read for this audit is `80138076960e7820523b4cb932c5b5d1936d4e7f`.
+  read for this audit is `80138076960e`.
   Malli exposes a schema's original properties directly
   (`reference-code/malli/src/malli/core.cljc:34-43`), and Seon's existing
   authored-form inspector extracts the same property map without compiling the
   declaration (`src/seon/schema/form.cljc:16-21`).
 - The live cardinality evidence uses the selected Datahike fork at
   `reference-code/datahike` revision
-  `0e8601d7f2f68c01070e13a95483bc82be04cabc`, declared at
+  `0e8601d7f2f6`, declared at
   `deps.edn:26-30`, through Seon's existing `seon.db/q` owner
   (`src/seon/db.clj:539-542`).
 - The first-party producer seam is the existing selection chain in

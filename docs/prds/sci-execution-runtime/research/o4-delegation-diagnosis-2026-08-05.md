@@ -46,13 +46,13 @@ The exact mechanisms at this boundary are:
 
 | Mechanism | Selected revision / source | First-party owner and proof |
 |---|---|---|
-| Datahike transaction listeners | `c15272730e74fb3f8bba91f6361c268492a99ba7`; `reference-code/datahike/src/datahike/writer.cljc:393-417` invokes listeners with the committed transaction report before delivering the report to the caller | `src/seon/cluster/wake.clj:197-246`; `test/seon/cluster/wake_test.clj` |
+| Datahike transaction listeners | `c15272730e74`; `reference-code/datahike/src/datahike/writer.cljc:393-417` invokes listeners with the committed transaction report before delivering the report to the caller | `src/seon/cluster/wake.clj:197-246`; `test/seon/cluster/wake_test.clj` |
 | core.async sliding buffer | `dc35f3e0d7bc2eef502e77982f48641f025c8051`; `reference-code/core.async/src/main/clojure/clojure/core/async/impl/buffers.clj:60-81` replaces the oldest value and never reports full | `src/seon/cluster/agent.clj:147-173,290-318`; `test/seon/cluster/agent_test.clj` |
 | Message value and durable delivery | first-party current source | `src/my/message.clj:20-63`; `src/seon/cluster/message.clj:268-414`; `src/seon/cluster/loop.clj:1588-1653` |
 | Wait disposition | first-party current source | `src/seon/cluster/loop.clj:290-344`; `test/seon/cluster/agent_test.clj:1590-1660` proves that wait closes the run and a later trigger opens a new run |
 | Episode termination and grading | first-party current source | `src/seon/eval/drive.clj:110-119,223-274,295-356`; `src/seon/bootstrap_drive.clj:224-258`; neither `test/seon/eval/drive_test.clj` nor `test/seon/bootstrap_drive_test.clj` contains a multi-agent episode proof |
 
-The SCI pin was `2db3358cba913b6fbbe49c7b5b34d7ac72715924`, but no SCI
+The SCI pin was `2db3358cba91`, but no SCI
 fork or reader behavior was implicated. The relevant production and test files
 were clean in the shared worktree after the live proof.
 

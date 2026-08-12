@@ -155,13 +155,13 @@ content. With `enable_thinking=false`, the same endpoint returned
   derived value whole into the live loop handle. `src/seon/ai.cljc:325-434`
   owns the one JDK HTTP attempt and standard Chat Completions response read.
 - SCI: `reference-code/sci` at
-  `8fac6e88f32d53a5fd82ebe80640881e317b84fd`.
+  `8fac6e88f32d`.
 - Datahike: `reference-code/datahike` at
-  `357ffc87c8009f342b239145802e1385d4a18ca9`.
+  `357ffc87c800`.
 - Serving runtime: MLX-LM `0.31.3`, MLX `0.32.0`, Transformers `5.13.1`,
   and Hugging Face Hub `1.23.0`.
 - Model artifact: Hugging Face revision
-  `73c707af4243243b18193444467872d20cff9399`, 19 GiB through resolved
+  `73c707af4243`, 19 GiB through resolved
   snapshot links, with no broken links. The `config.json` SHA-256 is
   `2baf1070d970ff2645ad8c9cf553e470ec7dddb770ca0502a7627daa5a097d54`.
   It declares `Qwen3_5MoeForConditionalGeneration` and mixed 4/8-bit affine

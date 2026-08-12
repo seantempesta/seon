@@ -39,7 +39,7 @@ are the retained mechanisms.
 |---|---|---|
 | Recovery order | `docs/prds/database-authority-mesh/roadmap.md` and [[system-recovery-graduation-plan-2026-07-16]] | One implementation per behavior; eval operation capture and web replayability are deleted local-replay mechanisms. |
 | Duplicate-owner audit | [[duplicate-runtime-owner-audit-2026-07-16]] | Native reports/direct errors and ordinary database values are already the only public `seon.db` contracts. |
-| Datahike | `reference-code/datahike` at `a464cd887458d2572414a6ea951c477b0981fdae` | `datahike.api.impl/transact!` forwards transaction data to the writer; `datahike.api.types/STransactionReport` is the map of `:db-before`, `:db-after`, `:tx-data`, `:tempids`, and optional `:tx-meta`. |
+| Datahike | `reference-code/datahike` at `a464cd887458` | `datahike.api.impl/transact!` forwards transaction data to the writer; `datahike.api.types/STransactionReport` is the map of `:db-before`, `:db-after`, `:tx-data`, `:tempids`, and optional `:tx-meta`. |
 | Datahike full-head fence | `reference-code/datahike/src/datahike/writing.cljc:862-879` | `:datahike/expected-basis-t` compares with the current database before applying a transaction. Seon's `:seon.db/expected-db` is the ordinary-data protocol expression of that fence. |
 | Public database facade | `src/seon/db.cljs:464-590` | Reads accept an explicit database or the current session value. Successful writes cache `:db-after`; failures are direct error maps. |
 | Generated identity allocation | `src/seon/db/id.cljc:1325-1367` | Allocation already consumes a native report/direct error and enriches success with generated ids; eval must not wrap it again. |

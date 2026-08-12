@@ -97,10 +97,10 @@ The r2 design has four owners, in dependency order:
 
 | Dependency | Revision checked | Required behavior |
 |---|---|---|
-| Malli | `80138076960e7820523b4cb932c5b5d1936d4e7f` | Function arity information and parsed schema forms in `reference-code/malli/src/malli/core.cljc:2192-2202,2276-2295,2819-2908`; instrumentation invokes the wrapped function after input preparation in `:3110-3131`. |
-| SCI | `2db3358cba913b6fbbe49c7b5b34d7ac72715924` | Ordinary analyzed calls go through `return-call`/`fn-call` in `reference-code/sci/src/sci/impl/analyzer.cljc:1717-1753` and `reference-code/sci/src/sci/impl/evaluator.cljc:384-420`; the existing observers observe but do not transform arguments. |
+| Malli | `80138076960e` | Function arity information and parsed schema forms in `reference-code/malli/src/malli/core.cljc:2192-2202,2276-2295,2819-2908`; instrumentation invokes the wrapped function after input preparation in `:3110-3131`. |
+| SCI | `2db3358cba91` | Ordinary analyzed calls go through `return-call`/`fn-call` in `reference-code/sci/src/sci/impl/analyzer.cljc:1717-1753` and `reference-code/sci/src/sci/impl/evaluator.cljc:384-420`; the existing observers observe but do not transform arguments. |
 | clj-kondo | `57252e07975710aa579b24f0d1b2b1e04195caa2` | Analysis supplies arglist strings, but `:arglists` metadata may override what is reported (`reference-code/clj-kondo/analysis/README.md:102-117`). It is a cross-check, not the source-binding authority. |
-| Datahike | `c15272730e74fb3f8bba91f6361c268492a99ba7` | Component refs own nested function facts; unique identities and ordinary Datalog joins own provider and shared-shape discovery. |
+| Datahike | `c15272730e74` | Component refs own nested function facts; unique identities and ordinary Datalog joins own provider and shared-shape discovery. |
 
 ### Existing Seon mechanisms
 

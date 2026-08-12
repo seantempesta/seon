@@ -51,8 +51,8 @@ JDK Seon runs.
 | dependency or mechanism | selected source | relevant owners |
 |---|---|---|
 | core.async Flow | `1.10.874-alpha3`, vendored commit `dc35f3e0d7bc2eef502e77982f48641f025c8051`; selected in `deps.edn:17-20` | `reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj`, `flow/impl.clj`, `flow.clj` |
-| SCI | vendored commit `8fac6e88f32d53a5fd82ebe80640881e317b84fd`; local root selected in `deps.edn:41-44` | `reference-code/sci/src/sci/interrupt.cljc`, `sci/impl/evaluator.cljc`, `sci/lang.cljc`, `sci/impl/load.cljc` |
-| Datahike | vendored commit `9a7a9ef10a954c32075e60d929f9101a9ac8abd9`; local root selected in `deps.edn:21-25` | `reference-code/datahike/src/datahike/writer.cljc`, `tools.cljc`, `connector.cljc`, `committed_report.cljc` |
+| SCI | vendored commit `8fac6e88f32d`; local root selected in `deps.edn:41-44` | `reference-code/sci/src/sci/interrupt.cljc`, `sci/impl/evaluator.cljc`, `sci/lang.cljc`, `sci/impl/load.cljc` |
+| Datahike | vendored commit `9a7a9ef10a95`; local root selected in `deps.edn:21-25` | `reference-code/datahike/src/datahike/writer.cljc`, `tools.cljc`, `connector.cljc`, `committed_report.cljc` |
 | Clojure | `1.12.5`, selected in `deps.edn:13-20` | promise implementation at `reference-code/clojure/src/clj/clojure/core.clj:7326-7362` |
 | JVM | live toolchain OpenJDK `26.0.1`; comparison install Temurin `21.0.11` | local `lib/src.zip!/java.base/java/lang/VirtualThread.java`, `jdk/internal/vm/Continuation.java`, and `java/util/concurrent/locks/LockSupport.java` |
 | Seon scheduling | tree at audit start `770834a60be3c4a59686231f5e4343350c9bb9fb` | `src/seon/flow.clj`, `src/seon/cluster.clj`, `src/seon/cluster/agent.clj`, `src/seon/cluster/loop.cljc` |

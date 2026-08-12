@@ -37,7 +37,7 @@ namespace workflow remains the broader P0 composition measure.
 ## Dependency ledger
 
 - Inspect AI is installed from `reference-code/inspect-ai` at
-  `05322696a0f784ec399ef6abbafd3d2a250ea9cc`. Its `Task`, `MemoryDataset`,
+  `05322696a0f7`. Its `Task`, `MemoryDataset`,
   `Sample`, and scorer contracts live in
   `src/inspect_ai/_eval/task/task.py`, `src/inspect_ai/dataset/_dataset.py`, and
   `src/inspect_ai/scorer/_scorer.py`. `EvalSample.metadata` and the public
@@ -60,10 +60,10 @@ namespace workflow remains the broader P0 composition measure.
   of the positive `:seon.fn/agent-facing?` fact; absence is the negative
   signal.
 - Malli `0.20.0` is mirrored at `reference-code/malli` revision
-  `80138076960e7820523b4cb932c5b5d1936d4e7f`. The compact cards consume the
+  `80138076960e`. The compact cards consume the
   persisted Malli callable contract rather than inventing a task-local schema.
 - The maintained Datahike reference checkout was observed at
-  `eb3e2239b650635977fdc8e73e7c657b23bf3383` and was dirty under another
+  `eb3e2239b650` and was dirty under another
   owner. It was read but not modified or treated as a clean dependency pin.
   Seon's `seon.db` operation observer and final immutable database coordinate
   are the only database evidence path used here.

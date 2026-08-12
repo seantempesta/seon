@@ -37,7 +37,7 @@ copied from the render-vocabulary lane:
   `resources/seon/schema.edn:2677-2688` and Datahike's accepted map/vector/seq
   transaction inputs at
   `reference-code/datahike/src/datahike/api/impl.cljc:30-42` (selected
-  submodule commit `0e8601d7f2f68c01070e13a95483bc82be04cabc`).
+  submodule commit `0e8601d7f2f6`).
 - The Flow emission verdict is grounded in the step-function transform
   contract—`[state' output]`, with `output` a map of output id to messages and
   no nil message—at

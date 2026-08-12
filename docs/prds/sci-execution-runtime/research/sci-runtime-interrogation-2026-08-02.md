@@ -25,13 +25,13 @@ mutation and cross-cluster consequences remain under isolated probe.
 ## Dependency ledger and method
 
 - SCI revision: root gitlink and checkout both select
-  `6de15683b7520cc973bc9c136aec7ad3f9b3788c`. Context construction and fork:
+  `6de15683b752`. Context construction and fork:
   `reference-code/sci/src/sci/core.cljc:312-331`; symbol value resolution:
   `reference-code/sci/src/sci/impl/analyzer.cljc:2296-2325`; SCI dynamic
   bindings: `reference-code/sci/src/sci/core.cljc:138-157` and
   `reference-code/sci/src/sci/impl/vars.cljc:115-184`.
 - Datahike revision: root gitlink and checkout both select
-  `256b714d97a0e8f952b01a47c693eff2976ccee7`. Current Seon branch connections
+  `256b714d97a0`. Current Seon branch connections
   are process-local Datahike connection values; reads and writes are local
   synchronous calls.
 - Core.async revision: root gitlink and checkout both select

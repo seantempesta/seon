@@ -59,9 +59,9 @@ It does not pretend to independently re-mine the missing Arm-A transcripts.
 | Dependency or mechanism | Selected revision | Grounding used here |
 |---|---|---|
 | Seon source | `700b0f65b90e2c4d60c64433e2f6996f1a24f062` | The resource forms; `seon.bootstrap/packaged-forms`, `ordered-sources`, `agent-sources`, `plan-digest`, and `seed-tx`; bootstrap tests |
-| Datahike | `56f1c62105b7087f0cac13162f9fd54b1690986e` | `reference-code/datahike`; `seon.db/q` and `pull` are the bootstrap's fact-resolution substrate |
-| SCI | `2db3358cba913b6fbbe49c7b5b34d7ac72715924` | `reference-code/sci`; forms execute in SCI, and the desk PRD's per-turn fork result was probed against this pin |
-| Malli | `0.20.0`; vendored source `80138076960e7820523b4cb932c5b5d1936d4e7f` | `reference-code/malli`; complete durable-function contracts and the `:any` refusal are teaching subjects |
+| Datahike | `56f1c62105b7` | `reference-code/datahike`; `seon.db/q` and `pull` are the bootstrap's fact-resolution substrate |
+| SCI | `2db3358cba91` | `reference-code/sci`; forms execute in SCI, and the desk PRD's per-turn fork result was probed against this pin |
+| Malli | `0.20.0`; vendored source `80138076960e` | `reference-code/malli`; complete durable-function contracts and the `:any` refusal are teaching subjects |
 | Token estimator | Seon source revision above | `seon.ai.tokens/estimate` is exactly integer-floored `chars / 4`; no tokenizer dependency |
 | Experiment harness | Baseline launch `dbef794ab`; current repair spec at source revision above | The old matrix supplies hypotheses only; the queued repair wave supplies the next trustworthy comparison |
 

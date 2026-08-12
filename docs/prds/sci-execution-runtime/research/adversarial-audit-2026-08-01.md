@@ -40,16 +40,16 @@ The exact dependency owners used by the probes were:
 - Clojure 1.12.5 from `deps.edn:15`; vendored source
   `reference-code/clojure@b18d3adc5b5f4d5d0ccea966203fb67a614d5c3d`.
 - Datahike from `reference-code/datahike` (`deps.edn:26-30`) at
-  `9b3be9d59cb07d9c895af280e60eb074bb57a400`.
+  `9b3be9d59cb0`.
 - Konserve from the Git dependency pinned by `deps.edn:31-37` at
-  `b5c99bc02a7175652a610324215288b78551801f`. The vendored checkout was already
+  `b5c99bc02a71`. The vendored checkout was already
   dirty at `737697d`; it was not used or touched by this audit.
 - SCI from `reference-code/sci` (`deps.edn:46-49`) at
-  `937d392a008e4f2f246b9ddf9dd816ca99de9d4e`.
+  `937d392a008e`.
 - Edamame source at
-  `38e627467daa3f6f1e5a8eb6421f702d2a940b7f`.
+  `38e627467daa`.
 - Malli runtime 0.20.0 (`deps.edn:16`); the vendored source is ahead at
-  `80138076960e7820523b4cb932c5b5d1936d4e7f`, an already-filed dependency
+  `80138076960e`, an already-filed dependency
   drift.
 
 The decisive reusable probes live under `tmp/audit-20260801b/src/`.

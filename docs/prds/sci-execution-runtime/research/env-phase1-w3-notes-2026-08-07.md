@@ -16,7 +16,7 @@ and [sci-built-in-call-observer-is-read-from-the-analysis-context.md](../../../s
 ## Result
 
 Branch **`seon-env-hook`** in `reference-code/sci`, branched from the current
-pin `2db3358c`, head **`f934044d94814e85867187f75ba13b90927c6db4`**. Three
+pin `2db3358c`, head **`f934044d9481`**. Three
 commits, one concern each. **The superproject pin is deliberately NOT bumped
 and NOT staged** — `git -C . status` shows `reference-code/sci` as modified
 and unstaged, for the orchestrator to review and bump.

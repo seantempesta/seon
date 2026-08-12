@@ -22,7 +22,7 @@ committed generation until contract/live-arity parity is a proven precondition.
 ## Evidence
 
 The selected Malli 0.20.0 source at SHA
-`80138076960e7820523b4cb932c5b5d1936d4e7f` exposes exact schema arities through
+`80138076960e` exposes exact schema arities through
 `m/-function-schema-arities` and `m/-function-info`. Its CLJS instrumentation
 restores every live fixed-arity accessor from that accessor's
 `malli$instrument$original` value without checking that one exists

@@ -33,9 +33,9 @@ producer admission, not permission for two row formats.
 
 | dependency or mechanism | selected revision | maintained source | boundary established |
 |---|---|---|---|
-| SCI | submodule `8fac6e88f32d53a5fd82ebe80640881e317b84fd` | `reference-code/sci/src/sci/core.cljc`, `reference-code/sci/doc/interrupt.md` | one ctx/fork and post-commit interpreted installation |
-| Datahike | submodule `19f5cdd950dc3c5ad2c8777a176d2ec4cb18c0bb` | `reference-code/datahike/src/datahike/db/transaction.cljc`, `writing.cljc`, `writer.cljc` | identity upsert, exact retraction, one serial transaction, `db-after` |
-| Malli | `0.20.0`, vendored revision `80138076960e7820523b4cb932c5b5d1936d4e7f` | `reference-code/malli/src/malli/registry.cljc`, `malli/core.cljc` | registries can be supplied explicitly; Malli's default registry is process-global |
+| SCI | submodule `8fac6e88f32d` | `reference-code/sci/src/sci/core.cljc`, `reference-code/sci/doc/interrupt.md` | one ctx/fork and post-commit interpreted installation |
+| Datahike | submodule `19f5cdd950dc` | `reference-code/datahike/src/datahike/db/transaction.cljc`, `writing.cljc`, `writer.cljc` | identity upsert, exact retraction, one serial transaction, `db-after` |
+| Malli | `0.20.0`, vendored revision `80138076960e` | `reference-code/malli/src/malli/registry.cljc`, `malli/core.cljc` | registries can be supplied explicitly; Malli's default registry is process-global |
 | fresh reader | current tree | `src/seon/sci/reader.cljc` | literal form-head classification and exact source spans |
 | pure schema projection | current tree | `src/seon/schema.cljc` | complete projection derivation from committed rows without database mutation |
 

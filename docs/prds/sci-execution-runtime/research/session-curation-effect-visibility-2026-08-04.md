@@ -50,11 +50,11 @@ while the current source below shows which parts have since landed.
 
 The dependency sources inspected at the live checkout are:
 
-- Datahike commit `574c5f0f0db9411d1982769f14512cb24ef719da`, especially
+- Datahike commit `574c5f0f0db9`, especially
   `reference-code/datahike/src/datahike/versioning.cljc`;
-- core.async commit `dc35f3e0d7bc2eef502e77982f48641f025c8051`, whose Flow
+- core.async commit `dc35f3e0d7bc`, whose Flow
   workload behavior was already measured in the named workload report; and
-- SCI commit `2db3358cba913b6fbbe49c7b5b34d7ac72715924`; all SCI claims
+- SCI commit `2db3358cba91`; all SCI claims
   below cite first-party integration source at the integration boundary.
 
 The live probe used only scratch cluster `session-curation-effects`, started

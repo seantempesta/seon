@@ -172,7 +172,7 @@ open/done, agent ref; run `ready-leaves`'s exact query with
 `my.plan.internal/rules`:
 
 ```bash
-DATAHIKE_QUERY_PLANNER=true clj -Sdeps '{:deps {org.replikativ/datahike {:local/root "reference-code/datahike"} org.replikativ/konserve {:git/url "https://github.com/seantempesta/konserve" :git/sha "32e3c59847184c3b4a3acea87797ed9c864a0ff7"}}}' \
+DATAHIKE_QUERY_PLANNER=true clj -Sdeps '{:deps {org.replikativ/datahike {:local/root "reference-code/datahike"} org.replikativ/konserve {:git/url "https://github.com/seantempesta/konserve" :git/sha "32e3c5984718"}}}' \
   -M -e '(load-file "repro.clj") (repro/-main "20000")'
 # WRONG: #{[a1 …] [root …]}   (root is not ready — it has open work)
 # with magic-info + use-delta-driven? forced off (CLJS path): #{[a1 …]} correct

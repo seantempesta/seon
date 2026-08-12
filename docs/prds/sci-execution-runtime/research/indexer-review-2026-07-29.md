@@ -53,11 +53,11 @@ test file.
 The relevant dependency and first-party boundaries were read before the
 probes:
 
-- SCI checkout `8fac6e88f32d53a5fd82ebe80640881e317b84fd`,
+- SCI checkout `8fac6e88f32d`,
   especially `reference-code/sci/src/sci/core.cljc:352-391` and
   `reference-code/sci/src/sci/impl/parser.cljc:44-51,142-190`;
 - Edamame `1.6.42`, selected by `reference-code/sci/deps.edn`;
-- Datahike checkout `19f5cdd950dc3c5ad2c8777a176d2ec4cb18c0bb`;
+- Datahike checkout `19f5cdd950dc`;
 - `src/seon/sci/reader.cljc` and `src/seon/fn.clj`, both read end to end;
 - the eval boundary in `src/seon/sci/eval.clj:321-555`;
 - schema activation in `src/seon/schema.cljc:1702-1740`;

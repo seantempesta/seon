@@ -46,7 +46,7 @@ duty.**
 
 | Dependency or mechanism | Selected revision | Contract used here |
 |---|---|---|
-| SCI | vendored `8fac6e88f32d53a5fd82ebe80640881e317b84fd`; `deps.edn:39-44` | `source-reader` + `parse-next+string` return `[form source-buffer]`; `eval-form` takes an already-parsed form; `parse-string` reads only the next form (`reference-code/sci/src/sci/core.cljc:352-402`) |
+| SCI | vendored `8fac6e88f32d`; `deps.edn:39-44` | `source-reader` + `parse-next+string` return `[form source-buffer]`; `eval-form` takes an already-parsed form; `parse-string` reads only the next form (`reference-code/sci/src/sci/core.cljc:352-402`) |
 | SCI parser | same revision, Edamame underneath | **`parse-next` merges caller `opts` LAST over its ctx-derived options** — `parse-opts (cond-> (assoc default-opts …) opts (merge opts))`, so `:features`, `:auto-resolve`, `:readers`, `:syntax-quote`, `:read-cond`, `:read-eval` are all supplyable as explicit parameters (`reference-code/sci/src/sci/impl/parser.cljc:142-190`). Falsification N1 independently probed all five and they hold |
 | SCI default parse opts | same | `{:all true :row-key :line :col-key :column :read-cond :allow :location? seq? :end-location false}` (`parser.cljc:42-50`) — **locations only on seqs, no end locations by default**; symbols get line/column patched by hand in `parse-next` |
 | Edamame built-in tags | via SCI, not vendored under `reference-code/` | `#inst` and `#uuid` are Edamame's own and survive `:readers {}`. **Probed rev 2** (`research/scripts/reader-refusal-2026-07-29.clj`): a `:readers` **function** is consulted for every tag including built-ins; a `:readers` **map** is not (§1.2) |

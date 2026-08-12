@@ -55,7 +55,7 @@ were read but not edited.
 |---|---|---|
 | Bun async context | Bun 1.3.14, `node:async_hooks` compatibility surface | `.run` scopes descendants without mutating sibling fibers; the executable proof is [[als-config-probe-2026-07-20]] |
 | Node comparison runtime | Node 26.4.0 | The same probe observed the same `.run`/`.enterWith` distinction |
-| Datahike | `reference-code/datahike` at `6f2569087ed31f53e751e7535ef4bf2527912046` | `db/transaction.cljc:830-849` turns every tx-meta entry into a datom and rejects an attribute absent from system/installed schema |
+| Datahike | `reference-code/datahike` at `6f2569087ed3` | `db/transaction.cljc:830-849` turns every tx-meta entry into a datom and rejects an attribute absent from system/installed schema |
 | ClojureScript | 1.12.145; vendored read source at `946d75f3483c0c8e784e6668bff2c71a25619a77` | Native Promise/await descendants are the operation fibers that ALS must isolate |
 | Seon ambient owner | `src/seon/db/internal.cljs:16-78` | Three ALS instances exist; only `tx-context` and `agent-context` overlap |
 | Seon transaction boundary | `src/seon/db.cljs:896-932` and `src/seon/db/internal.cljs:493-500` | `transact!` validates all tx-data and tx-meta attributes and values before transport, then returns failures as ordinary error data |

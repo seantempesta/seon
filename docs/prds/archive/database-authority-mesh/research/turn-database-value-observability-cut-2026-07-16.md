@@ -95,7 +95,7 @@ by branch creation. Do not replace it with a persisted turn descriptor.
 |---|---|---|
 | Seon | `ab98d70f28705386caa82ae7c4eb25b1e74a0299` plus active execution work | `:seon.db/db` is the closed request map in `src/seon/db/protocol.cljc:213-229`; execution messages are migrating to it. |
 | Seon schema | same revision | `:seon.db/ref` is the one application ref schema. No map encoding or new entity is required. |
-| Datahike | `a464cd887458d2572414a6ea951c477b0981fdae` | Numeric `as-of` filters datoms by transaction id; every ordinary transaction has a `:db/txInstant` entity datom. |
+| Datahike | `a464cd887458` | Numeric `as-of` filters datoms by transaction id; every ordinary transaction has a `:db/txInstant` entity datom. |
 | Datahike commit graph | same revision | Immutable commits retain parents and `max-tx`; origin resolution must distinguish ordinary transaction commits from branch metadata commits that repeat `max-tx`. |
 | ClojureScript | `1.12.145`; checkout `946d75f3483c0c8e784e6668bff2c71a25619a77` | Ordinary database maps cross Transit only for the duration of prompt/eval requests. |
 

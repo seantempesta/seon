@@ -27,8 +27,8 @@ is superseded.
 ## Dependency ledger
 
 The selected sources are Datahike
-`c15272730e74fb3f8bba91f6361c268492a99ba7` and Konserve
-`89795ae1b769aafd47adf4168e2393d7b4721bc2`.
+`c15272730e74` and Konserve
+`89795ae1b769`.
 
 - Datahike's present per-store branch-roster mutex is a capacity-one
   core.async channel in

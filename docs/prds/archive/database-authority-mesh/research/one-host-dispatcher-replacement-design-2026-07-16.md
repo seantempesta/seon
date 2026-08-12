@@ -41,7 +41,7 @@ unbounded “priority” executor.
   `src/seon/db/executor.clj`, `src/seon/db/writer.clj`,
   `src/seon/embed.clj`, `src/seon/db/transport/uds.clj`, and their focused
   tests under `test/seon/db/`.
-- Datahike `092f5b0580c892c32b1dc65bf9acdbe37db90c4f`:
+- Datahike `092f5b0580c8`:
   its per-connection writer, query cancellation/single-flight, immutable DB
   values, and exact generation release remain the resource owners.
 - Babashka process `16a84e0af0da51b8c84e289970f6b7cc35b35d18`:

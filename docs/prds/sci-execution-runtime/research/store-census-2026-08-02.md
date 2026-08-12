@@ -52,8 +52,8 @@ sample** over 13,204 commits. The byte pools here reconcile to that exact
 total.
 
 The maintained dependencies are Datahike
-`256b714d97a0e8f952b01a47c693eff2976ccee7`, Konserve
-`737697d9205e5e8f0bc08a666e4c97dad55e9dbe`, and
+`256b714d97a0`, Konserve
+`737697d9205e`, and
 persistent-sorted-set `0.4.137`. The record writer is
 `reference-code/datahike/src/datahike/writing.cljc:48-180,477-552`; the index
 codec is

@@ -56,7 +56,7 @@ database.
 
 | Owner | Selected source | Lifetime fact |
 |---|---|---|
-| Maintained Datahike | `reference-code/datahike` at `670cd1ada40462cb5927f0dc687f6b3a95f9e13f` | `connect` shares one connection by identity and counts owners; final `release` drains and closes the generation. |
+| Maintained Datahike | `reference-code/datahike` at `670cd1ada404` | `connect` shares one connection by identity and counts owners; final `release` drains and closes the generation. |
 | Datahike connection registry | `src/datahike/connections.cljc:3-127` | An existing active connection increments `:count`; zero references marks the connection releasing; concurrent release joins one completion. |
 | Datahike connector | `src/datahike/connector.cljc:275-424,438-541` | First open connects the store, restores the database and indexes, opens a query-cache generation, and creates the writer. Final release closes cache/report scopes, drains the writer, closes secondary indexes, releases the store, and deletes the connection. |
 | Datahike release tests | `test/datahike/test/connector_release_test.clj:31-268` | Concurrent first connects perform one store open and return the identical connection; each caller owns one reference; duplicate/final release behavior and drain ordering are executable. |

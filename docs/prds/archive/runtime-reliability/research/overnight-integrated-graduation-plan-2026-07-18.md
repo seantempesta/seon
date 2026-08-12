@@ -49,7 +49,7 @@ stored projection that duplicates derivable database facts.
   reads are owned by `reference-code/datahike/`, `reference-code/proximum/`,
   `src/seon/db/`, and the database-authority-mesh dependency ledger.
 - Namespace residency uses vendored Datahike commit
-  `4c55791be1fb8bb8d9332f21c576f5c20b85b760`: schema validation permits a
+  `4c55791be1fb`: schema validation permits a
   unique `:db.type/ref`, transaction ref values resolve to eids before AVET
   uniqueness, and stale database-value retry serializes concurrent creation.
   First-party owners are `src/seon/agent.cljs`, `src/seon/agent/home.cljs`,

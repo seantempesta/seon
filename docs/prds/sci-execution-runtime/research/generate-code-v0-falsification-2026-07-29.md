@@ -36,13 +36,13 @@ Dependency ledger:
 
 - Clojure 1.12.5, selected by `deps.edn:15`.
 - SCI from `reference-code/sci` at
-  `8fac6e88f32d53a5fd82ebe80640881e317b84fd`, especially its namespace binding
+  `8fac6e88f32d`, especially its namespace binding
   semantics as exercised through the first-party evaluator.
 - Datahike from `reference-code/datahike` at
-  `9a7a9ef10a954c32075e60d929f9101a9ac8abd9`, especially refs, unique-value
+  `9a7a9ef10a95`, especially refs, unique-value
   enforcement, and serial transactions.
 - core.async 1.10.874-alpha3, with vendored source at
-  `dc35f3e0d7bc2eef502e77982f48641f025c8051`; the first-party evidence is the
+  `dc35f3e0d7bc`; the first-party evidence is the
   single per-agent turn proc and its sliding wake connection.
 - First-party owners:
   `src/seon/cluster/{agent,work,loop,message,reply}.clj*`,

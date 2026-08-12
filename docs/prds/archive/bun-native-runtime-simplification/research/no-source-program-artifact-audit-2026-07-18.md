@@ -25,7 +25,7 @@ bootstrap authority, or production test bundle is needed.
 ## Dependency ledger
 
 - Shadow CLJS is the maintained fork at
-  `4e72595f57618f5c43388ad13d5136cd3bede566` in
+  `4e72595f5761` in
   `reference-code/shadow-cljs`.
 - The relevant hook dispatcher is
   `reference-code/shadow-cljs/src/main/shadow/build.clj`:

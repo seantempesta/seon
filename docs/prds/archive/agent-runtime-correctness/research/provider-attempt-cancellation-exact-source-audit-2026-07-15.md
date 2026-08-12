@@ -35,7 +35,7 @@ cancellation authority.
 
 | Dependency or mechanism | Selected identity | Exact source and relevant behavior |
 |---|---|---|
-| ClojureScript | `1.12.145`; official tag `r1.12.145`, commit `bd23d9a2475d822ea8dfd65deaa6732428b9ed25` | `deps.edn` `:cljs`; `reference-code/clojurescript`. `js/AbortController` and `js/Promise` are direct host interop; no CLJS cancellation abstraction is interposed. |
+| ClojureScript | `1.12.145`; official tag `r1.12.145`, commit `bd23d9a2475d` | `deps.edn` `:cljs`; `reference-code/clojurescript`. `js/AbortController` and `js/Promise` are direct host interop; no CLJS cancellation abstraction is interposed. |
 | Node.js | live `v26.4.0` | Host `AbortController`, `AbortSignal.any`, `AbortSignal.timeout`, `fetch`, and Promise scheduling were probed below. |
 | OpenAI Node SDK | `6.42.0`, tag `v6.42.0`, commit `6f849f4ff24f70167bf82d37c8c83e3f8b1c5472` | `reference-code/openai-node/src/internal/request-options.ts` declares `signal`; `src/resources/chat/completions/completions.ts` passes a second `RequestOptions` argument to `.stream`; `src/lib/ChatCompletionStream.ts` chains it to the stream controller; `src/client.ts` checks pre-abort, links the signal to its fetch controller, clears its internal timer, and maps external abort to `APIUserAbortError`. |
 | Anthropic TypeScript SDK | `0.104.2`, tag `sdk-v0.104.2`, commit `fbee0d149ce08532885d766d9b1dc99133181d8e` | `reference-code/anthropic-sdk-typescript/src/internal/request-options.ts` declares `signal`; `src/resources/messages/messages.ts` passes a second `RequestOptions` argument to `.stream`; `src/lib/MessageStream.ts` links and removes the external listener; `src/client.ts` checks pre-abort and maps it to `APIUserAbortError`. |

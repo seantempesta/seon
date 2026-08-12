@@ -9,7 +9,7 @@ tags: [prd, research, context, agent]
 ## Dependency ledger
 
 - Datahike is the maintained `reference-code/datahike` revision
-  `9b3be9d59cb07d9c895af280e60eb074bb57a400`; the walk uses
+  `9b3be9d59cb0`; the walk uses
   `datahike.api/datoms`, `q`, and `pull` against one immutable database
   value.
 - core.async is the maintained `reference-code/core.async` revision

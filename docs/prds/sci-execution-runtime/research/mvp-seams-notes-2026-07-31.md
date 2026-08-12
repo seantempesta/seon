@@ -64,7 +64,7 @@ reasoning from agent behavior:
 
 ## Dependency ledger and decisions
 
-- Datahike fork `9b3be9d59cb07d9c895af280e60eb074bb57a400` supplies the
+- Datahike fork `9b3be9d59cb0` supplies the
   immutable database value, `d/q`, `d/pull`, and live connection dereference.
 - SCI's namespace API is grounded in the maintained source under
   `reference-code/sci/src/sci/core.cljc`. A direct JVM probe falsified copied

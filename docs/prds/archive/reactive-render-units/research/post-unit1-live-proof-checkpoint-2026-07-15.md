@@ -30,8 +30,8 @@ and `/data` have not all moved to `seon.web.view-unit`.
 
 | Dependency or mechanism | Selected identity | Source read | Proof constraint |
 |---|---|---|---|
-| Datahike | maintained SHA `417649383c65e13f15ea41d394fb1ed742477965` in both root aliases | `reference-code/datahike` at that SHA; `query-attribute-dependencies` in `src/datahike/query.cljc`; listener replacement in `src/datahike/core.cljc` | Literal dependencies narrow; unsafe reads widen. The listener callback receives one immutable post-transaction value. |
-| Konserve | maintained SHA `df6818d43ea3363a808cd051c0d68917f1b987a9` | `reference-code/konserve` | Snapshot once; no retained unit may contain a database, connection, or entity view. |
+| Datahike | maintained SHA `417649383c65` in both root aliases | `reference-code/datahike` at that SHA; `query-attribute-dependencies` in `src/datahike/query.cljc`; listener replacement in `src/datahike/core.cljc` | Literal dependencies narrow; unsafe reads widen. The listener callback receives one immutable post-transaction value. |
+| Konserve | maintained SHA `df6818d43ea3` | `reference-code/konserve` | Snapshot once; no retained unit may contain a database, connection, or entity view. |
 | Datastar | client source SHA `bb9ed6fbe78cf5690f5ad23a5faf86407a44982f` | `reference-code/datastar/library/src/plugins/watchers/patchElements.ts` | One event may carry several complete stable-ID elements; outer morph selects each by `id`. |
 | Datastar Clojure gzip example | SHA `1cef624e9e59a2ea79ffe2f65df2e7b06f8198d2` | `reference-code/datastar-clojure/src/dev/examples/tiny_gzip.clj` | Open and close are socket ownership events; tiny gzip updates must flush rather than wait for stream close. |
 | Node gzip/SSE | runtime built-in `node:http` and `node:zlib` | `seon.web.datastar/open-feed!`, `patch-elements`, and `push-event!` | Response must be `text/event-stream` plus `Content-Encoding: gzip`; inspect the decompressed stream server-side. |

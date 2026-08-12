@@ -26,16 +26,16 @@ constructs a temporary package tree and starts no process.
 
 ## Dependency ledger at the audited head
 
-The audit was run at Git revision `124e5a23a90f2ecc41ecfd81e1ba61ac509cc7c9`.
+The audit was run at Git revision `124e5a23a90f`.
 
 | Input | Selected identity | Exact `reference-code/` source |
 |---|---|---|
 | Clojure | Maven `1.12.0` | absent |
 | ClojureScript | Maven `1.12.145` | absent; the mirror is `1.12.41` at `946d75f3483c0c8e784e6668bff2c71a25619a77` |
-| Shadow CLJS | `4e72595f57618f5c43388ad13d5136cd3bede566` | exact in `reference-code/shadow-cljs` |
+| Shadow CLJS | `4e72595f5761` | exact in `reference-code/shadow-cljs` |
 | tools.build | Maven `0.10.5` | absent |
-| Datahike | `417649383c65e13f15ea41d394fb1ed742477965` | exact in `reference-code/datahike` |
-| Konserve | `df6818d43ea3363a808cd051c0d68917f1b987a9` | exact in `reference-code/konserve` |
+| Datahike | `417649383c65` | exact in `reference-code/datahike` |
+| Konserve | `df6818d43ea3` | exact in `reference-code/konserve` |
 | superv.async | `3e6ed755f83634c9e9bbb58707f9446420d32ce9` | absent |
 | partial-cps | `1e119b03ea908ad925b98f9ba0a26371c65441e3` | absent |
 | Node/npm | Node `26.4.0`, npm `11.17.0` | external toolchain; lockfile is the package ledger |

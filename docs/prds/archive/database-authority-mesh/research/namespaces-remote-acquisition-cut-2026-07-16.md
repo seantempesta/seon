@@ -42,12 +42,12 @@ silently absorbed here.
 | Owner | Selected revision | Source-grounded constraint |
 |---|---|---|
 | Seon | current shared checkout on 2026-07-16 | `namespaces-block` selects current + direct requires + `::full-source`, orders by the `:seon.ns/name` datom transaction, and delegates full/schema formatting to `ctx.cljs`. |
-| Datahike | `670cd1ada40462cb5927f0dc687f6b3a95f9e13f` (`reference-code/datahike`) | `pull-many` parses one selector once and returns input-aligned eager results, including `nil` for missing refs. Queries accept native work/result/weight bounds. Exact committed query results and identical in-flight work are shared by committed coordinate identity. |
+| Datahike | `670cd1ada404` (`reference-code/datahike`) | `pull-many` parses one selector once and returns input-aligned eager results, including `nil` for missing refs. Queries accept native work/result/weight bounds. Exact committed query results and identical in-flight work are shared by committed coordinate identity. |
 | Seon database protocol | current protocol version 6 | `query`, `pull`, `pull-many`, installed schema, history queries, cancellation, and `execute-many` already return ordinary values at one complete coordinate. Execute-many members run independently on bounded JVM read workers and retain vector positions. |
 | Compiled child prompt owner | [[compiled-child-prompt-owner-2026-07-16]] | One supervised per-agent Bun child owns async acquisition, pure formatting, deadlines, and authored execution at `C`; there is no fixed global member catalog. |
 | Authored program loader | `src/seon/execution.cljs` | Authored invocations acquire source identity and load the agent program only when an authored target is actually invoked. Current acquisition is bounded to 2,048 rows and 3 MiB, and its result must match `C`. |
 | Shadow CLJS | `4e72595f57618f5c43388ad13d5136cd3bede566` | The compiled child artifact reaches the prompt and namespace owners through ordinary namespace requires; no manual module list is needed. |
-| Bun | `be77b652884b16a103cfaa4af3c1102f72f2dcd3` | The per-agent OS process supplies the runaway-loop and CPU-failure boundary; killing one child does not kill the parent, JVM, or sibling agents. |
+| Bun | `be77b652884b` | The per-agent OS process supplies the runaway-loop and CPU-failure boundary; killing one child does not kill the parent, JVM, or sibling agents. |
 
 First-party evidence read:
 

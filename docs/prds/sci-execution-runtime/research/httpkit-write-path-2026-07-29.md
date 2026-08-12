@@ -93,7 +93,7 @@ connection to reconnect.
 
 | dependency or mechanism | selected revision | source read |
 |---|---|---|
-| http-kit server | `v2.9.0-beta2`, `70432d3ab3c9f23cb4672c7656d94fe8d71726d6` | every `reference-code/http-kit/src/java/org/httpkit/server/*.java`; pristine `src/org/httpkit/server.clj`; `README.md`; `CHANGELOG.md`; server tests |
+| http-kit server | `v2.9.0-beta2`, `70432d3ab3c9` | every `reference-code/http-kit/src/java/org/httpkit/server/*.java`; pristine `src/org/httpkit/server.clj`; `README.md`; `CHANGELOG.md`; server tests |
 | current upstream check | `master`, `7bd0a06ae2d5e50a44ec38fb0f672897352cfe8d` on 2026-07-29 | GitHub source for `AsyncChannel.java`, `HttpServer.java`, `ServerAtta.java`, and `server.clj` |
 | Ring WebSocket protocols | `ring-clojure/ring` source at `75914ca942330ae6f8499b0ab9adda4664ad5f1b` | `ring-websocket-protocols/src/ring/websocket/protocols.clj`; `ring-core/src/ring/websocket.clj` |
 | Datastar Clojure http-kit adapter | checked-out `reference-code/datastar-clojure` | `libraries/sdk-http-kit/.../adapter/http_kit.clj` and `adapter/http_kit/impl.cljc` |

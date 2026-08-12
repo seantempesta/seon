@@ -54,8 +54,8 @@ Datahike call sites, and Seon's prepl/MCP evaluation path.
   loader paths below were also exercised reflectively in the running 1.12.5
   classes.
 - Datahike source and final measurements: vendored revision
-  `574c5f0f0db9411d1982769f14512cb24ef719da`. The checkout advanced from
-  `0e8601d7f2f68c01070e13a95483bc82be04cabc` during the investigation; every
+  `574c5f0f0db9`. The checkout advanced from
+  `0e8601d7f2f6` during the investigation; every
   final pressure, transaction, and repeated prepl observation below was rerun
   after the advance.
 - Clojure owners:

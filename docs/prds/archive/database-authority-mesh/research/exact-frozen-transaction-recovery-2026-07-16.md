@@ -84,8 +84,8 @@ response, and then permits reuse of the id.
 | JVM request owner | `src/seon/db/writer.clj:1141-1230,1243-1300,2505-2540,3501-3550,3564-3651` | Receipt recovery precedes another transaction; connection close cancels and drains physical work; a duplicate active id is currently indistinguishable from a durable hash conflict. |
 | Executor cancellation | `src/seon/db/executor.clj:340-414,656-684` | Queued work can be removed; running work is marked canceled but is not interrupted, so its database effect may still win. |
 | Receipt proof | `test/seon/db/request_receipt_test.clj:75-146,410-429` | Exact repeated and concurrent delivery commits once; changed data under one id is rejected. |
-| Maintained Datahike | `reference-code/datahike` at `a464cd887458d2572414a6ea951c477b0981fdae` | `LocalWriter` serializes operations per connection; `transact!` returns physical completion and publishes listeners only after its writer result. |
-| Bun | `reference-code/bun` at `be77b652884b16a103cfaa4af3c1102f72f2dcd3` | JavaScript socket `write` reports accepted bytes; with ordinary writes Bun does not retain the unwritten suffix for the caller. |
+| Maintained Datahike | `reference-code/datahike` at `a464cd887458` | `LocalWriter` serializes operations per connection; `transact!` returns physical completion and publishes listeners only after its writer result. |
+| Bun | `reference-code/bun` at `be77b652884b` | JavaScript socket `write` reports accepted bytes; with ordinary writes Bun does not retain the unwritten suffix for the caller. |
 
 ## What is frozen
 

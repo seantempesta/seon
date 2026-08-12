@@ -38,7 +38,7 @@ virtual thread on this pin. AOT-caching core.async therefore does not change
 
 | Dependency | Selected identity | Maintained source | Boundary used here |
 |---|---|---|---|
-| Clojure | `org.clojure/clojure` `1.12.5` (`deps.edn:15`); release tag dereferences to `3bc2b3e91fdff462620d84bbdfd40379d9c562e5` | `reference-code/clojure` is currently post-release master `b18d3adc5b5f4d5d0ccea966203fb67a614d5c3d`; the exact release object was fetched into that repository for comparison | `reference-code/clojure@3bc2b3e9:src/jvm/clojure/lang/RT.java:412-484`; `src/clj/clojure/core.clj:5960-6007,6070-6138,6176-6205`; `src/jvm/clojure/lang/Compiler.java:7572-7589,8290-8308,8327-8395` |
+| Clojure | `org.clojure/clojure` `1.12.5` (`deps.edn:15`); release tag dereferences to `3bc2b3e91fdf` | `reference-code/clojure` is currently post-release master `b18d3adc5b5f4d5d0ccea966203fb67a614d5c3d`; the exact release object was fetched into that repository for comparison | `reference-code/clojure@3bc2b3e9:src/jvm/clojure/lang/RT.java:412-484`; `src/clj/clojure/core.clj:5960-6007,6070-6138,6176-6205`; `src/jvm/clojure/lang/Compiler.java:7572-7589,8290-8308,8327-8395` |
 | core.async | `org.clojure/core.async` `1.10.874-alpha3` (`deps.edn:22-24`), tag/checkout `dc35f3e0d7bc2eef502e77982f48641f025c8051` | `reference-code/core.async` at the exact selected tag | `src/main/clojure/clojure/core/async.clj:485-505,509-556`; `impl/go.clj:977-1059`; `impl/dispatch.clj:71-123` |
 
 The checked-out Clojure master and the exact `1.12.5` tag have byte-identical

@@ -41,14 +41,14 @@ lessons only; none of its implementation is proposed for restoration.
 
 ## Dependency and authority ledger
 
-- Datahike is pinned at `0e8601d7f2f68c01070e13a95483bc82be04cabc`.
+- Datahike is pinned at `0e8601d7f2f6`.
   A Datahike ref attribute is only typed as `:db.type/ref`; transaction input
   resolves its value to an entity id (`reference-code/datahike/src/datahike/db/transaction.cljc:793`).
   It does not constrain which identity attribute the referenced entity carries.
-- Malli is pinned at `80138076960e7820523b4cb932c5b5d1936d4e7f`.
+- Malli is pinned at `80138076960e`.
   Fresh Seon's Malli-to-Datahike bridge maps `:seon.db/ref` directly to
   `:db.type/ref` (`src/seon/schema/datahike.clj:115`).
-- Core.async is pinned at `dc35f3e0d7bc2eef502e77982f48641f025c8051`.
+- Core.async is pinned at `dc35f3e0d7bc`.
   The relevant use is Seon's nonblocking, payload-free wake route, not a
   separate messaging queue (`src/seon/cluster/wake.clj:146-161`).
 - Current target authorities are

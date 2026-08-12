@@ -31,7 +31,7 @@ same cursor test passed for double, UUID, instant, and bytes values. Moving the
 two BigInts to cardinality-one assertions on distinct entities preserved both
 datoms and isolated cursor serialization from this dependency defect.
 
-Selected Datahike commit `6f90b339768b1a02066dce3b6fcc93a200758fcc`
+Selected Datahike commit `6f90b339768b`
 explicitly accepts native BigInt in its `:db.type/bigint` schema predicate at
 `reference-code/datahike/src/datahike/schema.cljc`, so silently losing one
 accepted value is not a valid schema rejection.

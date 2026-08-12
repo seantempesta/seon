@@ -32,7 +32,7 @@ The in-progress merge was inspected and then aborted. Post-abort proof:
 
 - Maintained fork: `seantempesta/datahike` `main` at `9b3be9d5`.
 - Upstream: `replikativ/datahike` `main` at `437d6401`.
-- Merge base: `85c40aee8a8662d757fcd69f85c5477ff36e605f`.
+- Merge base: `85c40aee8a86`.
 - Divergence: 95 commits only on maintained `main`; 28 only on
   `upstream/main`.
 - Fork source owners: `reference-code/datahike/src/datahike/query*.cljc`,

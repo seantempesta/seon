@@ -17,15 +17,15 @@ These are the maintained source revisions verified for this map:
 
 | Dependency | Revision |
 |---|---|
-| Datahike | `10540578248eaa686c1f88a7fe57644ee4c9f993` |
+| Datahike | `407e9328851ccce318148188f1d284646eb64132` |
 | Konserve | `07377c27c8288b7484f0aa7b82e8158b415985be` |
-| SCI | `2db3358cba913b6fbbe49c7b5b34d7ac72715924` |
+| SCI | `fcbd8862800e638dc0f8f5521111f999279cbcd2` |
 | core.async | `dc35f3e0d7bc2eef502e77982f48641f025c8051` |
-| Malli | `80138076960e7820523b4cb932c5b5d1936d4e7f` |
+| Malli | `3517a3cd9271b2083780ac7be1725493905bca2e` |
 | clj-kondo | `57252e07975710aa579b24f0d1b2b1e04195caa2` |
 | Reitit | `106fc4c7a09290c8e2df2d4ef9570ea1322ab2ab` |
-| Datastar browser | `bb9ed6fbe78cf5690f5ad23a5faf86407a44982f` |
-| Datastar Clojure | `1cef624e9e59a2ea79ffe2f65df2e7b06f8198d2` |
+| datastar | `bb9ed6fbe78cf5690f5ad23a5faf86407a44982f` |
+| datastar-clojure | `1cef624e9e59a2ea79ffe2f65df2e7b06f8198d2` |
 
 ## Current seams
 

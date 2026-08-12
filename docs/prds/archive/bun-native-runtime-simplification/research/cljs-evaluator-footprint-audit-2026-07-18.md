@@ -34,14 +34,14 @@ because rendering uses SCI while authored eval uses `cljs.js`.
 
 - ClojureScript: `946d75f3483c0c8e784e6668bff2c71a25619a77` in
   `reference-code/clojurescript`.
-- Shadow CLJS: `4e72595f57618f5c43388ad13d5136cd3bede566` in
+- Shadow CLJS: `4e72595f5761` in
   `reference-code/shadow-cljs`.
-- SCI 0.15.56: `9e9c78f4f358ede939b94352ff4edc03b0186c7a` in
+- SCI 0.15.56: `9e9c78f4f358` in
   `reference-code/sci`.
 - Bun 1.3.14, revision `0d9b296a`.
-- Cherry: `4fa784acde6f37498e227d957447358fd4791af1`.
-- Squint: `c3db1a55f0c9b9c116469fb722132a4a7a63c48e`.
-- NBB: `26adf6e870a7217f98aedc4857126609c3803ec6`.
+- Cherry: `4fa784acde6f`.
+- Squint: `c3db1a55f0c9`.
+- NBB: `26adf6e870a7`.
 
 The Cherry, Squint, and NBB checkouts were disposable source audits under
 `tmp/cljs-footprint`; they are not selected dependencies.

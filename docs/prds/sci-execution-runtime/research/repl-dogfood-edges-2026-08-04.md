@@ -31,7 +31,7 @@ and the [issue convention](../../../seon/issues/README.md) and
   `edgefaces0804`; PID `11892`; prepl `56068`; web port `7914`.
 - Published source branch commit ID at boot:
   `6a7262a6-e93a-5675-827f-990a7e356b6c`.
-- Vendored SCI pin: `2db3358cba913b6fbbe49c7b5b34d7ac72715924` under
+- Vendored SCI pin: `2db3358cba91` under
   `reference-code/sci/`.
 - Vendored Clojure pin: `b18d3adc5b5f4d5d0ccea966203fb67a614d5c3d` under
   `reference-code/clojure/`.

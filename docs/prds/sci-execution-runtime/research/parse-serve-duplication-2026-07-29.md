@@ -87,11 +87,11 @@ because it reads accepted source solely to lift a fact N5 already needs.
 
 | Dependency or mechanism | Selected revision or version | Source-grounded contract used here |
 |---|---|---|
-| SCI | vendored `8fac6e88f32d53a5fd82ebe80640881e317b84fd`; `deps.edn:39-44` | `source-reader` plus `parse-next+string` return a parsed form and buffered source; `parse-string` reads only the next form; `eval-form` accepts an already parsed form (`reference-code/sci/src/sci/core.cljc:352-402`) |
+| SCI | vendored `8fac6e88f32d`; `deps.edn:39-44` | `source-reader` plus `parse-next+string` return a parsed form and buffered source; `parse-string` reads only the next form; `eval-form` accepts an already parsed form (`reference-code/sci/src/sci/core.cljc:352-402`) |
 | SCI parser substrate | SCI revision above, Edamame underneath | default options enable locations and reader conditionals; context supplies features, readers, auto-resolution, and syntax-quote resolution; parse failures carry `:type :sci.error/parse`, phase, file, line, and column (`reference-code/sci/src/sci/impl/parser.cljc:42-50,142-190`) |
 | Clojure | `1.12.5`; `deps.edn:12` | `read`, `read+string`, `clojure.edn/read`, and receiver-side REPL readers currently form separate paths |
 | rewrite-clj | vendored `60782e501aaf312cb90c9ff0bee05d5da5125563` in the quarry alias | preserves syntax nodes and source for the old parser and current docstring hook; it is not the accepted execution reader |
-| Datahike | vendored `9a7a9ef10a954c32075e60d929f9101a9ac8abd9`; `deps.edn:18-22` | the N5 parse result becomes `:seon.fn`, `:seon.ns`, `:seon.schema`, and `:seon.test` facts; workload is derived at a database basis |
+| Datahike | vendored `9a7a9ef10a95`; `deps.edn:18-22` | the N5 parse result becomes `:seon.fn`, `:seon.ns`, `:seon.schema`, and `:seon.test` facts; workload is derived at a database basis |
 | workload ruling | `research/workload-classification-2026-07-28.md:71-148` | lift optional `^{:seon.workload :io\|:compute}` at the leaf; derive classification by reachability over calls, effects, and uncertainties |
 | N5 corpus target | `research/renderable-corpus-plan-2026-07-28.md:127-161` | functions require calls, uncertainties, workload, arities, doc, arglists, source, privacy, and contract facts |
 | current reply cut | base commit `2a49cbd75`; current in-flight working copy read on 2026-07-29 | current copy retries SCI parsing after rewriting prose as comments; it remains protected and was not edited (`src/seon/cluster/reply.cljc:64-100,111-319`) |

@@ -54,7 +54,7 @@ The run remained open with the dead pod run-holding process, no current turn, an
 receipts at writer basis transaction 536871709.
 
 The dependency boundary is Malli 0.20.0, pinned in `deps.edn`; its maintained
-source is `reference-code/malli` at `80138076960e7820523b4cb932c5b5d1936d4e7f`.
+source is `reference-code/malli` at `80138076960e`.
 `malli.core/-ref-schema` resolves registered keyword references through the
 active registry, and `seon.schema/valid-candidate-value?` validates against
 Seon's candidate registry. The existing R36 schema owners are

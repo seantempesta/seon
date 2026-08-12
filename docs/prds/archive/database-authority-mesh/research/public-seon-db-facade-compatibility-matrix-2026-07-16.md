@@ -68,7 +68,7 @@ These are intentional transport adaptations, not open tradeoffs.
 
 | Dependency or mechanism | Selected source | Evidence used |
 |---|---|---|
-| Maintained Datahike | `reference-code/datahike` at `670cd1ada40462cb5927f0dc687f6b3a95f9e13f` | `src/datahike/api/specification.cljc`, `api/impl.cljc`, `query.cljc`, `query/single_flight.cljc`, `core.cljc`, `pull_api.cljc`, `impl/entity.cljc`, `db.cljc`, local API tests, and `test/datahike/test/http/server_test.clj` remote tests |
+| Maintained Datahike | `reference-code/datahike` at `670cd1ada404` | `src/datahike/api/specification.cljc`, `api/impl.cljc`, `query.cljc`, `query/single_flight.cljc`, `core.cljc`, `pull_api.cljc`, `impl/entity.cljc`, `db.cljc`, local API tests, and `test/datahike/test/http/server_test.clj` remote tests |
 | Current Seon facade | current parent of this report | `src/seon/db.cljs` |
 | Current wire and writer | current parent of this report | `src/seon/db/protocol.cljc`, `src/seon/db/writer.clj`, and `src/seon/db/transport/uds.cljs` |
 | Datomic Client | official current documentation, read 2026-07-16 | [sync API](https://docs.datomic.com/client-api/datomic.client.api.html), [async API](https://docs.datomic.com/client-api/datomic.client.api.async.html), [Client reference](https://docs.datomic.com/reference/client-reference.html), and [index APIs](https://docs.datomic.com/indexes/index-apis.html) |

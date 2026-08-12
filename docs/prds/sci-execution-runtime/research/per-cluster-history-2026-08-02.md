@@ -44,7 +44,7 @@ cluster boundary described below. The issue therefore remains open.
 ## Dependency ledger
 
 The gitlink and checked-out Datahike source are both
-`0e8601d7f2f68c01070e13a95483bc82be04cabc`.
+`0e8601d7f2f6`.
 
 - Database construction creates temporal indices only when `keep-history?` is
   true: `reference-code/datahike/src/datahike/db.cljc:907-957`.

@@ -8,8 +8,8 @@ tags: [prd, agent, context, render, quarry]
 
 ## Dependency ledger
 
-- Seon source at `4193c3f919ab54d31bdfc4208953ccb4ef8297b0`; the surviving birth owner is `seon.cluster.agent/creation-tx`, and the landed distance view is `seon.render.agent/namespace-ai`.
-- Datahike source at `reference-code/datahike` revision `9a7a9ef10a954c32075e60d929f9101a9ac8abd9`; creation relies only on one transaction's tempid/ref semantics, not on quarry acquisition machinery.
+- Seon source at `4193c3f919ab`; the surviving birth owner is `seon.cluster.agent/creation-tx`, and the landed distance view is `seon.render.agent/namespace-ai`.
+- Datahike source at `reference-code/datahike` revision `9a7a9ef10a95`; creation relies only on one transaction's tempid/ref semantics, not on quarry acquisition machinery.
 - Quarry history: `844ec4483` first derived required-namespace API views from real require edges, `4b46a2cb2` made full source authoritative and kept an empty current namespace visible, and `2eeb3bd95` collapsed density to current-full plus required-compact.
 
 ## Findings

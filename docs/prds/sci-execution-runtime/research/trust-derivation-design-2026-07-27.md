@@ -58,7 +58,7 @@ The design is grounded in the following maintained mechanisms at Seon commit
   `docs/prds/sci-execution-runtime/research/n5-plan-2026-07-27.md:263-288`).
 
 The database dependency is the maintained Datahike fork at
-`357ffc87c8009f342b239145802e1385d4a18ca9`:
+`357ffc87c800`:
 
 - A transaction id is `inc` of the prior database value's `:max-tx`, so ids
   provide the required strict order

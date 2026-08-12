@@ -29,17 +29,17 @@ is not canonicalized before the seek. This is recorded in
 ## Dependency ledger
 
 The audit was run at Seon revision
-`f19afe23dc1f41b77a8e71d997bfdcd6d70014bf`. The working
+`f19afe23dc1f`. The working
 `reference-code/datahike` pointer had advanced to test-only commit
-`eb3e2239b650635977fdc8e73e7c657b23bf3383` in another lane. Seon's selected
-dependency remains `417649383c65e13f15ea41d394fb1ed742477965`; every Datahike
+`eb3e2239b650` in another lane. Seon's selected
+dependency remains `417649383c65`; every Datahike
 claim below was read with `git show` from that exact revision, without moving
 the shared checkout.
 
 | Dependency or mechanism | Selected identity | Exact source read | Constraint |
 |---|---|---|---|
-| Datahike | maintained SHA `417649383c65e13f15ea41d394fb1ed742477965` | `src/datahike/{core,db,datom,schema}.cljc`, `src/datahike/db/{utils,transaction}.cljc`, `src/datahike/api/impl.cljc` at the selected object | EAVT/AEVT/AVET prefix and seek reads are lazy; history ordering adds `added`; only four public seek components exist; transaction metadata is EAVT-addressable by tx eid. |
-| Konserve | maintained SHA `df6818d43ea3363a808cd051c0d68917f1b987a9` | exact `reference-code/konserve` checkout | One immutable database value must be captured and threaded; no database value belongs in a cursor or unit key. |
+| Datahike | maintained SHA `417649383c65` | `src/datahike/{core,db,datom,schema}.cljc`, `src/datahike/db/{utils,transaction}.cljc`, `src/datahike/api/impl.cljc` at the selected object | EAVT/AEVT/AVET prefix and seek reads are lazy; history ordering adds `added`; only four public seek components exist; transaction metadata is EAVT-addressable by tx eid. |
+| Konserve | maintained SHA `df6818d43ea3` | exact `reference-code/konserve` checkout | One immutable database value must be captured and threaded; no database value belongs in a cursor or unit key. |
 | Transit CLJS | Maven `0.8.280` | selected tag evidence retained by [[coordinate-bound-cursor-contract-2026-07-15]] | The existing version-1 base64url cursor is the only continuation. New projections extend its index/prefix use; they do not add tokens or registries. |
 | Datastar | source `bb9ed6fbe78cf5690f5ad23a5faf86407a44982f` | exact `reference-code/datastar` checkout | One event can carry multiple complete stable-id elements. The later UI composes units into `/data/feed`; no entity-specific feed is needed. |
 | Datastar Clojure | source `1cef624e9e59a2ea79ffe2f65df2e7b06f8198d2` | exact `reference-code/datastar-clojure` checkout | Preserve the canonical gzip SSE channel and server-side stream proof. |

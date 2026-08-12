@@ -26,9 +26,9 @@ teardown owners.
 
 | Dependency or mechanism | Selected version or SHA | Grounding source | Existing Seon owner or proof |
 |---|---|---|---|
-| Datahike | `6f90b339768b1a02066dce3b6fcc93a200758fcc` | `reference-code/datahike/src/datahike/connector.cljc:438-514`; `connections.cljc:11-37` | `seon.client/open-database-connection!`, `seon.db/attached?`, `seon.db.replica` |
-| Konserve | `df6818d43ea3363a808cd051c0d68917f1b987a9` | `reference-code/konserve/src/konserve/node_filestore.cljs:137-170,609`; `impl/defaults.cljc:300-351` | Released transitively by Datahike after writer and secondary-index drain |
-| ClojureScript | `1.12.145`; official tag `r1.12.145` at `bd23d9a2475d822ea8dfd65deaa6732428b9ed25` | Exact tag object in `reference-code/clojurescript`: `src/main/clojure/cljs/core.cljc:await`, `src/main/cljs/cljs/js.cljs:eval-str`; `src/seon/repl.cljs:84-143` | `repl/ensure-bootstrap!`, native `^:async`/`await`, Shadow hot reload |
+| Datahike | `6f90b339768b` | `reference-code/datahike/src/datahike/connector.cljc:438-514`; `connections.cljc:11-37` | `seon.client/open-database-connection!`, `seon.db/attached?`, `seon.db.replica` |
+| Konserve | `df6818d43ea3` | `reference-code/konserve/src/konserve/node_filestore.cljs:137-170,609`; `impl/defaults.cljc:300-351` | Released transitively by Datahike after writer and secondary-index drain |
+| ClojureScript | `1.12.145`; official tag `r1.12.145` at `bd23d9a2475d` | Exact tag object in `reference-code/clojurescript`: `src/main/clojure/cljs/core.cljc:await`, `src/main/cljs/cljs/js.cljs:eval-str`; `src/seon/repl.cljs:84-143` | `repl/ensure-bootstrap!`, native `^:async`/`await`, Shadow hot reload |
 | Malli | `0.20.0` | `reference-code/malli`; `seon.schema/register!` | Closed launch input and public lifecycle function contracts |
 | `superv.async` | `3e6ed755f83634c9e9bbb58707f9446420d32ce9` | `deps.edn` `:cljs` override; Datahike connector `go-try-` release path | Datahike CLJS release completion; no second async lifecycle |
 | `partial-cps` | `1e119b03ea908ad925b98f9ba0a26371c65441e3` | `deps.edn` `:cljs` override | CLJS `await` translation used by connection release |

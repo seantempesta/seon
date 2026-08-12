@@ -15,7 +15,7 @@ to the co-hosted production boot rather than the test fixture?
 
 ## Dependency ledger
 
-- Datahike commit `10540578248eaa686c1f88a7fe57644ee4c9f993` owns wildcard
+- Datahike commit `10540578248e` owns wildcard
   pull and history database semantics. `reference-code/datahike/src/datahike/pull_api.cljc:323-420`
   shows that `[*]` expands the selected entity's complete EAVT slice;
   `reference-code/datahike/src/datahike/api/impl.cljc:185-196` owns the temporal

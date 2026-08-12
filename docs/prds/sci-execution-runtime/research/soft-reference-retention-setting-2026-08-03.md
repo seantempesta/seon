@@ -44,7 +44,7 @@ incident.
   (`Compiler.java:8190-8253`); each form's eval still creates its own child.
 - The measured VM was Homebrew OpenJDK 26.0.1, build `26.0.1`. The matching
   OpenJDK 26.0.1 GA source commit is
-  [`fcc00fc4aee7337bef93840b7ae2fddf1fa5c428`](https://github.com/openjdk/jdk26u/tree/fcc00fc4aee7337bef93840b7ae2fddf1fa5c428).
+  [`fcc00fc4aee7`](https://github.com/openjdk/jdk26u/tree/fcc00fc4aee7).
   HotSpot computes the clearing interval from free heap multiplied by
   `SoftRefLRUPolicyMSPerMB` in
   [`referencePolicy.cpp`](https://github.com/openjdk/jdk26u/blob/fcc00fc4aee7337bef93840b7ae2fddf1fa5c428/src/hotspot/share/gc/shared/referencePolicy.cpp#L52-L83).

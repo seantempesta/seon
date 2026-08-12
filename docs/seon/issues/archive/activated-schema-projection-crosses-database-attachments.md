@@ -52,11 +52,11 @@ state restoration are involved.
 
 ## Dependency ledger
 
-- Datahike fork `6f90b339768b1a02066dce3b6fcc93a200758fcc`:
+- Datahike fork `6f90b339768b`:
   `reference-code/datahike/src/datahike/connections.cljc` and
   `connector.cljc` define connection release; they do not own Seon's program
   projection.
-- Malli `0.20.0` at `4c054bd7d042e70d60b83b9f07fb765bc103037f`:
+- Malli `0.20.0` at `4c054bd7d042`:
   `reference-code/malli/src/malli/core.cljc` confirms explicit registry lookup
   in `m/validate` and the observed `:malli.core/invalid-schema` path.
 - First-party owners: `seon.client/open-agent-conn!` owns the isolated

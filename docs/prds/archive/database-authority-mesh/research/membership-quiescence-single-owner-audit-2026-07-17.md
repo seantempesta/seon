@@ -45,7 +45,7 @@ lifecycle behavior.
 | Portable lifecycle response | `src/seon/runtime/lifecycle.cljc:1-29` | One closed Malli schema is shared by the pod and Babashka operator. The successful response carries durable drain results and optional process generation. |
 | Operator quiescence | `script/seon/dev/process.clj:1435-1505` | The operator validates the closed response, HTTP status, `:seon.client/quiesced?`, and managed process generation. It does not consume the database coordinate. |
 | Web lifecycle transport | `src/seon/web/serve.cljs:1541-1569` | The loopback handler awaits the one client lifecycle function and serializes its result unchanged. It owns no database or quiescence semantics. |
-| Maintained Datahike | `reference-code/datahike` at `a464cd887458d2572414a6ea951c477b0981fdae` | Datahike owns keyed listener replacement and query attribute dependency derivation. Seon should consume those mechanisms rather than repeat them. |
+| Maintained Datahike | `reference-code/datahike` at `a464cd887458` | Datahike owns keyed listener replacement and query attribute dependency derivation. Seon should consume those mechanisms rather than repeat them. |
 
 ### Datahike source evidence
 

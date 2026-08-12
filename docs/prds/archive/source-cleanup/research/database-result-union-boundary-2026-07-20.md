@@ -23,8 +23,8 @@ is permitted.
 
 | Dependency or existing mechanism | Selected source | Constraint established here |
 |---|---|---|
-| Malli | `metosin/malli` 0.20.0; `reference-code/malli` at `80138076960e7820523b4cb932c5b5d1936d4e7f` | `reference-code/malli/src/malli/core.cljc:1210-1319` proves `[:map {:closed true} ...]` rejects every unregistered key; `:or` uses child validators at `:980-1038`. Closedness, not key sniffing, establishes disjointness. |
-| Datahike | maintained fork at `reference-code/datahike` commit `6f2569087ed31f53e751e7535ef4bf2527912046` | Query and pull results retain native arbitrary shapes. The protocol deliberately registers their payload as `:any`; the facade must not reinterpret payload keys. |
+| Malli | `metosin/malli` 0.20.0; `reference-code/malli` at `80138076960e` | `reference-code/malli/src/malli/core.cljc:1210-1319` proves `[:map {:closed true} ...]` rejects every unregistered key; `:or` uses child validators at `:980-1038`. Closedness, not key sniffing, establishes disjointness. |
+| Datahike | maintained fork at `reference-code/datahike` commit `6f2569087ed3` | Query and pull results retain native arbitrary shapes. The protocol deliberately registers their payload as `:any`; the facade must not reinterpret payload keys. |
 | Wire response union | `src/seon/db/protocol.cljc:199-233, 752-956` | Every wire response is already discriminated by the closed `:seon.db.protocol/success?` variants. The defect appears only when `seon.db` projects a successful query/pull/schema response to its bare payload. Do not change the wire. |
 | Public database facade | `src/seon/db.cljs:21-175, 211-212, 778-1199` | `::error` is currently open, and private `error-value?` recognizes only a string message. `query`, `pull`, and `entity` return collision-capable bare values; the other reads need concrete fixed facade schemas. |
 | Shared result discriminator | `src/seon/result.cljs:1-10` | Reuse `:seon.result/ok?`; add only the generic payload shape required by the database result union. Do not create `:seon.db/ok?`. |

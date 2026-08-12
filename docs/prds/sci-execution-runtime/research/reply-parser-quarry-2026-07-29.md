@@ -13,7 +13,7 @@ with a worse whole-reply rule?
 
 | Dependency or mechanism | Selected source | Relevant contract |
 |---|---|---|
-| SCI | vendored fork `8fac6e88f32d53a5fd82ebe80640881e317b84fd`; `deps.edn:39-44` | `source-reader` plus `parse-next+string` return one form and its source buffer; `reference-code/sci/src/sci/core.cljc:364-391` |
+| SCI | vendored fork `8fac6e88f32d`; `deps.edn:39-44` | `source-reader` plus `parse-next+string` return one form and its source buffer; `reference-code/sci/src/sci/core.cljc:364-391` |
 | rewrite-clj | vendored `60782e501aaf312cb90c9ff0bee05d5da5125563`; old host alias in `deps.edn:140-143` | The quarry used one-token syntax reads and byte-faithful node strings in `src-old/seon/repl/parse.cljc:751-801` |
 | parinferish | Maven `0.8.0`; old host alias in `deps.edn:140-143` | The separate repair layer used indent mode, accepted only changed output that re-read, and returned the original source otherwise; `src-old/seon/repl/parse/repair.cljc:292-334`. Its maintained source is not vendored, and the fresh splitter does not depend on it. |
 | Fresh reply splitter | `2a49cbd75`; `src/seon/cluster/reply.cljc` | One throwaway SCI context splits source strings before `run/plan-tx`; no rewrite-clj or repair dependency |

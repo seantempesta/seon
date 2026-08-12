@@ -48,9 +48,9 @@ I read the following named authorities end to end before reaching this design:
 
 The selected dependency revisions are:
 
-- Datahike `56f1c62105b7087f0cac13162f9fd54b1690986e`, with branch-from-commit mechanics in `reference-code/datahike/src/datahike/versioning.cljc:212-255`;
-- core.async `dc35f3e0d7bc2eef502e77982f48641f025c8051`, with the existing payload-free wake pattern grounded through `src/seon/cluster/wake.clj:78-240`; and
-- SCI `2db3358cba913b6fbbe49c7b5b34d7ac72715924`, whose generation-aware copy-on-write fork is the admitted candidate-context mechanism.
+- Datahike `56f1c62105b7`, with branch-from-commit mechanics in `reference-code/datahike/src/datahike/versioning.cljc:212-255`;
+- core.async `dc35f3e0d7bc`, with the existing payload-free wake pattern grounded through `src/seon/cluster/wake.clj:78-240`; and
+- SCI `2db3358cba91`, whose generation-aware copy-on-write fork is the admitted candidate-context mechanism.
 
 The current first-party owners inspected are:
 

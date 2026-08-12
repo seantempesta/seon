@@ -63,10 +63,10 @@ maintained launcher is `script/seon/fresh_operator.clj`.
 
 | Boundary | Selected source | Seon seam |
 | --- | --- | --- |
-| Store addressing and identity | Datahike `c15272730e74fb3f8bba91f6361c268492a99ba7`: `reference-code/datahike/src/datahike/store.cljc:35-71`, `reference-code/datahike/src/datahike/config.cljc:200-248` | `src/seon/cluster/store.clj:121-164` |
-| Database creation, existence, and deletion | Datahike `c15272730e74fb3f8bba91f6361c268492a99ba7`: `reference-code/datahike/src/datahike/writing.cljc:603-731` | `src/seon/cluster/store.clj:241-351` |
-| Branch roster and branch heads | Datahike `c15272730e74fb3f8bba91f6361c268492a99ba7`: `reference-code/datahike/src/datahike/versioning.cljc:207-321` | `src/seon/cluster/registry.clj:92-111`, `src/seon/cluster/registry.clj:175-284` |
-| File-store existence and layout | Konserve `89795ae1b769aafd47adf4168e2393d7b4721bc2`: `reference-code/konserve/src/konserve/store.cljc:136-198`, `reference-code/konserve/src/konserve/filestore.clj:157-240` | `src/seon/cluster/store.clj:132-164` |
+| Store addressing and identity | Datahike `c15272730e74`: `reference-code/datahike/src/datahike/store.cljc:35-71`, `reference-code/datahike/src/datahike/config.cljc:200-248` | `src/seon/cluster/store.clj:121-164` |
+| Database creation, existence, and deletion | Datahike `c15272730e74`: `reference-code/datahike/src/datahike/writing.cljc:603-731` | `src/seon/cluster/store.clj:241-351` |
+| Branch roster and branch heads | Datahike `c15272730e74`: `reference-code/datahike/src/datahike/versioning.cljc:207-321` | `src/seon/cluster/registry.clj:92-111`, `src/seon/cluster/registry.clj:175-284` |
+| File-store existence and layout | Konserve `89795ae1b769`: `reference-code/konserve/src/konserve/store.cljc:136-198`, `reference-code/konserve/src/konserve/filestore.clj:157-240` | `src/seon/cluster/store.clj:132-164` |
 | Durable external records | Fresh tree `38f3cb84c2588dc2363d79dbf3fed3078e59d2d0`: `script/seon/dev/state.clj:28-63`, `script/seon/fresh_operator.clj:82-165` | `script/seon/fresh_operator.clj:210-220`, `src/seon/cluster/process.clj:12-49` |
 | Maintenance consumer | [Scheduler mining and root maintenance design](docs/prds/sci-execution-runtime/research/scheduler-mining-and-gc-design-2026-08-04.md) | `docs/prds/sci-execution-runtime/research/scheduler-mining-and-gc-design-2026-08-04.md:365-425` |
 

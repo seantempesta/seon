@@ -54,9 +54,9 @@ read-only tree and no claim is made that those unrelated edits belong to this
 lane. Absence claims such as “no production caller” were verified by an `rg`
 inventory over all current `src/**/*.clj` and `src/**/*.cljc`; an absent call
 site has no file line to cite. Dependency pins were Datahike
-`0e8601d7f2f68c01070e13a95483bc82be04cabc`, SCI
-`72150fd44c81a405387cc1aea1e4ea86247b8420`, and core.async
-`dc35f3e0d7bc2eef502e77982f48641f025c8051`. The relevant dependency seams are
+`0e8601d7f2f6`, SCI
+`72150fd44c81`, and core.async
+`dc35f3e0d7bc`. The relevant dependency seams are
 Datahike's write-schema value validation
 (`reference-code/datahike/src/datahike/db/transaction.cljc:32-51`), SCI context
 creation/evaluation (`reference-code/sci/src/sci/core.cljc:317-343`), SCI Var

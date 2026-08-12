@@ -39,7 +39,7 @@ Selected dependency revisions and boundaries:
 
 | Dependency or owner | Selected revision / path | Boundary exercised |
 |---|---|---|
-| Datahike fork | `574c5f0f0db9411d1982769f14512cb24ef719da` | `reference-code/datahike/src/datahike/api/impl.cljc:30-48`, accepted transaction shapes |
+| Datahike fork | `574c5f0f0db9` | `reference-code/datahike/src/datahike/api/impl.cljc:30-48`, accepted transaction shapes |
 | Malli fork | `80138076960e7820523b4cb932c5b5d1936d4e7f` | registered request/entity contracts |
 | SCI fork | `2db3358cba913b6fbbe49c7b5b34d7ac72715924` | guarded door evaluation and admission |
 | Seon database owner | `src/seon/db.clj:540-711,862-1113` | ambient reads, writes, bounded transaction projection, rejections |

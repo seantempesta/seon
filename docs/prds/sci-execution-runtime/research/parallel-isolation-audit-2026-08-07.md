@@ -58,8 +58,8 @@ today would go hunting for an atom that is not there.
 Dependency ledger: Clojure 1.12.5 (dynamic bindings, `bound-fn*`, binding
 conveyance in `future`/`go` but not in raw or virtual threads); Malli 0.20.0
 (`malli.registry` mutable default); Datahike vendored at
-`10540578248eaa686c1f88a7fe57644ee4c9f993`; SCI vendored at
-`2db3358cba913b6fbbe49c7b5b34d7ac72715924`
+`10540578248e`; SCI vendored at
+`2db3358cba91`
 (`reference-code/sci/src/sci/core.cljc:337`, generation-aware copy-on-write
 `fork`); core.async `1.10.874-alpha3`.
 

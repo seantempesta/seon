@@ -14,7 +14,7 @@ architecture. No source or test was changed.
 
 Selected dependency:
 
-- Datahike `9ada755087228e10cfb179fa5779ce227a6ed220` at
+- Datahike `9ada75508722` at
   `reference-code/datahike`.
 - Clojure `1.12.4` from that checkout's `deps.edn`.
 - JVM reported by the runs as OpenJDK `26.0.1`.

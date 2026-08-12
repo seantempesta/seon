@@ -73,7 +73,7 @@ Dependency ledger for the implemented boundary:
 - Clojure `b18d3adc5b5f4d5d0ccea966203fb67a614d5c3d`, with io-prepl's
   read/eval/session namespace behavior grounded in
   `reference-code/clojure/src/clj/clojure/core/server.clj:228-296`;
-- SCI `6de15683b7520cc973bc9c136aec7ad3f9b3788c`, with namespace creation and
+- SCI `6de15683b752`, with namespace creation and
   form evaluation grounded in `reference-code/sci/src/sci/core.cljc:354-405`;
 - the operator's one observation derivation in
   `script/seon/fresh_operator.clj:434-458,636-651,788-895`; and

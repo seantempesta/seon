@@ -56,10 +56,10 @@ status, or in-eval transaction as a candidate implementation.
 
 | Dependency or mechanism | Revision | Evidence used |
 |---|---|---|
-| Datahike | `0e8601d7f2f68c01070e13a95483bc82be04cabc` | The fresh database surface preserves Datahike-shaped positional and argument-map operations in `src/seon/db.clj:386-814`. |
-| SCI | `2db3358cba913b6fbbe49c7b5b34d7ac72715924` | Fresh acquisition installs loaded public host Vars at `src/seon/sci/eval.clj:798-823` and builds one cluster context at `:1201-1228`. |
+| Datahike | `0e8601d7f2f6` | The fresh database surface preserves Datahike-shaped positional and argument-map operations in `src/seon/db.clj:386-814`. |
+| SCI | `2db3358cba91` | Fresh acquisition installs loaded public host Vars at `src/seon/sci/eval.clj:798-823` and builds one cluster context at `:1201-1228`. |
 | core.async Flow | `dc35f3e0d7bc2eef502e77982f48641f025c8051` | Capability work must eventually leave compute at the effect boundary; no old job loop or scheduler is a surviving owner. |
-| Malli | `80138076960e7820523b4cb932c5b5d1936d4e7f` | Fresh public contracts and program facts are the discovery substrate; no public-function registry survives. |
+| Malli | `80138076960e` | Fresh public contracts and program facts are the discovery substrate; no public-function registry survives. |
 | ClojureScript quarry | `946d75f3483c0c8e784e6668bff2c71a25619a77` | Explains old `^:async`/`await` behavior only; the CLJS build remains off. |
 
 Historical source was read at three useful boundaries:

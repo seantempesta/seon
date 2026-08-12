@@ -17,9 +17,9 @@ data-oriented-Clojure, and Datahike skills before fixture work.
 
 The dependency ledger is:
 
-- SCI `6ee57c9c3e73e5b8224fde851e33a1e2a8e08383`, especially
+- SCI `6ee57c9c3e73`, especially
   `reference-code/sci/src/sci/core.cljc`'s generation-aware `fork`;
-- Datahike `10540578248eaa686c1f88a7fe57644ee4c9f993`, especially
+- Datahike `10540578248e`, especially
   `reference-code/datahike/src/datahike/versioning.cljc`'s `branch!`,
   `force-branch!`, and `delete-branch!` semantics;
 - the shared source/database base commits `e36377a02`, `6bb9cfe8d`,

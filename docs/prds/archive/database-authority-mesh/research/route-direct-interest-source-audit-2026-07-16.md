@@ -43,7 +43,7 @@ No database-authority protocol extension is required for this slice.
 
 | Mechanism | Selected source | Interior seam used |
 |---|---|---|
-| Datahike | `reference-code/datahike` at `d21abadb9412f1b828b02ddb3c08ddc81d57c595` | `query-attribute-dependencies` merges literal where attributes and pull-selector attributes |
+| Datahike | `reference-code/datahike` at `d21abadb9412` | `query-attribute-dependencies` merges literal where attributes and pull-selector attributes |
 | Database protocol | `src/seon/db/protocol.cljc` | coordinate-pinned query, query-derived listen, request-ID unlisten and cancel, event coordinate |
 | JVM authority | `src/seon/db/writer.clj` | one committed-report source per database scope and attribute-indexed interests |
 | Bun session | `src/seon/db/transport/uds.cljs` | multiplexed requests, bounded event coalescing, deadlines, close-once behavior |

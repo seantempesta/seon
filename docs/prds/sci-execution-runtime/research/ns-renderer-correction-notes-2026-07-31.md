@@ -25,13 +25,13 @@ require contains an eid map.
 ## Dependency ledger
 
 - Malli 0.20.0, vendored commit
-  `80138076960e7820523b4cb932c5b5d1936d4e7f`: `RefSchema` and `m/-ref` are
+  `80138076960e`: `RefSchema` and `m/-ref` are
   defined in `reference-code/malli/src/malli/core.cljc:67-69,102`; direct
   default ref walking is implemented at `:2009-2016`; `m/walk` is the public
   traversal at `:2612-2625`; registry composition is
   `reference-code/malli/src/malli/registry.cljc:17-22,54-59`.
 - Datahike fork commit
-  `9b3be9d59cb07d9c895af280e60eb074bb57a400`: the renderer uses synchronous
+  `9b3be9d59cb0`: the renderer uses synchronous
   `d/q` and concrete `d/pull` selectors over one immutable database value.
   Global schema definitions resolve by the identity lookup-ref
   `[:seon.schema/key key]`; the identity and adjacent form are declared at

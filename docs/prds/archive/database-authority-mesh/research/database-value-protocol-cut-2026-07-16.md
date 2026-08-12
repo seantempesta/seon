@@ -42,7 +42,7 @@ protocol beside it.
 
 | Owner | Selected source | Constraint used by the cut |
 |---|---|---|
-| Maintained Datahike | `reference-code/datahike` at `0070d507728159cb48c4c46d249d88db829ac679` | `query-source-bindings`, composite query-cache identity, multi-generation release, native reports, temporal wrappers, and eager `index-page` are the implementation seams. |
+| Maintained Datahike | `reference-code/datahike` at `0070d5077281` | `query-source-bindings`, composite query-cache identity, multi-generation release, native reports, temporal wrappers, and eager `index-page` are the implementation seams. |
 | Query parsing | `src/datahike/query.cljc:96-119,867-885,2824-2863` | `normalize-q-input` and the parsed `SrcVar` bindings, not map-shape guessing, determine which top-level args are database sources. |
 | Datahike remote values | `src/datahike/remote.cljc:40-106,121-162`; `src/datahike/transit.cljc:31-72` | Existing remote DB records prove the minimum native identity and exact wrapper structure, but they are host records attached to a remote peer and are not Seon's ordinary transport-neutral public value. |
 | Datahike database values | `src/datahike/db.cljc:307-411,499-701` | A committed raw DB has exact process-local cache identity; history, as-of, and since are wrappers over an origin DB. |

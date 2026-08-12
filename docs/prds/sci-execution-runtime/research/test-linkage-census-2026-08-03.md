@@ -81,8 +81,8 @@ facts for identities already present in the published database.
 | Dependency or mechanism | Selected revision | Evidence used |
 |---|---|---|
 | clj-kondo | `57252e07975710aa579b24f0d1b2b1e04195caa2` | The one analysis already returns caller, enclosing var, resolved target, arity presence, metadata, and filename. See [reference-code/clj-kondo](reference-code/clj-kondo), [src/seon/fn/analyzer.clj](src/seon/fn/analyzer.clj), and [src/seon/fn.clj](src/seon/fn.clj). |
-| Datahike | `0e8601d7f2f68c01070e13a95483bc82be04cabc` | Immutable database value, cardinality-many refs, recursive rules, and absence queries. See [reference-code/datahike](reference-code/datahike). |
-| SCI | `2db3358cba913b6fbbe49c7b5b34d7ac72715924` | Context for source-string and dynamic evaluation residue only; no SCI change is proposed. See [reference-code/sci](reference-code/sci). |
+| Datahike | `0e8601d7f2f6` | Immutable database value, cardinality-many refs, recursive rules, and absence queries. See [reference-code/datahike](reference-code/datahike). |
+| SCI | `2db3358cba91` | Context for source-string and dynamic evaluation residue only; no SCI change is proposed. See [reference-code/sci](reference-code/sci). |
 | Static program producer | current [src/seon/fn.clj](src/seon/fn.clj) | Computes call sets, exact rows, file artifacts, capability metadata, and analyzer projections. |
 | Static analyzer normalization | current [src/seon/fn/analyzer.clj](src/seon/fn/analyzer.clj) | Retains `:var-usages`, `from`, `from-var`, `to`, `name`, `arity`, metadata, and filename. |
 | Program-row owner | current [src/seon/program.cljc](src/seon/program.cljc) | Owns canonical function/test attributes and exact replacement. |

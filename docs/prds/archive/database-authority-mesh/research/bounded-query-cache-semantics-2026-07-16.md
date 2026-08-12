@@ -28,7 +28,7 @@ request identity.
 
 ## Dependency ledger
 
-- Datahike `092f5b0580c892c32b1dc65bf9acdbe37db90c4f`:
+- Datahike `092f5b0580c8`:
   - `reference-code/datahike/src/datahike/query.cljc`
   - `reference-code/datahike/src/datahike/query/single_flight.cljc`
   - `reference-code/datahike/src/datahike/resource.cljc`

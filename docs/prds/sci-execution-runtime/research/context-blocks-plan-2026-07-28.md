@@ -46,8 +46,8 @@ that the rendered evidence did not support.
 |---|---|---|---|
 | Clojure | 1.12.5, `deps.edn:15` | fresh `src/` | Immutable block values, reductions, stable sorting |
 | Malli | 0.20.0, `deps.edn:16` | `src/seon/schema/*.edn` through `seon.schema.edn` | Block, contribution, and rendered-context contracts; honest generators |
-| Datahike | `357ffc87c8009f342b239145802e1385d4a18ca9`, `reference-code/datahike` | `seon.render.block/blocks`, N2 transitions, `:seon.db/trigger` transaction metadata | One immutable database value, component refs, history-derived request cause, exact database identity |
-| SCI | `8fac6e88f32d53a5fd82ebe80640881e317b84fd`, `reference-code/sci` | `seon.sci.eval`, `seon.sci.admit` | Bounded evaluation of agent-authored projections after N5 acquisition |
+| Datahike | `357ffc87c800`, `reference-code/datahike` | `seon.render.block/blocks`, N2 transitions, `:seon.db/trigger` transaction metadata | One immutable database value, component refs, history-derived request cause, exact database identity |
+| SCI | `8fac6e88f32d`, `reference-code/sci` | `seon.sci.eval`, `seon.sci.admit` | Bounded evaluation of agent-authored projections after N5 acquisition |
 | core.async Flow | 1.10.874-alpha3, `deps.edn:19` | `seon.flow`; N4 plan C2–C8 | HTML push pipeline, one active evaluation per block/kind, equality suppression and fan-out |
 | Generic render router | `44435f07b`, `src/seon/render.clj:95-147` | late-resolved projection, flat error values | The only output-kind routing entry |
 | Block family, packages 1–2 | `5e71715c1`, `fa4cb38f4`, `492f2a17e`; `src/seon/schema/block.edn:1-169`, `src/seon/render/block.clj:149-567,628-754` | ordered pull, unit, surface, single-map bounded expansion, entity/ref following, page, generic panel, whole-block replacement | The durable unit and the exact four-cap, per-path-visited, depth-first expansion contract this rung must preserve |

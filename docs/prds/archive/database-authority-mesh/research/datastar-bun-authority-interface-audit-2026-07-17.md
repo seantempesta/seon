@@ -16,11 +16,11 @@ The exact checked-out dependencies are:
 
 - Datastar `bb9ed6fbe78cf5690f5ad23a5faf86407a44982f` at
   `reference-code/datastar/`;
-- Datastar Clojure `1cef624e9e59a2ea79ffe2f65df2e7b06f8198d2` at
+- Datastar Clojure `1cef624e9e59` at
   `reference-code/datastar-clojure/`;
-- Datahike `a464cd887458d2572414a6ea951c477b0981fdae` at
+- Datahike `a464cd887458` at
   `reference-code/datahike/`; and
-- Bun `be77b652884b16a103cfaa4af3c1102f72f2dcd3` at
+- Bun `be77b652884b` at
   `reference-code/bun/`.
 
 The first-party mechanisms are the normalized feed registry, coalescer, and

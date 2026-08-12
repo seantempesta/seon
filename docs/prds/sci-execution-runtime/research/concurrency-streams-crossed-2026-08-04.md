@@ -46,8 +46,8 @@ therefore used the current shared cluster context intentionally.
 
 | Mechanism | Selected source | Boundary read |
 |---|---|---|
-| SCI | `2db3358cba913b6fbbe49c7b5b34d7ac72715924` (`v0.14.56-18-g2db3358`) | `reference-code/sci/src/sci/core.cljc`; `reference-code/sci/src/sci/impl/namespaces.cljc`; namespace tests. `sci/fork` has copy-on-write generations; `ns-unmap` and `remove-ns` mutate the selected context's namespace table. |
-| Datahike | `574c5f0f0db9411d1982769f14512cb24ef719da` (`0.8.1732-98-g574c5f`) | `reference-code/datahike/src/datahike/writer.cljc` and transaction uniqueness paths. One connection's writer serializes submitted transactions. |
+| SCI | `2db3358cba91` (`v0.14.56-18-g2db3358`) | `reference-code/sci/src/sci/core.cljc`; `reference-code/sci/src/sci/impl/namespaces.cljc`; namespace tests. `sci/fork` has copy-on-write generations; `ns-unmap` and `remove-ns` mutate the selected context's namespace table. |
+| Datahike | `574c5f0f0db9` (`0.8.1732-98-g574c5f`) | `reference-code/datahike/src/datahike/writer.cljc` and transaction uniqueness paths. One connection's writer serializes submitted transactions. |
 | Seon evaluation | scratch `current-src` commit `6a726422-0d92-5683-905b-bf1ea1c7f117` | `src/seon/sci/eval.clj`, especially reader events, `changed-session-defs`, schema deltas, acquisition, and session-image installation. |
 | Seon terminal commit | same scratch publication | `src/seon/cluster/loop.clj`, `src/seon/cluster/run.clj`, `src/seon/program.cljc`, `src/seon/cluster/message.clj`, and `src/seon/cluster/work.clj`. |
 | Tests | current checkout | `test/seon/concurrency_independence_test.clj`, `test/seon/sci/eval_test.clj`, and `test/seon/test_support.clj`. |

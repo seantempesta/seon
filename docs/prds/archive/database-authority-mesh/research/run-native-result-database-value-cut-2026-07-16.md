@@ -42,7 +42,7 @@ its domain result, not a database envelope.
 | Dependency or owner | Selected source | Constraint used |
 |---|---|---|
 | Seon checkout | `7a093b1e5297c5a26da32da5535461ebccfaf252` plus the shared working tree | `seon.db` is already async and native-result-shaped; `seon.agent.run` still implements the removed local contract. |
-| Maintained Datahike | `reference-code/datahike` at `a464cd887458d2572414a6ea951c477b0981fdae` | `:db.fn/cas` resolves lookup refs, compares inside the serialized transaction, and aborts the entire transaction on mismatch. |
+| Maintained Datahike | `reference-code/datahike` at `a464cd887458` | `:db.fn/cas` resolves lookup refs, compares inside the serialized transaction, and aborts the entire transaction on mismatch. |
 | Public database facade | `src/seon/db.cljs:440-749` | `db/db`, reads, and `execute-many` are async; reads accept `:seon.db/db`; successful writes cache and return `:db-after`; errors are direct values. |
 | Writer | `src/seon/db/writer.clj:1156-1266,1891-1925` | Receipt recovery, current-value checking, transaction preparation, Datahike commit, and report construction are authority-owned. |
 | Run entity owner | `src/seon/agent/run.cljs` | Keep the run schemas, refs, bounds, watchdogs, outcome routing, and run-id fencing token in this namespace. |

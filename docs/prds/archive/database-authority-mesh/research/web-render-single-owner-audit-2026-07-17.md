@@ -55,10 +55,10 @@ useful evidence, not proof of the present tree.
 | Seon database API | `src/seon/db.cljs:268-280,513-587,968-1045` | Database values are ordinary data. `listen!` returns its public key, and handlers receive native transaction report data. |
 | Database value contract | `src/seon/db/protocol.cljc:213-229` | The closed value is `db-name`, `t`, `as-of`, `since`, `history`, and `datahike/commit-id`; no Datahike object crosses the wire. |
 | Writer interest | `src/seon/db/writer.clj:2123-2193,2311-2365` | Installation is serialized, query dependencies select interested listeners, matching commits carry transaction reports, and a gap carries `:db-after` resynchronization. |
-| Datahike | `reference-code/datahike` at `a464cd887458d2572414a6ea951c477b0981fdae` | `datahike.core/listen!` is keyed replacement plus transaction-report callback; `unlisten!` removes by key. |
+| Datahike | `reference-code/datahike` at `a464cd887458` | `datahike.core/listen!` is keyed replacement plus transaction-report callback; `unlisten!` removes by key. |
 | Datastar | `reference-code/datastar` at `bb9ed6fbe78cf5690f5ad23a5faf86407a44982f` | The client consumes arbitrary asynchronous byte chunks; outer element patches need no explicit selector. |
 | Datastar Clojure | `reference-code/datastar-clojure` at `1cef624e9e59a2ea79ffe2f65df2e7b06f8198d2` | `examples.tiny-gzip` uses a separate long-lived GET stream and demonstrates immediate gzip delivery for small events. |
-| Bun | `reference-code/bun` at `be77b652884b16a103cfaa4af3c1102f72f2dcd3` | Native streams may later replace Node socket/gzip mechanics without changing render or subscription ownership. |
+| Bun | `reference-code/bun` at `be77b652884b` | Native streams may later replace Node socket/gzip mechanics without changing render or subscription ownership. |
 | Intended seam | [[async-render-authority-seam-2026-07-16]] | Acquire outside pure render transitions; equivalent browsers share acquisition, render, serialization, and retained complete bytes. |
 
 ## Shortest falsifiers

@@ -121,14 +121,14 @@ host, and close the separately tracked parent-watchdog lifetime defect.
 - Clojure `b18d3adc5b5f4d5d0ccea966203fb67a614d5c3d`: io-prepl reads,
   evaluates, and returns structured events at
   `reference-code/clojure/src/clj/clojure/core/server.clj:228-296`.
-- SCI `6de15683b7520cc973bc9c136aec7ad3f9b3788c`: the selected cluster ctx
+- SCI `6de15683b752`: the selected cluster ctx
   and door evaluation are assembled at `src/seon/cluster.clj:1365-1370` and
   `script/seon/dev/mcp.clj:786-816`.
 - core.async `dc35f3e0d7bc2eef502e77982f48641f025c8051`: `ping` returns only procs
   that reply within its timeout, with state projected by `:ping-map-fn`
   (`reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:136-155,191-193`;
   implementation at `flow/impl.clj:76-86,271-279`).
-- core.async.flow-monitor `fbff8424696c7080ee7dc27b55cde1659ec18d8f`:
+- core.async.flow-monitor `fbff8424696c`:
   the dependency monitor runs a one-second polling ping loop and exposes
   inject/pause/resume controls (`reference-code/core.async.flow-monitor/src/clojure/core/async/flow_monitor.clj:71-103`).
   That is useful grounding and is not the MCP design.

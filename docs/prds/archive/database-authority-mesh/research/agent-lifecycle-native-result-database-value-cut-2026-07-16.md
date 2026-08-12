@@ -58,7 +58,7 @@ explicit database-value contracts, not through temporary adapters.
 | Run owner | `src/seon/agent/run.cljs` plus [[run-native-result-database-value-cut-2026-07-16]] | `current-run`, run open/close, pause/resume, and the `:seon.agent/run` fence have one owner. Lifecycle composes them; it does not copy a run service. |
 | Message owner | `src/seon/agent/message.cljs` | Completion and delegation keep one message path. Its useful message projection remains domain data; old database envelopes must disappear before these callers can be final. |
 | Identity allocator | `src/seon/db/id.cljc` | `allocate!` accepts an explicit `:seon.db/db`, returns the native report enriched with `::db.id/ids`, and retries only an exact generated-identity conflict. |
-| Maintained Datahike | `reference-code/datahike` at `a464cd887458d2572414a6ea951c477b0981fdae` | CAS resolves lookup refs, compares inside the serialized transaction, and aborts the whole transaction on mismatch. |
+| Maintained Datahike | `reference-code/datahike` at `a464cd887458` | CAS resolves lookup refs, compares inside the serialized transaction, and aborts the whole transaction on mismatch. |
 | Duplicate derived readers | `src/seon/derive.cljs` | Pure `state-from-primitives` is retained. Synchronous database access and lifecycle queries are not a second remote API. |
 | Runtime host projection | `src/seon/client.cljs:306-460` | Runtime advertisements and the committed feed already own process-local hosted-agent reconciliation; `agent/resumable-agent-ids!` is not another owner. |
 

@@ -27,9 +27,9 @@ repository already owns the large-content lifecycle in `my.blob`.
 
 The source and probe used the checkout's maintained writer dependency closure:
 
-- Datahike `caf526850084a9d5846ccd9ea34251fe411e0d6b`
+- Datahike `caf526850084`
   (`reference-code/datahike`; selected by `deps.edn:25-28`).
-- Konserve `b5c99bc02a7175652a610324215288b78551801f`
+- Konserve `b5c99bc02a71`
   (`reference-code/konserve`; selected by `deps.edn:29-35` and by Datahike at
   `reference-code/datahike/deps.edn:4-7`).
 - PersistentSortedSet 0.4.137,

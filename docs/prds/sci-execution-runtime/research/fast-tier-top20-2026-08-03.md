@@ -25,7 +25,7 @@ Raw artifacts:
 
 - Clojure 1.12.5: `reference-code/clojure/src/clj/clojure/test.clj:711-779`
   establishes test-var metadata and fixture execution.
-- Datahike `0e8601d7f2f68c01070e13a95483bc82be04cabc`:
+- Datahike `0e8601d7f2f6`:
   `reference-code/datahike`, supplying immutable database values and isolated
   child branches.
 - clj-kondo `57252e07975710aa579b24f0d1b2b1e04195caa2`:

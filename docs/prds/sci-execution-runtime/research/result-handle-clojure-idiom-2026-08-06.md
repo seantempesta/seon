@@ -64,9 +64,9 @@ graduation number; the retained benchmark design is recorded at
 
 | Dependency or owner | Selected revision | Seam read |
 |---|---|---|
-| SCI | `2db3358cba913b6fbbe49c7b5b34d7ac72715924` | Edamame delegation and readers at `reference-code/sci/src/sci/impl/parser.cljc:142-168`; `intern` at `reference-code/sci/src/sci/core.cljc:259-270`; generation-aware fork at `reference-code/sci/src/sci/core.cljc:331-337` |
+| SCI | `2db3358cba91` | Edamame delegation and readers at `reference-code/sci/src/sci/impl/parser.cljc:142-168`; `intern` at `reference-code/sci/src/sci/core.cljc:259-270`; generation-aware fork at `reference-code/sci/src/sci/core.cljc:331-337` |
 | Edamame | `38e627467daa3f6f1e5a8eb6421f702d2a940b7f` | qualified-symbol grammar at `reference-code/edamame/src/edamame/impl/parser.cljc:139-161`; tagged-reader invocation at `:592-606` |
-| Datahike | `10540578248eaa686c1f88a7fe57644ee4c9f993` | EID allocation at `reference-code/datahike/src/datahike/db/transaction.cljc:56-88,945-971,1288-1303` |
+| Datahike | `10540578248e` | EID allocation at `reference-code/datahike/src/datahike/db/transaction.cljc:56-88,945-971,1288-1303` |
 | core.async | `dc35f3e0d7bc2eef502e77982f48641f025c8051` | `:io`/`:compute` contract already grounded by the foundation report at `docs/prds/sci-execution-runtime/research/result-symbol-resolution-2026-08-06.md:175-183,207-220` |
 | Konserve | `07377c27c8288b7484f0aa7b82e8158b415985be` | synchronous blob read beneath the existing `seon.blob` owner, grounded at `docs/prds/sci-execution-runtime/research/result-symbol-resolution-2026-08-06.md:335-365` |
 | Seon reader | current tree | accepted tag map and refusal at `src/seon/sci/reader.cljc:20-34`; one Edamame parse at `:498-525`; public tag input at `:569-596` |

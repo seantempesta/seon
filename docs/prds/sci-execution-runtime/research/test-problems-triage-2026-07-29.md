@@ -64,7 +64,7 @@ review findings, such as the missing `core.async` require once reported in
 | Dependency or Seon mechanism | Selected source | Constraint on the fix |
 |---|---|---|
 | `clojure.core.async.flow` at `dc35f3e0d7bc2eef502e77982f48641f025c8051` | `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:108-155`; `flow/impl.clj:98-172` | Flow already publishes report data. Seon must retain and name the application events it needs; tests must not sample effects after those events. |
-| Datahike at `9a7a9ef10a954c32075e60d929f9101a9ac8abd9` | `reference-code/datahike/src/datahike/core.cljc:199-217`; `writer.cljc:384-405` | Transaction completion is observable through `listen!`. A committed-fact wait is not a database polling loop. |
+| Datahike at `9a7a9ef10a95` | `reference-code/datahike/src/datahike/core.cljc:199-217`; `writer.cljc:384-405` | Transaction completion is observable through `listen!`. A committed-fact wait is not a database polling loop. |
 | Malli at `80138076960e7820523b4cb932c5b5d1936d4e7f` | registered Seon schemas plus `seon.schema.datahike` | Schemas own constructible domains and projections. Test-local defaults, callback predicates, and optional-`nil` generators must not become alternate contracts. |
 | Runtime construction | `src/seon/cluster.clj:659-742` | The live cluster privately builds the loop handle. Fixtures therefore cannot invoke the production construction. |
 | Per-agent graphs | `src/seon/cluster/agent.clj:298-356` | Armed entries retain mailbox/completion state but discard the application report stream tests need for armed, idle, pause, and settlement observations. |

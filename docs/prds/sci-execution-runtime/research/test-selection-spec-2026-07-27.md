@@ -37,7 +37,7 @@ acquires them at a database basis
 |---|---|---|
 | Seon checkout | `f399551fda53e81cf029e83ba949751012360c4c` | The current hook, JVM indexer, edge analyzer, and plan ruling are the quarry for this specification. |
 | Clojure | 1.12.5 | The fresh project pins Clojure 1.12.5 (`deps.edn:13-14`). The indexer reads the `:clj` projection of `.clj` and `.cljc` source (`script/seon/dev/program_indexer.clj:49-67`, `script/seon/dev/program_indexer.clj:173-180`). |
-| Datahike | `reference-code/datahike` at `caf526850084a9d5846ccd9ea34251fe411e0d6b` | The fresh project selects the maintained checkout (`deps.edn:19-21`). Selection reads one immutable database value; it does not build a mutable cache or a second persisted graph. |
+| Datahike | `reference-code/datahike` at `caf526850084` | The fresh project selects the maintained checkout (`deps.edn:19-21`). Selection reads one immutable database value; it does not build a mutable cache or a second persisted graph. |
 | `seon.program.edge` | checkout revision above | This is the existing direct-call producer and vocabulary. It defines `:seon.program.edge/calls`, `:seon.program.edge/generation`, and the uncertainty set (`src-old/seon/program/edge.cljc:8-25`, `src-old/seon/program/edge.cljc:75-89`). |
 | `bin/test` | checkout revision above | The surviving gate accepts zero or more test namespace symbols and calls `clojure.test/run-tests` (`bin/test:15-26`, `bin/test:34-44`). Selection therefore returns suites, not an invented test runner. |
 

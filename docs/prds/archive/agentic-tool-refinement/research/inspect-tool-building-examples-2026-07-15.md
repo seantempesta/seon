@@ -27,7 +27,7 @@ round trip supplies the experimental shape, not a replacement implementation.
 
 | Dependency or mechanism | Selected identity | Source evidence | Constraint |
 |---|---|---|---|
-| Inspect AI | `05322696a0f784ec399ef6abbafd3d2a250ea9cc` | `reference-code/inspect-ai/src/inspect_ai/`, `reference-code/inspect-ai/tests/`, and `reference-code/inspect-ai/examples/` | Inspect owns evaluation, scoring, limits, cancellation accounting, sandboxes, and native logs. |
+| Inspect AI | `05322696a0f7` | `reference-code/inspect-ai/src/inspect_ai/`, `reference-code/inspect-ai/tests/`, and `reference-code/inspect-ai/examples/` | Inspect owns evaluation, scoring, limits, cancellation accounting, sandboxes, and native logs. |
 | Seon Inspect adapter | current checkout | `src-inspect-ai/src/seon_inspect/solver.py`, `milestone.py`, `catalog.py`, `source_admission.py`, and `scorecard.py` | The pod remains the agent runtime; the adapter preserves database evidence and rejects infrastructure faults before capability scoring. |
 | Seon dynamic function surface | current checkout | `src/seon/agent/ctx/namespaces.cljs`, `src/my/ns.cljs`, and indexed `:seon.fn` / `:seon.schema` facts | Current namespace source is full; required namespaces are inert compact contracts; positive `:seon.fn/agent-facing?` facts define callable eligibility. |
 | Existing stream and batch audit | current lane | [[inspect-batch-stream-cancellation-2026-07-15]] and [[batch-stream-cutoff-audit-2026-07-15]] | This report ranks source examples; it does not implement the queued P4 transport or multi-form repair. |

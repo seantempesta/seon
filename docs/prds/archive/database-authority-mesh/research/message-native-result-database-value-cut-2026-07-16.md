@@ -38,7 +38,7 @@ run. Wake remains the committed-datom interest owned by `seon.agent.loop`.
 | Dependency or owner | Selected source | Constraint used |
 |---|---|---|
 | Seon checkout | `7301ec5b06fd53645bc9c6af8f13adda0a460c80` plus the shared working tree | The async `seon.db` facade and native allocator are built; message acquisition still expects the removed coordinate/envelope contract. |
-| Maintained Datahike | `reference-code/datahike` at `a464cd887458d2572414a6ea951c477b0981fdae` | Lookup refs resolve at the transaction's intermediate database value; ref-many map values become independent datoms; transaction failure is atomic. |
+| Maintained Datahike | `reference-code/datahike` at `a464cd887458` | Lookup refs resolve at the transaction's intermediate database value; ref-many map values become independent datoms; transaction failure is atomic. |
 | Public database facade | `src/seon/db.cljs:440-749` | `db/db`, `pull-many`, `query`, and `execute-many` are async and accept ordinary `:seon.db/db` values; transaction failures are direct errors. |
 | Native allocator | `src/seon/db/id.cljc:1323-1373,1435-1465` | `allocate!` accepts `:seon.db/db`, returns an enriched native report, retries only exact generated-id conflicts, and returns direct errors otherwise. |
 | Message entity owner | `src/seon/agent/message.cljs` | Owns the one write entry point, entity schemas, origin/hop policy, agent-facing wrappers, and pure wake predicates. |

@@ -32,7 +32,7 @@ mechanisms in place:
 
 - Inspect AI is installed from `reference-code/inspect-ai/` through
   `src-inspect-ai/pyproject.toml` and `src-inspect-ai/uv.lock`. The selected
-  source SHA is `05322696a0f784ec399ef6abbafd3d2a250ea9cc`; the installed build
+  source SHA is `05322696a0f7`; the installed build
   reports `0.3.247.dev0+g05322696a.d20260715`. The relevant source owners are
   `dataset/_dataset.py` for stable `Sample.id`, `_eval/task/util.py` for exact
   sample-id filtering, and `_eval/task/run.py` for the filtered sample list and
@@ -41,7 +41,7 @@ mechanisms in place:
   `97c99f5f6507fc5d1449fe3247f267d591f64350` (`v0.14.3` in the submodule
   description). `inspect_evals.bfcl.bfcl` owns the upstream dataset and
   `bfcl_scorer`; its dataset commit is
-  `dac44e7ac9db5ff26a01ab0c1ec5de5a1e703b7a`. Seon changes only the generation
+  `dac44e7ac9db`. Seon changes only the generation
   bridge in `seon_inspect.bfcl_adapter`; the upstream AST scorer remains the
   verdict owner.
 - `seon_inspect.freeze` owns the current seeded draw, tier discipline, pins,

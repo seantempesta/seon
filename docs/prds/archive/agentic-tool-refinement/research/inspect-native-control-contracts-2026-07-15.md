@@ -26,7 +26,7 @@ The dependency order is:
 ## Dependency ledger
 
 - Inspect AI source: `reference-code/inspect-ai`, selected revision
-  `05322696a0f784ec399ef6abbafd3d2a250ea9cc` in
+  `05322696a0f7` in
   `src-inspect-ai/evaluation-sources.lock.json`.
 - Seon Inspect boundary: `src-inspect-ai/src/seon_inspect/solver.py` and the
   admitted `catalog.run_native_task` path.

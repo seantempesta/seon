@@ -70,7 +70,7 @@ children. Do not guess that it is a retry.
 | Public database facade | `src/seon/db.cljs:56-76,522-589` | `transact!` currently creates a random request id unless an internal request key is present; its closed public request does not expose that key. |
 | Durable transaction receipt | `src/seon/db/protocol.cljc:1208-1223,1369-1412` and `src/seon/db/writer.clj:1063-1278` | Receipt identity is request id plus a hash of transaction data, database value, expected database value, metadata, version, and generated candidates. |
 | Receipt proof | `test/seon/db/request_receipt_test.clj:75-146,401-432` | Identical redelivery recovers one commit; concurrent identical requests serialize to one commit; reuse with different data is a request conflict. |
-| Maintained Datahike | `reference-code/datahike` at `a464cd887458d2572414a6ea951c477b0981fdae` | Lookup refs resolve against intermediate transaction facts; CAS aborts the whole transaction on mismatch; identity attributes upsert rather than enforce insert-only message intent. |
+| Maintained Datahike | `reference-code/datahike` at `a464cd887458` | Lookup refs resolve against intermediate transaction facts; CAS aborts the whole transaction on mismatch; identity attributes upsert rather than enforce insert-only message intent. |
 | Runtime wake owner | `src/seon/agent/loop.cljs` and the committed database interest | A message transaction records delivery intent. Wake and child hosting remain derived from committed facts, not synchronous message acknowledgement. |
 
 ## What the existing receipt guarantees

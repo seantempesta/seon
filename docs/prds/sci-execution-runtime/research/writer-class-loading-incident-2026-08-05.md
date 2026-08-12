@@ -74,7 +74,7 @@ output.
 |---|---|---|
 | JVM | OpenJDK `26.0.1` | Child input includes G1, `MaxRAMPercentage=12.5`, and `G1PeriodicGCInterval=30000`; the observed max heap was 17,179,869,184 bytes. |
 | Clojure | `org.clojure/clojure` `1.12.5`; maintained source `b18d3adc5b5f4d5d0ccea966203fb67a614d5c3d` | `DynamicClassLoader` stores dynamic classes under soft references and has no retained byte array after clearing. |
-| Datahike | maintained fork `c15272730e74fb3f8bba91f6361c268492a99ba7` | `datahike.writer/create-database :self` owns the delayed nested `go` classes; `datahike.db.transaction/validate-val` owns the second incident family. |
+| Datahike | maintained fork `c15272730e74` | `datahike.writer/create-database :self` owns the delayed nested `go` classes; `datahike.db.transaction/validate-val` owns the second incident family. |
 | Seon tree exercised | `ace4a45f599db6e1c59eb0def976fc716eff7ddb` | Includes operator-consolidation commits `7dacba8ba` and `61cbb93ed`. |
 | Cache publication | `dev_cache.clj:285-291,354-366,400-425` | Cache identity selects a digest directory; admission moves into that path without replacement. |
 | Process retention | `script/seon/fresh_operator.clj:163-175,273-307,1659-1676` | Launch uses the exact cache path and records it beside generation, pid, and start instant. |

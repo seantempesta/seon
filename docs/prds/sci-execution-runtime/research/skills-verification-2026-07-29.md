@@ -40,7 +40,7 @@ would not use this pass as evidence for browser-only behavior.
 | Seon | moving shared tree; source claims rechecked after `811ec4356` and again before the verification commit |
 | Datahike fork | `19f5cdd950dc3c5ad2c8777a176d2ec4cb18c0bb` |
 | core.async | `dc35f3e0d7bc2eef502e77982f48641f025c8051` |
-| SCI | `8fac6e88f32d53a5fd82ebe80640881e317b84fd` |
+| SCI | `8fac6e88f32d` |
 | http-kit | `238a85cc555a38892f2f9a7583c9cf5cec0fb201` |
 | JVM used for probes | OpenJDK 26.0.1 |
 | Live system | lane-owned operator root, cluster `skills-verification-20260729`, JVM pid 3473, prepl 53717, web `127.0.0.1:7702`; later cross-root discovery proved the root was not an isolation boundary |

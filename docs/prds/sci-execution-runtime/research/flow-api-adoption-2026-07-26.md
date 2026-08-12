@@ -41,16 +41,16 @@ integration contract.
 | Seon's declared core.async | `org.clojure/core.async 1.10.870-alpha2`, tag commit `1dbbca209ec05a86c4b5a6f39645411e4c8a53fd` | `deps.edn:137-141`; this is the contract Seon would execute today |
 | vendored core.async | `b871f3519de6843a9f5ce66cf8d5c6cbe44d3222`, after `1.9.829-alpha2` | It **does contain Flow**, so it does not predate the API, but it is not the declared runtime source. Compared with `1.10.870-alpha2`, the Flow files differ by 30 lines, chiefly `ExecutorService` → `Executor` and `futurize` changes. Tag-qualified citations below therefore use the exact release object, not the older checkout. |
 | latest published Flow alpha found | `1.10.874-alpha3`, tag commit `dc35f3e0d7bc2eef502e77982f48641f025c8051` | It lives on core.async's `dev-flow-alpha` line and adds `:ping-map-fn`, the exact seam for database-derived ping state. Core.async `master` removed Flow in `c63dfee2e16121ae17a2a34d5f1c6a7f3add3a45` on 2026-03-19, while the separate Flow alpha line continued and published alpha3. Adoption therefore requires an explicit Flow-alpha pin, not an assumption that ordinary core.async `master` carries it. |
-| flow-monitor | vendored at `421d56c3e9049c0f2e7eecafd801376a7843444f` | Its own dependency is the older `1.9.808-alpha1` (`reference-code/core.async.flow-monitor/deps.edn:1-4`), but its calls still match alpha3. |
-| Datahike | `caf526850084a9d5846ccd9ea34251fe411e0d6b` | Its `:self` writer already has a transaction-processing channel and a batched commit channel per connection (`reference-code/datahike/src/datahike/writer.cljc:85-91,94-200,202-269,286-306`). |
-| SCI | `8fac6e88f32d53a5fd82ebe80640881e317b84fd` | `:interrupt-fn` runs at every interpreted function and loop body entrance (`reference-code/sci/doc/interrupt.md:6-8,50-52`); `interrupt!` is uncatchable by evaluated code (`reference-code/sci/src/sci/interrupt.cljc:32-42`). |
+| flow-monitor | vendored at `421d56c3e904` | Its own dependency is the older `1.9.808-alpha1` (`reference-code/core.async.flow-monitor/deps.edn:1-4`), but its calls still match alpha3. |
+| Datahike | `caf526850084` | Its `:self` writer already has a transaction-processing channel and a batched commit channel per connection (`reference-code/datahike/src/datahike/writer.cljc:85-91,94-200,202-269,286-306`). |
+| SCI | `8fac6e88f32d` | `:interrupt-fn` runs at every interpreted function and loop body entrance (`reference-code/sci/doc/interrupt.md:6-8,50-52`); `interrupt!` is uncatchable by evaluated code (`reference-code/sci/src/sci/interrupt.cljc:32-42`). |
 | Seon runtime target | seven base constructs | Database value, transaction, plan fold, guarded eval, capability door, corpus, and derived view are the complete set (`docs/prds/sci-execution-runtime/plan/README.md:123-163`). |
 
 The exact alpha2 Flow source can be inspected without moving the submodule:
 
 ```sh
 git -C reference-code/core.async show \
-  1dbbca209ec05a86c4b5a6f39645411e4c8a53fd:src/main/clojure/clojure/core/async/flow.clj
+  1dbbca209ec0:src/main/clojure/clojure/core/async/flow.clj
 
 ```
 

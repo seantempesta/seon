@@ -32,7 +32,7 @@ regressions, or full CLJ/CLJS matrix.
 
 | Owner | Selected source | Contract used |
 |---|---|---|
-| Maintained Datahike | `reference-code/datahike` at `670cd1ada40462cb5927f0dc687f6b3a95f9e13f` | Public semantics and executable fixtures |
+| Maintained Datahike | `reference-code/datahike` at `670cd1ada404` | Public semantics and executable fixtures |
 | Datahike API catalog | `src/datahike/api/specification.cljc` | Arity, remote suitability, host-value, lazy-result, cache, cancellation, and resource facts |
 | Datahike remote baseline | `test/datahike/test/http/server_test.clj` | One remote create/connect/transact/db/query/pull/entity/index/schema/release round trip |
 | Datahike query semantics | `query_pull_test.cljc`, `query_planner_test.clj`, `query_test.cljc`, and `api_test.cljc` | Multiple sources, temporal values, ordinary inputs, and exact find-result shapes |

@@ -18,7 +18,7 @@ invalid handler symbol.
 
 The design also named `reference-code/babashka-fs`, while the exact selected
 checkout is the nested submodule `reference-code/babashka/fs` at commit
-`3fdcbcb8de6af0c880a0082700a295c55ffd2ecd`.
+`3fdcbcb8de6a`.
 
 ## Evidence
 

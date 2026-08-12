@@ -23,7 +23,7 @@ values until retraction.
 ## Dependency ledger
 
 - Root gitlink and checked-out Datahike revision:
-  `0e8601d7f2f68c01070e13a95483bc82be04cabc`.
+  `0e8601d7f2f6`.
 - Seon's bridge maps `:seon.db/no-history?` to `:db/noHistory true` at
   `src/seon/schema/datahike.clj:209-244`.
 - Datahike derives `keep-history?` by excluding `:db/noHistory` attributes at

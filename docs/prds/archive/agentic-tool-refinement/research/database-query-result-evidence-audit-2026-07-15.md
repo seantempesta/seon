@@ -25,11 +25,11 @@ REPL, database backdoor, or second evaluation harness.
 
 The audit observed these exact source coordinates before design:
 
-- Seon `20e38b194be6598f7ec1e157e52142c6cf441da5` in the shared checkout;
+- Seon `20e38b194be6` in the shared checkout;
 - maintained Datahike fork
-  `eb3e2239b650635977fdc8e73e7c657b23bf3383`, selected by `deps.edn` and
+  `eb3e2239b650`, selected by `deps.edn` and
   mirrored at `reference-code/datahike/`;
-- Inspect AI `05322696a0f784ec399ef6abbafd3d2a250ea9cc`, installed into the
+- Inspect AI `05322696a0f7`, installed into the
   `src-inspect-ai` environment from the local directory recorded in
   `src-inspect-ai/uv.lock`; and
 - Inspect's nested view source is intentionally dirty under its separate
@@ -350,11 +350,11 @@ no operation bytes are admitted to the scorer.
 
 The correction is grounded in:
 
-- Seon `195aef0bc9273d750a33c4fac3c5733fd20ddb9d` before the edit;
-- maintained Datahike `eb3e2239b650635977fdc8e73e7c657b23bf3383`
+- Seon `195aef0bc927` before the edit;
+- maintained Datahike `eb3e2239b650`
   at `reference-code/datahike/`, where `versioning/commit-as-db` resolves a
   commit key directly and `parent-commit-ids` exposes its retained parents;
-- maintained Konserve `df6818d43ea3363a808cd051c0d68917f1b987a9`
+- maintained Konserve `df6818d43ea3`
   at `reference-code/konserve/`, the storage boundary traversed by the writer;
 - `src/seon/db/writer.clj`, whose `stored-ancestor?`,
   `transaction-origin-candidates`, and

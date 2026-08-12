@@ -33,7 +33,7 @@ transition.
 ## Dependency ledger
 
 - Selected source: `reference-code/datahike`, commit
-  `4c55791be1fb8bb8d9332f21c576f5c20b85b760` (2026-07-18,
+  `4c55791be1fb` (2026-07-18,
   `Avoid nil attribute probes in compiled queries`).
 - Transaction implementation:
   `reference-code/datahike/src/datahike/db/transaction.cljc`.

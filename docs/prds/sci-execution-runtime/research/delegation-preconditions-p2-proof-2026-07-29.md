@@ -11,7 +11,7 @@ tags: [testing, agents, datahike, delegation]
 - Clojure 1.12.5 `clojure.test/report` and `run-tests`, grounded in
   `reference-code/clojure/src/clj/clojure/test.clj`: the dynamically bound
   reporter sees begin-test-var, pass, fail, error, and summary events.
-- Datahike at `9a7a9ef10a954c32075e60d929f9101a9ac8abd9`,
+- Datahike at `9a7a9ef10a95`,
   grounded in `reference-code/datahike/src/datahike/db/transaction.cljc`: one
   transaction resolves the test, namespace, run, result, and component failure
   tempids and enforces the namespace-owner unique-value ref.

@@ -69,7 +69,7 @@ development flavor map.
   Exact source is also absent for Clojure, tools.build, superv.async, and
   partial-cps, so the compatibility contract is not grounded in every selected
   implementation.
-- Proximum `9846d3e79e1aee48474bc876d3d563d7137209c6` is the public upstream-
+- Proximum `9846d3e79e1a` is the public upstream-
   `v0.1.26` descendant with guarded force and `:deps/prep-lib` compilation of
   checked-in Java.
 - Datahike `9ada755087228e10cfb179fa5779ce227a6ed220` is public, supports cold

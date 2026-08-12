@@ -15,14 +15,14 @@ This independent pass distrusts the landing reports and judges commits
 
 Pinned sources read at the seams:
 
-- SCI `2db3358cba913b6fbbe49c7b5b34d7ac72715924`, especially
+- SCI `2db3358cba91`, especially
   `reference-code/sci/src/sci/impl/namespaces.cljc:843-861` and
   `evaluator.cljc:260-280`;
-- Datahike `0e8601d7f2f68c01070e13a95483bc82be04cabc`, especially
+- Datahike `0e8601d7f2f6`, especially
   `writing.cljc:489-520,672-711` and `versioning.cljc:237-321`;
-- Malli `80138076960e7820523b4cb932c5b5d1936d4e7f`, whose maps are open by
+- Malli `80138076960e`, whose maps are open by
   default at `reference-code/malli/README.md:294-300`;
-- Konserve `737697d9205e5e8f0bc08a666e4c97dad55e9dbe`, whose memory store was
+- Konserve `737697d9205e`, whose memory store was
   measured directly for the fixture probe; and
 - Clojure `b18d3adc5b5f4d5d0ccea966203fb67a614d5c3d`, including the process-global
   prepl server registry at `reference-code/clojure/src/clj/clojure/core/server.clj:24-43,85-123`.

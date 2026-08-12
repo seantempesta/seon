@@ -58,7 +58,7 @@ The answers are:
 ## Evidence basis
 
 The source dependency is the checked-out maintained SCI revision
-`2db3358cba913b6fbbe49c7b5b34d7ac72715924`
+`2db3358cba91`
 (`v0.14.56-18-g2db3358`). The relevant implementation is under
 `reference-code/sci/`; no installed archive or remembered API behavior was
 used. The revision values are probe output from `git -C reference-code/sci

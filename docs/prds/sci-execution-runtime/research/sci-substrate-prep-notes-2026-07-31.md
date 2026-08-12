@@ -12,7 +12,7 @@ is deliberately outside this change.
 ## Dependency ledger
 
 - Maintained SCI fork before the change:
-  `reference-code/sci` at `1305a90a1ab9ac3737ff5a539180bcc6d8f4e2d4`,
+  `reference-code/sci` at `1305a90a1ab9`,
   branch `seon`. SCI captures `:interrupt-fn` when it creates an interpreted
   function (`reference-code/sci/src/sci/impl/fns.cljc:39-40,63-64`) and
   `sci/fork` retains every ctx key while replacing only `:env`
@@ -120,7 +120,7 @@ runs against the fork's Clojure 1.10.3 profile
 The fork regression covers parsing, numeric edge cases, map metadata,
 `iteration` laziness/reduction, and UUID round trips
 (`reference-code/sci/test/sci/core_test.cljc:1818-1879`). The maintained fork
-commit is `937d392a008e4f2f246b9ddf9dd816ca99de9d4e`; it is local on branch
+commit is `937d392a008e`; it is local on branch
 `seon` and was not pushed because the separate publication lane owns remotes.
 
 The complete fork suite passed on both supported versions:

@@ -35,7 +35,7 @@ the existing local repository even when its working head differs.
 | Datastar browser bundle `v1.0.0-RC.7` | tag commit `904295865136b82a13eae2ba825d50693fa8c42e`; shipped `resources/public/js/datastar.js` SHA-256 `c9c8b99715d759df4543d4e01d6e6fe4b3940e4dee57ec9cde7eb344e86c61e2` | **Exact bytes present.** The shipped 30,732-byte file is byte-identical to tagged `bundles/datastar.js`. Datastar Clojure `v1.0.0-RC7` is also present at checked-out `1cef624e9e59a2ea79ffe2f65df2e7b06f8198d2`. |
 | Node OpenAI `6.42.0` | npm lock `6.42.0`; tag/head `v6.42.0` → `6f849f4ff24f70167bf82d37c8c83e3f8b1c5472` | **Exact source checked out and clean.** This owns DeepSeek and other OpenAI-compatible pod traffic too. |
 | Node Anthropic `0.104.2` | npm lock `0.104.2`; tag/head `sdk-v0.104.2` → `fbee0d149ce08532885d766d9b1dc99133181d8e` | **Exact source checked out and clean.** |
-| Java Google GenAI `1.59.0` | tag `v1.59.0` → `7bdfda579a187984c89fe03e75b2da841156ad0b`; working head `fd3713ba47ec8156a01cd95e474d3e44b3205fc0` is two commits later | **Exact source present in history.** Read the tag for `src/seon/embed.clj`; `reference-code/js-genai` is not selected by current manifests. |
+| Java Google GenAI `1.59.0` | tag `v1.59.0` → `7bdfda579a18`; working head `fd3713ba47ec` is two commits later | **Exact source present in history.** Read the tag for `src/seon/embed.clj`; `reference-code/js-genai` is not selected by current manifests. |
 
 ## Inspect and Inspect Evals split
 
@@ -43,7 +43,7 @@ the existing local repository even when its working head differs.
 `0.1.dev1+g92dd737b9` and selects a mutable sibling directory. Its lock records
 only `source = { directory = "../reference-code/inspect-ai" }`, without a Git
 revision or tree digest. The referenced repository's main commit is the exact
-`0.3.246` tag at `05322696a0f784ec399ef6abbafd3d2a250ea9cc`, but the working tree is
+`0.3.246` tag at `05322696a0f7`, but the working tree is
 dirty because the `ts-mono` gitlink has moved from recorded `eccde6b7…` to
 `f3588038…`. The installed wheel still reports
 `0.1.dev1+g92dd737b9`; that old commit remains present in local history, but the
@@ -67,7 +67,7 @@ a reproducible dependency identity proof.
    analyzer-sensitive inference made from the `1.12.41` tree with a named
    exact-object read.
 2. Promote the existing clean persistent-sorted-set tag
-   `e1a17bbe767c7801e67407c81f64efabfd2f1601` from
+   `e1a17bbe767c` from
    `tmp/dependency-source/` into `reference-code/` without changing the
    selected dependency. Verify `git rev-parse 0.4.137^{commit}` and a clean
    tree before using it in a plan.
@@ -90,7 +90,7 @@ a reproducible dependency identity proof.
 The integrity check should reduce to read-only assertions equivalent to:
 
 ```bash
-git -C reference-code/shadow-cljs show d3c04691952aa9ea33f7287ffe9a2b3109c1e510:project.clj
+git -C reference-code/shadow-cljs show d3c04691952a:project.clj
 git -C reference-code/malli rev-parse '0.20.0^{commit}'
 git -C reference-code/reitit rev-parse '0.10.1^{commit}'
 git -C reference-code/datahike rev-parse HEAD

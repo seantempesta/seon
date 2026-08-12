@@ -53,7 +53,7 @@ Resolved by `31044d4ac`. The `:seon.error/fact` contract was correct:
 use those identities. The projection was wrong because Datahike wildcard pull
 turns ordinary refs into `{:db/id ...}` maps
 (`reference-code/datahike/src/datahike/pull_api.cljc`, pinned at
-`10540578248eaa686c1f88a7fe57644ee4c9f993`). `error-signatures` now requests
+`10540578248e`). `error-signatures` now requests
 the run and agent identity attributes and restores the transaction-shaped
 lookup refs. A ref whose target lacks the expected identity falls back to its
 eid, which remains an admitted `:seon.db/ref` rather than making the whole

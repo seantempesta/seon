@@ -79,12 +79,12 @@ host path refer explicitly to the starting revision. No source file under
 
 | Dependency | Selected source/version | Source actually read | Relevant contract |
 |---|---|---|---|
-| Datahike | `caf526850084a9d5846ccd9ea34251fe411e0d6b` (`reference-code/datahike`) | `src/datahike/query.cljc:2425-2537,2975-3050,3076-3103,4597-4704`; `src/datahike/query/single_flight.cljc:16-180`; `src/datahike/db.cljc:387-411` | Weighted eager-query result cache; exact committed identity; dependency plans; JVM single-flight. |
+| Datahike | `caf526850084` (`reference-code/datahike`) | `src/datahike/query.cljc:2425-2537,2975-3050,3076-3103,4597-4704`; `src/datahike/query/single_flight.cljc:16-180`; `src/datahike/db.cljc:387-411` | Weighted eager-query result cache; exact committed identity; dependency plans; JVM single-flight. |
 | Datastar protocol | `bb9ed6fbe78cf5690f5ad23a5faf86407a44982f` (`reference-code/datastar`) | protocol sources plus the Clojure constants below | Complete `outer` morph semantics used by Seon. |
 | Datastar Clojure SDK | `1cef624e9e59a2ea79ffe2f65df2e7b06f8198d2`, SDK `1.0.0-RC7` | `libraries/sdk/src/main/starfederation/datastar/clojure/{consts.clj,api.clj,api/elements.clj,api/sse.clj}`; `libraries/sdk-http-kit/src/main/starfederation/datastar/clojure/adapter/{http_kit.clj,impl.cljc}` | `outer` is default; SDK frames events and delegates accepted writes to http-kit. |
 | http-kit | vendored 2.9.0-beta2, incorporated as submodule by concurrent commit `2953a3b2f` | `src/org/httpkit/server.clj:79-216,254-312,343-395`; Java `AsyncChannel.java:251-293`, `ServerAtta.java:1-35`, `HttpServer.java:364-400` | Request workers, asynchronous channel acceptance, and the unbounded pending socket list. |
-| SCI | `8fac6e88f32d53a5fd82ebe80640881e317b84fd` | `doc/interrupt.md:1-85`; `src/sci/interrupt.cljc:1-45`; `src/sci/core.cljc:310-325` | `:interrupt-fn` runs on every interpreted function and loop/recur body entrance; `interrupt!` is uncatchable by authored code. |
-| core.async | `b871f3519de6843a9f5ce66cf8d5c6cbe44d3222` | `src/main/clojure/clojure/core/async.clj:119-130,555-565`; `impl/dispatch.clj:122-134` | A sliding buffer drops oldest; workload definitions are in `thread-call`, while dispatch only constructs executors. |
+| SCI | `8fac6e88f32d` | `doc/interrupt.md:1-85`; `src/sci/interrupt.cljc:1-45`; `src/sci/core.cljc:310-325` | `:interrupt-fn` runs on every interpreted function and loop/recur body entrance; `interrupt!` is uncatchable by authored code. |
+| core.async | `b871f3519de6` | `src/main/clojure/clojure/core/async.clj:119-130,555-565`; `impl/dispatch.clj:122-134` | A sliding buffer drops oldest; workload definitions are in `thread-call`, while dispatch only constructs executors. |
 | Hyperlith | `b08a8e8689e1654fd7e0ce654064a703ca1f4772` | `src/hyperlith/core.clj:86-108`; `src/hyperlith/impl/datastar.clj:122-181`; `examples/` | Its render-per-connection, dropping-buffer, Brotli loop is a comparison, not the target. The stale `reference-code/n/examples/` reference was corrected to `reference-code/hyperlith/examples/`. |
 
 `deps.edn:55-72` selects SCI and both Datastar SDK local roots.

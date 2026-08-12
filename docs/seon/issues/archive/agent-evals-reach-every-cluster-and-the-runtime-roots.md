@@ -279,7 +279,7 @@ attempts to resolve every relocated process root. B remains unchanged.
 
 Ruling #43 accepted compiled Var metadata mutation as an explicit residual;
 ruling #50 revoked that acceptance and restored immutability. Maintained SCI
-commit `2db3358cba913b6fbbe49c7b5b34d7ac72715924` routes the JVM
+commit `2db3358cba91` routes the JVM
 `clojure.core/alter-meta!` and `/reset-meta!` entries through one compiled-Var
 refusal before either operation can run
 (`reference-code/sci/src/sci/impl/namespaces.cljc:842-861,1713-1716,2049-2052`).

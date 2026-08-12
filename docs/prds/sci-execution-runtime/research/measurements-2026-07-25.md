@@ -1225,8 +1225,8 @@ These conditions travel with every figure in §16:
 | local store | APFS `/dev/disk3s5`, 1.8 TiB total, 838 GiB free |
 | JVM | Homebrew OpenJDK 26.0.1, G1, `-Xmx4g`, NMT summary, no AOT/AppCDS |
 | Clojure | 1.12.5 |
-| Datahike | `caf526850084a9d5846ccd9ea34251fe411e0d6b` |
-| SCI | `8fac6e88f32d53a5fd82ebe80640881e317b84fd` |
+| Datahike | `caf526850084` |
+| SCI | `8fac6e88f32d` |
 | Seon starting revision | `742a11f73ca5bef7d0754c55be9409e6400ea0fd` |
 | other work | default and lifecycle Seon processes, watchers, desktop apps; the machine was not a sole-tenant benchmark host |
 

@@ -33,7 +33,7 @@ The principal historical points are:
 - `b50ebb5a8`, the compact-ID allocator landing; and
 - `0d30c829c^`, the earlier comment-shaped result face.
 
-Current-tree citations are against `4b9dbc1e7970da6aff5126d39541b1f59f155b33`.
+Current-tree citations are against `4b9dbc1e7970`.
 The maintained dependency boundary is Datahike's serial transaction allocator:
 `reference-code/datahike/src/datahike/db/transaction.cljc:56-88,963-970,1294-1303`
 allocates the next entity ID from the database's maximum and resolves

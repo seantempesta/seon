@@ -47,9 +47,9 @@ in full before initial facts.
 | Seon schema authority | `src/seon/schema.cljc`, `src/seon/schema/internal.cljc` | candidate forms, complete projection, active registry |
 | Seon publication | `src/seon/client.cljs`, `src/seon/runtime/admission.cljs`, `src/seon/eval.cljs` | schema facts, database publication, admission, authored-program load |
 | Seon writer | `src/seon/db/writer.clj` and writer integration tests | canonical forms and native Datahike schema derivation |
-| Malli | `reference-code/malli`, commit `80138076960e7820523b4cb932c5b5d1936d4e7f` | immutable fast/composite registries and explicit registry options |
-| maintained Datahike | `reference-code/datahike`, checkout `a464cd887458d2572414a6ea951c477b0981fdae` | ordered transaction processing and schema datoms |
-| Shadow CLJS | `reference-code/shadow-cljs`, commit `4e72595f57618f5c43388ad13d5136cd3bede566` | `:node-script` entries, dev preloads, and appended main call |
+| Malli | `reference-code/malli`, commit `80138076960e` | immutable fast/composite registries and explicit registry options |
+| maintained Datahike | `reference-code/datahike`, checkout `a464cd887458` | ordered transaction processing and schema datoms |
+| Shadow CLJS | `reference-code/shadow-cljs`, commit `4e72595f5761` | `:node-script` entries, dev preloads, and appended main call |
 
 The database-authority roadmap names an older maintained-Datahike SHA. The
 current vendored checkout above should be reconciled with the roadmap before an

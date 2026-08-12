@@ -28,8 +28,8 @@ mistaken for a production runtime.
 | Dependency | Selected source | Interface inspected |
 |---|---|---|
 | Bun | `reference-code/bun` at `d8ecf098572e2b8265b23e40c04efb4067e516cc` | `Bun.serve`, `Bun.connect`, `Bun.spawn`, Node-compatibility modules |
-| Datahike | `reference-code/datahike` at `4c55791be1fb8bb8d9332f21c576f5c20b85b760` | connections, database values, committed reports, indexes |
-| Shadow-CLJS | `reference-code/shadow-cljs` at `4e72595f57618f5c43388ad13d5136cd3bede566` | `:node-script`/`:node-test` artifact targets and development nREPL |
+| Datahike | `reference-code/datahike` at `4c55791be1fb` | connections, database values, committed reports, indexes |
+| Shadow-CLJS | `reference-code/shadow-cljs` at `4e72595f5761` | `:node-script`/`:node-test` artifact targets and development nREPL |
 | Datastar | `reference-code/datastar` at `bb9ed6fbe78cf5690f5ad23a5faf86407a44982f` | whole-element SSE morph protocol |
 | Babashka | `reference-code/babashka` at `0fb349c414e717800be775ba9cb77c95a9eb700d` | operator subprocess boundary |
 

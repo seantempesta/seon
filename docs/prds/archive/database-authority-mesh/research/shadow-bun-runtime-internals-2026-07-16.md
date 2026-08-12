@@ -36,15 +36,15 @@ not the Clojure compiler.
 
 ## Dependency ledger
 
-- Seon checkout observed at `7319ad1847d0b30d25a545402025cc1e7430d9c3`:
+- Seon checkout observed at `7319ad1847d0`:
   `shadow-cljs.edn`, `deps.edn`, `package.json`, `bin/test-cljs`,
   `script/seon/dev/process.clj`, `script/seon/dev/changed_test.clj`, and
   `script/seon/dev/config.clj`.
-- Shadow CLJS `4e72595f57618f5c43388ad13d5136cd3bede566`:
+- Shadow CLJS `4e72595f5761`:
   `reference-code/shadow-cljs/src/main/shadow/build/targets/node_script.clj`,
   `targets/node_test.clj`, `shadow/build/node.clj`, `shadow/build/npm.clj`, and
   `shadow/cljs/devtools/client/node.cljs`.
-- Bun `be77b652884b16a103cfaa4af3c1102f72f2dcd3`, locally executed as Bun
+- Bun `be77b652884b`, locally executed as Bun
   `1.3.14`:
   `reference-code/bun/docs/index.mdx`,
   `docs/runtime/module-resolution.mdx`, `src/resolver/resolver.rs`, and

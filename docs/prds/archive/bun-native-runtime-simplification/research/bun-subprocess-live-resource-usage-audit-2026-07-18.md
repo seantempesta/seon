@@ -53,11 +53,11 @@ child reports over Bun IPC because only the child knows them.
 ## Dependency ledger
 
 - Vendored Bun base revision:
-  `be77b652884b16a103cfaa4af3c1102f72f2dcd3` in `reference-code/bun`; the
+  `be77b652884b` in `reference-code/bun`; the
   measured live-resource implementation is commit
   `d8ecf098572e2b8265b23e40c04efb4067e516cc`.
 - Installed runtime used for one behavioral probe: Bun 1.3.14, revision
-  `0d9b296af33f2b851fcbf4df3e9ec89751734ba4`. This is evidence about the
+  `0d9b296af33f`. This is evidence about the
   shipped runtime, not a substitute for the vendored source audit.
 - Public types: `reference-code/bun/packages/bun-types/bun.d.ts`.
 - Subprocess binding and exit ownership:

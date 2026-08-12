@@ -21,7 +21,7 @@ independent reads through one execution lane.
 ## Dependency and mechanism ledger
 
 - Datahike source: `reference-code/datahike`, revision
-  `4c55791be1fb8bb8d9332f21c576f5c20b85b760`.
+  `4c55791be1fb`.
 - JVM authority owner: `src/seon/db/writer.clj` and
   `src/seon/db/query_cache.clj`.
 - Typed database protocol: `src/seon/db/protocol.cljc`.

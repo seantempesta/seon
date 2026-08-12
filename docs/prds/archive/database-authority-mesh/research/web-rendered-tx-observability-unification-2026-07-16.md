@@ -46,7 +46,7 @@ members change in place.
 | Turn record | `src/seon/agent/turn.cljs` and `docs/seon/architecture/observability.md` | One native `:seon.agent.turn/rendered-tx` ref replaces four copied turn fields. Attempt facts do not copy database identity. |
 | Turn reconstruction | `src/seon/agent/debug.cljs` | `turn` is asynchronous, accepts optional `:seon.db/db`, and returns the rendered transaction plus prompt/reply blob bytes. It is the retained semantic owner. |
 | Database facade | `src/seon/db.cljs` | `db/as-of` transforms an ordinary database value; asynchronous query and pull rehydrate it at the authority. There is no CLJS connection or `at-coordinate`. |
-| Datahike | `reference-code/datahike` at `a464cd887458d2572414a6ea951c477b0981fdae` | `AsOfDB` delegates indexes to its origin and adds an inclusive transaction-time predicate. Current plus temporal datoms are reassembled into the visible value. |
+| Datahike | `reference-code/datahike` at `a464cd887458` | `AsOfDB` delegates indexes to its origin and adds an inclusive transaction-time predicate. Current plus temporal datoms are reassembled into the visible value. |
 | LLM config | `src/seon/ai.cljs` | `resolved-config-from-rows` is the one pure config resolver; web evidence must use it rather than the removed `ai/resolved-config`. |
 | Web boundary | `src/seon/web/serve.cljs` | `POST /agents/run` remains the one composition response. Its final immutable database value scopes turns, evals, reply, and evidence. |
 | Inspect consumers | `src-inspect-ai/src/seon_inspect/{solver,milestone,reachability}.py` | Current consumers require copied coordinates and eval operation replay. They must change atomically with the production response rather than preserving a compatibility payload. |

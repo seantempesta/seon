@@ -9,7 +9,7 @@ tags: [research, agent, milestone, capability]
 ## Dependency ledger
 
 - Inspect AI is selected from `reference-code/inspect-ai/` at
-  `05322696a0f784ec399ef6abbafd3d2a250ea9cc` by the existing local source
+  `05322696a0f7` by the existing local source
   dependency. `inspect_ai.dataset.Sample` owns stable task input, target,
   metadata, and sample identity. `inspect_ai.Task` owns dataset, solver,
   scorer, and post-score cleanup. `_eval/task/run.py` filters exact sample IDs,

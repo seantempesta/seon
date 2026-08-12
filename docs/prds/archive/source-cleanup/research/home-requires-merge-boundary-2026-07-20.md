@@ -40,7 +40,7 @@ marker globally. Resolve it before closing the note.
 | Manifest/root composition | implementation commit `3c08c176` | `src/seon/config.cljs:619-657,1540-1571`; `config/system.edn:215-366,406-421`; `config/acme.edn:1-42` | `test/seon/config_test.cljs:295-384` proves namespace-identity replacement, append order, sparse inheritance, and explicit-tree replacement |
 | Namespace-card selection | implementation commit `e187284f` | `src/seon/agent/ctx/namespaces.cljs:165-209,680-687,1097-1140` | persisted `:seon.ns/require-edges` select whole cards for aliases or exact public schema-complete functions for refers; the renderer does not read `:seon.fn/agent-facing?` |
 | Execution wiring | `e187284f` plus current HEAD | `src/seon/eval.cljs`; `test/seon/eval/auto_refer_test.cljs:123-172` | root's resolved `start!`, `delegate!`, and `set-purpose!` refers install as real self-host uses and execute as functions |
-| Database semantics | `org.replikativ/datahike` `0.8.1681`; vendored checkout `6f2569087ed31f53e751e7535ef4bf2527912046` | `reference-code/datahike/`; the repository `datahike` skill | home requirements are one cardinality-one EDN value; durable dependency selection is the component require-edge data committed with the namespace entity |
+| Database semantics | `org.replikativ/datahike` `0.8.1681`; vendored checkout `6f2569087ed3` | `reference-code/datahike/`; the repository `datahike` skill | home requirements are one cardinality-one EDN value; durable dependency selection is the component require-edge data committed with the namespace entity |
 
 No dependency source is missing for this boundary.
 

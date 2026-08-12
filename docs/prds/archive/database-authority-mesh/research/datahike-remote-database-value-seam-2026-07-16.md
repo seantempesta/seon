@@ -52,7 +52,7 @@ maps in relation or scalar data untouched.
 
 | Owner | Selected source | Relevant seam |
 |---|---|---|
-| Maintained Datahike | `reference-code/datahike` at `0070d507728159cb48c4c46d249d88db829ac679` | Exact source inspected for native database records, readers, Transit, API wrappers, query source parsing, versioning, and HTTP remote tests. |
+| Maintained Datahike | `reference-code/datahike` at `0070d5077281` | Exact source inspected for native database records, readers, Transit, API wrappers, query source parsing, versioning, and HTTP remote tests. |
 | Native raw database | `src/datahike/db.cljc:132-411` | A committed raw `DB` owns indexes and carries exact process-local cache identity separately from its persisted commit ID. |
 | Native temporal values | `src/datahike/db.cljc:499-675` | `HistoricalDB`, `AsOfDB`, and `SinceDB` are thin wrappers over `origin-db`; history has no point, while as-of/since carry `time-point`. |
 | Native temporal constructors | `src/datahike/api/impl.cljc:148-194` | `since`, `as-of`, and `history` validate temporal capability and construct the native wrappers. History is idempotent. |

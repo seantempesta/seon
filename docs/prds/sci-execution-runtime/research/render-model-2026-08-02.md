@@ -31,7 +31,7 @@ contract rewrite would reject all current defaults.
 ## Grounding and method
 
 The dependency facts used here are SCI at
-`6de15683b7520cc973bc9c136aec7ad3f9b3788c`, Malli's arbitrary schema
+`6de15683b752`, Malli's arbitrary schema
 properties (`reference-code/malli/src/malli/core.cljc:39`), and the parsed
 contract facts produced in `src/seon/program.cljc:254-276`. The static source
 manifest contained 2,738 program rows and 1,790 function rows. A second probe

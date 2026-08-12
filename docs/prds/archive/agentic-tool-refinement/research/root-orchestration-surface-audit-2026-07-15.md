@@ -42,18 +42,18 @@ repair in the existing owner, not context prose.
   doc, arglists, and user metadata; `src/seon/analyzer_info.cljs` projects the
   literal positive `:seon.fn/agent-facing? true` value into database facts.
 - Malli `0.20.0`, reference revision
-  `80138076960e7820523b4cb932c5b5d1936d4e7f`, owns function schemas and
+  `80138076960e`, owns function schemas and
   reference walking. `reference-code/malli/src/malli/core.cljc` defines
   `FunctionSchema`, `walk`, and `-ref-schema?`; the existing namespace-card
   renderer derives complete transitive schema closure from persisted forms.
 - The selected application Datahike coordinate in `deps.edn` is
-  `417649383c65e13f15ea41d394fb1ed742477965`. The local reference checkout was
-  observed at `eb3e2239b650635977fdc8e73e7c657b23bf3383` and is owned and dirty
+  `417649383c65`. The local reference checkout was
+  observed at `eb3e2239b650` and is owned and dirty
   under the runtime lane, so this audit neither modifies it nor treats it as a
   replacement pin. Seon's immutable database value, query, pull, entity, and
   operation-evidence paths remain the only proof substrate.
 - Inspect AI is sourced from `reference-code/inspect-ai` revision
-  `05322696a0f784ec399ef6abbafd3d2a250ea9cc` through
+  `05322696a0f7` through
   `src-inspect-ai/pyproject.toml`. Its `Task`, `Sample`, scorer, and public
   native-log read/write contracts own all proposed trajectories and retained
   evidence; no drive script or second harness is proposed.

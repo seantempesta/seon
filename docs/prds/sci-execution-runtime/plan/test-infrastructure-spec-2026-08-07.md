@@ -217,9 +217,9 @@ vendored dependency source at the boundaries below.
 
 | Dependency or owner | Selected revision | Source read for this decision | Contract used here |
 |---|---:|---|---|
-| Datahike | `10540578248eaa686c1f88a7fe57644ee4c9f993` | `reference-code/datahike/src/datahike/versioning.cljc` | `branch!` copies a branch head with CoW indices; `delete-branch!` requires released child connections and removes roster reachability while the key remains until GC |
+| Datahike | `10540578248e` | `reference-code/datahike/src/datahike/versioning.cljc` | `branch!` copies a branch head with CoW indices; `delete-branch!` requires released child connections and removes roster reachability while the key remains until GC |
 | core.async | `dc35f3e0d7bc2eef502e77982f48641f025c8051` | `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj`, `flow/impl.clj`, and `flow/spi.clj` | A Flow is created from one data graph of procs and conns; Flow owns allocation and lifecycle |
-| SCI | `2db3358cba913b6fbbe49c7b5b34d7ac72715924` | `reference-code/sci/src/sci/core.cljc` | `sci/fork` creates a generation-aware fork with a copied environment atom |
+| SCI | `2db3358cba91` | `reference-code/sci/src/sci/core.cljc` | `sci/fork` creates a generation-aware fork with a copied environment atom |
 | Seon store and branches | current checkout | `src/seon/cluster/store.clj`, `src/seon/cluster/registry.clj`, `src/seon/cluster.clj` | One process-root store under `flock`; one sovereign branch and connection per cluster |
 | Seon SCI | current checkout | `src/seon/sci/eval.clj` | `projection-state`, `cluster-ctx`, and `fork-for-turn` own acquisition, projection, and isolated interpreter forks |
 | Seon graphs | current checkout | `src/seon/flow.clj`, `src/seon/cluster/agent.clj`, `src/seon/cluster.clj` | `var-process` is the proc-construction door; production blueprints own graph contents |

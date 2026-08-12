@@ -89,7 +89,7 @@ the opt-in categories and their fields, including locals, keyword occurrences,
 protocol implementations, quoted symbols, Java definitions/usages, and
 instance invocations (`reference-code/clj-kondo/analysis/README.md:14-30,77-223`).
 
-The Malli pin is `80138076960e7820523b4cb932c5b5d1936d4e7f`. I read
+The Malli pin is `80138076960e`. I read
 `reference-code/malli/src/malli/registry.cljc:1-105` and
 `reference-code/malli/src/malli/util.cljc:1-404` in full. In `malli.core` I
 read the complete relevant seams: the `Schema`, `RefSchema`, `Walker`, and
@@ -105,7 +105,7 @@ schemas (`reference-code/malli/src/malli/core.cljc:1940-2300`); the public
 `function-schema` (`reference-code/malli/src/malli/core.cljc:3074-3078`).
 
 The relevant Datahike pin is
-`c15272730e74fb3f8bba91f6361c268492a99ba7`. Cardinality-many attributes are
+`c15272730e74`. Cardinality-many attributes are
 sets, which explains why the present ref projection necessarily collapses
 occurrences (`src/seon/fn.clj:264-276`; `resources/seon/schemas/seon.fn.arity.edn:3-10`).
 

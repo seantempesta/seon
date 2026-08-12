@@ -41,7 +41,7 @@ confounding compiler, artifact, database, or application changes.
 ## Scope and exact source ledger
 
 The audited Bun checkout is `reference-code/bun` at
-`be77b652884b16a103cfaa4af3c1102f72f2dcd3`, dated 2026-07-14. Its `LATEST`
+`be77b652884b`, dated 2026-07-14. Its `LATEST`
 file identifies 1.3.14. The installed `/Users/sean/.bun/bin/bun` is also
 1.3.14, revision `0d9b296af`; it is not the audited checkout SHA, so executable
 and source identities remain distinct in the evidence. Bun is

@@ -287,10 +287,10 @@ external effects.
 
 The integrated source pair is now pinned and vendored exactly:
 
-- Datahike `30a154838ffcc270d32d03bfca7f6518c9ad9faf` in
+- Datahike `30a154838ffc` in
   `reference-code/datahike`, including upstream through `0.8.1729` plus the
   branch/secondary, connection-lifecycle, force-branch, and fatal-writer fixes;
-- Konserve `df6818d43ea3363a808cd051c0d68917f1b987a9` in
+- Konserve `df6818d43ea3` in
   `reference-code/konserve`, based on upstream `0.9.356` and retaining the
   shared CLJ/CLJS legacy one-byte metadata-header reader; and
 - Konserve-sync `0.1.35` through Datahike's Kabel dependency, carrying ordered

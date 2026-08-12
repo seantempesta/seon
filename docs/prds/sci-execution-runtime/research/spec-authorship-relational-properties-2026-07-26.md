@@ -50,7 +50,7 @@ Neither is generative contract evidence.
 
 | Dependency or mechanism | Selected source | Evidence used here |
 |---|---|---|
-| Malli | `metosin/malli 0.20.0`; vendored commit `80138076960e7820523b4cb932c5b5d1936d4e7f` | `reference-code/malli/src/malli/core.cljc`, `generator.cljc`, `instrument.clj` |
+| Malli | `metosin/malli 0.20.0`; vendored commit `80138076960e` | `reference-code/malli/src/malli/core.cljc`, `generator.cljc`, `instrument.clj` |
 | test.check | `org.clojure/test.check 1.1.1` | Malli dependency plus Seon's existing `tc/quick-check` properties |
 | Function instrumentation | Seon's database-derived program graph | `src/seon/instrument.cljc`; this audit relies on Malli semantics, not a second collector |
 | Durable replay | `seon.db/transact!` → writer request receipt | `src/seon/db.cljc`, `src/seon/db/protocol.cljc`, `src/seon/db/writer.clj` |

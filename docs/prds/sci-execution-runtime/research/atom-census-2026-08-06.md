@@ -58,13 +58,13 @@ Dependency ledger:
   `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj` and
   `flow/impl.clj` establish proc-local state, channels, and disposable graph
   handles.
-- Datahike is vendored at `10540578248eaa686c1f88a7fe57644ee4c9f993`;
+- Datahike is vendored at `10540578248e`;
   `reference-code/datahike/src/datahike/writer.cljc` establishes the database
   writer rather than an application atom as the durable serialization owner.
-- SCI is vendored at `2db3358cba913b6fbbe49c7b5b34d7ac72715924`;
+- SCI is vendored at `2db3358cba91`;
   `reference-code/sci/src/sci/core.cljc` establishes mutable interpreter
   contexts and forked per-turn execution artifacts.
-- Malli is vendored at `80138076960e7820523b4cb932c5b5d1936d4e7f`;
+- Malli is vendored at `80138076960e`;
   its callback walker and compiled registries explain the sanctioned
   invocation-local collectors and compiler caches, but do not justify a global
   database-derived projection.

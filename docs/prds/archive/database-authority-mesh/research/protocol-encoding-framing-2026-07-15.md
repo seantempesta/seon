@@ -40,7 +40,7 @@ Sean.
 - Checked-in Transit sources:
   `reference-code/transit-clj`, `reference-code/transit-cljs`, and
   `reference-code/transit-js`, rooted at Seon commit
-  `be30f4206445a186c7fbbfa6dc608e9abee25846`.
+  `be30f4206445`.
 - `reference-code/transit-js/src/com/cognitect/transit.js:62-131` permits only
   JSON/verbose JSON; its integer and UUID representations are in
   `reference-code/transit-js/src/com/cognitect/transit/types.js:82-356`.

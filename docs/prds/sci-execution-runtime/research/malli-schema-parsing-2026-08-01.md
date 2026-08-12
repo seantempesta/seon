@@ -42,7 +42,7 @@ explicit query edge.
 
 | Dependency or owner | Revision / location | Contract established here |
 |---|---|---|
-| Malli | `80138076960e7820523b4cb932c5b5d1936d4e7f` (`0.20.1~10` checkout; application coordinate remains 0.20.0) | Schema construction, AST, function decomposition, refs, walk, registry |
+| Malli | `80138076960e` (`0.20.1~10` checkout; application coordinate remains 0.20.0) | Schema construction, AST, function decomposition, refs, walk, registry |
 | Malli core | `reference-code/malli/src/malli/core.cljc` | `Schema`, `AST`, `FunctionSchema`, `m/schema`, `m/ast`, `m/from-ast`, `m/form`, `m/children`, `m/walk`, `m/parse` |
 | Malli util | `reference-code/malli/src/malli/util.cljc` | Traversal/transformation helpers only; no schema parser |
 | Malli registry | `reference-code/malli/src/malli/registry.cljc` | Registry lookup and composition used while compiling refs |

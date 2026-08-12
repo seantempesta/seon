@@ -60,9 +60,9 @@ Eight plain pushes published missing maintained tips:
 
 | Submodule | Branch | Before | Published tip |
 |---|---|---|---|
-| `datahike` | `main` | `9c356e32a0f2b0afcd41ce5000cba2a575a59a8a` | `9b3be9d59cb07d9c895af280e60eb074bb57a400` |
-| `sci` | `seon` | `8fac6e88f32d53a5fd82ebe80640881e317b84fd` | `1305a90a1ab9ac3737ff5a539180bcc6d8f4e2d4` |
-| `partial-cps` | `main` | `395063696067b65afe87f85c1f336578b608428c` | `1e119b03ea908ad925b98f9ba0a26371c65441e3` |
+| `datahike` | `main` | `9c356e32a0f2` | `9b3be9d59cb0` |
+| `sci` | `seon` | `8fac6e88f32d` | `1305a90a1ab9` |
+| `partial-cps` | `main` | `395063696067` | `1e119b03ea908ad925b98f9ba0a26371c65441e3` |
 | `clj-kondo` | `seon` | absent | `57252e07975710aa579b24f0d1b2b1e04195caa2` |
 | `core.async.flow-monitor` | `seon` | absent | `fbff8424696c7080ee7dc27b55cde1659ec18d8f` |
 | `http-kit` | `seon-pending-write-state` | absent | `238a85cc555a38892f2f9a7583c9cf5cec0fb201` |
@@ -79,10 +79,10 @@ proved those commits had no remote ref.
 
 | Submodule | Owner repository | Maintained branch | GitHub API tip | Verified |
 |---|---|---|---|---|
-| `datahike` | [seantempesta/datahike](https://github.com/seantempesta/datahike) | `main` | `9b3be9d59cb07d9c895af280e60eb074bb57a400` | yes |
-| `konserve` | [seantempesta/konserve](https://github.com/seantempesta/konserve) | `seon-0.9.359-legacy-header` | `b5c99bc02a7175652a610324215288b78551801f` | yes |
+| `datahike` | [seantempesta/datahike](https://github.com/seantempesta/datahike) | `main` | `9b3be9d59cb0` | yes |
+| `konserve` | [seantempesta/konserve](https://github.com/seantempesta/konserve) | `seon-0.9.359-legacy-header` | `b5c99bc02a71` | yes |
 | `proximum` | [seantempesta/proximum](https://github.com/seantempesta/proximum) | `seon-guarded-force-v126` | `9846d3e79e1aee48474bc876d3d563d7137209c6` | yes |
-| `sci` | [seantempesta/sci](https://github.com/seantempesta/sci) | `seon` | `937d392a008e4f2f246b9ddf9dd816ca99de9d4e` | yes |
+| `sci` | [seantempesta/sci](https://github.com/seantempesta/sci) | `seon` | `937d392a008e` | yes |
 | `clj-kondo` | [seantempesta/clj-kondo](https://github.com/seantempesta/clj-kondo) | `seon` | `57252e07975710aa579b24f0d1b2b1e04195caa2` | yes |
 | `core.async.flow-monitor` | [seantempesta/core.async.flow-monitor](https://github.com/seantempesta/core.async.flow-monitor) | `seon` | `fbff8424696c7080ee7dc27b55cde1659ec18d8f` | yes |
 | `superv.async` | [seantempesta/superv.async](https://github.com/seantempesta/superv.async) | `wasm/lazy-watchdog` | `3e6ed755f83634c9e9bbb58707f9446420d32ce9` | yes |
@@ -124,7 +124,7 @@ fresh GitHub API read exactly matched the local tip.
 
 | Submodule | Owner repository | Branch | Previous tip | Verified remote tip |
 |---|---|---|---|---|
-| `sci` | [seantempesta/sci](https://github.com/seantempesta/sci) | `seon` | `1305a90a1ab9ac3737ff5a539180bcc6d8f4e2d4` | `937d392a008e4f2f246b9ddf9dd816ca99de9d4e` |
+| `sci` | [seantempesta/sci](https://github.com/seantempesta/sci) | `seon` | `1305a90a1ab9` | `937d392a008e` |
 
 ## GitHub Actions disabled on every owner fork — 2026-07-31
 

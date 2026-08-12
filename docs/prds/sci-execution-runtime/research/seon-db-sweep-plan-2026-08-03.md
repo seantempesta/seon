@@ -15,9 +15,9 @@ counts and it makes no production changes.
 Census basis:
 
 - Seon HEAD observed with the final census:
-  7a09aaa310c69feb71b17ddf41e955ef8bf14314.
+  7a09aaa310c6.
 - Datahike root gitlink and checked-out revision:
-  0e8601d7f2f68c01070e13a95483bc82be04cabc.
+  0e8601d7f2f6.
 - Datahike interface authority:
   reference-code/datahike/src/datahike/api/specification.cljc and
   reference-code/datahike/src/datahike/api/impl.cljc.

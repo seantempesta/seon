@@ -40,7 +40,7 @@ not retain a Datahike schema view. The database's canonical
 | Current CLJS bridge | `src/seon/db/internal.cljs` at `7e4f9afb` | `ensure-datahike-attrs!` derives missing declarations but commits a separate schema transaction before the data transaction; this entire connection-dependent path disappears with the replica. |
 | Current JVM bridge | `src/seon/db/datahike/schema.clj` at `7e4f9afb` | Pure Malli-to-Datahike derivation already exists on the authority side, but it currently depends on the process-global Malli registry and is not yet parameterized by one database's canonical forms. |
 | Generated identities | `src/seon/db/id.cljc` at `7e4f9afb` | `effective-schema` deliberately merges declarations found in incoming transaction data with the installed schema, so generated IDs, nested refs, and caller tempids already understand a schema-plus-data transaction. |
-| Datahike | `reference-code/datahike` at `d21abadb9412f1b828b02ddb3c08ddc81d57c595` | `entity-map->op-vec` applies schema updates while interpreting one transaction; `writing/transact!` owns the serialized expected-basis fence. |
+| Datahike | `reference-code/datahike` at `d21abadb9412` | `entity-map->op-vec` applies schema updates while interpreting one transaction; `writing/transact!` owns the serialized expected-basis fence. |
 
 ## Shortest executable probes
 

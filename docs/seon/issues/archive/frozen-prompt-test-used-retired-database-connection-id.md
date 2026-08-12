@@ -51,11 +51,11 @@ Dependency ledger:
 
 - Malli `0.20.0` is pinned in `deps.edn`; maintained source is
   `reference-code/malli` at
-  `80138076960e7820523b4cb932c5b5d1936d4e7f`.
+  `80138076960e`.
   `malli.core/explain` returns the rejecting paths used above.
 - Datahike is the local root in `deps.edn`; maintained source is
   `reference-code/datahike` at
-  `caf526850084a9d5846ccd9ea34251fe411e0d6b`.
+  `caf526850084`.
   `datahike.store/connection-id` constructs `[store UUID, branch]` for
   `:self` and appends the writer backend for remote writers.
 

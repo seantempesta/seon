@@ -48,7 +48,7 @@ block-slot generator.
 | Mechanism | Grounding | Design consequence |
 |---|---|---|
 | `clojure.core.async.flow` at `dc35f3e0d7bc2eef502e77982f48641f025c8051` | `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:108-155` returns a `:report-chan`; `flow/impl.clj:98-172` wires report and error channels | A proc transition is observable data. Repeated ping sampling is not the owning interface. |
-| Datahike at `9a7a9ef10a954c32075e60d929f9101a9ac8abd9` | `reference-code/datahike/src/datahike/core.cljc:199-217` owns `listen!`/`unlisten!`; `writer.cljc:384-405` publishes transaction reports | A committed fact has a real event. Database tests need not poll the database. |
+| Datahike at `9a7a9ef10a95` | `reference-code/datahike/src/datahike/core.cljc:199-217` owns `listen!`/`unlisten!`; `writer.cljc:384-405` publishes transaction reports | A committed fact has a real event. Database tests need not poll the database. |
 | Malli at `80138076960e7820523b4cb932c5b5d1936d4e7f` | Registered Seon schemas and `seon.schema.datahike` already generate the canonical database attributes | Test-local error predicates, cap defaults, and full runtime schema lists should not become authorities. |
 | Seon runtime assembly | `src/seon/cluster.clj:659-742` privately builds the live loop handle from database dials | Tests cannot invoke the canonical construction, so four suites recreate it. |
 | Seon armed graphs | `src/seon/cluster/agent.clj:298-356` starts each graph but retains mailbox/completion, not the application report stream | Tests infer readiness, pause, and settlement from effects after the event instead of consuming the event itself. |

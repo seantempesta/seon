@@ -23,7 +23,7 @@ The dependency ledger for this slice is:
 
 | Dependency or owner | Selected revision or source | Boundary used |
 |---|---|---|
-| Datahike | `0e8601d7f2f68c01070e13a95483bc82be04cabc` | `q-with-evidence` returns the raw query result and dependency evidence (`reference-code/datahike/src/datahike/query.cljc:98-151`); pull and pull-many return raw result maps plus parsed dependency plans (`reference-code/datahike/src/datahike/pull_api.cljc:411-454`); `datoms` exposes the stored datom values unchanged (`reference-code/datahike/src/datahike/core.cljc:157-164`). |
+| Datahike | `0e8601d7f2f6` | `q-with-evidence` returns the raw query result and dependency evidence (`reference-code/datahike/src/datahike/query.cljc:98-151`); pull and pull-many return raw result maps plus parsed dependency plans (`reference-code/datahike/src/datahike/pull_api.cljc:411-454`); `datoms` exposes the stored datom values unchanged (`reference-code/datahike/src/datahike/core.cljc:157-164`). |
 | Datalog parser | the revision vendored with the pinned Datahike checkout | `parse-pull` returns the parsed attribute map, including aliases and subpatterns (`reference-code/datalog-parser/src/datalog/parser/pull.cljc:200-234`). |
 | Seon schema bridge | `src/seon/schema/datahike.clj` | Mixed top-level unions derive `:db.type/string` (`src/seon/schema/datahike.clj:135-150`), the transaction encoder writes canonical EDN (`src/seon/schema/datahike.clj:322-430`), and the existing decoder reads, canonicality-checks, and validates it (`src/seon/schema/datahike.clj:432-468`). |
 | Seon database reads | `src/seon/db.clj` | The general application boundary is `q`, `pull`, `pull-many`, `entity`, and `datoms`; all now normalize before returning (`src/seon/db.clj:177-378,445-487,563-612`). |

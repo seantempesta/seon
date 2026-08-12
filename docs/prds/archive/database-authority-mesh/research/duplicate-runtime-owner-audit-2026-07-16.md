@@ -41,9 +41,9 @@ implementation. Neither remains a duplicate owner.
 |---|---|---|
 | Recovery program | `docs/prds/database-authority-mesh/roadmap.md` and [[system-recovery-graduation-plan-2026-07-16]] | One implementation per behavior; correctness and deletion precede tuning. |
 | Database facade | `src/seon/db.cljs` | One asynchronous session, ordinary database maps, native transaction reports, eager reads, and direct error values. |
-| Datahike | `reference-code/datahike` at `a464cd887458d2572414a6ea951c477b0981fdae` | `transact!` accepts Datahike transaction arguments and returns the transaction report produced by the writer; the report shape is `:db-before`, `:db-after`, `:tx-data`, `:tempids`, and optional `:tx-meta`. |
+| Datahike | `reference-code/datahike` at `a464cd887458` | `transact!` accepts Datahike transaction arguments and returns the transaction report produced by the writer; the report shape is `:db-before`, `:db-after`, `:tx-data`, `:tempids`, and optional `:tx-meta`. |
 | Execution child | `src/seon/execution.cljs` and `src/seon/execution/runtime.cljs` | One retained compiler per isolated child; compiled prompt, page, and eval functions are the process boundary. |
-| Bun | `reference-code/bun` at `be77b652884b16a103cfaa4af3c1102f72f2dcd3` | A supervised child is an isolation and lifecycle boundary, not another database owner. |
+| Bun | `reference-code/bun` at `be77b652884b` | A supervised child is an isolation and lifecycle boundary, not another database owner. |
 | Renderer | `src/seon/render.cljs`, `src/seon/render/sci.cljs`, and `src/seon/web/datastar.cljs` | The guarded recursive formatter may remain pure; database acquisition and authored function execution belong in the child. |
 | Test surfaces | `bin/test-cljs`, `bin/test-writer`, and `script/seon/dev/changed_test.clj` | Tests must exercise the retained owner, not recreate a deleted production architecture. |
 

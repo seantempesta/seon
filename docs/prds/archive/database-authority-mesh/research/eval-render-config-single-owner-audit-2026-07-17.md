@@ -38,8 +38,8 @@ accessors and render/eval transformations remain pure over ordinary data.
 | Eval | `src/seon/eval.cljs:2390-2405,2927-3035,3064-3332,3897-4090,5040-5168` | Caps and repair policy affect one batch and its persisted result projection; they must be frozen with that operation rather than read at namespace load or at leaves. |
 | Error scopes | `src/seon/error.cljs:390-506,533-590` and `src/seon/instrument.cljc:280-355` | Error recording is synthesized by instrumentation and process nets, so explicit arguments cannot be added at every arbitrary function call. The existing fiber-local error scope is the narrow propagation seam. |
 | ClojureScript | `reference-code/clojurescript` at `946d75f3483c0c8e784e6668bff2c71a25619a77`; `src/main/clojure/cljs/core.cljc:975-976` | `await` is valid only in an async environment. Database acquisition therefore stays at async operation edges. |
-| Datahike | `reference-code/datahike` at `a464cd887458d2572414a6ea951c477b0981fdae`; `src/datahike/query.cljc:121`, `src/datahike/core.cljc:243` | Queries consume explicit inputs, and `db` returns an immutable database value. One acquisition can supply every pure consumer consistently. |
-| Bun | `reference-code/bun` at `be77b652884b16a103cfaa4af3c1102f72f2dcd3` | Async context propagation is available across Promise work; no socket or Bun-native owner needs to enter configuration data. |
+| Datahike | `reference-code/datahike` at `a464cd887458`; `src/datahike/query.cljc:121`, `src/datahike/core.cljc:243` | Queries consume explicit inputs, and `db` returns an immutable database value. One acquisition can supply every pure consumer consistently. |
+| Bun | `reference-code/bun` at `be77b652884b` | Async context propagation is available across Promise work; no socket or Bun-native owner needs to enter configuration data. |
 
 ## Existing operation owners
 

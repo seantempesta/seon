@@ -25,7 +25,7 @@ lossless consumer, never a second config resolver or database client.
 ## Dependency ledger
 
 - Seon source was inspected at superproject commit
-  `de5e606d389c2bb058030ab14745349308df71a7`. The owners are
+  `de5e606d389c`. The owners are
   `seon.ai/resolved-config`, `seon.ai.dispatch/llm-fn`,
   `seon.ai.openai-compat/complete`, `seon.agent.turn/call-llm!`, and
   `seon.web.serve/run-agent-task!`.
@@ -34,7 +34,7 @@ lossless consumer, never a second config resolver or database client.
   the locked installed package is `openai` `6.42.0`. The pod, not Inspect's
   Python OpenAI package, performs the evaluated model calls.
 - Inspect AI is selected at
-  `reference-code/inspect-ai@05322696a0f784ec399ef6abbafd3d2a250ea9cc`;
+  `reference-code/inspect-ai@05322696a0f7`;
   the installed distribution is
   `0.3.247.dev0+g05322696a.d20260715`. `TaskState.metadata` is copied into the
   full native `EvalSample.metadata` by

@@ -31,15 +31,15 @@ not add a resend, replay, processed flag, or client-specific wake path.
 
 ### Selected source
 
-- Seon was inspected at `47754eabda46628aec3cfaf2e56a62ebda224d62`.
+- Seon was inspected at `47754eabda46`.
 - `b950603e` removed the old resumable-agent query value and changed
   resumable-ID acquisition to an ordinary database value.
 - `e33db778` closed resume-time committed-work reconciliation in the existing
   loop/runtime owners.
 - `reference-code/datahike` is at
-  `a464cd887458d2572414a6ea951c477b0981fdae`.
+  `a464cd887458`.
 - `reference-code/shadow-cljs` is at
-  `4e72595f57618f5c43388ad13d5136cd3bede566`.
+  `4e72595f5761`.
 - `reference-code/clojurescript` is at
   `946d75f3483c0c8e784e6668bff2c71a25619a77`.
 

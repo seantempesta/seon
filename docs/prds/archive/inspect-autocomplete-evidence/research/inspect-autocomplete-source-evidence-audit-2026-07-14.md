@@ -48,7 +48,7 @@ framework, source world, and task ownership cannot be reproduced.
 ## Immutable dependency and mechanism ledger
 
 Snapshot repository HEAD was
-`dc778de958c072e6999de128585168d522ab80ec`. File identities below are
+`dc778de958c0`. File identities below are
 SHA-256 unless a Git identity is named.
 
 | Dependency or mechanism | Selected or observed identity | Exact source read | Constraint or finding |

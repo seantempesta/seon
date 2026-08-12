@@ -10,9 +10,9 @@ tags: [database, flow, research]
 
 | Dependency | Selected source | Relevant mechanism |
 |---|---|---|
-| Datahike | `417649383c65e13f15ea41d394fb1ed742477965` | `reference-code/datahike/src/datahike/versioning.cljc`, `writing.cljc`, and `index/secondary.cljc` |
+| Datahike | `417649383c65` | `reference-code/datahike/src/datahike/versioning.cljc`, `writing.cljc`, and `index/secondary.cljc` |
 | Proximum bridge | selected through the writer alias | `reference-code/datahike/src-secondary/datahike/index/secondary/proximum.clj` |
-| Proximum | `org.replikativ/proximum` `0.1.25`; maintained checkout `5f7142d532aa173071f5651af91414b983d7320f` | `reference-code/proximum/src/proximum/versioning.clj`, `writing.clj`, `vectors.clj`, and `protocols.clj` |
+| Proximum | `org.replikativ/proximum` `0.1.25`; maintained checkout `5f7142d532aa` | `reference-code/proximum/src/proximum/versioning.clj`, `writing.clj`, `vectors.clj`, and `protocols.clj` |
 | Seon | current branch | `src/seon/db/registry.clj`, `src/seon/embed.clj`, and `test/seon/db/restore_admin_test.clj` |
 
 ## Shortest falsifier

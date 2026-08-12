@@ -126,8 +126,8 @@ mechanism would mint no result blob objects for that exact archived run.
 
 ## Dependency ledger and reproduction
 
-Measurements use Datahike `0e8601d7f2f68c01070e13a95483bc82be04cabc`,
-Konserve `737697d9205e5e8f0bc08a666e4c97dad55e9dbe`, fused roots, a 256-entry
+Measurements use Datahike `0e8601d7f2f6`,
+Konserve `737697d9205e`, fused roots, a 256-entry
 diff buffer, history enabled, and the self writer. The governing source is:
 
 - Datahike stored database and ordered writer shapes:

@@ -23,12 +23,12 @@ and writer-interest evidence.
 
 ## Dependency ledger
 
-Audit source revision: `6c81f02655e622f2dc150ddf52a044039af3f687`.
+Audit source revision: `6c81f02655e6`.
 Concurrent tracked edits outside this report were present and are not evidence.
 
 | Dependency or Seon owner | Selected revision | Grounding and consequence |
 |---|---|---|
-| Datahike | `6f2569087ed31f53e751e7535ef4bf2527912046` | `reference-code/datahike/src/datahike/query.cljc` owns execution-aware, source-positioned query dependency plans; `pull_api.cljc` derives pull dependencies; `api/types.cljc` defines `:all` as the conservative alternative. Seon must transport those plans, not infer attributes from query text. |
+| Datahike | `6f2569087ed3` | `reference-code/datahike/src/datahike/query.cljc` owns execution-aware, source-positioned query dependency plans; `pull_api.cljc` derives pull dependencies; `api/types.cljc` defines `:all` as the conservative alternative. Seon must transport those plans, not infer attributes from query text. |
 | Datastar | `bb9ed6fbe78cf5690f5ad23a5faf86407a44982f` | Datastar supplies the morph event vocabulary. The maintained Seon framing owner remains `seon.web.datastar/patch-elements`; no debug-specific stream is authorized. |
 | Datastar Clojure | `1cef624e9e59a2ea79ffe2f65df2e7b06f8198d2` | `reference-code/datastar-clojure/src/dev/examples/tiny_gzip.clj` grounds a separate long-lived SSE GET and flushable frames. Browser automation cannot reliably hold that stream, so the feed proof is server-side. |
 | Execution IPC | current Seon revision | `seon.execution/terminal-message` already carries the child's optional `:seon.db/read-evidence` in the closed result frame. No protocol addition is needed. |

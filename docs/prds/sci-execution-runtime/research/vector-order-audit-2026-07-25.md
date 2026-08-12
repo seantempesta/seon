@@ -48,7 +48,7 @@ The relevant selected sources are:
 - Malli `0.20.0`, selected at `deps.edn:6-7`.
 - The maintained Datahike checkout selected through
   `reference-code/datahike` at `deps.edn:23-26`, commit
-  `caf526850084a9d5846ccd9ea34251fe411e0d6b`.
+  `caf526850084`.
 - The maintained Proximum checkout selected through
   `reference-code/proximum` at `deps.edn:40-42`, commit
   `9846d3e79e1aee48474bc876d3d563d7137209c6`.

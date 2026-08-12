@@ -67,8 +67,8 @@ The observed seams depend on these checked-in sources and pins:
 
 | Dependency or mechanism | Selected revision | Read boundary |
 |---|---|---|
-| Datahike | `10540578248eaa686c1f88a7fe57644ee4c9f993` | `reference-code/datahike/src/datahike/api.cljc`, `reference-code/datahike/src/datahike/writer.cljc` |
-| SCI | `2db3358cba913b6fbbe49c7b5b34d7ac72715924` | `reference-code/sci/src/sci/core.cljc`, `src/seon/sci/eval.clj` |
+| Datahike | `10540578248e` | `reference-code/datahike/src/datahike/api.cljc`, `reference-code/datahike/src/datahike/writer.cljc` |
+| SCI | `2db3358cba91` | `reference-code/sci/src/sci/core.cljc`, `src/seon/sci/eval.clj` |
 | core.async Flow | `dc35f3e0d7bc2eef502e77982f48641f025c8051` | `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj`, `src/seon/cluster/loop.clj` |
 | http-kit | `238a85cc555a38892f2f9a7583c9cf5cec0fb201` | `reference-code/http-kit/src/org/httpkit/server.clj`, `src/seon/render/web.clj` |
 | Reitit | `0.10.1` | `src/seon/render/route.clj` |

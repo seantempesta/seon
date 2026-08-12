@@ -31,11 +31,11 @@ the suite-speed-tail record and is outside this lane.
   `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj`,
   `flow/impl.clj`, and `flow/spi.clj`. Flow ping exposes the live proc roster
   through the datafied graph; no second roster is needed.
-- Datahike is pinned at `10540578248eaa686c1f88a7fe57644ee4c9f993`.
+- Datahike is pinned at `10540578248e`.
   `reference-code/datahike/src/datahike/core.cljc:199-218` establishes that a
   connection listener receives each committed transaction report. The tested
   listener is not responsible for a request refused before transaction.
-- Malli is pinned at `80138076960e7820523b4cb932c5b5d1936d4e7f`.
+- Malli is pinned at `80138076960e`.
   Seon's durable inverse is `seon.schema/canonical-definition`; it correctly
   refuses a function object with no recoverable qualified symbol.
 - SCI is pinned at `6ee57c9c3e73e5b8224fde851e33a1e2a8e08383`.

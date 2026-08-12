@@ -34,7 +34,7 @@ the facts they enable.
 | Dependency or mechanism | Selected source | Relevant behavior |
 |---|---|---|
 | Seon | `422800ed9f03aaaff02390470b41c71fb016355a` plus current shared writer work | `:seon.db/user`, `:seon.db/process`, root identity, and stable process identities |
-| Maintained Datahike | `reference-code/datahike` at `a464cd887458d2572414a6ea951c477b0981fdae` | transaction metadata expansion, intermediate database values, schema-on-write, lookup refs |
+| Maintained Datahike | `reference-code/datahike` at `a464cd887458` | transaction metadata expansion, intermediate database values, schema-on-write, lookup refs |
 | Seon backend | `src/seon/db/backend.clj:122-126` | history is enabled and schema flexibility is `:write` |
 | Process identities | `src/seon/db/process.cljc:11-36` | `:seon.db.process/id` is identity and genesis supplies boot, config, and REPL entities |
 | Provenance refs | `src/seon/db.cljs:40-41` | transaction user and process are ordinary refs |

@@ -43,7 +43,7 @@ maps and nils.
 
 | Owner | Exact source | Relevant fact |
 |---|---|---|
-| Datahike | `reference-code/datahike` at `1296cfc4cb8c9b4868dde8bb6c3f4d4dc523d043` | Maintained fork with bounded pull resources, ordered missing-value pull, and the protocol capability catalog. |
+| Datahike | `reference-code/datahike` at `1296cfc4cb8c` | Maintained fork with bounded pull resources, ordered missing-value pull, and the protocol capability catalog. |
 | Pull engine | `src/datahike/pull_api.cljc:18-29, 290-359` | One root frame owns ordered entity traversal; `pull-many` parses once and calls `pull-spec` once. |
 | Entity resolution | `src/datahike/db/utils.cljc:109-148` | `entid` returns nil only for a well-formed missing ref and still throws syntax/unique-schema errors; `entid-strict` converts nil to `:entity-id/missing`. |
 | Native index access | `src/datahike/db/interface.cljc:87-103`; `src/datahike/db.cljc:246-254` | Pull uses exact EAVT/AVET prefix slices through the database wrapper's search context. There is no multi-key index cursor primitive. |

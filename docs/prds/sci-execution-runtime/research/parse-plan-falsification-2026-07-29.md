@@ -38,7 +38,7 @@ only after the blockers below are resolved.
 | Dependency or mechanism | Reviewed revision | Source used |
 |---|---|---|
 | target plan | `ea9d4cea65da71fc199119ecd16fedd91fa8664a` | `plan/parse-primitives-plan-2026-07-29.md` |
-| SCI | `8fac6e88f32d53a5fd82ebe80640881e317b84fd` | `reference-code/sci/src/sci/impl/parser.cljc:42-51,126-190`; `sci/core.cljc:352-400` |
+| SCI | `8fac6e88f32d` | `reference-code/sci/src/sci/impl/parser.cljc:42-51,126-190`; `sci/core.cljc:352-400` |
 | reply splitter | `7d32ecec535a5a94010f37204f8b7f7b5c89e293` | `src/seon/cluster/reply.cljc:111-319`; `test/seon/cluster/reply_test.clj` |
 | generate-code v0 | `aa8f2c24f68abb3412d2ee8e214e4e5e0af1fce1` | `plan/generate-code-v0-plan-2026-07-29.md:120-176,289-352,461-474` |
 | UI conversion | `4e9ca56ee8ca12b78b2b736fe4f9f9a2f096c97f` | `plan/ui-conversion-plan-2026-07-29.md:39-50,88-188,391-444` |

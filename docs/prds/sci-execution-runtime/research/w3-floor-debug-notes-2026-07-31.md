@@ -51,13 +51,13 @@ tabs cost nothing.
   `dc35f3e0d7bc2eef502e77982f48641f025c8051`. The existing render proc, mult,
   sliding-1 taps, and workload tag remain the delivery owner.
 - Datahike: vendored commit
-  `9b3be9d59cb07d9c895af280e60eb074bb57a400`. `d/pull '[*]` was not used as a
+  `9b3be9d59cb0`. `d/pull '[*]` was not used as a
   recursive debug walk: non-component refs pull only `{:db/id ...}` while
   component refs may nest (`reference-code/datahike/test/datahike/test/api_test.cljc:266-267`).
   The debug reader instead reads one opened entity's current EAVT datoms and
   leaves every ref as a `{:db/id eid}` drill handle.
 - http-kit: vendored commit
-  `238a85cc555a38892f2f9a7583c9cf5cec0fb201`. The existing write-state drain
+  `238a85cc555a`. The existing write-state drain
   completion remains the socket backpressure owner; W3 added no writer.
 - First-party precedents: `src/seon/render/web.clj`'s exact four-route
   dispatcher and feed; the former `src/seon/render/data.clj` EDN path/offset

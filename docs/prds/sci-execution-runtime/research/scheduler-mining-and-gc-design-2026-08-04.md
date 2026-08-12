@@ -48,8 +48,8 @@ GC seams needed to test the design against the tree.
 | Boundary | Pinned source | First-party seam |
 | --- | --- | --- |
 | Agent graphs and wakes | core.async `dc35f3e0d7bc2eef502e77982f48641f025c8051`: `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj`, `flow/impl.clj`, and `flow/spi.clj` | `src/seon/flow.clj`, `src/seon/cluster/loop.clj`, `src/seon/cluster.clj` |
-| Safe store collection | Datahike `c15272730e74fb3f8bba91f6361c268492a99ba7`: `reference-code/datahike/src/datahike/gc.cljc` and `writer.cljc` | `src/seon/cluster/registry.clj:327` |
-| Blob sweep | Konserve `89795ae1b769aafd47adf4168e2393d7b4721bc2`: `reference-code/konserve/src/konserve/gc.cljc` | the `collect!` reachability extension in `src/seon/cluster/registry.clj` |
+| Safe store collection | Datahike `c15272730e74`: `reference-code/datahike/src/datahike/gc.cljc` and `writer.cljc` | `src/seon/cluster/registry.clj:327` |
+| Blob sweep | Konserve `89795ae1b769`: `reference-code/konserve/src/konserve/gc.cljc` | the `collect!` reachability extension in `src/seon/cluster/registry.clj` |
 | One operations owner | fresh tree at `7eeff3e70`: `src/seon/operator.clj` | `bin/seon` and `script/seon/fresh_operator.clj` |
 | Ordinary durable wake | `resources/seon/schemas/seon.cluster.message.edn`, `src/seon/cluster/message.clj`, `src/seon/cluster/loop.clj` | a commit containing `:seon.cluster.message/to` wakes the addressed graph |
 

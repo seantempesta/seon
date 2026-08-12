@@ -17,9 +17,9 @@ fusion result are complete; the issue remains open because the unfused
 ## Dependency ledger
 
 - Maintained konserve fork: `reference-code/konserve` at
-  `b5c99bc02a7175652a610324215288b78551801f` before this repair.
+  `b5c99bc02a71` before this repair.
 - Maintained Datahike fork: `reference-code/datahike` at
-  `9b3be9d59cb07d9c895af280e60eb074bb57a400`; this task reads it but does not
+  `9b3be9d59cb0`; this task reads it but does not
   edit it.
 - Persistent sorted set: `0.4.137`, selected by the maintained Datahike fork;
   this is the first pin containing the concurrent-read correction required by

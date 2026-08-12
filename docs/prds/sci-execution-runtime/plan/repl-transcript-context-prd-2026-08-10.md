@@ -92,8 +92,8 @@ this revision applies it without repeating its disposition table.
 
 | Dependency | Selected revision | Boundary read and first-party owner |
 |---|---|---|
-| Datahike | `10540578248eaa686c1f88a7fe57644ee4c9f993` | Relation and tuple inputs become query relations at `reference-code/datahike/src/datahike/query.cljc:832-890`; all calls remain through `src/seon/db.clj:779-823`. |
-| Malli | `80138076960e7820523b4cb932c5b5d1936d4e7f` | Schema properties/forms are dependency-owned protocol operations at `reference-code/malli/src/malli/core.cljc:30-43`; Seon's declared producer/profile properties remain in `resources/seon/schemas/seon.render.edn:1-55` and `resources/seon/schemas/seon.render.profile.edn:1-18`. |
+| Datahike | `10540578248e` | Relation and tuple inputs become query relations at `reference-code/datahike/src/datahike/query.cljc:832-890`; all calls remain through `src/seon/db.clj:779-823`. |
+| Malli | `80138076960e` | Schema properties/forms are dependency-owned protocol operations at `reference-code/malli/src/malli/core.cljc:30-43`; Seon's declared producer/profile properties remain in `resources/seon/schemas/seon.render.edn:1-55` and `resources/seon/schemas/seon.render.profile.edn:1-18`. |
 | core.async | `dc35f3e0d7bc2eef502e77982f48641f025c8051` | A mult distributes each value to all taps and requires buffering to isolate slow taps at `reference-code/core.async/src/main/clojure/clojure/core/async.clj:797-845`; Seon's package taps and writer live at `src/seon/render/web.clj:673-800`. |
 | Datastar Clojure | `1cef624e9e59a2ea79ffe2f65df2e7b06f8198d2` | `patch-elements!` sends ID-bearing fragments over an SSE response at `reference-code/datastar-clojure/src/dev/examples/snippets.clj:10-16,26-33`; Seon's one patch call and target package live at `src/seon/render/web.clj:978-1085`. |
 

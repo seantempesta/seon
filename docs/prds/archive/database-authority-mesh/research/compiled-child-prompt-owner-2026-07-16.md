@@ -27,7 +27,7 @@ real graph data-dependent.
 | Owner | Selected revision | Constraint used |
 |---|---|---|
 | Seon | `5271a65f` before the trusted-call implementation; implementation `ecead888` | `seon.db` is the application database API; the execution child already owns the direct session, coordinate context, deadline, cancellation, output bound, and process isolation. |
-| Bun | `be77b652884b16a103cfaa4af3c1102f72f2dcd3` | One supervised OS process per active agent supplies CPU and failure isolation. |
+| Bun | `be77b652884b` | One supervised OS process per active agent supplies CPU and failure isolation. |
 | Shadow CLJS | `4e72595f57618f5c43388ad13d5136cd3bede566` | The node-script target derives one module from `:main`; ordinary namespace requires define the production closure. |
 | ClojureScript | `946d75f3483c0c8e784e6668bff2c71a25619a77` | Core `^:async` functions and returned Promises are the honest nonblocking boundary. |
 

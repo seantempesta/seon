@@ -56,7 +56,7 @@ later refuse.
 | mechanism | selected source | contract used here |
 |---|---|---|
 | core.async Flow | `reference-code/core.async` at `dc35f3e0d7bc2eef502e77982f48641f025c8051`, tag `v1.10.874-alpha3` | ordinary proc state is sequential; custom launchers own non-ordinary threads and lifecycle |
-| Datahike | `reference-code/datahike` at `357ffc87c8009f342b239145802e1385d4a18ca9` | one local writer serializes transaction functions over its current immutable database value |
+| Datahike | `reference-code/datahike` at `357ffc87c800` | one local writer serializes transaction functions over its current immutable database value |
 | Seon Flow launcher | `src/seon/flow.clj` | fixed-buffer submission plus active-count bounded execution, currently compute-only |
 | Seon run transitions | `src/seon/cluster/run.cljc` | open, custody, lease, epoch, plan, receipt, release, and close fences |
 | Seon work derivation | `src/seon/cluster/work.cljc` | pure next instruction and interruption derivation |

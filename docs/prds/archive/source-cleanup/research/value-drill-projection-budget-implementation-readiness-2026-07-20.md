@@ -50,7 +50,7 @@ the examples in research prose.
 | Numeric default ruling | [[value-drill-cap-default-ruling-2026-07-20]] (`38f24f39`) | Defaults are 32 decoded path segments, 4096 raw percent-encoded UTF-8 bytes, and `offset + page-size <= 1024`, with at most 1025 touches including the honest tail sentinel. |
 | Existing config mechanism | `src/seon/config.cljs`, `config/system.edn`, `test/seon/config_test.cljs` | Register each leaf once as `:seon.config/cap`, reference it from the closed render section and singleton, flatten it in `resolve-config-singleton`, and provide a pure accessor whose absent-config fallback is byte-identical to the shipped manifest. |
 | Orchard paging evidence | `reference-code/orchard/src/orchard/inspect.clj:44-141` at `c462a25d97988f1af51e8181265c43ec9b7d3d6f` | `drop` followed by `take (inc page-size)` establishes the truthful head-plus-one sentinel. Orchard supplies no total-offset ceiling and is not a second inspector implementation. |
-| Malli 0.20.0 | `reference-code/malli/src/malli/core.cljc:1223-1310,2635-2641` at `80138076960e7820523b4cb932c5b5d1936d4e7f` | Closed maps reject unknown keys; positive-int leaves are registered schemas, not repeated hand validation. |
+| Malli 0.20.0 | `reference-code/malli/src/malli/core.cljc:1223-1310,2635-2641` at `80138076960e` | Closed maps reject unknown keys; positive-int leaves are registered schemas, not repeated hand validation. |
 | Aero 1.1.6 | `reference-code/aero/src/aero/core.cljc:63-70,100-102,258-275,414-431` at `c47a10fa5f6a52084d04769af06d5e04d6603e13` | The selected manifest resolves values once before schema validation and database reconciliation. Runtime drill code never rereads Aero or environment variables. |
 
 ## Unit 1C: projected map-key drillability repair

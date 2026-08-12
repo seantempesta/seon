@@ -17,14 +17,14 @@ wrappers. It also relates that failure to the open atomic hot-reload issue.
 ## Dependency ledger
 
 - Malli `0.20.0`, tag commit
-  `4c054bd7d042e70d60b83b9f07fb765bc103037f`:
+  `4c054bd7d042`:
   `reference-code/malli/src/malli/core.cljc` and
   `reference-code/malli/src/malli/instrument.cljs`.
 - ClojureScript `1.12.145`, tag `r1.12.145`, commit
-  `bd23d9a2475d822ea8dfd65deaa6732428b9ed25`:
+  `bd23d9a2475d`:
   `reference-code/clojurescript/src/main/clojure/cljs/compiler.cljc`.
 - Maintained Shadow CLJS commit
-  `4e72595f57618f5c43388ad13d5136cd3bede566`:
+  `4e72595f5761`:
   `reference-code/shadow-cljs/src/main/shadow/cljs/devtools/client/node.cljs`
   and `client/env.cljs`.
 - First-party owners: `seon.schema` owns the immutable active projection and

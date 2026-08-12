@@ -40,9 +40,9 @@ pod-only spec under interruption-safe unwind.
 |---|---|---|---|
 | Babashka | `1.12.212` | operator runtime plus `reference-code/babashka-process` | `bin/seon` and `seon.dev.cli` |
 | `babashka.process` | `16a84e0af0da51b8c84e289970f6b7cc35b35d18` | `src/babashka/process.cljc:96-171,367-507,678-710` | `seon.dev.process` detached process identity, readiness, and drain |
-| Transit CLJ | `1.0.333`, tag object `12f50e4391208d36f910a39dd947cefabf77dc52` | `reference-code/transit-clj`, tag `v1.0.333`, `src/cognitect/transit.clj:139-171,290-323` | `seon.db.transport.uds` length-framed typed maps; Babashka already loads `cognitect.transit` |
-| Datahike | `417649383c65e13f15ea41d394fb1ed742477965` | `reference-code/datahike` | runtime coordinate resolution and writer branch authority; must not enter the Babashka launch constructor classpath |
-| Konserve | `df6818d43ea3363a808cd051c0d68917f1b987a9` | `reference-code/konserve` | shared physical database/blob bases; branch pod never owns a writer |
+| Transit CLJ | `1.0.333`, tag object `12f50e439120` | `reference-code/transit-clj`, tag `v1.0.333`, `src/cognitect/transit.clj:139-171,290-323` | `seon.db.transport.uds` length-framed typed maps; Babashka already loads `cognitect.transit` |
+| Datahike | `417649383c65` | `reference-code/datahike` | runtime coordinate resolution and writer branch authority; must not enter the Babashka launch constructor classpath |
+| Konserve | `df6818d43ea3` | `reference-code/konserve` | shared physical database/blob bases; branch pod never owns a writer |
 | Atomic operator state | current branch | `script/seon/dev/state.clj` | `write-edn!` uses temp plus atomic replace; retained lifecycle state remains file data |
 | Settled launch composition | `9edf26f1` | `src/seon/launch.cljc`, `src/seon/client/schema.cljc`, `src/my/blob/schema.cljc` | one closed descriptor, one client capability, one blob storage view |
 

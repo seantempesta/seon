@@ -904,9 +904,9 @@ listener state.
   `db.cljc`, `connections.cljc`, `connector.cljc`, `core.cljc`,
   `writing.cljc`, `writer.cljc`, `query.cljc`, `resource.cljc`,
   `pull_api.cljc`, and `api/specification.cljc`.
-- Konserve `b5c99bc02a7175652a610324215288b78551801f`:
+- Konserve `b5c99bc02a71`:
   cache/store lifecycle and selected backend source.
-- Bun `be77b652884b16a103cfaa4af3c1102f72f2dcd3`:
+- Bun `be77b652884b`:
   native spawn, socket, stream, and server types/implementations.
 - Babashka process `16a84e0a` (`v0.6.25`):
   `reference-code/babashka-process` and `script/seon/dev/process.clj`.

@@ -27,9 +27,9 @@ release remain root/supervisor operations, not agent protocol operations.
 
 | Dependency or mechanism | Selected version or SHA | Grounding source | Existing Seon owner or proof |
 |---|---|---|---|
-| Datahike | `6f90b339768b1a02066dce3b6fcc93a200758fcc` | `reference-code/datahike/src/datahike/versioning.cljc`; `test/datahike/test/versioning_test.cljc`; `test/datahike/test/nodejs_test.cljs` | `deps.edn` `:writer` and `:cljs`; `seon.db.backend`; `seon.db.registry`; `seon.db/at-coordinate` |
-| Konserve | `df6818d43ea3363a808cd051c0d68917f1b987a9` | `reference-code/konserve/src/konserve/filestore.clj`; `impl/defaults.cljc`; `node_filestore.cljs` | Datahike's file store; no direct Seon blob dependency |
-| Malli | `0.20.0` | `reference-code/malli` at `80138076960e7820523b4cb932c5b5d1936d4e7f` | `seon.schema`; public function schemas |
+| Datahike | `6f90b339768b` | `reference-code/datahike/src/datahike/versioning.cljc`; `test/datahike/test/versioning_test.cljc`; `test/datahike/test/nodejs_test.cljs` | `deps.edn` `:writer` and `:cljs`; `seon.db.backend`; `seon.db.registry`; `seon.db/at-coordinate` |
+| Konserve | `df6818d43ea3` | `reference-code/konserve/src/konserve/filestore.clj`; `impl/defaults.cljc`; `node_filestore.cljs` | Datahike's file store; no direct Seon blob dependency |
+| Malli | `0.20.0` | `reference-code/malli` at `80138076960e` | `seon.schema`; public function schemas |
 | Clojure / ClojureScript | `1.12.0` / `1.12.145` | `deps.edn` | writer and pod build bases |
 | `superv.async` | `3e6ed755f83634c9e9bbb58707f9446420d32ce9` | maintained fork selected in `deps.edn` | Datahike CLJS async boundary; not a new lifecycle API |
 | `partial-cps` | `1e119b03ea908ad925b98f9ba0a26371c65441e3` | maintained fork selected in `deps.edn` | CLJS `await`; not a lifecycle owner |

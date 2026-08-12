@@ -19,7 +19,7 @@ tags: [research, database, agent]
 
 ## Ground truth: the sources read
 
-- Fork the pod actually runs: `~/.gitlibs/libs/org.replikativ/datahike/01ba3f18bf08da2c093eb0972ec1f272b817f23d` (= `seantempesta/datahike@01ba3f18`, 2026-05-20, per `deps.edn` `:override-deps`). All `src/datahike/...` cites below are into that checkout.
+- Fork the pod actually runs: `~/.gitlibs/libs/org.replikativ/datahike/01ba3f18bf08` (= `seantempesta/datahike@01ba3f18`, 2026-05-20, per `deps.edn` `:override-deps`). All `src/datahike/...` cites below are into that checkout.
 - Upstream vendored: `reference-code/datahike` at `replikativ@717a0d27` (2026-05-17) — same era; `doc/distributed.md` is the architecture statement.
 - konserve 0.9.346 (the version BOTH the fork's deps.edn and the JVM resolve): inspected from the jar (`konserve/serializers.cljc`, `konserve/node_filestore.cljs`, `konserve/impl/defaults.cljc`); scratch extraction in `tmp/konserve-inspect/`.
 - Seon wire-server: `src/seon/server/{wire,boot,broadcast,reactive,store}.clj`.

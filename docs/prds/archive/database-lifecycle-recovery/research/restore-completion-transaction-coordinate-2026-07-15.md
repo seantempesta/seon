@@ -25,8 +25,8 @@ commit.
 
 | dependency or mechanism | selected version or SHA | grounded source | relevant behavior |
 |---|---|---|---|
-| Datahike | `417649383c65e13f15ea41d394fb1ed742477965` | `reference-code/datahike/src/datahike/{versioning,writing}.cljc` | ordinary writer commits persist one immutable commit node and advance `:max-tx`; `force-branch!` writes a new commit node while retaining the selected database value's `:max-tx`; parents are immutable commit ids |
-| Konserve | `df6818d43ea3363a808cd051c0d68917f1b987a9` | `reference-code/konserve/src/konserve/core.cljc` | the writer can read retained immutable commit maps by commit UUID without materializing historical secondary-index resources |
+| Datahike | `417649383c65` | `reference-code/datahike/src/datahike/{versioning,writing}.cljc` | ordinary writer commits persist one immutable commit node and advance `:max-tx`; `force-branch!` writes a new commit node while retaining the selected database value's `:max-tx`; parents are immutable commit ids |
+| Konserve | `df6818d43ea3` | `reference-code/konserve/src/konserve/core.cljc` | the writer can read retained immutable commit maps by commit UUID without materializing historical secondary-index resources |
 | Malli | `0.20.0` | `reference-code/malli`, `seon.schema` | the portable request is closed and restricts the frozen head to branch `:db` |
 | Seon database protocol | protocol v2 | `src/seon/db/protocol.cljc`, `src/seon/db/writer.clj` | one typed writer request/response and canonical protocol failure envelope; no restore-only transport |
 | Seon replica RPC | current branch | `src/seon/db/replica.cljs` | the one pod-to-writer UDS owner sends the request; `seon.db` does not open another socket path |

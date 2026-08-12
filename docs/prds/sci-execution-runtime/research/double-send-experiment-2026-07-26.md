@@ -31,8 +31,8 @@ that is not today's runtime.
 | Dependency or owner | Revision read | Evidence used |
 |---|---|---|
 | Seon working tree | `472797ffc8f4ab432e7a206e00e3ca832e0a4fe1` | `seon.sci.ctx/base`, `seon.agent.driver/{lifecycle-tx-data,execute-form!,allocated-transact!}`, `seon.agent.run.core/finish-tx-data`, and `seon.eval.receipt/receipt-id`. |
-| SCI | `8fac6e88f32d53a5fd82ebe80640881e317b84fd` | `reference-code/sci/src/sci/core.cljc:277-283` defines supplied namespaces; `reference-code/sci/src/sci/impl/resolve.cljc:323-334` rejects an unresolved symbol. |
-| Datahike | `caf526850084a9d5846ccd9ea34251fe411e0d6b` | `reference-code/datahike/src/datahike/db/transaction.cljc:1195-1248` folds the submitted transaction data into one resulting `db-after`. |
+| SCI | `8fac6e88f32d` | `reference-code/sci/src/sci/core.cljc:277-283` defines supplied namespaces; `reference-code/sci/src/sci/impl/resolve.cljc:323-334` rejects an unresolved symbol. |
+| Datahike | `caf526850084` | `reference-code/datahike/src/datahike/db/transaction.cljc:1195-1248` folds the submitted transaction data into one resulting `db-after`. |
 | Wake fix | `4dbaeda0ef905c07600637e86df5d5de8fc7e725` | The driver now enumerates addressed candidate messages and applies `waking-inbound?`, so a future duplicate A-to-B message will be observable by B. |
 
 ## Fresh-id allocation site

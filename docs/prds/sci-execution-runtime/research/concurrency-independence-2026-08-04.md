@@ -34,14 +34,14 @@ data-oriented Clojure, Datahike, Clojure-testing, and REPL skills.
 ## Dependency ledger
 
 - Seon source frozen by the focused test runner: Git
-  `f98b159c4b20a13876ca47beccf9ca24f0544715`. The shared checkout advanced
+  `f98b159c4b20`. The shared checkout advanced
   while the isolated test ran; conclusions here belong to the runner's frozen
   copy, not later in-flight edits.
-- Datahike/Proximum pin: `574c5f0f0db9411d1982769f14512cb24ef719da`,
+- Datahike/Proximum pin: `574c5f0f0db9`,
   especially its serialized writer and history query semantics under
   `reference-code/datahike/src/datahike/writer.cljc` and
   `reference-code/datahike/src/datahike/writing.cljc`.
-- SCI pin: `2db3358cba913b6fbbe49c7b5b34d7ac72715924`, especially
+- SCI pin: `2db3358cba91`, especially
   `reference-code/sci/src/sci/core.cljc` fork/Var behavior.
 - core.async pin: `dc35f3e0d7bc2eef502e77982f48641f025c8051`, especially
   `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj` and

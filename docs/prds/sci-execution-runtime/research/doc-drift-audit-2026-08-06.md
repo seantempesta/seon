@@ -196,9 +196,9 @@ gitlinks:
 
 | Dependency | Document | Checked-out gitlink |
 |---|---|---|
-| Datahike | `256b714...` | `56f1c62105b7087f0cac13162f9fd54b1690986e` |
+| Datahike | `256b714...` | `56f1c62105b7` |
 | Konserve | `737697d...` | `07377c27c8288b7484f0aa7b82e8158b415985be` |
-| SCI | `a27e2c0...` | `2db3358cba913b6fbbe49c7b5b34d7ac72715924` |
+| SCI | `a27e2c0...` | `2db3358cba91` |
 | Datastar | `1cef624...` | `bb9ed6fbe78cf5690f5ad23a5faf86407a44982f` |
 
 Lines 35-40 also describe shared-context evaluation and monolithic-schema

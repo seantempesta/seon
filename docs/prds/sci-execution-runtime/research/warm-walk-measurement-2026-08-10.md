@@ -55,9 +55,9 @@ and checkout:
 
 | Dependency | Selected revision | Boundary used |
 |---|---|---|
-| Datahike | `10540578248eaa686c1f88a7fe57644ee4c9f993` | Immutable database values, `db-with`, pull/query evidence, and AVET/EAVT reads. |
-| SCI | `6ee57c9c3e73e5b8224fde851e33a1e2a8e08383` | The live acquired producer context used by `render-call`. |
-| Malli | `80138076960e7820523b4cb932c5b5d1936d4e7f` | Contract-derived producer selection through the acquired schema projection. |
+| Datahike | `10540578248e` | Immutable database values, `db-with`, pull/query evidence, and AVET/EAVT reads. |
+| SCI | `6ee57c9c3e73` | The live acquired producer context used by `render-call`. |
+| Malli | `80138076960e` | Contract-derived producer selection through the acquired schema projection. |
 
 The `datahike` skill still names `56f1c621...` as current. That statement is
 stale; measurement and this report use the verified selected revision above.

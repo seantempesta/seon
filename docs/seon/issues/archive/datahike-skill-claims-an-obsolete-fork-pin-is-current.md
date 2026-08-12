@@ -26,7 +26,7 @@ inviting a fork maintainer to trust that no intervening semantics need review.
   `references/fork-maintenance.md:1-15`.
 - `git submodule status reference-code/datahike` and
   `git -C reference-code/datahike rev-parse HEAD` both resolve to
-  `256b714d97a0e8f952b01a47c693eff2976ccee7`.
+  `256b714d97a0`.
 - `git -C reference-code/datahike log 19f5cdd9..HEAD` includes current Seon
   dependencies such as ordered Konserve filestore batches (`256b714d`), schema
   removal refusal (`b73550bf`), branch-roster serialization (`357ffc87`), and

@@ -26,7 +26,7 @@ It cross-references the two existing inventories:
 
 | Submodule | SHA / tag | Status | Justification |
 |---|---|---|---|
-| `reference-code/sci` | `937d392a008e4f2f246b9ddf9dd816ca99de9d4e` (`v0.2.4-1070-g937d392`, our fork `seantempesta/sci`) | already present | sci IS our engine; `test/sci/` is the single most relevant corpus and the only place sci's own promises are pinned |
+| `reference-code/sci` | `937d392a008e` (`v0.2.4-1070-g937d392`, our fork `seantempesta/sci`) | already present | sci IS our engine; `test/sci/` is the single most relevant corpus and the only place sci's own promises are pinned |
 | `reference-code/clojure` | `b18d3adc5b5f4d5d0ccea966203fb67a614d5c3d` (master, shallow) | already present | the ground truth for print faces, `doc`/`source`/`apropos`/`dir`, `ex-triage`/`ex-str`, and reader tags. The shallow clone **does** carry `test/`, which the jar never does |
 | `reference-code/babashka` | `0fb349c414e717800be775ba9cb77c95a9eb700d` (`v1.12.218`) | already present | the largest sci-based REPL-parity effort in existence; `test/babashka/impl/repl_test.clj` is a runnable REPL-LOOP corpus (`*1`/`*2`/`*3`, `*e`, `pst`, stderr routing) that no other suite provides |
 | `reference-code/edamame` | `38e627467daa3f6f1e5a8eb6421f702d2a940b7f` (`v1.6.42`) | **ADDED** | sci's reader is edamame, not tools.reader (`reference-code/sci/deps.edn:2` pins `borkdude/edamame 1.6.42`; our tree resolves the identical 1.6.42). `seon.sci.reader` wraps it, so D6/S4 is an edamame `:readers` semantics question and we had **no source** for it. Reading it falsified S4's prescription in one line (see G1 below) |

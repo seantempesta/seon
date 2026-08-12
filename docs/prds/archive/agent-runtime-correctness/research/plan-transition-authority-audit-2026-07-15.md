@@ -27,9 +27,9 @@ enum, second queue, parallel plan ledger, or automatic retry of a stale intent.
 
 | Dependency or mechanism | Selected identity | Exact source and first-party use |
 |---|---|---|
-| Datahike | maintained fork `417649383c65e13f15ea41d394fb1ed742477965` in root `:writer` and `:cljs` aliases | `reference-code/datahike/src/datahike/db/transaction.cljc` implements CAS and entity retraction; `src/seon/db.cljs` exposes `cas-assert`; `test/seon/db/transact_precondition_test.cljs` proves a stale complete coordinate writes nothing |
-| Malli | `0.20.0`, release commit `4c054bd7d042e70d60b83b9f07fb765bc103037f` | the tagged `src/malli/core.cljc` map schema is open unless explicitly closed and represents absence with optional entries; Seon plan request/result schemas are in `src/my/plan.cljs` |
-| ClojureScript | `1.12.145`, tag `r1.12.145`, commit `bd23d9a2475d822ea8dfd65deaa6732428b9ed25` | self-hosted plan functions execute through the existing pod evaluator; async verifier behavior must use the one Promise-aware function-schema owner rather than a plan-specific evaluator |
+| Datahike | maintained fork `417649383c65` in root `:writer` and `:cljs` aliases | `reference-code/datahike/src/datahike/db/transaction.cljc` implements CAS and entity retraction; `src/seon/db.cljs` exposes `cas-assert`; `test/seon/db/transact_precondition_test.cljs` proves a stale complete coordinate writes nothing |
+| Malli | `0.20.0`, release commit `4c054bd7d042` | the tagged `src/malli/core.cljc` map schema is open unless explicitly closed and represents absence with optional entries; Seon plan request/result schemas are in `src/my/plan.cljs` |
+| ClojureScript | `1.12.145`, tag `r1.12.145`, commit `bd23d9a2475d` | self-hosted plan functions execute through the existing pod evaluator; async verifier behavior must use the one Promise-aware function-schema owner rather than a plan-specific evaluator |
 | Database coordinate | Seon `::seon.db.coordinate/coordinate` | `src/seon/db/coordinate.cljc`, `seon.db/head-coordinate`, and `:seon.db/expected-coordinate` in `src/seon/db/internal.cljs` define the existing stale-intent fence |
 | Plan graph | `my.plan` and `my.plan.internal` | `src/my/plan.cljs`, `src/my/plan/internal.cljs`, and `test/my/plan_test.cljs` own step schemas, derived readiness, document/reconcile, escalation, and planner relations |
 | Runtime identity injection | `seon.instrument` | `src/seon/instrument.cljc` injects a missing `:seon.agent/id`, but an explicit caller value wins; it is convenience context, not an authorization credential |

@@ -31,7 +31,7 @@ current runtime-authored namespace sections through `cljs.js`.
 | Dependency or mechanism | Selected source | Required behavior |
 |---|---|---|
 | Seon checkout | `ab98d70f28705386caa82ae7c4eb25b1e74a0299` plus the current shared execution changes | `index-core!`, `index-schemas`, the exact core-program delta, database ensure, and child namespace loading |
-| Maintained Datahike | `reference-code/datahike` at `a464cd887458d2572414a6ea951c477b0981fdae` | `database-exists?`, `create-database :initial-tx`, one serialized writer, identity upsert, component retraction, immutable database values |
+| Maintained Datahike | `reference-code/datahike` at `a464cd887458` | `database-exists?`, `create-database :initial-tx`, one serialized writer, identity upsert, component retraction, immutable database values |
 | ClojureScript | `reference-code/clojurescript` at `946d75f3483c0c8e784e6668bff2c71a25619a77` | `cljs.js/eval-str`, dependency analysis, recursive load, cycle detection, and load-once |
 | Program graph | `:seon.ns/name`, `:seon.fn/sym`, `:seon.schema/key`, `:seon.test/sym` | Existing identity attributes and refs remain the model; no program kind, version row, or parallel registry |
 | Provenance | transaction refs `:seon.db/user` and `:seon.db/process` | Boot-owned declarations are managed by current source-datom provenance; runtime-authored facts remain ordinary current database facts |

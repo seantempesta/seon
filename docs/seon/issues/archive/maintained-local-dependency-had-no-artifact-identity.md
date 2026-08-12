@@ -20,7 +20,7 @@ had a stronger exact Git identity.
 The operator rejected `org.replikativ/datahike` in the writer `:replace-deps`
 because its coordinate was `{:local/root "reference-code/datahike"}`. The
 selected repository was clean at
-`a464cd887458d2572414a6ea951c477b0981fdae`, with origin
+`a464cd887458`, with origin
 `git@github.com:seantempesta/datahike.git`.
 
 ## Owner

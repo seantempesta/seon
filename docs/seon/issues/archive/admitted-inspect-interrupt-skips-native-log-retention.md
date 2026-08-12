@@ -18,7 +18,7 @@ directory.
 
 - Inspect cancellation authority is
   `reference-code/inspect-ai/tests/test_cancellation_logging.py` at pinned SHA
-  `05322696a0f784ec399ef6abbafd3d2a250ea9cc`.
+  `05322696a0f7`.
 - Public `inspect_ai.log.list_eval_logs` identifies published native artifacts;
   Inspect's recorder owns their partial/cancelled contents.
 - `seon_inspect.catalog._eval_admitted_task` owns admitted execution and

@@ -18,7 +18,7 @@ selected `versioning.cljc` branch implementation.
 
 The dependency ledger is:
 
-- Datahike `10540578248eaa686c1f88a7fe57644ee4c9f993`, especially
+- Datahike `10540578248e`, especially
   `reference-code/datahike/src/datahike/versioning.cljc`'s copy-on-write
   `branch!`;
 - the existing clone/reidentify fixture in `test/seon/test_support.clj` and

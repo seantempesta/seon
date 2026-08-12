@@ -73,7 +73,7 @@ diagnosing JVM transport state.
 | cluster JVM transport | U6b implementation commit `200e847e9`; current `ai/http.clj` owning history includes descriptor-row change `e88057afd915cea876f04480b76806e3c83f4592` | One process-shared JDK client; call-time credential lookup; new request per call |
 | OpenAI Node SDK | `6.42.0`; `reference-code/openai-node` at tag `v6.42.0`, SHA `6f849f4ff24f70167bf82d37c8c83e3f8b1c5472`; `bun.lock:236` selects the same release | The actual native leaf used by the recorded pod run-holding process |
 | OpenJDK | running `26.0.1` | `java.net.http` implementation used only by the successful fresh JVM falsifier and by a future host-PID run-holding process proof |
-| SCI | `reference-code/sci` at `8fac6e88f32d53a5fd82ebe80640881e317b84fd` | Included because the cluster JVM shares the host process and virtual-thread driver, but SCI is not on the LLM HTTP call itself |
+| SCI | `reference-code/sci` at `8fac6e88f32d` | Included because the cluster JVM shares the host process and virtual-thread driver, but SCI is not on the LLM HTTP call itself |
 | Accepted LLM leaf design | [[llm-http-io-design-2026-07-23]] | Section 6 states the exact L4(b) gate: kill the pod before the LLM phase, then prove the host claims and calls through `java.net.http` |
 | U9 deletion design | [[u9-deletion-plan-2026-07-23]] | Its L9 inventory explicitly says the pod remains the interim LLM run-holding process while the cluster JVM also has an LLM leaf |
 

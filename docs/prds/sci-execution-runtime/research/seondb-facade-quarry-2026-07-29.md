@@ -90,7 +90,7 @@ edited.
 
 | dependency or Seon mechanism | selected revision | source read |
 |---|---|---|
-| Datahike | `9a7a9ef10a954c32075e60d929f9101a9ac8abd9` | `reference-code/datahike/src/datahike/api/specification.cljc:440-771`, `query.cljc:115-170,2480-2520,2880-2960`, `pull_api.cljc:420-465` |
+| Datahike | `9a7a9ef10a95` | `reference-code/datahike/src/datahike/api/specification.cljc:440-771`, `query.cljc:115-170,2480-2520,2880-2960`, `pull_api.cljc:420-465` |
 | Datahike query evidence | same revision | `q-with-evidence`, `query-dependency-plan`, `dependency-plan-attributes` |
 | Datahike pull evidence | same revision | `pull-dependency-plan`, `pull-with-evidence`, `pull-many-with-evidence` |
 | Datahike lazy entity | same revision | `impl/entity.cljc:17-39,53-184,205-218` |

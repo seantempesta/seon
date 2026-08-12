@@ -44,7 +44,7 @@ hard arbitrary-allocation residual remains owned by
 
 | Dependency or owner | Selected identity | Exact source read | First-party consumer/evidence |
 |---|---|---|---|
-| Maintained Datahike | `417649383c65e13f15ea41d394fb1ed742477965`, selected by both root `:writer` and `:cljs` aliases; local test-only descendant `eb3e2239` adds proof without changing implementation source | `reference-code/datahike/src/datahike/resource.cljc`, `query.cljc`, `query/execute.cljc`, and `pull_api.cljc` | `src/seon/db.cljs`; Datahike query, pull, and weighted-LRU tests |
+| Maintained Datahike | `417649383c65`, selected by both root `:writer` and `:cljs` aliases; local test-only descendant `eb3e2239` adds proof without changing implementation source | `reference-code/datahike/src/datahike/resource.cljc`, `query.cljc`, `query/execute.cljc`, and `pull_api.cljc` | `src/seon/db.cljs`; Datahike query, pull, and weighted-LRU tests |
 | ClojureScript self-host/runtime | `1.12.145` | `reference-code/clojurescript/src/main/cljs/cljs/js.cljs` and async/compiler sources named by the `clojurescript` skill | `src/seon/eval.cljs`; eval memory/result tests |
 | Seon read boundary | current branch | `src/seon/db.cljs` and `src/seon/db/internal.cljs` | `test/seon/db_test.cljs`, `test/seon/db/read_observer_test.cljs` |
 | Seon retained-value owner | current branch | `src/seon/eval.cljs` and the shared opaque-value predicate in `src/seon/render/value.cljs` | `test/seon/eval/memory_safety_test.cljs`, `result_var_test.cljs`, `record_eval_tee_test.cljs`, and transcript tests |

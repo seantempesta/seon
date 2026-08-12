@@ -45,7 +45,7 @@ commit maximum.
 
 | Owner | Selected source | Exact dependency fact |
 |---|---|---|
-| Datahike | `reference-code/datahike` at `a53158582dd2d8ba12e8bfc0843125d246b573c6` | `commit-as-db`, `as-of`, `history`, native index access, commit parents, and materialized-value release are the selected primitives. |
+| Datahike | `reference-code/datahike` at `a53158582dd2` | `commit-as-db`, `as-of`, `history`, native index access, commit parents, and materialized-value release are the selected primitives. |
 | Datahike immutable values | `src/datahike/db.cljc:319-407,515-701` | Raw `DB` owns exact max transaction and cache identity. `HistoricalDB`, `AsOfDB`, and `SinceDB` are wrappers over an origin value; wrappers report the origin's max transaction. |
 | Datahike temporal filtering | `src/datahike/db.cljc:142-152,567-631` | Numeric `as-of` is inclusive. A future transaction is not rejected by Datahike; it simply produces the head state. Seon must enforce the containing range. |
 | Datahike versioning | `src/datahike/versioning.cljc:403-443` | `commit-as-db` loads any retained commit UUID. It preserves attached cache ownership but does not prove that the commit is reachable from the caller's branch. |

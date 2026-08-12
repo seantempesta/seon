@@ -31,8 +31,8 @@ changes documentation only.
 
 | Dependency or mechanism | Selected identity | Source and constraint |
 |---|---|---|
-| ClojureScript self-host | `1.12.145`, official tag `r1.12.145`, commit `bd23d9a2475d822ea8dfd65deaa6732428b9ed25` | `reference-code/clojurescript/src/main/cljs/cljs/js.cljs` plus `src/seon/eval.cljs`: analyzer and runtime state are process-local. Only a parent-accepted candidate may become durable program truth. |
-| Datahike | maintained commit `417649383c65e13f15ea41d394fb1ed742477965` | `reference-code/datahike/src/datahike/db.cljc`, `transactor.clj`, and `src/seon/db.cljs`: use one `seon.db/transact!`, `db/cas-assert`, and complete expected coordinates. Do not call Datahike directly. |
+| ClojureScript self-host | `1.12.145`, official tag `r1.12.145`, commit `bd23d9a2475d` | `reference-code/clojurescript/src/main/cljs/cljs/js.cljs` plus `src/seon/eval.cljs`: analyzer and runtime state are process-local. Only a parent-accepted candidate may become durable program truth. |
+| Datahike | maintained commit `417649383c65` | `reference-code/datahike/src/datahike/db.cljc`, `transactor.clj`, and `src/seon/db.cljs`: use one `seon.db/transact!`, `db/cas-assert`, and complete expected coordinates. Do not call Datahike directly. |
 | Node child process | `v26.4.0`, release commit `2022edf3e32ce28ee08b17f8566243a090dacd95` | Official `child_process` and permission source: retain the `ChildProcess` handle, remove listeners once, and wait for `close`. A PID or request-supplied token is not authority. |
 | Pod eval owner | `src/seon/eval.cljs` | `eval-batch!`, `eval-form-entry!`, and `record-eval!` are the one execution and evidence path. Split their phases in place; do not route isolated eval through `seon.worker-eval`. |
 | Turn and provider owner | `src/seon/agent/turn.cljs` | `open-turn!` creates the running turn; `call-llm!` is the sole retry owner; `ask-and-eval-reply!` owns the committed reply-to-eval edge. |

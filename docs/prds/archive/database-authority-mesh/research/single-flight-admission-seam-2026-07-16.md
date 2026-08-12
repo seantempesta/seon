@@ -53,7 +53,7 @@ cache/resource evidence, and error values.
 ## Dependency ledger
 
 The audit uses the exact maintained Datahike commit
-`d9765276cd8d0778f39e93046c2d59b8c2fa8ff2` and these owners:
+`d9765276cd8d` and these owners:
 
 - `reference-code/datahike/src/datahike/query.cljc` — normalization,
   completed-cache identity, cache recheck, query execution, evidence, and

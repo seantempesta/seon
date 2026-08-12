@@ -40,7 +40,7 @@ integrator must rule the map-tail choice before implementing map `offset > 0`.
 | Strict path codec | [[value-route-path-codec-boundary-2026-07-20]] (`c932c9e1`) | Canonical EDN vector; nil, boolean, identity-stable finite non-negative-zero number, string, keyword, or symbol only; strict EOF and no tag readers. This later ruling supersedes the authorization report's illustrative UUID allowance. |
 | Configured budgets | [[value-drill-budget-config-boundary-2026-07-20]] (`3d5943db`) and [[value-drill-cap-default-ruling-2026-07-20]] (`38f24f39`) | 32 segments, 4096 raw encoded path bytes, `offset + page-size <= 1024`, and at most one additional omission sentinel. |
 | Execution boundary | [[execution-child-value-sampling-boundary-2026-07-20]] | Closed correlated frames carry only the request/result schemas below and eager ordinary Transit data. The child repeats admission before live lookup. |
-| Malli 0.20.0 | `reference-code/malli/src/malli/core.cljc:1223-1310,2635-2641` at `80138076960e7820523b4cb932c5b5d1936d4e7f` | Closed maps and registered predicates express the concrete boundary without `:any`, `[:maybe ...]`, or bare keys. |
+| Malli 0.20.0 | `reference-code/malli/src/malli/core.cljc:1223-1310,2635-2641` at `80138076960e` | Closed maps and registered predicates express the concrete boundary without `:any`, `[:maybe ...]`, or bare keys. |
 | Orchard | `reference-code/orchard/src/orchard/inspect.clj:44,96-141` at `c462a25d97988f1af51e8181265c43ec9b7d3d6f` | `drop` plus `take (inc page-size)` proves truthful sequence paging, but supplies neither a total-offset ceiling nor insertion-independent bounded map pagination. |
 
 ## One owner and one normalization contract

@@ -70,8 +70,8 @@ probe has an `--expect-fixed` mode that exits nonzero today.
 |---|---|---|
 | Seon tree | `eccffa01db7eb67b9e7d0c895f264b8b26b1ba83`; scheduling sources unchanged from probe-start `05db9d8e839dc18223ce383176f9ebe642a7d43c` | `src/seon/flow.clj`, `src/seon/sci/reader.cljc`, `src/seon/sci/eval.clj` |
 | core.async Flow | `1.10.874-alpha3`; submodule `dc35f3e0d7bc2eef502e77982f48641f025c8051` | `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj`, `flow/impl.clj`, `impl/dispatch.clj` |
-| SCI | local root; submodule `8fac6e88f32d53a5fd82ebe80640881e317b84fd` | `reference-code/sci/src/sci/core.cljc`, `sci/interrupt.cljc`; exercised through Seon's reader/evaluator |
-| Datahike | local root; submodule `9a7a9ef10a954c32075e60d929f9101a9ac8abd9` | present on the selected `:dev` classpath; this probe performs no database work |
+| SCI | local root; submodule `8fac6e88f32d` | `reference-code/sci/src/sci/core.cljc`, `sci/interrupt.cljc`; exercised through Seon's reader/evaluator |
+| Datahike | local root; submodule `9a7a9ef10a95` | present on the selected `:dev` classpath; this probe performs no database work |
 | Clojure/JVM | Clojure `1.12.5`; OpenJDK `26.0.1` | `deps.edn`; live `clojure -M:dev` processes |
 | Existing acceptance idiom | current tree | `test/seon/flow_test.clj` production-launcher wedge and fixed-buffer cases; `test/seon/sci/eval_test.clj` guarded-eval cases |
 

@@ -37,7 +37,7 @@ that a complete page rerender is the dominant remaining cost.
 
 | Owner | Selected source | Contract used |
 |---|---|---|
-| Maintained Datahike | `reference-code/datahike` based on `4c55791be1fb8bb8d9332f21c576f5c20b85b760`; first dependency fix `b9a487f6` | parsed query and pull forms, exact immutable database identities, result cache, single-flight, committed reports |
+| Maintained Datahike | `reference-code/datahike` based on `4c55791be1fb`; first dependency fix `b9a487f6` | parsed query and pull forms, exact immutable database identities, result cache, single-flight, committed reports |
 | Datalog parser | `reference-code/datalog-parser` at `08a32d8f2facde9986e257e3df2807104402bf59` (release `0.2.37`) | typed query clauses, database source bindings, and recursive canonical PullSpec data |
 | Datastar | `reference-code/datastar` at `bb9ed6fbe78cf5690f5ad23a5faf86407a44982f` | stable-id outer morph, streaming fetch, request cancellation and retry |
 | Datastar Clojure | `reference-code/datastar-clojure` at `1cef624e9e59a2ea79ffe2f65df2e7b06f8198d2` | canonical `datastar-patch-elements` SSE framing |

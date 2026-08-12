@@ -8,7 +8,7 @@ tags: [research, config, database, runtime, acme]
 
 ## Dependency ledger
 
-- Aero at pinned submodule SHA `c47a10fa3830d3bcf6e4545a75cdbb1fe8d38d5d`:
+- Aero at pinned submodule SHA `c47a10fa3830`:
   `reference-code/aero/src/aero/core.cljc` owns manifest reading, tag dispatch,
   and relative include resolution. `seon.config/read-config-file` is Seon's one
   configured reader seam.

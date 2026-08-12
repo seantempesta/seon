@@ -77,7 +77,7 @@ This extends, and does not replace,
 
 | Dependency or mechanism | Selected source | Grounded behavior |
 |---|---|---|
-| Malli | `metosin/malli 0.20.0`; vendored commit `80138076960e7820523b4cb932c5b5d1936d4e7f` | Generator selection, recursive generation, function checking, and instrumentation in `reference-code/malli/src/malli/{generator,core}.cljc` |
+| Malli | `metosin/malli 0.20.0`; vendored commit `80138076960e` | Generator selection, recursive generation, function checking, and instrumentation in `reference-code/malli/src/malli/{generator,core}.cljc` |
 | test.check | `org.clojure/test.check 1.1.1` | Generators and `quick-check`; selected by Malli in `reference-code/malli/deps.edn:5` |
 | Canonical schema registration | `seon.schema/register!` | EDN-round-trippable forms collected and later activated as one database-derived projection; `src/seon/schema.cljc:739-813` |
 | Predicate binding | `seon.schema/register-core-predicate!` | Durable forms retain qualified symbols; the process-local cache supplies admitted callables during compilation; `src/seon/schema.cljc:310-355` |

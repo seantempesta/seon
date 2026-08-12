@@ -68,7 +68,7 @@ behavior.
 
 | Mechanism | Selected revision | Maintained source | Seon use |
 |---|---|---|---|
-| SCI | `8fac6e88f32d53a5fd82ebe80640881e317b84fd` | `reference-code/sci/src/sci/core.cljc:352-400`, `reference-code/sci/src/sci/impl/parser.cljc:44-51,142-190` | `sci/source-reader` and `sci/parse-next+string` are the surviving read mechanism |
+| SCI | `8fac6e88f32d` | `reference-code/sci/src/sci/core.cljc:352-400`, `reference-code/sci/src/sci/impl/parser.cljc:44-51,142-190` | `sci/source-reader` and `sci/parse-next+string` are the surviving read mechanism |
 | Edamame | `1.6.42`, selected by SCI | SCI parser dependency above | Clojure/CLJS reader conditionals, location data, tags, and SCI parse failures |
 | rewrite-clj | `60782e501aaf312cb90c9ff0bee05d5da5125563` | `reference-code/rewrite-clj/src/rewrite_clj/parser.cljc:17-42` | Old parser's lossless node source and whitespace-preserving traversal |
 

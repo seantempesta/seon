@@ -20,8 +20,8 @@ probes were isolated Bun processes and a temporary native Unix socket under
 
 ## Dependency ledger
 
-- Seon source: `918cfe12eb0fc30643e26d28b5925d5c80692ad6`.
-- Bun source: `be77b652884b16a103cfaa4af3c1102f72f2dcd3`;
+- Seon source: `918cfe12eb0f`.
+- Bun source: `be77b652884b`;
   executable Bun 1.3.14, macOS arm64.
 - Datahike is the maintained source in `reference-code/datahike`; its exact
   repository checkout is part of Seon's root repository rather than a Git

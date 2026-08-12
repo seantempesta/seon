@@ -62,7 +62,7 @@ The following authorities were read end to end before attribution:
 
 | Boundary | Selected source | First-party use |
 |---|---|---|
-| Datahike serialized writer | `10540578248eaa686c1f88a7fe57644ee4c9f993`; `reference-code/datahike/src/datahike/writer.cljc:80-190,393-420` | `src/seon/fn.clj:1276-1380`; every extra program phase is another complete writer transaction |
+| Datahike serialized writer | `10540578248e`; `reference-code/datahike/src/datahike/writer.cljc:80-190,393-420` | `src/seon/fn.clj:1276-1380`; every extra program phase is another complete writer transaction |
 | Datahike branches | same pin; `reference-code/datahike/src/datahike/versioning.cljc:212-330` | `test/seon/test_support.clj:320-349`; production source-base target in the test-infrastructure specification |
 | SCI copy-on-write fork | `6ee57c9c3e73e5b8224fde851e33a1e2a8e08383` | `src/seon/sci/eval.clj:180-230,1505-1545`; owner-ruled `start-fork!` target |
 | `clojure.test` reporting | `b18d3adc5b5f4d5d0ccea966203fb67a614d5c3d` | `src/seon/test/runner.clj:150-185`; only namespace and Var boundaries currently advance suite progress |

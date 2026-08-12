@@ -31,7 +31,7 @@ model experiment through the maintained Inspect AI path?
   source, static target, and immutable model-server identity at both ends and
   retains the finalized `.eval` artifact.
 - The maintained database dependencies remain Datahike
-  `9ada755087228e10cfb179fa5779ce227a6ed220`, Konserve
+  `9ada75508722`, Konserve
   `b5c99bc02a7175652a610324215288b78551801f`, and Proximum
   `9846d3e79e1aee48474bc876d3d563d7137209c6`.
 

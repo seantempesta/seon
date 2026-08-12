@@ -42,7 +42,7 @@ The narrow result is:
 
 | Dependency or mechanism | Selected revision | Evidence and role |
 |---|---:|---|
-| clj-kondo | `v2026.07.24`, `794a508d53df319bfb2f4db666315de6a3e56fff` | `deps.edn:17-21`; vendored `reference-code/clj-kondo`. Static findings, namespace/var analysis, dependency caches, hook configuration. |
+| clj-kondo | `v2026.07.24`, `794a508d53df` | `deps.edn:17-21`; vendored `reference-code/clj-kondo`. Static findings, namespace/var analysis, dependency caches, hook configuration. |
 | clj-kondo JVM API | same | `reference-code/clj-kondo/src/clj_kondo/core.clj:67-106`. `run!` accepts paths/classpaths, stdin, filename, cache, config, and parallel options and returns findings, summary, config, and optional analysis. |
 | clj-kondo cache | same | `reference-code/clj-kondo/src/clj_kondo/impl/cache.clj:16-36,65-79,83-144,210-215`. Per-namespace Transit cache, built-in fallback, process/thread locking, required-namespace loading. |
 | clj-kondo analysis | same | `reference-code/clj-kondo/analysis/README.md:14-60,77-142`. Namespace/var definitions and usages plus opt-in locals, keywords, protocol, Java, metadata, and call data. |

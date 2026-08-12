@@ -23,10 +23,10 @@ maintain a database replica.
 
 ## Dependency ledger
 
-- Seon source inspected at `ab98d70f28705386caa82ae7c4eb25b1e74a0299`
+- Seon source inspected at `ab98d70f2870`
   plus the shared working-tree changes visible on 2026-07-16.
 - Maintained Datahike source: `reference-code/datahike` at
-  `a464cd887458d2572414a6ea951c477b0981fdae`, selected as a local root in
+  `a464cd887458`, selected as a local root in
   `deps.edn`.
 - ClojureScript source: runtime version `1.12.145`; vendored source inspected at
   `reference-code/clojurescript` commit

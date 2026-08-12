@@ -43,8 +43,8 @@ second feed.
 | Seon architecture | `docs/seon/architecture/architecture.md` and `src/seon/AGENTS.md` | One database facade, one eval owner, one renderer, one lifecycle and one test surface per boundary. |
 | Recovery program | `docs/prds/database-authority-mesh/roadmap.md` and [[system-recovery-graduation-plan-2026-07-16]] | Correctness and deletion precede tuning; no compatibility namespace or generation-suffixed implementation is allowed. |
 | Seon database facade | `src/seon/db.cljs`, current shared worktree | `db`, reads, writes, temporal selection, interests and release are asynchronous operations over ordinary database maps. No local connection public var exists. |
-| Datahike | `reference-code/datahike` at the selected `670cd1ada40462cb5927f0dc687f6b3a95f9e13f` line recorded in the roadmap | The JVM owns connections, indexes, immutable database values, query sharing and serialized writes. |
-| Bun | `reference-code/bun` at `be77b652884b16a103cfaa4af3c1102f72f2dcd3` | The supervised execution child, not an in-pod interpreter, is the isolation boundary. |
+| Datahike | `reference-code/datahike` at the selected `670cd1ada404` line recorded in the roadmap | The JVM owns connections, indexes, immutable database values, query sharing and serialized writes. |
+| Bun | `reference-code/bun` at `be77b652884b` | The supervised execution child, not an in-pod interpreter, is the isolation boundary. |
 | Babashka process | `reference-code/babashka-process` at `16a84e0a` | The operator owns outer process lifecycle; that is distinct from agent run lifecycle. |
 
 The audit searched `src/`, `script/`, `bin/`, and `test/` for namespace and

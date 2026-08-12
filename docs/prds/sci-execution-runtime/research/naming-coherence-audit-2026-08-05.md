@@ -78,9 +78,9 @@ producer and consumer establish a stable reusable shape.
 
 | Boundary | Selected source | Names it establishes | First-party seam |
 |---|---|---|---|
-| Datahike | `reference-code/datahike` at `c15272730e74fb3f8bba91f6361c268492a99ba7` | connection, immutable database value, connection ID, transaction data/report | `seon.db`, `seon.cluster.store`, source publication |
+| Datahike | `reference-code/datahike` at `c15272730e74` | connection, immutable database value, connection ID, transaction data/report | `seon.db`, `seon.cluster.store`, source publication |
 | cron-utils | `reference-code/cron-utils` at `a3d31f7445376b19d1337c604d3d3b7e986302cc` / 9.2.1 | cron expression, `Cron`, `ExecutionTime`, `ZoneId`-based execution | `seon.schedule` |
-| SCI | `reference-code/sci` at `2db3358cba913b6fbbe49c7b5b34d7ac72715924` | `ctx`, `fork`, Vars | `seon.sci.eval`, session-image acquisition |
+| SCI | `reference-code/sci` at `2db3358cba91` | `ctx`, `fork`, Vars | `seon.sci.eval`, session-image acquisition |
 | Clojure | checked-in Clojure source and ordinary language terms | `def`, Var, namespace, source form | program rows and `:seon.code.def` |
 | JDK | `ProcessHandle`, `Files/size`, `ZoneId` used directly by first-party owners | PID/start instant identity, logical file size, zone ID | cluster process and operator records/footprint |
 

@@ -29,7 +29,7 @@ The immediate autonomous path is:
    public `seantempesta/proximum` fork, and pin that full SHA in Seon's
    `:writer` alias;
 3. finish the Datahike integration on selected commit
-   `417649383c65e13f15ea41d394fb1ed742477965`, add `src-secondary` to the Git
+   `417649383c65`, add `src-secondary` to the Git
    dependency's declared `:paths`, push the result to the already-public
    `seantempesta/datahike` repository, and pin that full SHA in both `:writer`
    and `:cljs`; and
@@ -52,8 +52,8 @@ clusters.
 |---|---|---|
 | Proximum production dependency | Maven `org.replikativ/proximum` `0.1.25`; local guarded-force commit `fb6572c…` | `fb6572c…` exists only on local branch `codex/guarded-force-branch`. The only configured remote is `https://github.com/replikativ/proximum.git`; it does not contain that commit. `https://github.com/seantempesta/proximum.git` does not exist. |
 | Proximum upstream | tag `v0.1.26` and commit `c1235796…` | The public tag and Clojars metadata both select `0.1.26`; its `proximum.versioning` still has only create-new `branch!`, not guarded existing-destination force. |
-| Datahike | Git SHA `417649383c65e13f15ea41d394fb1ed742477965` | Publicly reachable at `https://github.com/seantempesta/datahike.git`, branch `sync-upstream`; its `:deps/prep-lib` cold-compiles checked-in generated Java. The guarded secondary integration is still an uncommitted dependency-worktree change at audit time. |
-| Konserve | Git SHA `df6818d43ea3363a808cd051c0d68917f1b987a9` | Already selected directly in both maintained Seon bases; no change is required for this integration. |
+| Datahike | Git SHA `417649383c65` | Publicly reachable at `https://github.com/seantempesta/datahike.git`, branch `sync-upstream`; its `:deps/prep-lib` cold-compiles checked-in generated Java. The guarded secondary integration is still an uncommitted dependency-worktree change at audit time. |
+| Konserve | Git SHA `df6818d43ea3` | Already selected directly in both maintained Seon bases; no change is required for this integration. |
 | Seon writer | `:writer` alias plus `build.clj/writer-uber` | The basis selects Datahike by Git SHA but Proximum by Maven `0.1.25`; it also adds and copies `reference-code/datahike/src-secondary`, making source-secondary availability checkout-local. |
 | Seon CLJS | `:cljs` alias | Datahike and Konserve are exact Git overrides. Proximum is JVM-only and is neither required nor desired in the CLJS/downstream SDK basis. |
 

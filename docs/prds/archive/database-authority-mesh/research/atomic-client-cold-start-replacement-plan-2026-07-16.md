@@ -36,9 +36,9 @@ this report.
 
 | Dependency or mechanism | Selected source | Interior fact used here | Existing Seon owner |
 |---|---|---|---|
-| Maintained Datahike | `reference-code/datahike` at `670cd1ada40462cb5927f0dc687f6b3a95f9e13f` | transactions serialize per database; immutable database values support concurrent reads; the maintained transaction reducer admits schema before later facts in the same request | `seon.db.writer`, `seon.db.datahike.schema` |
-| Bun | `reference-code/bun` at `be77b652884b16a103cfaa4af3c1102f72f2dcd3` | native Unix sockets support persistent multiplexed process sessions and write/drain backpressure; ordinary environment maps remain compatible with the launch descriptor | `seon.db.transport.uds` |
-| shadow-cljs | `reference-code/shadow-cljs` at `4e72595f57618f5c43388ad13d5136cd3bede566` | `:node-script` describes the generated server artifact, not the executable that runs it | current pod build |
+| Maintained Datahike | `reference-code/datahike` at `670cd1ada404` | transactions serialize per database; immutable database values support concurrent reads; the maintained transaction reducer admits schema before later facts in the same request | `seon.db.writer`, `seon.db.datahike.schema` |
+| Bun | `reference-code/bun` at `be77b652884b` | native Unix sockets support persistent multiplexed process sessions and write/drain backpressure; ordinary environment maps remain compatible with the launch descriptor | `seon.db.transport.uds` |
+| shadow-cljs | `reference-code/shadow-cljs` at `4e72595f5761` | `:node-script` describes the generated server artifact, not the executable that runs it | current pod build |
 | ClojureScript | `1.12.145` | `^:async`/`await` contains Promise effects at outer acquisition boundaries while pure inner functions remain ordinary CLJS | existing async Seon functions |
 | Direct database facade | current `src/seon/db.cljs` | one acquired session, explicit coordinates, concurrent in-flight requests, execute-many, transactions, interests, and physical close | `seon.db` |
 | Current lifecycle | root commit `5cfceff0` | the stable client still uses the local replica; incomplete session cut `068c41a3` was reverted | `seon.client` |

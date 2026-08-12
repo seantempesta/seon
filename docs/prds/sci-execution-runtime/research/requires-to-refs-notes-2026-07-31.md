@@ -25,7 +25,7 @@ The implementation landed in path-limited commits:
 
 ## Dependency ledger and shortest falsifier
 
-Datahike is pinned at `9b3be9d59cb07d9c895af280e60eb074bb57a400`.
+Datahike is pinned at `9b3be9d59cb0`.
 Identity upsert reads the evolving transaction database in
 `reference-code/datahike/src/datahike/db/transaction.cljc:640-714`; transaction
 maps are reduced in order at `:1233-1274`; ref values resolve through strict

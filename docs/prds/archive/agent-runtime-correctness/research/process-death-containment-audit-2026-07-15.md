@@ -68,9 +68,9 @@ destructive first-slice measurements below mandatory rather than inferred.
 | Dependency or mechanism | Selected identity | Exact source and consequence |
 |---|---|---|
 | Node.js | live `v26.4.0`, release commit `2022edf3e32ce28ee08b17f8566243a090dacd95`, V8 `14.6.202.34-node.21` | Official tag source `doc/api/worker_threads.md`, `child_process.md`, `cli.md`, and `permissions.md`: worker limits exclude external memory; child abort sends a signal but does not prove exit; old-space is not a total RSS limit; `--permission` denies filesystem, network, child process, workers, addons, WASI, FFI, and inspector by default. Node explicitly calls that model a bypassable seat belt for trusted code, not a malicious-code security boundary. Exact source was located at the official tag because no Node mirror exists under `reference-code/`. |
-| ClojureScript self-host | selected `1.12.145`; official tag `r1.12.145`, commit `bd23d9a2475d822ea8dfd65deaa6732428b9ed25` | `reference-code/clojurescript/src/main/cljs/cljs/js.cljs` and current `seon.eval` establish that analyzer state and definitions persist across `cljs.js/eval-str` calls. Child reconstruction must load committed program source, never replay effects. |
+| ClojureScript self-host | selected `1.12.145`; official tag `r1.12.145`, commit `bd23d9a2475d` | `reference-code/clojurescript/src/main/cljs/cljs/js.cljs` and current `seon.eval` establish that analyzer state and definitions persist across `cljs.js/eval-str` calls. Child reconstruction must load committed program source, never replay effects. |
 | Shadow CLJS | selected `3.4.10`, release commit `d3c04691952aa9ea33f7287ffe9a2b3109c1e510` | The bootstrap/client artifact and analysis cache are immutable child inputs. Artifact identity must match the parent launch descriptor; never select Shadow's latest runtime. |
-| SCI | `0.13.53`, commit `b4917436550c857a18b8f6a4a8b5b26356acc2c4` | Pinned for bounded interpreted surfaces. The application evaluator uses `cljs.js`; SCI interruption cannot contain emitted native JS and is not the process boundary. |
+| SCI | `0.13.53`, commit `b4917436550c` | Pinned for bounded interpreted surfaces. The application evaluator uses `cljs.js`; SCI interruption cannot contain emitted native JS and is not the process boundary. |
 | Piscina | reference commit `23a6c2e94735216c6978679fe7b8ea0b5666683b`; not a selected dependency | `worker_pool/index.ts`, `task_queue/index.ts`, abort tests, and crash-reset tests demonstrate one-task abort listener cleanup, termination of a busy worker, task rejection, and replacement. These are patterns only; adopting a pool would add an unnecessary dependency and still fail external-memory isolation. |
 | Datahike and Seon database | maintained Datahike `417649383c65e13f15ea41d394fb1ed742477965`; one `seon.db` API and JVM writer | The parent holds the frozen database value and sole writer capability. Child reads/writes cross a typed capability pipe and retain expected coordinate plus run/eval fences. No Datahike resource or feed enters the child. |
 | Provider SDKs | OpenAI Node `6.42.0`, Anthropic `0.104.2`; exact source mapped by the provider cancellation audit | One fresh attempt signal remains valid cooperative cancellation. Hard timeout additionally kills and reaps the attempt child; SDK retry stays disabled and `call-llm!` remains the sole retry decision owner. |
@@ -463,7 +463,7 @@ database facts.
   deterministic termination/replacement examples only.
 - Node `v26.4.0` official tag source `doc/api/worker_threads.md`,
   `doc/api/child_process.md`, `doc/api/cli.md`, and `doc/api/permissions.md` at
-  commit `2022edf3e32ce28ee08b17f8566243a090dacd95`.
+  commit `2022edf3e32c`.
 - `src-inspect-ai/src/seon_inspect/swebench_arm.py` — existing Docker
   network-none, internal relay, read-only artifact mount, and memory-limit
   patterns plus the controls still missing for a hard eval child.

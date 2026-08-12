@@ -49,10 +49,10 @@ this report and `docs/seon/issues/**`.
 
 Exact dependency owners used:
 
-- SCI `reference-code/sci@47f6c8b5a55707d44d5d809f54ddb568198a4d2a`.
+- SCI `reference-code/sci@47f6c8b5a557`.
   The observer commit is the current checkout, not an API assumption.
 - Datahike
-  `reference-code/datahike@9b3be9d59cb07d9c895af280e60eb074bb57a400`.
+  `reference-code/datahike@9b3be9d59cb0`.
 - Clojure
   `reference-code/clojure@b18d3adc5b5f4d5d0ccea966203fb67a614d5c3d`.
 - clj-kondo

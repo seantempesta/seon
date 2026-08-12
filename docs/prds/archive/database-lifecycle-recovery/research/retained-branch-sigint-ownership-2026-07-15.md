@@ -21,9 +21,9 @@ destructive branch cleanup.
 |---|---|---|---|
 | Babashka | `v1.12.212` | `bin/seon`, `seon.dev.process` | One JVM shutdown hook runs on OS SIGINT and may perform synchronous cleanup. |
 | `babashka.process` | `v0.6.25`, `16a84e0af0da51b8c84e289970f6b7cc35b35d18` | `reference-code/babashka-process/src/babashka/process.cljc:432-445`; `seon.dev.process/spawn-detached!` | Detached publication remains inside the supervisor's synchronized ownership phase; executor-backed shell helpers are not used from shutdown. |
-| Transit CLJ | `1.0.333`, `12f50e4391208d36f910a39dd947cefabf77dc52` | `reference-code/transit-clj`; `seon.db.transport.uds` | Branch create, ensure, release, and delete preserve exact UUID coordinates over the existing typed UDS protocol. |
-| Datahike | `417649383c65e13f15ea41d394fb1ed742477965` | `reference-code/datahike`; JVM writer native branch owner | The Babashka transition never opens Datahike directly; release/delete stay fenced through the writer's retained source route. |
-| Konserve | `df6818d43ea3363a808cd051c0d68917f1b987a9` | `reference-code/konserve`; shared database path behind the writer | A branch reuses the source physical database and owns no copied directory or second connection authority. |
+| Transit CLJ | `1.0.333`, `12f50e439120` | `reference-code/transit-clj`; `seon.db.transport.uds` | Branch create, ensure, release, and delete preserve exact UUID coordinates over the existing typed UDS protocol. |
+| Datahike | `417649383c65` | `reference-code/datahike`; JVM writer native branch owner | The Babashka transition never opens Datahike directly; release/delete stay fenced through the writer's retained source route. |
+| Konserve | `df6818d43ea3` | `reference-code/konserve`; shared database path behind the writer | A branch reuses the source physical database and owns no copied directory or second connection authority. |
 | Retained lifecycle data | current branch | `seon.dev.branch`, `seon.dev.state/write-edn!` | Exact create intent precedes mutation; created/adopted evidence and the launch descriptor remain the retry authority. |
 | Process inverse | `fbb8c399` | [[ordinary-startup-sigint-ownership-2026-07-15]]; `seon.dev.process/with-startup-ownership` | Shutdown closes acquisition admission, waits through publication, and unwinds only invocation-owned resources in reverse order. |
 

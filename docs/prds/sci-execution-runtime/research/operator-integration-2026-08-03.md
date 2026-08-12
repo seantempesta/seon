@@ -65,7 +65,7 @@ opened. Those are bootstrap/supervision exceptions, not a competing runtime.
 |---|---|---|
 | Integrant | vendored `bcad6bcf35b62d3a32a453dc26b6d3a4d659dc01` (`1.0.1-2-gbcad6bc`) | `reference-code/integrant/src/integrant/core.cljc:182-222,351-548,650-702` |
 | `core.async.flow` | `dc35f3e0d7bc2eef502e77982f48641f025c8051`, published as `1.10.874-alpha3` | `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj`; `flow/impl.clj`; `flow/spi.clj` |
-| Datahike branch and writer lifecycle | maintained fork `0e8601d7f2f68c01070e13a95483bc82be04cabc` | `reference-code/datahike/src/datahike/versioning.cljc`; `writing.cljc`; `writer.cljc` |
+| Datahike branch and writer lifecycle | maintained fork `0e8601d7f2f6` | `reference-code/datahike/src/datahike/versioning.cljc`; `writing.cljc`; `writer.cljc` |
 | Process-root custody | hidden runtime namespace | `resources/seon/operator/runtime.clj:1-28` |
 | Store and lifetime flock | `seon.cluster.store` | `src/seon/cluster/store.clj:183-239,270-351` |
 | Branch lifecycle | `seon.cluster.registry` | `src/seon/cluster/registry.clj:92-111,160-284` |

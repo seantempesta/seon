@@ -38,9 +38,9 @@ Audit head: Seon `474a32092469b3313434f84abe9c27931c83eab9` on 2026-07-18.
 |---|---|---|
 | Database protocol | `seon.db.protocol/current-version` 10 | `src/seon/db/protocol.cljc`; the writer and both Bun entries must bind this same value |
 | Development artifact manifest | `seon.dev.artifact/current-version` 9 | `script/seon/dev/artifact.clj`; useful admission machinery, but its paths and Shadow development closure are not a release contract |
-| Writer | Clojure 1.12.0, Datahike `4c55791be1fb8bb8d9332f21c576f5c20b85b760`, Konserve `b5c99bc02a7175652a610324215288b78551801f`, Proximum `9846d3e79e1aee48474bc876d3d563d7137209c6` | `deps.edn`, `build.clj`, `reference-code/datahike`, `reference-code/konserve`, and `reference-code/proximum`; `target/seon-database-server-standalone.jar` is already the independent writer artifact |
+| Writer | Clojure 1.12.0, Datahike `4c55791be1fb`, Konserve `b5c99bc02a71`, Proximum `9846d3e79e1a` | `deps.edn`, `build.clj`, `reference-code/datahike`, `reference-code/konserve`, and `reference-code/proximum`; `target/seon-database-server-standalone.jar` is already the independent writer artifact |
 | ClojureScript | selected Maven 1.12.145 | `deps.edn`; the existing `reference-code/clojurescript` checkout is 1.12.41 at `946d75f3483c0c8e784e6668bff2c71a25619a77`, so exact selected compiler source is still absent |
-| Shadow CLJS | `4e72595f57618f5c43388ad13d5136cd3bede566` | `reference-code/shadow-cljs`; `shadow.build.node/flush-unoptimized` explains the development entry plus cache-owned runtime tree, while a release build emits the optimized entry |
+| Shadow CLJS | `4e72595f5761` | `reference-code/shadow-cljs`; `shadow.build.node/flush-unoptimized` explains the development entry plus cache-owned runtime tree, while a release build emits the optimized entry |
 | superv.async | `3e6ed755f83634c9e9bbb58707f9446420d32ce9` | exact `reference-code/superv.async` and `deps.edn` override |
 | partial-cps | `1e119b03ea908ad925b98f9ba0a26371c65441e3` | exact `reference-code/partial-cps` and `deps.edn` override |
 | tools.build | Maven 0.10.5 | selected by `deps.edn` and used by `build.clj`; exact source is not mirrored under `reference-code/` |

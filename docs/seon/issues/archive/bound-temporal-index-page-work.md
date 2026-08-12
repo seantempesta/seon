@@ -37,7 +37,7 @@ public page shape or the correctness repair in `f0ee54c2`.
 - `filter-txInstant` consumes all candidates and performs a temporal EAVT
   lookup for every distinct transaction, even when the cut is numeric
   (`reference-code/datahike/src/datahike/db/utils.cljc:277-289`).
-- Datahike `f0ee54c22d70a20de0279996f93aea98c6a9d1df` correctly restores native
+- Datahike `f0ee54c22d70` correctly restores native
   order, but sorts before prefix, cursor, and `limit + 1` processing
   (`reference-code/datahike/src/datahike/index_page.cljc:45-53,130-154`).
 - The complete complexity analysis, PSS/HHT distinction, bounded dependency

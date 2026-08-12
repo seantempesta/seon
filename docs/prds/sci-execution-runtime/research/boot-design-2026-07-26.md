@@ -70,8 +70,8 @@ derived once into release data; the live `ctx` itself cannot be persisted.
 | Runtime plan | working tree, read-only | `plan/README.md` steps 5–6 and L6/L7/L18: one compile-time program producer, mandatory pages, one write connection per store, event-armed lease wakes, reset to current code/pages. |
 | Integrant decision | Seon commit `bd803841971a158fdf810ab443e078cea7f9f822` | Conditional narrow adoption only with the topology merge; one root system plus one nested system per cluster; resolved-value `ig/assert-key` choke point; no custom suspend/resume; flat `refset` reset risk. |
 | Integrant | `bcad6bcf35b62d3a32a453dc26b6d3a4d659dc01` | Refs resolve before `assert-key`; init is dependency ordered; halt is reverse ordered; partial system is carried in build exception data; `init-key` return is the only built-in readiness boundary. |
-| Datahike | `caf526850084a9d5846ccd9ea34251fe411e0d6b` | `create-writer :self` constructs a `LocalWriter` from one connection; connection ID is `[store-id branch]` for `:self`; distinct connections create distinct writers. N distinct stores in one process are legal. |
-| Sci | `8fac6e88f32d53a5fd82ebe80640881e317b84fd` | A `ctx` contains live Vars/functions; `fork` shares existing Vars; `:interrupt-fn` is the one time-limit mechanism. |
+| Datahike | `caf526850084` | `create-writer :self` constructs a `LocalWriter` from one connection; connection ID is `[store-id branch]` for `:self`; distinct connections create distinct writers. N distinct stores in one process are legal. |
+| Sci | `8fac6e88f32d` | A `ctx` contains live Vars/functions; `fork` shares existing Vars; `:interrupt-fn` is the one time-limit mechanism. |
 | JVM render investigation | working tree | `jvm-render-design-2026-07-26.md`: authored work stays in the cluster JVM; web-render consumes ordinary data and an immutable database value; current remote-session implementation is not yet a replica; attach and bounded feed questions remain. |
 
 The current operator graph is watcher → writer and host, then pod, then

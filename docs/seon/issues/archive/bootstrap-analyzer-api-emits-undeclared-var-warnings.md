@@ -40,7 +40,7 @@ The selected dependency is ClojureScript `1.12.145`, but the
 `reference-code/clojurescript` checkout at `946d75f…` identifies itself as
 `1.12.41` in `pom.xml`; the exact selected dependency source is not currently
 mirrored. Exact Shadow `3.4.10` source is present separately at release commit
-`d3c04691952aa9ea33f7287ffe9a2b3109c1e510`; its parent `2911c908…` still
+`d3c04691952a`; its parent `2911c908…` still
 declares `3.4.9`. That ClojureScript checkout's
 `cljs.env/with-compiler-env` macro expands to CLJ-only
 `clojure.lang.Atom`, `IllegalArgumentException`, and `class` forms. The

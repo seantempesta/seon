@@ -28,12 +28,12 @@ planner repair is recorded in
 Verify the root gitlink and checkout before reading or editing the fork:
 
 ```bash
-git ls-tree HEAD reference-code/datahike
+git ls-files -s reference-code/datahike
 git -C reference-code/datahike rev-parse HEAD
 ```
 
 Both currently select
-`10540578248eaa686c1f88a7fe57644ee4c9f993`. Treat `357ffc87` and
+`407e9328851ccce318148188f1d284646eb64132`. Treat `357ffc87` and
 `19f5cdd9` only as repair provenance; neither is the selected revision.
 
 | Mechanism | Selected-revision source | Seon acceptance |

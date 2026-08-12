@@ -157,7 +157,7 @@ Both existing Datahike/Lucene examples were read end to end before this design:
   (Scriptum `0.1.27`, Lucene `10.3.2`) demonstrates transaction-coupled datom
   additions/retractions and deterministic document deletion; and
 - JobTech Taxonomy API commit
-  `19a5868d096e9ad174240c32ed50707b9c86d2eb`, especially
+  `19a5868d096e`, especially
   `src/jobtech_taxonomy_api/db/search.clj` and `database_connection.clj`
   (Lucene `10.4.0`), demonstrates keeping search objects process-local and
   keying derived search state to database identity.
@@ -233,9 +233,9 @@ This audit used:
   published `current-src` artifact at commit ID
   `6a70edff-34b3-5e60-a45b-bba3708d6a74`
   (`data/clusters/build/current-src.edn:1`) for scale measurements;
-- Datahike fork pin `0e8601d7f2f68c01070e13a95483bc82be04cabc`
+- Datahike fork pin `0e8601d7f2f6`
   (`0.8.1732-97-g0e8601d7`), with upstream fetched through
-  `09c3b27914db1a2e7531fbf0822330cf2ace6e1e` (`0.8.1770`);
+  `09c3b27914db` (`0.8.1770`);
 - Scriptum `0.1.27`, the optional version selected at
   `reference-code/datahike/deps.edn:101`;
 - Datahike's primary persistent-set and Konserve index owners at

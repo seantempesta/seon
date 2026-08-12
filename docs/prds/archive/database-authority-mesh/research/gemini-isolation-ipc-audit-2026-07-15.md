@@ -31,9 +31,9 @@ current direct UDS authority cannot solve.
 
 - Attachment audited:
   `/Users/sean/.codex/attachments/7a891eb8-2e9c-4ef2-97ca-d115380898ac/pasted-text.txt`.
-- Seon pins Datahike `9ada755087228e10cfb179fa5779ce227a6ed220`,
-  Konserve `b5c99bc02a7175652a610324215288b78551801f`, Proximum
-  `9846d3e79e1aee48474bc876d3d563d7137209c6`, Transit CLJ 1.0.333,
+- Seon pins Datahike `9ada75508722`,
+  Konserve `b5c99bc02a71`, Proximum
+  `9846d3e79e1a`, Transit CLJ 1.0.333,
   Clojure 1.12.0, and OpenJDK 26 launch flags in `deps.edn:13-54`.
 - Datahike has an upstream-style `:native-cli` alias at
   `reference-code/datahike/deps.edn:133-151`. It builds `datahike.cli`; it is not

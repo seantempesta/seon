@@ -43,7 +43,7 @@ as namespace movement.
   traversal. `seon.agent.ctx` uses an isolated registry so closure derivation
   is a pure function of persisted schema forms, not the mutable Malli registry.
 - The maintained Datahike dependency is pinned at
-  `417649383c65e13f15ea41d394fb1ed742477965` in `deps.edn`. Its `q`, `pull`,
+  `417649383c65` in `deps.edn`. Its `q`, `pull`,
   and entity implementations are in `reference-code/datahike/src/datahike/`.
   The local reference submodule was advanced and dirty under another owner, so
   it was read but not modified or treated as the selected runtime revision.

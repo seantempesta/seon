@@ -93,14 +93,14 @@ depending on executor binding propagation.
 - Clojure `b18d3adc5b5f4d5d0ccea966203fb67a614d5c3d`: `binding` installs and
   restores thread-local Var bindings in `reference-code/clojure/src/clj/
   clojure/core.clj:1953-1985`.
-- core.async `dc35f3e0d7bc2eef502e77982f48641f025c8051`: the work launcher runs
+- core.async `dc35f3e0d7bc`: the work launcher runs
   the submitted function on its worker and returns its synchronous value;
   Seon's boundary is `src/seon/flow.clj:479-521`.
-- SCI `6de15683b7520cc973bc9c136aec7ad3f9b3788c`: `eval-form` directly invokes
+- SCI `6de15683b752`: `eval-form` directly invokes
   the interpreter (`reference-code/sci/src/sci/core.cljc:401-408`), while
   Seon installs compiled first-party Vars directly at
   `src/seon/sci/eval.clj:907-931`.
-- Datahike `256b714d97a0e8f952b01a47c693eff2976ccee7`: both tested connections use
+- Datahike `256b714d97a0`: both tested connections use
   `:schema-flexibility :write`; `seon.cluster.store/transact!` retains the
   dependency's `:transact/schema` rejection as `:seon.db/rejected`.
 

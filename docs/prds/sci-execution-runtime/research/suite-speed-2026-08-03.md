@@ -242,15 +242,15 @@ where a single test explicitly exercises restart/reopen behavior.
 
 ## Dependency ledger and commits
 
-- Datahike `0e8601d7f2f68c01070e13a95483bc82be04cabc`:
+- Datahike `0e8601d7f2f6`:
   `reference-code/datahike`, exercised through `datahike.api` and the existing
   memory-store fixture.
 - clj-kondo `57252e07975710aa579b24f0d1b2b1e04195caa2`:
   `reference-code/clj-kondo`, invoked by `seon.fn/build-manifest` through
   `seon.fn.analyzer`.
-- Malli `80138076960e7820523b4cb932c5b5d1936d4e7f`:
+- Malli `80138076960e`:
   `reference-code/malli`, supplying the admitted schema population.
-- Proximum `9846d3e79e1aee48474bc876d3d563d7137209c6`:
+- Proximum `9846d3e79e1a`:
   `reference-code/proximum`, supplying Datahike's branch and commit graph.
 - First-party owners: `seon.fn/build-manifest`, `seon.fn/index!`,
   `seon.cluster/populate-source!`, `seon.test-support/with-database`, and
