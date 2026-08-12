@@ -16,6 +16,7 @@
            {:seon.db/entity true,
             :seon.render/form seon.render.ns/function-form}
            [:seon.fn/sym :seon.fn/sym]
+           [:seon.test/subject {:optional true} :seon.test/subject]
            [:seon.schema.admission/source
             :seon.schema.admission/source]
            [:seon.fn/ns :seon.fn/ns]

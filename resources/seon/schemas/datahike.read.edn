@@ -1,0 +1,7 @@
+;; Datahike's own read-evidence vocabulary, declared once so entries naming
+;; these keys (receipt read-evidence components, retained render calls) admit
+;; against the shapes seon.db.edn already defines. The keys are the
+;; dependency's names (datahike.query dependency plans and cache revisions);
+;; this file only organizes the registry and never scopes or renames them.
+#:datahike.read{:dependency-plan :seon.db/read-dependency-plan,
+                :revision :seon.db/dependency-revision}
