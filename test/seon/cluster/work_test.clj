@@ -320,6 +320,31 @@
                 (is (seon.schema/valid-candidate-value?
                      :seon.cluster.work/next derived))))))))))
 
+(deftest a-generated-run-resumes-then-requests-one-more-form
+  (with-database
+    (fn [connection]
+      (open-run! connection {:holder process})
+      (db/transact!
+       connection
+       [{:seon.cluster.run.form/id "generated-form-0"
+         :seon.cluster.run.form/run [:seon.cluster.run/id run-id]
+         :seon.cluster.run.form/ordinal 0
+         :seon.cluster.run.form/author :system
+         :seon.cluster.run.form/source "(help)"}])
+      (is (= {:seon.cluster.work/situation :resume
+              :seon.cluster.run/id run-id
+              :seon.cluster.agent/id agent-id
+              :seon.cluster.run.form/ordinal 0}
+             (work/next-agent-work @connection request)))
+      (terminal-receipt! connection 0 "{:introduced 'my.run}")
+      (let [derived (work/next-agent-work @connection request)]
+        (is (= {:seon.cluster.work/situation :generate
+                :seon.cluster.run/id run-id
+                :seon.cluster.agent/id agent-id}
+               derived))
+        (is (seon.schema/valid-candidate-value?
+             :seon.cluster.work/next derived))))))
+
 (deftest comment-only-input-is-recorded-but-never-becomes-eval-work
   (with-database
     (fn [connection]

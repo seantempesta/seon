@@ -8,13 +8,16 @@
   the work, and `next-agent-work` reads them. Boot recovery runs before
   this derivation and closes every interrupted prior-process run.
 
-  FOUR SITUATIONS, TOTAL AND MUTUALLY EXCLUSIVE, `nil` for idle:
+  FIVE SITUATIONS, TOTAL AND MUTUALLY EXCLUSIVE, `nil` for idle:
 
   - `:resume` — an open run this process holds, WITH a plan digest.
     Fold from the first ordinal lacking a terminal receipt. This is the
     ordinary live fold, never a cold continuation after recovery;
   - `:call` — an open run this process holds, WITHOUT a plan digest.
     Derive the prompt, make the ONE paid model call, freeze the plan;
+  - `:generate` — a system-authored generated run whose current prefix has
+    terminal receipts. Derive and append exactly its next dependency-ready
+    form; no model call and no stored whole-episode plan;
   - `:open` — an agent with no open run and either a lint-refused latest
     closed turn below the episode cap or an unanswered trigger. A lint
     refusal reuses that turn's trigger identity so its committed findings
@@ -564,6 +567,29 @@
        :seon.cluster.run/id run-id
        :seon.cluster.agent/id agent-id})))
 
+(defn- generated-run?
+  [db run-id]
+  (some?
+   (db/q '[:find ?form .
+          :in $ ?run-id
+          :where
+          [?run :seon.cluster.run/id ?run-id]
+          [?form :seon.cluster.run.form/run ?run]
+          [?form :seon.cluster.run.form/author :system]]
+        db run-id)))
+
+(defn- resume-or-generate
+  [db run agent-id]
+  (let [run-id (:seon.cluster.run/id run)]
+    (if-let [ordinal (next-ordinal db run-id)]
+      {:seon.cluster.work/situation :resume
+       :seon.cluster.run/id run-id
+       :seon.cluster.agent/id agent-id
+       :seon.cluster.run.form/ordinal ordinal}
+      {:seon.cluster.work/situation :generate
+       :seon.cluster.run/id run-id
+       :seon.cluster.agent/id agent-id})))
+
 (defn- unanswered-background-result?
   [db agent-id]
   (boolean
@@ -602,8 +628,14 @@
       ;; a run this process holds outranks any trigger: finishing what
       ;; is started is what makes the busy fence mean anything
       (and run (= process (:seon.cluster.run/process run)))
-      (if (:seon.cluster.run/plan-digest run)
+      (cond
+        (:seon.cluster.run/plan-digest run)
         (fold-or-close db run agent-id)
+
+        (generated-run? db (:seon.cluster.run/id run))
+        (resume-or-generate db run agent-id)
+
+        :else
         {:seon.cluster.work/situation :call
          :seon.cluster.run/id (:seon.cluster.run/id run)
          :seon.cluster.agent/id agent-id})

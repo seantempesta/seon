@@ -5,6 +5,15 @@
                    :forms
                    [:set #:seon.db{:component true} :seon.db/ref],
                    :id [:string {:min 1, :seon.db/identity true}],
+                   :generated-form-request
+                   [:map
+                    [:seon.cluster.run/id :seon.cluster.run/id]
+                    [:seon.cluster.run/process :seon.cluster.run/process]
+                    [:seon.cluster.run.form/ordinal
+                     :seon.cluster.run.form/ordinal]
+                    [:seon.cluster.run.form/source
+                     :seon.cluster.run.form/source]
+                    [:seon.ns/name :seon.ns/name]],
                    ;; PRESENCE IS THE STATE: a run carries this exactly
                    ;; when a dead process's custody of it was recovered.
                    ;; The receipt-level twin says which FORM was cut; a
@@ -30,6 +39,17 @@
                     [:seon.cluster.run/plan-digest :seon.cluster.run/plan-digest]
                     [:seon.cluster.run/sources :seon.cluster.reply/sources]
                     [:seon.cluster.run/trigger {:optional true} :seon.cluster.run/trigger]],
+                   :generated-run-request
+                   [:map
+                    [:seon.cluster.agent/id :seon.cluster.agent/id]
+                    [:seon.cluster.run/id :seon.cluster.run/id]
+                    [:seon.cluster.run/process :seon.cluster.run/process]
+                    [:seon.cluster.run/opened-at :seon.cluster.run/opened-at]
+                    [:seon.cluster.run/starting-ns :seon.cluster.run/starting-ns]
+                    [:seon.cluster.run.form/source
+                     :seon.cluster.run.form/source]
+                    [:seon.cluster.run/trigger {:optional true}
+                     :seon.cluster.run/trigger]],
                    :run
                    [:map
                     {:seon.db/entity true,

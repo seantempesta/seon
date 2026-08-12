@@ -48,6 +48,12 @@
                        [:seon.cluster.run/id :seon.cluster.run/id]
                        [:seon.cluster.agent/id
                         :seon.cluster.agent/id]]]
+                     [:generate
+                      [:map
+                       [:seon.cluster.work/situation [:= :generate]]
+                       [:seon.cluster.run/id :seon.cluster.run/id]
+                       [:seon.cluster.agent/id
+                        :seon.cluster.agent/id]]]
                      [:open
                       [:map
                        [:seon.cluster.work/situation [:= :open]]
@@ -70,4 +76,4 @@
                      [:seon.cluster.work/settled?
                       :seon.cluster.work/settled?]],
                     :settled? :boolean,
-                    :situation [:enum :resume :call :open :close]}
+                    :situation [:enum :resume :call :generate :open :close]}

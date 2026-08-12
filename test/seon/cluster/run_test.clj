@@ -288,6 +288,72 @@
               "a closed run holds no custody"))
         (is (nil? (agent-pointer connection "teacher")))))))
 
+(deftest generated-system-runs-grow-only-after-their-settled-prefix
+  (with-model-database
+    (fn [connection]
+      (db/transact!
+       connection
+       [{:seon.ns/name 'my.agents.generated}
+        {:seon.cluster.agent/id "generated-agent"
+         :seon.cluster.agent/namespace
+         [:seon.ns/name 'my.agents.generated]}])
+      (is (= ::committed
+             (transact-or-refusal
+              connection
+              (run/generated-run-tx
+               @connection
+               {:seon.cluster.agent/id "generated-agent"
+                ::run/id "generated-run"
+                ::run/process "generated-process"
+                ::run/opened-at t0
+                ::run/starting-ns [:seon.ns/name 'my.agents.generated]
+                :seon.cluster.run.form/source "(help)"}))))
+      (is (= ::run/generated-prefix-unsettled
+             (::run/rule
+              (transact-or-refusal
+               connection
+               (run/append-generated-tx
+                {::run/id "generated-run"
+                 ::run/process "generated-process"
+                 :seon.cluster.run.form/ordinal 1
+                 :seon.cluster.run.form/source "(dir 'my.run)"
+                 :seon.ns/name 'my.agents.generated})))))
+      (db/transact!
+       connection
+       (run/receipt-start-tx
+        {::run/id "generated-run"
+         :seon.cluster.eval/ordinal 0
+         :seon.cluster.eval/at t0}))
+      (db/transact!
+       connection
+       (run/receipt-settle-tx
+        {::run/id "generated-run"
+         :seon.cluster.eval/ordinal 0
+         :seon.cluster.eval/result-edn "{:introduced 'my.run}"}))
+      (is (= ::committed
+             (transact-or-refusal
+              connection
+              (run/append-generated-tx
+               {::run/id "generated-run"
+                ::run/process "generated-process"
+                :seon.cluster.run.form/ordinal 1
+                :seon.cluster.run.form/source "(dir 'my.run)"
+                :seon.ns/name 'my.agents.generated}))))
+      (is (= [[0 :system "(help)"]
+              [1 :system "(dir 'my.run)"]]
+             (db/q {:query
+                    '[:find ?ordinal ?author ?source
+                      :where
+                      [?run :seon.cluster.run/id "generated-run"]
+                      [?form :seon.cluster.run.form/run ?run]
+                      [?form :seon.cluster.run.form/ordinal ?ordinal]
+                      [?form :seon.cluster.run.form/author ?author]
+                      [?form :seon.cluster.run.form/source ?source]]
+                    :args [@connection]
+                    :order-by '[?ordinal :asc]})))
+      (is (nil? (::run/plan-digest
+                 (run-entity connection "generated-run")))))))
+
 (deftest run-records-its-opening-commit-and-starting-namespace
   (with-model-database
     (fn [connection]
