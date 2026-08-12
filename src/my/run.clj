@@ -98,10 +98,10 @@
         (when database
           (db/q '[:find ?test-symbol .
                  :where
-                 [?namespace :seon.ns/name my.run]
-                 [?test :seon.test/ns ?namespace]
                  [?test :seon.test/usage true]
-                 [?test :seon.test/sym ?test-symbol]]
+                 [?test :seon.test/sym ?test-symbol]
+                 [?test :seon.fn/calls ?function]
+                 [?function :seon.fn/sym "my.run/walkthrough"]]
                database))]
     (when (and database (nil? usage-test))
       (throw

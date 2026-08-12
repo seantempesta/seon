@@ -10,8 +10,9 @@
          :note [:string {:min 1}],
          :namespace-unit
          [:map
-         {:seon.render/form my.run/usage-form}
-         [:seon.ns/name [:= my.run]]
+          {:seon.render/ai my.run/render-namespace-ai,
+           :seon.render/form my.run/usage-form}
+          [:seon.ns/name [:= my.run]]
           [:seon.db/db {:optional true} :seon.db/database-value]
           [:seon.ns/doc {:optional true} :seon.ns/doc]],
          :usage-unit

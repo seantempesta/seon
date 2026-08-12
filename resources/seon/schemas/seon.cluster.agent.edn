@@ -103,6 +103,11 @@
                       [:seon.cluster.agent/open-run-ref
                        {:optional true}
                        :seon.cluster.agent/open-run-ref]
+                      [:seon.cluster.run/trigger
+                       {:optional true}
+                       :seon.cluster.run/trigger]
+                      [:seon.cluster.run/turns-remaining
+                       :seon.cluster.run/turns-remaining]
                       [:seon.cluster.agent/protocol-namespaces
                        :seon.cluster.agent/protocol-namespaces]],
                      :no-such-agent :seon.cluster.agent/id

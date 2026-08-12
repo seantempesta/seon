@@ -93,6 +93,7 @@
                      {:optional true}
                      :seon.cluster.run/error]],
                    :trigger [:and #:seon.db{:index true} :seon.db/ref],
+                   :turns-remaining [:int {:min 0}],
                    ;; PRESENCE IS THE STATE: the run loop asserts this in
                    ;; the same transaction that closes the last clean form
                    ;; exactly when no complete/wait disposition was returned.

@@ -66,6 +66,7 @@
   (:require [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as async.protocols]
             [clojure.core.async.flow :as flow]
+            [clojure.string :as str]
             [datahike.api :as d]
             [seon.ai :as ai]
             [seon.bootstrap :as bootstrap]
@@ -111,10 +112,12 @@
       :seon.cluster.agent/cluster [:seon.cluster/name cluster-name]}]))
 
 (defn situation-form
-  "Return the bare root form for an agent or situation unit."
+  "Return the opening question and bare root form for an agent situation."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
   [_unit]
-  '(help))
+  {:seon.repl/comment
+   "; A new run just opened. Why am I awake — do I have messages?"
+   :seon.repl/form '(help)})
 
 (defn render-situation-ai
   "Render the live situation as concise orientation for the agent.
@@ -125,7 +128,9 @@
   presentation duplicate."
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
   [unit]
-  (let [situation
+  (let [doc-line (fn [documented-var]
+                   (first (str/split-lines (:doc (meta documented-var)))))
+        situation
         (if (contains? unit :seon.cluster.agent/unread-message-count)
           unit
           (when (and (:seon.db/db unit) (:seon.cluster.agent/id unit))
@@ -140,7 +145,14 @@
            " unread message"
            (when-not (= 1 (:seon.cluster.agent/unread-message-count situation))
              "s")
-           ". Every run ends with my.run/complete or my.run/wait; "
+           ". " (:seon.cluster.run/turns-remaining situation)
+           " turns remain in this episode."
+           (when-let [trigger (:seon.cluster.run/trigger situation)]
+             (str " This run exists because of " (pr-str trigger) "."))
+           "\nInjected callables: help — " (doc-line #'bootstrap/help)
+           " dir — " (doc-line #'bootstrap/dir)
+           " doc — " (doc-line #'bootstrap/doc)
+           "\nEvery run ends with my.run/complete or my.run/wait; "
            "an undisposed run is unfinished work."))))
 
 (defn render-creation-ai

@@ -44,12 +44,16 @@
                 :seon.cluster.agent/unread-message-count 1
                 :seon.cluster.agent/open-run-ref
                 [:seon.cluster.run/id "situation-run"]
+                :seon.cluster.run/turns-remaining 0
                 :seon.cluster.agent/protocol-namespaces
                 ['my.message 'my.run]}
                situation))
         (is (= '(seon.bootstrap/situation)
                (macroexpand '(seon.bootstrap/help))))
-        (is (= '(help) (agent/situation-form situation)))
+        (is (= {:seon.repl/comment
+                "; A new run just opened. Why am I awake — do I have messages?"
+                :seon.repl/form '(help)}
+               (agent/situation-form situation)))
         (is (not-any? #(contains? stored %)
                       [:seon.cluster.agent/namespace-ref
                        :seon.cluster.agent/unread-message-count
