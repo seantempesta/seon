@@ -6,6 +6,14 @@ tags: [prd, render, agent, runtime]
 
 # The agent interface — owner rulings and plan (2026-08-10)
 
+> **CURRENT AUTHORITY (2026-08-12):** This document preserves the 2026-08-10
+> inputs. The design is now ruled complete through rulings 1–50 in
+> [the self-generating-context PRD](self-generating-context-prd-2026-08-11.md#owner-rulings-1-50),
+> and the executable contract is
+> [the evolving-session implementation PRD](evolving-session-implementation-2026-08-12.md).
+> Its generated gap closure supersedes the bootstrap, injection, fixed-preview,
+> and unresolved-option shapes below.
+
 This document contains ONLY what the owner ruled in the 2026-08-10
 session, each marked verbatim-grounded, plus a plan skeleton and an
 explicit list of open questions. Anything the owner has not ruled is
@@ -57,6 +65,9 @@ in the OPEN QUESTIONS section, not silently assumed.
    namespaces/functions" — the system may INJECT forms into the REPL
    session (not part of the indexed code). Injected-but-honest session
    forms are the accepted mechanism.
+   **SUPERSEDED (2026-08-12):** ruling 32 replaces injection with generated
+   gap closure from `(pull, retained history)`; no injection mechanism,
+   counter, or standing-form roster survives.
 8. **Agent-authored renderers appear on the UI automatically.**
    Owner requirement, proven live the same day: a model-authored
    `:seon.render/ai` producer was selected by contract query with zero
@@ -85,51 +96,13 @@ in the OPEN QUESTIONS section, not silently assumed.
     exercise. An independent critic reviews the PRD against this
     standard before the owner sees it.
 
-## Plan skeleton (sequencing only; content governed by the rulings)
+## Superseded plan and questions
 
-- **Now (running):** the clean full-suite gate; the model-authoring
-  drive observer. Tree frozen until the gate lands.
-- **Phase 1 — prep (only what the target needs):** make the printer
-  total (the unqualified-keys refusal at `render-argument`,
-  `src/seon/render.clj:106-107`, is the found seam; delete the
-  renderer-unavailable substitute face; elision never longer than its
-  value) and stand up the recurring printer STRESS HARNESS (generated
-  values from every registered schema + real database values; every
-  bad face is a grammar fix). Finish the declaration-resolution noise
-  at its last owners. Measure warm-walk cost at unchanged basis (both
-  projections) and make reuse real. Root-cause the suite fat tail
-  (the ~185 s operator tests, the await-process! wedge).
-- **Phase 2 — the transcript walk:** design session with the owner on
-  the unit grammar (see open questions), then build: walk renders the
-  ordered run/form/result facts as form → printed-value units; delete
-  the separate transcript assembly, the schema walls, the comment
-  headers; deep doc + bulk faces tool; the HTML page is the same
-  session rendered with the page profile. Storage verified 2026-08-10:
-  form sources/ordinals and settled results are already facts — this
-  is render-side unification plus deletions.
-- **Phase 3 — prove by drives:** a fresh agent bootstraps on the
-  transcript context; re-drive model authoring on the minimum context
-  vs today's measured baseline; browser re-walk; then the multi-agent
-  preview discussion on proven ground.
-- **Phase 4 — the bad-output catalog** per the owner directive,
-  trimmed to the classes that survive Phases 1–2 structurally.
-
-## OPEN QUESTIONS (nothing here is decided)
-
-1. The unit grammar for the design session: how does an inbound HUMAN
-   message appear in the session (as what form/value)? How does model
-   prose appear (comment grammar is the current convention — does it
-   survive the "no commented weird summaries" rule as INPUT prose
-   while outputs stay pure data)?
-2. Which forms open a fresh agent's session (the current bootstrap
-   forms re-read as the transcript, plus which injected requires)?
-3. What "lightly explained API" looks like concretely (names +
-   arglists + one-liners is the working guess — NOT ruled).
-4. The minimum-context target size: found by experiment (ruled
-   "find the minimum"), no number is ruled.
-5. How much of the bad-output catalog survives after Phases 1–2; which
-   observation facts are actually worth committing (census Option 1
-   was a lane's recommendation, not an owner ruling).
-6. Schema rendering's replacement face (owner: current form "is
-   fucking stupid" — the replacement is a design-session item, not
-   pre-decided here).
+The plan skeleton and six open questions from this 2026-08-10 record are
+closed or superseded by rulings 1–50. There are zero open design choices.
+Ruling 24 replaces authored bootstrap forms with a generated opening; ruling
+32 replaces injection with gap closure; rulings 37 and 39 settle the
+demonstration and root preview; ruling 49 retires `my.plan` unbuilt; and ruling
+50 makes effect replay receipt-backed and old by default. Current ordering
+lives only in [the program plan](README.md), while exact source phases live in
+[the implementation PRD](evolving-session-implementation-2026-08-12.md#phase-ownership-and-dependency-order).
