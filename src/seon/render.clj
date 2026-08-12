@@ -217,9 +217,11 @@
 
 (defn- declared-producer
   [projection request value output]
-  (or (when (= :seon.render/form output)
-        (attribute-producer projection request output))
-      (schema-producer projection value output)))
+  (if (and (= :seon.render/form output)
+           (:seon.render.walk/attribute request))
+    (or (attribute-producer projection request output)
+        'seon.render/render-form)
+    (schema-producer projection value output)))
 
 (defn- producer
   [{ctx :seon.sci.eval/ctx

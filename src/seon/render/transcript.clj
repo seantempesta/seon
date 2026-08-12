@@ -683,9 +683,10 @@
 
 (defn- output-tokens
   [pinned entries elided]
-  (max (tokens/estimate (ai-output pinned entries elided))
-       (tokens/estimate
-        (hiccup/->string (html-output pinned entries elided)))))
+  (max (long (or (tokens/estimate (ai-output pinned entries elided)) 0))
+       (long (or (tokens/estimate
+                  (hiccup/->string (html-output pinned entries elided)))
+                 0))))
 
 (defn- fits?
   [budget pinned entries elided]
@@ -789,6 +790,13 @@
        (if (string? form) form (pr-str form))
        (when (seq printed-value) (str "\n" printed-value))))
 
+(defn- entry-basis
+  [db entry]
+  (reduce (fn [latest datom]
+            (max latest (long (or (:tx datom) 0))))
+          0
+          (db/datoms db :eavt (get-in entry [::entity :db/id]))))
+
 (defn history-entries
   "Return one agent's durable transcript as immutable REPL entries.
 
@@ -828,7 +836,7 @@
                    :eval (receipt-printed-value unit entry))]
              {:seon.render.history/call-id
               [:seon.render.transcript/entry (::kind entry) (::id entry)]
-              :seon.render.history/basis-transaction 0
+              :seon.render.history/basis-transaction (entry-basis db entry)
               :seon.render.history/form form
               :seon.render.history/printed-value printed-value
               :seon.render.history/bytes
@@ -839,7 +847,9 @@
            spent 0
            fitted []]
       (if-let [entry (first remaining)]
-        (let [cost (tokens/estimate (:seon.render.history/bytes entry))]
+        (let [cost (long (or (tokens/estimate
+                              (:seon.render.history/bytes entry))
+                             0))]
           (if (<= (+ spent cost) budget)
             (recur (next remaining) (+ spent cost) (conj fitted entry))
             fitted))

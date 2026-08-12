@@ -8,8 +8,11 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.render :as render]
+            [seon.render.ns :as render.ns]
+            [seon.render.transcript :as transcript]
             [seon.render.walk :as walk]
             [seon.render.web :as web]
+            [seon.schema :as schema]
             [seon.test-support :as support]))
 
 (def ^:private caps (config/result-caps (config/defaults)))
@@ -29,40 +32,70 @@
    (fn [connection]
      (db/transact!
       connection
+      (into []
+            (filter (comp #{:seon.render/form
+                            :seon.render/output
+                            :seon.render/rendered
+                            :seon.render/call-request
+                            :seon.ns/ns
+                            :seon.fn/fn
+                            :seon.schema/schema
+                            :seon.cluster.message/message
+                            :seon.cluster.message/to}
+                          :seon.schema/key))
+            (schema/canonical-schema-rows)))
+     (db/transact!
+      connection
       [{:seon.ns/name 'fixture.history}
        {:seon.cluster.agent/id "history-agent"
         :seon.cluster.agent/namespace [:seon.ns/name 'fixture.history]}
        {:seon.cluster.message/id "history-message"
         :seon.cluster.message/to [:seon.cluster.agent/id "history-agent"]
+        :seon.cluster.message/at (java.util.Date. 1786400000000)
         :seon.cluster.message/content "Read me."}])
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
-           render-one
+           selected
            (fn [value & [attribute]]
-             (render/render-call
+             (#'seon.render/producer
               (cond-> (render-request database ctx value)
-                attribute (assoc :seon.render.walk/attribute attribute))))
+                attribute
+                (assoc :seon.render.walk/attribute attribute))
+              :seon.render/form
+              :seon.render/form))
            namespace-entity
            (db/pull database '[*] [:seon.ns/name 'fixture.history])
            message
            (db/pull database '[*]
                     [:seon.cluster.message/id "history-message"])]
        (testing "shape owners declare ordinary doc/dir/read forms"
+         (is (= 'seon.render.ns/namespace-form
+                (selected namespace-entity)))
          (is (= '(dir (quote fixture.history))
-                (render-one namespace-entity)))
+                (render.ns/namespace-form namespace-entity)))
+         (is (= 'seon.render.transcript/message-form
+                (selected message)))
          (is (= '(my.message/read "history-message")
-                (render-one message))))
+                (transcript/message-form message))))
        (testing "an attribute declaration precedes the landed entity shape"
-         (is (= '(my.message/inbox)
-                (render-one message :seon.cluster.message/to))))
+         (is (= 'seon.render.transcript/inbox-form
+                (selected message :seon.cluster.message/to)))
+         (is (= '(my.message/inbox) (transcript/inbox-form message))))
        (testing "the entity floor uses the projection's declared identity"
          (let [agent-entity (db/pull database '[*]
                                      [:seon.cluster.agent/id "history-agent"])
-               form (render-one agent-entity)]
+               producer (selected agent-entity)
+               form (render/render-form
+                     (render-request database ctx agent-entity))]
+           (is (= 'seon.render/render-form producer))
            (is (= 'db/pull (first form)))
            (is (= [:seon.cluster.agent/id "history-agent"] (last form)))))
        (testing "the attribute floor is a listing query"
-         (let [form (render-one namespace-entity :seon.ns/requires)]
+         (let [request (assoc (render-request database ctx namespace-entity)
+                              :seon.render.walk/attribute :seon.ns/requires)
+               producer (selected namespace-entity :seon.ns/requires)
+               form (render/render-form request)]
+           (is (= 'seon.render/render-form producer))
            (is (= 'db/q (first form)))
            (is (str/includes? (pr-str form) ":seon.ns/requires"))))))))
 
