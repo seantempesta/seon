@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (54)
+## Blocker (55)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -74,6 +74,7 @@ See `README.md` for the convention.
 | [Supply the generated entry's required render output](generated-turn-omits-the-required-render-output.md) | blocker | generate-call-transition lane (held `loop.clj`) |
 | [Return from the generated opening's second live pull](generated-opening-live-pull-does-not-return-after-help.md) | blocker | prefix-drift bootstrap performance diagnosis (held `bootstrap.clj`) |
 | [Arm an agent created after boot](fresh-agent-created-after-boot-was-not-armed.md) | blocker | first-agent supervision transition design (held loop/run owners) |
+| [Explain the 24-second live root pull of 189 members](live-root-pull-of-189-members-takes-24-seconds.md) | blocker | render acquisition performance wave |
 
 ## Friction (141)
 

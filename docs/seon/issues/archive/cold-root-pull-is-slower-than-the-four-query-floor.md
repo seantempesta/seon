@@ -232,3 +232,23 @@ below 1 GiB. It and
 `require-context-rows-persist-namespace-lookup-refs` passed together in three
 independent focused JVM runs. The maintained Datahike regression passed in
 all three configured test platforms: 6 tests, 30 assertions, zero failures.
+
+## 2026-08-12 integration-gate evidence
+
+The complete `bin/test --all` attempt at `12d9dcee8` loaded all 124 test
+namespaces, completed the 71-test platform tier, and advanced 1,176 of 1,178
+selected test rows through their worker `END` event without a recursive pull
+stall, heap saturation, or OOM. In particular,
+`cold-root-pull-records-an-informational-latency-sample` completed in 42 ms,
+the other root-pull regressions completed, and the prompt/render-path tests
+that previously exposed `datalog.parser.pull/parse-pattern` allocation
+collapse returned. The run eventually exited 124 at a distinct agent-test
+worker liveness boundary recorded in
+[[parallel-test-stress-exposes-eleven-isolation-sensitive-tests]]. This issue
+therefore remains resolved: the integration gate did not reproduce its
+selector-parse stall/OOM class.
+
+The keystone lane's separate 24.2-second live-path measurement for a pull of
+189 members is not explained by this gate. The gate did not time that exact
+live request or member cardinality, so the measurement remains an explicit
+open line in [[live-root-pull-of-189-members-takes-24-seconds]].

@@ -131,6 +131,34 @@ defect. Its future generative proof must likewise register interest before
 derivation and await observable render completion; a tuned polling interval
 must never classify a pending derivation as a lost invalidation.
 
+## 2026-08-12 complete-tier recurrence
+
+The integration `bin/test --all` attempt at `12d9dcee8` selected 71 platform
+and 1,107 bulk test rows. The platform tier completed, and 1,176 of the 1,178
+selected rows published worker `END` events. The same two agent properties did
+not return:
+
+- `seon.cluster.agent-test/n-agent-parallel-turns-property` began on `pool-5`
+  at `22:17:10Z`;
+- `seon.cluster.agent-test/wake-routing-conservation-property` began on
+  `pool-9` at `22:17:17Z`.
+
+After the last unrelated result at `22:22:13Z`, the coordinator reached its
+300-second no-progress backstop and exited 124. Its virtual-thread-aware dump
+is retained at
+`tmp/test-runs/run.ZyS5O7/tmp/test-liveness/11878-1786573634108-threads.json`.
+It shows `main` waiting in `run-task-pool!` on a task future and two task-pool
+virtual threads blocked in `worker-rpc!` reading worker protocol responses.
+The diagnostic reported no JVM deadlock and all ten workers alive. No final
+assertion summary exists because those two rows never returned to aggregation.
+
+This is a recurrence at the agent-property fixture owner, not the separately
+known worker-root cleanup race: the cleanup regression itself returned after
+22.913 seconds, and no `DirectoryNotEmptyException` was emitted. The next
+proof must make both property tasks publish terminal task results under the
+nine-worker complete tier; a focused pass or a later terminal transaction
+during teardown does not close this boundary.
+
 ## Owner
 
 The test and production owner of each resource named during triage: clj-kondo
