@@ -10,6 +10,9 @@
             [seon.schema :as schema]
             [seon.schema.form :as schema.form]))
 
+(defn- packaged-forms []
+  ((requiring-resolve 'seon.schema.edn/packaged-forms)))
+
 (defn form-children
   "The non-property children of one Malli form."
   {:malli/schema
@@ -40,7 +43,7 @@
    [:=> [:cat :seon.schema/definition] :seon.schema/definition]}
   [form]
   (resolve-malli-form-in
-   {:seon.schema.projection/forms (schema/registered-schemas)}
+   {:seon.schema.projection/forms (packaged-forms)}
    form))
 
 (def malli-type->datahike-type
@@ -80,7 +83,7 @@
    [:=> [:cat :seon.schema/definition] :seon.schema/definition]}
   [form]
   (resolve-datahike-form-in
-   {:seon.schema.projection/forms (schema/registered-schemas)}
+   {:seon.schema.projection/forms (packaged-forms)}
    form))
 
 (defn- registration-form
@@ -167,7 +170,7 @@
   {:malli/schema [:=> [:cat :seon.schema/definition] :keyword]}
   [form]
   (form->datahike-value-type-in
-   {:seon.schema.projection/forms (schema/registered-schemas)}
+   {:seon.schema.projection/forms (packaged-forms)}
    form))
 
 (defn form->cardinality
@@ -249,7 +252,7 @@
   {:malli/schema [:=> [:cat :keyword] :map]}
   [attr]
   (malli->datahike-attr-in
-   {:seon.schema.projection/forms (schema/registered-schemas)}
+   {:seon.schema.projection/forms (packaged-forms)}
    attr))
 
 (defn malli->datahike-schema-in
@@ -263,7 +266,7 @@
   {:malli/schema [:=> [:cat [:sequential :keyword]] [:vector :map]]}
   [attrs]
   (malli->datahike-schema-in
-   {:seon.schema.projection/forms (schema/registered-schemas)}
+   {:seon.schema.projection/forms (packaged-forms)}
    attrs))
 
 (defn storable-attribute-in?
