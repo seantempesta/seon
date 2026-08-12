@@ -16,13 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (37)
+## Blocker (35)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Make the render value floor total over ordinary unqualified-key maps](render-value-floor-refuses-any-map-with-unqualified-keys.md) | blocker | interface-economy W1 total-floor wave |
-| [Reconcile the context architecture with append-only refresh entries](context-architecture-conflicts-with-append-only-refresh-entries.md) | blocker | self-generating context design (this session) |
-| [Make pull evidence cover automatic component expansion](datahike-pull-evidence-misses-automatic-component-expansion.md) | blocker | root-pull implementation wave |
 | [Publish terminal evidence for every background binary result](background-binary-settlement-does-not-publish-required-event.md) | blocker | background settlement investigation |
 | [Make the first injected core fault observable at the fault committer](fault-committer-misses-the-first-injected-fault.md) | blocker | fault-facts lane |
 | [Rebuild an export without reopening an already-connected branch](export-fallback-reopens-an-already-connected-branch.md) | blocker | suite-speed-tail / export owner |

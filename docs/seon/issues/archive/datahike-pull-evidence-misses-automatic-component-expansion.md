@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, database, datahike, render, caching]
 ---
@@ -41,3 +41,33 @@ pull analyzer.
   dependency revision/replay.
 - Explicit nested selectors remain concrete; reverse refs and recursion retain
   their current canonical attributes.
+
+## Resolution
+
+Resolved in the maintained Datahike fork at
+`407e9328851ccce318148188f1d284646eb64132` and pinned by Seon commit
+`5ad4fed91`.
+
+`pull-with-evidence` and `pull-many-with-evidence` now pass the database value
+into `pull-dependency-plan`. The dependency projection consults Datahike's
+schema semantics and widens a bare forward component ref to `:all`, exactly
+matching the wildcard `PullSpec` that execution installs for automatic
+component expansion. Explicit nested selectors, reverse refs, and recursion
+continue to return their concrete canonical attributes. The database-free
+experimental arity widens bare forward attributes conservatively rather than
+claiming schema precision it does not have.
+
+### Evidence
+
+- Before the fix, a raw JVM REPL over a schema with component ref
+  `:root/child` pulled `:child/value` from the child but returned evidence
+  attributes `#{:root/child}`.
+- After the fix, the identical form returns evidence attributes `:all` while
+  preserving the same expanded result.
+- Datahike's focused pull API gate passed all three configured suites: 78
+  tests, 255 assertions, zero failures.
+- `bin/test seon.db-test seon.datahike-fork-test` passed 25 tests and 219
+  assertions. Its Seon regression changes only the expanded component
+  child's value and proves `read-evidence-current?` returns false.
+- `bin/test --changed test/seon/db_test.clj` passed its platform and derived
+  selections: 95 tests, 535 assertions, zero failures.
