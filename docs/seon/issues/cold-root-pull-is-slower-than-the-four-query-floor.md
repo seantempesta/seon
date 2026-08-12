@@ -51,3 +51,85 @@ recorded W2 fixture, constructed the request before the clock, and timed only
 That is 122.335209 ms (6.8%) faster than the recorded before value, but still
 36.37× the four-query floor. The ambient conversion did not collapse this
 cost; the residue is real and this issue remains open for its own profile.
+
+## 2026-08-12 cold attribution
+
+The W2 acceptance evidence and this issue were read end to end before the
+probe. The dependency boundary is Datahike fork
+`407e9328851ccce318148188f1d284646eb64132` and datalog-parser fork
+`08a32d8f2facde9986e257e3df2807104402bf59`.
+`datahike.pull-api/pull-with-evidence` parses the selector once for the pull
+and again for `pull-dependency-plan`; `seon.db/decode-pull-result` parses it a
+third time. None of those owners memoizes the parsed selector.
+
+The isolated live probe used
+`bin/seon --root tmp/coldpull-root start coldpull`, restarted the JVM before
+each cold sample, constructed the request before the clock, and timed only
+`seon.render.walk/root-acquisition`. The live root sample contained 29
+members:
+
+| Phase | Cold wall time |
+|---|---:|
+| Complete root acquisition | 1,524.701 ms |
+| Selector generation | 1.514 ms |
+| Datahike pull with evidence | 1,102.008 ms |
+| Three selector parses, inclusive across pull/evidence/decode | 1,013.093 ms |
+| Result decode, including its third parse | 414.036 ms |
+| Membership index | 6.245 ms |
+| Stable evidence-result capture | 0.172 ms |
+| Evidence fingerprinting after acquisition | 1.262 ms |
+
+The selector has 669 top-level entries at distance 1. A second cold-process
+sample against an absent lookup removed result size from the equation while
+preserving the same selector. It measured 1,400.948 ms total: 1.679 ms selector
+generation, 1,054.606 ms pull with evidence, 1,073.142 ms across the same three
+selector parses, 342.372 ms decode including the third parse, 1.468 ms
+membership indexing, 0.003 ms stable-result capture, and 3.624 ms evidence
+fingerprinting. Datahike pull execution itself was below 0.280 ms in that
+sample. These nested timings are not additive: the parse total is contained
+inside the pull/evidence and decode totals.
+
+The requested remaining categories are zero inside the measured boundary.
+`root-acquisition` invokes no render function, performs no admission/print,
+and consults no render-candidate index. Those operations begin later in
+`neighborhood`/`history`; they cannot explain a clock surrounding only
+`root-acquisition`. Selector generation is per acquisition today, but its
+1.5–1.7 ms cost also cannot explain the residue. The existing 19.6 ms cold raw
+Datahike pull remains consistent with this attribution: the regression class
+is compilation and repeated traversal of the large concrete selector around
+the index pull, not the index pull itself and not ambient projection.
+
+### Owner ruling required — exactly three options
+
+1. **Compile the concrete pull once at the Datahike owner (recommended).**
+   Add one maintained Datahike pull-plan boundary that parses the EDN selector
+   once, derives its exact dependency plan once, executes from that parsed
+   value, and hands the same parsed value to Seon decoding. Acquire that plan
+   once per immutable schema generation plus distance/caps. Guarantee: the
+   current forward/reverse selector, one-read membership oracle, component
+   evidence, and invalidation semantics remain unchanged. Cost/risk: moderate
+   coordinated changes in the maintained Datahike fork and `seon.db`, with a
+   direct fork regression plus the W2 acceptance proof. Operational trade-off:
+   retain one immutable compiled plan per active schema-generation/profile
+   key. Gives up: nothing in the W2 contract; the dependency API gains an
+   explicit compiled-plan value.
+2. **Make every current traversal DAG-aware within one call.** Preserve the
+   EDN-facing APIs, but identity-memoize shared nested selector parsing and
+   dependency walking in datalog-parser/Datahike, and compile Seon's decoder
+   options once per shared parsed subpattern. Guarantee: no process-lifetime
+   cache and no contract change; cost becomes proportional to unique selector
+   nodes rather than repeated occurrences. Cost/risk: medium-to-high changes
+   across three traversal owners, with careful alias, recursion, and CLJ/CLJS
+   fork proofs. Operational trade-off: invocation-local memo tables and more
+   complicated walkers. Gives up: the present simple tree-walk
+   implementations.
+3. **Return to layered small reads.** Replace the recursive all-ref pull with
+   depth-layered pulls/queries and combine their evidence into the membership
+   result. Guarantee: each read stays small and can return toward the measured
+   four-query floor. Cost/risk: high first-party redesign of membership,
+   component evidence, and invalidation, with more database round trips.
+   Operational trade-off: latency depends on depth and read count. Gives up:
+   W2's exactly-one-read membership oracle, so this option requires explicitly
+   overruling the current acceptance contract.
+
+No production code was changed pending this ruling.
