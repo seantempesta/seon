@@ -133,3 +133,38 @@ the index pull, not the index pull itself and not ambient projection.
    overruling the current acceptance contract.
 
 No production code was changed pending this ruling.
+
+## 2026-08-12 retained changed-run attribution
+
+The 61-minute `bin/test --changed` boundary retained at
+`tmp/test-runs/run.LksNlc` is this acquisition defect under the real parallel
+runner, not an unattributed runner spin:
+
+- `test-run.txt` records shared-base preparation PID 87947 exiting zero after
+  64 seconds, followed by selected-runner PID 88819 running from 01:21:26 to
+  02:22:55 and being reaped with exit 137 only after the launcher received
+  TERM.
+- Pool worker PID 88834 acquired the packaged test projection once. Its
+  retained stderr contains six consecutive thread dumps taken at 02:19:11,
+  after 3,391 seconds of worker lifetime. In all six, the main thread is
+  parked in `seon.cluster.prompt-test` awaiting
+  `seon.render/acquire-context!`.
+- In every dump, carrier `ForkJoinPool-1-worker-4` is mounted on virtual thread
+  187 inside `datalog.parser.pull/parse-pattern`. The complete first-party
+  stack is `datahike.pull-api/pull-with-evidence` → `seon.db/pull` →
+  `seon.render.walk/root-acquisition` → `seon.render.web/acquire-root` → the
+  render proc. The repeated dump therefore identifies the active operation,
+  including its virtual thread; no runner frame is doing compute.
+- The worker heap is saturated in every dump: 16,777,216 KiB committed and
+  16,744,263–16,744,272 KiB used, with 2 of 2,048 G1 regions free. G1 worker
+  threads 0–13 each report about 255–257 seconds of CPU, roughly 59.7 minutes
+  in aggregate, while the mounted parser carrier reports 85.8 seconds. This is
+  an allocation/GC collapse during the recursive selector parse, not a test
+  assertion failure or a cold schema-population fallback; the pool-3 log
+  contains no such fallback warning.
+
+This raises the acceptance boundary: the compiled-plan repair must prove the
+same prompt/render-path acquisition completes with bounded allocation under a
+real changed-path runner worker, in addition to meeting the 46 ms cold latency
+floor. The runner itself is only the observer and needs no separate issue or
+change for this retained incident.
