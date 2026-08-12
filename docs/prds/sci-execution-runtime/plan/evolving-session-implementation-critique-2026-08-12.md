@@ -559,7 +559,7 @@ reconciled the later current-HEAD rulings 45–48 from commits `13a8c8519`,
 |---|---|
 | Ruling 38 — environment carriage | The implementation and decision record now say `seon.env` carries only derivation inputs. Opening context is derived per agent from the walk and is never stored in or on the environment. |
 | Ruling 39 — derived root preview | Root's preview is explicitly the same gap closure over the agent. The phase and graduation gates contain no fixed preview-depth constant or second preview mechanism. |
-| Ruling 40 — test-result facts | Added a hard external prerequisite in the dependency ledger and Phase 0: `[in flight → cite its commit when it lands]`. No evolving-session phase owns a stub or may begin before that lane lands. |
+| Ruling 40 — test-result facts | Added a hard external prerequisite in the dependency ledger and Phase 0: `[in flight -> cite its commit when you land]`. No evolving-session phase owns a stub or may begin before that lane lands. |
 | Ruling 41 / D3 | Deleted the owner choice. Phase 6 now names the typed budget-wait value, pure constructor, one in-transaction force-settlement owner, ordinary receipt/delivery path, and both zero transitions. |
 | Ruling 42 / D4 | Deleted the owner choice and rejected refresh runs. Phase 7 re-observes the same read on the next message/error wake, appends at the newer basis, preserves old bytes, and adds no meta-entry. |
 | Ruling 43 / D5+D6 | Deleted both owner choices. Phases 1 and 4 now require the one-pass invocation-local state, deletion of per-form re-pulls, additions-only `since` deltas, per-new-id current pulls, and zero new callable arities. |

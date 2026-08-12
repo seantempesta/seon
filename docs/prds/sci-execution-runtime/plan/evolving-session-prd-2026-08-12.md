@@ -86,7 +86,7 @@ ordinals by the existing generated-form count
   depth survives.
 - **Ruling 40 — test results become facts before this build.** The one runner
   commits the declared test-run/result attributes. Dependency status:
-  `[in flight → cite its commit when it lands]`; evolving-session phases do
+  `[in flight -> cite its commit when you land]`; evolving-session phases do
   not build on a stub.
 - **Ruling 41 / D3 — zero turns force-settles `:wait`.** A distinct typed
   budget-exhausted condition is delivered to the requester, the run closes
