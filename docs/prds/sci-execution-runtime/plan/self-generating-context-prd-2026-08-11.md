@@ -271,13 +271,16 @@ back — everywhere, for every agent, with no maintained list of forms.
 
 ## Ruling 50 (owner, 2026-08-12 night — declared read-only effects)
 
-50. **Declared read-only effects may refresh at generation.** Capability
-    leaves gain a declared idempotent-read fact (lifted at index time like
-    :seon.workload); generation and rebirth may re-execute exactly those
-    for fresh openings. The declaration must never lie — a declared-read
-    effect observed writing is the loud class, with its falsifier.
-    Undeclared external shapes render from their last RECEIPTS with
-    staleness visible; the agent refreshes deliberately.
+50. **Effectful values replay as OLD by default; a declared read-only tag
+    authorizes re-execution** (owner refinement, same night): no read-only
+    tag exists today — DEFAULT behavior ships first: anything effectful
+    renders on replay/rebirth from its last RECEIPT, explicitly marked old
+    /not-current; the agent refreshes deliberately. The declared
+    idempotent-read metadata tag (lifted at index time like
+    :seon.workload) is PRE-APPROVED: once a capability leaf declares it,
+    generation and rebirth may re-execute exactly those for fresh
+    openings, with the never-lie falsifier landing alongside the first
+    declaration.
 
 ## The mechanism (composed from the verified reports)
 
