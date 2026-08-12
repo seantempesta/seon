@@ -125,14 +125,10 @@
           config-name (ref-identity database
                                     (:seon.cluster/config unit)
                                     :seon.config/cluster)
-          plan-id (ref-identity database
-                                (:seon.cluster/bootstrap-plan unit)
-                                :seon.bootstrap.plan/id)
           instructions (count (:seon.cluster/instructions unit))
           toolkit (count (:seon.cluster/toolkit unit))]
       (str "Cluster " name ".\n"
            "Configuration " (or config-name "is connected")
-           " and bootstrap plan " (or plan-id "is connected")
            "; " instructions " shared instruction"
            (when-not (= 1 instructions) "s")
            " and " toolkit " toolkit namespace"
@@ -147,15 +143,11 @@
     (let [database (:seon.db/db unit)
           config-name (ref-identity database
                                     (:seon.cluster/config unit)
-                                    :seon.config/cluster)
-          plan-id (ref-identity database
-                                (:seon.cluster/bootstrap-plan unit)
-                                :seon.bootstrap.plan/id)]
+                                    :seon.config/cluster)]
       [:article {:class "seon-family-entry seon-cluster-entry"}
        [:h3 (str "Cluster " name)]
        [:dl
         [:div [:dt "Configuration"] [:dd (str (or config-name "Connected"))]]
-        [:div [:dt "Bootstrap plan"] [:dd [:code (str (or plan-id "Connected"))]]]
         [:div [:dt "Shared instructions"]
          [:dd (str (count (:seon.cluster/instructions unit)))]]
         [:div [:dt "Toolkit namespaces"]
@@ -1186,16 +1178,6 @@
        (report-source-progress! "schema population started")
        (accrete-schema-population! connection nil)
        (report-source-progress! "schema population complete")
-       (report-source-progress! "bootstrap rows")
-       (let [rows (bootstrap/population-tx @connection)]
-         (when (seq rows)
-           (require-committed!
-            (db/transact! connection
-                          {:tx-data rows
-                           :tx-meta
-                           {:seon.db/process
-                            [:seon.db.process/id boot-process-identity]}})
-            {:seon.boot/population :seon.bootstrap/rows})))
        (report-source-progress! "instruction rows")
        (let [rows (instruction-row-changes
                    @connection
@@ -1242,8 +1224,7 @@
 (def source-roots
   "The complete file roots whose content identifies `current-src`."
   (into seon.fn/source-roots
-        ["resources/seon/bootstrap.edn"
-         "config/default.edn"]))
+        ["config/default.edn"]))
 
 (defonce ^:private source-refresh-monitor
   ;; One JVM may receive overlapping editor events. Serialize analysis,
@@ -1708,8 +1689,6 @@
         desired {:seon.cluster/name cluster-name
                  :seon.cluster/config
                  [:seon.config/cluster cluster-name]
-                 :seon.cluster/bootstrap-plan
-                 [:seon.bootstrap.plan/id bootstrap/plan-id]
                  :seon.cluster/instructions
                  (mapv (fn [instruction-id]
                          [:seon.cluster.instruction/id instruction-id])
@@ -1721,8 +1700,6 @@
         expected-current
         {:seon.cluster/name cluster-name
          :seon.cluster/config {:seon.config/cluster cluster-name}
-         :seon.cluster/bootstrap-plan
-         {:seon.bootstrap.plan/id bootstrap/plan-id}
          :seon.cluster/instructions
          (into #{}
                (map (fn [instruction-id]
@@ -1737,8 +1714,6 @@
                                 '[:seon.cluster/name
                                   {:seon.cluster/config
                                    [:seon.config/cluster]}
-                                  {:seon.cluster/bootstrap-plan
-                                   [:seon.bootstrap.plan/id]}
                                   {:seon.cluster/instructions
                                    [:seon.cluster.instruction/id]}
                                   {:seon.cluster/toolkit

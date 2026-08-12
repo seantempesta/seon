@@ -17,13 +17,11 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.db :as db]
-            [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.config :as config]
             [seon.eval.drive :as eval.drive]
-            [seon.schema :as schema]
             [seon.sci.eval :as sci.eval])
   (:import [java.util UUID]))
 
@@ -304,24 +302,6 @@
     (spit file (str (pr-str report) "\n"))
     (.getPath file)))
 
-(defn- bootstrap-forms
-  [request]
-  (let [forms
-        (if (contains? request :seon.bootstrap-drive/bootstrap-forms)
-          (:seon.bootstrap-drive/bootstrap-forms request)
-          (bootstrap/packaged-forms))]
-    (when-not (schema/valid-candidate-value?
-               :seon.bootstrap/default-forms forms)
-      (throw
-       (ex-info
-        "The bootstrap-drive candidate forms are invalid."
-        {:seon.error/kind :seon.bootstrap-drive/invalid-bootstrap-forms
-         :seon.bootstrap-drive/bootstrap-forms forms
-         :seon.bootstrap-drive/explanation
-         (schema/explain-candidate-value
-          :seon.bootstrap/default-forms forms)})))
-    forms))
-
 (defn- payment-required?
   [report]
   (boolean
@@ -345,7 +325,7 @@
     (assoc report :seon.bootstrap-drive/report-path path)))
 
 (defn- one-drive!
-  [instance objective attempt run-cap remote-timeout-ms form-count]
+  [instance objective attempt run-cap remote-timeout-ms]
   (let [cluster-name (get-in instance [:seon.boot/config
                                        :seon.boot/cluster-name])
         drive-id (str (name objective) "-" attempt "-"
@@ -380,7 +360,6 @@
                (:seon.eval.drive/model episode)
                :seon.bootstrap-drive/thinking
                (:seon.eval.drive/thinking episode)
-               :seon.bootstrap-drive/bootstrap-form-count form-count
                :seon.bootstrap-drive/model-attempts
                (:seon.eval.drive/model-attempts episode)
                :seon.bootstrap-drive/message-id
@@ -415,7 +394,6 @@
               runs 1
               run-cap default-run-cap}}
         request
-        forms (bootstrap-forms request)
         invocation-id (subs (uuid-text) 0 8)
         cluster-name (str "bootstrap-drive-" invocation-id)
         process-root (str "tmp/bootstrap-drives/" invocation-id "/clusters")
@@ -424,8 +402,7 @@
       (throw (ex-info "Drive runs and run cap must be positive integers."
                       {:seon.bootstrap-drive/runs runs
                        :seon.bootstrap-drive/run-cap run-cap})))
-    (with-redefs [bootstrap/packaged-forms (constantly forms)]
-      (cluster/refresh-source! process-root))
+    (cluster/refresh-source! process-root)
     (let [instance
           (cluster/start!
            {:seon.boot/cluster-name cluster-name
@@ -437,8 +414,7 @@
          (fn [reports attempt]
            (let [report
                  (try
-                   (one-drive! instance objective attempt run-cap timeout-ms
-                               (count forms))
+                   (one-drive! instance objective attempt run-cap timeout-ms)
                    (catch Throwable failure
                      (failed-report objective attempt failure)))
                  reports (conj reports report)]

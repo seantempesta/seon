@@ -1,117 +1,11 @@
 (ns seon.bootstrap
-  "The fact-authored bootstrap run shared by every new agent."
+  "The live-fact generated bootstrap run shared by every new agent."
   (:require [clojure.edn :as edn]
-            [clojure.java.io :as io]
-            [clojure.string :as str]
-            [seon.ai.tokens :as tokens]
             [seon.cluster.run :as run]
             [seon.db :as db]
+            [seon.render :as render]
+            [seon.render.walk :as walk]
             [seon.schema :as schema]))
-
-(def plan-id
-  "The inherited bootstrap-plan identity on every cluster branch."
-  :default)
-
-(defn- plan-summary
-  [unit]
-  (let [database (:seon.db/db unit)
-        eid (:db/id unit)
-        namespace-sources
-        (if (and database eid)
-          (db/q '[:find [?namespace-source ...]
-                  :in $ ?plan
-                  :where
-                  [?plan :seon.bootstrap.plan/forms ?form]
-                  [?form :seon.bootstrap.plan.form/namespace-source
-                   ?namespace-source]]
-                database eid)
-          (keep :seon.bootstrap.plan.form/namespace-source
-                (:seon.bootstrap.plan/forms unit)))
-        help-texts
-        (if (and database eid)
-          (db/q '[:find [?help-text ...]
-                  :in $ ?plan
-                  :where
-                  [?plan :seon.bootstrap.plan/forms ?form]
-                  [?form :seon.bootstrap.plan.form/help-text ?help-text]]
-                database eid)
-          (keep :seon.bootstrap.plan.form/help-text
-                (:seon.bootstrap.plan/forms unit)))
-        counts (frequencies namespace-sources)]
-    {:forms (count namespace-sources)
-     :agent (get counts :agent 0)
-     :user (get counts :user 0)
-     :help-texts (count help-texts)
-     :help-text-tokens (reduce + 0 (map tokens/estimate help-texts))}))
-
-(defn render-ai
-  "`:seon.render/ai` — one bootstrap plan without its source payloads."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
-  [unit]
-  (when-let [id (:seon.bootstrap.plan/id unit)]
-    (let [{:keys [forms agent user help-texts help-text-tokens]}
-          (plan-summary unit)]
-      (str "Bootstrap plan " id " · digest "
-           (:seon.bootstrap.plan/digest unit) ".\n"
-           forms " ordered evaluation forms: " agent " agent, " user
-           " user; " help-texts " help-text form"
-           (when-not (= 1 help-texts) "s") " · approximately "
-           help-text-tokens " tokens."))))
-
-(defn render-html
-  "`:seon.render/html` — one readable bootstrap-plan card."
-  {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:maybe :seon.render/hiccup]]}
-  [unit]
-  (when-let [id (:seon.bootstrap.plan/id unit)]
-    (let [{:keys [forms agent user help-texts help-text-tokens]}
-          (plan-summary unit)]
-      [:article {:class "seon-family-entry seon-bootstrap-plan-entry"}
-       [:h3 (str "Bootstrap plan " id)]
-       [:dl
-        [:div [:dt "Digest"]
-         [:dd [:code (:seon.bootstrap.plan/digest unit)]]]
-        [:div [:dt "Ordered forms"] [:dd (str forms)]]
-        [:div [:dt "Namespace source"]
-         [:dd (str agent " agent / " user " user")]]
-        [:div [:dt "Help text"]
-         [:dd (str help-texts " form"
-                   (when-not (= 1 help-texts) "s") " · approximately "
-                   help-text-tokens " tokens")]]]])))
-
-(def ^:private resource-path
-  "seon/bootstrap.edn")
-
-(def ^:private namespace-token
-  "{{seon.ns/name}}")
-
-(defn packaged-forms
-  "The shipped bootstrap form maps read from the classpath EDN resource."
-  {:malli/schema [:=> [:cat] :seon.bootstrap/default-forms]}
-  []
-  (let [resource (io/resource resource-path)
-        forms (when resource (edn/read-string (slurp resource)))]
-    (when-not resource
-      (throw
-       (ex-info "The shipped bootstrap EDN resource is absent."
-                {:seon.error/kind :seon.bootstrap/resource-absent
-                 :seon.bootstrap/resource resource-path})))
-    (when-not (schema/valid-candidate-value?
-               :seon.bootstrap/default-forms forms)
-      (throw
-       (ex-info "The shipped bootstrap EDN resource is invalid."
-                {:seon.error/kind :seon.bootstrap/resource-invalid
-                 :seon.bootstrap/resource resource-path
-                 :seon.bootstrap/explanation
-                 (schema/explain-candidate-value
-                  :seon.bootstrap/default-forms forms)})))
-    forms))
-
-(defn help-text
-  "The legacy authored help payload, retained only until plan deletion."
-  {:malli/schema [:=> [:cat] :string]}
-  []
-  (:seon.bootstrap.plan.form/help-text (first (packaged-forms))))
 
 (defmacro help
   "Read the calling agent's live situation.
@@ -135,7 +29,10 @@
                    {:seon.cluster.agent/namespace
                     [:db/id :seon.ns/name
                      {:seon.ns/requires [:seon.ns/name]}]}
-                   {:seon.cluster.agent/run [:seon.cluster.run/id]}]
+                   {:seon.cluster.agent/run
+                    [:seon.cluster.run/id
+                     {:seon.cluster.run/trigger
+                      [:seon.cluster.message/id]}]}]
                  [:seon.cluster.agent/id agent-id])]
     (if-not (:seon.cluster.agent/id agent)
       {:seon.error/kind :seon.cluster.agent/no-such-agent
@@ -143,6 +40,13 @@
        :seon.error/data {:seon.cluster.agent/id agent-id}}
       (let [namespace (:seon.cluster.agent/namespace agent)
             run (:seon.cluster.agent/run agent)
+            turn-limit
+            (db/q '[:find ?limit .
+                   :where [_ :seon.config.run/max-episode-runs ?limit]]
+                 database)
+            turns-used
+            ((requiring-resolve 'seon.cluster.work/episode-runs)
+             database agent-id)
             unread
             (or (db/q '[:find (count ?message) .
                         :in $ ?agent-id
@@ -158,6 +62,8 @@
           :seon.cluster.agent/namespace-ref
           [:seon.ns/name (:seon.ns/name namespace)]
           :seon.cluster.agent/unread-message-count (long unread)
+          :seon.cluster.run/turns-remaining
+          (long (max 0 (- (or turn-limit 0) turns-used)))
           :seon.cluster.agent/protocol-namespaces
           (->> (:seon.ns/requires namespace)
                (map :seon.ns/name)
@@ -166,7 +72,12 @@
           run
           (assoc :seon.cluster.agent/open-run-ref
                  [:seon.cluster.run/id
-                  (:seon.cluster.run/id run)]))))))
+                  (:seon.cluster.run/id run)])
+          (:seon.cluster.run/trigger run)
+          (assoc :seon.cluster.run/trigger
+                 [:seon.cluster.message/id
+                  (get-in run [:seon.cluster.run/trigger
+                               :seon.cluster.message/id])]))))))
 
 (defmacro dir
   "List the public names in namespace-name through Clojure's REPL macro."
@@ -200,6 +111,160 @@
        "row with the greatest :example/amount, or {} for empty input. Call "
        "it once, query its stored :seon.fn/spec, then complete with a short "
        "reply naming what you built and its contract."))
+
+(defn entry-source
+  "Render one comment/form entry as ordinary reader source."
+  {:malli/schema [:=> [:cat :seon.repl/entry]
+                  :seon.cluster.run.form/source]}
+  [{comment :seon.repl/comment form :seon.repl/form}]
+  (str (when comment (str comment "\n")) (pr-str form)))
+
+(defn- entries
+  [rendered]
+  (cond
+    (and (map? rendered) (:seon.repl/form rendered)) [rendered]
+    (and (vector? rendered) (every? :seon.repl/form rendered)) rendered
+    (sequential? rendered) [{:seon.repl/form rendered}]
+    :else []))
+
+(defn- namespace-subject
+  [lookup]
+  (when (and (vector? lookup) (= :seon.ns/name (first lookup)))
+    (second lookup)))
+
+(defn- direct-candidates
+  [request acquisition]
+  (let [root (first (:seon.render.walk/order acquisition))]
+    (into []
+          (mapcat
+           (fn [lookup]
+             (let [member (get-in acquisition [:seon.render.walk/members lookup])
+                   value (:seon.render/value member)
+                   rendered
+                   (render/render-call
+                    (cond-> (assoc request
+                                   :seon.render/value value
+                                   :seon.render/output :seon.render/form
+                                   :seon.render.call/id
+                                   [:seon.render/form lookup])
+                      (:seon.ns/name value)
+                      (assoc :seon.render/namespace (:seon.ns/name value))))
+                   rendered-entries (entries rendered)
+                   subject (or (namespace-subject lookup) lookup)]
+               (when (or (= lookup root)
+                         (namespace-subject lookup)
+                         (some seq (map (comp walk/form-symbols :seon.repl/form)
+                                        rendered-entries)))
+                 (map-indexed
+                  (fn [index entry]
+                    {:seon.repl/key [lookup index]
+                     :seon.repl/subject subject
+                     :seon.repl/previous-key
+                     (when (pos? index) [lookup (dec index)])
+                     :seon.repl/entry entry})
+                  rendered-entries))))
+          (:seon.render.walk/order acquisition)))))
+
+(defn- listing-candidates
+  [request acquisition]
+  (into []
+        (comp
+         (filter :seon.render.walk/attribute)
+         (mapcat
+          (fn [unit]
+            (let [rendered-entries (entries (:seon.render/output unit))]
+              (keep-indexed
+               (fn [index entry]
+                 (when (seq (walk/form-symbols (:seon.repl/form entry)))
+                   {:seon.repl/key [(:seon.render.walk/lookup unit)
+                                    :listing index]
+                    :seon.repl/subject
+                    (first (sort-by str
+                                    (walk/form-symbols
+                                     (:seon.repl/form entry))))
+                    :seon.repl/entry entry}))
+               rendered-entries)))))
+        (walk/neighborhood
+         (assoc request
+                :seon.render.walk/root-acquisition acquisition
+                :seon.render/output :seon.render/form))))
+
+(defn pull-result
+  "Pull and render the bounded candidate neighborhood for one opening."
+  {:malli/schema [:=> [:cat :seon.render.walk/request] :map]}
+  [request]
+  (let [acquisition (walk/root-acquisition request)
+        identities (->> (vals (:seon.schema.projection/shape-rows
+                               (schema/current-projection)))
+                        (keep :seon.entity/id-attr)
+                        set)]
+    {:seon.repl/root-key
+     [(first (:seon.render.walk/order acquisition)) 0]
+     :seon.repl/candidates
+     (->> (concat (direct-candidates request acquisition)
+                  (listing-candidates request acquisition))
+          (sort-by (juxt (comp pr-str :seon.repl/key)
+                         (comp pr-str :seon.repl/entry)))
+          vec)
+     :seon.print/identity-attributes identities}))
+
+(defn next-entry
+  "Derive the next generated entry from receipts already stored on the run."
+  {:malli/schema [:=> [:cat :seon.render.walk/request :seon.cluster.run/id]
+                  [:maybe :seon.repl/entry]]}
+  [request run-id]
+  (let [rows
+        (db/q {:query
+               '[:find ?ordinal ?source ?result
+                 :in $ ?run-id
+                 :where
+                 [?run :seon.cluster.run/id ?run-id]
+                 [?form :seon.cluster.run.form/run ?run]
+                 [?form :seon.cluster.run.form/ordinal ?ordinal]
+                 [?form :seon.cluster.run.form/source ?source]
+                 [?receipt :seon.cluster.eval/run ?run]
+                 [?receipt :seon.cluster.eval/ordinal ?ordinal]
+                 [?receipt :seon.cluster.eval/result-edn ?result]]
+               :args [(:seon.db/db request) run-id]
+               :order-by '[?ordinal :asc]})
+        pull (pull-result request)
+        candidates (:seon.repl/candidates pull)
+        candidate-by-source
+        (reduce (fn [by-source candidate]
+                  (let [source (entry-source (:seon.repl/entry candidate))]
+                    (if (contains? by-source source)
+                      (throw
+                       (ex-info "Generated forms must have unique source."
+                                {:seon.error/kind ::ambiguous-source
+                                 :seon.cluster.run.form/source source}))
+                      (assoc by-source source candidate))))
+                {}
+                candidates)
+        settled
+        (mapv (fn [[_ source result]]
+                (let [candidate (get candidate-by-source source)]
+                  (when-not candidate
+                    (throw
+                     (ex-info "A stored generated form is outside the pull."
+                              {:seon.error/kind ::prefix-drift
+                               :seon.cluster.run/id run-id
+                               :seon.cluster.run.form/source source})))
+                  {:seon.repl/key (:seon.repl/key candidate)
+                   :seon.sci.admit/print-node (edn/read-string result)}))
+              rows)
+        episode
+        (walk/ordered-episode (assoc pull :seon.repl/settled settled))
+        index (count rows)
+        prior-sources (mapv second rows)
+        expected-sources (mapv entry-source (take index episode))]
+    (when-not (= prior-sources expected-sources)
+      (throw
+       (ex-info "The generated opening prefix differs from its receipts."
+                {:seon.error/kind ::prefix-drift
+                 :seon.cluster.run/id run-id
+                 :seon.bootstrap/expected expected-sources
+                 :seon.bootstrap/actual prior-sources})))
+    (nth episode index nil)))
 
 (defn- digest-value
   [value]
@@ -323,121 +388,6 @@
         :seon.cluster.run/plan-digest (digest-value sources)
         :seon.cluster.run/sources sources}))))
 
-(defn population-tx
-  "Install the shipped bootstrap plan once on a source database value."
-  {:malli/schema [:=> [:cat :seon.db/database-value]
-                  :seon.store/transaction-data]}
-  [db]
-  (let [forms (packaged-forms)
-        digest (digest-value forms)
-        current (db/pull db
-                        [:seon.bootstrap.plan/id
-                         :seon.bootstrap.plan/digest]
-                        [:seon.bootstrap.plan/id plan-id])]
-    (cond
-      (nil? current)
-      [{:seon.bootstrap.plan/id plan-id
-        :seon.bootstrap.plan/digest digest
-        :seon.bootstrap.plan/forms
-        (mapv (fn [ordinal form]
-                (assoc form
-                       :seon.cluster.run.form/ordinal (long ordinal)
-                       :seon.cluster.run.form/author :system))
-              (range)
-              forms)}]
-
-      (= digest (:seon.bootstrap.plan/digest current))
-      []
-
-      :else
-      (throw
-       (ex-info
-        "The database already carries a different bootstrap plan."
-        {:seon.error/kind :seon.bootstrap/population-conflict
-         :seon.bootstrap.plan/id plan-id
-         :seon.bootstrap.plan/digest digest
-         :seon.bootstrap.plan/current-digest
-         (:seon.bootstrap.plan/digest current)})))))
-
-(defn- ordered-plan-rows
-  [db cluster-name]
-  (let [rows
-        (db/q
-         {:query
-          '[:find ?ordinal ?source ?designation
-            :in $ ?cluster-name
-            :where
-            [?cluster :seon.cluster/name ?cluster-name]
-            [?cluster :seon.cluster/bootstrap-plan ?plan]
-            [?plan :seon.bootstrap.plan/forms ?form]
-            [?form :seon.cluster.run.form/ordinal ?ordinal]
-            [?form :seon.cluster.run.form/source ?source]
-            [?form :seon.bootstrap.plan.form/namespace-source ?designation]]
-          :args [db cluster-name]
-          :order-by '[?ordinal :asc]})
-        actual-ordinals (mapv first rows)
-        expected-ordinals (mapv long (range (count rows)))]
-    (when (empty? rows)
-      (throw
-       (ex-info "The cluster has no bootstrap-plan forms."
-                {:seon.error/kind :seon.bootstrap/plan-absent
-                 :seon.cluster/name cluster-name})))
-    (when-not (= expected-ordinals actual-ordinals)
-      (throw
-       (ex-info "The cluster bootstrap-plan ordinals are not contiguous."
-                {:seon.error/kind :seon.bootstrap/invalid-ordinals
-                 :seon.cluster/name cluster-name
-                 :seon.bootstrap.plan/expected-ordinals expected-ordinals
-                 :seon.bootstrap.plan/actual-ordinals actual-ordinals})))
-    rows))
-
-(defn ordered-sources
-  "The cluster's bootstrap-plan facts resolved for one agent namespace."
-  {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.cluster/name
-                       :seon.ns/name]
-                  :seon.cluster.reply/sources]}
-  [db cluster-name namespace-name]
-  (mapv
-   (fn [[_ source designation]]
-     {:seon.cluster.run.form/source
-      (str/replace source namespace-token (str namespace-name))
-      :seon.ns/name
-      (case designation
-        :agent namespace-name
-        :user 'user)})
-   (ordered-plan-rows db cluster-name)))
-
-(defn agent-sources
-  "The owning cluster's ordered bootstrap sources for an existing agent."
-  {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.cluster.agent/id]
-                  :seon.cluster.reply/sources]}
-  [db agent-id]
-  (let [[cluster-name namespace-name]
-        (db/q '[:find [?cluster-name ?namespace-name]
-               :in $ ?agent-id
-               :where
-               [?agent :seon.cluster.agent/id ?agent-id]
-               [?agent :seon.cluster.agent/cluster ?cluster]
-               [?cluster :seon.cluster/name ?cluster-name]
-               [?agent :seon.cluster.agent/namespace ?namespace]
-               [?namespace :seon.ns/name ?namespace-name]]
-             db agent-id)]
-    (when-not cluster-name
-      (throw
-       (ex-info "The agent has no cluster-backed bootstrap plan."
-                {:seon.error/kind :seon.bootstrap/agent-plan-absent
-                 :seon.cluster.agent/id agent-id})))
-    (ordered-sources db cluster-name namespace-name)))
-
-(defn plan-digest
-  "The stable digest of a cluster's ordered bootstrap-plan facts."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster/name]
-                  :seon.cluster.run/plan-digest]}
-  [db cluster-name]
-  (digest-value (ordered-plan-rows db cluster-name)))
-
 (defn seed-tx
   "Transaction data opening, claiming, and freezing one bootstrap run."
   {:malli/schema
@@ -453,13 +403,11 @@
     :seon.store/transaction-data]}
   [db
    {agent-id :seon.cluster.agent/id
-    cluster-name :seon.cluster/name
     namespace-name :seon.ns/name
     process :seon.cluster.run/process
     opened-at :seon.cluster.run/opened-at}]
   (let [id (run-id agent-id)
         message-id (task-message-id agent-id)
-        sources (ordered-sources db cluster-name namespace-name)
         namespace-row
         {:seon.ns/name namespace-name
          :seon.ns/requires
@@ -483,7 +431,7 @@
          :seon.cluster.message/content (task-message)
          :seon.cluster.message/at opened-at}]
     (into [namespace-row message-row]
-          (run/system-run-tx
+          (run/generated-run-tx
            db
            {:seon.cluster.agent/id agent-id
             :seon.cluster.run/id id
@@ -492,5 +440,8 @@
             :seon.cluster.run/trigger
             [:seon.cluster.message/id message-id]
             :seon.cluster.run/starting-ns [:seon.ns/name namespace-name]
-            :seon.cluster.run/plan-digest (plan-digest db cluster-name)
-            :seon.cluster.run/sources sources}))))
+            :seon.cluster.run.form/source
+            (entry-source
+             {:seon.repl/comment
+              "; A new run just opened. Why am I awake — do I have messages?"
+              :seon.repl/form '(help)})}))))

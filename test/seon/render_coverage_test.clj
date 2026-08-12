@@ -3,7 +3,6 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.ai.tokens :as tokens]
-            [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.run :as run]
@@ -16,7 +15,6 @@
             [seon.render.walk :as walk]
             [seon.schema.edn :as schema.edn]
             [seon.schema.form :as schema.form]
-            [seon.sci.eval :as sci.eval]
             [seon.test-support :as support])
   (:import [java.util Date]))
 
@@ -133,10 +131,6 @@
           :seon.render/html `config/render-html}
          (select-keys (family-properties :seon.config/entity)
                       [:seon.render/ai :seon.render/html])))
-  (is (= {:seon.render/ai `bootstrap/render-ai
-          :seon.render/html `bootstrap/render-html}
-         (select-keys (family-properties :seon.bootstrap.plan/plan)
-                      [:seon.render/ai :seon.render/html])))
   (support/with-database
    (fn [connection]
      (seed-entities! connection)
@@ -144,8 +138,6 @@
            ctx (support/fork-cluster-ctx connection)
            cluster-value (pulled database [:seon.cluster/name cluster-name])
            config-value (pulled database [:seon.config/cluster cluster-name])
-           plan-value (pulled database
-                              [:seon.bootstrap.plan/id bootstrap/plan-id])
            cases [{:value cluster-value
                    :direct-ai cluster/render-ai
                    :direct-html cluster/render-html
@@ -153,11 +145,7 @@
                   {:value config-value
                    :direct-ai config/render-ai
                    :direct-html config/render-html
-                   :class "seon-family-entry seon-config-entry"}
-                  {:value plan-value
-                   :direct-ai bootstrap/render-ai
-                   :direct-html bootstrap/render-html
-                   :class "seon-family-entry seon-bootstrap-plan-entry"}]]
+                   :class "seon-family-entry seon-config-entry"}]]
        (doseq [{:keys [value direct-ai direct-html class]} cases]
          (let [request (render-request database ctx value)
                ai (render/render-ai request)
@@ -174,9 +162,7 @@
              (pulled database
                      [:seon.ai.model/id (:seon.config.ai/model config-value)])
              model-ai (render/render-ai
-                       (render-request database ctx model-value))
-             plan-ai (bootstrap/render-ai (assoc plan-value
-                                                   :seon.db/db database))]
+                       (render-request database ctx model-value))]
          (is (not (str/includes? config-ai "DEEPSEEK_API_KEY")))
          (is (not (str/includes? config-ai
                                  "https://api.deepseek.com")))
@@ -184,12 +170,7 @@
              "the recurring config face does not inline the model roster")
          (is (str/includes? model-ai
                             (str "Model " (:seon.config.ai/model config-value)))
-             "the configured model remains reachable through its own face")
-         (is (str/includes? plan-ai "tokens"))
-         (is (not (str/includes? plan-ai
-                                 ":seon.cluster.run.form/source")))
-         (is (not (str/includes? plan-ai
-                                 ":seon.bootstrap.plan.form/help-text"))))
+             "the configured model remains reachable through its own face"))
        (doseq [output [:seon.render/ai :seon.render/html]]
          (let [units (walk/neighborhood
                       {:seon.db/db database
@@ -202,8 +183,7 @@
                        :seon.config/on-core-error :panic
                        :seon.render/distance 2})]
            (doseq [attribute [:seon.cluster.agent/cluster
-                              :seon.cluster/config
-                              :seon.cluster/bootstrap-plan]]
+                              :seon.cluster/config]]
              (let [face (walk-output-by-attribute units attribute)]
                (is (some? face))
                (is (not (str/includes? (str face) ":db/id")))))))))))

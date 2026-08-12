@@ -325,9 +325,8 @@
                      (sci/eval-string+
                       ctx "(macroexpand-1 '(help))"
                       {:ns (sci/create-ns 'my.agents.restart-a)}))]
-                (is (= 'clojure.core/print (first help-expansion)))
-                (is (= (bootstrap/help-text) (second help-expansion))
-                    "the cold bootstrap help binding is callable"))
+                (is (= '(seon.bootstrap/situation) help-expansion)
+                    "the cold bootstrap help binding resolves live facts"))
               (is (some #{'clojure.set} (:requires bindings)))
               (is (not (some #{'missing.restart.namespace}
                              (:requires bindings)))))

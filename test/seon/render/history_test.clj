@@ -180,8 +180,8 @@
         candidates episode-candidates
         result (walk/ordered-episode (episode-request candidates settled))
         episode-keys (mapv :seon.repl/key result)]
-    (is (= [:root :message-namespace :inbox-doc :inbox :read-doc :message
-            :run-namespace :complete-doc]
+    (is (= [:root :message-namespace :run-namespace :inbox-doc :read-doc
+            :complete-doc :inbox :message]
            episode-keys)
         "listings and docs explain each later use, with stable ties")
     (is (< (.indexOf episode-keys :inbox) (.indexOf episode-keys :message))
@@ -214,7 +214,7 @@
                                        (:seon.repl/key %))
                            episode-candidates)
         episode (walk/ordered-episode (episode-request candidates settled))]
-    (is (= [:root :message-namespace :inbox-doc :inbox :read-doc :message]
+    (is (= [:root :message-namespace :inbox-doc :read-doc :inbox :message]
            (mapv :seon.repl/key episode)))
     (is (= '(my.message/read "task-1")
            (:seon.repl/form (peek episode))))))

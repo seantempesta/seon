@@ -1,5 +1,4 @@
-#:seon.cluster{:bootstrap-plan :seon.db/ref,
-               :cluster
+#:seon.cluster{:cluster
                [:map
                 {:seon.db/entity true
                  :seon.render/ai seon.cluster/render-ai
@@ -7,9 +6,7 @@
                 [:seon.cluster/name :seon.cluster/name]
                 [:seon.cluster/config :seon.cluster/config]
                 [:seon.cluster/instructions :seon.cluster/instructions]
-                [:seon.cluster/toolkit :seon.cluster/toolkit]
-                [:seon.cluster/bootstrap-plan
-                 :seon.cluster/bootstrap-plan]],
+                [:seon.cluster/toolkit :seon.cluster/toolkit]],
                :config :seon.db/ref,
                :created? :boolean,
                :instructions [:set :seon.db/ref],

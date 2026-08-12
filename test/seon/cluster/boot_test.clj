@@ -1047,8 +1047,8 @@
            (get (:seon.source/file-digests (cluster/source-snapshot))
                 schema-path))
         "the ancestor hashes the merged schema declaration set"))
-  (is (some #{"resources/seon/bootstrap.edn"} cluster/source-roots)
-      "the ancestor hashes the bootstrap forms installed as source facts")
+  (is (not-any? #{"resources/seon/bootstrap.edn"} cluster/source-roots)
+      "generated openings have no authored bootstrap resource")
   (is (not-any? #{"resources" "resources/seon/schemas"} cluster/source-roots)
       "schema directory organization is not part of the ancestor digest"))
 
@@ -1182,7 +1182,12 @@
                   build-index (.indexOf session "(defn largest")
                   verify-index (.indexOf session ":seon.fn/spec")
                   complete-index (.indexOf session "(run/complete")]
-              (is (= (count (bootstrap/packaged-forms))
+              (is (= (db/q '[:find (count ?form) .
+                             :in $ ?run-id
+                             :where
+                             [?run :seon.cluster.run/id ?run-id]
+                             [?form :seon.cluster.run.form/run ?run]]
+                           database run-id)
                      (db/q '[:find (count ?receipt) .
                              :in $ ?run-id
                              :where

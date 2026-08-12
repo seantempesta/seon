@@ -44,9 +44,16 @@
                        [?run :seon.cluster.run/id ?run-id]
                        [?receipt :seon.cluster.eval/run ?run]]
                      db run-id)
+                0)
+            form-count
+            (or (db/q '[:find (count ?form) .
+                       :in $ ?run-id
+                       :where
+                       [?run :seon.cluster.run/id ?run-id]
+                       [?form :seon.cluster.run.form/run ?run]]
+                     db run-id)
                 0)]
-        (when (= (count (bootstrap/agent-sources db agent-id))
-                 receipt-count)
+        (when (= form-count receipt-count)
           {:seon.cluster.run/id run-id
            :seon.cluster.run/closed-at closed-at
            :seon.eval.drive/receipt-count receipt-count})))))

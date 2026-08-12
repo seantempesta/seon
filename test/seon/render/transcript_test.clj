@@ -310,7 +310,7 @@
 (defn- seed-pinned-bootstrap-history!
   [connection]
   (let [bootstrap-run-id (bootstrap/run-id agent-id)
-        bootstrap-count (count (bootstrap/packaged-forms))
+        bootstrap-count 12
         bootstrap-receipts
         (mapcat
          (fn [ordinal]
@@ -370,7 +370,7 @@
             html (hiccup/->string html-value)
             html-rows (html-entries html-value)
             bootstrap-run-id (bootstrap/run-id agent-id)
-            bootstrap-count (count (bootstrap/packaged-forms))
+            bootstrap-count 12
             pinned-ids
             (mapv #(pr-str [bootstrap-run-id %]) (range bootstrap-count))
             bootstrap-task-id (bootstrap/task-message-id agent-id)

@@ -38,6 +38,7 @@
             [clojure.string :as str]
             [seon.ai :as ai]
             [seon.blob :as blob]
+            [seon.bootstrap :as bootstrap]
             [seon.context :as context]
             [seon.cluster.message :as message]
             [seon.cluster.prompt :as prompt]
@@ -50,6 +51,7 @@
             [seon.flow :as seon.flow]
             [seon.problems :as problems]
             [seon.render :as render]
+            [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -404,7 +406,24 @@
     problem :seon.problems/form-problem
     trigger :seon.cluster.message/trigger}]
   (let [database @(get cluster :seon.db/connection)
-        settled (disposition (:seon.sci.admit/value evaluation))
+        raw-settled (disposition (:seon.sci.admit/value evaluation))
+        settled
+        (cond-> raw-settled
+          (= :completed (:my.run/disposition raw-settled))
+          (assoc :my.run/delivered-to
+                 (or (some->> trigger (message/sender database))
+                     :outside)))
+        evaluation
+        (if (and settled (not= settled raw-settled))
+          (merge evaluation
+                 (admit/admit
+                  {:seon.sci.admit/value settled
+                   :seon.sci.admit/interrupt-fn (constantly nil)
+                   :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+                   :seon.config/on-core-error
+                   (:seon.config/on-core-error cluster)
+                   :seon.schema/projection (schema/current-projection)}))
+          evaluation)
         last-ordinal
         (db/q '[:find (max ?ordinal) .
                 :in $ ?run-id
@@ -1554,6 +1573,68 @@
           (report :error 0))
         (report :closed 0)))))
 
+(defn- generate-turn
+  "Append and execute one dependency-ready generated bootstrap form."
+  [{cluster ::cluster work ::work now ::now report ::report :as request}]
+  (let [connection (:seon.db/connection cluster)
+        process (:seon.cluster.run/process cluster)
+        agent-id (:seon.cluster.agent/id work)
+        run-id (:seon.cluster.run/id work)
+        ordinal
+        (long
+         (or (db/q '[:find (count ?form) .
+                    :in $ ?run-id
+                    :where
+                    [?run :seon.cluster.run/id ?run-id]
+                    [?form :seon.cluster.run.form/run ?run]]
+                  @connection run-id)
+             0))
+        entry
+        (bootstrap/next-entry
+         {:seon.db/db @connection
+          :seon.db/connection connection
+          :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
+          :seon.render.walk/lookup [:seon.cluster.agent/id agent-id]
+          :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+          :seon.sci.eval/time-limit-ms
+          (:seon.config.eval/time-limit-ms cluster)
+          :seon.config/on-core-error (:seon.config/on-core-error cluster)
+          :seon.render/distance 3}
+         run-id)]
+    (if-not entry
+      (do
+        (settle! {::cluster cluster
+                  ::now now
+                  :seon.cluster.agent/id agent-id
+                  :seon.cluster.run/id run-id
+                  :seon.error/value
+                  {:seon.error/kind ::generated-opening-unresolved
+                   :seon.error/message
+                   "The generated opening reached no dependency-ready form."}})
+        (report :error 0))
+      (let [appended
+            (db/transact!
+             connection
+             (run/append-generated-tx
+              {:seon.cluster.run/id run-id
+               :seon.cluster.run/process process
+               :seon.cluster.run.form/ordinal ordinal
+               :seon.cluster.run.form/source (bootstrap/entry-source entry)
+               :seon.ns/name (sci.eval/agent-namespace @connection agent-id)}))]
+        (if (:seon.error/kind appended)
+          (do
+            (settle! {::cluster cluster
+                      ::now now
+                      :seon.cluster.agent/id agent-id
+                      :seon.cluster.run/id run-id
+                      :seon.error/value appended})
+            (report :error 0))
+          (resume-turn
+           (assoc request ::work
+                  (assoc work
+                         :seon.cluster.work/situation :resume
+                         :seon.cluster.run.form/ordinal ordinal))))))))
+
 (defn turn
   "Run one turn to its next durable boundary; returns the turn report.
   The sequence is the contract: claim → derive prompt → model (`:io`)
@@ -1583,5 +1664,6 @@
     (case (:seon.cluster.work/situation work)
       :open (open-turn request)
       :call (call-turn request)
+      :generate (generate-turn request)
       :resume (resume-turn request)
       :close (close-turn request))))
