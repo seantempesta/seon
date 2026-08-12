@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, context, ai]
 ---
@@ -55,3 +55,19 @@ not observe the resulting cache behavior; the hazard is to production prompts.
 Render/print owner, alongside the
 [self-generating-context PRD](../../prds/sci-execution-runtime/plan/self-generating-context-prd-2026-08-11.md)
 prefix-stability work.
+
+## Resolution
+
+Resolved by `3f6958fc2`. The declared `:seon.print/object` grammar no longer
+contains `:seon.print/address`, so an agent-facing identity hash has no field
+through which it can return. Generic host objects render by stable class only;
+`sci.lang.Namespace` additionally renders the symbolic name supplied by SCI's
+maintained `HasName` protocol. Generic host `toString` output is not admitted,
+because it commonly embeds the same identity bytes.
+
+`agent-facing-object-faces-are-byte-stable-across-processes` launches two fresh
+JVMs and proves byte-identical output for both the named namespace face and a
+generic reference face. The focused regression passed on 2026-08-12. The
+repository `bin/test` selection was separately attempted but stopped before
+test execution while the concurrently changing shared source scratch
+population was refused; the integrated lane owns that publication gate.

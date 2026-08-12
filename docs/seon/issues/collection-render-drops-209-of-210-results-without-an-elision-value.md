@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, context, agent]
 ---
@@ -51,3 +51,20 @@ collection-level output is the single `(ns seon.bootstrap …)` card.
 `seon.render` / `seon.print/fit` profile owner, with the
 [self-generating-context PRD](../../prds/sci-execution-runtime/plan/self-generating-context-prd-2026-08-11.md)
 context-quality work.
+
+## Resolution
+
+Resolved by `3f6958fc2`. `seon.print/fit` no longer discards a carried trailing
+collection elision and then mistakes the admitted prefix for the source total.
+It reads the carried total (or derives it from retained plus omitted), applies
+the current child limit, and emits one recalculated trailing elision while
+preserving the original requery identity or refusal.
+
+`refitting-a-truncated-collection-preserves-its-honest-elision` fixes the
+observed class at its outer boundary: a 210-result collection already admitted
+as one rendered child plus an elision is fitted again, and the recurring test
+asserts `rendered + omitted = total`, specifically `1 + 209 = 210`, with the
+requery identity retained. The focused regression passed on 2026-08-12. The
+repository `bin/test` selection was separately attempted but stopped before
+test execution while the concurrently changing shared source scratch
+population was refused; the integrated lane owns that publication gate.
