@@ -4134,3 +4134,37 @@ both violate the no-hobbling ruling (no evidence of a real problem) and
 break legitimate local fetches, including our own web UI. Keep the
 honest-mistake bounds: size ceilings, redirect depth, timeouts. Resume
 `my-web` with this correction.
+
+## The issue campaign (orchestrator plan, 2026-08-12 close — 208 open)
+
+Strategy: CLASS-KILLS OVER INSTANCES, interleaved with the spine; the
+[mining taxonomy](../research/issue-class-mining-2026-08-11.md) is the map.
+
+1. **The spine consumes blockers for free**: the evolving-session
+   implementation phases close their own blocker set (fork-env carriage,
+   opening-walkthrough replication, live-pull residue, the 24.2s live-path
+   pull) — never fix these standalone; they are phase acceptance criteria.
+2. **N1 — total outward render (rank 1, 34 issues)** opens W3: one total
+   rendered-value/omission/error construction is literally W3's "both views
+   beautiful" prerequisite. One lane, the mining report's structural kill,
+   member list as worklist.
+3. **N5 completion**: the constructor landed 2026-08-12; its four deferred
+   members (named with exact edits in the class issue) are now unblocked —
+   one short lane.
+4. **The two mechanical rename waves on a quiet tree** (post-gate, one lane
+   each, path-limited): kind→shape (442 occurrences, migration plan in
+   [the audit](../research/error-kind-audit-2026-08-12.md)) and
+   database-value→db (146). Each closes its class issue.
+5. **Sweep deltas by owner** ([systems sweep](../research/rebirth-systems-sweep-2026-08-12.md)
+   ranked list): minimal my.note (the survivability hole), the ruling-49
+   todo union, spend-since-shown render, test-result rendering — each is
+   one owner, one lane, drive-verifiable.
+6. **Remaining classes N2/N4/N6-N14** refill idle slots strictly by the
+   mining rank score; singletons (45) are NEVER dedicated lanes — batch
+   them by owner file when related work opens that owner.
+7. **The instruments keep feeding**: floor-hit counts, injections-per-turn,
+   ugly-output reports, and the loud fences file the next generation of
+   issues themselves; every drive doubles as an audit.
+
+Cadence: one class-kill lane always running beside the spine; index gate
+clean at every commit; push at every landing.
