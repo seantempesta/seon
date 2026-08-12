@@ -93,3 +93,64 @@ find; the drives are the reproduction.
    as data, not as the headline.
 3. One regression asserting the class: a stream that delivers reasoning and
    no text produces that named refusal rather than a bare transport message.
+
+## Confirmed mechanism and Phase 1 repair — 2026-08-12
+
+The dropped toggle and the separately filed credential override were one
+descriptor-resolution failure class in `seon.ai/resolved-target`:
+
+- `model-details` returned Datahike's pulled cardinality-many thinking dials as
+  a vector, while `resolved-target` used `contains?` as a membership test.
+  Vector `contains?` tests indices, so every configured thinking keyword was
+  removed before `request-body` ran.
+- The same resolution associated the provider descriptor's credential variable
+  unconditionally after per-agent settings had already resolved.
+
+Phase 1 normalizes the pulled thinking dials to a set at `model-details`, makes
+the descriptor credential a default only when the effective target has no
+selection, and leaves provider endpoint and wire-key selection with the model
+descriptor. Class regressions exercise supported thinking membership, explicit
+credential preservation with a pre-network refusal, and descriptor fallback
+when credential selection is absent.
+
+The stream owner can also name the silent burn without touching the loop. A
+truncated stream with reasoning and no assistant text now reports the reasoning
+character count, the missing assistant text, and whether the configured HTTP
+time limit fired. Reasoning is counted as observed paid output even when text is
+empty. The regression drives an SSE reasoning chunk followed by the JDK timeout
+cause shape.
+
+## Remaining Phase 2 boundary
+
+This issue remains open for exactly one implementation remainder and its live
+proof:
+
+- Record the actual serialized outbound body on the durable attempt fact. The
+  JSON exists in `seon.ai/complete`, but attempt transaction data is assembled
+  by `record-attempt!` at `src/seon/cluster/loop.clj:674`; the new declaration
+  belongs in `resources/seon/schemas/seon.ai.attempt.edn`. The
+  `defs-rename-sweep` lane currently owns `loop.clj`, so these files await
+  orchestrator reassignment.
+
+The Phase 1 live proof uses the existing attempt usage fact: one isolated Flash
+call must persist effective thinking `:disabled` and zero reasoning tokens. It
+does not claim exact outbound-body proof until the Phase 2 fact lands.
+
+### Live-proof boundary observed on 2026-08-12
+
+Two isolated-root proof attempts made zero provider calls and therefore do not
+count as the required live evidence:
+
+1. The public-message path opened a run but failed prompt rendering before the
+   provider seam with `seon.render.walk/root-acquisition` invalid input:
+   required `:seon.render/output` was missing. The scratch database contained
+   zero attempt entities.
+2. A fresh-root direct HTTP-owner proof could not start its cluster because
+   shared source inputs changed during the coordinated build checkpoint;
+   development dependency-cache discovery then failed. This is foreign
+   in-flight source churn, not evidence about `seon.ai`.
+
+Per the shared-tree stop rule, Phase 1 does not retry either foreign boundary.
+After the owning lanes settle, the remaining live exit is still exactly one
+Flash call whose persisted attempt settings say `:disabled` and whose persisted
+usage has zero reasoning tokens.

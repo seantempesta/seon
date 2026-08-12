@@ -232,10 +232,11 @@
   (test-support/with-database
     (fn [connection]
       (seed-registry! connection)
-      (let [settings (assoc @dials
-                            :seon.config.ai/model "registered-model"
-                            :seon.config.ai/max-tokens 500
-                            :seon.config.ai/thinking :disabled)
+      (let [settings (-> @dials
+                         (assoc :seon.config.ai/model "registered-model"
+                                :seon.config.ai/max-tokens 500
+                                :seon.config.ai/thinking :disabled)
+                         (dissoc :seon.config.ai/api-key-variable))
             target (:seon.ai/primary (ai/targets @connection settings))
             body (ai/request-body (assoc target :seon.ai/prompt "hello"))]
         (is (= "https://example.invalid/v1/chat/completions"
@@ -248,6 +249,55 @@
         (is (= 100 (get body "max_completion_tokens")))
         (is (not (contains? body "max_tokens"))
             "the provider row, not the model name, selects the wire field")))))
+
+(deftest descriptor-resolution-normalizes-cardinality-many-before-membership
+  (test-support/with-database
+    (fn [connection]
+      (seed-registry! connection)
+      (let [settings (assoc @dials
+                            :seon.config.ai/model "registered-model"
+                            :seon.config.ai/thinking :high)
+            target (:seon.ai/primary (ai/targets @connection settings))
+            body (ai/request-body (assoc target :seon.ai/prompt "hello"))]
+        (is (= :high (:seon.ai/thinking target))
+            "a supported keyword is membership data, never a vector index")
+        (is (= {"type" "enabled"} (get body "thinking")))
+        (is (= "high" (get body "reasoning_effort")))))))
+
+(deftest explicit-credential-selection-survives-provider-resolution
+  (test-support/with-database
+    (fn [connection]
+      (seed-registry! connection)
+      (let [missing-variable "SEON_AI_AGENT_OVERRIDE_VERIFIED_ABSENT"
+            target
+            (:seon.ai/primary
+             (ai/targets @connection
+                         (assoc @dials
+                                :seon.config.ai/model "registered-model"
+                                :seon.config.ai/api-key-variable
+                                missing-variable)))
+            requests (atom [])
+            outcome
+            (with-redefs-fn
+              {#'seon.ai/send-request
+               (fn [request]
+                 (swap! requests conj request)
+                 {:seon.ai/text "must not happen"})}
+              #(ai/complete (assoc target :seon.ai/prompt "hello")))]
+        (is (= missing-variable (:seon.ai/api-key-variable target)))
+        (is (= :seon.ai/no-credential (:seon.error/kind outcome)))
+        (is (empty? @requests)
+            "the explicit absent credential refuses before the network")))))
+
+(deftest provider-descriptor-fills-an-absent-credential-selection
+  (test-support/with-database
+    (fn [connection]
+      (seed-registry! connection)
+      (let [settings (-> @dials
+                         (assoc :seon.config.ai/model "registered-model")
+                         (dissoc :seon.config.ai/api-key-variable))
+            target (:seon.ai/primary (ai/targets @connection settings))]
+        (is (= "TEST_PROVIDER_KEY" (:seon.ai/api-key-variable target)))))))
 
 (deftest a-missing-registry-row-leaves-the-working-call-target-unchanged
   (test-support/with-database
@@ -689,24 +739,24 @@
 (defn- truncating-stream
   "A body that delivers `text` and then fails the way the JDK fails a
   stream whose connection went away."
-  [text]
-  (let [delivered (java.io.ByteArrayInputStream. (.getBytes ^String text "UTF-8"))]
-    (proxy [java.io.InputStream] []
-      (read
-        ([]
-         (let [byte-read (.read delivered)]
-           (if (neg? byte-read)
-             (throw (java.io.IOException.
-                     "closed"
-                     (java.io.IOException. "connection reset by peer")))
-             byte-read)))
-        ([buffer offset length]
-         (let [read (.read delivered buffer offset length)]
-           (if (neg? read)
-             (throw (java.io.IOException.
-                     "closed"
-                     (java.io.IOException. "connection reset by peer")))
-             read)))))))
+  ([text]
+   (truncating-stream text
+                      (java.io.IOException. "connection reset by peer")))
+  ([text cause]
+   (let [delivered
+         (java.io.ByteArrayInputStream. (.getBytes ^String text "UTF-8"))]
+     (proxy [java.io.InputStream] []
+       (read
+         ([]
+          (let [byte-read (.read delivered)]
+            (if (neg? byte-read)
+              (throw (java.io.IOException. "closed" cause))
+              byte-read)))
+         ([buffer offset length]
+          (let [read (.read delivered buffer offset length)]
+            (if (neg? read)
+              (throw (java.io.IOException. "closed" cause))
+              read))))))))
 
 (defn- streamed-lines [& lines] (str (str/join "\n" lines) "\n"))
 
@@ -746,6 +796,25 @@
            (get-in completion [:seon.error/data :seon.ai/cause-chain])))
     (is (not (str/includes? (:seon.error/message completion) "readable JSON"))
         "nothing blames the body for a transport that ended")))
+
+(deftest a-reasoning-only-time-limit-names-the-missing-assistant-text
+  (let [body
+        (truncating-stream
+         (streamed-lines
+          "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking\"}}]}")
+         (java.net.http.HttpTimeoutException. "request timed out"))
+        failure (#'seon.ai/streamed-completion body nil)]
+    (is (= :seon.ai/stream-truncated (:seon.error/kind failure)))
+    (is (= 8 (get-in failure
+                      [:seon.error/data :seon.ai/reasoning-received])))
+    (is (zero? (get-in failure
+                       [:seon.error/data :seon.ai/text-received])))
+    (is (str/includes? (:seon.error/message failure)
+                       "8 characters of reasoning but no assistant text"))
+    (is (str/includes? (:seon.error/message failure)
+                       "configured time limit fired"))
+    (is (true? (#'seon.ai/output-observed? (:seon.error/data failure)))
+        "reasoning is paid output even when assistant text is absent")))
 
 (deftest a-truncated-stream-never-reports-output-that-never-arrived
   ;; the flag `disposition` reads was a hardcoded true on every 2xx

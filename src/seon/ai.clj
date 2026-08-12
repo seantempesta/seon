@@ -169,7 +169,9 @@
 
 (defn- model-details
   [database model-id]
-  (db/pull database model-detail-pull [:seon.ai.model/id model-id]))
+  (some-> (db/pull database model-detail-pull
+                   [:seon.ai.model/id model-id])
+          (update :seon.ai.model/thinking-dials set)))
 
 (defn- rendered-model
   [unit]
@@ -351,16 +353,28 @@
   (if-let [model (model-details database (:seon.ai/model target))]
     (let [provider (:seon.ai.model/provider model)
           thinking-dials (:seon.ai.model/thinking-dials model)
-          configured-thinking (:seon.ai/thinking target)]
+          configured-thinking (:seon.ai/thinking target)
+          target
+          (if provider
+            (let [resolved
+                  (cond->
+                   (assoc target
+                          :seon.ai/endpoint
+                          (:seon.config.ai/endpoint provider)
+                          :seon.ai.model/output-token-wire-key
+                          (:seon.ai.model/output-token-wire-key provider))
+                    ;; Credential selection is already effective per-agent
+                    ;; data. The descriptor supplies its default only when
+                    ;; no caller selected one, so resolution cannot clobber
+                    ;; an explicit variable name.
+                    (not (contains? target :seon.ai/api-key-variable))
+                    (assoc :seon.ai/api-key-variable
+                           (:seon.config.ai/api-key-variable provider)))]
+              (if (:seon.config.ai/no-auth target)
+                (dissoc resolved :seon.ai/api-key-variable)
+                (dissoc resolved :seon.config.ai/no-auth)))
+            target)]
       (cond-> target
-        provider
-        (->
-         (assoc :seon.ai/endpoint (:seon.config.ai/endpoint provider)
-                :seon.ai/api-key-variable
-                (:seon.config.ai/api-key-variable provider)
-                :seon.ai.model/output-token-wire-key
-                (:seon.ai.model/output-token-wire-key provider))
-         (dissoc :seon.config.ai/no-auth))
 
         (:seon.ai.model/max-output-tokens model)
         (update :seon.ai/max-tokens min
@@ -1047,6 +1061,12 @@
              (conj chain (str (.getName (class failure)) ": "
                               (ex-message failure)))))))
 
+(defn- caused-by?
+  [failure throwable-class]
+  (boolean
+   (some #(.isInstance ^Class throwable-class %)
+         (take-while some? (iterate ex-cause failure)))))
+
 (defn- interruptible-lines
   "Lines from `reader`, recording a read failure in `failure` rather
   than throwing it.
@@ -1079,14 +1099,28 @@
   and the two have completely different owners."
   [snapshot failure]
   (let [received (count (:seon.ai/text snapshot))
+        reasoning-received (count (:seon.ai/reasoning-partial snapshot))
+        time-limit-fired? (caused-by? failure
+                                      java.net.http.HttpTimeoutException)
         chain (cause-chain failure)]
     {:seon.error/kind ::stream-truncated
      :seon.error/message
-     (if (pos? received)
+     (cond
+       (pos? received)
        (str "The provider's stream ended after " received
             " characters of assistant text, before its terminal event."
             " What arrived was kept and may stop mid-thought. The"
             " transport ended with: " (str/join " <- " chain))
+
+       (pos? reasoning-received)
+       (str "The provider streamed " reasoning-received
+            " characters of reasoning but no assistant text"
+            (if time-limit-fired?
+              " before the configured time limit fired."
+              " before its stream ended.")
+            " The transport ended with: " (str/join " <- " chain))
+
+       :else
        (str "The provider answered 200 and then ended the stream before"
             " sending any assistant text. The transport ended with: "
             (str/join " <- " chain)))
@@ -1094,9 +1128,8 @@
      (cond-> {::cause-chain chain
               ::text-received received
               ::thread-interrupted? (.isInterrupted (Thread/currentThread))}
-       (:seon.ai/reasoning-partial snapshot)
-       (assoc ::reasoning-received
-              (count (:seon.ai/reasoning-partial snapshot))))}))
+       (pos? reasoning-received)
+       (assoc ::reasoning-received reasoning-received))}))
 
 (defn- truncated-completion
   "One completion value for a 2xx stream that ended before its terminal.
@@ -1165,6 +1198,14 @@
          (:seon.ai/usage snapshot)
          (:seon.ai/tokens snapshot)
          ::empty-stream)))))
+
+(defn- output-observed?
+  [evidence]
+  (if (or (contains? evidence ::text-received)
+          (contains? evidence ::reasoning-received))
+    (or (pos? (get evidence ::text-received 0))
+        (pos? (get evidence ::reasoning-received 0)))
+    true))
 
 (defn- http-request-data
   "Ordinary request data for the JDK leaf."
@@ -1256,8 +1297,7 @@
                          ;; every other 2xx failure holds a body the
                          ;; provider generated and charged for.
                          ::output-observed?
-                         (pos? (get (:seon.error/data completion)
-                                    ::text-received 1))})
+                         (output-observed? (:seon.error/data completion))})
                 completion))
             (catch Throwable failure
               {:seon.error/kind ::unparseable-body

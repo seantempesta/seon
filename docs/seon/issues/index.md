@@ -66,7 +66,7 @@ See `README.md` for the convention.
 | [Settle what arrived when a provider stream closes mid-body](a-mid-stream-provider-disconnect-discards-the-whole-turn.md) | blocker | whole-system arc repair wave |
 | [Await every worker writer before deleting its root](test-runner-cleans-a-worker-root-while-kondo-is-still-writing.md) | blocker | test runner cleanup repair wave |
 
-## Friction (140)
+## Friction (139)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -77,7 +77,6 @@ See `README.md` for the convention.
 | [Make domain order come only from recorded order facts](class-domain-order-falls-through-to-strings-and-hashes.md) | friction | class-kill queue |
 | [Make local updates unable to recompute global projections](class-local-updates-recompute-global-projections.md) | friction | class-kill queue |
 | [Translate dependency representations once at their boundary](class-dependency-representations-leak-past-boundaries.md) | friction | class-kill queue |
-| [Preserve per-agent credential selection through provider resolution](provider-descriptor-overwrites-per-agent-credential-selection.md) | friction | AI provider settings precedence wave |
 | [Record posh's cardinality-one pull-analysis arity defect](posh-cardinality-one-pull-analysis-has-an-arity-defect.md) | friction | upstream-delta sweep |
 | [Read terminal failure from the settlement key its producer writes](loop-settlement-consumer-reads-a-key-no-producer-writes.md) | friction | loop settlement contract wave |
 | [Derive the oversight fleet proof from the live proc roster](oversight-fleet-test-pins-a-stale-proc-roster.md) | friction | oversight test repair |
