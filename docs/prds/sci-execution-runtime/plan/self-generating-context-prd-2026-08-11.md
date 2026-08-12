@@ -251,15 +251,24 @@ the WORKED CONTRACTED-DEFN DEMONSTRATION. Recommendation to the owner: rule
 HALF's shape as the V1 minimum; the ablation table lives in
 [the plan](../research/minimum-context-ablation-plan-2026-08-11.md).
 
-## Open with the owner (not yet ruled)
+## Morning rulings 2026-08-12 (owner, second round)
 
-- Tile content: live window (newest-basis block, whatever shape) vs fixed
-  agent card with freshness — recommended: live window.
-- Preview depth for attached agents; drill via the same form the agent would
-  type — recommended as stated.
-- Tile ordering: newest-first vs stable grid + freshness highlight —
-  recommendation: stable grid with freshness highlight, newest-first only in
-  the column.
+18. **HALF is the V1 minimum opening context**: instructions, own namespace
+    in detail, required namespaces as one dir listing each, the worked
+    contracted-defn demonstration, and the task message (drive evidence: two
+    replicates, identical durable results to FULL at 46% tokens). The
+    demonstration is the load-bearing teaching.
+19. **Tiles are live windows by default; pins override.** HTML renders exist
+    for the USER's eyes; each tile shows the agent's newest-basis block; the
+    user may star/pin any block and the pinned block holds the tile instead
+    of the live window until unpinned. For agents the same entries are a
+    glimpse of current work — and the context must TEACH root to query its
+    agents' histories or simply message them when an output does not explain
+    itself (attention is a taught vocabulary, never a dashboard mechanism).
+20. **Stable grid + freshness highlight** for tile arrangement; newest-first
+    ordering lives only inside an agent's own column.
+21. **Preview depth: newest block + recent messages** per attached agent in
+    root's context and tile.
 - ~~History compaction~~ RULED 2026-08-11 night: DEFERRED — W2 builds
   without eviction; histories grow unbounded until a live long-lived agent
   forces the decision with evidence. Batched-at-checkpoint remains the
