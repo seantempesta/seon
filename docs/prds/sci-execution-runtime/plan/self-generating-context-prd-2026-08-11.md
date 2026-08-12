@@ -178,6 +178,23 @@ back — everywhere, for every agent, with no maintained list of forms.
     that does not already exist. Every form in the worked example must be
     one the generation machinery genuinely emits.
 
+## Rulings 38-40 (owner, 2026-08-12 night — watch-list resolved)
+
+38. **The environment carries, never contains** (clarifies 13): seon.env
+    carries what derivation NEEDS — projection, basis, connection, agent
+    scope — and the opening context is DERIVED per agent from the walk,
+    never stored in or on the environment. Ruling 13's env-not-bootstrap
+    vocabulary anchor survives; the "extension" phrasing is retired.
+39. **Root's preview is derived like everything else** (supersedes 21's
+    fixed depth): the preview of each agent is the gap-closure of root's
+    own walk over that agent — newest block always in membership; messages
+    appear when unshown since the shown basis. One mechanism, no fixed
+    depth rule.
+40. **Test results become facts NOW** (ruling 10 implemented before the
+    evolving-session build): declared result attributes committed by the
+    one runner, unlocking the demonstration's test exchange, the problems
+    list, and after-change auto-runs — no phase builds on a stub.
+
 ## The mechanism (composed from the verified reports)
 
 ### One derivation
