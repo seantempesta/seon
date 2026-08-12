@@ -528,3 +528,18 @@ Open assumptions section; it is no longer left to an implementer.
 | MI-1 | The entry model and example now keep comment plus form in one source under one namespace prompt; comments are never independent forms. |
 | MI-2 | Downgrades Example B to an executable ordering/shape frame and assigns all literal ids/output bytes to the recurring fixture; no abbreviation is presented as byte authority. |
 | MI-3 | Defines determinism over database commit/basis, retained history identities/bytes, acquired program generation, and admission cap/profile; the missing program-generation input is an exact `[target]` field. |
+
+## Owner-rejection round disposition (ruling 37)
+
+Ruling 37 supersedes the earlier disposition of BA-4, BA-5, and the content
+side of BA-6 wherever those rows describe scratch-first status development.
+The suite/PRD byte-authority boundary from BA-6 remains unchanged.
+
+| Owner finding | Disposition |
+|---|---|
+| OR-1 — spec-first, one definition | Deleted the scratch → contract → redefine arc. The revised frame names the already declared `:seon.ns/ns` input and `:seon.render/ai` output before one `render-namespace-ai` definition. Comments narrate that data model; no redefinition remains. |
+| OR-2 — use the existing artifact | Deleted the database-taking status function, invented status shape, and `register!` exchange. The artifact is one public function in the agent's own namespace accepting the namespace unit and returning AI bytes. The implementation PRD cites the landed owner propagation and unique contract-fit selection chain. |
+| OR-3 — genuine emitted forms | Removed invented `in-ns`, `require`, and hand-picked `doc` forms. The prefix is only `(help)` plus namespace `dir` forms produced by landed owners. The final five forms are the exact `[target]` return of the retargeted `my.run/walkthrough`; Phase 2 names the `clojure.test` required-namespace change that makes its discovery form derivable. All eight forms parse, and every invoked function/macro exists at the cited HEAD signature. |
+| OR-4 — retain the real exchanges | Kept one wrong-call exchange and pinned its class assertion to `:seon.instrument/contract-violated`, never temporary `:seon.error/kind`; kept the declared usage test, successful AI value, and one-argument `my.run/complete`. The settled result includes `:my.run/delivered-to "root"`. |
+| OR-5 — D2 and phase ownership | Reconciled D2 in both evolving-session documents to ruling 37. Phase 2 now owns the bootstrap required-namespace change and regression as well as `my.run` and its usage test, and therefore serializes after Phase 1 instead of claiming false disjointness. |
+| OR-6 — two byte authorities | Preserved BA-6's boundary: the recurring usage test and rendered fixture pin every demonstration byte; the implementation document pins only the derivation frame and enabling source changes. |

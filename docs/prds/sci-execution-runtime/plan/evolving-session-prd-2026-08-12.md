@@ -14,7 +14,7 @@ defects filed) and
 [Fable's fresh-context review](../research/evolving-session-fable-review-2026-08-12.md)
 (the eight named unknowns answered; verdict: the design is sound). Parent
 design: [self-generating-context-prd-2026-08-11.md](self-generating-context-prd-2026-08-11.md)
-(rulings 1–36).
+(rulings 1–37).
 
 ## The model in one paragraph
 
@@ -40,11 +40,11 @@ shape preserving ruling 36 literally. Sol's Option 2 (render-proc append) is
 rejected as untruthful history; Option 3 (refresh runs) is rejected unless
 ruling 36 is ever explicitly narrowed.
 
-Two enabling changes Option 1 needs (Sol, with file:line):
-`generated-run?` currently classifies any run with a system form as forever
-generated (`src/seon/cluster/work.clj:570-591`) — the state transition must
-become `generate → call`; and plan publication must append after the
-existing prefix instead of ordinal zero (`src/seon/cluster/loop.clj:1604-1614`).
+The two enabling changes Option 1 needed are now landed. Held generated runs
+derive `:resume`, `:generate`, or `:call` from stored facts
+(`src/seon/cluster/work.clj:570-650`), and `plan-call` offsets provider-reply
+ordinals by the existing generated-form count
+(`src/seon/cluster/run.clj:640-698`).
 
 ## Owner rulings on this document (2026-08-12 evening round)
 
@@ -55,15 +55,19 @@ existing prefix instead of ordinal zero (`src/seon/cluster/loop.clj:1604-1614`).
   ruling used as selection), nearest-first to the cap. No hand lists;
   "check messages" derives from the run's trigger fact. Context grows by
   the agent ACTING (requiring namespaces generates their dirs next wake).
-- **D2 RULED — the demonstration is the agent authoring a render function
-  for its own namespace-state** (schema + defn + render declaration + its
-  output appearing in context, feeding root's tiles): real, wanted, unique
-  per agent, nothing to retract; the my.run usage test stays the
-  suite-gated source of the arc's SHAPE, retargeted to this content.
-  Discipline is taught by comments narrating intent ("; scratch first";
-  "; schemas as metadata make it a program fact") — never staged mistakes;
-  the ONE real error exchange remains the wrong-call contract violation
-  (errors-as-values, live). Deliberate-failure theater stays dead.
+- **D2 RULED, as governed by ruling 37 — spec-first owning-namespace
+  render**: the demonstration uses the existing mechanism. The agent authors
+  one function in its own namespace accepting the existing `:seon.ns/ns` unit
+  and returning `:seon.render/ai`. The landed owning-namespace contract-fit
+  chain selects it before the schema default or floor, so this is how the
+  agent controls what other agents' walks see of its namespace. Comments
+  narrate the data model; every needed named spec precedes the function, and
+  the function is written once. There is no invented status value, schema
+  registration exchange, scratch definition, or redefinition. The stable
+  `my.run` usage test remains the suite-gated byte authority for the retargeted
+  arc. The one real error exchange remains the wrong-call class-shaped contract
+  violation; the test is declared, the correct AI value is observed, and
+  completion is delivered to the requester.
 - **T2 RULED — pending page, settle at wake**: the page pulls for the user
   now; the agent pulls at wake; ruling 36 intact.
 
