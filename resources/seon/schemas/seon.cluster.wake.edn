@@ -20,6 +20,8 @@
                       :seon.flow/channel]
                      [:seon.cluster.wake/render-channel
                       :seon.flow/channel]
+                     [:seon.render.web/interest
+                      :seon.render.web/interest]
                      [:seon.cluster.wake/search-channel
                       {:optional true}
                       :seon.flow/channel]

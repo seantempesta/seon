@@ -2204,11 +2204,13 @@
         search-channel (async/chan (async/sliding-buffer 1))
         pages-channel (async/chan (async/sliding-buffer 1))
         latest-packages (atom {})
+        render-interest (atom :all)
         view {:seon.render.web/render-channel render-channel
               :seon.render/context-channel context-channel
               :seon.render.web/pages-channel pages-channel
               :seon.render.web/registration (atom {})
               :seon.render.web/latest-packages latest-packages
+              :seon.render.web/interest render-interest
               :seon.render.web/completion (async/promise-chan)
               :seon.render.web/root-agent-id "root"
               :seon.search/index (:seon.search/index instance)
@@ -2284,10 +2286,16 @@
                     (cluster.agent/fenced-route? routing agent-eid channel))
                   :seon.cluster.wake/armer-channel armer-channel
                   :seon.cluster.wake/render-channel render-channel
+                  :seon.render.web/interest render-interest
                   :seon.cluster.wake/search-channel search-channel
                   :seon.cluster.wake/fault-channel
                   (:seon.flow/fault-channel fanout)
                   :seon.cluster.wake/key :seon.cluster.agent/route})
+    ;; BOOT IS ONE WAKE through the ordinary render path. The listener is
+    ;; already registered and the cold interest is `:all`, so commits before
+    ;; this offer are covered by the same newest-database derivation as every
+    ;; later pass.
+    (async/offer! render-channel ::wake/render)
     ;; ARM ALL AT BOOT (R6), synchronously, through the armer's ONE
     ;; derivation. The listener is already registered, so every arm's
     ;; mailbox prime and every commit concurrent with it are conserved.

@@ -33,6 +33,12 @@
                     "must be a process-local atom containing each page's latest render package"
                     :gen/gen seon.flow/atom-reference-generator}
                    seon.flow/atom-reference?],
+                  :interest
+                  [:fn
+                   {:error/message
+                    "must be a process-local atom containing render dependency attributes"
+                    :gen/gen seon.flow/atom-reference-generator}
+                   seon.flow/atom-reference?],
                   :page-request
                   [:map
                    [:seon.cluster.agent/id :seon.cluster.agent/id]
@@ -115,6 +121,8 @@
                     :seon.render.web/registration]
                    [:seon.render.web/latest-packages
                     :seon.render.web/latest-packages]
+                   [:seon.render.web/interest
+                    :seon.render.web/interest]
                    [:seon.render.web/completion :seon.flow/channel]
                    [:seon.render.web/root-agent-id
                     :seon.render.web/root-agent-id]
