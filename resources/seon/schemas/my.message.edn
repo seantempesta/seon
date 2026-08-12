@@ -1,29 +1,43 @@
-#:my.message{:about [:string {:min 1}],
-             :content [:string {:min 1}],
-             :declination
+{:my.message/about [:string {:min 1}],
+ :my.message/content [:string {:min 1}],
+ :my.message/from :seon.cluster.agent/id,
+ :my.message/at :inst,
+ :my.message/id :seon.cluster.message/id,
+ :my.message/preview [:string {:max 160}],
+ :my.message/inbox-entry
+             [:map
+              [:my.message/id :my.message/id]
+              [:my.message/from {:optional true} :my.message/from]
+              [:my.message/at :my.message/at]
+              [:my.message/preview :my.message/preview]],
+ :my.message/inbox [:vector :my.message/inbox-entry],
+ :my.message/inbox-options
+             [:map
+              [:seon.db/since :seon.db/basis-t]],
+ :my.message/declination
              [:map
               [:my.message/to :my.message/to]
               [:my.message/about :my.message/about]
               [:my.message/reason :my.message/reason]],
-             :message
+ :my.message/message
              [:map
               [:my.message/to :my.message/to]
               [:my.message/content :my.message/content]
               [:my.message/about {:optional true} :my.message/about]],
-             :reason [:string {:min 1}],
-             :to [:string {:min 1}],
-             :value
+ :my.message/reason [:string {:min 1}],
+ :my.message/to [:string {:min 1}],
+ :my.message/value
              [:or
               :my.message/message
               :my.message/declination
               [:vector
                {:min 1}
                [:or :my.message/message :my.message/declination]]],
-             :no-recipient [:= true]
-             :no-recipient-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a message request with no recipient"} [:my.message/no-recipient :my.message/no-recipient] [:seon.error/message :seon.error/message]]
-             :no-content [:= true]
-             :no-content-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a message request with no content"} [:my.message/no-content :my.message/no-content] [:seon.error/message :seon.error/message]]
-             :no-about [:= true]
-             :no-about-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a declination with no subject"} [:my.message/no-about :my.message/no-about] [:seon.error/message :seon.error/message]]
-             :no-reason [:= true]
-             :no-reason-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a declination with no reason"} [:my.message/no-reason :my.message/no-reason] [:seon.error/message :seon.error/message]]}
+ :my.message/no-recipient [:= true]
+ :my.message/no-recipient-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a message request with no recipient"} [:my.message/no-recipient :my.message/no-recipient] [:seon.error/message :seon.error/message]]
+ :my.message/no-content [:= true]
+ :my.message/no-content-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a message request with no content"} [:my.message/no-content :my.message/no-content] [:seon.error/message :seon.error/message]]
+ :my.message/no-about [:= true]
+ :my.message/no-about-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a declination with no subject"} [:my.message/no-about :my.message/no-about] [:seon.error/message :seon.error/message]]
+ :my.message/no-reason [:= true]
+ :my.message/no-reason-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a declination with no reason"} [:my.message/no-reason :my.message/no-reason] [:seon.error/message :seon.error/message]]}

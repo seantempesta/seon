@@ -11,7 +11,65 @@
   (:require [clojure.test :refer [deftest is testing]]
             [my.message :as message]
             [my.run :as run]
-            [seon.schema]))
+            [seon.db :as db]
+            [seon.schema]
+            [seon.test-support :as support]))
+
+(defn- with-messages
+  [f]
+  (support/with-database
+    (fn [connection]
+      (db/transact! connection
+                    [{:seon.cluster.agent/id "alice"}
+                     {:seon.cluster.agent/id "bob"}])
+      (let [before (db/basis-t @connection)]
+        (db/transact! connection
+                      [{:seon.cluster.message/id "m-1"
+                        :seon.cluster.message/to
+                        [:seon.cluster.agent/id "bob"]
+                        :seon.cluster.message/from
+                        [:seon.cluster.agent/id "alice"]
+                        :seon.cluster.message/content "First message"
+                        :seon.cluster.message/at #inst "2026-08-12T10:00:00.000-00:00"}
+                       {:seon.cluster.message/id "m-2"
+                        :seon.cluster.message/to
+                        [:seon.cluster.agent/id "bob"]
+                        :seon.cluster.message/content (apply str (repeat 200 "x"))
+                        :seon.cluster.message/at #inst "2026-08-12T11:00:00.000-00:00"}])
+        (f connection before)))))
+
+(deftest ^{:seon.test/usage true} inbox-lists-this-agents-messages-newest-last
+  (with-messages
+    (fn [connection before]
+      (let [long-preview (str (apply str (repeat 159 "x")) "…")]
+        (is (= [{:my.message/id "m-1"
+                 :my.message/from "alice"
+                 :my.message/at #inst "2026-08-12T10:00:00.000-00:00"
+                 :my.message/preview "First message"}
+                {:my.message/id "m-2"
+                 :my.message/at #inst "2026-08-12T11:00:00.000-00:00"
+                 :my.message/preview long-preview}]
+               (message/inbox @connection "bob"))))
+      (is (= ["m-1" "m-2"]
+             (mapv :my.message/id
+                   (message/inbox {:seon.db/since before}
+                                  @connection "bob")))))))
+
+(deftest ^{:seon.test/usage true} read-pulls-one-admitted-message-row
+  (with-messages
+    (fn [connection _before]
+      (let [value (message/read "m-1" @connection)]
+        (is (= {:seon.cluster.message/id "m-1"
+                :seon.cluster.message/to
+                [:seon.cluster.agent/id "bob"]
+                :seon.cluster.message/from
+                [:seon.cluster.agent/id "alice"]
+                :seon.cluster.message/content "First message"
+                :seon.cluster.message/at
+                #inst "2026-08-12T10:00:00.000-00:00"}
+               value))
+        (is (seon.schema/valid-candidate-value?
+             :seon.cluster.message/message value))))))
 
 (deftest a-message-is-an-ordinary-value
   (testing "send carries the recipient and the content, and nothing else"
@@ -98,11 +156,12 @@
     (is (seon.schema/valid-candidate-value? :seon.error/value value)
         "the error path keeps the output schema too")))
 
-(deftest the-surface-is-exactly-two-functions
+(deftest the-surface-is-exactly-four-functions
   ;; Countable, like the disposition ruling: fan-out is the vector, so
   ;; there is no send-many or decline-many, and delivery is the
   ;; driver's, so neither function has a `!`.
-  (is (= #{'decline 'send} (set (keys (ns-publics 'my.message)))))
+  (is (= #{'decline 'inbox 'read 'send}
+         (set (keys (ns-publics 'my.message)))))
   (is (.contains ^String (:doc (meta (the-ns 'my.message)))
                  "inter-agent message protocol"))
   (is (.contains ^String (:doc (meta #'message/send))
