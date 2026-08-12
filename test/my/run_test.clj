@@ -76,9 +76,25 @@
               :seon.sci.admit/caps
               (config/result-caps (config/defaults))
               :seon.sci.eval/time-limit-ms 5000
-              :seon.config/on-core-error :record}
+             :seon.config/on-core-error :record}
              :seon.render/ai :seon.render/ai)]
-        (is (= 'my.run/render-namespace-ai selected))))))
+        (is (= 'my.run/render-namespace-ai selected))
+        (is (= 'my.run/usage-form
+               (#'render/producer
+                {:seon.db/db database
+                 :seon.sci.eval/ctx ctx
+                 :seon.render/namespace 'my.run
+                 :seon.render/value namespace-entity
+                 :seon.render/output :seon.render/form
+                 :seon.sci.admit/caps
+                 (config/result-caps (config/defaults))
+                 :seon.sci.eval/time-limit-ms 5000
+                 :seon.config/on-core-error :record}
+                :seon.render/form :seon.render/form)))
+        (let [entries (run/usage-form
+                       (assoc namespace-entity :seon.db/db database))]
+          (is (= '(dir 'my.run) (:seon.repl/form (first entries))))
+          (is (= 6 (count entries))))))))
 
 (deftest ^{:seon.test/usage true} the-lifecycle-walkthrough-is-executable-data
   (let [entries (run/walkthrough)

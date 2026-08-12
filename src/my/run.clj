@@ -83,10 +83,32 @@
            "test is green."))}])
 
 (defn usage-form
-  "Render the canonical usage test as its executable walkthrough."
-  {:malli/schema [:=> [:cat :my.run/usage-unit] :seon.repl/entries]}
-  [_unit]
-  (walkthrough))
+  "Render my.run's listing followed by its canonical usage walkthrough.
+
+  The usage declaration is the executable teaching source. Rendering the
+  namespace refuses loudly when the indexed usage test is absent, so the
+  generated opening cannot silently retain a hand-copied demonstration after
+  its recurring anti-rot gate disappears."
+  {:malli/schema
+   [:=> [:cat [:or :my.run/namespace-unit :my.run/usage-unit]]
+    :seon.repl/entries]}
+  [unit]
+  (let [database (:seon.db/db unit)
+        usage-test
+        (when database
+          (db/q '[:find ?test-symbol .
+                 :where
+                 [?namespace :seon.ns/name my.run]
+                 [?test :seon.test/ns ?namespace]
+                 [?test :seon.test/usage true]
+                 [?test :seon.test/sym ?test-symbol]]
+               database))]
+    (when (and database (nil? usage-test))
+      (throw
+       (ex-info "my.run has no declared usage walkthrough."
+                {:seon.error/kind ::usage-walkthrough-absent
+                 :seon.ns/name 'my.run})))
+    (into [{:seon.repl/form '(dir 'my.run)}] (walkthrough))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The two dispositions
