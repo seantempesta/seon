@@ -125,6 +125,35 @@
            (is (= 0 (:seon.render/distance nearer)))
            (is (= shallower-caps (:seon.sci.admit/caps recapped)))))))))
 
+(deftest compiled-root-plan-cache-hit-never-compares-the-selector
+  (support/with-database
+   {:seon.test-support/extra-schema root-pull-schema}
+   (fn [connection]
+     (let [equality-visits (atom 0)
+           selector (fn []
+                      [(reify Object
+                         (equals [_ _]
+                           (swap! equality-visits inc)
+                           true)
+                         (hashCode [_] 0))])
+           acquisition-request (request connection)
+           compiled-plan (Object.)]
+       (with-redefs-fn
+         {#'seon.render.walk/root-selector
+          (fn [_database _distance _caps] (selector))
+          #'pull-api/compile-pull-plan
+          (fn [_database _selector] compiled-plan)}
+         (fn []
+           (is (identical? compiled-plan
+                           (:datahike.pull/plan
+                            (walk/root-pull-plan acquisition-request))))
+           (reset! equality-visits 0)
+           (is (identical? compiled-plan
+                           (:datahike.pull/plan
+                            (walk/root-pull-plan acquisition-request))))
+           (is (zero? @equality-visits)
+               "cache lookup compares only the generation, distance, and caps key")))))))
+
 (defn- reverse-attribute
   [attribute]
   (keyword (namespace attribute) (str "_" (name attribute))))

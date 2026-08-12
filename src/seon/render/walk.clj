@@ -52,6 +52,14 @@
 
 (schema.edn/load! {})
 
+(deftype ^:private DatabaseSchemaIdentity [schema]
+  Object
+  (equals [_ other]
+    (and (instance? DatabaseSchemaIdentity other)
+         (identical? schema (.-schema ^DatabaseSchemaIdentity other))))
+  (hashCode [_]
+    (System/identityHashCode schema)))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The connections
 ;;; ---------------------------------------------------------------------------
@@ -313,7 +321,11 @@
         distance (long (get request :seon.render/distance 1))
         selector (root-selector database distance caps)
         cache (:seon.schema.projection/compiled projection)
-        cache-key [::root-pull-plan distance caps selector]
+        cache-key [::root-pull-plan
+                   (:seon.schema.projection/fingerprint projection)
+                   (DatabaseSchemaIdentity. (:schema database))
+                   distance
+                   caps]
         candidate
         (delay
           {:seon.schema.projection/fingerprint
