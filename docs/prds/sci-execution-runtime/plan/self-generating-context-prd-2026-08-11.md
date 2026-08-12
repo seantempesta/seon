@@ -198,6 +198,22 @@ back — everywhere, for every agent, with no maintained list of forms.
     one runner, unlocking the demonstration's test exchange, the problems
     list, and after-change auto-runs — no phase builds on a stub.
 
+## Rulings 41-44 (owner, 2026-08-12 night — every open assumption ruled)
+
+41. **Zero turns force-settles `:wait`** with a typed budget-exhausted
+    condition the requester sees; the agent stays alive and its next wake
+    shows why the episode ended.
+42. **Corrections are re-observations at a newer basis** — the same read
+    re-derives and appends; newest-basis wins in blocks; old bytes never
+    change; no meta-entries, no mutation.
+43. **The one-pass incremental fold and since-based deltas land as
+    specced** (D5+D6): the per-form re-pull is deleted; deltas are the one
+    since-database mechanism plus per-new-id reads; zero new callable
+    arities.
+44. **Errors wake** — ruling 6's pair stands: facts ADDRESSED to the agent
+    (messages, and errors recorded against it) open runs; everything else
+    is passive until the next wake.
+
 ## The mechanism (composed from the verified reports)
 
 ### One derivation
