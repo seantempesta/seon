@@ -1,0 +1,606 @@
+my.agents.w1-history-proof-5=> (defn largest
+  "The row with the largest :amount."
+  {:malli/schema [:=> [:cat [:sequential :any]]
+                  [:map [:label :string] [:amount :int]]]}
+  [rows]
+  (last (sort-by :amount rows)))
+Execution error (ExceptionInfo) at seon.schema.internal/contract-error! (internal.cljc:25).
+my.agents.w1-history-proof-5/largest uses :any in an agent-authored contract. Replace the undefined slot with a named predicate schema, for example (schema/register! ::value [:fn {:error/message "must be ..." :gen/schema :string} 'my.domain/value?]).
+
+my.agents.w1-history-proof-5=> (defn largest
+  "The row with the largest :amount; {} when there are none."
+  {:malli/schema [:=> [:cat [:sequential [:map [:label :string] [:amount :int]]]]
+                  [:map [:label {:optional true} :string] [:amount {:optional true} :int]]]}
+  [rows]
+  (or (last (sort-by :amount rows)) {}))
+#'my.agents.w1-history-proof-5/largest
+
+my.agents.w1-history-proof-5=> (dir my.message)
+decline
+send
+nil
+
+my.agents.w1-history-proof-5=> (dir my.run)
+complete
+wait
+nil
+
+my.agents.w1-history-proof-5=> (doc my.run/complete)
+-------------------------
+my.run/complete
+([result])
+  Finish this run with a reply for its requester.
+
+  Takes non-blank reply text and returns a completed disposition or a flat
+  error. Use it only after the run's requested work is done.
+  in:  :my.run/result  [:string {:min 1}]
+  out: :my.run/completed  [:map [:my.run/disposition [:= :completed]] [:my.run/result :my.run/result]]
+       :seon.error/value
+nil
+
+my.agents.w1-history-proof-5=> (help)
+You are an agent in a Seon cluster — a real Clojure REPL, and it is
+yours. Your reply is read as forms and evaluated in order in your own
+namespace; each form and its actual value come back as this session.
+Round trips are expensive: batch what can run together, split where a
+form needs an earlier result. `;;` comments before your own forms are
+welcome.
+
+The cluster is one graph database, versioned like git: branches and
+commits, fast-forward only — no merge, no index, no remotes. Everything
+is a fact in it — every function, schema, test, and message — so every
+question about the system is a query. `dir` and `doc` answer from those
+facts.
+
+Your session is your working tree: defs and atoms here are for fast
+experimentation, restored across restarts, never shared. Committing is
+a contract: a `defn` with a complete `:malli/schema` becomes a durable
+fact any agent can find and call. Contracts are checked honestly —
+declared keys validated rigorously, extra keys ignored, no `:any`, no
+bare `[:maybe ...]` returns.
+
+Every function in the cluster is callable. Public defns are a
+namespace's API — how others get and put; `defn-` is implementation,
+curated out of views yet always yours to inspect. Each namespace has
+one owner agent; to change a foreign namespace, message its owner — a
+pull request, in words.
+
+Reach agents and the human with (my.message/send "id" "text"). End your
+run with (my.run/complete "reply") or (my.run/wait "what for") — your
+next run starts fresh from that note.
+nil
+
+my.agents.w1-history-proof-5=> (in-ns 'my.agents.w1-history-proof-5)
+#object[sci.lang.Namespace 0x454fde80 "my.agents.w1-history-proof-5"]
+
+my.agents.w1-history-proof-5=> (largest [])
+{}
+
+my.agents.w1-history-proof-5=> (largest [{:label "a" :amount 3} {:label "b" :amount 9}])
+{:label "b", :amount 9}
+
+my.agents.w1-history-proof-5=> (largest)
+Execution error (IllegalArgumentException) at seon.instrument/violation (instrument.clj:224).
+No such namespace: my.agents.w1-history-proof-5
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster.agent/cluster]]) db)
+Cluster w1int.
+Configuration w1int and bootstrap plan :default; 1 shared instruction and 7 toolkit namespaces.
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster.agent/cluster]]) db)
+Agent w1-history-proof-5 is idle.
+my.agents.w1-history-proof-5=> (help)
+You are an agent in a Seon cluster — a real Clojure REPL, and it is
+yours. Your reply is read as forms and evaluated in order in your own
+namespace; each form and its actual value come back as this session.
+Round trips are expensive: batch what can run together, split where a
+form needs an earlier result. `;;` comments before your own forms are
+welcome.
+
+The cluster is one graph database, versioned like git: branches and
+commits, fast-forward only — no merge, no index, no remotes. Everything
+is a fact in it — every function, schema, test, and message — so every
+question about the system is a query. `dir` and `doc` answer from those
+facts.
+
+Your session is your working tree: defs and atoms here are for fast
+experimentation, restored across restarts, never shared. Committing is
+a contract: a `defn` with a complete `:malli/schema` becomes a durable
+fact any agent can find and call. Contracts are checked honestly —
+declared keys validated rigorously, extra keys ignored, no `:any`, no
+bare `[:maybe ...]` returns.
+
+Every function in the cluster is callable. Public defns are a
+namespace's API — how others get and put; `defn-` is implementation,
+curated out of views yet always yours to inspect. Each namespace has
+one owner agent; to change a foreign namespace, message its owner — a
+pull request, in words.
+
+Reach agents and the human with (my.message/send "id" "text"). End your
+run with (my.run/complete "reply") or (my.run/wait "what for") — your
+next run starts fresh from that note.
+nil
+
+my.agents.w1-history-proof-5=> (in-ns 'my.agents.w1-history-proof-5)
+#object[sci.lang.Namespace 0x454fde80 "my.agents.w1-history-proof-5"]
+
+my.agents.w1-history-proof-5=> (dir my.run)
+complete
+wait
+nil
+
+my.agents.w1-history-proof-5=> (doc my.run/complete)
+-------------------------
+my.run/complete
+([result])
+  Finish this run with a reply for its requester.
+
+  Takes non-blank reply text and returns a completed disposition or a flat
+  error. Use it only after the run's requested work is done.
+  in:  :my.run/result  [:string {:min 1}]
+  out: :my.run/completed  [:map [:my.run/disposition [:= :completed]] [:my.run/result :my.run/result]]
+       :seon.error/value
+nil
+
+my.agents.w1-history-proof-5=> (dir my.message)
+decline
+send
+nil
+
+my.agents.w1-history-proof-5=> (seon.db/q '[:find (count ?f) . :where [?f :seon.fn/sym _]])
+2886
+
+my.agents.w1-history-proof-5=> (seon.db/q '[:find ?sym :where [?s :seon.schema/key :my.run/result] [?a :seon.fn.arity/input-refs ?s] [?f :seon.fn/arities ?a] [?f :seon.fn/sym ?sym]])
+#{["my.run/complete"]}
+
+my.agents.w1-history-proof-5=> (defn largest
+  "The row with the largest :amount."
+  {:malli/schema [:=> [:cat [:sequential :any]]
+                  [:map [:label :string] [:amount :int]]]}
+  [rows]
+  (last (sort-by :amount rows)))
+Execution error (ExceptionInfo) at seon.schema.internal/contract-error! (internal.cljc:25).
+my.agents.w1-history-proof-5/largest uses :any in an agent-authored contract. Replace the undefined slot with a named predicate schema, for example (schema/register! ::value [:fn {:error/message "must be ..." :gen/schema :string} 'my.domain/value?]).
+
+my.agents.w1-history-proof-5=> (defn largest
+  "The row with the largest :amount; {} when there are none."
+  {:malli/schema [:=> [:cat [:sequential [:map [:label :string] [:amount :int]]]]
+                  [:map [:label {:optional true} :string] [:amount {:optional true} :int]]]}
+  [rows]
+  (or (last (sort-by :amount rows)) {}))
+#'my.agents.w1-history-proof-5/largest
+
+my.agents.w1-history-proof-5=> (largest [{:label "a" :amount 3} {:label "b" :amount 9}])
+{:label "b", :amount 9}
+
+my.agents.w1-history-proof-5=> (largest)
+Execution error (IllegalArgumentException) at seon.instrument/violation (instrument.clj:224).
+No such namespace: my.agents.w1-history-proof-5
+
+my.agents.w1-history-proof-5=> (largest [])
+{}
+
+my.agents.w1-history-proof-5=> (seon.db/q '[:find ?spec . :in $ ?sym :where [?f :seon.fn/sym ?sym] [?f :seon.fn/spec ?spec]] "my.agents.w1-history-proof-5/largest")
+"[:=> [:cat [:sequential [:map [:label :string] [:amount :int]]]] [:map [:label {:optional true} :string] [:amount {:optional true} :int]]]"
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster.agent/cluster]]) db)
+Agent w1-history-proof-5 is running now.
+my.agents.w1-history-proof-5=> (help)
+You are an agent in a Seon cluster — a real Clojure REPL, and it is
+yours. Your reply is read as forms and evaluated in order in your own
+namespace; each form and its actual value come back as this session.
+Round trips are expensive: batch what can run together, split where a
+form needs an earlier result. `;;` comments before your own forms are
+welcome.
+
+The cluster is one graph database, versioned like git: branches and
+commits, fast-forward only — no merge, no index, no remotes. Everything
+is a fact in it — every function, schema, test, and message — so every
+question about the system is a query. `dir` and `doc` answer from those
+facts.
+
+Your session is your working tree: defs and atoms here are for fast
+experimentation, restored across restarts, never shared. Committing is
+a contract: a `defn` with a complete `:malli/schema` becomes a durable
+fact any agent can find and call. Contracts are checked honestly —
+declared keys validated rigorously, extra keys ignored, no `:any`, no
+bare `[:maybe ...]` returns.
+
+Every function in the cluster is callable. Public defns are a
+namespace's API — how others get and put; `defn-` is implementation,
+curated out of views yet always yours to inspect. Each namespace has
+one owner agent; to change a foreign namespace, message its owner — a
+pull request, in words.
+
+Reach agents and the human with (my.message/send "id" "text"). End your
+run with (my.run/complete "reply") or (my.run/wait "what for") — your
+next run starts fresh from that note.
+nil
+
+my.agents.w1-history-proof-5=> (in-ns 'my.agents.w1-history-proof-5)
+#object[sci.lang.Namespace 0x454fde80 "my.agents.w1-history-proof-5"]
+
+my.agents.w1-history-proof-5=> (dir my.run)
+complete
+wait
+nil
+
+my.agents.w1-history-proof-5=> (doc my.run/complete)
+-------------------------
+my.run/complete
+([result])
+  Finish this run with a reply for its requester.
+
+  Takes non-blank reply text and returns a completed disposition or a flat
+  error. Use it only after the run's requested work is done.
+  in:  :my.run/result  [:string {:min 1}]
+  out: :my.run/completed  [:map [:my.run/disposition [:= :completed]] [:my.run/result :my.run/result]]
+       :seon.error/value
+nil
+
+my.agents.w1-history-proof-5=> (dir my.message)
+decline
+send
+nil
+
+my.agents.w1-history-proof-5=> (seon.db/q '[:find (count ?f) . :where [?f :seon.fn/sym _]])
+2886
+
+my.agents.w1-history-proof-5=> (seon.db/q '[:find ?sym :where [?s :seon.schema/key :my.run/result] [?a :seon.fn.arity/input-refs ?s] [?f :seon.fn/arities ?a] [?f :seon.fn/sym ?sym]])
+#{["my.run/complete"]}
+
+my.agents.w1-history-proof-5=> (defn largest
+  "The row with the largest :amount."
+  {:malli/schema [:=> [:cat [:sequential :any]]
+                  [:map [:label :string] [:amount :int]]]}
+  [rows]
+  (last (sort-by :amount rows)))
+Execution error (ExceptionInfo) at seon.schema.internal/contract-error! (internal.cljc:25).
+my.agents.w1-history-proof-5/largest uses :any in an agent-authored contract. Replace the undefined slot with a named predicate schema, for example (schema/register! ::value [:fn {:error/message "must be ..." :gen/schema :string} 'my.domain/value?]).
+
+my.agents.w1-history-proof-5=> (defn largest
+  "The row with the largest :amount; {} when there are none."
+  {:malli/schema [:=> [:cat [:sequential [:map [:label :string] [:amount :int]]]]
+                  [:map [:label {:optional true} :string] [:amount {:optional true} :int]]]}
+  [rows]
+  (or (last (sort-by :amount rows)) {}))
+#'my.agents.w1-history-proof-5/largest
+
+my.agents.w1-history-proof-5=> (largest [{:label "a" :amount 3} {:label "b" :amount 9}])
+{:label "b", :amount 9}
+
+my.agents.w1-history-proof-5=> (largest)
+Execution error (IllegalArgumentException) at seon.instrument/violation (instrument.clj:224).
+No such namespace: my.agents.w1-history-proof-5
+
+my.agents.w1-history-proof-5=> (largest [])
+{}
+
+my.agents.w1-history-proof-5=> (seon.db/q '[:find ?spec . :in $ ?sym :where [?f :seon.fn/sym ?sym] [?f :seon.fn/spec ?spec]] "my.agents.w1-history-proof-5/largest")
+"[:=> [:cat [:sequential [:map [:label :string] [:amount :int]]]] [:map [:label {:optional true} :string] [:amount {:optional true} :int]]]"
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster.agent/namespace]]) db)
+(ns my.agents.w1-history-proof-5 (:require my.message my.run seon.bootstrap))
+
+(defn largest
+  "The row with the largest :amount; {} when there are none."
+  {:malli/schema [:=> [:cat [:sequential [:map [:label :string] [:amount :int]]]]
+                  [:map [:label {:optional true} :string] [:amount {:optional true} :int]]]}
+  [rows]
+  (or (last (sort-by :amount rows)) {}))
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster.eval/run]]) db)
+Execution error (ExceptionInfo) at seon.schema.internal/contract-error! (internal.cljc:25).
+my.agents.w1-history-proof-5/largest uses :any in an agent-authored contract. Replace the undefined slot with a named predicate schema, for example (schema/register! ::value [:fn {:error/message "must be ..." :gen/schema :string} 'my.domain/value?]).
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster.eval/run]]) db)
+#:seon.print{:face :seon.print/var, :name "my.agents.w1-history-proof-5/largest"}
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster.run/agent]]) db)
+Renderer unavailable.
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster.run/forms]]) db)
+Form 0: (help)
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster.run/forms]]) db)
+Form 1: (in-ns 'my.agents.w1-history-proof-5)
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster.run/forms]]) db)
+Form 2: (dir my.run)
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster.run/forms]]) db)
+Form 3: (doc my.run/complete)
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster.run/forms]]) db)
+Form 4: (dir my.message)
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster.run/forms]]) db)
+Form 5: (seon.db/q '[:find (count ?f) . :where [?f :seon.fn/sym _]])
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster.run/forms]]) db)
+Form 6: (seon.db/q '[:find ?sym :where [?s :seon.schema/key :my.run/result] [?a :seon.fn.arity/input-refs ?s] [?f :seon.fn/arities ?a] [?f :seon.fn/sym ?sym]])
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster.run/forms]]) db)
+Form 7: (defn largest
+  "The row with the largest :amount."
+  {:malli/schema [:=> [:cat [:sequential :any]]
+                  [:map [:label :string] [:amount :int]]]}
+  [rows]
+  (last (sort-by :amount rows)))
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster.run/forms]]) db)
+Form 8: (defn largest
+  "The row with the largest :amount; {} when there are none."
+  {:malli/schema [:=> [:cat [:sequential [:map [:label :string] [:amount :int]]]]
+                  [:map [:label {:optional true} :string] [:amount {:optional true} :int]]]}
+  [rows]
+  (or (last (sort-by :amount rows)) {}))
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster.run/forms]]) db)
+Form 9: (largest [{:label "a" :amount 3} {:label "b" :amount 9}])
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster.run/forms]]) db)
+Form 10: (largest)
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster.run/forms]]) db)
+Form 11: (largest [])
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster.run/forms]]) db)
+Form 12: (seon.db/q '[:find ?spec . :in $ ?sym :where [?f :seon.fn/sym ?sym] [?f :seon.fn/spec ?spec]] "my.agents.w1-history-proof-5/largest")
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster/bootstrap-plan]]) db)
+Bootstrap plan :default · digest f5ce726df89dee2a04ff9feb1ebff8a7641833c338a9cf98a6490b062293012e.
+2 ordered evaluation forms: 1 agent, 1 user; 1 help-text form · approximately 468 tokens.
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster/config]]) db)
+Configuration w1int · manifest 990c19e35f83.
+Model deepseek-v4-flash (thinking disabled, max 65536 output tokens); evaluation 30000 ms; Flow 18 compute / 64 I/O; core faults panic.
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster/instructions]]) db)
+This is a live Clojure REPL. Everything above is the output of `(seon.render/walk)` — run it yourself with `:depth`/`:root` to see more. Your reply is read as forms and evaluated in your namespace. A `defn` with `:malli/schema` becomes permanent; anything else is scratch. Talk to other agents with `(my.message/send "agent-id" "message")`. Prose lines are kept as `;;` comments.
+
+```clojure
+;; unqualified name — it lands in YOUR namespace
+;; the :malli/schema attr-map is what makes it permanent; without it this is scratch
+(defn greet
+  "Say hello."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [name]
+  (str "Hello, " name))
+```
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster/toolkit]]) db)
+(ns my.background (:require [my.run :as run] [seon.db :as db] [seon.schema.edn :as schema.edn]))
+
+; fn my.background/await — [:=> [:cat :my.background/result :my.run/note] [:or :my.background/receipt :my.run/wait :seon.error/value]] — "Wait for a background request or return its finished result."
+; fn my.background/poll — [:=> [:cat :my.background/result] [:or :my.background/receipt :seon.error/value]] — "Read the current result of a background request."
+; schema :my.background/invalid-call = [:= true]
+; schema :my.background/invalid-call-error = [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark an invalid background call"} [:my.background/invalid-call :my.background/invalid-call] [:seon.error/message :seon.error/message]]
+; schema :my.background/invalid-result = [:= true]
+; schema :my.background/invalid-result-error = [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark an invalid background result"} [:my.background/invalid-result :my.background/invalid-result] [:seon.error/message :seon.error/message]]
+; schema :my.background/missing-result = [:= true]
+; schema :my.background/missing-result-error = [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a background call with no result"} [:my.background/missing-result :my.background/missing-result] [:seon.error/message :seon.error/message]]
+; schema :my.background/receipt = [:map [:seon.effect/id :seon.effect/id] [:seon.effect/request-edn :seon.effect/request-edn] [:seon.effect/result-edn {:optional true} :seon.effect/result-edn] [:seon.effect/result-blob {:optional true} :seon.effect/result-blob] [:seon.effect/result-size {:optional true} :seon.effect/result-size] [:seon.effect/duration-ms {:optional true} :seon.effect/duration-ms] [:seon.effect/interrupted-at {:optional true} :seon.effect/interrupted-at]]
+; schema :my.background/result = [:tuple [:= :seon.effect/id] :seon.effect/id]
+; referenced schemas
+; (register! :my.run/note [:string {:min 1}])
+; (register! :my.run/wait [:map [:my.run/disposition [:= :wait]] [:my.run/note :my.run/note] [:my.background/result {:optional true} :my.background/result]])
+; (register! :seon.blob/digest [:re "^[0-9a-f]{64}$"])
+; (register! :seon.effect/duration-ms [:int {:min 0}])
+; (register! :seon.effect/id [:string {:min 1, :seon.db/identity true}])
+; (register! :seon.effect/interrupted-at :inst)
+; (register! :seon.effect/request-edn [:string {:seon.db/no-history? true}])
+; (register! :seon.effect/result-blob :seon.blob/digest)
+; (register! :seon.effect/result-edn [:string {:seon.db/no-history? true}])
+; (register! :seon.effect/result-size [:int {:min 0}])
+; (register! :seon.error/data :map)
+; (register! :seon.error/kind :keyword)
+; (register! :seon.error/message [:string {:min 1, :seon.search/index :text}])
+; (register! :seon.error/value [:map [:seon.error/kind :seon.error/kind] [:seon.error/message :seon.error/message] [:seon.error/data {:optional true} :seon.error/data]])
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster/toolkit]]) db)
+(ns my.edit (:require [clojure.test.check.generators :as gen] [seon.edit :as edit] [seon.schema :as schema] [seon.schema.edn :as schema.edn]))
+
+; fn my.edit/exact — [:=> [:cat :my.edit/exact-request] [:or :my.edit/result :seon.error/value]] — "Replace exact source text under a digest fence."
+; fn my.edit/form — [:=> [:cat :my.edit/form-request] [:or :my.edit/result :seon.error/value]] — "Edit one named top-level Clojure form under a digest fence."
+; fn my.edit/lines — [:=> [:cat :my.edit/lines-request] [:or :my.edit/result :seon.error/value]] — "Replace one verified line window under a digest fence."
+; fn my.edit/valid-form-operation? — [:=> [:cat :seon.schema/value] :boolean] — "Whether a form-edit request has the required replacement source."
+; schema :my.edit/actual-window = :my.edit/source-window
+; schema :my.edit/after-bytes = :my.fs/byte-count
+; schema :my.edit/after-digest = :my.fs/digest
+; schema :my.edit/ambiguous-match = :my.edit/path
+; schema :my.edit/ambiguous-match-error = [:map {:seon.error/class true, :seon.render/ai seon.error/edit-prose, :seon.render/html seon.error/render-html, :error/message "must identify the path with ambiguous edit targets"} [:my.edit/ambiguous-match :my.edit/ambiguous-match] [:seon.error/message :seon.error/message]]
+; schema :my.edit/before-bytes = :my.fs/byte-count
+; schema :my.edit/before-digest = :my.fs/digest
+; schema :my.edit/changed? = :boolean
+; schema :my.edit/exact-request = [:map [:my.edit/path :my.edit/path] [:my.edit/expected-digest :my.edit/expected-digest] [:my.edit/old-string :my.edit/old-string] [:my.edit/new-string :my.edit/new-string] [:my.edit/replace-all? {:optional true} :my.edit/replace-all?]]
+; schema :my.edit/expected-digest = :my.fs/digest
+; schema :my.edit/form = :my.edit.form/selector
+; schema :my.edit/form-request = [:and [:map [:my.edit/path :my.edit/path] [:my.edit/expected-digest :my.edit/expected-digest] [:my.edit/form :my.edit/form] [:my.edit/operation :my.edit/operation] [:my.edit/source {:optional true} :my.edit/source]] [:fn {:error/message "must pair :delete with no :my.edit/source, or a replace/insert operation with one readable Clojure form in :my.edit/source", :gen/gen my.edit/form-request-generator} my.edit/valid-form-operation?]]
+; schema :my.edit/from-line = [:int {:min 1}]
+; schema :my.edit/lines-request = [:map [:my.edit/path :my.edit/path] [:my.edit/expected-digest :my.edit/expected-digest] [:my.edit/from-line :my.edit/from-line] [:my.edit/to-line :my.edit/to-line] [:my.edit/old-window :my.edit/old-window] [:my.edit/new-window :my.edit/new-window]]
+; schema :my.edit/lossless-check-failed = [:= true]
+; schema :my.edit/lossless-check-failed-error = [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark edited source that failed the lossless check"} [:my.edit/lossless-check-failed :my.edit/lossless-check-failed] [:seon.error/message :seon.error/message]]
+; schema :my.edit/new-string = :string
+; schema :my.edit/new-window = :string
+; schema :my.edit/no-match = :my.edit/path
+
+;; 31 definitions omitted by the namespace render budget.
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster/toolkit]]) db)
+(ns my.fs (:require [clojure.test.check.generators :as gen] [seon.schema :as schema] [seon.schema.edn :as schema.edn]))
+
+; fn my.fs/content? — [:=> [:cat :seon.schema/value] :boolean] — "Whether a value names exactly one file-content source."
+; fn my.fs/glob — [:=> [:cat :my.fs/glob-request] [:or :my.fs/glob-result :seon.error/value]] — "Find paths beneath one root without following symbolic links."
+; fn my.fs/read — [:=> [:cat :my.fs/read-request] [:or :my.fs/read-result :seon.error/value]] — "Read a bounded window of one file, whatever the file's size."
+; fn my.fs/stat — [:=> [:cat :my.fs/stat-request] [:or :my.fs/stat-result :seon.error/value]] — "Inspect one path without following a symbolic link."
+; fn my.fs/write — [:=> [:cat :my.fs/write-request] [:or :my.fs/write-result :seon.error/value]] — "Write one file only if its content precondition holds."
+; fn my.fs/write-precondition? — [:=> [:cat :seon.schema/value] :boolean] — "Whether a value names exactly one write precondition."
+; schema :my.fs/after-digest = :my.fs/digest
+; schema :my.fs/already-exists = :my.fs/path
+; schema :my.fs/already-exists-error = [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must identify the path that already exists"} [:my.fs/already-exists :my.fs/already-exists] [:seon.error/message :seon.error/message]]
+; schema :my.fs/already-exists? = :boolean
+; schema :my.fs/atomic-write-unsupported = [:= true]
+; schema :my.fs/atomic-write-unsupported-error = [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must identify the path where atomic replacement is unavailable"} [:my.fs/atomic-write-unsupported :my.fs/atomic-write-unsupported] [:seon.error/message :seon.error/message]]
+; schema :my.fs/before-digest = :my.fs/digest
+; schema :my.fs/blob-unavailable = :seon.blob/digest
+; schema :my.fs/blob-unavailable-error = [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must identify the unavailable blob digest"} [:my.fs/blob-unavailable :my.fs/blob-unavailable] [:seon.error/message :seon.error/message]]
+; schema :my.fs/byte = [:int {:min 0, :max 255}]
+; schema :my.fs/byte-count = [:int {:min 0}]
+; schema :my.fs/byte-offset = [:int {:min 0}]
+; schema :my.fs/byte-size = :my.fs/byte-count
+; schema :my.fs/bytes = [:vector :my.fs/byte]
+; schema :my.fs/bytes-read = :my.fs/byte-count
+; schema :my.fs/bytes-written = :my.fs/byte-count
+; schema :my.fs/changed-during-read = :my.fs/path
+; schema :my.fs/changed-during-read-error = [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must identify the path that changed during its read"} [:my.fs/changed-during-read :my.fs/changed-during-read] [:seon.error/message :seon.error/message]]
+; schema :my.fs/changed? = :boolean
+; schema :my.fs/complete? = :boolean
+
+;; 63 definitions omitted by the namespace render budget.
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster/toolkit]]) db)
+(ns my.message (:require [clojure.string :as str] [seon.schema.edn :as schema.edn]))
+
+; fn my.message/decline — [:=> [:cat :my.message/to :my.message/about :my.message/reason] [:or :my.message/declination :seon.error/value]] — "Decline an assignment and explain why to its sender."
+; fn my.message/send — [:function [:=> [:cat :my.message/to :my.message/content] [:or :my.message/message :seon.error/value]] [:=> [:cat :my.message/to :my.message/content :my.message/about] [:or :my.message/message :seon.error/value]]] — "Address a message to another agent."
+; schema :my.message/about = [:string {:min 1}]
+; schema :my.message/content = [:string {:min 1}]
+; schema :my.message/declination = [:map [:my.message/to :my.message/to] [:my.message/about :my.message/about] [:my.message/reason :my.message/reason]]
+; schema :my.message/message = [:map [:my.message/to :my.message/to] [:my.message/content :my.message/content] [:my.message/about {:optional true} :my.message/about]]
+; schema :my.message/no-about = [:= true]
+; schema :my.message/no-about-error = [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a declination with no subject"} [:my.message/no-about :my.message/no-about] [:seon.error/message :seon.error/message]]
+; schema :my.message/no-content = [:= true]
+; schema :my.message/no-content-error = [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a message request with no content"} [:my.message/no-content :my.message/no-content] [:seon.error/message :seon.error/message]]
+; schema :my.message/no-reason = [:= true]
+; schema :my.message/no-reason-error = [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a declination with no reason"} [:my.message/no-reason :my.message/no-reason] [:seon.error/message :seon.error/message]]
+; schema :my.message/no-recipient = [:= true]
+; schema :my.message/no-recipient-error = [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a message request with no recipient"} [:my.message/no-recipient :my.message/no-recipient] [:seon.error/message :seon.error/message]]
+; schema :my.message/reason = [:string {:min 1}]
+; schema :my.message/to = [:string {:min 1}]
+; schema :my.message/value = [:or :my.message/message :my.message/declination [:vector {:min 1} [:or :my.message/message :my.message/declination]]]
+; referenced schemas
+; (register! :seon.error/data :map)
+; (register! :seon.error/kind :keyword)
+; (register! :seon.error/message [:string {:min 1, :seon.search/index :text}])
+; (register! :seon.error/value [:map [:seon.error/kind :seon.error/kind] [:seon.error/message :seon.error/message] [:seon.error/data {:optional true} :seon.error/data]])
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster/toolkit]]) db)
+(ns my.run (:require [clojure.string :as str] [seon.schema.edn :as schema.edn]))
+
+; fn my.run/complete — [:=> [:cat :my.run/result] [:or :my.run/completed :seon.error/value]] — "Finish this run with a reply for its requester."
+; fn my.run/wait — [:=> [:cat :my.run/note] [:or :my.run/wait :seon.error/value]] — "Finish this run without a reply and record what you await."
+; schema :my.run/blank-note = [:= true]
+; schema :my.run/blank-note-error = [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a run wait whose note is blank"} [:my.run/blank-note :my.run/blank-note] [:seon.error/message :seon.error/message]]
+; schema :my.run/blank-result = [:= true]
+; schema :my.run/blank-result-error = [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a run completion whose result is blank"} [:my.run/blank-result :my.run/blank-result] [:seon.error/message :seon.error/message]]
+; schema :my.run/completed = [:map [:my.run/disposition [:= :completed]] [:my.run/result :my.run/result]]
+; schema :my.run/disposition = [:enum :wait :completed]
+; schema :my.run/note = [:string {:min 1}]
+; schema :my.run/result = [:string {:min 1}]
+; schema :my.run/value = [:or :my.run/wait :my.run/completed]
+; schema :my.run/wait = [:map [:my.run/disposition [:= :wait]] [:my.run/note :my.run/note] [:my.background/result {:optional true} :my.background/result]]
+; referenced schemas
+; (register! :my.background/result [:tuple [:= :seon.effect/id] :seon.effect/id])
+; (register! :seon.effect/id [:string {:min 1, :seon.db/identity true}])
+; (register! :seon.error/data :map)
+; (register! :seon.error/kind :keyword)
+; (register! :seon.error/message [:string {:min 1, :seon.search/index :text}])
+; (register! :seon.error/value [:map [:seon.error/kind :seon.error/kind] [:seon.error/message :seon.error/message] [:seon.error/data {:optional true} :seon.error/data]])
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster/toolkit]]) db)
+(ns my.shell (:require [clojure.test.check.generators :as gen] [seon.schema :as schema] [seon.schema.edn :as schema.edn]))
+
+; fn my.shell/output? — [:=> [:cat :seon.schema/value] :boolean] — "True when output names exactly one complete representation."
+; fn my.shell/run — [:=> [:cat :my.shell/run-request] [:or :my.shell/run-result :seon.error/value]] — "Run one foreground argv vector and return complete process evidence."
+; fn my.shell/stdin? — [:=> [:cat :seon.schema/value] :boolean] — "True when stdin names exactly one byte source."
+; schema :my.shell/argv = [:vector {:min 1} [:string {:min 1}]]
+; schema :my.shell/cwd = :my.fs/path
+; schema :my.shell/exit = :int
+; schema :my.shell/run-request = [:map [:my.shell/argv :my.shell/argv] [:my.shell/cwd :my.shell/cwd] [:my.shell/stdin {:optional true} :my.shell/stdin]]
+; schema :my.shell/run-result = [:map [:my.shell/argv :my.shell/argv] [:my.shell/cwd :my.shell/cwd] [:my.shell/exit :my.shell/exit] [:my.shell/stdout :my.shell.output/value] [:my.shell/stderr :my.shell.output/value]]
+; schema :my.shell/stderr = :my.shell.output/value
+; schema :my.shell/stdin = [:and [:map [:my.shell/stdin-text {:optional true} :my.shell/stdin-text] [:my.shell/stdin-bytes {:optional true} :my.shell/stdin-bytes] [:seon.blob/digest {:optional true} :seon.blob/digest]] [:fn {:error/message "must contain exactly one stdin source: :my.shell/stdin-text, :my.shell/stdin-bytes, or :seon.blob/digest", :gen/schema [:or [:map [:my.shell/stdin-text :my.shell/stdin-text]] [:map [:my.shell/stdin-bytes :my.shell/stdin-bytes]] [:map [:seon.blob/digest :seon.blob/digest]]]} my.shell/stdin?]]
+; schema :my.shell/stdin-bytes = :my.fs/bytes
+; schema :my.shell/stdin-text = :string
+; schema :my.shell/stdout = :my.shell.output/value
+; referenced schemas
+; (register! :my.fs/byte [:int {:min 0, :max 255}])
+; (register! :my.fs/byte-count [:int {:min 0}])
+; (register! :my.fs/bytes [:vector :my.fs/byte])
+; (register! :my.fs/path [:string {:min 1}])
+; (register! :my.shell.output/blob :seon.blob/digest)
+; (register! :my.shell.output/bytes :my.fs/byte-count)
+; (register! :my.shell.output/digest :seon.blob/digest)
+; (register! :my.shell.output/octet-values :my.fs/bytes)
+; (register! :my.shell.output/preview :string)
+; (register! :my.shell.output/preview-complete? :boolean)
+; (register! :my.shell.output/text :string)
+
+;; 7 definitions omitted by the namespace render budget.
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.cluster/toolkit]]) db)
+(ns my.web (:require [seon.effect :as effect] [seon.schema.edn :as schema.edn]))
+
+; fn my.web/fetch — [:=> [:cat :my.web/fetch-request] [:or :my.web/fetch-result :my.web/error]] — "Fetch one bounded HTTP(S) resource."
+; fn my.web/search — [:=> [:cat :my.web/search-request] [:or :my.web/search-result :my.web/error]] — "Search the configured provider for source rows."
+; schema :my.web/body = :my.web.body/value
+; schema :my.web/content-type = [:string {:min 1}]
+; schema :my.web/credits = [:int {:min 0}]
+; schema :my.web/error = [:or :my.web/invalid-url-error :my.web/redirect-limit-error :my.web/redirect-loop-error :my.web/missing-location-error :my.web/response-limit-error :my.web/timeout-error :my.web/transport-failed-error :my.web/no-credential-error :my.web/provider-failed-error :my.web/unparseable-response-error :my.web/projection-failed-error]
+; schema :my.web/extraction = :my.web.extract/value
+; schema :my.web/extraction-error = :string
+; schema :my.web/fetch-request = [:map [:my.web/url :my.web/url] [:my.web/method {:optional true} :my.web/method]]
+; schema :my.web/fetch-result = [:map [:my.web/url :my.web/url] [:my.web/final-url :my.web/final-url] [:my.web/status :my.web/status] [:my.web/redirects :my.web/redirects] [:my.web/body :my.web/body] [:my.web/content-type {:optional true} :my.web/content-type] [:my.web/extraction {:optional true} :my.web/extraction] [:my.web/extraction-error {:optional true} :my.web/extraction-error]]
+; schema :my.web/final-url = :my.web/url
+; schema :my.web/invalid-url = [:= true]
+; schema :my.web/invalid-url-error = [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must identify a malformed or unsupported web URL"} [:my.web/invalid-url :my.web/invalid-url] [:seon.error/message :seon.error/message] [:my.web/url {:optional true} :my.web/url]]
+; schema :my.web/max-results = [:int {:min 1}]
+; schema :my.web/method = [:enum :get :head]
+; schema :my.web/missing-location = [:= true]
+; schema :my.web/missing-location-error = [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must identify a redirect with no Location header"} [:my.web/missing-location :my.web/missing-location] [:seon.error/message :seon.error/message] [:my.web/url {:optional true} :my.web/url] [:my.web/status {:optional true} :my.web/status]]
+; schema :my.web/no-credential = [:= true]
+; schema :my.web/no-credential-error = [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must identify a missing search-provider credential"} [:my.web/no-credential :my.web/no-credential] [:seon.error/message :seon.error/message] [:my.web/query {:optional true} :my.web/query]]
+; schema :my.web/projection-failed = [:= true]
+
+;; 48 definitions omitted by the namespace render budget.
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.def/agent]]) db)
+{:seon.def/name largest#root, :seon.def/id "my.agents.w1-history-proof-5/largest#root",
+  :seon.def/ns #:db{:id 26918}, :seon.def/ordinal 8, :seon.def/agent #:db{:id
+    26919}, :db/id 27052, :seon.schema.admission/source :agent, :seon.def/size
+  902, :seon.def/value-edn "{:sci.root/version 1, :sci.root/ns my.agents.w1-history-proof-5, :sci.root/name largest, :sci.root/meta {:ns my.agents.w1-history-proof-5, :name ^{:arglists (quote ([rows])), :doc \"The row with the largest :amount; {} when there are none.\", :malli/schema [:=> [:cat [:sequential [:map [:label :string] [:amount :int]]]] [:map [:label {:optional true} :string] [:amount {:optional true} :int]]]} largest, :file nil, :column 1, :line 1, :malli/schema [:=> [:cat [:sequential [:map [:label :string] [:amount :int]]]] [:map [:label {:optional true} :string] [:amount {:optional true} :int]]], :arglists ([rows]), :doc \"The row with the largest :amount; {} when there are none.\"}, :sci.root/function {:sci.root/form ^{:sci.impl/fn {:macro nil, :fn-name largest}} (fn* ([rows] ^{:line 6, :column 3} (or ^{:line 6, :column 7} (last ^{:line 6, :column 13} (sort-by :amount rows)) {}))), :sci.root/captures []}}",
+  :seon.def/key "[\"w1-history-proof-5\" \"my.agents.w1-history-proof-5/largest#root\"]"}
+
+my.agents.w1-history-proof-5=> (db/q (quote [:find [(pull ?entity [*]) ...] :where [?entity :seon.ns/requires]]) db)
+(ns seon.bootstrap (:require [clojure.edn :as edn] [clojure.java.io :as io] [clojure.string :as str] [seon.ai.tokens :as tokens] [seon.cluster.run :as run] [seon.db :as db] [seon.schema :as schema]))
+
+; fn seon.bootstrap/agent-sources — [:=> [:cat :seon.db/database-value :seon.cluster.agent/id] :seon.cluster.reply/sources] — "The owning cluster's ordered bootstrap sources for an existing agent."
+; fn seon.bootstrap/help-text — [:=> [:cat] :string] — "The prose authored on the shipped help form map."
+; fn seon.bootstrap/ordered-sources — [:=> [:cat :seon.db/database-value :seon.cluster/name :seon.ns/name] :seon.cluster.reply/sources] — "The cluster's bootstrap-plan facts resolved for one agent namespace."
+; fn seon.bootstrap/packaged-forms — [:=> [:cat] :seon.bootstrap/default-forms] — "The shipped bootstrap form maps read from the classpath EDN resource."
+; fn seon.bootstrap/plan-digest — [:=> [:cat :seon.db/database-value :seon.cluster/name] :seon.cluster.run/plan-digest] — "The stable digest of a cluster's ordered bootstrap-plan facts."
+; fn seon.bootstrap/population-tx — [:=> [:cat :seon.db/database-value] :seon.store/transaction-data] — "Install the shipped bootstrap plan once on a source database value."
+; fn seon.bootstrap/render-ai — [:=> [:cat :seon.render/unit] [:maybe :string]] — "`:seon.render/ai` — one bootstrap plan without its source payloads."
+; fn seon.bootstrap/render-html — [:=> [:cat :seon.render/unit] [:maybe :seon.render/hiccup]] — "`:seon.render/html` — one readable bootstrap-plan card."
+; fn seon.bootstrap/run-id — [:=> [:cat :seon.cluster.agent/id] :seon.cluster.run/id] — "The deterministic id of an agent's system-authored bootstrap run."
+; fn seon.bootstrap/seed-tx — [:=> [:cat :seon.db/database-value [:map [:seon.cluster.agent/id :seon.cluster.agent/id] [:seon.cluster/name :seon.cluster/name] [:seon.ns/name :seon.ns/name] [:seon.cluster.run/process :seon.cluster.run/process] [:seon.cluster.run/opened-at :seon.cluster.run/opened-at]]] :seon.store/transaction-data] — "Transaction data opening, claiming, and freezing one bootstrap run."
+; schema :seon.bootstrap/agent-plan-absent = :seon.cluster.agent/id
+; schema :seon.bootstrap/agent-plan-absent-error = [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must identify the agent with no bootstrap plan"} [:seon.bootstrap/agent-plan-absent :seon.bootstrap/agent-plan-absent] [:seon.error/message :seon.error/message]]
+; schema :seon.bootstrap/default-form = [:map [:seon.cluster.run.form/source :seon.cluster.run.form/source] [:seon.bootstrap.plan.form/namespace-source :seon.bootstrap.plan.form/namespace-source] [:seon.bootstrap.plan.form/help-text {:optional true} :seon.bootstrap.plan.form/help-text]]
+; schema :seon.bootstrap/default-forms = [:vector {:min 1} :seon.bootstrap/default-form]
+; schema :seon.bootstrap/invalid-ordinals = [:= true]
+
+;; 28 definitions omitted by the namespace render budget.
+
+my.agents.w1-history-proof-5=> (seon.db/q '[:find (count ?f) . :where [?f :seon.fn/sym _]])
+2886
+
+my.agents.w1-history-proof-5=> (seon.db/q '[:find ?spec . :in $ ?sym :where [?f :seon.fn/sym ?sym] [?f :seon.fn/spec ?spec]] "my.agents.w1-history-proof-5/largest")
+"[:=> [:cat [:sequential [:map [:label :string] [:amount :int]]]] [:map [:label {:optional true} :string] [:amount {:optional true} :int]]]"
+
+my.agents.w1-history-proof-5=> (seon.db/q '[:find ?sym :where [?s :seon.schema/key :my.run/result] [?a :seon.fn.arity/input-refs ?s] [?f :seon.fn/arities ?a] [?f :seon.fn/sym ?sym]])
+#{["my.run/complete"]}
+
+my.agents.w1-history-proof-5=> (my.message/read "minimum-context-task")
+From outside this cluster to w1-history-proof-5: In your namespace, define a durable contracted function named cluster-agent-count that takes no arguments and returns the count of cluster facts carrying :seon.cluster.agent/id. Call it once. Then query the program graph for your function's :seon.fn/spec and return that contract value once. Complete only after all three operations succeed; use (my.run/complete {:function 'cluster-agent-count :count <the-count> :contract <the-contract>}).

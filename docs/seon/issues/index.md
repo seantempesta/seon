@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (35)
+## Blocker (36)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -24,6 +24,7 @@ See `README.md` for the convention.
 | [Publish terminal evidence for every background binary result](background-binary-settlement-does-not-publish-required-event.md) | blocker | background settlement investigation |
 | [Derive a completion reply from the triggering message](message-completion-replies-from-the-wrong-agent-and-duplicates-the-trigger.md) | blocker | message delivery repair wave |
 | [Register the fault committer before the cluster graph can emit](fault-committer-misses-the-first-injected-fault.md) | blocker | fault-facts verification pending W1 integration |
+| [Make graph construction attach every declared fanout before resume](graph-construction-leaves-tap-before-resume-to-callers.md) | blocker | CLASS KILL #4 graph-construction owner |
 | [Stop the bootstrap plan's deliberate failures from interrupting the run](bootstrap-teaching-failures-strand-every-new-agent.md) | blocker | agent context repair wave (2026-08-10 audit) |
 | [Every agent prompt is a neighborhood render-walk contract violation](every-agent-prompt-is-a-neighborhood-render-walk-contract-violation.md) | blocker | live-drive context repair wave |
 | [Settle a receipt for every recorded run form](a-runs-last-form-can-close-without-a-receipt.md) | blocker | live-drive context repair wave |
@@ -54,10 +55,11 @@ See `README.md` for the convention.
 | [Settle what arrived when a provider stream closes mid-body](a-mid-stream-provider-disconnect-discards-the-whole-turn.md) | blocker | whole-system arc repair wave |
 | [Await every worker writer before deleting its root](test-runner-cleans-a-worker-root-while-kondo-is-still-writing.md) | blocker | test runner cleanup repair wave |
 
-## Friction (134)
+## Friction (135)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Preserve per-agent credential selection through provider resolution](provider-descriptor-overwrites-per-agent-credential-selection.md) | friction | AI provider settings precedence wave |
 | [Record posh's cardinality-one pull-analysis arity defect](posh-cardinality-one-pull-analysis-has-an-arity-defect.md) | friction | upstream-delta sweep |
 | [Read terminal failure from the settlement key its producer writes](loop-settlement-consumer-reads-a-key-no-producer-writes.md) | friction | loop settlement contract wave |
 | [Derive the oversight fleet proof from the live proc roster](oversight-fleet-test-pins-a-stale-proc-roster.md) | friction | oversight test repair |
