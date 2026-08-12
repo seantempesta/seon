@@ -172,6 +172,32 @@ lists beyond `(help)` + `(in-ns …)` + the requires; `changed-at` as an
 invalidation oracle; the schema walls and comment-framed headers already
 slated by the transcript PRD.
 
+## Rulings appended after W0 markup (owner, same session)
+
+14. **Define-before-use is the one intra-distance ordering rule**: no entry
+    may reference a symbol the history has not already introduced (require
+    introduces an alias, `dir` introduces names, `doc` may then use one, a
+    call may follow its doc). Computed from the parsed forms, stable
+    alphabetical tie-breaks. One regression walks a generated history with
+    the introduced-symbol set and asserts the property — "the context
+    teaches" becomes machine-checkable.
+15. **Render functions live with the shape's owner** (existing convention,
+    now ruled): the schema names a fully qualified function in the owning
+    namespace; agent-authored renderers live in the agent's namespace. No
+    `seon.agents` collection home, no roster.
+16. **V1 spend policy is concise-until-cap**: render everything at concise
+    (names, one-liners, schema names) in order until X tokens; every concise
+    value indicates its deeper form. No per-distance budgets in V1.
+    **[TARGET]** distance-adaptive rendering — render functions receiving
+    proximity to the agent's namespace and adapting spend, plus usage-edge
+    detail sharpening (`:seon.fn/calls` from run forms shortening effective
+    distance) — is the eventual design, deferred until a live V1 history is
+    measured.
+17. **Agent-authored functions, schemas, and tests get index parity**:
+    settlement commits them through the same analysis as shipped source —
+    same calls/keywords/subject edges, same tests-reaching derivation. One
+    mechanism, verified in W1.
+
 ## Waves (build → drive → learn; design re-litigated only at boundaries)
 
 - **W0 (this document)** — owner marks up anything that reads wrong.
