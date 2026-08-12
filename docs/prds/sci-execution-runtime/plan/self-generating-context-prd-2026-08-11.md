@@ -104,6 +104,23 @@ back — everywhere, for every agent, with no maintained list of forms.
     renders + executed receipts; a hand-assembled prompt fragment found
     anywhere is a defect.
 
+## Rulings 29-31 (owner, 2026-08-12 afternoon — the expansion frame)
+
+29. **The explained-set rule is the generator's invariant** (the
+    macroexpansion frame: expansion to fixed point, resolve-or-fail where
+    resolve = teach): before ANY form is emitted — including the
+    demonstration's — its unexplained symbols get their explanations
+    emitted first, recursively, membership-gated by the pull. Fixed point:
+    no emitted form contains an unexplained symbol.
+30. **Why-awake and the turn budget are situation DATA**: the open run's
+    trigger ref and turns-remaining (new config dial + run derivation —
+    the missing fact was the defect) appear in `(help)`'s value, so purpose
+    and budget are facts the agent can act on, never ambient knowledge.
+31. **`complete` IS the reply** — its settled value shows where delivery
+    went (the run's trigger sender); no separate "message your requester"
+    teaching, no prose-packaging: the lifecycle routes replies because the
+    run carries its trigger.
+
 ## The mechanism (composed from the verified reports)
 
 ### One derivation
