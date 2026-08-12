@@ -13,7 +13,12 @@
   :unresolved-namespace {:level :error}
   :unresolved-var {:level :error}
   :invalid-arity {:level :error}
-  :type-mismatch {:level :error}
+  ;; visible warning context, never an edit veto: kondo's local type
+  ;; inference is not a sound admission proof (AGENTS.md, dev feedback), and
+  ;; src/seon/fn/analyzer.clj exempts exactly this class at publication — a
+  ;; :error level here blocked edits the publication gate correctly admits
+  ;; (issue: type-mismatch-blocks-edits-that-deref-a-connection)
+  :type-mismatch {:level :warning}
   :missing-else-branch {:level :off}  ; too noisy for our style
 
   ;; === WARNING LEVEL (report but don't block) ===

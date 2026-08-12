@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, tooling, database]
 ---
@@ -75,3 +75,12 @@ plus `.clj-kondo/config.edn`.
 - Syntax, unresolved name/namespace, privacy, and arity findings still block.
 - One regression feeds the hook a file whose only finding is
   `:type-mismatch` and asserts the edit is admitted with the finding visible.
+
+## Resolved 2026-08-12
+
+`.clj-kondo/config.edn` demoted `:type-mismatch` to `:level :warning` with the
+policy comment. This matches the documented rule (AGENTS.md dev feedback:
+type-mismatch findings are visible warning context and never a sound
+admission veto) and the publication analyzer's existing exemption at
+`src/seon/fn/analyzer.clj`. Edits that deref a connection now pass the hook
+with the warning visible.
