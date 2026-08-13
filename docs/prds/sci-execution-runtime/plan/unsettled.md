@@ -239,6 +239,19 @@ regression (temporal walk terminates or refuses within the bound),
 commit alone, then its original scope. R3 holds on that fix — it is the
 critical path to the drive.
 
+**Drive prep running in parallel (2026-08-13 night):** an opus
+diagnosis agent on the live-pull-after-help blocker (read-only,
+committed-code probes, deliverable
+`../research/live-pull-after-help-diagnosis-2026-08-13.md`, verdict on
+whether it is the SAME class as the walk-history wedge) and a
+`staleness-sweep` lane (docs-only, source-verified archival against
+today's landings). The shared-root reset is DEFERRED until R3 commits —
+publication reads files, and R3's uncommitted layout would republish
+half-landed. The
+[live-drive spec](live-drive-spec-2026-08-13.md) is written; the
+`my.plan` vocabulary row carries its landed links; the memory anchor is
+current.
+
 **THE ORDERED QUEUE AFTER RETURNS:**
 1. R2 continuation, serial, red-tolerant: W2b (deferred producers in
    bootstrap/walk/plan once those lanes land) → W3 consumers dispatch on
