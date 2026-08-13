@@ -147,7 +147,8 @@ config dial: dev panics, prod degrades.
 
 Seon is the core: consumer-specific UI, vendor integrations, and domain
 models belong in downstream repositories, never `src/` or `docs/`.
-Orientation for anyone new: [docs/TRANSFER_PROMPT.md](docs/TRANSFER_PROMPT.md).
+If you are the orchestrator (no bounded task, talking to the owner), your
+manual is [docs/TRANSFER_PROMPT.md](docs/TRANSFER_PROMPT.md).
 
 ## 2. The five design laws
 
@@ -679,9 +680,9 @@ moment they are seen.
 
 ## 8. Pointers
 
-- [docs/TRANSFER_PROMPT.md](docs/TRANSFER_PROMPT.md) — orchestrator
-  orientation: the current working edge, how the owner works, orchestration
-  lessons;
+- [docs/TRANSFER_PROMPT.md](docs/TRANSFER_PROMPT.md) — THE ORCHESTRATOR'S
+  manual: the role rule, session start, owner working style, handoff shape,
+  and accumulated orchestration lessons;
 - [docs/seon/architecture/architecture.md](docs/seon/architecture/architecture.md)
   — the aspirational system map, then the domain docs;
 - [docs/prds/sci-execution-runtime/plan/README.md](docs/prds/sci-execution-runtime/plan/README.md)
