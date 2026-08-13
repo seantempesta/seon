@@ -118,7 +118,7 @@ Contract:
 (collect!
  {:seon.operator/repository-root <canonical repository root>
   :seon.operator/managed-root <canonical operator root>})
-;; => :seon.operator.collect/result | :seon.error/value
+:seon.operator.collect/result | :seon.error/value
 ```
 
 Successful result:
@@ -164,7 +164,7 @@ Contract:
 (census-processes!
  {:seon.operator/repository-root <canonical repository root>
   :seon.operator/managed-root <canonical caller root>})
-;; => :seon.operator.process-census/result | :seon.error/value
+:seon.operator.process-census/result | :seon.error/value
 ```
 
 Successful result:
@@ -221,7 +221,7 @@ Contract:
 (reap-dead-roots!
  {:seon.operator/repository-root <canonical repository root>
   :seon.operator/managed-root <canonical caller root>})
-;; => :seon.operator.reap/result | :seon.error/value
+:seon.operator.reap/result | :seon.error/value
 ```
 
 Successful result:
@@ -317,7 +317,7 @@ Contract:
  {:seon.operator/repository-root <canonical repository root>
   :seon.operator/managed-root <canonical operator root>
   :seon.boot/cluster-name <cluster name>})
-;; => :seon.operator.cluster-cleanup/result | :seon.error/value
+:seon.operator.cluster-cleanup/result | :seon.error/value
 ```
 
 Successful result:
