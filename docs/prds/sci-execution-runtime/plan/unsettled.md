@@ -184,6 +184,12 @@ database-value/sources renames → ONE closing --all → live drive.
 Wedge-continuation classes (host crossings, orderly-stop joins, web
 delivery) interleave where file-disjoint from W3.
 
+**R3 RULED (option 2) AND LAUNCHED** (`r3-store-layout` lane: layout
+move + reserved-name refusal + doc updates, isolated-root proof only)
+alongside `test-premise` (the proofs-without-premise class at its test
+infrastructure choke point). Both file-disjoint from the drain
+(db-diff → plan-t3 → dump-kill) and from each other.
+
 **THE ORDERED QUEUE AFTER RETURNS:**
 1. R2 continuation, serial, red-tolerant: W2b (deferred producers in
    bootstrap/walk/plan once those lanes land) → W3 consumers dispatch on
