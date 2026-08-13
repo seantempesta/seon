@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (39)
+## Blocker (37)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -56,8 +56,6 @@ See `README.md` for the convention.
 | [Settle what arrived when a provider stream closes mid-body](a-mid-stream-provider-disconnect-discards-the-whole-turn.md) | blocker | whole-system arc repair wave |
 | [Supply the generated entry's required render output](generated-turn-omits-the-required-render-output.md) | blocker | generate-call-transition lane (held `loop.clj`) |
 | [Return from the generated opening's second live pull](generated-opening-live-pull-does-not-return-after-help.md) | blocker | prefix-drift bootstrap performance diagnosis (held `bootstrap.clj`) |
-| [Arm an agent created after boot](fresh-agent-created-after-boot-was-not-armed.md) | blocker | first-agent supervision transition design (held loop/run owners) |
-| [Stop run-opening retries against an answered trigger](run-opening-retries-storm-against-an-answered-trigger.md) | blocker | gate wedge lane (wedge-properties) |
 | [Explain the 24-second live root pull of 189 members](live-root-pull-of-189-members-takes-24-seconds.md) | blocker | render acquisition performance wave |
 
 ## Friction (129)

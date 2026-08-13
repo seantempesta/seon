@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, flow, runtime]
 ---
@@ -125,3 +125,7 @@ the owner required all three gates to pass before closure.
 - The committed bootstrap run receives its first receipt.
 - A listener/armer failure is committed or reported with enough evidence to
   name the failed transition.
+
+## Closure — 2026-08-13
+
+Resolved by `de66c1e4a`: `armer-step` now performs one fact-derived transition per wake and returns, with run closure supplying a coalescing armer wake (the Flow event-driven model) — the synchronous wait on the first generated opening is gone. Proven by the post-fix opening probe (fresh `probe-agent` created after boot, generated opening closed in seconds) and the green focused agent suite (18/176/0).

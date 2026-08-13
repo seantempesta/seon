@@ -52,6 +52,29 @@ reasoning-only stream, before the live drive), `test-platform-race`
 (background settlement reads no binding frame). Lanes do NOT touch the
 issue index or archive; the orchestrator reconciles at boundaries.
 
+**Wave outcome (2026-08-13 late).** All eleven lanes returned. Landed at
+cause with class regressions: the answered-trigger retry storm and armer
+synchronous wait (`de66c1e4a` — both formerly never-returning agent
+properties now complete, 65.8 s / 143.1 s), N5 complete (all four deferred
+members + the temporal-database diagnostic fix), N1's total/bounded render
+terminal (`4bc8104d8`, `5e449b275` — 9 members closed) plus the nested
+admission projection fix (`e8e37eb50`), per-row acquire containment
+(`5b4d98c57`), provider transport totality (`8be1b0e03`), effect settlement
+as data (`e4eaacdfe`), worker-root cleanup on child exits (`b2b3aa185`),
+`my.background` render contracts (`5bf211af0`), `my.note` (`9b26cb7a7`),
+`:seon.flow/join!` (`10e014b87`), and the synthetic-marker leak proof
+(`26e8cf84a`). Live-pull ATTRIBUTED: Datahike per-entity selector execution
+(1.77 M `pull-pattern-frame` calls/acquisition); the 24.2 s did not
+reproduce at HEAD (2.80 s) —
+[report](../research/live-pull-attribution-2026-08-13.md). Issue count 210 →
+179 open. REMAINING GATE BLOCKER: the bulk tier wedges in
+`seon.test-runner-test` (retained root `tmp/test-runs/run.BGxKo6`; suspect:
+the cleanup change's unbounded child-exit wait needs its loud backstop, and
+the liveness diagnostic must dump worker JVMs); the test-platform lane is on
+it. The rebirth proof probe is repaired and running on the quiet tree.
+Also filed:
+[the armed-eval nested render refusal](../../seon/issues/public-walk-render-inside-an-armed-eval-hits-already-armed.md).
+
 **Uncommitted foreign residue deliberately left:**
 `test/seon/public_contract_test.clj` (reader→analyzer refactor) and the
 regenerated `universal-output-floor-baseline-2026-08-04.edn` — unverified

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, runtime, flow]
 ---
@@ -136,3 +136,7 @@ wake fact.
 - One class regression proves an already-answered trigger produces at most
   one refused open attempt per wake.
 - The probe rerun logs zero repeated rejections for the same trigger.
+
+## Closure — 2026-08-13
+
+Resolved by `de66c1e4a` (answered triggers are terminal work verdicts; refusals cannot self-wake) with the `answered-trigger-is-a-terminal-work-verdict` class regression. Post-fix opening probe: both openings closed, ZERO `trigger-already-answered` occurrences (`tmp/opening/probe-post-fix-2.log`). The 2026-08-12 gate-wedge connection was refuted by virtual-thread dumps; the wedge had its own causes (property fixtures missing `:seon.render.web/interest`, the armer synchronous wait), fixed in the same commits and proven by both properties completing (65.8 s / 143.1 s, `tmp/opening/agent-test-final.log`).
