@@ -52,4 +52,27 @@ one mechanism: the nested invocation inherits the live arm (the
 
 ## Closure — 2026-08-13
 
-Resolved by `9108d47ab`: environment-carriage wrappers sharing the interpreter's `:env` inherit the active arm (genuine `sci/fork` contexts still refuse); the two-direction regression covers armed nested rendering, unarmed rendering, and outer time-limit inheritance. `bin/test seon.sci.eval-test` 61/362/0 including the pinned public-walk test.
+Resolved by `9108d47ab`, corrected and made explicit by `1dbb868e9`:
+inheritance first selects only the arm installed in the current thread's
+`ThreadLocal`, then requires that arm and the nested context to share SCI's
+interpreter `:env`. An environment-carriage wrapper on that thread therefore
+inherits the live deadline; a sibling thread sees no current arm and owns an
+independent one even when it evaluates the same context; a genuine `sci/fork`
+on an armed thread still refuses because it has a distinct `:env`.
+
+The original sibling regression conflated arm independence with interpreter
+throughput: its successful sibling had to execute 100,000,000 interpreted loop
+iterations before a fixed 10-second evaluation limit, allocating about 3 GB in
+the direct reproduction. Under the parallel full gate it could exhaust its own
+limit without observing the other thread's arm. The corrected regression arms
+both threads before either proceeds, observes one thread's 30 ms interrupt,
+then calls the shared interrupt function from the still-armed sibling. It
+therefore proves arm identity directly and completes in 35 ms.
+
+Evidence: `bin/test seon.sci.eval-test` passed 61 tests / 359 assertions,
+including nested selected-render inheritance, outer time-limit inheritance,
+the pinned public-walk test, and sibling independence. The retained full gate
+also reported `seon.cluster.agent-test/park-wake-test`; a focused complete
+`bin/test seon.cluster.agent-test` passed 18 tests / 176 assertions, with
+`park-wake-test` passing in 4.9 seconds, so that failure is not attributed to
+arm inheritance.
