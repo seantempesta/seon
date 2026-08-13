@@ -25,6 +25,18 @@
   "The loud clock around test events whose publishers are observable."
   20)
 
+(defn render-context-channel
+  "Create a channel supplying one profile to every context request."
+  [profile]
+  (async/chan
+   1
+   (map (fn [message]
+          (update message
+                  :seon.render.context/request
+                  assoc
+                  :seon.render/profile
+                  profile)))))
+
 (defn- clone-directory!
   "Copy one immutable test base into a private mutable root."
   [source target]

@@ -31,6 +31,7 @@
             [seon.config :as config]
             [seon.flow :as seon.flow]
             [seon.problems :as problems]
+            [seon.render :as render]
             [seon.render.web :as web]
             [seon.schema :as schema]
             [seon.test-support :as test-support])
@@ -99,7 +100,9 @@
                :seon.config.flow.compute/concurrency 3
                :seon.config.flow.io/queue-depth 2
                :seon.config.flow.io/concurrency 2}})
-            context-channel (async/chan)
+            context-channel
+            (test-support/render-context-channel
+             (render/agent-render-profile (config/defaults)))
             stream-channel (async/chan (async/sliding-buffer 1))
             render-channel (async/chan (async/sliding-buffer 1))
             pages-channel (async/chan (async/sliding-buffer 1))

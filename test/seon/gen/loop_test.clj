@@ -36,6 +36,7 @@
             [seon.cluster.work :as work]
             [seon.config :as config]
             [seon.flow :as seon.flow]
+            [seon.render :as render]
             [seon.render.web :as web]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
@@ -78,7 +79,9 @@
 (defn- with-render-context-proc
   "Run the production render proc that answers prompt context requests."
   [cluster body]
-  (let [context-channel (async/chan)
+  (let [context-channel
+        (test-support/render-context-channel
+         (render/agent-render-profile (config/defaults)))
         render-channel (async/chan (async/sliding-buffer 1))
         pages-channel (async/chan (async/sliding-buffer 1))
         stream-channel (async/chan (async/sliding-buffer 1))

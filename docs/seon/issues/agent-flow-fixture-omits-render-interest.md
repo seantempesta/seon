@@ -51,7 +51,22 @@ initialization before either fixture could exercise its subject.
   `tmp/overnight-gen-loop-threads.json` showed the render proc actively in
   `render.web/context-pass`, computing a Datahike schema projection rather than
   a missing delivery. That later render-cost boundary is not evidence against
-  the fixture correction and remains to be isolated independently.
+  the fixture correction.
+- The later complete-tier worker dump at
+  `tmp/test-runs/run.czWGK6/tmp/test-liveness/86091-1786612994637-threads.json`
+  showed the same stack in the wake-routing property: the turn waited for
+  context while the render proc repeatedly derived config through
+  `schema/projection-from-database` at individual render calls. An identical
+  routing trial took 217,100 ms without a supplied render profile and 6,185 ms
+  with the shipped agent profile; both returned every routing verdict true.
+- `test-support/render-context-channel` now supplies that already-derived
+  profile to these fixed-config fixtures. The production render proc and walk
+  still execute; only the unrelated config-to-profile derivation is removed
+  from each visited node. The focused agent namespace passed 18 tests / 176
+  assertions; the combined agent + generative-loop run passed 21 / 196, with
+  the goal test reduced from 758 seconds to 12.910 seconds. The nine-worker
+  reproduction passed 92 / 510; the same goal test completed in 18.626 seconds
+  while the routing property completed in 76.179 seconds.
 
 ## Owner
 

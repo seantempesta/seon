@@ -159,6 +159,43 @@ proof must make both property tasks publish terminal task results under the
 nine-worker complete tier; a focused pass or a later terminal transaction
 during teardown does not close this boundary.
 
+## 2026-08-13 render-profile attribution
+
+The later retained worker dump at
+`tmp/test-runs/run.czWGK6/tmp/test-liveness/86091-1786612994637-threads.json`
+contains 66 platform and virtual threads. The test thread is parked in
+`await-database-state!`, but the agent graph is not missing a wake: one turn
+proc is waiting for `seon.render/acquire-context!`, while the only runnable
+application virtual thread is executing
+`render.web/context-pass` → `render.walk/history` → `render/render-call` →
+`config/effective` → `schema/projection-from-database` → Datahike's temporal
+merge. The remaining agent and armer procs are ordinarily parked on their
+Flow inputs. The dump therefore identifies active render derivation, not an
+executor deadlock, missing armer route, or absent terminal transaction.
+
+The post-property commits named in the recurrence were excluded by source
+inspection: `677f84f85` and `0ef66e742` only supplied the render interest
+reference in other fixtures; `00232b834` and `24255dcfe` changed
+materialized-branch registry/operator reads and custody proof. None changed
+`routing-trial`, its awaited predicate, agent wake routing, or context
+acquisition.
+
+A same-JVM probe over identical operations measured the fixture's ordinary
+unprofiled context request at 217,100 ms and the same request carrying
+`render/agent-render-profile` derived from shipped defaults at 6,185 ms. Both
+runs returned all four routing verdicts true. The class was fixed at the test
+construction seam: `test-support/render-context-channel` supplies the
+already-derived profile that these fixed-config integration fixtures know,
+while the production render proc, context walk, prompt assembly, turns, and
+database facts remain real.
+
+The nine-worker changed-path reproduction selected 71 platform plus 21 bulk
+tests and completed 92 tests / 510 assertions with no failures or errors.
+`n-agent-parallel-turns-property` returned in 61,330 ms and
+`wake-routing-conservation-property` in 76,179 ms under pool contention. This
+closes the current recurrence without a serial roster, reduced worker count,
+poll, or semantic clock.
+
 ## Owner
 
 The test and production owner of each resource named during triage: clj-kondo
