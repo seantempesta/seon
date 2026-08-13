@@ -25,13 +25,17 @@
                      [:or [:vector :any] :qualified-symbol])
    (schema/register! ::row-id [:string {:seon.db/identity true}])))
 
+(def ^:private fixture-projection
+  (schema/build-projection
+   @(:seon.schema.delta/candidate-forms schema-delta)))
+
 (use-fixtures
  :each
  (fn [test-body]
    (schema/call-with-registration-delta
     schema-delta
     {:seon.schema.admission/source :core}
-    test-body)))
+    #(schema/call-with-projection fixture-projection test-body))))
 
 (def ^:private exam-query
   '[:find (count ?key) .
@@ -73,7 +77,8 @@
 (deftest edn-backed-reads-return-distinguishable-logical-values
   (test-support/with-database
    {:seon.test-support/extra-schema
-    (schema.datahike/malli->datahike-schema
+    (schema.datahike/malli->datahike-schema-in
+     fixture-projection
      [::ai-declaration ::html-declaration ::row-id])}
    (fn [connection]
      (let [producer 'example.render/ai
@@ -135,7 +140,8 @@
            ["true" ::schema.datahike/schema-invalid]]]
     (test-support/with-database
      {:seon.test-support/extra-schema
-      [(schema.datahike/malli->datahike-attr ::ai-declaration)]}
+      [(schema.datahike/malli->datahike-attr-in
+        fixture-projection ::ai-declaration)]}
      (fn [connection]
        (d/transact connection [{::ai-declaration stored}])
        (let [result
@@ -214,7 +220,8 @@
 (deftest return-map-queries-preserve-ordering-and-limit
   (test-support/with-database
    {:seon.test-support/extra-schema
-    (schema.datahike/malli->datahike-schema [::row-id])}
+    (schema.datahike/malli->datahike-schema-in
+     fixture-projection [::row-id])}
    (fn [connection]
      (db/transact! connection
                    [{::row-id "charlie"}

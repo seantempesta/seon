@@ -96,3 +96,15 @@ so they remain evidence rather than being reported as N5 absence.
   witness that queries an installed identity through a history database value.
 - `bin/test seon.render.web-test` covers both newly resolved debug-route
   members.
+
+## Overnight fixture follow-up — 2026-08-13
+
+The three attributed `seon.db-test` failures were stale fixture construction,
+not read regressions. Their registration delta correctly retained the
+synthetic declarations, but the tests asked the canonical JVM-only
+`malli->datahike-*` entry points to derive those attributes and then handed
+database operations the fixture database's production projection. The fixture
+now builds one immutable projection from its complete delta, uses the bridge's
+explicit `-in` entry points, and hands that same projection to every synthetic
+transaction and read. The three direct test vars pass; the focused namespace
+gate is the recurring proof.
