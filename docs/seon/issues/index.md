@@ -61,7 +61,7 @@ See `README.md` for the convention.
 | [Return from the generated opening's second live pull](generated-opening-live-pull-does-not-return-after-help.md) | blocker | prefix-drift bootstrap performance diagnosis (held `bootstrap.clj`) |
 | [Explain the 24-second live root pull of 189 members](live-root-pull-of-189-members-takes-24-seconds.md) | blocker | render acquisition performance wave |
 
-## Friction (133)
+## Friction (130)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -132,7 +132,6 @@ See `README.md` for the convention.
 | [Replace recurring anonymous runtime contracts with named predicates](anonymous-runtime-contracts-have-recurred.md) | friction | contract-gate repair |
 | [Derive operator process identity without command substring lists](operator-classifies-processes-by-command-substrings.md) | friction | operator process-identity wave |
 | [Bound operator subprocess reads and waits](operator-subprocesses-have-unbounded-read-and-wait-paths.md) | friction | operator child-lifecycle wave |
-| [Delete the readerless second Datahike transaction codec](schema-datahike-keeps-a-readerless-second-codec.md) | friction | schema codec deletion wave |
 | [Derive predicate-owner readiness before live source publication](live-publication-has-a-hand-maintained-predicate-owner-reload.md) | friction | publication registration-provenance wave |
 | [Hold one store ownership interval across artifact install and start](artifact-releases-the-fence-between-install-and-start.md) | friction | artifact startup wave |
 | [Make production docstrings describe the surviving runtime](production-docstrings-teach-deleted-semantics.md) | friction | production documentation-honesty wave |
@@ -152,7 +151,6 @@ See `README.md` for the convention.
 | [Make the oversized terminal-refusal settle as one schema-valid error fact](terminal-refusal-error-fact-fails-on-oversized-data.md) | friction | settlement fix wave |
 | [Promote the 34 proven REPL-parity divergences as the print path lands](repl-parity-divergences.md) | friction | print-path implementation wave |
 | [Close the 2026-08-01 unlogged findings (interop policy, agent write surface, rot)](unlogged-findings-2026-08-01.md) | friction | general |
-| [Stop rebuilding the whole schema projection on every contracted `defn`](contracted-defn-rebuilds-the-whole-schema-projection.md) | friction | per-cluster live-graph wave |
 | [Stop rebuilding gigabytes of schema state for one declaration](schema-declaration-rebuilds-four-gigabytes-per-form.md) | friction | schema projection performance wave |
 | [Give offline roster discovery a current read-only helper](give-offline-roster-discovery-a-current-read-only-helper.md) | friction | operator artifact follow-up |
 | [Separate declared search metadata from the process index ID](search-index-property-collides-with-process-index-id.md) | friction | cluster search wiring wave |
@@ -187,7 +185,6 @@ See `README.md` for the convention.
 | [Render effect notices as ordinary values](effect-context-suffix-returns-comment-notices.md) | friction | strict REPL display wave |
 | [Render run forms and receipts with strict REPL fidelity](run-renderer-narrates-forms-and-receipts.md) | friction | strict REPL display wave |
 | [Effect receipts have no render producers](effect-receipts-have-no-render-producers.md) | friction | render receipt-producer wave |
-| [Cluster, config, and bootstrap plan render as raw maps](cluster-config-and-bootstrap-plan-render-as-raw-maps.md) | friction | render important-schema producer wave |
 | [Order transcript receipt and comment candidates by numeric facts](transcript-candidate-window-orders-receipts-and-comments-by-id.md) | friction | transcript ordering follow-up |
 | [Order effect feedback by numeric facts](effect-feedback-orders-receipts-by-id.md) | friction | effect ordering follow-up |
 | [Select the latest closed run without comparing run ids](latest-closed-run-orders-by-id-string.md) | friction | work ordering follow-up |
@@ -197,7 +194,7 @@ See `README.md` for the convention.
 | [Declare the agent's plan relationship](agent-plan-has-no-declared-database-relationship.md) | friction | evolving-session PRD design gate |
 | [Generate only action-demanded opening candidates](opening-generator-pushes-undemanded-candidates.md) | friction | prefix-drift demand-first generation design (held `bootstrap.clj`) |
 
-## Cleanup (16)
+## Cleanup (15)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -210,7 +207,6 @@ See `README.md` for the convention.
 | [Delete five readerless schema rows left by completed cuts](schema-population-retains-five-readerless-rows.md) | cleanup | schema population deletion wave |
 | [Keep the page body from scrolling sideways on a phone](agent-pages-overflow-a-phone-viewport.md) | cleanup | visual-QA fix wave |
 | [Fix the context wave's three small honesty defects](context-wave-leaves-three-small-honesty-defects.md) | cleanup | context wave fix lane |
-| [Give Flow configuration dials one registration owner](flow-config-dials-have-two-registration-owners.md) | cleanup | Core |
 | [Remove or implement monitor-graph's throwing command proc](monitor-graph-command-proc-throws.md) | cleanup | flow-protocol wave |
 | [Delete the konserve LRU our fork allocates and never reads](datahike-allocates-a-konserve-cache-it-never-reads.md) | cleanup | store/perf fix lane |
 | [Close the remaining vendored-versus-pinned dependency drift](vendored-transit-clj-drifts-from-the-pinned-artifact.md) | cleanup | upstream-delta sweep follow-up |
