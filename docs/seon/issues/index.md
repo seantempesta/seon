@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (41)
+## Blocker (39)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -30,10 +30,8 @@ See `README.md` for the convention.
 | [Make accepted work require terminal evidence](class-accepted-work-can-end-without-terminal-evidence.md) | blocker | class-kill queue |
 | [Make destructive reachability changes atomic](class-destructive-reachability-changes-are-not-atomic.md) | blocker | class-kill queue |
 | [Record a call edge when an agent form calls a core function](agent-form-calls-to-core-namespaces-are-not-indexed.md) | blocker | program-graph indexing wave |
-| [Make the render value floor total over ordinary unqualified-key maps](render-value-floor-refuses-any-map-with-unqualified-keys.md) | blocker | interface-economy W1 total-floor wave |
 | [Publish terminal evidence for every background binary result](background-binary-settlement-does-not-publish-required-event.md) | blocker | background settlement investigation |
 | [Derive a completion reply from the triggering message](message-completion-replies-from-the-wrong-agent-and-duplicates-the-trigger.md) | blocker | message delivery repair wave |
-| [Every agent prompt is a neighborhood render-walk contract violation](every-agent-prompt-is-a-neighborhood-render-walk-contract-violation.md) | blocker | live-drive context repair wave |
 | [Route failover context through the captured rendered history](failover-adds-an-uncaptured-system-context-fragment.md) | blocker | strict dogfood provider-context repair |
 | [Delete the separate agent transcript assembler](agent-html-still-uses-the-retired-transcript-assembler.md) | blocker | strict dogfood transcript-deletion wave |
 | [Execute generated form projections before they enter history](render-history-serializes-unexecuted-form-projections.md) | blocker | generated-episode receipt integration |
@@ -62,7 +60,7 @@ See `README.md` for the convention.
 | [Stop run-opening retries against an answered trigger](run-opening-retries-storm-against-an-answered-trigger.md) | blocker | gate wedge lane (wedge-properties) |
 | [Explain the 24-second live root pull of 189 members](live-root-pull-of-189-members-takes-24-seconds.md) | blocker | render acquisition performance wave |
 
-## Friction (133)
+## Friction (128)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -80,7 +78,6 @@ See `README.md` for the convention.
 | [Construct the schedule graph test from a real environment-bearing handle](schedule-graph-test-constructs-a-handle-without-an-environment.md) | friction | schedule fixture repair |
 | [Render a capability namespace by its API, not by its Malli source](namespace-units-render-error-schema-boilerplate.md) | friction | agent context repair wave (2026-08-10 audit) |
 | [Render database identities in HTML instead of opaque host objects](database-values-render-as-opaque-host-objects-in-html.md) | friction | render important-schema producer wave |
-| [Do not tell an agent an unindexed namespace is empty](unindexed-namespaces-render-as-empty.md) | friction | agent context repair wave (2026-08-10 audit) |
 | [Stop sending debug pages patches for elements they do not have](debug-pages-receive-block-patches-for-elements-they-do-not-have.md) | friction | UI watchability wave (2026-08-10 route walk) |
 | [May a run refine a schema key nothing depends on?](within-run-schema-key-refinement-needs-an-owner-ruling.md) | friction | owner design ruling (schema-key immutability vs the usage guard) |
 | [Stop a failed turn from waking itself through its own fault message](a-failed-turn-wakes-itself-through-its-own-fault-message.md) | friction | live-drive context repair wave |
@@ -180,13 +177,9 @@ See `README.md` for the convention.
 | [Route exact context captures through the blob owner](context-capture-prompts-bypass-the-blob-splitter.md) | friction | eval-scale economics wave |
 | [Give the shared compute executor per-cluster fairness](root-compute-executor-has-no-per-cluster-fairness.md) | friction | shared-surface scheduling design gate |
 | [Extract Malli map entries by shape, not position](schema-map-extraction-still-depends-on-position-two.md) | friction | schema-form extraction repair |
-| [Stop encoding namespace-render results as source comments](namespace-renderer-encodes-results-as-comments.md) | friction | strict REPL display wave |
 | [Render transcript entries as forms and actual values](transcript-renderer-encodes-entries-as-comment-forms.md) | friction | strict REPL display wave |
-| [Make the rendered walk an ordinary REPL value](render-walk-frames-values-as-comments.md) | friction | strict REPL display wave |
-| [Return walk state and failures without comment notices](render-walk-wrapper-returns-comment-notices.md) | friction | strict REPL display wave |
 | [Render effect notices as ordinary values](effect-context-suffix-returns-comment-notices.md) | friction | strict REPL display wave |
 | [Render run forms and receipts with strict REPL fidelity](run-renderer-narrates-forms-and-receipts.md) | friction | strict REPL display wave |
-| [Keep nested map sequences structurally readable](nested-map-sequences-render-as-tables-inside-structural-values.md) | friction | print-path follow-up |
 | [Effect receipts have no render producers](effect-receipts-have-no-render-producers.md) | friction | render receipt-producer wave |
 | [Cluster, config, and bootstrap plan render as raw maps](cluster-config-and-bootstrap-plan-render-as-raw-maps.md) | friction | render important-schema producer wave |
 | [Order transcript receipt and comment candidates by numeric facts](transcript-candidate-window-orders-receipts-and-comments-by-id.md) | friction | transcript ordering follow-up |
