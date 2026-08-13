@@ -155,6 +155,59 @@
       (is (= [:parallel-only nil :parallel-only]
              (mapv ::runner/parallel-failure confirmed))))))
 
+(deftest unlaunchable-confirmation-worker-does-not-suppress-the-tally
+  (let [task-results
+        [{::runner/task-id :unlaunchable
+          ::runner/task-ordinal 7
+          ::runner/task-symbols ["seon.example-test/unlaunchable"]
+          ::runner/task-summary {::runner/test-count 1
+                                 ::runner/pass-count 2
+                                 ::runner/fail-count 1
+                                 ::runner/error-count 0}}
+         {::runner/task-id :green
+          ::runner/task-ordinal 8
+          ::runner/task-symbols ["seon.example-test/green"]
+          ::runner/task-summary {::runner/test-count 1
+                                 ::runner/pass-count 3
+                                 ::runner/fail-count 0
+                                 ::runner/error-count 0}}]
+        confirmed* (atom nil)
+        summary* (atom nil)
+        output
+        (with-out-str
+          (let [confirmed
+                (#'runner/confirm-task-results!
+                 1 nil #{:unlaunchable} task-results
+                 (fn [_progress _result]
+                   (throw
+                    (ex-info
+                     "Injected confirmation process launch refusal."
+                     {:seon.error/kind
+                      ::runner/worker-launch-failure}))))
+                summary (#'runner/summarize-task-results confirmed)]
+            (reset! confirmed* confirmed)
+            (reset! summary* summary)
+            (#'runner/print-final-tally! summary confirmed)))
+        unconfirmed (first @confirmed*)
+        failure (::runner/confirmation-failure unconfirmed)]
+    (is (= #:seon.test.runner{:test-count 2
+                              :pass-count 5
+                              :fail-count 1
+                              :error-count 0}
+           @summary*)
+        "confirmation launch is outside the already-complete bulk tally")
+    (is (= :unconfirmed (::runner/parallel-failure unconfirmed)))
+    (is (= :seon.test.runner/confirmation-worker-launch-failure
+           (:seon.error/kind failure)))
+    (is (= ["seon.example-test/unlaunchable"]
+           (::runner/task-symbols failure))
+        "the typed launch failure carries the task known before readiness")
+    (is (str/includes? output "Ran 2 tests containing 6 assertions."))
+    (is (str/includes? output "1 failures, 0 errors."))
+    (is (str/includes?
+         output
+         "Unconfirmed tasks:\n - seon.example-test/unlaunchable"))))
+
 (deftest boot-tests-have-no-namespace-wide-execution-shape
   (let [namespace-object (find-ns 'seon.cluster.boot-test)
         fixtures (meta namespace-object)]

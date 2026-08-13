@@ -1117,6 +1117,7 @@
   (let [error-log (io/file operator-root "logs" "worker-stderr.log")
         published-base (System/getProperty "seon.test.published-base")
         command (cond-> [(or (System/getenv "SEON_TEST_CLOJURE") "clojure")
+                         "-Scp" (System/getProperty "java.class.path")
                          (str "-J-Dseon.operator.root="
                               (.getCanonicalPath operator-root))
                          (str "-J-Dseon.test.root="
@@ -1131,7 +1132,16 @@
                   (.directory checkout-root)
                   (.redirectError
                    (ProcessBuilder$Redirect/appendTo error-log)))
-        process (.start builder)
+        process
+        (try
+          (.start builder)
+          (catch Exception failure
+            (throw
+             (ex-info "A test worker process could not launch."
+                      {:seon.error/kind ::worker-launch-failure
+                       ::worker-id worker-id
+                       ::worker-error-log (.getCanonicalPath error-log)}
+                      failure))))
         worker {::worker-id worker-id
                 ::worker-process process
                 ::worker-reader (io/reader (.getInputStream process))
@@ -1143,14 +1153,18 @@
     (when-not ready
       (throw
        (ex-info "A test worker exited before publishing readiness."
-                {::worker-id worker-id
+                {:seon.error/kind ::worker-launch-failure
+                 ::worker-id worker-id
                  ::worker-exit (when-not (.isAlive process)
                                  (.exitValue process))
                  ::worker-error-log (::worker-error-log worker)})))
     (when-not (= :ready (::worker-event ready))
       (throw
        (ex-info "A test worker published an invalid readiness value."
-                {::worker-id worker-id ::worker-ready ready})))
+                {:seon.error/kind ::worker-launch-failure
+                 ::worker-id worker-id
+                 ::worker-ready ready
+                 ::worker-error-log (::worker-error-log worker)})))
     worker))
 
 (defn- worker-rpc!
@@ -1321,6 +1335,43 @@
                  "operator-roots" (::task-id task))
     (.mkdirs)))
 
+(defn- confirmation-launch
+  [task]
+  {::worker-id (str "confirmation-" (::task-ordinal task))
+   ::task-id (::task-id task)
+   ::task-ordinal (::task-ordinal task)
+   ::task-symbols (::task-symbols task)})
+
+(defn- publish-confirmation-launch!
+  [root launch]
+  (spit (io/file root "confirmation-launch.edn")
+        (str (pr-str launch) "\n"))
+  launch)
+
+(defn- unconfirmed-confirmation
+  [task-result failure]
+  (let [launch (confirmation-launch task-result)
+        underlying-kind (:seon.error/kind (ex-data failure))
+        failure-kind
+        (if (= ::worker-launch-failure underlying-kind)
+          ::confirmation-worker-launch-failure
+          ::confirmation-worker-failure)
+        failure-fact
+        (cond->
+         (assoc launch
+                :seon.error/kind failure-kind
+                ::failure-class (.getName (class failure))
+                ::failure-message (or (ex-message failure) ""))
+          underlying-kind (assoc ::underlying-failure-kind underlying-kind)
+          (ex-data failure) (assoc ::failure-data (ex-data failure)))]
+    (println "bin/test: confirmation unconfirmed"
+             (str/join "," (::task-symbols task-result))
+             "worker=" (::worker-id launch)
+             "kind=" failure-kind)
+    (assoc task-result
+           ::parallel-failure :unconfirmed
+           ::confirmation-failure failure-fact)))
+
 (defn- confirm-parallel-failure!
   [progress task-result]
   (let [task (select-keys task-result
@@ -1328,8 +1379,12 @@
                            ::task-symbols ::task-long?])
         checkout (worker-checkout "confirmation")
         root (confirmation-root task)
-        worker (start-worker! (str "confirmation-" (::task-ordinal task))
-                              checkout root)]
+        launch (publish-confirmation-launch!
+                root (confirmation-launch task))
+        _ (announce! progress
+                     (str "CONFIRM launch worker=" (::worker-id launch)
+                          " task=" (str/join "," (::task-symbols task))))
+        worker (start-worker! (::worker-id launch) checkout root)]
     (try
       (initialize-worker! worker [(symbol (::task-namespace task))])
       (announce! progress
@@ -1364,7 +1419,15 @@
                           (.submit
                            executor
                            ^java.util.concurrent.Callable
-                           #(confirm! progress result))]))
+                           (fn []
+                             (try
+                               (confirm! progress result)
+                               (catch InterruptedException failure
+                                 (.interrupt (Thread/currentThread))
+                                 (throw failure))
+                               (catch Throwable failure
+                                 (unconfirmed-confirmation
+                                  result failure)))))]))
                   failures)]
         (try
           (mapv (fn [result]
@@ -1390,6 +1453,27 @@
     (println "bin/test: attributed output for"
              (str/join "," (::task-symbols result)))
     (print (::task-output result))))
+
+(defn- print-final-tally!
+  [summary task-results]
+  (println)
+  (println "Ran" (::test-count summary) "tests containing"
+           (+ (::pass-count summary) (::fail-count summary))
+           "assertions.")
+  (println (::fail-count summary) "failures,"
+           (::error-count summary) "errors.")
+  (let [unconfirmed
+        (sort-by ::task-ordinal
+                 (filter #(= :unconfirmed (::parallel-failure %))
+                         task-results))]
+    (when (seq unconfirmed)
+      (println)
+      (println "Unconfirmed tasks:")
+      (doseq [task-result unconfirmed]
+        (let [failure (::confirmation-failure task-result)]
+          (println " -" (str/join "," (::task-symbols task-result))
+                   "worker=" (::worker-id failure)
+                   "kind=" (:seon.error/kind failure)))))))
 
 (defn- run-parallel-stage!
   [progress manifest workers serial-worker tasks]
@@ -1549,26 +1633,21 @@
                                            (:seon.test/error-count %))))
                           (map :seon.test/sym)
                           sort)]
-          (println)
-          (println "Ran" (::test-count summary) "tests containing"
-                   (+ (::pass-count summary) (::fail-count summary))
-                   "assertions.")
-          (println (::fail-count summary) "failures,"
-                   (::error-count summary) "errors.")
-        (when-let [stopped (::stopped-after run-result)]
-          (println)
-          (println "bin/test: PLATFORM TIER RED —" (name stopped)
-                   "moving-part regressions failed; the bulk tier did not run.")
-          (println "bin/test: fix the platform first; a broken platform"
-                   "poisons every test that forks it."))
-        (when (seq failures)
-          (println "\nFailing tests:")
-          (doseq [test-symbol failures]
-            (println " -" test-symbol)))
-        (print-skipped! skipped)
-        (when (and green? (::digests bulk))
-          (record-green-basis! selection-mode git-sha (::digests bulk)))
-        (flush)
+          (print-final-tally! summary task-results)
+          (when-let [stopped (::stopped-after run-result)]
+            (println)
+            (println "bin/test: PLATFORM TIER RED —" (name stopped)
+                     "moving-part regressions failed; the bulk tier did not run.")
+            (println "bin/test: fix the platform first; a broken platform"
+                     "poisons every test that forks it."))
+          (when (seq failures)
+            (println "\nFailing tests:")
+            (doseq [test-symbol failures]
+              (println " -" test-symbol)))
+          (print-skipped! skipped)
+          (when (and green? (::digests bulk))
+            (record-green-basis! selection-mode git-sha (::digests bulk)))
+          (flush)
           (if green? 0 1)))
       (finally
         (doseq [worker @workers*]
