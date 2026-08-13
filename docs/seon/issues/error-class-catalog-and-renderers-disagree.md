@@ -49,6 +49,28 @@ correction rather than silent reinterpretation. The earlier archived issue
 incorrectly says the 225 correction and query-derived gate fully resolved the
 problem.
 
+W2 producer accretion landed on 2026-08-13 in commits `2aacc58fe`,
+`2638370c5`, `e1f1fbe6d`, `72e093ae7`, `06e654c76`, `ff182e7e9`, and
+`1aacbc638`. Every in-scope producer found by the parsed census now retains
+its existing `:seon.error/kind` and also emits the marker member of its
+declared error-class shape. Registry-first declaration raised the current
+parsed count of declared error-class markers from 226 at the start of W2 to
+306 after the accretion; the source census still reports the kind writes and
+reads because their deletion belongs to W3--W5. Dynamic constructors now use
+their selected keyword as the marker as well as the legacy kind, and
+`seon.error/diagnostic` preserves a supplied class marker.
+
+The protected live-lane owners `src/my/plan.clj`,
+`resources/seon/schemas/my.plan.edn`, `src/seon/bootstrap.clj`, and
+`src/seon/render/walk.clj` were deliberately deferred to W2b rather than
+being edited across lane ownership. All edited production namespaces loaded
+after publication. The direct regression
+`seon.error-test/exact-dispatch-producers-carry-their-class-markers` passes
+and constructs one representative of each of the twelve real exact-dispatch
+classes through `seon.error/diagnostic`, proving that the constructor retains
+each marker and that the active registry recognizes the resulting class
+shape. No broad or `--all` test gate is W2 evidence.
+
 ## Owner
 
 The error-model catalog and its source-derived census method in
