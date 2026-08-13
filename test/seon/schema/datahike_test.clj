@@ -3,6 +3,7 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [datahike.api :as d]
             [seon.db :as db]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -207,6 +208,83 @@
                  (db/q '[:find ?title .
                          :where [_ ::title ?title]]
                        (db/db connection)))))))))
+
+(deftest agent-authored-render-symbols-cross-the-transaction-function-codec
+  ;; CLASS: transaction data returned by `:db.fn/call` used to bypass the one
+  ;; logical-to-storage encoder. Agent-authored schema rows are built at that
+  ;; seam, so coherent qualified render symbols reached Datahike's string-backed
+  ;; render attributes raw and could never publish. Wrapping transaction-function
+  ;; output in the same codec makes every returned heterogeneous slot cross the
+  ;; one representation boundary exactly once.
+  (support/with-database
+   (fn [connection]
+     (let [namespace-name 'my.agents.render-codec
+           attribute :probe.render-codec/id
+           shape :probe.render-codec/plan
+           renderers
+           {:seon.render/ai 'my.agents.render-codec/render-plan-ai
+            :seon.render/html 'my.agents.render-codec/render-plan-html
+            :seon.render/form 'my.agents.render-codec/render-plan-form}
+           outputs
+           {:seon.render/ai :seon.render/ai
+            :seon.render/html :seon.render/html
+            :seon.render/form :seon.render/form}
+           row-tx (ns-resolve 'seon.cluster.run 'row-tx)
+           transact-row!
+           (fn [row]
+             (db/transact!
+              connection [[:db.fn/call row-tx {} row]]))
+           attribute-form [:string {:seon.db/identity true}]
+           argument-form [:map [attribute attribute]]]
+       (db/transact! connection
+                     [{:seon.ns/name namespace-name
+                       :seon.ns/source (pr-str (list 'ns namespace-name))}])
+       (transact-row!
+        {:seon.schema/key attribute
+         :seon.schema/form (pr-str attribute-form)})
+       (doseq [[property renderer] renderers]
+         (let [function-name (symbol (name renderer))]
+           (transact-row!
+            {:seon.fn/sym (str renderer)
+             :seon.fn/ns [:seon.ns/name namespace-name]
+             :seon.fn/source
+             (pr-str
+              (list 'defn function-name
+                    {:malli/schema
+                     [:=> [:cat argument-form] (get outputs property)]}
+                    '[plan]
+                    nil))
+             :seon.fn/arglists "([plan])"
+             :seon.fn/private? false
+             :seon.fn/spec
+             (pr-str [:=> [:cat argument-form] (get outputs property)])})))
+       (transact-row!
+        {:seon.schema/key shape
+         :seon.schema/form
+         (pr-str
+          [:map
+           (merge {:seon.db/entity true} renderers)
+           [attribute attribute]])})
+       (db/transact! connection [{attribute "plan-1"}])
+       (let [raw-row
+             (d/pull @connection
+                     [:seon.render/ai :seon.render/html :seon.render/form]
+                     [:seon.schema/key shape])
+             logical-row
+             (db/pull @connection
+                      [:seon.render/ai :seon.render/html :seon.render/form]
+                      [:seon.schema/key shape])
+             projection (schema/projection-from-database @connection)
+             entity (db/pull @connection '[*] [attribute "plan-1"])
+             selected-row
+             (some #(when (= shape (:seon.schema/key %)) %)
+                   (schema/matching-shapes-in projection entity))]
+         (testing "storage uses the declared encoded representation"
+           (is (= (update-vals renderers pr-str) raw-row)))
+         (testing "database reads restore the logical qualified symbols"
+           (is (= renderers logical-row)))
+         (testing "cold acquisition preserves the declarations used by selection"
+           (is (= renderers (select-keys selected-row (keys renderers))))))))))
 
 (deftest encode-transaction-resolves-the-declaration-population-once
   ;; The class: the encode seam resolving the declaration population PER

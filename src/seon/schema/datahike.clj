@@ -356,7 +356,17 @@
     (refuse-slot! ::schema-invalid attr value))
   value)
 
-(declare encode-entity-in)
+(declare encode-entity-in encode-transaction-data-in)
+
+(def ^:private encoded-operation-key ::encoded-operation)
+
+(defn- encoded-operation?
+  [operation]
+  (true? (get (meta operation) encoded-operation-key)))
+
+(defn- mark-encoded
+  [operation]
+  (vary-meta operation assoc encoded-operation-key true))
 
 (def ^:private storage-readers
   {'seon.schema.datahike/keyword
@@ -421,21 +431,43 @@
    (empty entity)
    entity))
 
+(defn- encode-call-output-in
+  "Encode transaction data returned by one Datahike transaction function."
+  [db projection f & args]
+  (encode-transaction-data-in projection (apply f db args)))
+
 (defn- encode-transaction-data-in
   [projection transaction-data]
   (mapv
    (fn [operation]
      (cond
+       (encoded-operation? operation)
+       operation
+
        (map? operation)
-       (encode-entity-in projection operation)
+       (mark-encoded (encode-entity-in projection operation))
 
        (and (vector? operation)
             (= :db/add (first operation))
             (edn-encoded-attr-in? projection (nth operation 2 nil)))
-       (update operation 3
-               #(storage-string
-                 (validate-logical-slot-in!
-                  projection (nth operation 2) %)))
+       (mark-encoded
+        (update operation 3
+                #(storage-string
+                  (validate-logical-slot-in!
+                   projection (nth operation 2) %))))
+
+       (and (vector? operation)
+            (= :db.fn/call (first operation)))
+       ;; Datahike invokes the transaction function after this outer encoder
+       ;; has run, then splices its returned transaction data into the same
+       ;; transaction. Route that returned data through this same codec before
+       ;; Datahike interprets it. The metadata marker is process-local and
+       ;; prevents a nested owner that already called this codec from being
+       ;; encoded twice; Datahike stores only the operation's ordinary data.
+       (mark-encoded
+        (into [:db.fn/call #'encode-call-output-in
+               projection (second operation)]
+              (nnext operation)))
 
        :else operation))
    transaction-data))
