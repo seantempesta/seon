@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (46)
+## Blocker (44)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -57,24 +57,21 @@ See `README.md` for the convention.
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 | [Attribute and cut the ~2.4 s a run pays between every form](a-run-pays-two-and-a-half-seconds-between-every-form.md) | blocker | development-velocity incident (run loop per-form cost) |
 | [Stop a schema-resource edit from bricking value admission in running clusters](a-schema-resource-edit-bricks-value-admission-in-every-running-cluster.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
-| [Confirm the background `:io` connection fix with a real `my.shell` drive](every-background-capability-request-loses-its-connection.md) | blocker | tool-exercise lane re-run against `f3b8eabda` |
 | [Reuse one HttpClient so concurrent provider calls stop closing mid-read](concurrent-provider-calls-fail-with-a-closed-response-body.md) | blocker | whole-system arc repair wave |
 | [Settle what arrived when a provider stream closes mid-body](a-mid-stream-provider-disconnect-discards-the-whole-turn.md) | blocker | whole-system arc repair wave |
-| [Await every worker writer before deleting its root](test-runner-cleans-a-worker-root-while-kondo-is-still-writing.md) | blocker | test runner cleanup repair wave |
 | [Supply the generated entry's required render output](generated-turn-omits-the-required-render-output.md) | blocker | generate-call-transition lane (held `loop.clj`) |
 | [Return from the generated opening's second live pull](generated-opening-live-pull-does-not-return-after-help.md) | blocker | prefix-drift bootstrap performance diagnosis (held `bootstrap.clj`) |
 | [Arm an agent created after boot](fresh-agent-created-after-boot-was-not-armed.md) | blocker | first-agent supervision transition design (held loop/run owners) |
 | [Stop run-opening retries against an answered trigger](run-opening-retries-storm-against-an-answered-trigger.md) | blocker | gate wedge lane (wedge-properties) |
 | [Explain the 24-second live root pull of 189 members](live-root-pull-of-189-members-takes-24-seconds.md) | blocker | render acquisition performance wave |
 
-## Friction (138)
+## Friction (133)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Stop the opening walkthrough replicating its usage test per agent](opening-walkthrough-replicates-a-usage-test.md) | friction | evolving-session implementation phases |
 | [Supply every declared render dependency in the agent-flow fixture](agent-flow-fixture-omits-render-interest.md) | friction | flow join-wedge diagnosis |
 | [Make proofs unable to pass without exercising their premise](class-proofs-pass-without-exercising-their-premise.md) | friction | class-kill queue |
-| [Prevent diagnostics from collapsing evidence into noise or absence](class-diagnostics-collapse-evidence-into-noise-or-absence.md) | friction | class-kill queue |
 | [Make every durable contract predicate identifiable](class-anonymous-contracts-cannot-survive-publication.md) | friction | class-kill queue |
 | [Make classification query facts instead of text and hand lists](class-classification-is-inferred-from-hand-lists.md) | friction | class-kill queue |
 | [Make domain order come only from recorded order facts](class-domain-order-falls-through-to-strings-and-hashes.md) | friction | class-kill queue |
@@ -87,7 +84,6 @@ See `README.md` for the convention.
 | [Render a capability namespace by its API, not by its Malli source](namespace-units-render-error-schema-boilerplate.md) | friction | agent context repair wave (2026-08-10 audit) |
 | [Render database identities in HTML instead of opaque host objects](database-values-render-as-opaque-host-objects-in-html.md) | friction | render important-schema producer wave |
 | [Do not tell an agent an unindexed namespace is empty](unindexed-namespaces-render-as-empty.md) | friction | agent context repair wave (2026-08-10 audit) |
-| [Show a never-run agent's prospective context on its debug page](a-never-run-agents-context-cannot-be-inspected.md) | friction | agent context repair wave (2026-08-10 audit) |
 | [Stop sending debug pages patches for elements they do not have](debug-pages-receive-block-patches-for-elements-they-do-not-have.md) | friction | UI watchability wave (2026-08-10 route walk) |
 | [May a run refine a schema key nothing depends on?](within-run-schema-key-refinement-needs-an-owner-ruling.md) | friction | owner design ruling (schema-key immutability vs the usage guard) |
 | [Stop a failed turn from waking itself through its own fault message](a-failed-turn-wakes-itself-through-its-own-fault-message.md) | friction | live-drive context repair wave |
@@ -126,7 +122,6 @@ See `README.md` for the convention.
 | [Render adversarial roots outlive their fault experiment](render-adversarial-roots-outlive-their-experiment.md) | friction | operator directory-claim governor wave |
 | [Include non-installed operator and MCP leaves in the sink proof](output-sink-query-excludes-operator-and-mcp-scripts.md) | friction | program-index production-subject wave |
 | [Give open map unions explicit discriminants](map-unions-have-no-explicit-discriminants.md) | friction | open-maps accretion wave |
-| [Give debug pages the real live-process set](debug-pages-invent-wedged-runs.md) | friction | render liveness-evidence wave |
 | [Make the AI transport taxonomy test assert its premise](ai-transport-taxonomy-test-can-run-zero-assertions.md) | friction | AI provider-integrity wave |
 | [Give the SCI source-size cap a declared owner](sci-reader-hides-a-production-source-cap.md) | friction | SCI reader-limit wave |
 | [Derive render-walk connections without a function hand list](render-walk-maintains-a-derived-edge-hand-list.md) | friction | render connection-model wave |
@@ -175,8 +170,6 @@ See `README.md` for the convention.
 | [Adopt flow's read-set control and sanctioned egress](flow-has-no-read-set-control-and-a-hand-rolled-egress.md) | friction | flow-protocol wave |
 | [Connect namespace alias and refer targets with refs](namespace-binding-targets-are-symbols-not-refs.md) | friction | future program-graph binding wave |
 | [Partial hot reload leaves a live JVM running mixed old and new code](partial-hot-reload-produces-mixed-code-with-no-warning.md) | friction | general |
-| [Refuse invalid database read identities instead of returning absence](database-read-admission-treats-invalid-identities-as-absence.md) | friction | database read-admission repair |
-| [Make database request errors name the public operation](database-request-shape-errors-bypass-public-contracts.md) | friction | database diagnostic-output wave |
 | [Publish graph transitions instead of polling them in tests](observable-graph-transitions-are-polled-in-tests.md) | friction | Core |
 | [Acquire Flow test resources inside their cleanup scope](flow-monitor-test-resources-outlive-their-cleanup-scope.md) | friction | test fixture repair wave |
 | [Publish eval arming before testing concurrent interruption](concurrent-eval-test-calibrates-interpreted-work-to-wall-time.md) | friction | SCI eval readiness wave |

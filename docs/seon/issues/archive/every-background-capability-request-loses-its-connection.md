@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, architecture, toolkit]
 ---
@@ -157,3 +157,7 @@ Its shared published-base preparation refused the protected foreign file
 `test/seon/render/web_test.clj:505`: unresolved symbol `debug-feed-path`
 (`tmp/test-runs/run.JtBA4Q/test-run.txt`, `runner-exit=1`). Per lane ownership,
 this issue remains open and no foreign file was edited or rerun around.
+
+## Verification — 2026-08-13
+
+The deferred focused gate ran green after the foreign tree churn settled: `bin/test seon.effect-test` passed 10 tests / 125 assertions / 0 failures / 0 errors, including the fresh-thread no-bindings regression landed in `e4eaacdfe`. Settlement inputs travel as request data; terminal settlement reads no dynamic binding.
