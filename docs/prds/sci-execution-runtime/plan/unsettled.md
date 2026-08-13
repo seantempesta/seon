@@ -103,6 +103,18 @@ reds span blob-publication, curate, db/store codec, gen.loop, operator, and
 custody-stability owners — the next session's fix worklist, each with
 attributed output in the retained log.
 
+**Post-tally repairs (2026-08-13 early AM).** The run/turn/work family is
+FULLY closed: 12 `run-test` reds were ONE hand-roster fixture missing
+`:seon.effect/to` (hand-list class; canonical fixture restored,
+`100f03a40`), the independent turn-test reds were stale expectations, and
+the last two shared the as-of selector defect — the temporal
+origin-schema class N5 killed in `seon.db`, surviving in the walk — now
+fixed by REUSING the shared derivation (`0ea973301`, focused 72/454/0,
+issue archived). An overnight `small-owner-reds` lane is sweeping the
+remaining independent red owners (db fixtures, store codec, gen.loop,
+blob-publication, call-preparation, prompt, curate, custody-stability,
+oversight, operator) from the tally log's worklist.
+
 **Uncommitted foreign residue deliberately left:**
 `test/seon/public_contract_test.clj` (reader→analyzer refactor) and the
 regenerated `universal-output-floor-baseline-2026-08-04.edn` — unverified
