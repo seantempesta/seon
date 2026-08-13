@@ -379,7 +379,7 @@
                   [?receipt :seon.cluster.eval/ordinal 0]]
                 @connection run-id))))))
 
-(deftest a-lint-refusal-derives-an-immediate-corrective-turn
+(deftest a-lint-refusal-is-terminal-until-a-new-trigger-arrives
   (doseq [[label results]
           [["all forms were refused" [lint-refusal lint-refusal]]
            ["one form succeeded and one was refused" [1 lint-refusal]]]]
@@ -392,21 +392,20 @@
           (let [db @connection
                 derived (work/next-agent-work db request)]
             (is (empty? (work/unanswered-triggers db agent-id))
-                "no external message manufactures the corrective turn")
-            (is (= {:seon.cluster.work/situation :open
-                    :seon.cluster.agent/id agent-id
-                    :seon.cluster.message/id message-id}
-                   derived)
-                "the existing open situation reuses the original trigger")
+                "the refused run answered its external trigger")
+            (is (nil? derived)
+                "a refusal does not self-wake a corrective turn")
+            (is (false? (work/more-agent-work? db request)))
             (add-outside-trigger! connection "concurrent-message"
                                   (Date. 1700000000001))
-            (is (= message-id
-                   (:seon.cluster.message/id
-                    (work/next-agent-work @connection request)))
-                "immediate correction precedes a concurrent outside trigger")
-            (is (true? (work/more-agent-work? db request)))
-            (is (seon.schema/valid-candidate-value?
-                 :seon.cluster.work/next derived))))))))
+            (let [next-trigger (work/next-agent-work @connection request)]
+              (is (= {:seon.cluster.work/situation :open
+                      :seon.cluster.agent/id agent-id
+                      :seon.cluster.message/id "concurrent-message"}
+                     next-trigger)
+                  "only a new outside trigger starts another turn")
+              (is (seon.schema/valid-candidate-value?
+                   :seon.cluster.work/next next-trigger)))))))))
 
 (deftest a-clean-correction-retires-the-previous-lint-refusal
   (with-database

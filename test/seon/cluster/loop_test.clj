@@ -1206,21 +1206,6 @@
 ;;; The crash walk, as kill positions over facts
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private attributes
-  [:seon.cluster.agent/id :seon.cluster.agent/run
-   :seon.cluster.run/id :seon.cluster.run/agent :seon.cluster.run/trigger
-   :seon.cluster.run/opened-at
-   :seon.cluster.run/closed-at :seon.cluster.run/process
-   :seon.cluster.run/plan-digest :seon.cluster.run/forms
-   :seon.cluster.run.form/id :seon.cluster.run.form/run
-   :seon.cluster.run.form/ordinal :seon.cluster.run.form/source
-   :seon.cluster.eval/id :seon.cluster.eval/run :seon.cluster.eval/ordinal
-   :seon.cluster.eval/at
-   :seon.cluster.eval/interrupted-at :seon.cluster.eval/result-edn
-   :seon.cluster.eval/error
-   :seon.cluster.message/id :seon.cluster.message/to
-   :seon.cluster.message/content :seon.cluster.message/at])
-
 (def ^:private request
   "The AGENT-SCOPED request (F2 §3.2): the kill positions below are
   per-agent facts and always were, so the crash walk derives through
@@ -1231,22 +1216,15 @@
    :seon.cluster.work/now now})
 
 (defn- with-database [body]
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :schema-flexibility :write}
-        _ (d/create-database configuration)
-        connection (d/connect configuration)]
-    (try
-      (db/transact! connection (schema.datahike/malli->datahike-schema attributes))
+  (test-support/with-database
+   (fn [connection]
       (db/transact! connection
                   [{:seon.cluster.agent/id "agent-a"}
                    {:seon.cluster.message/id "m-1"
                     :seon.cluster.message/to [:seon.cluster.agent/id "agent-a"]
                     :seon.cluster.message/content "go"
                     :seon.cluster.message/at now}])
-      (body connection)
-      (finally
-        (d/release connection)
-        (d/delete-database configuration)))))
+      (body connection))))
 
 (defn- commit-run! [connection {:keys [held? planned? receipts closed?]}]
   (db/transact!

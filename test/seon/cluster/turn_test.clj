@@ -2797,22 +2797,24 @@
     (fn [cluster]
       (let [cluster (assoc cluster :seon.cluster.loop/evaluate
                            'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)]
+            connection (:seon.db/connection cluster)
+            requests (atom [])]
         (db/transact! connection [(agent-row "agent-b")])
-        ;; ONE stub, two agents: the reply depends on WHOSE prompt it
-        ;; is, so the delegate answers instead of forwarding the same
-        ;; sentence back. (Without this the stub made agent-b message
-        ;; itself — which the loop happily delivered, and which is the
-        ;; cheapest possible proof that the wake really fires.)
+        ;; ONE ordered provider stub, two agents. Agent identity is a
+        ;; database fact, not stable prompt prose; render changes must not
+        ;; silently turn this into a prompt-format test.
         (with-redefs [ai/complete
-                      (fn [{prompt :seon.ai/prompt}]
+                      (recording-completer
+                       requests
+                       [{:seon.ai/text
+                         (str "(my.message/send \"agent-b\" "
+                              "\"please count the widgets\")\n"
+                              "(my.run/complete \"asked agent-b\")")}
                         {:seon.ai/text
-                         (if (str/includes? prompt "Agent agent-b")
-                           "(my.run/complete \"there are three widgets\")"
-                           (str "(my.message/send \"agent-b\" "
-                                "\"please count the widgets\")\n"
-                                "(my.run/complete \"asked agent-b\")"))})]
+                         "(my.run/complete \"there are three widgets\")"}])]
           (drive! cluster 10)
+          (is (= 2 (count @requests))
+              "the trigger and its answer each make one provider call")
           (testing "the message is a durable fact addressed to the peer —
                     and the peer's completion answers back, derived from
                     the trigger rather than remembered by the delegate"
@@ -2876,7 +2878,7 @@
           (with-redefs [injected-evaluation {:seon.sci.admit/value asked
                                   :seon.cluster.eval/result-edn
                                   (pr-str asked)}]
-            (is (= [:open :call :resume :close]
+            (is (= [:open :call :resume]
                    (mapv :seon.cluster.work/situation
                          (drive-agent! cluster "agent-a" 10))))
             (let [terminal-txs
