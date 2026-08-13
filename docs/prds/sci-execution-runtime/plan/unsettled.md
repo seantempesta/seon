@@ -213,6 +213,20 @@ walk state — `walk/neighborhood → history` under render acquisition, a
 suspect hang in the T3 membership code itself for plan-t3's own gate to
 surface).
 
+**T3 LANDED** (`9eae1664d`): refless byte-identical PROVEN; intent
+delta = exactly the admitted subject units (3 entries, 60/1024 est.
+tokens: pull + dir + first-use demonstration); `plan!` refuses
+unresolved subjects pre-transaction; basis-t renders as `t=<basis>`
+beside results; missing budget = typed refusal. Released on its return:
+`r3-store-layout` (finish + commit; if the walk wedge reproduces
+against COMMITTED code it is a T3 regression to file as a blocker),
+`entity-flag-deletion` (ruling 5 + the render-cost recording seam,
+ledger 21/24), `floor-render` (ledger 27: seon.render.value derives
+concise output for registered shapes; inbox exemplar with zero
+declarations). After those: six-word-error MCP face (frees with R3),
+remaining premise members, reset + live-pull fix → THE DRIVE (before
+W3-W5 per ruling 26).
+
 **THE ORDERED QUEUE AFTER RETURNS:**
 1. R2 continuation, serial, red-tolerant: W2b (deferred producers in
    bootstrap/walk/plan once those lanes land) → W3 consumers dispatch on
