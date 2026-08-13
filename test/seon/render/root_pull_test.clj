@@ -61,6 +61,14 @@
   [diff kind]
   (into #{} (map :seon.render.walk/lookup) (get diff kind)))
 
+(defn- within-event-backstop
+  [f]
+  (let [task (future (f))]
+    (try
+      (deref task (* 1000 support/event-backstop-seconds) ::backstop)
+      (finally
+        (future-cancel task)))))
+
 (deftest temporal-root-selector-uses-the-origin-schema
   (support/with-database
    (fn [connection]
@@ -121,6 +129,40 @@
                      (:seon.render.history/form %))
                  history)
            "history renders the acquired message as its identified value")))))
+
+(deftest history-database-neighborhood-terminates-with-origin-schema
+  (support/with-database
+   (fn [connection]
+     (db/transact!
+      connection
+      [{:seon.cluster.agent/id "historical-walk-agent"}
+       {:seon.cluster.message/id "historical-walk-message"
+        :seon.cluster.message/to
+        [:seon.cluster.agent/id "historical-walk-agent"]
+        :seon.cluster.message/at (java.util.Date. 1786400000000)
+        :seon.cluster.message/content "A historical walk must terminate."}])
+     (let [current @connection
+           render-request {:seon.db/db current
+                    :seon.cluster.agent/id "historical-walk-agent"
+                    :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+                    :seon.render.walk/lookup
+                    [:seon.cluster.agent/id "historical-walk-agent"]
+                    :seon.render/distance 1
+                    :seon.sci.admit/caps caps
+                    :seon.sci.eval/time-limit-ms 5000
+                    :seon.config/on-core-error :record}
+           acquisition (walk/root-acquisition render-request)
+           result
+           (within-event-backstop
+            #(walk/history
+              (assoc render-request
+                     :seon.db/db (db/history current)
+                     :seon.render/captured-calls (atom {})
+                     :seon.render.walk/root-acquisition acquisition)))]
+       (is (not= ::backstop result)
+           "history-db rendering terminates within the declared event bound")
+       (is (or (vector? result) (:seon.error/kind result))
+           "a temporal walk returns units or a loud typed refusal")))))
 
 (deftest root-acquisition-contract-is-projection-neutral
   (support/with-database

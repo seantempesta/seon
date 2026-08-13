@@ -527,7 +527,8 @@
    ;; one it already resolved for its extent — measured live 2026-08-07:
    ;; 84,664 resource reads before the read seam was repaired, 1,216 after it,
    ;; and 152 (one population, 12.6 ms) once supplied.
-   (let [projection (schema/projection-from-database db)]
+   (let [projection (schema/projection-from-database
+                     (db/schema-database db))]
      (schema/call-with-projection
       projection
       #(effective-in db (or cluster-name "default"))))))
@@ -535,7 +536,7 @@
 (defn- effective-in
   [db cluster-name]
   (let [forms (:seon.schema.projection/forms
-               (schema/projection-from-database db))
+               (schema/handed-projection))
         row (db/pull db '[*] [:seon.config/cluster cluster-name])
         effective (select-keys row (dial-attributes forms))
         missing (vec (sort (set/difference (required-dial-attributes forms)
