@@ -14,6 +14,7 @@
   (:require [clojure.core.async :as async]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.print :as print]
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
@@ -56,6 +57,9 @@
      :seon.render.profile/composition
      (:seon.config.render.agent/composition effective)}))
 
+(def ^:private default-agent-profile
+  (agent-render-profile (config/defaults)))
+
 (defn- request-profile
   [request]
   (or (:seon.render/profile request)
@@ -73,14 +77,25 @@
             effective (when cluster-name
                         (config/effective database cluster-name))]
         (when effective
-          (agent-render-profile effective)))))
+          (agent-render-profile effective)))
+      default-agent-profile))
 
 (defn- target-profile
   [request]
-  ;; The declared profile is the agent/AI face. The page profile lands with
-  ;; the transcript walk; until then HTML keeps its unfitted projection.
-  (when (= :seon.render/ai (:seon.render/output request))
-    (request-profile request)))
+  (cond-> (request-profile request)
+    (:seon.cluster.eval/result-blob request)
+    (assoc :seon.print/requery-id
+           [:seon.blob/digest (:seon.cluster.eval/result-blob request)])
+
+    (and (nil? (:seon.cluster.eval/result-blob request))
+         (:seon.render.call/id request))
+    (assoc :seon.print/requery-id
+           [:seon.render.call/id (:seon.render.call/id request)])
+
+    (and (nil? (:seon.cluster.eval/result-blob request))
+         (nil? (:seon.render.call/id request)))
+    (assoc :seon.print/requery-refusal
+           "The rendered value has no stable requery identity.")))
 
 (defn- render-argument
   [request]
@@ -113,9 +128,30 @@
                   (and (counted? value)
                        (not (contains? context :seon.render.data/total)))
                   (assoc :seon.render.data/total (count value)))]
+    ;; The floor unit and the value are different data. A floor unit carries
+    ;; only qualified render inputs; an arbitrary map remains wholly under
+    ;; `:seon.render/value`. Merging a value into this unit made ordinary maps
+    ;; with unqualified keys unconstructable at the one total floor.
+    (assoc context :seon.render/value value)))
+
+(defn- producer-argument
+  [request]
+  ;; Existing declared producers accept the qualified attributes of the value
+  ;; they render together with render custody. Keep that established contract
+  ;; for producer selection and invocation. The universal floor is the sole
+  ;; exception below: arbitrary value keys never become its unit keys.
+  (let [argument (render-argument request)
+        value (:seon.render/value argument)]
     (if (map? value)
-      (assoc (merge value context) :seon.render/value value)
-      (assoc context :seon.render/value value))))
+      (assoc (merge value (dissoc argument :seon.render/value))
+             :seon.render/value value)
+      argument)))
+
+(defn- floor-producer?
+  [selected]
+  (contains? #{'seon.render.value/render-ai
+               'seon.render.value/render-html}
+             selected))
 
 (defn- candidates
   "Contract-fitting public functions in the explicit owning namespace.
@@ -133,7 +169,7 @@
   (if-not namespace-name
     []
     (let [projection (sci.kernel/context-projection ctx)
-          argument (render-argument request)
+          argument (producer-argument request)
           symbols (sci.kernel/public-functions-in ctx namespace-name)]
       (into []
             (comp
@@ -214,7 +250,9 @@
                    (attribute-producer projection request :seon.render/form))]
     (if (= selected declared)
       (get (render.value/transacted (render-value request)) attribute)
-      (render-argument request))))
+      (if (floor-producer? selected)
+        (render-argument request)
+        (producer-argument request)))))
 
 (defn- declared-producer
   [projection request value output]
@@ -257,6 +295,7 @@
                    argument)
         value (when (map? argument) (:seon.render/value argument))]
     {:seon.render.call/producer selected
+     :seon.render/would-fall-to-floor? (floor-producer? selected)
      :seon.render.call/declaration-row
      (sci.kernel/program-function (:seon.sci.eval/ctx request) selected)
      :seon.render.call/argument
@@ -409,6 +448,21 @@
       selected
       (invoke-selected request selected))))
 
+(defn- fit-terminal
+  [request output rendered]
+  (if (or (nil? rendered) (:seon.error/kind rendered))
+    rendered
+    (let [profile (target-profile request)
+          node (print/fit
+                {:seon.print/face :seon.print/projected
+                 :seon.render/output output
+                 :seon.print/value rendered}
+                profile)
+          emitted (print/emit-both node (print/default-options))]
+      (if (= output :seon.render/html)
+        (:seon.print/hiccup emitted)
+        (:seon.print/text emitted)))))
+
 (defn render-ai
   "Render one value as text through the unique selected live SCI Var."
   {:malli/schema [:=> [:cat :seon.render/call-request]
@@ -416,7 +470,7 @@
   [request]
   (let [rendered (invoke-producer request :seon.render/ai :seon.render/ai)]
     (if (or (nil? rendered) (string? rendered) (:seon.error/kind rendered))
-      rendered
+      (fit-terminal request :seon.render/ai rendered)
       {:seon.error/kind ::invalid-ai-output
        :seon.error/message "The selected AI renderer did not return text."
        :seon.error/data {:seon.render/output rendered}})))
@@ -431,7 +485,7 @@
     (if (or (nil? rendered)
             (:seon.error/kind rendered)
             (hiccup/hiccup? rendered))
-      rendered
+      (fit-terminal request :seon.render/html rendered)
       {:seon.error/kind ::invalid-html-output
        :seon.error/message "The selected HTML renderer did not return Hiccup."
        :seon.error/data {:seon.render/output rendered}})))
@@ -665,7 +719,9 @@
 
 (defn- walk-error
   [message]
-  (str ";; (seon.render/walk) => error\n" message))
+  (pr-str
+   {:seon.error/kind ::walk-failed
+    :seon.error/message message}))
 
 (defn- ambient-database-value
   []
@@ -694,9 +750,21 @@
                [?namespace :seon.ns/name ?name]]
              db agent-id)
         instant (:db/txInstant (db/pull db [:db/txInstant] basis))]
-    (str ";; REPL state namespace=" (pr-str namespace-name)
-         " basis=" basis
-         " time=" (pr-str instant))))
+    {:seon.ns/name namespace-name
+     :seon.render.history/basis-transaction basis
+     :db/txInstant instant}))
+
+(defn- selected-walk-units
+  [units branch]
+  (if (nil? branch)
+    units
+    (into []
+          (filter
+           (fn [unit]
+             (let [path (:seon.render.walk/path unit)]
+               (and (<= (count branch) (count path))
+                    (= branch (subvec path 0 (count branch)))))))
+          units)))
 
 (defn walk
   "Return the calling agent's labeled database walk as text.
@@ -777,21 +845,18 @@
                       :seon.config/on-core-error
                       (:seon.config/on-core-error *walk-context*)}
                       profile (assoc :seon.render/profile profile)))
-                   selected? (or (not (contains? options :branch))
-                                 (some (fn [unit]
-                                         (let [path (:seon.render.walk/path unit)]
-                                           (and (<= (count branch) (count path))
-                                                (= branch (subvec path 0 (count branch))))))
-                                       units))]
-               (if-not selected?
+                   selected (selected-walk-units units branch)]
+               (if (and branch (empty? selected))
                  (walk-error (str "No walk branch exists at "
                                   (pr-str branch) "."))
-                 (str ((requiring-resolve 'seon.render.walk/prose)
-                       db units
-                       (cond-> {}
-                         (contains? options :branch)
-                         (assoc :seon.render.walk/branch branch)))
-                      "\n" (repl-state db agent-id))))))))
+                 (pr-str
+                  (cond->
+                   {:seon.render.walk/lookup root
+                    :seon.render/distance depth
+                    :seon.render.walk/units selected
+                    :seon.render/value (repl-state db agent-id)}
+                    branch
+                    (assoc :seon.render.walk/branch branch)))))))))
      (catch Throwable failure
        (walk-error (str "Walk failed: "
                         (or (ex-message failure)

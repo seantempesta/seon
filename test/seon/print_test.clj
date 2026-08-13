@@ -230,6 +230,44 @@
                 summaries)
         "every print summary owns a visible label without CSS")))
 
+(deftest terminal-emission-is-total-for-an-unknown-or-absent-face
+  (doseq [node [{:seon.print/face :fixture/unknown
+                 :fixture/value 1}
+                {:fixture/value 1}]]
+    (let [{:seon.print/keys [text hiccup]}
+          (print/emit-both node no-cuts)
+          error (edn/read-string text)]
+      (is (str/includes? text ":seon.print/unknown-face"))
+      (is (str/includes? text (pr-str (:seon.print/face node))))
+      (is (= (vec (sort-by str (keys node)))
+             (get-in error [:seon.error/data :seon.print/node-keys])))
+      (is (= (normalize-whitespace text)
+             (normalize-whitespace (lexical-hiccup-text hiccup)))))))
+
+(deftest terminal-projections-fit-to-complete-elision-values
+  (let [profile {:seon.render.profile/id :seon.render.profile/agent
+                 :seon.render.profile/token-budget 16
+                 :seon.render.profile/max-depth 8
+                 :seon.render.profile/max-children 32
+                 :seon.render.profile/composition :multiline
+                 :seon.print/requery-id [:seon.render.call/id :fixture/long]}
+        long-text (apply str (repeat 512 "outward "))]
+    (doseq [node [{:seon.print/face :seon.print/projected
+                   :seon.render/output :seon.render/ai
+                   :seon.print/value long-text}
+                  {:seon.print/face :seon.print/projected
+                   :seon.render/output :seon.render/html
+                   :seon.print/value [:pre long-text]}]]
+      (let [fitted (print/fit node profile)]
+        (is (= :seon.print/elided (:seon.print/face fitted)))
+        (is (= :characters (:seon.print/elision-unit fitted)))
+        (is (= [:seon.render.call/id :fixture/long]
+               (:seon.print/requery-id fitted)))
+        (is (pos? (:seon.print/omitted fitted)))
+        (is (= (:seon.render.data/total fitted)
+               (+ (:seon.render.data/next-offset fitted)
+                  (:seon.print/omitted fitted))))))))
+
 (deftest tagged-envelope-never-collides-with-authored-print-keywords
   (let [value {:seon.print/face :seon.print/elided
                :seon.print/value :seon.print/pruned
@@ -364,10 +402,16 @@
 (deftest derived-table-is-one-text-and-html-face
   (let [node (admitted-node [{:a 1 :b 'x} {:a 22 :b 'yy}])
         options (assoc no-cuts :seon.print/table? :derived)
-        {:seon.print/keys [text hiccup]} (print/emit-both node options)]
+        {:seon.print/keys [text hiccup]} (print/emit-both node options)
+        nested-text
+        (print/emit-text
+         (admitted-node {:rows [{:a 1 :b 'x} {:a 22 :b 'yy}]})
+         options)]
     (is (= "\n| :a | :b |\n|----+----|\n|  1 |  x |\n| 22 | yy |\n"
            text))
     (is (= text (lexical-hiccup-text hiccup)))
     (is (hiccup/hiccup? hiccup))
     (is (str/includes? (hiccup/->string hiccup) "<table"))
-    (is (= :table (-> hiccup (get-in [3 0]))))))
+    (is (= :table (-> hiccup (get-in [3 0]))))
+    (is (= "{:rows [{:a 1, :b x} {:a 22, :b yy}]}" nested-text))
+    (is (not (str/includes? nested-text "| :a |")))))

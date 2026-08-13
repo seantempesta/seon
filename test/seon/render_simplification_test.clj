@@ -55,7 +55,11 @@
    (fn [connection]
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)]
-       (doseq [rendered-value [7 [1 2 3] {:open/declared 1 :open/extra 2}]]
+       (doseq [rendered-value [7
+                               [1 2 3]
+                               {:open/declared 1 :open/extra 2}
+                               {:a 1 :b 2}
+                               {:rows [{:a 1}]}]]
          (let [request (render-request database ctx nil rendered-value)
                floor-unit {:seon.render/value rendered-value
                            :seon.render.call/id
@@ -65,6 +69,24 @@
            (is (= (value/render-html floor-unit) (render-html request)))
            (is (not= :seon.render/missing-declaration
                      (:seon.error/kind (render-ai request))))))))))
+
+(deftest floor-selection-is-recorded-on-the-retained-call
+  (support/with-database
+   (fn [connection]
+     (let [database @connection
+           ctx (support/fork-cluster-ctx connection)
+           call-id [:seon.render-simplification-test/counted-floor]
+           captured (atom {})
+           request (assoc (render-request database ctx nil {:a 1})
+                          :seon.render.call/id call-id
+                          :seon.render/output :seon.render/ai
+                          :seon.render/captured-calls captured)]
+       (is (string? (target-call 'seon.render 'render-call request)))
+       (is (true?
+            (get-in @captured
+                    [call-id
+                     :seon.render.call/static-evidence
+                     :seon.render/would-fall-to-floor?])))))))
 
 (deftest nested-values-render-their-declared-faces
   (support/with-database

@@ -413,7 +413,10 @@
 (defn- emit-entry
   [entry sink options depth path]
   (if (= ::elided (::face entry))
-    (-token sink ::elision "...")
+    ;; An elision is ordinary data with count, path, profile, and requery
+    ;; evidence. Emitting a bare marker here discarded every one of those
+    ;; facts specifically when a map was cut.
+    (emit-node entry sink options depth path)
     (let [[key-node value-node] entry]
       (emit-node key-node sink options (inc depth) (conj path 0))
       (-token sink ::separator " ")
@@ -552,10 +555,19 @@
   (-token sink ::prune "#"))
 
 (defmethod emit :default
-  [node _ _ _ _]
-  (throw (ex-info "Unknown admitted print face."
-                  {:seon.error/kind ::unknown-face
-                   ::face (::face node)})))
+  [node sink _ _ _]
+  ;; The emitter is the terminal outward boundary and therefore cannot turn a
+  ;; diagnostic value into a second exception. An undeclared or absent face is
+  ;; rendered as the same flat error value in both sinks, naming the observed
+  ;; face and node keys. Admission should make this branch rare; totality makes
+  ;; it safe and diagnosable when an old artifact or host caller reaches it.
+  (-token sink ::object
+          (pr-str
+           {:seon.error/kind ::unknown-face
+            :seon.error/message "The admitted value has no declared print face."
+            :seon.error/data
+            {::face (::face node)
+             ::node-keys (vec (sort-by str (keys node)))}})))
 
 (defn- scalar-node-value
   [node]
@@ -625,6 +637,7 @@
 (defn- emit-node
   [node sink options depth path]
   (if (and (contains? #{::vector ::list} (::face node))
+           (zero? depth)
            (not (structural-cut? options depth)))
     (if-let [table (table-data node options)]
       (emit-table node table sink path)
@@ -817,6 +830,21 @@
       (elision-node profile path retained (- original retained) original
                     :characters (pr-str (subs value 0 retained))))))
 
+(defn- projected-text
+  [node]
+  (let [value (::value node)]
+    (if (string? value) value (pr-str value))))
+
+(defn- fit-projected
+  [node profile path string-limit]
+  (let [value (projected-text node)
+        original (count value)
+        retained (min string-limit original)]
+    (if (= retained original)
+      node
+      (elision-node profile path retained (- original retained) original
+                    :characters (pr-str (subs value 0 retained))))))
+
 (defn- structural-elision
   [node profile path]
   (let [children (vec (or (::items node) (::entries node) []))
@@ -856,6 +884,9 @@
 
         (::string ::truncated-string)
         (fit-string node profile path string-limit)
+
+        ::projected
+        (fit-projected node profile path string-limit)
 
         node))))
 
