@@ -41,6 +41,55 @@ worker JVMs alive, `tmp/test-runs/run.ZyS5O7`): property tests that create
 agents would accumulate spinning procs that starve the bounded `:compute`
 pool. That attribution is a hypothesis until the wedge lane probes it.
 
+## Diagnosis and implementation — 2026-08-13
+
+The retry storm is a conflict between two work contracts. A closed run is the
+one durable answer to its trigger, but `seon.cluster.work/next-agent-work`
+special-cased a refused closed run by selecting that same trigger again. The
+open transaction then correctly returned
+`:seon.cluster.loop/trigger-already-answered`; `turn-step` re-derived the same
+work and self-woke because the refusal committed no new fact. The resulting
+cycle was pure re-execution against unchanged database state.
+
+A fresh isolated reproduction at `tmp/opening/scratch-root-4` printed the
+decisive derivation after the generated run had closed:
+
+```clojure
+{:next-work {:seon.cluster.work/situation :open
+             :seon.cluster.message/id "bootstrap-task:probe-agent"}
+ :trigger "bootstrap-task:probe-agent"
+ :errors [27530]
+ :attempts []}
+```
+
+The implementation removes refused-run continuation from
+`next-agent-work`: only an unanswered trigger can derive `:open`. It also
+marks the transaction-function refusal as a terminal report and forbids that
+report from manufacturing a self-wake. This second fence covers a stale
+derivation race: one outside wake can cause at most one refused open attempt.
+The owned source and regression are committed as `de66c1e4a`.
+The class regression is
+`answered-trigger-is-a-terminal-work-verdict` in
+`test/seon/cluster/agent_test.clj`.
+
+The proposed compute-starvation connection to the two focused properties was
+refuted. The virtual-thread-aware dump
+`tmp/opening/n-agent-parallel-before-fix-threads.json` has the test thread
+parked in `await-database-state!` at the then-current
+`agent_test.clj:234/474`, while the Flow proc virtual threads are waiting for
+input in the pinned core.async Flow source at `flow/impl.clj:295`; no proc is
+executing the refused-open loop. The companion
+`tmp/opening/wake-routing-before-fix-threads.json` has the test thread parked
+on `armed-event` at the then-current `agent_test.clj:1452`, with its Flow procs
+also waiting at `flow/impl.clj:295`. The retry storm is real, but it was not
+the immediate reason those focused properties never returned.
+
+Post-fix execution is not yet recorded. A foreign in-flight edit made the
+protected `src/seon/render/web.clj` unreadable at line 377 (uneven map literal),
+so namespace loading fails before this regression, the opening probe, or the
+integration gate can run. Per the shared-tree stop rule, this issue remains
+open until those three proofs can be rerun against a coherent tree.
+
 ## Owner
 
 The work-derivation/arm seam that opens runs from triggers —
