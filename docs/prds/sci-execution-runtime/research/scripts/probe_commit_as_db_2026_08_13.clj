@@ -1,0 +1,27 @@
+(require '[datahike.api :as d] '[datahike.versioning :as v]
+         '[org.replikativ.persistent-sorted-set :as psset])
+(def dir (str "tmp/diff-probes/store2-" (rand-int 100000)))
+(def cfg {:store {:backend :file :path dir :id (java.util.UUID/nameUUIDFromBytes (.getBytes dir "UTF-8"))}
+          :writer {:backend :self} :keep-history? true :fuse-index-roots? true
+          :index-config {:diff-buf-size 256} :schema-flexibility :write})
+(d/delete-database cfg) (d/create-database cfg)
+(def conn (d/connect cfg))
+(d/transact conn [{:db/ident :m/id :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
+                  {:db/ident :m/read? :db/valueType :db.type/boolean :db/cardinality :db.cardinality/one}])
+(d/transact conn (vec (for [i (range 20000)] {:m/id (str "m" i) :m/read? false})))
+(def db0 @conn)
+(def cid0 (v/commit-id db0))
+(println :commit-id-0 cid0)
+(d/transact conn [{:m/id "m5" :m/read? true}])
+(def db1 @conn)
+(println :commit-id-1 (v/commit-id db1) :parents (v/parent-commit-ids db1))
+(def old (v/commit-as-db conn cid0))
+(println :old-type (type old) :old-max-tx (:max-tx old) :db1-max-tx (:max-tx db1))
+(defn addrs [pss] (let [a (atom #{})] (psset/walk-addresses pss #(swap! a conj %)) @a))
+(def ao (addrs (:eavt old))) (def a1 (addrs (:eavt db1)))
+(println :old-addrs (count ao) :new-addrs (count a1)
+         :shared (count (clojure.set/intersection ao a1))
+         :only-new (count (clojure.set/difference a1 ao)))
+(println :old-eavt-count (count (:eavt old)) :new (count (:eavt db1)))
+(println :q-old (count (d/q '[:find ?id :where [?e :m/read? true][?e :m/id ?id]] old)))
+(println :q-new (count (d/q '[:find ?id :where [?e :m/read? true][?e :m/id ?id]] db1)))
