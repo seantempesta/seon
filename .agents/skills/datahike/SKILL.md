@@ -43,9 +43,9 @@ the selected identity comes from `git ls-files -s reference-code/datahike` and
 source map are in `references/fork-maintenance.md`. Never treat a historical
 repair commit as current provenance.
 
-## The runtime: co-located, synchronous, one connection per branch
+## Running: co-located, synchronous, one connection per branch
 
-Everything runs in the **cluster JVM**, which embeds Datahike. There is no wire
+Everything runs in the **cluster JVM**, which embeds Datahike. There is no internal transport
 on the database path.
 
 - **One process holds one physical store lock and may open many branches.**
@@ -70,7 +70,7 @@ on the database path.
   into SCI (`src/seon/db.clj:861-1358`;
   `test/seon/db_test.clj:1-841`). Compose reads in straight-line code.
 - **Writes are a function call returning a value.** `seon.db/transact!`
-  accepts an explicit live connection or elides it for ambient custody, and
+  accepts an explicit live connection or elides it from the calling agent's scoped environment, and
   accepts Datahike's positional transaction data or its `{:tx-data :tx-meta}`
   argument map. Rejections are flat `:seon.error` values, not throws from the
   public boundary (`src/seon/db.clj:1361-1601`;
@@ -191,7 +191,7 @@ from registry key to Malli form; section comments are only editorial.
 
 Use Datahike's own argument-map keys when that operation defines them; never
 invent a Seon envelope. These are equivalent to their positional forms, and
-each ambient form elides only the database value or connection:
+each elided form omits only the database value or connection:
 
 ```clojure
 ;; Illustrative API-shape comparison; the named inputs come from the caller.
@@ -212,7 +212,7 @@ each ambient form elides only the database value or connection:
                           :tx-meta transaction-metadata})
 ```
 
-The accepted shapes and ambient parity are the public contracts at
+The accepted shapes and explicit/elided parity are the public contracts at
 `src/seon/db.clj:861-1358,1361-1601` and the recurring proofs at
 `test/seon/db_test.clj:1-841`.
 
@@ -244,7 +244,7 @@ attribute throws `Bad entity attribute … not defined in current schema`.
 There is no lazy install.
 
 Runtime agent-authored schema declarations still enter through
-`schema/register!`; that is selective corpus admission, not the authoring path
+`schema/register!`; that is selective program-graph admission, not the authoring path
 for shipped first-party schemas. It passes the candidate plus the complete
 population through the same `schema.edn/admit` gate.
 
@@ -326,7 +326,7 @@ schemas plus identity-only projection
 ## Write path
 
 `seon.db/transact!` preserves BOTH of Datahike's documented transaction
-shapes, with either an explicit connection or the calling agent's ambient
+shapes, with either an explicit connection or the calling agent's scoped
 cluster connection:
 
 ```clojure
@@ -345,7 +345,7 @@ The arg-map is canonical when transaction metadata is needed. A map without
 `:tx-data` is rejected; vectors and sequences are wrapped internally as
 `{:tx-data ...}`. Grounding:
 `reference-code/datahike/src/datahike/api/impl.cljc:30-48` ↔
-`src/seon/db.clj:1361-1601`; explicit/ambient parity is asserted at
+`src/seon/db.clj:1361-1601`; explicit/elided parity is asserted at
 `test/seon/db_test.clj:1-841`.
 
 Datahike throws internally on a rejected transaction — that is the fence
@@ -354,7 +354,7 @@ a classified `:seon.db/rejected`, or `:seon.db/unknown-failure`. Development
 may rethrow only the unknown core failure under the one panic config
 (`src/seon/db.clj:1361-1481`).
 
-Ambient-custody calls return the declared bounded transaction-report face;
+Elided-connection calls return the declared bounded transaction-report face;
 unbound system callers retain Datahike's exact report
 (`src/seon/db.clj:1441-1601`; `test/seon/db_test.clj:1-841`).
 Classified writer refusals still reach the caller unchanged. The maintained
@@ -628,8 +628,8 @@ listener is the sanctioned alternative to polling or a tuned timeout
 | File | Purpose |
 |------|---------|
 | `resources/seon/schemas/` | first-party attribute/entity/value schemas |
-| `src/seon/db.clj` | one database namespace: explicit/ambient reads, writes, ordinary-data projection, flat errors |
-| `test/seon/db_test.clj` | positional/argument-map and explicit/ambient parity; eager return proofs |
+| `src/seon/db.clj` | one database namespace: explicit/elided reads, writes, ordinary-data projection, flat errors |
+| `test/seon/db_test.clj` | positional/argument-map and explicit/elided parity; eager return proofs |
 | `src/seon/schema/edn.clj` | classpath loading, config derivation, population admission |
 | `src/seon/schema.clj` | registry, activation, entity-schema decomposition |
 | `src/seon/schema/datahike.clj` | the Malli→Datahike bridge (extend it here) |

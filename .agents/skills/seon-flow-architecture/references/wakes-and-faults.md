@@ -26,7 +26,7 @@ The router currently:
 - offers every report to the cluster render input; and
 - catches `Throwable` so an observer failure does not escape the listener.
 
-Do not add one Datahike listener per agent, render, page, or feature. Derive
+Do not add one Datahike listener per agent, render, web surface, or feature. Derive
 interest behind this router and route to existing graph inputs.
 
 The routed values are signals or reports, not a second durable work log.

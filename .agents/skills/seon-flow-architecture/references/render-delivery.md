@@ -20,10 +20,10 @@ One cluster render proc consumes:
 
 - database transaction reports;
 - streamed partial values; and
-- page-demand signals.
+- web-surface-demand signals.
 
 It retains serialized fragments, emits one revisioned package per changed
-page, and mults the latest package map to connected tabs. Every package carries
+web surface, and mults the latest package map to connected tabs. Every package carries
 both delta bytes and a complete keyframe
 (`src/seon/render/web.clj:553-600,631-735`).
 
@@ -79,7 +79,7 @@ The current protocol uses three delivery nouns:
 - **keyframe** — every current block, serialized once.
 
 The render proc serializes shared bytes once, then mults the immutable package
-map to every tab. A revision gap selects the latest keyframe, and a new page
+map to every tab. A revision gap selects the latest keyframe, and a new web surface
 load reuses the current fact-derived keyframe when its basis is current
 (`src/seon/render/web.clj:553-600,930-1026`).
 
@@ -91,7 +91,7 @@ Choose each buffer from its loss semantics:
 |---|---|---|
 | database render wake | sliding-1 | newest database value supersedes older wakes |
 | streamed partial | sliding-1 | newest complete partial supersedes an older partial |
-| page demand | sliding-1 | demand means derive current page |
+| web-surface demand | sliding-1 | demand means derive current web surface |
 | package to each tab | sliding-1 | a slow tab needs the newest complete package/keyframe |
 | socket write completion | no lossy handoff | writer must observe drained or closed |
 | fault observation | counted-dropping | producer must never block on diagnostics |
@@ -146,9 +146,9 @@ The once+mult comparison's per-tab serialization baseline was
 31.783–42.479 ms p50; do not misquote it as 53 ms.
 
 These results support block-local morphing and shared serialization under the
-tested conditions. They do not prove every page stays below 16 ms. Measure
+tested conditions. They do not prove every web surface stays below 16 ms. Measure
 changed-block count, serialized bytes, tab count, browser morph time, and
-socket backlog for the actual page.
+socket backlog for the actual web surface.
 
 ## Change checklist
 

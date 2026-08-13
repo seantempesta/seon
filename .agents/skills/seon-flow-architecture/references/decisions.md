@@ -70,7 +70,7 @@ and discover the thread cost under scale.
 
 ## Nothing re-fires
 
-Recovery does not replay an interrupted effect, plan suffix, or turn.
+Recovery does not replay an interrupted effect, form-source suffix, or turn.
 Reopening the database marks dangling receipts interrupted, rebuilds graphs,
 and lets the agent adapt from durable facts.
 
@@ -126,7 +126,7 @@ disagree with the database or live process.
 
 ## Derive, do not store
 
-Status, context, eligibility, current page output, and interest are
+Status, context, eligibility, current web-surface output, and interest are
 projections of existing facts and process-local custody. Persist only source
 facts and expensive values that are themselves durable domain truth.
 
@@ -177,7 +177,7 @@ namespace pages, or debug pages as tabled.
 
 The generalized agent-authored canvas/control API and guarded `/call` route
 remain **[TARGET]**: the live route table has neither, and current interaction
-is the fixed inbound-message route plus a page-local checkbox
+is the fixed inbound-message route plus a browser-local checkbox
 (`src/seon/render/route.clj:5-27`;
 `src/seon/render/web.clj:1027-1037,1104-1110`). Agent-owned `::renders` remains
 **[TARGET]**; current delivery already uses revisioned packages with delta and

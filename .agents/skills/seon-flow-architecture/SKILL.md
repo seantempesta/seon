@@ -1,6 +1,6 @@
 ---
 name: seon-flow-architecture
-description: "How Seon is architected on core.async.flow — procs, workloads, buffers, agent graphs, the boot tower, and how flow composes with the database and SCI. Load this whenever you are adding or changing a proc, graph, channel, or buffer; deciding :io vs :compute; wiring wakes, faults, or streaming; reasoning about what survives a crash; or wondering where a new runtime mechanism belongs. Also load it before designing ANY new runtime machinery in Seon, even if flow is not mentioned — the answer is usually a proc in an existing graph, and this skill says which one and why."
+description: "How Seon is architected on core.async.flow — procs, workloads, buffers, agent graphs, the boot sequence, and how flow composes with the database and SCI. Load this whenever you are adding or changing a proc, graph, channel, or buffer; deciding :io vs :compute; wiring wakes, faults, or streaming; reasoning about what survives a crash; or wondering where new running machinery belongs. Also load it before designing ANY new running machinery in Seon, even if flow is not mentioned — the answer is usually a proc in an existing graph, and this skill says which one and why."
 ---
 
 # Seon flow architecture
@@ -51,12 +51,12 @@ Read the progressive-disclosure references when the map is not enough:
 - `references/render-delivery.md` — the current package/keyframe renderer,
   buffer laws, http-kit drain state, and frame
   budgets.
-- `references/degraded-start.md` — tower-layer diagnosis, advertisements,
+- `references/degraded-start.md` — boot-layer diagnosis, advertisements,
   scratch-JVM cleanup, stale code, and the in-memory fallback boundary.
 - `references/decisions.md` — the rulings, rationale, and rejected
   predecessors.
 
-## The tower — where a new mechanism belongs
+## The boot sequence — where a new mechanism belongs
 
 Boot is layered, each layer reading only the one below and publishing its
 own readiness (`src/seon/cluster.clj`):
@@ -113,7 +113,7 @@ The executor owners are deliberately distinct:
 
 ## Degraded start and stale JVMs
 
-When a scratch cluster fails partway up the tower, read
+When a scratch cluster fails partway through boot, read
 `references/degraded-start.md` before retrying. The short version:
 
 - inspect the carried `:seon.boot/instance`; absent keys identify the last
@@ -130,7 +130,7 @@ that canonical root (`bin/seon:1-150`;
 `script/seon/fresh_operator.clj:1-2824`); and
 - if boot is blocked by shared-tree churn but the subject is a pure
   transformation, fall back to a separate `clojure -M:dev` JVM with immutable
-  in-memory inputs and make no live-tower claim.
+  in-memory inputs and make no live-system claim.
 
 ## Building a proc
 
@@ -221,7 +221,7 @@ Full grounding, audit and probe transcript:
 Paths below are relative to
 `reference-code/core.async/src/main/clojure/clojure/core/async/`.
 
-### One wire, broadcast, filtered by the receiver
+### One control channel, broadcast, filtered by the receiver
 
 `start` creates ONE control chan of buffer 10 wrapped in a mult
 (`flow/impl.clj:99-100`); each proc taps it with its own `(chan 10)` delivered
@@ -395,7 +395,7 @@ or superseded by a newer complete value.
 
 | buffer | meaning | example |
 |---|---|---|
-| `(sliding-buffer 1)` | latest-wins mailbox; a wake says only "look" and the woken pass derives everything from facts | agent episode conn (`src/seon/cluster/agent.clj:198-477`), render/stream inputs (`src/seon/cluster.clj:2123-2250`), and page taps (`src/seon/render/web.clj:1267-1340`) |
+| `(sliding-buffer 1)` | newest-only delivery; a wake says only "look" and the woken pass derives everything from facts | agent episode conn (`src/seon/cluster/agent.clj:198-477`), render/stream inputs (`src/seon/cluster.clj:2123-2250`), and web-surface taps (`src/seon/render/web.clj:1267-1340`) |
 | fixed | backpressure — the producer must wait | bounded work submission |
 | counted-dropping | observation that must never block the producer | flow's error/report channels |
 
@@ -428,8 +428,8 @@ loop agents forever is a design defect to dissolve, never a thing to
 cap** — and nothing re-fires: a failed turn's only retry budget is the
 episode's remaining turns.
 
-**[TARGET] `::renders`** — a fourth proc owning every derived view of the
-agent's world (html blocks *and* its own AI context pieces), memoized in
+**[TARGET] `::renders`** — a fourth proc owning every derived render projection for the
+agent (HTML blocks *and* its own AI context pieces), memoized in
 proc state with byte digests. A 100-agent in-memory comparison on JDK 26 with
 `-Xmx512m -XX:+UseG1GC`, two discarded warm-ups, three forced GCs, and a
 400 ms park measured +7.3 to +9.2 KB/agent and zero new platform threads; its
@@ -461,7 +461,7 @@ cluster handler still commits the fault and prints it; it does not throw from
 the recorder (`src/seon/cluster.clj:2123-2250`).
 
 **Streaming**: partials ride channels; only the settled reply commits. The
-current JVM renderer builds one revisioned package per changed page. Each
+current JVM renderer builds one revisioned package per changed web surface. Each
 package carries delta bytes plus a complete keyframe; contiguous tabs receive
 the smaller delta, while a revision gap receives the keyframe
 (`src/seon/render/web.clj:648-725,1267-1340`).
@@ -477,7 +477,7 @@ completion so the `:io` writer **parks** on real backpressure — stock
 `reference-code/http-kit/src/org/httpkit/server.clj:321-326`;
 `httpkit-write-path-2026-07-29.md`).
 
-## Evaluation and the guarded door
+## Evaluation and the SCI interruption boundary
 
 Agent code runs in a fresh per-turn fork of the program-only cluster base under
 one `:interrupt-fn` with a time limit as the only limit. The selected agent's

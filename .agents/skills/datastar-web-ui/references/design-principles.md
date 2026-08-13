@@ -92,7 +92,7 @@ owners produce source, transcript, problem, and data presentation; the shared
 walk membership/order seam is `src/seon/render/walk.clj:693-876`. Do not
 restore old `seon.ui.*` CLJS namespaces or quarry-era block call signatures.
 
-Design within the live page shapes:
+Design within the live web UI shapes:
 
 - namespace pages use a primary/rail walk-unit layout and a local
   `showEverything` signal (`src/seon/render/web.clj:1011-1039`,
@@ -125,7 +125,7 @@ The following remain **[TARGET]**:
 
 - generalized `my.canvas` controls and `/call`: neither appears in the exact
   live route table (`src/seon/render/route.clj:5-27`), while current input is
-  the fixed message form and page-local floor checkbox
+  the fixed message form and browser-local floor checkbox
   (`src/seon/render/web.clj:132-169,1027-1037`);
 - agent-owned `::renders`: the live blueprint contains only mailbox and turn
   (`src/seon/cluster/agent.clj:240-264`); and

@@ -4,9 +4,9 @@ Use this runbook when a scratch cluster fails during startup, especially while
 other lanes are changing the shared tree. Do not restart or mutate another
 lane's cluster to obtain a cleaner signal.
 
-## 1. Separate launch failure from a degraded tower
+## 1. Separate launch failure from degraded boot
 
-`seon.cluster/start!` opens and advertises `io-prepl` first. Every later tower
+`seon.cluster/start!` opens and advertises `io-prepl` first. Every later boot
 layer republishes the instance as it stands; a later failure throws with that
 value under `:seon.boot/instance`, while the REPL, advertisement, and registry
 entry survive (`src/seon/cluster.clj:1388-1485`).
@@ -44,7 +44,7 @@ Read absence from the bottom upward:
 | connection, no `:seon.boot/config-result` | coherent-program validation, schema accretion, recovery, or config application failed; use the exception cause to select among them |
 | config result, no `:seon.sci.eval/ctx` | cluster/root-agent fact convergence, cold program acquisition, or base-context construction failed |
 | SCI ctx, no routing/served value | work-launcher install, agent arm, or web serve failed |
-| `:seon.boot/ready-ms` | the complete tower returned |
+| `:seon.boot/ready-ms` | the complete boot sequence returned |
 
 This table follows the actual publish points and order at
 `src/seon/cluster.clj:1289-1386,1388-1485`; the program-only base context is
@@ -57,7 +57,7 @@ The per-cluster advertisement is
 `<bootstrap-root>/<cluster-name>/prepl.edn`
 (`src/seon/cluster.clj:135-152`). JVM process identity is only
 `(pid, start-instant)` (`src/seon/cluster/process.clj:2-28`); the advertisement
-adds cluster name and the bound REPL endpoint, and the final tower adds the web
+adds cluster name and the bound REPL endpoint, and the final boot layer adds the web
 URL (`src/seon/cluster.clj:1371-1386,1434-1452`).
 
 For the shared default root, use:
@@ -132,7 +132,7 @@ path
 
 ## 4. Fall back to an isolated in-memory JVM
 
-If shared-tree churn prevents the tower from reaching the mechanism under
+If shared-tree churn prevents boot from reaching the mechanism under
 test, stop claiming live-cluster proof. When the question is pure Datahike
 planning or another cluster-independent transformation, use a separate
 `clojure -M:dev` JVM and an immutable in-memory value:

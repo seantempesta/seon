@@ -33,12 +33,12 @@ not database facts.
 |---|---|
 | `GET /` | alias to the configured root agent's namespace page |
 | `GET /ns/{namespace}` | canonical namespace page |
-| `GET /ns/{namespace}/debug` | canonical namespace debug page |
+| `GET /ns/{namespace}/debug` | canonical namespace debug surface |
 | `GET /agent/{id}` | alias to that agent's namespace page |
-| `GET /agent/{id}/debug` | alias to that agent's debug page |
+| `GET /agent/{id}/debug` | alias to that agent's debug surface |
 | `POST /agent/{id}/message` | same-origin inbound-message commit |
-| `GET /feed/{id}` | that agent's Datastar SSE feed; debug pages use `?debug=true` |
-| `GET /data` | schema/entity drill page |
+| `GET /feed/{id}` | that agent's Datastar SSE feed; debug surfaces use `?debug=true` |
+| `GET /data` | schema/entity `get-in` surface |
 | `GET /css/{*path}`, `GET /js/{*path}` | packaged public resources |
 
 Verify the exact methods and paths at `src/seon/render/route.clj:5-27`, the
@@ -56,19 +56,19 @@ or malformed namespace returns 404 (`src/seon/render/web.clj:931-983,1074-1087`)
 The `/agent/{id}` forms are aliases and return 404 when the agent has no
 assigned namespace (`src/seon/render/web.clj:1089-1102`).
 
-Keep AI context and HTML pages on the same visible walk. HTML `page-of` calls
+Keep AI context and namespace-page HTML on the same visible walk. HTML `page-of` calls
 `seon.render.walk/neighborhood` and `units`; the AI boundary calls
-`seon.render/walk`, which calls the same neighborhood and assembles it through
-`prose` (`src/seon/render/web.clj:300-350,988-1009`,
+`seon.render/walk`, which calls the same neighborhood and assembles the AI projection
+(`src/seon/render/web.clj:300-350,988-1009`,
 `src/seon/render.clj:147-226`, `src/seon/render/walk.clj:693-876`). The debug
-page derives both projections from the same database value and shows AI on the
+surface derives both projections from the same database value and shows AI on the
 left and every walked HTML unit on the right
-(`src/seon/render/web.clj:428-441,1041-1072`). Do not add a parallel page
+(`src/seon/render/web.clj:428-441,1041-1072`). Do not add a parallel web
 renderer or a debug-only traversal.
 
 AI and HTML remain distinct projections: AI returns text and HTML returns
-Hiccup. Recursive producer selection applies at every admitted value depth,
-and selected producer output is terminal (`src/seon/render.clj:300-334,344-369`).
+Hiccup. Recursive render-function selection applies at every admitted value depth,
+and selected render-function output is terminal (`src/seon/render.clj:300-334,344-369`).
 Generic preparation enriches elisions and calls the single `seon.print/fit`
 owner (`src/seon/render/value.clj:220-269`;
 `src/seon/print.cljc:669-675,750-785`). The current agent profile derives from
@@ -89,7 +89,7 @@ For each tab, preserve this sequence:
 
 1. Register interest, tap the `mult` with `(sliding-buffer 1)`, and paint every
    block from the current database value.
-2. Consume the newest complete page snapshot.
+2. Consume the newest complete namespace-page snapshot.
 3. Compare it with that tab's last delivered map.
 4. Send one Datastar patch for each changed block.
 5. Park the connection-owned virtual thread on http-kit's drain-or-close
@@ -111,7 +111,7 @@ commits the admitted message and returns 204 without painting
 render path. Use Datastar's colon-form attributes such as `data-on:submit`; do
 not add an action-specific refresh channel.
 
-## Verify the page and feed
+## Verify the namespace page and feed
 
 Use a browser for layout, stable IDs, form behavior, and console errors. If a
 browser bridge does not hold the SSE connection, verify `/feed/{id}` with a

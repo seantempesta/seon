@@ -7,7 +7,7 @@ description: "Distinguish and probe Seon's agent-reply reader, an agent turn in 
 
 Four surfaces share Clojure syntax but not an execution contract:
 
-- **The Seon agent-form reader** splits a model's text reply into ordered plan
+- **The Seon agent-form reader** splits a model's text reply into ordered form
   source strings. This is what this skill is mostly about. Fresh Seon uses
   `seon.cluster.reply/sources` over `seon.sci.reader/read`; deleted reader
   implementations are Git-history quarry and are not on this path
@@ -81,8 +81,8 @@ tracks the namespace in effect while reading
 
 `seon.cluster.reply/sources` then decides which events are code:
 
-- Structured top-level lists, vectors, maps, and sets are plan forms.
-- A bare symbol is a plan form only when it occupies its own source line and
+- Structured top-level lists, vectors, maps, and sets are reply forms.
+- A bare symbol is a reply form only when it occupies its own source line and
   the reply also contains structured code. This includes a trailing standalone
   symbol that a human might have intended as prose.
 - Other text becomes single-`;` source comments attached to a form — the one
@@ -91,7 +91,7 @@ tracks the namespace in effect while reading
 - Markdown fence lines are stripped before reading because backticks otherwise
   read as plausible symbols.
 
-EVERY PLAN SOURCE CARRIES A READER EVENT. Prose alone is never a plan source:
+EVERY REPLY SOURCE CARRIES A READER EVENT. Prose alone is never a form source:
 a comment-only source has no event, so nothing evaluates it and no
 `:seon.cluster.eval` receipt is ever written, and the run closes with an
 unsettled form of its own — the 105-forms/102-receipts gap of 2026-08-08,
@@ -188,7 +188,7 @@ not program-graph indexing”).
 
 | Symptom | Surface and next move |
 |---|---|
-| Reply became prose or the wrong plan forms | Agent reply: call `seon.cluster.reply/sources` with the actual run/form namespace or the result of `seon.sci.eval/agent-namespace`. |
+| Reply became prose or the wrong forms | Agent reply: call `seon.cluster.reply/sources` with the actual run/form namespace or the result of `seon.sci.eval/agent-namespace`. |
 | `:seon.cluster.reply/unreadable` | Agent reply: fix malformed Clojure; no repair layer will close it. |
 | A def is live now but missing after restart | Agent turn: inspect its terminal receipt plus `:seon.def` row, then cold-acquire a fresh cluster context (`src/seon/cluster/loop.clj:1-1706`; `src/seon/sci/eval.clj:1270-1693`). |
 | Bare map/keyword evaluates and prints | Expected in `io-prepl` and raw JVM REPLs. |

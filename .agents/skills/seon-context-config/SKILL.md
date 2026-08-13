@@ -50,7 +50,7 @@ shipped defaults → selected sparse overlay → explicit typed environment map
 ```
 
 The environment map is a caller-supplied typed bootstrap input, not an
-invitation for runtime code to read ambient environment variables.
+invitation for running code to read process environment variables.
 
 Use `:seon.config/absent` to retract an optional defaulted attribute. The
 compiler refuses it for a required attribute and never stores the marker or

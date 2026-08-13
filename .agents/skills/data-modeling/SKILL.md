@@ -380,7 +380,7 @@ worked pair: identity attributes, refs, and transition contracts.
 | `src/seon/schema.clj` | registry, activation, entity-schema decomposition |
 | `src/seon/schema/datahike.clj` | `malli->datahike-attr` — the bridge (extend it here) |
 | `src/seon/schema/form.cljc` | shared form inspection the bridge and gates use |
-| `src/seon/fn.clj` | selective durable corpus admission |
+| `src/seon/fn.clj` | selective durable program-graph admission |
 | `src/seon/instrument.clj` | computed public-contracted-var instrumentation |
 | `src/seon/cluster/run.clj` | a live domain model end to end |
 | `.agents/skills/data-oriented-clojure/SKILL.md` | public contracts, namespaced data, and error values |

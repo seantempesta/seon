@@ -22,7 +22,7 @@ Do not write or recommend executable calls such as:
 
 The one live route table has no `/call` route
 (`src/seon/render/route.clj:5-27`). Current interaction is the fixed
-human-to-agent message form plus the page-local `showEverything` checkbox
+human-to-agent message form plus the browser-local `showEverything` checkbox
 (`src/seon/render/web.clj:132-169,1027-1037`), not a constructor API available
 to agent code.
 
@@ -52,7 +52,7 @@ one database value (`src/seon/render/web.clj:1041-1072`). Load
 Mark each of these **[TARGET]** until current source contains it:
 
 - generalized canvas/control constructors and their schema: current source
-  exposes only the fixed message form and page-local checkbox
+  exposes only the fixed message form and browser-local checkbox
   (`src/seon/render/web.clj:132-169,1027-1037`);
 - a guarded action value and `/call` handler: neither appears in the complete
   route table (`src/seon/render/route.clj:5-27`);

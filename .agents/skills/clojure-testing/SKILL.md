@@ -91,7 +91,7 @@ separate invocations are separate JVMs.
 Use the production population owner through `seon.test-support/with-database`.
 It opens a fresh `:memory` store, calls `cluster/populate-source!` to install
 the current `resources/seon/schemas/` population and program rows, and
-releases and deletes it in a `finally`. There is no ambient connection
+releases and deletes it in a `finally`. There is no process-global connection
 (`test/seon/test_support.clj:379-475`).
 
 ```clojure
@@ -283,7 +283,7 @@ after every command. `test/seon/cluster/run_test.clj` implements exactly this.
    extending the generator.
 4. **The oracle must re-derive the invariant, not restate the
    implementation.** For run custody, presence of the exact process is the
-   fence: absence means unheld; release, close, and plan require the requesting
+   fence: absence means unheld; release, close, and source publication require the requesting
    process; claim may take unheld custody or recover custody from a process
    absent from the supplied live-process set. There is no epoch or lease.
    Derive that independently in the model, as the current oracle does
