@@ -61,7 +61,7 @@ See `README.md` for the convention.
 | [Bound agent-facing host crossings](agent-facing-host-crossings-can-wait-without-a-bound.md) | blocker | wedge class-kill continuation |
 | [Bound orderly-stop completion joins](orderly-stop-completion-joins-have-no-bound.md) | blocker | wedge class-kill continuation |
 
-## Friction (131)
+## Friction (130)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -70,7 +70,6 @@ See `README.md` for the convention.
 | [Carry the operator root explicitly instead of guessing from names](operator-root-inference-guesses-from-directory-names.md) | friction | R3 store-path decision |
 | [Bound the parallel-only confirmation protocol exchange](confirmation-parallel-failure-blocks-reading-worker-protocol.md) | friction | test-platform follow-up |
 | [Render one blob digest once per refusal envelope](contract-refusal-envelope-repeats-one-blob-digest-six-times.md) | friction | class-kill queue |
-| [Aggregate and reclaim orphaned operator claims](status-prints-unexplained-invalid-claim-lines.md) | friction | operator status face |
 | [Make generation dependency analysis see keywords](generation-dependency-analysis-ignores-keywords.md) | friction | evolving-session phases |
 | [Delete bloated stores at IO pace with progress](reset-deletes-a-bloated-store-one-lstat-at-a-time.md) | friction | operator velocity fixes |
 | [Stop the opening walkthrough replicating its usage test per agent](opening-walkthrough-replicates-a-usage-test.md) | friction | evolving-session implementation phases |
