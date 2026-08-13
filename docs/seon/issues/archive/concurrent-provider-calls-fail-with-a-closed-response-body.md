@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, agent, ai, live-drive]
 ---
@@ -183,3 +183,7 @@ One response sends provider finish evidence and closes promptly while its
 peer's body remains open between chunks; the peer then completes as
 `"peer survived"`. This proves that settling and closing one attempt cannot
 close a concurrent attempt's body. No paid provider call was made.
+
+## Closure — 2026-08-13
+
+Resolved by `8be1b0e03`: response bodies now have explicit attempt-local custody, and the regression proves one attempt cannot close its concurrent peer's body. The originally filed concurrency attribution was REFUTED by source inspection — no Seon lifecycle closes another turn's body; the historical `IOException("closed")` is consistent only with an upstream/JDK response-stream failure after HTTP 200, and its old diagnostic had discarded the cause chain. Future occurrences retain the complete cause chain, so any recurrence files a precise new issue.

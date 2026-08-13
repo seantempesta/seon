@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, ai, agent, live-drive]
 ---
@@ -234,3 +234,7 @@ holding the body, proving that neither EOF nor the request time limit is the
 settlement mechanism. No paid provider call was made. The issue remains open
 only for its separately required paid one-call evidence after the live-drive
 owner chooses to spend it.
+
+## Closure — 2026-08-13
+
+Resolved by `8be1b0e03`: reasoning-only finish evidence settles the fold immediately as `:seon.ai/reasoning-without-answer`; the local-stub regression proves settlement before EOF/time limit. Focused gate `bin/test seon.ai-test` 50/290/0.

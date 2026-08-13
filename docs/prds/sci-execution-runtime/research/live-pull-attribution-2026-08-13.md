@@ -45,7 +45,7 @@ attribution:
 - [the archived four-query-floor issue](../../../seon/issues/archive/cold-root-pull-is-slower-than-the-four-query-floor.md)
 
 The selected Datahike source is the repository gitlink at
-`cdcb5792a5c917768c74e6da884af1c853c23995`. The relevant first-party seams are
+`cdcb5792db8bd599487f099437265d18a31164a5`. The relevant first-party seams are
 the root selector and acquisition in `src/seon/render/walk.clj:82-144,198-381`,
 candidate expansion in `src/seon/bootstrap.clj:135-220`, generated-entry
 selection in `src/seon/bootstrap.clj:237-303`, and render selection/invocation

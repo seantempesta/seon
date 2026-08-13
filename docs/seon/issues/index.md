@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (44)
+## Blocker (42)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -29,7 +29,6 @@ See `README.md` for the convention.
 | [Make mutable resources carry their root and lifetime](class-mutable-resources-lack-explicit-root-and-lifetime.md) | blocker | class-kill queue |
 | [Make accepted work require terminal evidence](class-accepted-work-can-end-without-terminal-evidence.md) | blocker | class-kill queue |
 | [Make destructive reachability changes atomic](class-destructive-reachability-changes-are-not-atomic.md) | blocker | class-kill queue |
-| [Settle a turn whose provider stream carries only reasoning](a-reasoning-only-stream-burns-the-whole-time-limit.md) | blocker | live-drive provider wave |
 | [Record a call edge when an agent form calls a core function](agent-form-calls-to-core-namespaces-are-not-indexed.md) | blocker | program-graph indexing wave |
 | [Make the render value floor total over ordinary unqualified-key maps](render-value-floor-refuses-any-map-with-unqualified-keys.md) | blocker | interface-economy W1 total-floor wave |
 | [Publish terminal evidence for every background binary result](background-binary-settlement-does-not-publish-required-event.md) | blocker | background settlement investigation |
@@ -57,7 +56,6 @@ See `README.md` for the convention.
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
 | [Attribute and cut the ~2.4 s a run pays between every form](a-run-pays-two-and-a-half-seconds-between-every-form.md) | blocker | development-velocity incident (run loop per-form cost) |
 | [Stop a schema-resource edit from bricking value admission in running clusters](a-schema-resource-edit-bricks-value-admission-in-every-running-cluster.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
-| [Reuse one HttpClient so concurrent provider calls stop closing mid-read](concurrent-provider-calls-fail-with-a-closed-response-body.md) | blocker | whole-system arc repair wave |
 | [Settle what arrived when a provider stream closes mid-body](a-mid-stream-provider-disconnect-discards-the-whole-turn.md) | blocker | whole-system arc repair wave |
 | [Supply the generated entry's required render output](generated-turn-omits-the-required-render-output.md) | blocker | generate-call-transition lane (held `loop.clj`) |
 | [Return from the generated opening's second live pull](generated-opening-live-pull-does-not-return-after-help.md) | blocker | prefix-drift bootstrap performance diagnosis (held `bootstrap.clj`) |
