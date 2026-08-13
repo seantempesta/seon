@@ -61,10 +61,12 @@ See `README.md` for the convention.
 | [Return from the generated opening's second live pull](generated-opening-live-pull-does-not-return-after-help.md) | blocker | prefix-drift bootstrap performance diagnosis (held `bootstrap.clj`) |
 | [Explain the 24-second live root pull of 189 members](live-root-pull-of-189-members-takes-24-seconds.md) | blocker | render acquisition performance wave |
 
-## Friction (130)
+## Friction (132)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Refuse cluster names that collide with the store directory](cluster-named-store-collides-with-the-store-directory.md) | friction | R3 store-path decision |
+| [Carry the operator root explicitly instead of guessing from names](operator-root-inference-guesses-from-directory-names.md) | friction | R3 store-path decision |
 | [Bound the parallel-only confirmation protocol exchange](confirmation-parallel-failure-blocks-reading-worker-protocol.md) | friction | test-platform follow-up |
 | [Render one blob digest once per refusal envelope](contract-refusal-envelope-repeats-one-blob-digest-six-times.md) | friction | class-kill queue |
 | [Aggregate and reclaim orphaned operator claims](status-prints-unexplained-invalid-claim-lines.md) | friction | operator status face |
