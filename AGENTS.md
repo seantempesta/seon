@@ -203,7 +203,7 @@ registry before declaring a key.
 
 ```clojure
 ;; which tests exercise this function? — a query, not a naming convention:
-(seon.fn/tests-reaching db 'seon.cluster.run/open-tx)
+(seon.fn/tests-reaching (seon.db/db) "seon.cluster.run/open-tx") ;=> 67 tests
 ;; which functions need cluster custody? — declared arity input-refs:
 [?f :seon.fn.arity/input-refs :seon.db/connection]
 ```
@@ -377,11 +377,11 @@ writing.
 | attributes + connections | the Datahike model | entity kind/type |
 | build, operator, artifact | the `bin/seon`/`bin/acme` supervisor scope; the digested publication output | flavor |
 | get-in, path | paged navigation into a nested value | drill |
-| the todo | the ONE task system: derived obligations plus authored item facts | my.plan, bare "plan" |
+| **[TARGET] the todo** | the ONE task system: derived obligations plus authored item facts (ruling 49; [implementation PRD Phase 5](docs/prds/sci-execution-runtime/plan/evolving-session-implementation-2026-08-12.md)) — unbuilt; update this row when it lands | my.plan, bare "plan" |
 | provider descriptor row | one hosted provider's data row under the config singleton | adapter, integration |
 | packages/, package.json, deps.edn | each ecosystem's own manifest names | npm-pkgs, maven-pkgs |
 | contexts on hosts, binding tables | sci's own vocabulary for agent execution | sandbox, VM, jail |
-| `:interrupt-fn` | the ONE zero-arg fn sci calls on every fn body entrance (`reference-code/sci/doc/interrupt.md` ↔ `src/seon/sci/eval.clj`) | the guard, the door, the cage |
+| `:interrupt-fn` | the ONE zero-arg fn sci calls on every fn body entrance and `loop/recur` (`reference-code/sci/doc/interrupt.md` ↔ `src/seon/sci/eval.clj`) | the guard, the door, the cage |
 | `interrupt!` | stops an eval uncatchably (`reference-code/sci/src/sci/interrupt.cljc`) | stop!, steering-error! |
 | `time-limit` | the ONLY limit; sci counts nothing (`reference-code/sci/doc/interrupt.md`) | fuel, gas, step budget |
 | `:seon.eval/fn-entries` | a RECORDED DIAGNOSTIC, never a limit | a step budget |
@@ -436,7 +436,11 @@ The loop:
    never reset or write to someone else's).
 2. **Reach it.** `mcp__seon__runtime_status` lists live clusters;
    `mcp__seon__eval_clj` evaluates in the selected cluster's JVM (qualify
-   the cluster when several are live — ambiguity must fail). **If these
+   the cluster when several are live — ambiguity must fail). Its `jvm`
+   mode is the host prepl with NO cluster custody bound — `seon.db`'s
+   elided db/conn arities refuse there; `door` mode evaluates through the
+   cluster's SCI ctx where elision holds (and mutates that shared ctx, so
+   keep door probes disposable). **If these
    tools are down, degraded, or missing, SAY SO IMMEDIATELY** — report it
    to the orchestrator/owner and file the issue before working around it. A
    silent workaround (hand-rolled prepl senders, blind file edits) is how
@@ -577,10 +581,11 @@ code — reset it onto current source rather than debugging phantoms);
 build on it unreviewed); and sweep the disposable exhaust — retained
 `tmp/test-runs/run.*` roots whose reds are superseded, scratch cluster
 roots under `tmp/`, and any store whose footprint has left its normal
-range. **Before deleting any run root, confirm no live runner holds it**
-(`bin/codex-agent status` for lanes plus the process table for `bin/test`
-JVMs) — sweeping an active root kills a foreign gate mid-run (`bin/seon status` prints it; database data is disposable by ruling —
-reset freely, never migrate). Everything under `tmp/` is throwaway until
+range (`bin/seon status` prints the root footprint). **Before deleting any
+run root, confirm no live runner holds it** (`bin/codex-agent status` for
+lanes plus the process table for `bin/test` JVMs) — sweeping an active
+root kills a foreign gate mid-run. Database data is disposable by ruling:
+reset freely, never migrate. Everything under `tmp/` is throwaway until
 production; a disk filling with dead roots is a defect to fix in the
 minute it is noticed, and the [TARGET] root maintenance portfolio is the
 machinery that eventually owns this automatically.
@@ -676,5 +681,4 @@ moment they are seen.
 - [docs/conventions.md](docs/conventions.md) — code/schema patterns;
 - [docs/seon/issues/README.md](docs/seon/issues/README.md) — issue
   lifecycle, severity, query tags;
-- `.agents/skills/` — load the matching skill before specialized work;
-- `AGENT.md` — thin delegated-lane compatibility adapter.
+- `.agents/skills/` — load the matching skill before specialized work.
