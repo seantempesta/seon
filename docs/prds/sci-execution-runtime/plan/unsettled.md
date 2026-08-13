@@ -88,9 +88,19 @@ registered-keys-self-explain.
   option 2 recommended; its archaeology surfaced two defects, filed and
   scheduled in `c1576fa56`/`daa32aab8`). W2 RETURNED COMPLETE
   (`2aacc58fe`–`5423c5a10`, accretion-reviewed clean; my.plan/bootstrap/
-  walk producers deferred to W2b as specced). The rebirth probe rerun is
-  IN FLIGHT on `tmp/rebirth/scratch-root-quiet` (`clojure -M:dev:test`,
-  the probe needs the test classpath); W2b launches when it completes. Owner kept the instruction-facts PRD and all AWAITING ledger
+  walk producers deferred to W2b as specced). **THE REBIRTH PROOF IS ACCEPTED** (2026-08-13
+  evening, quiet-tree rerun on `tmp/rebirth/scratch-root-quiet`): raw AND
+  rendered regeneration deterministic, agent-authored function + green
+  usage test present in the reborn opening, 5,743 lived → 1,560 reborn
+  tokens, basis-t 536871027; both rebirth-gap issues archived on that
+  evidence (`a907f2543`). The probe's stop path then wedged the JVM —
+  filed as
+  [cluster-disarm-awaits-turn-completion-without-a-bound](../../seon/issues/cluster-disarm-awaits-turn-completion-without-a-bound.md)
+  (unbounded await in `disarm!`, jstack preserved). `issue-class-kill`
+  round 2 RETURNED: ai-retry stale-proof member fixed + archived
+  (config/default.edn retry schedule now spans the 180 s timeout). W2b
+  (`kind-class-w2b` lane) is RUNNING on the four freed files; index green
+  at 181 open. Owner kept the instruction-facts PRD and all AWAITING ledger
   items PARKED. Post-R2 order (T3-first vs drive-first) and the
   cheapest-form cost model are PENDING his answer after explanations
   delivered in chat.
