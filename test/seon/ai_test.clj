@@ -655,7 +655,7 @@
     (is (= thinking-usage (:seon.ai/usage completion)))
     (is (schema/valid-candidate-value? :seon.ai/completion completion))))
 
-(deftest a-reasoning-starved-response-is-a-named-evidenced-error
+(deftest a-reasoning-only-response-is-a-named-evidenced-error
   (let [usage {"prompt_tokens" 104
                "completion_tokens" 8
                "total_tokens" 112
@@ -667,7 +667,8 @@
                                   "content" ""}
                       "finish_reason" "length"}]
           "usage" usage})]
-    (is (= :seon.ai/token-starvation (:seon.error/kind failure)))
+    (is (= :seon.ai/reasoning-without-answer
+           (:seon.error/kind failure)))
     (is (= "length" (get-in failure
                              [:seon.error/data :seon.ai/finish-reason])))
     (is (= 8 (get-in failure
@@ -676,6 +677,10 @@
     (is (= "all reasoning"
            (get-in failure
                    [:seon.error/data :seon.ai/reasoning-content])))
+    (is (= 13 (get-in failure
+                       [:seon.error/data :seon.ai/reasoning-received])))
+    (is (zero? (get-in failure
+                        [:seon.error/data :seon.ai/text-received])))
     (is (schema/valid-candidate-value? :seon.error/value failure))))
 
 (deftest streaming-reasoning-never-becomes-text-and-retains-terminal-evidence
@@ -717,12 +722,17 @@
         body (java.io.ByteArrayInputStream.
               (.getBytes (str/join "\n" lines) "UTF-8"))
         failure (#'seon.ai/streamed-completion body nil)]
-    (is (= :seon.ai/token-starvation (:seon.error/kind failure)))
+    (is (= :seon.ai/reasoning-without-answer
+           (:seon.error/kind failure)))
     (is (= "length" (get-in failure
                              [:seon.error/data :seon.ai/finish-reason])))
     (is (= usage (get-in failure [:seon.error/data :seon.ai/usage])))
     (is (= "x" (get-in failure
-                        [:seon.error/data :seon.ai/reasoning-content])))))
+                        [:seon.error/data :seon.ai/reasoning-content])))
+    (is (= 1 (get-in failure
+                      [:seon.error/data :seon.ai/reasoning-received])))
+    (is (zero? (get-in failure
+                        [:seon.error/data :seon.ai/text-received])))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; A stream that ends before its terminal event
@@ -961,6 +971,75 @@
          :seon.ai/stream? true
          :seon.ai/timeout-ms 10000))
 
+(defn- stub-leaf-request [server path]
+  {:seon.ai/endpoint (str "http://127.0.0.1:"
+                          (.getPort (.getAddress server)) path)
+   :seon.ai/timeout-ms 10000
+   :seon.ai/stream? true
+   :seon.ai.http/headers {"content-type" "application/json"}
+   :seon.ai.attempt/sent-body "{}"})
+
+(defn- start-custody-stub!
+  "A local server whose two response bodies are independently gated."
+  []
+  (let [server (com.sun.net.httpserver.HttpServer/create
+                (java.net.InetSocketAddress. "127.0.0.1" 0) 0)
+        executor (java.util.concurrent.Executors/newVirtualThreadPerTaskExecutor)
+        reasoning-finished (java.util.concurrent.CountDownLatch. 1)
+        release-reasoning (java.util.concurrent.CountDownLatch. 1)
+        peer-started (java.util.concurrent.CountDownLatch. 1)
+        release-peer (java.util.concurrent.CountDownLatch. 1)
+        begin (fn [exchange]
+                (.add (.getResponseHeaders exchange)
+                      "Content-Type" "text/event-stream")
+                ;; Zero selects chunked transfer, so the handler can keep the
+                ;; response open after it sends the provider finish signal.
+                (.sendResponseHeaders exchange 200 0)
+                (.getResponseBody exchange))
+        write! (fn [out value]
+                 (.write out (.getBytes ^String value "UTF-8"))
+                 (.flush out))]
+    (.createContext
+     server "/reasoning"
+     (reify com.sun.net.httpserver.HttpHandler
+       (handle [_ exchange]
+         (with-open [out (begin exchange)]
+           (write! out
+                   (streamed-lines
+                    (str "data: {\"choices\":[{\"delta\":{"
+                         "\"reasoning_content\":\"thinking\"},"
+                         "\"finish_reason\":\"stop\"}]}")))
+           (.countDown reasoning-finished)
+           (.await release-reasoning 5 java.util.concurrent.TimeUnit/SECONDS)))))
+    (.createContext
+     server "/peer"
+     (reify com.sun.net.httpserver.HttpHandler
+       (handle [_ exchange]
+         (with-open [out (begin exchange)]
+           (write! out (sse-chunk "peer "))
+           (.countDown peer-started)
+           (.await release-peer 5 java.util.concurrent.TimeUnit/SECONDS)
+           (write! out
+                   (str (sse-chunk "survived")
+                        "data: {\"choices\":[{\"delta\":{\"content\":\"\"},"
+                        "\"finish_reason\":\"stop\"}]}\n\n"
+                        "data: [DONE]\n\n"))))))
+    (.setExecutor server executor)
+    (.start server)
+    {:server server
+     :executor executor
+     :reasoning-finished reasoning-finished
+     :release-reasoning release-reasoning
+     :peer-started peer-started
+     :release-peer release-peer}))
+
+(defn- stop-custody-stub!
+  [{:keys [server executor release-reasoning release-peer]}]
+  (.countDown ^java.util.concurrent.CountDownLatch release-reasoning)
+  (.countDown ^java.util.concurrent.CountDownLatch release-peer)
+  (.stop ^com.sun.net.httpserver.HttpServer server 0)
+  (.shutdownNow ^java.util.concurrent.ExecutorService executor))
+
 (deftest a-provider-that-hangs-up-mid-body-settles-what-it-already-sent
   (let [server (start-stub!)]
     (try
@@ -994,6 +1073,53 @@
             (str "every concurrent stream completed: "
                  (pr-str (mapv #(or (:seon.error/message %) :ok) outcomes)))))
       (finally (.stop server 0)))))
+
+(deftest a-reasoning-finish-settles-before-the-response-body-ends
+  (let [{:keys [server reasoning-finished] :as stub}
+        (start-custody-stub!)]
+    (try
+      (let [outcome (future
+                      (#'seon.ai/send-request
+                       (stub-leaf-request server "/reasoning")))]
+        (is (.await ^java.util.concurrent.CountDownLatch reasoning-finished
+                    15 java.util.concurrent.TimeUnit/SECONDS)
+            "the local provider published its finish evidence")
+        (let [settled (deref outcome 2000 ::did-not-settle)]
+          (is (not= ::did-not-settle settled)
+              "finish evidence settles without waiting for EOF or timeout")
+          (is (= :seon.ai/reasoning-without-answer
+                 (:seon.error/kind settled)))
+          (is (= 8 (get-in settled
+                           [:seon.error/data
+                            :seon.ai/reasoning-received])))
+          (is (zero? (get-in settled
+                             [:seon.error/data :seon.ai/text-received])))))
+      (finally (stop-custody-stub! stub)))))
+
+(deftest closing-one-attempts-body-cannot-close-its-concurrent-peer
+  (let [{:keys [server peer-started release-peer reasoning-finished]
+         :as stub}
+        (start-custody-stub!)]
+    (try
+      (let [complete! #(#'seon.ai/send-request
+                        (stub-leaf-request server %))
+            peer (future (complete! "/peer"))]
+        (is (.await ^java.util.concurrent.CountDownLatch peer-started
+                    15 java.util.concurrent.TimeUnit/SECONDS)
+            "the peer owns an open response body")
+        (let [reasoning (future (complete! "/reasoning"))]
+          (is (.await ^java.util.concurrent.CountDownLatch reasoning-finished
+                      15 java.util.concurrent.TimeUnit/SECONDS))
+          (is (= :seon.ai/reasoning-without-answer
+                 (:seon.error/kind (deref reasoning 2000
+                                          {::timed-out true})))
+              "the finished attempt closes its own body")
+          (.countDown ^java.util.concurrent.CountDownLatch release-peer)
+          (let [peer-outcome (deref peer 2000 {::timed-out true})]
+            (is (= "peer survived" (:seon.ai/text peer-outcome))
+                (str "the concurrent peer remained readable: "
+                     (pr-str peer-outcome))))))
+      (finally (stop-custody-stub! stub)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The evidence, and the disposition computed from it

@@ -808,7 +808,17 @@
                                        (:seon.ai/reasoning-partial
                                         next-snapshot))))
                     (try (sink next-snapshot) (catch Throwable _ nil)))
-                  next-snapshot))))
+                  ;; A provider finish reason is terminal evidence. When the
+                  ;; accumulated output is reasoning-only, continuing to read
+                  ;; cannot turn that finished choice into assistant text; it
+                  ;; can only park until EOF or the request time limit. End the
+                  ;; fold here so `streamed-completion` closes this attempt's
+                  ;; body and returns the typed refusal immediately.
+                  (if (and (string? (:seon.ai/finish-reason next-snapshot))
+                           (str/blank? (:seon.ai/text next-snapshot))
+                           (seq (:seon.ai/reasoning-partial next-snapshot)))
+                    (reduced next-snapshot)
+                    next-snapshot)))))
           {:seon.ai/text "" :seon.ai/tokens 0}
           lines))
 
@@ -832,6 +842,19 @@
        :seon.error/message
        "The provider's assistant reasoning was not text."
        :seon.error/data evidence}
+
+      (and (string? reasoning-content)
+           (seq reasoning-content)
+           (str/blank? content))
+      {:seon.error/kind ::reasoning-without-answer
+       :seon.error/message
+       (str "The provider finished after streaming "
+            (count reasoning-content)
+            " characters of reasoning and no assistant text.")
+       :seon.error/data
+       (assoc evidence
+              ::reasoning-received (count reasoning-content)
+              ::text-received 0)}
 
       (and (= "length" finish-reason) (str/blank? content))
       {:seon.error/kind ::token-starvation
@@ -1168,7 +1191,7 @@
   disposition and the attempt facts, is untouched by which transport
   ran.
 
-  Reads to natural EOF because reply evaluation is `:batch`
+  Reads visible-text replies to natural EOF because reply evaluation is `:batch`
   (`docs/seon/reference/llm-adapters.md:545-556`): the complete program
   is parsed once, so aborting on the first form would be a different
   evaluation mode, not an optimization.
@@ -1180,9 +1203,10 @@
   what arrived). A read failure never unwinds past the snapshot, so a
   mid-stream disconnect cannot discard billed output.
 
-  Empty text is an error, not an empty reply, exactly as
-  `completion-text` treats it — a provider that streamed nothing has
-  failed the call however cleanly it closed the socket."
+  A reasoning-only choice ends at its provider finish reason rather than
+  waiting for EOF or the HTTP time limit: that finish signal proves no
+  assistant text will follow for the finished choice. Empty text is an
+  error, not an empty reply, exactly as `completion-text` treats it."
   [body sink]
   (with-open [reader (BufferedReader. (InputStreamReader. body "UTF-8"))]
     (let [failure (atom nil)
@@ -1273,17 +1297,23 @@
                               (HttpResponse$BodyHandlers/ofInputStream)
                               (HttpResponse$BodyHandlers/ofString)))
             status (.statusCode response)
+            ;; Response-body custody is born here and never recovered from
+            ;; the shared client or looked up again through the response.
+            ;; Exactly this attempt passes it to exactly one reader, whose
+            ;; `with-open` owns its close. Another attempt has a different
+            ;; body value even though both share the process's client.
+            body (.body response)
             ;; a non-2xx body has to be readable either way, and a
             ;; stream's body is only readable once
             read-body (fn [] (if stream?
-                               (slurp (.body response))
-                               (.body response)))]
+                               (slurp body)
+                               body))]
         (if (<= 200 status 299)
           (try
             (let [completion
                   (if stream?
-                    (streamed-completion (.body response) sink)
-                    (completion-text (json/read-str (.body response))))]
+                    (streamed-completion body sink)
+                    (completion-text (json/read-str body)))]
               (if (:seon.error/kind completion)
                 (update completion :seon.error/data merge
                         {::status status
