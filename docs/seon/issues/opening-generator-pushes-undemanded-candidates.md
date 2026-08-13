@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: high
+severity: friction
 tags: [issue, agent, bootstrap, context, render]
 ---
 
@@ -34,6 +34,14 @@ surveys.
 
 `seon.bootstrap/pull-result` owns candidate selection. The episode's action arc
 must define the demanded symbols before the fixed-point explanation walk.
+
+## Scheduling note — 2026-08-12
+
+Skipped by the evolving-session defect-clear wave because
+`src/seon/bootstrap.clj` is held by the prefix-drift lane. Its demand-first
+selection contract must be implemented and falsified at that one owner after
+the lane releases the file; this wave will not add filtering at a downstream
+render owner.
 
 ## Acceptance
 

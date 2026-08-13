@@ -153,7 +153,7 @@ becomes "in substrate-ns-set AND NOT an override row". Plus a new ordering tier:
 - WITHIN replay, override rows sort LAST (after `:ns` rows and ordinary agent
   defs), so an override that calls through to other agent corpus sees it
   defined. Extend the existing `sort-by (juxt …)` (`client.cljs:693`) with an
-  override tier (`:ns`=0, agent-def=1, override=2).
+  override tier (`:ns`=0, the agent's defs=1, override=2).
 
 The `#29` guard (`seval/effectful-bare-def?`, `eval.cljs:930`,
 `client.cljs:680`) still applies to override rows — an override is a `defn`

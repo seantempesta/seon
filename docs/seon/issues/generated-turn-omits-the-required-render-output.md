@@ -36,6 +36,14 @@ this refusal. No source was edited.
 `seon.cluster.loop/generate-turn` owns the complete request passed to the one
 generated-entry derivation.
 
+## Scheduling note — 2026-08-12
+
+Skipped by the evolving-session defect-clear wave because
+`src/seon/cluster/loop.clj` is held by the generate-call-transition lane. The
+reproduction and owner are specific, but changing or testing that request
+constructor would overlap the live lane. Leave this issue scheduled until that
+owner is free.
+
 ## Acceptance
 
 - The live second generation pass satisfies `next-entry`'s input contract.

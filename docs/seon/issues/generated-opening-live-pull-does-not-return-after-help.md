@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: high
+severity: blocker
 tags: [issue, agent, bootstrap, render, performance]
 ---
 
@@ -32,6 +32,14 @@ removed by live Var wrappers before this measurement.
 candidate pull and expansion cost. Diagnosis must begin with a virtual-thread-
 aware dump or bounded source-level counters; the observation does not yet
 attribute the compute to a specific inner function.
+
+## Scheduling note — 2026-08-12
+
+Skipped by the evolving-session defect-clear wave. `src/seon/bootstrap.clj`
+is held by the prefix-drift lane, and the report deliberately does not yet
+attribute the compute to a specific inner owner. Resume with the required
+virtual-thread-aware dump or bounded counters after that held owner is free;
+do not patch the observed stall at a neighboring render seam.
 
 ## Acceptance
 
