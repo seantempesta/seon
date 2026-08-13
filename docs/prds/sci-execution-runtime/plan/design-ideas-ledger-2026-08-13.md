@@ -1,0 +1,80 @@
+---
+type: prd
+status: active
+tags: [prd, agent, context, architecture]
+---
+
+# Design ideas ledger — 2026-08-13 session
+
+Every design idea that surfaced in the owner session, with its status.
+AWAITING-OWNER rows are the ones he may not have responded to yet — each is
+one decision away from queued work. Ruled items cite their record.
+
+## Ruled today (no response needed)
+
+1. **my.plan is the one task noun** — semantics of ruling 49 unchanged
+   ([ruling batch](README.md#rulings-2026-08-13-owner) #1).
+2. **T3 intent-directed membership** — ready items' `:about` refs join
+   pull membership through the existing beyond-closure budget; refless
+   openings byte-identical (batch #2). Includes: `plan!`
+   resolution-validation (hallucinated refs refused at planning time) and
+   subject units rendering WITH their usage demonstrations — the two
+   agent workflows (use-existing vs build-new) unified by which
+   demonstrations the subjects carry.
+3. **R2 semantic migrations now, serial, red-tolerant** (batch #3).
+4. **Registered keys/functions self-explain; identity decides sameness;
+   regeneration collapses definitions to declaration/doc faces with
+   source one query away** (batch #4).
+
+## Queued as work (authorized, in the working edge)
+
+5. **Instruction-facts PRD** (owner reviews before implementation):
+   AGENTS.md ideas become instruction entities with program-graph subject
+   refs and declared renders; the file becomes a render-equality
+   artifact; lessons reach agents through the walk (teach-on-miss) and
+   self-fade via ruling 46.
+6. **The five laws' demonstrations as suite-gated usage tests** — part of
+   the instruction-facts PRD.
+7. **Class-issue member lists become tag queries** — replace each class
+   issue's hand list with its `class/<id>` tag derivation (hand lists
+   were provably stale within a day).
+
+## AWAITING OWNER RESPONSE — surfaced, discussed, not ruled
+
+8. **The "cheapest form" cost model.** V1: one comparison in the one
+   generator (`membership-diff > collection-size/2 → full re-read, else
+   delta`). Refinement: price candidates as `count × learned per-item
+   render cost`, where the per-(shape, profile) cost is a FACT recorded
+   from real render receipts — no bake-offs ever. Decision: adopt V1 rule
+   now, or wait for live-drive token measurements?
+9. **Lessons MINED from lived receipts.** The session-curation machinery
+   (editor → revision → mechanical proof → adoption) could promote a
+   lived span of real receipts into a canonical usage demonstration —
+   teaching material that was executed by construction, not authored.
+   Decision: add to the instruction-facts PRD scope or keep curation
+   separate?
+10. **Negative lessons as executed refusals.** Scars taught as one real
+    wrong call + its typed flat-error receipt (ruling 37's demonstration
+    already contains one) instead of prose warnings. Decision: standard
+    part of every usage demonstration, or only where a class repeats?
+11. **Auto-derived `:about` candidates.** Sugar atop T3: parse qualified
+    symbols out of item titles/descriptions and suggest them as refs (the
+    explicit `:about` + validation stays the contract). Cheap, unruled.
+12. **Per-(shape, profile) render-cost facts** as the general learned
+    constant enabling #8 — a small schema + one recording seam.
+13. **Derive-or-die for every mirror.** The session's meta-lesson: every
+    hand-maintained mirror of the tree (member lists, IN-FLIGHT blocks,
+    vocabulary, counts in prose) must be derived, checker-enforced, or
+    dated — candidate for promotion from practice to explicit AGENTS.md
+    law text.
+14. **Store-bloat key-prefix census** on next occurrence (issue filed) —
+    plus whether the exclusive sweep should run on a schedule NOW rather
+    than waiting for the maintenance portfolio.
+
+## Parked explicitly (owner said not yet / needs design first)
+
+15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
+    options owed to the owner before any edit.
+16. **Effectful re-execution tag** (`idempotent-read`) — pre-approved
+    design, lands only with its never-lie falsifier when a capability
+    leaf first declares it (ruling 50).

@@ -30,6 +30,77 @@ rules landed in AGENTS.md so the classes stay dead. The standing no-fleet
 constraint is lifted; the spine (rebirth-gap wave → drive → phases)
 proceeds on a green base.
 
+## WORKING EDGE — 2026-08-13 afternoon (THE resumption authority)
+
+A compacted/fresh session resumes HERE. Read this block, then the
+2026-08-13 ruling batch in [README](README.md#rulings-2026-08-13-owner),
+then act. The owner is away; the work below is AUTHORIZED — continue
+autonomously, push at every landing, reconcile the issues index only at
+boundaries (lanes never touch it).
+
+**STATE.** `bin/test --all` went GREEN (1200/9356/0) this morning — first
+ever — then the owner ruled the rename program RED-TOLERANT: no full gates
+until the program's ONE closing `--all`. AGENTS.md is rewritten, twice
+deployment-tested, examples-verified; TRANSFER_PROMPT is the orchestrator
+manual (role rule: no bounded task + talking to the owner = orchestrator);
+conventions.md and three architecture catalogs are dissolved; six skills
+re-verified (120+ citation fixes); R1 renames done (tower gone,
+frontmatter repaired). Issue count ~186 open, index green. The 2026-08-13
+ruling batch: my.plan is the task noun (49's semantics unchanged), T3
+intent-membership approved as specced, R2 now/serial/red-tolerant,
+registered-keys-self-explain.
+
+**LANES RUNNING (fold each return before refilling):**
+- `todo-t1-t2` — my.plan T1+T2 per
+  [plan-context-prd-2026-08-13.md](plan-context-prd-2026-08-13.md)
+  (renamed mid-flight from my.todo; owns my.plan{,.item}.edn,
+  src/my/plan.clj, test/my/plan_test.clj). After it lands: T3
+  (membership + `:about` resolution-validation + usage-demo rendering) is
+  APPROVED and next — owners add src/seon/bootstrap.clj +
+  src/seon/render/walk.clj, so serialize behind the rebirth lane.
+- `rebirth-gap-authored-results` — reborn openings must include the
+  agent's namespace results; closes
+  [its issue](../../seon/issues/rebirth-opening-omits-agent-authored-results.md)
+  and re-runs the rebirth probe (which also live-verifies the landed
+  render-symbol fix `592e62159`, closing
+  [that issue](../../seon/issues/agent-schema-render-symbol-bypasses-transaction-encoding.md)).
+- `kind-class-w2` — R2 stage W2 (producers emit class markers beside
+  kind; census in
+  [error-kind-audit-2026-08-12](../research/error-kind-audit-2026-08-12.md)).
+
+**THE ORDERED QUEUE AFTER RETURNS:**
+1. R2 continuation, serial, red-tolerant: W2b (deferred producers in
+   bootstrap/walk/plan once those lanes land) → W3 consumers dispatch on
+   class presence → W4 delete kind writes → W5 delete readers + member →
+   `:seon.db/database-value` key migration (accretion pattern; the issue
+   [database-value-shape-name-duplicates-the-db-key](../../seon/issues/database-value-shape-name-duplicates-the-db-key.md))
+   → run-internal `plan-tx`/`plan-digest` → `sources-*` rename → **ONE
+   `bin/test --all` closes the rename program** (fix-forward any reds it
+   finds; that tally is the next headline number).
+2. **The live drive** (spine step 3, README order, PRE-AUTHORIZED):
+   flash-only, independent observer, a real generated-opening
+   evolving-session drive; preserve episode facts; remeasure the live
+   pull under named conditions
+   ([attribution baseline](../research/live-pull-attribution-2026-08-13.md)).
+3. T3 implementation per ruling 2 of the batch (falsifier: refless agents
+   byte-identical; admission through the existing beyond-closure budget).
+4. Draft the **instruction-facts PRD** (files→facts: catalogue-seeded
+   instruction entities with program-graph subject refs, declared renders,
+   AGENTS.md as render-equality artifact; the five laws' demonstrations as
+   suite-gated usage tests) — for the owner's markup, no implementation
+   before his review.
+5. Keep the issue campaign beside the spine: class-kill by mining rank,
+   staleness archival with source-verified evidence only.
+
+**PENDING THE OWNER (do not decide):** R3 `data/clusters/store` path
+rename options; instruction-facts PRD markup; T3 landing review.
+
+**STANDING FOR THE RESUMED SESSION:** lanes get owned+protected paths and
+neutral wording; foreign breakage never blocks a commit; verify claims
+before naming causes; hygiene sweeps carry the live-runner guard (a sweep
+killed a live gate once today); the fixture rules in AGENTS.md §5 bind
+every new test; sober summaries with full repo-relative links.
+
 ## RENAME PROGRAM — 2026-08-13 (owner-directed: red-tolerant, one final gate)
 
 The owner ruled: batch all renames, do NOT run full suites per step — the
