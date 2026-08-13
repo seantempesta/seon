@@ -91,6 +91,11 @@
              {:error/message "must be a core.async Flow graph"
               :gen/gen seon.flow/graph-generator}
              seon.flow/graph?],
+            :join!
+            [:fn
+             {:error/message "must be a callable Flow graph join"
+              :gen/schema [:=> [:cat :map] :map]}
+             clojure.core/ifn?],
             :join-error-request
             [:map
              [:seon.flow/started

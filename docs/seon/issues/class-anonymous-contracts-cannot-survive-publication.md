@@ -25,6 +25,8 @@ the same construction at schema identity rather than predicate identity: a
 contract admits a name no registry can resolve and fails only in a later
 whole-tree projection.
 
+`seon.flow/start-graph!` supplied a fresh instance with an inline `clojure.core/ifn?` join predicate; it now references the registered `:seon.flow/join!` schema.
+
 ## Owner
 
 Schema registration and contracted-definition admission.

@@ -67,7 +67,7 @@
      [:map
       [::graph-definition :map]
       [::joins {:optional true}
-       [:map-of :qualified-keyword [:fn clojure.core/ifn?]]]]]
+       [:map-of :qualified-keyword :seon.flow/join!]]]]
     [:map
      [::graph ::graph]
      [::started ::started]
