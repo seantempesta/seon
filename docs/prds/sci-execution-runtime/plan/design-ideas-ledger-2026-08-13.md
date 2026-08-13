@@ -143,6 +143,17 @@ one decision away from queued work. Ruled items cite their record.
     plus whether the exclusive sweep should run on a schedule NOW rather
     than waiting for the maintenance portfolio.
 
+21. **`{:seon.db/entity true}` challenged as fragile** (owner, 2026-08-13
+    late): an opt-in boolean whose false nobody asserts — absence cannot
+    distinguish "not an entity" from "forgot" (37/2231 declarations).
+    Candidate dissolution: derive entity-kind-ness from possession of an
+    installed unique-identity attribute (the database already knows);
+    the envelope counterexample is a MEASUREMENT, not an argument —
+    query (shapes with derivable identity attrs) vs (shapes declaring
+    the flag) and read the disagreement set. Folded into the
+    general-diff research brief; the diff identity path already ignores
+    the flag either way.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
