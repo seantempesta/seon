@@ -10,7 +10,7 @@
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Schemas — resources/seon/schema.edn
+;;; Schemas — resources/seon/schemas/my.message.edn
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})

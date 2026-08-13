@@ -321,6 +321,14 @@ nil, prefer `(get m k default)` with a sentinel default, or `find` when you
 need presence-and-value in one step. Reach for `contains?` only when you
 genuinely mean key membership and the collection is a map or set.
 
+**The `my.*` / `seon.*` split is surface versus owner, never duplication:**
+a capability has ONE durable fact family and ONE system-side owning
+mechanism (`seon.cluster.message`, `seon.cluster.run`), and `my.<name>` is
+the thin agent-facing protocol over those same facts — reads through
+`seon.db`, effects as returned values the run loop interprets. Finding two
+namespaces for one noun is the ruled layering; finding two FACT families or
+two delivery paths for one noun is the defect.
+
 `seon.db` is the ONE database namespace: all of Datahike's core data
 functions, agent-first, each with Datahike's own positional AND
 argument-map arities, both able to elide db/conn to the calling agent's
