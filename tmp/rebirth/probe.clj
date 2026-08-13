@@ -147,6 +147,27 @@
        "[:probe.rebirth.plan/agent :probe.rebirth.plan/agent] "
        "[:probe.rebirth.plan/items [:vector " item-map "]]]"))
 
+(def ^:private namespace-map
+  ":my.agents.rebirth/namespace-value")
+
+(def ^:private plan-attribute-keys
+  [:probe.rebirth.plan/id
+   :probe.rebirth.plan/title
+   :probe.rebirth.plan/agent
+   :probe.rebirth.plan/items
+   :probe.rebirth.plan.item/id
+   :probe.rebirth.plan.item/text
+   :probe.rebirth.plan.item/status
+   :probe.rebirth.plan.item/completed-at])
+
+(def ^:private probe-schema-keys
+  (into plan-attribute-keys
+        [:probe.rebirth.plan.item/attributes
+         :probe.rebirth.plan/storage
+         :probe.rebirth.plan/plan
+         :my.agents.rebirth/namespace-value
+         :my.agents.rebirth/namespace-unit]))
+
 (defn- artifact-reply []
   (str
    "The durable shape comes first. Prose-only rationale: I want the future "
@@ -159,48 +180,56 @@
    "(seon.schema/register! :probe.rebirth.plan.item/text :string)\n"
    "(seon.schema/register! :probe.rebirth.plan.item/status [:enum :pending :active :done])\n"
    "(seon.schema/register! :probe.rebirth.plan.item/completed-at :inst)\n"
+   "(seon.schema/register! :probe.rebirth.plan.item/attributes [:map {:seon.db/attributes true} [:probe.rebirth.plan.item/id :probe.rebirth.plan.item/id] [:probe.rebirth.plan.item/text :probe.rebirth.plan.item/text] [:probe.rebirth.plan.item/status :probe.rebirth.plan.item/status] [:probe.rebirth.plan.item/completed-at {:optional true} :probe.rebirth.plan.item/completed-at]])\n"
+   "(seon.schema/register! :probe.rebirth.plan/storage [:map {:seon.db/entity true} [:probe.rebirth.plan/id :probe.rebirth.plan/id] [:probe.rebirth.plan/title :probe.rebirth.plan/title] [:probe.rebirth.plan/agent :probe.rebirth.plan/agent] [:probe.rebirth.plan/items [:vector " item-map "]]])\n"
+   "(seon.schema/register! :my.agents.rebirth/namespace-value '[:map [:seon.ns/name [:= my.agents.rebirth]] [:seon.ns/doc {:optional true} :seon.ns/doc]])\n"
    "(defn ^{:malli/schema [:=> [:cat " plan-map "] [:vector " item-map "]]} current-items [plan] (->> (:probe.rebirth.plan/items plan) (remove #(= :done (:probe.rebirth.plan.item/status %))) (sort-by :probe.rebirth.plan.item/id) vec))\n"
    "(defn ^{:malli/schema [:=> [:cat " plan-map "] :seon.render/ai]} render-plan-ai [plan] (let [items (:probe.rebirth.plan/items plan) remaining (current-items plan) completed (->> items (filter #(= :done (:probe.rebirth.plan.item/status %))) (sort-by :probe.rebirth.plan.item/completed-at #(compare %2 %1))) recent (take 2 completed) older (drop 2 completed)] (str \"Plan \" (:probe.rebirth.plan/title plan) \".\\nRemaining:\\n\" (apply str (map #(str \"- \" (:probe.rebirth.plan.item/id %) \" — \" (:probe.rebirth.plan.item/text %) \"\\n\") remaining)) \"Recent completions:\\n\" (apply str (map #(str \"- \" (:probe.rebirth.plan.item/id %) \" — \" (:probe.rebirth.plan.item/text %) \"\\n\") recent)) (when (seq older) (str \"... \" (count older) \" older completions; requery with (db/q '[:find ?id ?at :where [?item :probe.rebirth.plan.item/id ?id] [?item :probe.rebirth.plan.item/status :done] [?item :probe.rebirth.plan.item/completed-at ?at]] (db/db)).\")))))\n"
-   "(defn ^{:malli/schema [:=> [:cat :my.agents.rebirth/namespace-unit] :seon.render/ai]} render-namespace-ai [unit] (str \"Namespace \" (:seon.ns/name unit) \" owns a fact-backed plan, current-items, render-plan-ai, and plan-current-state-test.\"))\n"
-   "(seon.schema/register! :my.agents.rebirth/namespace-unit [:map {:seon.render/ai my.agents.rebirth/render-namespace-ai} [:seon.ns/name [:= my.agents.rebirth]] [:seon.ns/doc {:optional true} :seon.ns/doc]])\n"
-   "(seon.schema/register! :probe.rebirth.plan/plan [:map {:seon.db/entity true :seon.render/ai my.agents.rebirth/render-plan-ai} [:probe.rebirth.plan/id :probe.rebirth.plan/id] [:probe.rebirth.plan/title :probe.rebirth.plan/title] [:probe.rebirth.plan/agent :probe.rebirth.plan/agent] [:probe.rebirth.plan/items [:vector " item-map "]]])\n"
    "(clojure.test/deftest ^{:seon.test/usage true} plan-current-state-test (clojure.test/is (= [\"remaining\"] (mapv :probe.rebirth.plan.item/id (current-items {:probe.rebirth.plan/id \"sample\" :probe.rebirth.plan/title \"sample\" :probe.rebirth.plan/agent 1 :probe.rebirth.plan/items [{:probe.rebirth.plan.item/id \"done\" :probe.rebirth.plan.item/text \"done\" :probe.rebirth.plan.item/status :done :probe.rebirth.plan.item/completed-at #inst \"2026-08-12T00:00:00.000-00:00\"} {:probe.rebirth.plan.item/id \"remaining\" :probe.rebirth.plan.item/text \"remaining\" :probe.rebirth.plan.item/status :pending}]})))))\n"
    "(seon.test/run #'plan-current-state-test)\n"
-   "(my.run/complete \"Declared the plan facts, current-state function, plan and namespace renders, and a green usage test.\")"))
+   "(my.run/complete \"Declared the plan facts, current-state functions, and a green usage test.\")"))
+
+(defn- render-declarations-reply []
+  (str
+   "The render declarations name qualified functions as ordinary schema data.\n"
+   "(defn ^{:malli/schema [:=> [:cat " namespace-map "] :seon.render/ai]} render-namespace-ai [unit] (str \"Namespace \" (:seon.ns/name unit) \" owns a fact-backed plan, current-items, render-plan-ai, and plan-current-state-test.\"))\n"
+   "(seon.schema/register! :probe.rebirth.plan/plan '[:map {:seon.db/entity true :seon.render/ai my.agents.rebirth/render-plan-ai} [:probe.rebirth.plan/id :probe.rebirth.plan/id] [:probe.rebirth.plan/title :probe.rebirth.plan/title] [:probe.rebirth.plan/agent :probe.rebirth.plan/agent] [:probe.rebirth.plan/items [:vector " item-map "]]])\n"
+   "(seon.schema/register! :my.agents.rebirth/namespace-unit '[:map {:seon.render/ai my.agents.rebirth/render-namespace-ai} [:seon.ns/name [:= my.agents.rebirth]] [:seon.ns/doc {:optional true} :seon.ns/doc]])\n"
+   "(my.run/complete \"Declared compact namespace and current-plan renders.\")"))
 
 (defn- delta-form [shown-basis]
   (str
-   "(db/q {:query '[:find ?id ?tx ?user-id :in $current $delta ?agent-id "
+   "(seon.db/q {:query '[:find ?id ?tx ?user-id :in $current $delta ?agent-id "
    ":where [$current ?agent :seon.cluster.agent/id ?agent-id] "
    "[$delta ?message :seon.cluster.message/to ?agent ?tx] "
    "[$current ?message :seon.cluster.message/id ?id] "
    "[$delta ?tx :seon.db/user ?user] "
    "[$current ?user :seon.cluster.agent/id ?user-id]] "
-   ":args [(db/db) (db/since (db/db) " shown-basis ") "
+   ":args [(seon.db/db) (seon.db/since (seon.db/db) " shown-basis ") "
    (pr-str agent-id) "]})"))
 
 (defn- plan-create-reply [shown-basis]
   (str
    "I am choosing six explicit items because the hidden rationale should not survive unless modeled.\n"
    (delta-form shown-basis) "\n"
-   "(my.message/read \"rebirth-message-1\")\n"
-   "(db/transact! [{:probe.rebirth.plan/id \"rebirth-plan\" :probe.rebirth.plan/title \"Prove rebirth compacts state\" :probe.rebirth.plan/agent [:seon.cluster.agent/id \"rebirth\"] :probe.rebirth.plan/items [{:probe.rebirth.plan.item/id \"i1\" :probe.rebirth.plan.item/text \"Audit current my.plan\" :probe.rebirth.plan.item/status :active} {:probe.rebirth.plan.item/id \"i2\" :probe.rebirth.plan.item/text \"Capture lived deltas\" :probe.rebirth.plan.item/status :pending} {:probe.rebirth.plan.item/id \"i3\" :probe.rebirth.plan.item/text \"Author durable artifacts\" :probe.rebirth.plan.item/status :pending} {:probe.rebirth.plan.item/id \"i4\" :probe.rebirth.plan.item/text \"Prove current-state rendering\" :probe.rebirth.plan.item/status :pending} {:probe.rebirth.plan.item/id \"i5\" :probe.rebirth.plan.item/text \"Compare deterministic rebirths\" :probe.rebirth.plan.item/status :pending} {:probe.rebirth.plan.item/id \"i6\" :probe.rebirth.plan.item/text \"Record implementation deltas\" :probe.rebirth.plan.item/status :pending}]}])\n"
+   "(my.message/read \"rebirth-message-1\" (seon.db/db))\n"
+   "(seon.db/transact! [{:probe.rebirth.plan/id \"rebirth-plan\" :probe.rebirth.plan/title \"Prove rebirth compacts state\" :probe.rebirth.plan/agent [:seon.cluster.agent/id \"rebirth\"] :probe.rebirth.plan/items [{:probe.rebirth.plan.item/id \"i1\" :probe.rebirth.plan.item/text \"Audit current my.plan\" :probe.rebirth.plan.item/status :active} {:probe.rebirth.plan.item/id \"i2\" :probe.rebirth.plan.item/text \"Capture lived deltas\" :probe.rebirth.plan.item/status :pending} {:probe.rebirth.plan.item/id \"i3\" :probe.rebirth.plan.item/text \"Author durable artifacts\" :probe.rebirth.plan.item/status :pending} {:probe.rebirth.plan.item/id \"i4\" :probe.rebirth.plan.item/text \"Prove current-state rendering\" :probe.rebirth.plan.item/status :pending} {:probe.rebirth.plan.item/id \"i5\" :probe.rebirth.plan.item/text \"Compare deterministic rebirths\" :probe.rebirth.plan.item/status :pending} {:probe.rebirth.plan.item/id \"i6\" :probe.rebirth.plan.item/text \"Record implementation deltas\" :probe.rebirth.plan.item/status :pending}]}])\n"
    "(my.run/complete \"Created the six-item fact-backed plan.\")"))
 
 (defn- plan-refine-reply [shown-basis]
   (str
    "The prose-only insight this turn is that i4 is the conceptual center; this sentence intentionally has no fact.\n"
    (delta-form shown-basis) "\n"
-   "(my.message/read \"rebirth-message-2\")\n"
-   "(db/transact! [{:probe.rebirth.plan/id \"rebirth-plan\" :probe.rebirth.plan/title \"Prove rebirth compacts fact-backed state\"} {:probe.rebirth.plan.item/id \"i1\" :probe.rebirth.plan.item/text \"Audit current my.plan facts, status fields, timestamps, and renders\" :probe.rebirth.plan.item/status :done :probe.rebirth.plan.item/completed-at #inst \"2026-08-12T01:00:00.000-00:00\"} {:probe.rebirth.plan.item/id \"i2\" :probe.rebirth.plan.item/status :done :probe.rebirth.plan.item/completed-at #inst \"2026-08-12T02:00:00.000-00:00\"} {:probe.rebirth.plan.item/id \"i3\" :probe.rebirth.plan.item/status :active}])\n"
+   "(my.message/read \"rebirth-message-2\" (seon.db/db))\n"
+   "(seon.db/transact! [{:probe.rebirth.plan/id \"rebirth-plan\" :probe.rebirth.plan/title \"Prove rebirth compacts fact-backed state\"} {:probe.rebirth.plan.item/id \"i1\" :probe.rebirth.plan.item/text \"Audit current my.plan facts, status fields, timestamps, and renders\" :probe.rebirth.plan.item/status :done :probe.rebirth.plan.item/completed-at #inst \"2026-08-12T01:00:00.000-00:00\"} {:probe.rebirth.plan.item/id \"i2\" :probe.rebirth.plan.item/status :done :probe.rebirth.plan.item/completed-at #inst \"2026-08-12T02:00:00.000-00:00\"} {:probe.rebirth.plan.item/id \"i3\" :probe.rebirth.plan.item/status :active}])\n"
    "(my.run/complete \"Refined the plan and completed i1 and i2.\")"))
 
 (defn- plan-finish-reply [shown-basis]
   (str
    "My final prose-only reasoning is that a declared render is the compaction algorithm. It should disappear.\n"
    (delta-form shown-basis) "\n"
-   "(my.message/read \"rebirth-message-3\")\n"
-   "(db/transact! [{:probe.rebirth.plan.item/id \"i3\" :probe.rebirth.plan.item/status :done :probe.rebirth.plan.item/completed-at #inst \"2026-08-12T03:00:00.000-00:00\"} {:probe.rebirth.plan.item/id \"i4\" :probe.rebirth.plan.item/status :done :probe.rebirth.plan.item/completed-at #inst \"2026-08-12T04:00:00.000-00:00\"} {:probe.rebirth.plan.item/id \"i5\" :probe.rebirth.plan.item/text \"Byte-compare two empty-history derivations\" :probe.rebirth.plan.item/status :active} {:probe.rebirth.plan.item/id \"i6\" :probe.rebirth.plan.item/status :pending}])\n"
+   "(my.message/read \"rebirth-message-3\" (seon.db/db))\n"
+   "(seon.db/transact! [{:probe.rebirth.plan.item/id \"i3\" :probe.rebirth.plan.item/status :done :probe.rebirth.plan.item/completed-at #inst \"2026-08-12T03:00:00.000-00:00\"} {:probe.rebirth.plan.item/id \"i4\" :probe.rebirth.plan.item/status :done :probe.rebirth.plan.item/completed-at #inst \"2026-08-12T04:00:00.000-00:00\"} {:probe.rebirth.plan.item/id \"i5\" :probe.rebirth.plan.item/text \"Byte-compare two empty-history derivations\" :probe.rebirth.plan.item/status :active} {:probe.rebirth.plan.item/id \"i6\" :probe.rebirth.plan.item/status :pending}])\n"
    "missing-plan-helper\n"
    "(current-items :wrong-shape)\n"
    "(my.run/complete \"Completed i3 and i4; i5 is active and i6 remains.\")"))
@@ -227,24 +256,30 @@
     :args [database agent-id]
     :order-by '[?opened :asc ?ordinal :asc]}))
 
-(defn- transcript-entries [instance database]
-  (let [cluster-handle (:seon.cluster.loop/cluster instance)
-        settings (config/effective database
-                                   (get-in instance [:seon.boot/config
-                                                     :seon.boot/cluster-name]))]
+(defn- transcript-entries*
+  [connection cluster-handle cluster-name database]
+  (let [settings (config/effective database cluster-name)]
     (schema/call-with-projection-state
-     (get-in cluster-handle
-             [:seon.sci.eval/ctx :seon.sci.eval/projection-state])
+     (:seon.sci.eval/projection-state cluster-handle)
      #(transcript/history-entries
        {:seon.db/db database
-        :seon.db/connection (:seon.boot/cluster-connection instance)
+        :seon.db/connection connection
         :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster-handle)
         :seon.cluster.agent/id agent-id
         :seon.render/profile
         (assoc (render/agent-render-profile settings)
                :seon.render.profile/token-budget 1000000)
         :seon.sci.admit/caps (config/result-caps settings)
+        :seon.sci.eval/time-limit-ms
+        (:seon.config.eval/time-limit-ms settings)
         :seon.config/on-core-error :record}))))
+
+(defn- transcript-entries [instance database]
+  (transcript-entries*
+   (:seon.boot/cluster-connection instance)
+   (:seon.cluster.loop/cluster instance)
+   (get-in instance [:seon.boot/config :seon.boot/cluster-name])
+   database))
 
 (defn- run-generated-rebirth!
   [instance branch run-id]
@@ -294,22 +329,38 @@
                         :seon.db/connection connection
                         :seon.sci.eval/ctx ctx
                         :seon.cluster.run/process process-id)
+                 superseded-run-ids
+                 (sort
+                  (db/q '[:find [?run-id ...]
+                          :in $ ?agent-id
+                          :where
+                          [?agent :seon.cluster.agent/id ?agent-id]
+                          [?run :seon.cluster.run/agent ?agent]
+                          [?run :seon.cluster.run/id ?run-id]]
+                        @connection agent-id))
                  opened
                  (db/transact!
                   connection
-                  (run/generated-run-tx
-                   @connection
-                   {:seon.cluster.agent/id agent-id
-                    :seon.cluster.run/id run-id
-                    :seon.cluster.run/process process-id
-                    :seon.cluster.run/opened-at (at 90000)
-                    :seon.cluster.run/starting-ns
-                    [:seon.ns/name namespace-name]
-                    :seon.cluster.run.form/source
-                    (bootstrap/entry-source
-                     {:seon.repl/comment
-                      "; Reborn from current facts with empty history."
-                      :seon.repl/form '(help)})}))]
+                  {:tx-data
+                   (into
+                    (run/generated-run-tx
+                     @connection
+                     {:seon.cluster.agent/id agent-id
+                      :seon.cluster.run/id run-id
+                      :seon.cluster.run/process process-id
+                      :seon.cluster.run/opened-at (at 90000)
+                      :seon.cluster.run/starting-ns
+                      [:seon.ns/name namespace-name]
+                      :seon.cluster.run.form/source
+                      (bootstrap/entry-source
+                       {:seon.repl/comment
+                        "; Reborn from current facts with empty history."
+                        :seon.repl/form '(help)})})
+                    (map (fn [old-run-id]
+                           [:db/add [:seon.cluster.run/id run-id]
+                            :seon.cluster.run/supersedes
+                            [:seon.cluster.run/id old-run-id]]))
+                    superseded-run-ids)})]
              (when (error-value? opened)
                (throw (ex-info "Rebirth run open was refused." opened)))
              (loop [passes 0]
@@ -330,8 +381,25 @@
                          :seon.cluster.work/next next-work}
                         (at (+ 90000 passes)))
                        (recur (inc passes)))))))
-             {:rebirth.probe/run-id run-id
-              :rebirth.probe/history (raw-run-history @connection)})))
+             (let [database @connection]
+               {:rebirth.probe/run-id run-id
+                :rebirth.probe/history
+                (into [] (filter #(= run-id (first %)))
+                      (raw-run-history database))
+                :rebirth.probe/rendered-history
+                (transcript-entries*
+                 connection cluster-handle
+                 (get-in instance [:seon.boot/config
+                                   :seon.boot/cluster-name])
+                 database)
+                :rebirth.probe/supersedes
+                (db/q '[:find [?old-id ...]
+                        :in $ ?new-id
+                        :where
+                        [?new :seon.cluster.run/id ?new-id]
+                        [?new :seon.cluster.run/supersedes ?old]
+                        [?old :seon.cluster.run/id ?old-id]]
+                      database run-id)}))))
         (finally
           (store/release-branch! connection)
           (registry/retire-branch! {:seon.store/store store-value
@@ -358,14 +426,16 @@
            [(get-else $ ?test :seon.test/fail-count 0) ?fail]
            [(get-else $ ?test :seon.test/error-count 0) ?error]]
          database namespace-name)
-   :rebirth.probe/declared-schema-forms
+   :rebirth.probe/registered-schema-forms
    (db/q '[:find ?schema-key ?form
            :in $ [?schema-key ...]
            :where
            [?schema :seon.schema/key ?schema-key]
            [?schema :seon.schema/form ?form]]
          database
-         [:probe.rebirth.plan/plan :my.agents.rebirth/namespace-unit])})
+         probe-schema-keys)
+   :rebirth.probe/installed-plan-attributes
+   (into [] (filter #(contains? (:schema database) %)) plan-attribute-keys)})
 
 (defn- supersedes-evidence [database]
   {:rebirth.probe/installed?
@@ -400,17 +470,23 @@
           (agent/disarm! {:seon.cluster.agent/id agent-id
                           :seon.cluster.agent/routing
                           (:seon.cluster.agent/routing instance)})
-          (let [basis-0
+          (let [_artifact-basis
                 (open-agent-run!
                  instance process "rebirth-artifacts-run"
                  "rebirth-artifacts"
                  "Declare the fact-backed plan and its artifacts."
                  (artifact-reply) 1000)
+                basis-render
+                (open-agent-run!
+                 instance process "rebirth-render-declarations-run"
+                 "rebirth-render-declarations"
+                 "Declare the namespace and current-plan renders."
+                 (render-declarations-reply) 1500)
                 basis-1
                 (open-agent-run!
                  instance process "rebirth-plan-turn-1"
                  "rebirth-message-1" "Create the initial plan items."
-                 (plan-create-reply basis-0) 2000)
+                 (plan-create-reply basis-render) 2000)
                 basis-2
                 (open-agent-run!
                  instance process "rebirth-plan-turn-2"
@@ -429,7 +505,7 @@
                              instance :rebirth-proof-a "rebirth-proof-a")
               second-rebirth (run-generated-rebirth!
                               instance :rebirth-proof-b "rebirth-proof-b")
-              normalized
+              normalized-raw
               (fn [proof]
                 (let [own-id (:rebirth.probe/run-id proof)]
                   (mapv (fn [row]
@@ -438,8 +514,20 @@
                                    %)
                                 (assoc (vec row) 0 "rebirth")))
                         (:rebirth.probe/history proof))))
-              first-bytes (pr-str (normalized first-rebirth))
-              second-bytes (pr-str (normalized second-rebirth))
+              normalized-rendered-bytes
+              (fn [proof]
+                (let [own-id (:rebirth.probe/run-id proof)]
+                  (str/join
+                   "\n\n"
+                   (map #(str/replace (:seon.render.history/bytes %)
+                                      own-id "rebirth")
+                        (:rebirth.probe/rendered-history proof)))))
+              first-raw-bytes (pr-str (normalized-raw first-rebirth))
+              second-raw-bytes (pr-str (normalized-raw second-rebirth))
+              first-rendered-bytes
+              (normalized-rendered-bytes first-rebirth)
+              second-rendered-bytes
+              (normalized-rendered-bytes second-rebirth)
               evidence
               {:rebirth.probe/root root
                :rebirth.probe/basis-t (db/basis-t database)
@@ -450,8 +538,15 @@
                 (str/join "\n\n" (map :seon.render.history/bytes
                                       rendered-lived)))
                :rebirth.probe/rebirth first-rebirth
-               :rebirth.probe/rebirth-tokens (tokens/estimate first-bytes)
-               :rebirth.probe/deterministic? (= first-bytes second-bytes)
+               :rebirth.probe/rebirth-tokens
+               (tokens/estimate first-rendered-bytes)
+               :rebirth.probe/deterministic?
+               (and (= first-raw-bytes second-raw-bytes)
+                    (= first-rendered-bytes second-rendered-bytes))
+               :rebirth.probe/raw-deterministic?
+               (= first-raw-bytes second-raw-bytes)
+               :rebirth.probe/rendered-deterministic?
+               (= first-rendered-bytes second-rendered-bytes)
                :rebirth.probe/program-graph
                (program-graph-evidence database)
                :rebirth.probe/supersedes (supersedes-evidence database)

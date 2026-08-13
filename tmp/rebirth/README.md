@@ -11,9 +11,9 @@ Run only after the issue
 is closed by its owning lane:
 
 ```bash
-clojure -M:test -e '(load-file "tmp/rebirth/probe.clj") (rebirth.probe/-main "tmp/rebirth/scratch-root")'
+clojure -M:test -e '(load-file "tmp/rebirth/probe.clj") (rebirth.probe/-main "tmp/rebirth/scratch-root-4")'
 ```
 
 The complete EDN evidence is written beneath that isolated root as
 `rebirth-evidence.edn`. The committed owner-facing interpretation belongs at
-`docs/prds/sci-execution-runtime/research/rebirth-capability-proof-2026-08-12.md`.
+`docs/prds/sci-execution-runtime/research/rebirth-capability-proof-2026-08-13.md`.
