@@ -77,8 +77,13 @@ registered-keys-self-explain.
   [error-kind-audit-2026-08-12](../research/error-kind-audit-2026-08-12.md)).
 - **2026-08-13 evening, owner back online — three parallel side-lanes
   launched with his approval** (all file-disjoint from W2):
-  `r4-docs-census` (legacy-spelling census + doc-only fixes; src/test
-  residue reported, never edited), `issue-class-kill` (top-ranked open
+  `r4-docs-census` (RETURNED COMPLETE: doc fixes in `e8b43c617` +
+  `22e6209a4`, the 102-spelling concordance in
+  [legacy-spelling-census-2026-08-13](../research/legacy-spelling-census-2026-08-13.md)
+  `44a9b0609`; src/test residue recorded for the R2/R4 batch — headline
+  counts: `driver` 133, `fold` 199, run-source `plan` 317, `door` 131,
+  `ambient` 230 — counts include ordinary-English hits, judge per row
+  before batching), `issue-class-kill` (top-ranked open
   class disjoint from the W2 census files), `class-member-tags`
   (RETURNED COMPLETE `90eecdee5`: 13 hand lists dissolved into
   `class/<id>` tag derivations, `bin/issues-index --class` query added
