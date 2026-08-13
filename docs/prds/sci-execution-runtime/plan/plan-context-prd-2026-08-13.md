@@ -94,3 +94,32 @@ omission.
 Model the schema/verb/render idiom on `my.note` (`9b26cb7a7`) — the
 freshest ruled example of exactly this shape, including per-shape render
 functions.
+
+## T3 amendments — 2026-08-13 evening (owner rulings, conversational)
+
+T3 is UNBLOCKED: the membership ruling landed as ruling 2 of the
+2026-08-13 batch (approved as specced above), and the producer-side
+kind→class migration (W2 `2aacc58fe`–`5423c5a10`, W2b `d5f7c7a08`) freed
+the owned files. Four rulings from the evening's design session ride into
+T3's scope, recorded in the
+[design-ideas ledger](design-ideas-ledger-2026-08-13.md) entries 17–20:
+
+1. **Render the basis `t` beside every entry's result** (entry 17). The
+   receipt already records the read-basis transaction; T3 renders it so
+   agents anchor their own temporal reasoning on a shown value.
+2. **No undeclared temporal keys** (entry 18, amended precision): the
+   uniform read-surface convention is a declared `:seon.db/db`
+   database-value argument plus fully namespaced registered options
+   (`my.message/inbox` at HEAD is the canonical example). T3 extends the
+   pair to read surfaces it touches; it never adds an undeclared key.
+3. **Nothing rendered that will not run verbatim for the agent**
+   (entry 19): generated delta/demo entries are ordinary replayable
+   forms; the falsifier is replaying generated forms in a fresh fork.
+4. **`seon.db/diff` (entry 20)** — the one generic delta helper over any
+   form whose function declares a `:seon.db/db` input; final contract
+   PENDING the live REPL exploration
+   (`../research/generic-diff-exploration-2026-08-13.md` when it lands) —
+   implement in T3 only after that note settles the shape; the demo-vs-doc
+   rule (docs for lookup, demonstrations on first real use via `:about`
+   intent + no prior demonstrating artifact) governs how subject units
+   render either way.
