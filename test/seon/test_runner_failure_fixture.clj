@@ -8,6 +8,9 @@
 (deftest failing-example
   (is (= 5 (+ 2 2)) "the deliberate broken-test evidence"))
 
+(deftest assertionless-example
+  nil)
+
 (defn- refusal
   [error-class signature]
   (doto (ex-info "one repeated refusal"

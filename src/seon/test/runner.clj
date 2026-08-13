@@ -201,6 +201,31 @@
           (report-error! options event signature))))
     (default-report event)))
 
+(defn- assertionless-failure
+  [capture event]
+  (when (= :end-test-var (:type event))
+    (let [test-symbol (event-symbol event)
+          result (get-in @capture [::results test-symbol])
+          assertion-count
+          (+ (get result :seon.test/pass-count 0)
+             (get result :seon.test/fail-count 0)
+             (get result :seon.test/error-count 0))]
+      (when (and result (zero? assertion-count))
+        {:type :fail
+         :var (:var event)
+         :message (str "Test " test-symbol
+                       " completed without assertion evidence.")
+         :expected '(pos? assertion-count)
+         :actual assertion-count}))))
+
+(defn- capture-and-report-event!
+  [options capture selected-namespaces default-report reported-signatures event]
+  (capture-event! options capture selected-namespaces event)
+  (when-let [failure (assertionless-failure capture event)]
+    (capture-event! options capture selected-namespaces failure)
+    (report-event! options default-report reported-signatures failure))
+  (report-event! options default-report reported-signatures event))
+
 (defn- announce!
   [progress description]
   (let [at (Instant/now)]
@@ -469,9 +494,9 @@
           default-report test/report]
       (binding [test/report
                 (fn [event]
-                  (capture-event! options capture selected-namespaces event)
-                  (report-event! options default-report
-                                 reported-signatures event))]
+                  (capture-and-report-event!
+                   options capture selected-namespaces default-report
+                   reported-signatures event))]
         (test/test-vars [test-var]))
       (first (captured-results @capture)))))
 
@@ -665,11 +690,11 @@
         {::keys [raw-summary stopped-after]}
         (binding [test/report
                   (fn [event]
-                    (capture-event! options capture selected-namespaces event)
                     (when progress
                       (progress-event! progress event))
-                    (report-event! options default-report
-                                   reported-signatures event))]
+                    (capture-and-report-event!
+                     options capture selected-namespaces default-report
+                     reported-signatures event))]
           (if tiers
             (let [outcome (run-tiers! (:seon.test.runner/namespaces request)
                                       progress tiers)]
@@ -730,9 +755,9 @@
                       test/*test-out* output
                       test/report
                       (fn [event]
-                        (capture-event! options capture #{namespace-name} event)
-                        (report-event! options default-report
-                                       reported-signatures event))]
+                        (capture-and-report-event!
+                         options capture #{namespace-name} default-report
+                         reported-signatures event))]
               (let [summary (run-selected-tests [namespace-name] test-vars)]
                 (test/do-report (assoc summary :type :summary))
                 summary))]

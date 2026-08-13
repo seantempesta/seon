@@ -221,9 +221,9 @@
         by-symbol (into {}
                         (map (juxt :seon.test/sym identity))
                         (:seon.test.runner/results result))]
-    (is (= #:seon.test.runner{:test-count 4
+    (is (= #:seon.test.runner{:test-count 5
                               :pass-count 1
-                              :fail-count 1
+                              :fail-count 2
                               :error-count 8}
            (:seon.test.runner/summary result)))
     (is (= #:seon.test{:pass-count 1 :fail-count 0 :error-count 0}
@@ -242,6 +242,23 @@
           (by-symbol
            "seon.test-runner-failure-fixture/failing-example"))
          "deliberate broken-test evidence"))))
+
+(deftest assertionless-test-is-an-attributed-failure
+  (let [result (captured-run)
+        by-symbol (into {}
+                        (map (juxt :seon.test/sym identity))
+                        (:seon.test.runner/results result))
+        assertionless
+        (by-symbol
+         "seon.test-runner-failure-fixture/assertionless-example")]
+    (is (= #:seon.test{:pass-count 0 :fail-count 1 :error-count 0}
+           (select-keys assertionless
+                        [:seon.test/pass-count
+                         :seon.test/fail-count
+                         :seon.test/error-count])))
+    (is (str/includes?
+         (:seon.test/failure-message assertionless)
+         "Test seon.test-runner-failure-fixture/assertionless-example completed without assertion evidence."))))
 
 (deftest repeated-identical-errors-have-one-bounded-face
   (let [{::keys [result output]} (captured-run-with-output)
