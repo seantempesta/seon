@@ -60,10 +60,11 @@ See `README.md` for the convention.
 | [Stop run-opening retries against an answered trigger](run-opening-retries-storm-against-an-answered-trigger.md) | blocker | gate wedge lane (wedge-properties) |
 | [Explain the 24-second live root pull of 189 members](live-root-pull-of-189-members-takes-24-seconds.md) | blocker | render acquisition performance wave |
 
-## Friction (128)
+## Friction (129)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Run selected renders under the requesting eval's arm](public-walk-render-inside-an-armed-eval-hits-already-armed.md) | friction | render/arm nesting fix (next wave) |
 | [Stop the opening walkthrough replicating its usage test per agent](opening-walkthrough-replicates-a-usage-test.md) | friction | evolving-session implementation phases |
 | [Supply every declared render dependency in the agent-flow fixture](agent-flow-fixture-omits-render-interest.md) | friction | flow join-wedge diagnosis |
 | [Make proofs unable to pass without exercising their premise](class-proofs-pass-without-exercising-their-premise.md) | friction | class-kill queue |
