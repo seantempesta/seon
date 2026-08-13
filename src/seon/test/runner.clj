@@ -23,6 +23,7 @@
 
 (defn var-reference?
   "True for a host or SCI Var reference."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
   (or (var? value) (sci.utils/var? value)))
 

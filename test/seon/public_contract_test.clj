@@ -3,83 +3,89 @@
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
             [clojure.test.check.generators :as gen]
-            [clojure.tools.reader :as reader]
-            [clojure.tools.reader.reader-types :as reader-types]
             [datahike.api :as d]
             [seon.cluster :as cluster]
             [seon.cluster.store :as store]
             [seon.flow :as flow]
+            [seon.fn.analyzer :as analyzer]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]))
 
-(def ^:private reader-options
-  {:read-cond :allow
-   :features #{:clj}
-   :eof ::eof})
+(defn- public-defn?
+  [definition]
+  (and (= 'clojure.core/defn (::analyzer/defined-by definition))
+       (not (::analyzer/private definition))))
 
-(defn- source-file?
-  [file]
-  (and (.isFile file)
-       (or (.endsWith (.getName file) ".clj")
-           (.endsWith (.getName file) ".cljc"))))
+(defn- identity-bearing?
+  [definition]
+  (and (symbol? (::analyzer/ns definition))
+       (symbol? (::analyzer/name definition))
+       (string? (::analyzer/filename definition))
+       (pos-int? (::analyzer/row definition))))
 
-(defn- require-aliases
-  [ns-form]
-  (into {}
+(defn- analyzed-files
+  [analysis]
+  (into []
         (comp
-         (filter #(and (seq? %) (= :require (first %))))
-         (mapcat rest)
-         (filter vector?)
-         (keep
-          (fn [[library & options]]
-            (let [options (apply hash-map options)
-                  alias (or (:as options) (:as-alias options))]
-              (when alias [alias library])))))
-        (drop 2 ns-form)))
+         (map ::analyzer/filename)
+         (remove nil?)
+         (distinct))
+        (concat (::analyzer/namespace-definitions analysis)
+                (::analyzer/var-definitions analysis)
+                (::analyzer/findings analysis))))
 
-(defn- defn-contract
-  [form]
-  (when (and (seq? form) (= 'defn (first form)))
-    (let [function-name (second form)
-          body (drop 2 form)
-          body (if (string? (first body)) (next body) body)
-          attributes (when (map? (first body)) (first body))
-          metadata (merge (meta function-name) attributes)]
-      (when-not (:private metadata)
-        {:seon.public-contract/name function-name
-         :seon.public-contract/schema (:malli/schema metadata)}))))
-
-(defn- file-contracts
-  [file]
-  (with-open [file-reader (io/reader file)]
-    (let [pushback (reader-types/indexing-push-back-reader file-reader)
-          ns-form (reader/read reader-options pushback)
-          namespace-name (second ns-form)
-          aliases (require-aliases ns-form)
-          parsing-ns (or (find-ns namespace-name)
-                         (create-ns namespace-name))]
-      (binding [*ns* parsing-ns
-                reader/*alias-map* aliases]
-        (loop [contracts []]
-          (let [form (reader/read reader-options pushback)]
-            (if (= ::eof form)
-              contracts
-              (recur
-               (cond-> contracts
-                 (defn-contract form)
-                 (conj
-                  (assoc (defn-contract form)
-                         :seon.public-contract/file (.getPath file))))))))))))
+(defn- public-function-census!
+  [paths]
+  (let [analysis (analyzer/analyze {::analyzer/paths paths})
+        subjects (filterv public-defn? (::analyzer/var-definitions analysis))
+        evidence
+        {:seon.public-contract/paths paths
+         :seon.public-contract/analyzed-files (analyzed-files analysis)
+         :seon.public-contract/findings (::analyzer/findings analysis)}]
+    (when-not (seq subjects)
+      (throw
+       (ex-info "Public-contract analysis produced no public function subjects."
+                (assoc evidence
+                       :seon.error/kind
+                       ::no-public-function-subjects))))
+    (when-let [subject (first (remove identity-bearing? subjects))]
+      (throw
+       (ex-info "Public-contract analysis produced an unidentified subject."
+                (assoc evidence
+                       :seon.error/kind ::unidentified-public-function
+                       :seon.public-contract/subject subject))))
+    subjects))
 
 (deftest every-fresh-public-function-has-a-complete-contract
-  (let [missing
+  (let [subjects (public-function-census! ["src"])
+        missing
         (into []
               (comp
-               (filter source-file?)
-               (mapcat file-contracts)
-               (filter #(nil? (:seon.public-contract/schema %))))
-              (file-seq (io/file "src")))]
+               (filter #(nil? (get-in % [::analyzer/meta :malli/schema])))
+               (map #(select-keys % [::analyzer/filename
+                                     ::analyzer/row
+                                     ::analyzer/ns
+                                     ::analyzer/name])))
+              subjects)]
+    (is (seq subjects) "the production analyzer must find public functions")
+    (is (every? identity-bearing? subjects)
+        "every analyzed public function must retain source identity")
     (is (empty? missing) (pr-str missing))))
+
+(deftest public-contract-census-refuses-an-absent-source-root
+  (let [absent-root (io/file "tmp" "n2-public-contract-absent-source-root")
+        _ (is (not (.exists absent-root))
+              (str "counterexample root must be absent: " absent-root))
+        failure
+        (try
+          (public-function-census! [(.getPath absent-root)])
+          nil
+          (catch clojure.lang.ExceptionInfo error error))]
+    (is (= ::no-public-function-subjects
+           (:seon.error/kind (ex-data failure))))
+    (is (= [] (:seon.public-contract/analyzed-files (ex-data failure))))
+    (is (= [(.getPath absent-root)]
+           (:seon.public-contract/paths (ex-data failure))))))
 
 (deftest opaque-predicate-contracts-construct-real-values
   (doseq [[predicate generator]
