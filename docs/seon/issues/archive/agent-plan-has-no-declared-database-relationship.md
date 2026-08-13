@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, agent, schema, database, wave/evolving-session-prd]
 ---
@@ -50,3 +50,20 @@ would silently choose semantics the issue leaves open.
   datom's transaction metadata.
 - Changing the plan alone derives no agent work; a separate message is the
   only model-turn wake.
+
+## Resolution — 2026-08-13
+
+Resolved by `d8a545a3e`. The fact-first plan landing declares authored plan
+items as database entities connected to their agent through
+`:my.plan.item/agent`, with an optional `:my.plan/anchor` ref on the agent
+entity. `my.plan/add!`, `complete!`, and `plan!` transact those facts with
+`:seon.db/user` transaction metadata, so another database writer can update
+the same declared facts and provenance remains derivable from the changed
+datom's transaction.
+
+Source verification at committed HEAD found that `my.plan/plan` derives the
+current authored plan from those refs, while
+`seon.cluster.work/next-agent-work` still derives work only from held runs,
+message triggers, and unanswered background results. No `my.plan` fact is a
+wake input, so a plan-only transaction remains passive until a separate
+message arrives.
