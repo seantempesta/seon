@@ -1467,8 +1467,11 @@
                        (set (keys (:seon.cluster.agent/armed state))))
                 (async/offer! armed-event state)))]
         (db/transact! connection
-                    [(config-row "route-trial"
-                                 {:seon.config.run/max-episode-runs 100})])
+                      [{:seon.db.process/id process}
+                       {:seon.cluster/name "route-trial"}
+                       (config-row
+                        "route-trial"
+                        {:seon.config.run/max-episode-runs 100})])
         (try
           (with-redefs [ai/complete
                         (recording-completer
@@ -1538,7 +1541,7 @@
                       (await-database-state!
                        connection
                        (:seon.cluster.agent-test/events events)
-                       #(and (= @message-count
+                       #(and (= (+ @message-count (count agent-ids))
                                 (count (answers-by-trigger %)))
                              (quiescent? % agent-ids)))
                       answers (answers-by-trigger db)]
@@ -1554,7 +1557,8 @@
                                           db agent-id))))
                            agent-ids)
                    :every-message-answered-once?
-                   (and (= @message-count (count answers))
+                   (and (= (+ @message-count (count agent-ids))
+                           (count answers))
                         (every? #(= 1 (val %)) answers))})
                 (finally
                   (remove-watch routing watch-key)
