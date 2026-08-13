@@ -161,6 +161,18 @@ one decision away from queued work. Ruled items cite their record.
     IMPLEMENTATION QUEUED after plan-t3 returns (it holds walk.clj and
     bootstrap.clj).
 
+22. **Cluster-name safety is computed, never a reserved list** (owner
+    exchange, 2026-08-13 night): the store collision was a LAYOUT defect
+    (refs and object store in one directory — the git analogy), which R3
+    option 2 dissolves structurally. The remaining guard is derived: a
+    cluster name must be a valid single path segment (tightening
+    `:seon.boot/cluster-name`, an honest input narrowing), and creation
+    refuses when the target directory exists and is not a cluster —
+    checked against the filesystem at admission, never a hand list of
+    reserved names. Identity beneath the address already exists: store
+    id, branch head commit id, Datahike's named branch. Folded into the
+    r3-store-layout lane's resume.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
