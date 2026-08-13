@@ -150,6 +150,14 @@ carried stale evidence within a day. Re-verify before starting.
    datoms; identity from the installed schema's `:db.unique/identity`;
    entity-vs-envelope from `storable-attribute-in?`. Detail: ledger
    entry 21. Implementation queued behind plan-t3's return.
+6. **R3 store layout = option 2 of
+   [the options doc](../research/store-path-rename-options-2026-08-13.md)**
+   (late night): `data/clusters/` holds ONLY clusters; the store,
+   `store.lock`, and `blob-staging` move up to `data/` siblings, plus the
+   addendum's reserved-cluster-name refusal, in one commit. Existing
+   roots break by design (`bin/seon reset --force`; database data is
+   disposable by ruling). The store id derives from its path, so the
+   move changes store identity — reset, never migrate.
 
 ### Current dependency spine — 2026-08-12 wind-down
 
