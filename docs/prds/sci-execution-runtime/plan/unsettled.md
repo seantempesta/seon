@@ -100,6 +100,15 @@ registered-keys-self-explain.
 5. Keep the issue campaign beside the spine: class-kill by mining rank,
    staleness archival with source-verified evidence only.
 
+**ON OWNER RETURN (his standing instruction):** open with ONE
+AskUserQuestion round covering the pending design decisions below, and
+give him the link to
+[the draft instruction-facts PRD](instruction-facts-prd-2026-08-13.md)
+(its five numbered decisions are the core of the round; add R3 and the
+ledger's cheapest-cost-model item; a second round only if he engages).
+Meanwhile: RESUME ANY CRASHED LANE with its context (stop/resume mechanics
+in the orchestrator manual) — lane crashes are weather.
+
 **PENDING THE OWNER (do not decide):** R3 `data/clusters/store` path
 rename options; the drafted
 [instruction-facts PRD](instruction-facts-prd-2026-08-13.md)'s five
