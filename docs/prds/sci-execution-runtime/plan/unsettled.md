@@ -167,6 +167,23 @@ config/default.edn line last) — both resume to commit when config
 settles. The general-diff research agent was killed by host sleep and
 was resumed with the entity-flag ruling added to its brief.
 
+**2026-08-13 night check-in state:** editscript VENDORED
+(`reference-code/editscript` submodule and its deps.edn entry,
+owner-ruled after the
+general-diff research measured the comparison at 13.2 of ~18 ms;
+migration queued as db-diff's follow-up round with the three filed
+render defects and the identity-attr? coverage substitution 37→116).
+Both research agents delivered
+([general-diff-and-render](../research/general-diff-and-render-2026-08-13.md)
+with the web survey folded inside it). The dial is whole (1024 default landed).
+Class-kill r3 landed the operator status aggregate. Serialization
+draining: db-diff commits (critical path) → plan-t3 verifies+commits T3
+→ dump-kill commits. THEN: entity-flag deletion lane (ruling 5) and the
+db-diff follow-up round; W3 consumers after those; W4/W5 →
+database-value/sources renames → ONE closing --all → live drive.
+Wedge-continuation classes (host crossings, orderly-stop joins, web
+delivery) interleave where file-disjoint from W3.
+
 **THE ORDERED QUEUE AFTER RETURNS:**
 1. R2 continuation, serial, red-tolerant: W2b (deferred producers in
    bootstrap/walk/plan once those lanes land) → W3 consumers dispatch on
