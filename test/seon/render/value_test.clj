@@ -5,9 +5,12 @@
             [clojure.test :refer [deftest is]]
             [seon.config :as config]
             [seon.print :as print]
+            [seon.render :as render]
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
-            [seon.sci.admit :as admit]))
+            [seon.schema :as schema]
+            [seon.sci.admit :as admit]
+            [seon.test-support :as support]))
 
 (def ^:private caps
   (config/result-caps (config/defaults)))
@@ -28,6 +31,19 @@
                                    :seon.render.data/offset 0}
          :seon.render.value/options
          {:seon.render.value/max-collection size}))
+
+(defn- registered-unit
+  [connection raw]
+  (assoc (unit raw)
+         :seon.db/db @connection
+         :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+         :seon.render.value/root [:seon.render.value-test/registered raw]))
+
+(defn- render-request
+  [connection raw]
+  (assoc (registered-unit connection raw)
+         :seon.sci.eval/time-limit-ms 2000
+         :seon.config/on-core-error :panic))
 
 (defn- lexical-hiccup-text
   [form]
@@ -57,6 +73,118 @@
         (is (= 1 @emissions))
         (is (= "{:a [1 2 3]}" (value/render-ai-data projection)))
         (is (vector? (value/render-html-data projection)))))))
+
+(deftest registered-map-collections-render-one-concise-line-per-row
+  (support/with-database
+   (fn [connection]
+     (let [rows [{:my.message/id "m-1"
+                  :my.message/at (java.util.Date. 1000)
+                  :my.message/preview "first"}
+                 {:my.message/id "m-2"
+                  :my.message/from "alice"
+                  :my.message/at (java.util.Date. 2000)
+                  :my.message/preview "second"}]
+           floor-unit (registered-unit connection rows)
+           ai (value/render-ai floor-unit)
+           html (hiccup/->string (value/render-html floor-unit))
+           lines (str/split-lines ai)]
+       (is (= 2 (count lines)))
+       (is (every? #(str/starts-with? % "id: ") lines))
+       (is (every? #(and (str/includes? % "at: ")
+                         (str/includes? % "preview: "))
+                   lines))
+       (is (str/includes? (second lines) "from: \"alice\""))
+       (is (not (str/includes? ai "|")))
+       (is (= 2 (count (re-seq #"<li>" html))))))))
+
+(deftest one-registered-map-renders-a-compact-attribute-listing
+  (support/with-database
+   (fn [connection]
+     (let [row {:my.message/preview "hello"
+                :my.message/at (java.util.Date. 1000)
+                :my.message/id "m-1"}
+           floor-unit (registered-unit connection row)
+           ai (value/render-ai floor-unit)
+           html (hiccup/->string (value/render-html floor-unit))
+           identity-after-first-required
+           {:my.message/value {:my.message/to "root"
+                               :my.message/content "hello"}
+            :seon.cluster.agent/id "root"
+            :seon.cluster.run/id "run-1"
+            :seon.cluster.run.form/ordinal 0
+            :seon.cluster.message/at (java.util.Date. 1000)
+            :seon.config.message/max-chain 1}
+           identity-ai
+           (value/render-ai
+            (registered-unit connection identity-after-first-required))]
+       (is (str/starts-with? ai "id: \"m-1\", at: "))
+       (is (str/ends-with? ai "preview: \"hello\""))
+       (is (= 1 (count (str/split-lines ai))))
+       (is (not (str/includes? ai "{:my.message")))
+       (is (str/includes? html "seon-data-map"))
+       (is (< (str/index-of html "id")
+              (str/index-of html "preview")))
+       (is (str/starts-with?
+            identity-ai ":seon.cluster.agent/id: \"root\""))
+       (is (< (str/index-of identity-ai "my.message/value")
+              (str/index-of identity-ai ":seon.cluster.run/id")))))))
+
+(deftest unregistered-values-keep-the-existing-fitted-print-floor
+  (let [raw {:unregistered/value 1 :unregistered/detail [2 3]}
+        floor-unit (unit raw)
+        projection (value/prepare floor-unit)
+        html (hiccup/->string (value/render-html-data projection))]
+    (is (= (pr-str raw) (value/render-ai-data projection)))
+    (is (= :seon.print/map
+           (:seon.print/face (:seon.render.value/tree projection))))
+    (is (str/includes? html "seon-print-map"))
+    (is (not (str/includes? html "seon-data-map")))))
+
+(deftest declared-producers-still-have-absolute-precedence
+  (support/with-database
+   (fn [connection]
+     (let [failure {:my.message/no-recipient true
+                    :seon.error/message "A recipient is required."}
+           request (render-request connection failure)
+           declared-row {:seon.schema/key :fixture/declared-producer
+                         :seon.render/ai 'fixture/render-ai
+                         :seon.render/html 'fixture/render-html}]
+       (with-redefs [schema/matching-shapes-in
+                     (fn [_projection _value] [declared-row])]
+         (is (= 'fixture/render-ai
+                (#'seon.render/producer request
+                 :seon.render/ai :seon.render/ai)))
+         (is (= 'fixture/render-html
+                (#'seon.render/producer request
+                 :seon.render/html :seon.render/html))))))))
+
+(deftest registered-floor-elisions-retain-their-requery-identity
+  (support/with-database
+   (fn [connection]
+     (let [rows (mapv (fn [ordinal]
+                        {:my.message/id (str "m-" ordinal)
+                         :my.message/at (java.util.Date. (* 1000 ordinal))
+                         :my.message/preview (str "message " ordinal)})
+                      (range 3))
+           root [:my.message/inbox "root"]
+           profile {:seon.render.profile/id :seon.render.profile/test
+                    :seon.render.profile/token-budget 1024
+                    :seon.render.profile/max-depth 8
+                    :seon.render.profile/max-children 1
+                    :seon.render.profile/composition :single-line}
+           floor-unit (assoc (registered-unit connection rows)
+                             :seon.render.value/root root
+                             :seon.render/profile profile)
+           projection (value/prepare floor-unit)
+           root-elision (last (:seon.print/items
+                               (:seon.render.value/tree projection)))
+           ai (value/render-ai-data projection)
+           html (hiccup/->string (value/render-html-data projection))]
+       (is (= :seon.print/elided (:seon.print/face root-elision)))
+       (is (= root (:seon.print/requery-id root-elision)))
+       (is (= 2 (:seon.print/omitted root-elision)))
+       (is (str/includes? ai "requery by [:my.message/inbox \"root\"]"))
+       (is (str/includes? html "requery by [:my.message/inbox"))))))
 
 (deftest stored-print-data-feeds-both-sinks-without-readmission
   (let [stored (:seon.cluster.eval/result-edn
