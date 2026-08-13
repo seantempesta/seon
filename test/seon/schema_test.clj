@@ -53,11 +53,13 @@
      projection
      (fn []
        (is (schema/malli-form? definition))
-       (is (nil? (find-ns 'clojure.java.shell))
+       (is (nil? (find-ns 'seon.schema-test.probe-ns))
            "precondition: the arbitrary predicate namespace is not loaded")
-       (is (false? (schema/malli-form? [:fn 'clojure.java.shell/sh]))
+       (is (false?
+            (schema/malli-form?
+             [:fn 'seon.schema-test.probe-ns/probe-predicate?]))
            "schema validation never loads an arbitrary predicate namespace")
-       (is (nil? (find-ns 'clojure.java.shell))
+       (is (nil? (find-ns 'seon.schema-test.probe-ns))
            "and asking the question did not load it either")))))
 
 (deftest two-projections-never-exchange-a-compiled-validator
