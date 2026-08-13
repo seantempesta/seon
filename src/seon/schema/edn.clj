@@ -129,6 +129,7 @@
     (str "Schema EDN resource is absent: " resource)
     {::error ::unreadable-file
      ::file resource
+     ::unreadable-file resource
      :seon.error/kind :user-input})))
 
 (defn- filesystem-safe-namespace?
@@ -180,6 +181,7 @@
            (.getProtocol directory-url))
       {::error ::unreadable-file
        ::file (.toExternalForm directory-url)
+       ::unreadable-file (.toExternalForm directory-url)
        :seon.error/kind :user-input})))]
     (when (empty? paths)
       (throw
@@ -187,6 +189,7 @@
         (str "Schema resource directory contains no EDN files: " resource)
         {::error ::unreadable-file
          ::file (.toExternalForm directory-url)
+         ::unreadable-file (.toExternalForm directory-url)
          :seon.error/kind :user-input})))
     paths))
 
@@ -216,6 +219,7 @@
                   {::error ::duplicate-attribute
                    ::attribute attribute
                    ::file file
+                   ::duplicate-attribute attribute
                    :seon.error/kind :user-input}
                   error))
                 (throw
@@ -223,6 +227,7 @@
                   (str "Schema EDN resource is unreadable: " file)
                   {::error ::unreadable-file
                    ::file file
+                   ::unreadable-file file
                    :seon.error/kind :user-input}
                   error))))
             (catch Exception error
@@ -231,6 +236,7 @@
                 (str "Schema EDN resource is unreadable: " file)
                 {::error ::unreadable-file
                  ::file file
+                 ::unreadable-file file
                  :seon.error/kind :user-input}
                 error))))]
     (when-not (map? value)
@@ -239,6 +245,7 @@
         (str "Schema EDN resource must contain one map: " file)
         {::error ::not-a-map
          ::file file
+         ::not-a-map file
          :seon.error/kind :user-input})))
     {::file file ::resource resource ::forms value}))
 
@@ -263,6 +270,7 @@
         {::error ::unsafe-namespace
          ::file file
          ::namespace file-namespace
+         ::unsafe-namespace (keyword file-namespace "resource")
          :seon.error/kind :user-input})))
     (doseq [registry-key (keys forms)
             :let [schema-namespace (when (qualified-keyword? registry-key)
@@ -277,6 +285,7 @@
            ::attribute registry-key
            ::file file
            ::namespace schema-namespace
+           ::unsafe-namespace registry-key
            :seon.error/kind :user-input})))
       (when-not (or unqualified?
                     (= file-namespace schema-namespace))
@@ -288,6 +297,7 @@
            ::attribute registry-key
            ::file file
            ::expected-file (str schema-namespace ".edn")
+           ::misplaced-attribute registry-key
            :seon.error/kind :user-input}))))))
 
 (defn- merge-schema-resources
@@ -305,6 +315,7 @@
             ::attribute attribute
             ::file file
             ::files [first-file file]
+            ::duplicate-attribute attribute
             :seon.error/kind :user-input}))))
      {::forms (merge forms incoming)
       ::files-by-key
@@ -404,6 +415,7 @@
        (merge
         {::error error
          ::attribute identity
+         error (if (= ::unreadable-file error) file identity)
          :seon.schema/definition declaration
          :seon.error/kind :user-input}
         extra)

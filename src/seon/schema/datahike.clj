@@ -126,7 +126,9 @@
                  "literal whose value has a native Datahike type, for "
                  "example "
                  (registration-form :my.domain/enabled [:= true]) ".")
-            {::form resolved :seon.error/kind :user-input})))
+            {::form resolved
+             ::literal-not-storable true
+             :seon.error/kind :user-input})))
       (= :enum head)
       (if (every? keyword? (form-children resolved))
         :db.type/keyword
@@ -135,7 +137,9 @@
                      "members, for example "
                      (registration-form :my.domain/status
                                         [:enum :open :done]) ".")
-                {::form resolved :seon.error/kind :user-input})))
+                {::form resolved
+                 ::enum-not-storable true
+                 :seon.error/kind :user-input})))
       (= :or head)
       (let [explicit (:seon.db/value-type
                       (schema.form/attr-form-properties resolved))
@@ -156,14 +160,18 @@
       (throw (ex-info (str "Stored attributes cannot use `:maybe`. Register the "
                            "non-nil base shape, then omit an absent key or mark "
                            "its entity-map entry `{:optional true}`.")
-                      {::form resolved :seon.error/kind :user-input}))
+                      {::form resolved
+                       ::nilable-attribute ::form
+                       :seon.error/kind :user-input}))
       :else
       (or (malli-type->datahike-type head)
           (throw (ex-info
                   (str "The Malli form has no Datahike value type. Register a "
                        "concrete storable shape, for example "
                        (registration-form :my.domain/value :string) ".")
-                  {::form resolved :seon.error/kind :user-input}))))))
+                  {::form resolved
+                   ::value-type-unavailable true
+                   :seon.error/kind :user-input}))))))
 
 (defn form->datahike-value-type
   "The Datahike value type represented by a canonical JVM Malli form."
@@ -220,7 +228,9 @@
                              (registration-form attr :string)
                              " with the intended concrete type before "
                              "transacting it.")
-                        {::attr attr :seon.error/kind :user-input})))
+                        {::attr attr
+                         ::attribute-absent attr
+                         :seon.error/kind :user-input})))
         resolved (resolve-malli-form-in projection raw)
         props (schema.form/attr-form-properties resolved)
         value-form (form->child-form-in projection resolved)
@@ -232,7 +242,9 @@
               (str "A secondary-only attribute must contain floats. Register "
                    (registration-form attr
                                       [:float {:db.secondary/only true}]) ".")
-              {::attr attr :seon.error/kind :user-input})))
+              {::attr attr
+               ::invalid-secondary-attribute attr
+               :seon.error/kind :user-input})))
     (cond-> {:db/ident attr
              :db/valueType (if secondary?
                              :db.type/tuple
@@ -348,6 +360,7 @@
     {::rule rule
      ::attr attr
      ::value value
+     rule (if (= ::schema-invalid rule) attr true)
      :seon.error/kind :user-input})))
 
 (defn- validate-logical-slot-in!
