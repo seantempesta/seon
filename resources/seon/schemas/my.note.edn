@@ -1,0 +1,21 @@
+#:my.note{:id [:string {:min 1, :seon.db/identity true}],
+          :agent :seon.db/ref,
+          :content [:string {:min 1}],
+          :about :seon.db/ref,
+          :note
+          [:map
+           {:seon.db/entity true,
+            :seon.render/ai my.note/render-note-ai,
+            :seon.render/html my.note/render-note-html,
+            :seon.render/form my.note/render-note-form}
+           [:my.note/id :my.note/id]
+           [:my.note/agent :my.note/agent]
+           [:my.note/content :my.note/content]
+           [:my.note/about {:optional true} :my.note/about]],
+          :notes
+          [:vector
+           {:max 50,
+            :seon.render/ai my.note/render-notes-ai,
+            :seon.render/html my.note/render-notes-html,
+            :seon.render/form my.note/render-notes-form}
+           :my.note/note]}
