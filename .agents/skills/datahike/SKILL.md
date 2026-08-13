@@ -51,41 +51,41 @@ on the database path.
 - **One process holds one physical store lock and may open many branches.**
   Each cluster is a distinct branch in that store
   (`src/seon/cluster/registry.clj:1-38`;
-  `src/seon/cluster/store.clj:288-398`). A self-writer connection identity is
+  `src/seon/cluster/store.clj:117-434`). A self-writer connection identity is
   `[store-id branch]`, and Seon refuses a second open connection to the same
   branch (`reference-code/datahike/src/datahike/store.cljc:50-61`;
-  `src/seon/cluster/store.clj:369-398`).
+  `src/seon/cluster/store.clj:397-434`).
 - **Creation settings and reopen settings are different.** Fresh creation
   supplies fused index roots and the selected diff buffer; reopen and
   `open-branch!` omit those creation-only keys so Datahike adopts the stored
   values. An incomplete genesis is recreated; a complete store is reopened
   without rewriting its configuration
-  (`src/seon/cluster/store.clj:155-183,266-346,369-398`;
+  (`src/seon/cluster/store.clj:133-176,254-374,397-434`;
   `reference-code/datahike/src/datahike/connector.cljc:183-237,343-362`;
-  `test/seon/cluster/store_test.clj:94-162,248-266`).
+  `test/seon/cluster/store_test.clj:1-533`).
 - **Reads are synchronous and local.** `seon.db/q`, `pull`, `pull-many`,
   `entity`, and `datoms` accept an explicit immutable database value or elide
   it for the calling agent's current cluster database. `entity` and `datoms`
   realize eager ordinary data so process-local Datahike objects never cross
-  into SCI (`src/seon/db.clj:198-248,262-392`;
-  `test/seon/db_test.clj:31-77,147-171`). Compose reads in straight-line code.
+  into SCI (`src/seon/db.clj:861-1358`;
+  `test/seon/db_test.clj:1-841`). Compose reads in straight-line code.
 - **Writes are a function call returning a value.** `seon.db/transact!`
   accepts an explicit live connection or elides it for ambient custody, and
   accepts Datahike's positional transaction data or its `{:tx-data :tx-meta}`
   argument map. Rejections are flat `:seon.error` values, not throws from the
-  public boundary (`src/seon/db.clj:465-517`;
-  `test/seon/db_test.clj:173-198`).
+  public boundary (`src/seon/db.clj:1361-1601`;
+  `test/seon/db_test.clj:1-841`).
 - **Reference admission is identity-only.** Database values and connections
   declare `:seon.schema/identity-only` plus a qualified identity projection.
   Admission consults the registry at every depth and never walks Datahike
   records (`resources/seon/schemas/seon.db.edn:8-34`;
-  `src/seon/schema.clj:2572-2640`; `src/seon/sci/admit.clj:141-149,229-260`).
+  `src/seon/schema.clj:3033-3115`; `src/seon/sci/admit.clj:122-337`).
 - **`seon.db` is the one database namespace, never a facade.** New first-party
   code calls it for `q`, `pull`, `pull-many`, `entity`, `datoms`, `db`,
   `history`, `as-of`, `since`, and `transact!`. Only `seon.db` itself and the
   store/registry custody owners for open, release, and branch lifecycle may
   require `datahike.api` directly
-  (`src/seon/db.clj:1-14,159-170,198-248,262-443,501-517`).
+  (`src/seon/db.clj:1-14,861-1358,1361-1601`).
 
 A database is a **value, not a place**. The "race" you think you have ("the database moved
 between deciding and acting") is almost always re-reading the connection three
@@ -146,6 +146,7 @@ Put first-party schema forms in the one classpath resource. It is one EDN map
 from registry key to Malli form; section comments are only editorial.
 
 ```clojure
+;; Illustrative schema-resource content, not a JVM form to evaluate.
 ;; resources/seon/schemas/ — owning knowledge-base family
 {:my.kb.source/id [:string {:seon.db/identity true}]
  :my.kb.source/title :string
@@ -153,6 +154,8 @@ from registry key to Malli form; section comments are only editorial.
 ```
 
 ```clojure
+;; Illustrative session: `connection` is a fresh database whose schema
+;; population includes the three `:my.kb.source/*` declarations above.
 (require '[seon.db :as db]
          '[seon.schema :as schema]
          '[seon.schema.datahike :as schema.datahike]
@@ -191,6 +194,7 @@ invent a Seon envelope. These are equivalent to their positional forms, and
 each ambient form elides only the database value or connection:
 
 ```clojure
+;; Illustrative API-shape comparison; the named inputs come from the caller.
 (db/q (db/db connection) {:query query-form :args inputs})
 (binding [db/*conn* connection]
   (db/q {:query query-form :args inputs}))
@@ -209,8 +213,8 @@ each ambient form elides only the database value or connection:
 ```
 
 The accepted shapes and ambient parity are the public contracts at
-`src/seon/db.clj:198-248,262-334,380-443,501-517` and the recurring proofs at
-`test/seon/db_test.clj:31-77,147-218`.
+`src/seon/db.clj:861-1358,1361-1601` and the recurring proofs at
+`test/seon/db_test.clj:1-841`.
 
 `resources/seon/schemas/seon.cluster.run.edn`, `src/seon/cluster/run.clj`, and
 `test/seon/cluster/run_test.clj` are the live worked set: declarations,
@@ -229,7 +233,7 @@ yourself.
 resources, refuses duplicate keys and unreadable resources, and contributes
 candidates without activation. Activation admits the whole population:
 references must resolve and every predicate must be registered and carry an
-honest generator (`src/seon/schema/edn.clj:1-15,49-51,143-225,234-324`).
+honest generator (`src/seon/schema/edn.clj:1-15,31-115,142-359,361-539`).
 Production cluster population then installs the derived
 Datahike declarations and canonical schema rows.
 
@@ -263,15 +267,15 @@ Keep the four states separate; the checked current/target source is
 Schemas are globally identified by `:seon.schema/key`, never owned by the
 namespace where registration happened. Runtime `schema/unregister!` only
 stages removal inside the current evaluation delta
-(`src/seon/schema.clj:1072-1092`). Seon's terminal transaction refuses
+(`src/seon/schema.clj:1323-1341`). Seon's terminal transaction refuses
 replacement or removal while any directly or transitively affected Datahike
 attribute—including an entity schema's child attributes—has current datoms.
 Removal also refuses while another schema or function contract depends on the
 key. After current datoms and dependencies are retracted, the operation may
 commit atomically with the program row and derived Datahike declarations
-(`src/seon/schema.clj:1894-1958`;
-`src/seon/cluster/run.clj:580-742`;
-`test/seon/schema_usage_guard_test.clj:80-397`).
+(`src/seon/schema.clj:2440-2570`;
+`src/seon/cluster/run.clj:427-686`;
+`test/seon/schema_usage_guard_test.clj:80-476`).
 
 The maintained Datahike fork independently refuses schema-attribute
 removal while its current AEVT is nonempty
@@ -326,6 +330,8 @@ shapes, with either an explicit connection or the calling agent's ambient
 cluster connection:
 
 ```clojure
+;; Illustrative write shapes; the connection, refs, and transaction data are
+;; supplied by the caller.
 (db/transact! connection {:tx-data [{::id "s1"}]
                           :tx-meta {:seon.db/process process-ref}})
 (db/transact! connection [{::id "s1"}]) ; positional vector/sequence
@@ -339,18 +345,18 @@ The arg-map is canonical when transaction metadata is needed. A map without
 `:tx-data` is rejected; vectors and sequences are wrapped internally as
 `{:tx-data ...}`. Grounding:
 `reference-code/datahike/src/datahike/api/impl.cljc:30-48` ↔
-`src/seon/db.clj:465-517`; explicit/ambient parity is asserted at
-`test/seon/db_test.clj:173-198`.
+`src/seon/db.clj:1361-1601`; explicit/ambient parity is asserted at
+`test/seon/db_test.clj:1-841`.
 
 Datahike throws internally on a rejected transaction — that is the fence
 working — while public `db/transact!` returns the transition's own flat error,
 a classified `:seon.db/rejected`, or `:seon.db/unknown-failure`. Development
 may rethrow only the unknown core failure under the one panic config
-(`src/seon/db.clj:465-499`).
+(`src/seon/db.clj:1361-1481`).
 
 Ambient-custody calls return the declared bounded transaction-report face;
 unbound system callers retain Datahike's exact report
-(`src/seon/db.clj:964-1029,1113-1137`; `test/seon/db_test.clj:330-401`).
+(`src/seon/db.clj:1441-1601`; `test/seon/db_test.clj:1-841`).
 Classified writer refusals still reach the caller unchanged. The maintained
 Datahike writer logs one bounded single-line `:datahike/write-rejected` face
 without throwable, invocation, or transaction arguments; unclassified writer
@@ -368,6 +374,8 @@ non-empty `ex-data`. Classify that value; never parse the message. Treat a
 chain with no classifiable data as an unknown core failure, not as a refusal.
 
 ```clojure
+;; Illustrative mutations over previously declared `::id`, `::title`, and
+;; `::tags` attributes.
 ;; UPSERT by identity — same identity value ⇒ same entity, no duplicate.
 ;; OMITTED keys are LEFT UNCHANGED (absent ≠ cleared):
 (db/transact! connection [{::id "s1" ::title "Alpha v2"}])
@@ -433,8 +441,8 @@ Current run custody is process presence: absent is unheld and present is held;
 there is no epoch or lease. The production `claim-call` additionally recovers
 custody from a process absent from the supplied live-process set and stamps
 that holder's running receipts interrupted
-(`src/seon/cluster/run.clj:18-30,264-309`).
-`test/seon/cluster/run_test.clj:14-23,487-514` independently models the same
+(`src/seon/cluster/run.clj:427-475`).
+`test/seon/cluster/run_test.clj:1-1467` independently models the same
 custody fence.
 `src/seon/cluster/run.clj` is the worked example;
 `test/seon/cluster/run_test.clj` asserts both rails.
@@ -458,28 +466,28 @@ value equals `old`". CAS is pure transaction data, unlike a
 `db/q` preserves Datahike's positional query interface and its `{:query :args}`
 argument-map interface. The database value is an ordinary `:in` input; when
 the one `$` source is omitted, `db/q` inserts the calling agent's current
-database at its parsed source position (`src/seon/db.clj:172-248`;
-`test/seon/db_test.clj:31-58`).
+database at its parsed source position (`src/seon/db.clj:926-1038`;
+`test/seon/db_test.clj:1-841`).
 
 ```clojure
 ;; relation / scalar / collection / single-tuple — chosen by :find shape:
 (db/q '[:find ?n ?r :where [?e ::name ?n] [?e ::rank ?r]] database)
-#{["A" 1] ["B" 2]}
+;; => #{["A" 1] ["B" 2]}
 
 (db/q '[:find ?n . :in $ ?wanted
         :where [?e ::name ?n] [(= ?n ?wanted)]]
       database "A")
-"A"
+;; => "A"
 
 (db/q '[:find [?n ...] :in $ ?wanted
         :where [?e ::name ?n] [(= ?n ?wanted)]]
       database "A")
-["A"]
+;; => ["A"]
 
 (db/q '[:find [?n ?r] :in $ ?wanted
         :where [?e ::name ?n] [?e ::rank ?r] [(= ?n ?wanted)]]
       database "A")
-["A" 1]
+;; => ["A" 1]
 
 ;; :in parameter — pass inputs AFTER the query:
 (db/q '[:find [?n ...] :in $ ?min
@@ -591,7 +599,7 @@ current example is `:seon.context.capture/basis-t`, the `:max-tx` of the
 database value used to render the prompt; intervening transactions mean the
 capture entity's creation transaction cannot derive that earlier basis
 (`resources/seon/schemas/seon.cluster.run.edn`;
-`src/seon/context.clj:121-140`). Genuinely underivable → a real domain attr.
+`src/seon/context.clj:150-178`). Genuinely underivable → a real domain attr.
 
 ## Temporal, listeners, triggers (brief)
 
