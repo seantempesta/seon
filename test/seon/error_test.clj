@@ -138,6 +138,63 @@
                          :seon.error/diagnostic-evidence]))
         "unavailable evidence is typed and boundary context cannot replace it")))
 
+(deftest exact-dispatch-producers-carry-their-class-markers
+  (let [representatives
+        [(error/diagnostic
+          {:my.fs/stale-digest "tmp/stale"
+          :seon.error/kind :my.fs/stale-digest
+           :seon.error/message "stale"})
+         (error/diagnostic
+          {:my.fs/invalid-utf8-window "tmp/not-utf8"
+          :seon.error/kind :my.fs/invalid-utf8-window
+           :seon.error/message "not UTF-8"})
+         (error/diagnostic
+          {:seon.cluster.reply/refused-tag 'secret/tag
+          :seon.error/kind :seon.cluster.reply/refused-tag
+           :seon.error/message "tag refused"})
+         (error/diagnostic
+          {:seon.db/transaction-outcome-unknown true
+          :seon.error/kind :seon.db/unknown-failure
+           :seon.error/message "outcome unknown"})
+         (error/diagnostic
+          {:seon.instrument/contract-violated "sample/fn"
+          :seon.error/kind :seon.instrument/contract-violated
+           :seon.error/message "contract violated"})
+         (error/diagnostic
+          {:seon.render.walk/elided true
+          :seon.error/kind :seon.render.walk/elided
+           :seon.error/message "elided"})
+         (error/diagnostic
+          {:seon.ai/stream-truncated true
+          :seon.error/kind :seon.ai/stream-truncated
+           :seon.error/message "stream truncated"})
+         (error/diagnostic
+          {:seon.cluster.loop/trigger-already-answered true
+          :seon.error/kind :seon.cluster.loop/trigger-already-answered
+           :seon.error/message "already answered"})
+         (error/diagnostic
+          {:seon.cluster.reply/unreadable "["
+          :seon.error/kind :seon.cluster.reply/unreadable
+           :seon.error/message "unreadable"})
+         (error/diagnostic
+          {:seon.cluster.loop/phase-failed true
+          :seon.error/kind :seon.cluster.loop/phase-failed
+           :seon.error/message "phase failed"})
+         (error/diagnostic
+          {:seon.cluster.loop/lint-rejected true
+          :seon.error/kind :seon.cluster.loop/lint-rejected
+           :seon.error/message "lint rejected"})
+         (error/diagnostic
+          {:seon.operator/collection-incomplete true
+          :seon.error/kind :seon.operator/collection-incomplete
+           :seon.error/message "collection incomplete"})]
+        projection (schema/build-projection (schema/registered-schemas))]
+    (with-redefs [schema/current-projection (constantly projection)]
+      (doseq [value representatives]
+        (is (true? (error/error? value))
+            (str "class marker was not recognized for "
+                 (:seon.error/kind value)))))))
+
 (defn- cyclic-state
   "A proc state shaped like the run loop's, holding a live-object stand-in
   that CANNOT be printed: an atom holding the map that holds it.
