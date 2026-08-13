@@ -17,6 +17,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.render :as render]
             [seon.render.transcript :as transcript]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
@@ -90,7 +91,7 @@
         (recur (inc passes))))))
 
 (defn- open-agent-run!
-  [instance run-id message-id reply-text offset]
+  [instance process run-id message-id message-content reply-text offset]
   (let [connection (:seon.boot/cluster-connection instance)
         cluster-handle (assoc (:seon.cluster.loop/cluster instance)
                               :seon.cluster.run/process process-id)
@@ -102,7 +103,14 @@
            connection
            {:tx-data
             (into [] cat
-                  [(run/open-tx
+                  [[{:seon.cluster.message/id message-id
+                     :seon.cluster.message/ordinal (long offset)
+                     :seon.cluster.message/from root-user
+                     :seon.cluster.message/to
+                     [:seon.cluster.agent/id agent-id]
+                     :seon.cluster.message/content message-content
+                     :seon.cluster.message/at (at offset)}]
+                   (run/open-tx
                     {:seon.cluster.run/id run-id
                      :seon.cluster.run/agent
                      [:seon.cluster.agent/id agent-id]
@@ -120,31 +128,15 @@
                      :seon.cluster.run/starting-ns
                      [:seon.ns/name namespace-name]
                      :seon.cluster.run/plan-digest (digest sources)
-                     :seon.cluster.run/sources sources})])})]
+                     :seon.cluster.run/sources sources})])
+            :tx-meta {:seon.db/user root-user
+                      :seon.db/process
+                      [:seon.db.process/id process]}})]
       (when (error-value? opened)
         (throw (ex-info "Probe run open was refused." opened)))
       (execute-planned-run! connection cluster-handle run-id)
       (await-closed! connection run-id)
-      run-id)))
-
-(defn- message!
-  [connection process message-id content offset]
-  (let [result
-        (db/transact!
-         connection
-         {:tx-data
-          [{:seon.cluster.message/id message-id
-            :seon.cluster.message/ordinal (long offset)
-            :seon.cluster.message/from root-user
-            :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
-            :seon.cluster.message/content content
-            :seon.cluster.message/at (at offset)}]
-          :tx-meta {:seon.db/user root-user
-                    :seon.db/process
-                    [:seon.db.process/id process]}})]
-    (when (error-value? result)
-      (throw (ex-info "Probe message transaction was refused." result)))
-    (db/basis-t (:db-after result))))
+      (db/basis-t (:db-after opened)))))
 
 (def ^:private item-map
   "[:map [:probe.rebirth.plan.item/id :probe.rebirth.plan.item/id] [:probe.rebirth.plan.item/text :probe.rebirth.plan.item/text] [:probe.rebirth.plan.item/status :probe.rebirth.plan.item/status] [:probe.rebirth.plan.item/completed-at {:optional true} :probe.rebirth.plan.item/completed-at]]")
@@ -248,7 +240,9 @@
         :seon.db/connection (:seon.boot/cluster-connection instance)
         :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster-handle)
         :seon.cluster.agent/id agent-id
-        :seon.render/profile {:seon.render.profile/token-budget 1000000}
+        :seon.render/profile
+        (assoc (render/agent-render-profile settings)
+               :seon.render.profile/token-budget 1000000)
         :seon.sci.admit/caps (config/result-caps settings)
         :seon.config/on-core-error :record}))))
 
@@ -406,28 +400,28 @@
           (agent/disarm! {:seon.cluster.agent/id agent-id
                           :seon.cluster.agent/routing
                           (:seon.cluster.agent/routing instance)})
-          (let [basis-0 (message! connection process "rebirth-artifacts"
-                                  "Declare the fact-backed plan and its artifacts."
-                                  1000)]
-            (open-agent-run! instance "rebirth-artifacts-run"
-                             "rebirth-artifacts" (artifact-reply) 1100)
-            (let [basis-1 (message! connection process "rebirth-message-1"
-                                    "Create the initial plan items." 2000)]
-              (open-agent-run! instance "rebirth-plan-turn-1"
-                               "rebirth-message-1"
-                               (plan-create-reply basis-0) 2100)
-              (let [basis-2 (message! connection process "rebirth-message-2"
-                                      "Refine the plan and complete early items."
-                                      3000)]
-                (open-agent-run! instance "rebirth-plan-turn-2"
-                                 "rebirth-message-2"
-                                 (plan-refine-reply basis-1) 3100)
-                (message! connection process "rebirth-message-3"
-                          "Complete the centerpiece and leave follow-up work."
-                          4000)
-                (open-agent-run! instance "rebirth-plan-turn-3"
-                                 "rebirth-message-3"
-                                 (plan-finish-reply basis-2) 4100))))
+          (let [basis-0
+                (open-agent-run!
+                 instance process "rebirth-artifacts-run"
+                 "rebirth-artifacts"
+                 "Declare the fact-backed plan and its artifacts."
+                 (artifact-reply) 1000)
+                basis-1
+                (open-agent-run!
+                 instance process "rebirth-plan-turn-1"
+                 "rebirth-message-1" "Create the initial plan items."
+                 (plan-create-reply basis-0) 2000)
+                basis-2
+                (open-agent-run!
+                 instance process "rebirth-plan-turn-2"
+                 "rebirth-message-2"
+                 "Refine the plan and complete early items."
+                 (plan-refine-reply basis-1) 3000)]
+            (open-agent-run!
+             instance process "rebirth-plan-turn-3"
+             "rebirth-message-3"
+             "Complete the centerpiece and leave follow-up work."
+             (plan-finish-reply basis-2) 4000))
           (let [database @connection
               lived (raw-run-history database)
               rendered-lived (transcript-entries instance database)
@@ -469,7 +463,10 @@
                   (str (pr-str evidence) "\n"))
             evidence))))
       (finally
-        (cluster/stop! instance)))))
+        (schema/call-with-projection-state
+         (get-in instance [:seon.cluster.loop/cluster
+                           :seon.sci.eval/projection-state])
+         #(cluster/stop! instance))))))
 
 (defn -main
   "Run the probe at `root` and print its compact outcome."
