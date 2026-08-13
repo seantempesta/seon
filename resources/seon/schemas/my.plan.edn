@@ -1,5 +1,47 @@
 #:my.plan{:anchor :seon.db/ref,
           :anchor? :boolean,
+          :label [:string {:min 1}],
+          :after [:vector :my.plan/label],
+          :children [:vector :my.plan/node],
+          :node
+          [:schema
+           {:registry
+            {:my.plan/node*
+             [:map
+              [:my.plan.item/id {:optional true} :my.plan.item/id]
+              [:my.plan.item/title :my.plan.item/title]
+              [:my.plan.item/description
+               {:optional true}
+               :my.plan.item/description]
+              [:my.plan.item/expected-result
+               {:optional true}
+               :my.plan.item/expected-result]
+              [:my.plan.item/needs {:optional true} :my.plan.item/needs]
+              [:my.plan.item/about {:optional true} :my.plan.item/about]
+              [:my.plan/label {:optional true} :my.plan/label]
+              [:my.plan/after {:optional true} :my.plan/after]
+              [:my.plan/children
+               {:optional true}
+               [:vector [:ref :my.plan/node*]]]]}}
+           [:ref :my.plan/node*]],
+          :tree [:vector :my.plan/node],
+          :added [:int {:min 0}],
+          :changed [:int {:min 0}],
+          :retracted [:int {:min 0}],
+          :diff
+          [:map
+           [:my.plan/added :my.plan/added]
+           [:my.plan/changed :my.plan/changed]
+           [:my.plan/retracted :my.plan/retracted]],
+          :converged? :boolean,
+          :basis-t :seon.db/basis-t,
+          :ids [:map-of :my.plan/label :my.plan.item/id],
+          :plan-result
+          [:map
+           [:my.plan/converged? :my.plan/converged?]
+           [:my.plan/basis-t :my.plan/basis-t]
+           [:my.plan/diff :my.plan/diff]
+           [:my.plan/ids :my.plan/ids]],
           :agent-state
           [:map
            {:seon.db/entity true}

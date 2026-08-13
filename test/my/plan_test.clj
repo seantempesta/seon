@@ -159,3 +159,143 @@
             (is (seon.schema/valid-candidate-value? :seon.render/hiccup html))
             (is (str/includes? ai "Current work"))
             (is (= :section (first html)))))))))
+
+(defn- item-count
+  [database]
+  (or (db/q '[:find (count ?item) .
+              :where [?item :my.plan.item/id]]
+            database)
+      0))
+
+(deftest plan-reconciles-a-complete-authored-tree-in-one-transaction
+  (with-plan
+    (fn [connection]
+      (let [initial
+            [{:my.plan.item/title "Ship"
+              :my.plan/label "root"
+              :my.plan/children
+              [{:my.plan.item/title "Prepare"
+                :my.plan/label "prepare"}
+               {:my.plan.item/title "Verify"
+                :my.plan/label "verify"
+                :my.plan/after ["prepare"]}]}]
+            before (db/basis-t @connection)
+            created (plan/plan! initial @connection connection "alice")
+            after-create (db/basis-t @connection)
+            root-id (get (:my.plan/ids created) "root")
+            prepare-id (get (:my.plan/ids created) "prepare")
+            verify-id (get (:my.plan/ids created) "verify")]
+        (is (= {:my.plan/added 3
+                :my.plan/changed 0
+                :my.plan/retracted 0}
+               (:my.plan/diff created)))
+        (is (= (inc before) after-create)
+            "the complete tree commits through exactly one transaction")
+        (is (= 3 (item-count @connection)))
+        (is (= [prepare-id]
+               (mapv :my.plan.item/id (plan/ready @connection "alice"))))
+        (let [edited
+              [{:my.plan.item/id root-id
+                :my.plan.item/title "Ship"
+                :my.plan/label "root"
+                :my.plan/children
+                [{:my.plan.item/id prepare-id
+                  :my.plan.item/title "Prepare better"
+                  :my.plan/label "prepare"}
+                 {:my.plan.item/title "Publish"
+                  :my.plan/label "publish"}]}]
+              changed (plan/plan! edited @connection connection "alice")]
+          (is (= {:my.plan/added 1
+                  :my.plan/changed 1
+                  :my.plan/retracted 1}
+                 (:my.plan/diff changed)))
+          (is (= "Prepare better"
+                 (db/q '[:find ?title .
+                         :in $ ?id
+                         :where
+                         [?item :my.plan.item/id ?id]
+                         [?item :my.plan.item/title ?title]]
+                       @connection prepare-id)))
+          (is (nil? (db/pull @connection '[*]
+                             [:my.plan.item/id verify-id])))
+          (is (= 3 (item-count @connection))))))))
+
+(deftest plan-converges-without-a-transaction-and-refuses-ambiguity
+  (with-plan
+    (fn [connection]
+      (let [document [{:my.plan.item/title "Root"
+                       :my.plan/label "root"
+                       :my.plan/children
+                       [{:my.plan.item/title "Same"}
+                        {:my.plan.item/title "Same"}]}]
+            created (plan/plan! document @connection connection "alice")
+            root-id (get (:my.plan/ids created) "root")
+            children
+            (db/q '[:find [?id ...]
+                    :in $ ?root-id
+                    :where
+                    [?root :my.plan.item/id ?root-id]
+                    [?child :my.plan.item/parent ?root]
+                    [?child :my.plan.item/id ?id]]
+                  @connection root-id)
+            ambiguous
+            [{:my.plan.item/id root-id
+              :my.plan.item/title "Root"
+              :my.plan/children [{:my.plan.item/title "Same"}]}]
+            basis (db/basis-t @connection)
+            refusal (plan/plan! ambiguous @connection connection "alice")]
+        (is (= 2 (count children)))
+        (is (= :my.plan/ambiguous-identity (:seon.error/kind refusal)))
+        (is (= basis (db/basis-t @connection)))
+        (let [exact
+              [{:my.plan.item/id root-id
+                :my.plan.item/title "Root"
+                :my.plan/children
+                (mapv (fn [id]
+                        {:my.plan.item/id id :my.plan.item/title "Same"})
+                      (sort children))}]
+              first-round (plan/plan! exact @connection connection "alice")
+              converged-basis (db/basis-t @connection)
+              second-round (plan/plan! exact @connection connection "alice")]
+          (is (zero? (:my.plan/added (:my.plan/diff first-round))))
+          (is (true? (:my.plan/converged? second-round)))
+          (is (= {:my.plan/added 0
+                  :my.plan/changed 0
+                  :my.plan/retracted 0}
+                 (:my.plan/diff second-round)))
+          (is (= converged-basis (db/basis-t @connection))))))))
+
+(deftest plan-is-basis-fenced-and-cannot-touch-derived-obligations
+  (with-plan
+    (fn [connection]
+      (db/transact!
+       connection
+       [{:seon.cluster.message/id "question"
+         :seon.cluster.message/to [:seon.cluster.agent/id "alice"]
+         :seon.cluster.message/content "Answer me."
+         :seon.cluster.message/at (at 10)}])
+      (let [observed @connection
+            _ (db/transact! connection
+                            [{:seon.cluster.message/id "later"
+                              :seon.cluster.message/to
+                              [:seon.cluster.agent/id "alice"]
+                              :seon.cluster.message/content "Also answer me."
+                              :seon.cluster.message/at (at 11)}])
+            stale (plan/plan! [{:my.plan.item/title "Must not commit"}]
+                              observed connection "alice")]
+        (is (= :seon.db/rejected (:seon.error/kind stale)))
+        (is (= :transaction/stale-basis
+               (get-in stale [:seon.error/data :error])))
+        (is (zero? (item-count @connection))))
+      (let [before
+            (set (map :my.plan/obligation-id
+                      (:my.plan/obligations (plan/plan @connection "alice"))))
+            applied
+            (plan/plan! [{:my.plan.item/title "Authored only"}]
+                        @connection connection "alice")
+            after
+            (set (map :my.plan/obligation-id
+                      (:my.plan/obligations (plan/plan @connection "alice"))))]
+        (is (= #{"question" "later"} before))
+        (is (= before after))
+        (is (= 1 (:my.plan/added (:my.plan/diff applied))))))))
