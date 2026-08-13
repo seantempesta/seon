@@ -28,13 +28,16 @@ bin/test --full                 # every *_test.clj / *_test.cljc under test/
 bin/test seon.cluster.run-test  # every test in exactly these namespaces
 ```
 
-Source classpath, no artifact and no operator: the exit code is the verdict.
-Use one explicit multi-namespace selection while iterating and `bin/test
---full` at the natural checkpoint boundary. Bare `bin/test` excludes only vars
-or namespaces carrying a non-blank `:seon.test/long` reason, then prints every
-omitted test and the full-suite command. `SEON_TEST_FULL=1 bin/test` is the CI
-equivalent. Explicit namespace selections are always complete, which preserves
-the changed-test selector (`bin/test:41-150`; `src/seon/test/runner.clj:1-1200`).
+The gate creates an isolated operator root and the exit code is the verdict.
+Use one explicit multi-namespace selection while iterating. Bare `bin/test`
+runs the declared platform regressions first and stops if they fail, then runs
+the tests whose program-graph reachability covers code changed since the last
+recorded green basis. A missing basis, removed file, or unmodeled gate input
+widens selection conservatively. `--all` runs every non-long test after the
+platform tier; `--full` also includes long tests, and `SEON_TEST_FULL=1` is its
+environment equivalent. Explicit namespace selections are always complete and
+record no green basis (`bin/test:1-24,43-57`;
+`src/seon/test/runner.clj:1-1200`).
 
 `bin/test` discovers a namespace by file name: a test file must end in
 `_test.clj` or `_test.cljc` under `test/`, mirroring its `src/` namespace. A

@@ -100,8 +100,8 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    maintenance, and policy without making that agent's home namespace a
    permanent silo. Published agent-authored functions are shared capabilities;
    the invoking agent may differ from the original author.
-4. **Perpetual motion = plan + location + window.** Grounding that survives
-   forever: purpose + the `my.plan` anchor (WHAT I'm doing) + current-ns
+4. **Perpetual motion = intent + location + window.** Grounding that survives
+   forever: purpose + authored intent facts (WHAT I'm doing) + current-ns
    (WHERE I am) + the sliding transcript window (what I'm doing RIGHT NOW). A
    1000-turn agent behaves like a turn-3 agent because context is derived,
    windowed, and cache-stable — never accumulated and never replaced by a

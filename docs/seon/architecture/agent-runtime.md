@@ -19,7 +19,7 @@ Each cluster owns one acquired base SCI `ctx`, and each turn evaluates in a
 fresh fork of that live base. The fork is turn-private mutable interpreter
 state; the database program graph and each agent's defs are the durable
 authority. Agents share contracted definitions by committing program facts;
-their uncontracted definitions remain in their own desks.
+their uncontracted definitions remain in their own agent-scoped facts.
 
 ## State is attribute presence
 
@@ -34,7 +34,7 @@ The agent and run store primitives:
 - An eval receipt carrying none of `:seon.cluster.eval/result-edn`, `/error`, or
   `/interrupted-at` is running. Presence of one of those facts is terminal.
 
-No stored status, phase, epoch, lease, heartbeat, claimant, pause, termination,
+No stored status, phase, claim epoch, lease, heartbeat, pause, termination,
 or answered flag restates these facts. Start, pause, resume, and terminate are
 not persisted disposition kinds. Flow commands may park or resume an agent's
 process-local graph without inventing durable lifecycle state.
@@ -98,6 +98,21 @@ lost channel value is free because the next wake re-derives the same question.
 The message `:seon.cluster.message/to` datom is the work wake. Run, form,
 receipt, and agent-pointer datoms are deliberately not wake attributes, so work
 the loop commits cannot wake itself.
+
+## Fresh-agent generated opening
+
+Agent creation commits identity and namespace ownership and wakes the cluster's
+arm owner. The new graph then opens a system-authored generated episode from
+live source-initialization facts. It appends and settles exactly one
+dependency-ready generated form at a time; the stored prefix and receipts are
+the recovery authority, so there is no separate bootstrap-plan row or
+process-local checklist to reconstruct.
+
+When the generated prefix is complete, the same held run advances to its model
+call. An ordinary readable reply differs only at publication: its complete
+ordered forms are frozen together before evaluation, then reduced one receipt
+at a time. Both paths use the same run custody, form, receipt, and settlement
+fences.
 
 ## Prompt, model call, plan, and eval fold
 
@@ -213,9 +228,10 @@ destructive rewrite of history.
 ## Messages and agent creation
 
 Formal creation transacts the namespace row and agent row together. The agent
-has an identity, cluster ref, namespace ownership ref, optional additive
-instructions, and no current run. Committing `:seon.cluster.agent/id` also wakes
-the cluster's arm owner so a graph is created for the new agent.
+has an identity, cluster ref, namespace ownership ref, and optional additive
+instructions. The creation transaction itself does not synthesize an ordinary
+message run: committing `:seon.cluster.agent/id` wakes the cluster's arm owner,
+which creates the graph and begins the generated opening described above.
 
 A message is one recipient, content, instant, and optional numeric ordinal,
 with optional sender, `about`, and `caused-by` refs. Delivery vectors record
@@ -305,6 +321,6 @@ platform worker.
 ## See also
 
 - [[architecture]] — process topology, Flow scheduling, and the effect seam.
-- [[data-model]] — the admitted attribute census.
+- [[data-model]] — durable relationships and schema authority.
 - [[context]] — agent context, continuity of the agent's defs, and the context-capture contract.
 - [[observability]] — forensic use of captures, attempts, receipts, and errors.

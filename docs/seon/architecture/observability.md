@@ -230,20 +230,13 @@ and the ordinary message/run path.
 
 ## Source authority
 
-- The family declarations under `resources/seon/schemas/` own the durable
-  evidence shapes.
-- `src/seon/context.clj` commits captures from rendered context.
-- `src/seon/cluster/loop.clj` opens attempts and receipts, persists blobs and
-  the agent's defs, and settles the fold.
-- `src/seon/cluster/run.clj` owns settle-once and recovery transitions.
-- `src/seon/render/transcript.clj` owns the message/receipt queries and REPL
-  interleave.
-- `src/seon/render/{agent,root,ns,web}.clj` owns current agent, root, namespace,
-  debug, and data-page inspection.
+The admitted schemas own durable evidence shapes. Program-graph queries locate
+the current functions that produce, settle, and render those facts; this page
+does not maintain a parallel source-file roster.
 
 ## See also
 
-- [[data-model]] — admitted evidence attributes.
+- [[data-model]] — durable evidence relationships and schema authority.
 - [[agent-runtime]] — the transitions that create and settle them.
 - [[context]] — current context derivation.
 - [[ui]] — the pages that render the same facts for a human.

@@ -123,7 +123,7 @@ always renders:
   facts.
 - **what I just did** — my last turn's actions and their outcomes, from the
   transcript.
-- **what I learned** — accumulated knowledge (`my.kb`), and *only* knowledge:
+- **what I learned** — accumulated knowledge facts, and *only* knowledge:
   work-tracking that still carries a live lifecycle status is not a settled
   finding and never renders as one.
 - **what changed since I last looked** — the basis-labelled suffix appended by
@@ -266,10 +266,10 @@ records the resulting namespace facts.
 
 Because one render call supplies the form, AI, and HTML projections, the agent
 and the human look at one retained artifact at different fits. An agent working
-in `my.plan` receives the plan's form and printed value in its history while the
-HTML projection puts the same plan on the human's page. Root's preview of that
-agent uses the same retained AI bytes. The agent can rely on "my human is
-seeing this" — it is structurally true, no messaging required.
+with an authored intent value receives its form and printed value in history
+while the HTML projection puts the same value on the human's page. Root's
+preview of that agent uses the same retained AI bytes. The agent can rely on
+"my human is seeing this" — it is structurally true, no messaging required.
 
 ## How tree values find renderers
 
@@ -359,8 +359,8 @@ Derived root-only warnings render only when their queries return facts.
 
 ### Importing a skill does not inject it
 
-Users may import standard `SKILL.md` content into canonical `my.skills` database
-facts, but skill-fact availability and prompt placement are independent. Default
+Users may import standard `SKILL.md` content as canonical database facts, but
+skill-fact availability and prompt placement are independent. Default
 and test context trees carry no skill ref. Namespace cards, current-namespace
 source, state-gated render units, and pull references remain the normal
 discovery path. Explicit selection adds an ordinary schema'd ref reachable from

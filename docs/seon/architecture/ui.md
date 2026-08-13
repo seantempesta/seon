@@ -330,7 +330,7 @@ redirects one render to another, or changes membership. No slot redirect exists.
 An agent page gives the newest-basis HTML block the large primary position and
 places every other HTML-bearing block in a vertical column of smaller blocks.
 The same newest-basis ranking places the freshest appended AI observations
-nearest the next model turn. The `/` layout uses one live-window tile per
+nearest the next model turn. The `/` layout uses one live-window card per
 attached agent, each showing that agent's newest-basis block.
 
 **Expansion is bounded** by the root pull's selector depth and `:limit`, plus
@@ -351,8 +351,8 @@ discipline.
 Every page is a projection over one database value and the same root-pull/block
 machinery:
 
-- `/` renders root's namespace page plus one live-window tile per attached
-  agent. Each tile is that agent's newest-basis block in its HTML fit; the AI
+- `/` renders root's namespace page plus one live-window card per attached
+  agent. Each card is that agent's newest-basis block in its HTML fit; the AI
   fit of the same retained block is root's agent preview.
 - `/ns/{namespace}` resolves the namespace, its owner agent through
   `:seon.cluster.agent/namespace`, and the owner's root pull.
@@ -573,7 +573,7 @@ link and read it.
   transitions.
 - The `ui-canvas` skill — the built-versus-target canvas/control boundary.
 - [[context-rebuild]] — the measured arc for knowledge-on-demand (cards +
-  state-gated teaching + pull); imported `my.skills` bodies remain explicit
+  state-gated teaching + pull); imported skill bodies remain explicit
   overrides rather than a default context block.
 - [[roadmap]] — implementation state, gaps, work order, and evidence.
 - [[datahike-primer]] — the datahike-in-the-grain mindset.
