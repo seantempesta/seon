@@ -3512,8 +3512,9 @@
 
 (defn- await-streaming!
   "Wait until the render proc's ping reports `expected` streaming
-  agents. Event-driven against the proc's own published state, with a
-  loud backstop whose firing is itself the bug report."
+  agents. A busy proc may be absent from Flow's partial ping result, so
+  retry until the proc publishes the exact state or the shared loud
+  backstop fires."
   [proc expected label]
   (test-support/await-event!
    (future
@@ -3604,13 +3605,18 @@
                        from the channel")))
 
               (testing "the terminal fact is the stream terminal"
+                ;; Establish the causal predecessor first. Without this
+                ;; observation, an initial zero can satisfy the terminal wait
+                ;; before either the partial or terminal input is consumed.
+                (is (= 1 (await-streaming! proc 1 [:streaming-observed]))
+                    "the render proc observed the in-flight partial")
                 ;; Production's one routing listener offers this
                 ;; payload-free interest on the terminal transaction.
                 ;; This turn fixture owns no listener, so publish the
                 ;; already-observed fact wake at the same proc port.
                 (async/offer! (:render-channel proc) ::terminal-fact)
-                (await-streaming! proc 0 [:streaming-superseded])
-                (is (= 0 (streaming-agents proc))
+                (is (= 0 (await-streaming! proc 0
+                                           [:streaming-superseded]))
                     "the settled facts repaint the page; no channel
                      value carries done"))))
           (finally

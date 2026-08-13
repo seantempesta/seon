@@ -223,31 +223,39 @@
                     :seon.cluster.agent/routing routing})))
 
 (defn- await-until
-  "Bounded poll — the test-side clock, failing loudly by returning nil.
-  Production is event-driven; a TEST must decide when to give up."
+  "Await a probe through the shared loud test-event backstop."
   [probe]
-  (loop [attempt 0]
-    (or (probe)
-        (when (< attempt 200)
-          (Thread/sleep 25)
-          (recur (inc attempt))))))
+  (test-support/await-event!
+   (future
+     (loop []
+       (or (probe)
+           (do
+             (Thread/sleep 25)
+             (recur)))))
+   ::probe-satisfied))
 
 (defn- await-database-state!
   "Return the first observed database value satisfying `accept?`.
 
   The caller registers `event-source` before its initial derivation. A commit
-  between the connection read and the channel take is therefore queued, and
-  no wall clock can turn merely pending work into a false invariant verdict.
-  The test runner owns the outer loud backstop for a genuinely missing event."
+  between the connection read and the channel take is therefore queued. The
+  shared test-event backstop fails loudly when the exact state never lands."
   [connection event-source accept?]
-  (loop [database @connection]
+  (let [database @connection]
     (if (accept? database)
       database
-      (if-some [report (async/<!! event-source)]
-        (recur (:db-after report))
-        (throw
-         (ex-info "The database event source closed before the required state."
-                  {:seon.error/kind ::database-event-source-closed}))))))
+      (:db-after
+       (test-support/await-event!
+        event-source
+        ::database-state
+        #(accept? (:db-after %)))))))
+
+(defn- terminal-receipt-count
+  [database]
+  (or (db/q '[:find (count ?receipt) .
+              :where [?receipt :seon.cluster.eval/result-edn _]]
+            database)
+      0))
 
 (defn- turn-ping
   [entry]
@@ -1649,7 +1657,8 @@
                     (await-database-state!
                      connection
                      (:seon.cluster.agent-test/events events)
-                     #(quiescent? % ["waiter"]))
+                     #(and (= 1 (terminal-receipt-count %))
+                            (quiescent? % ["waiter"])))
                     (finally
                       (stop-database-events! connection events)))
                   run-id (db/q '[:find ?id . :where
@@ -1700,7 +1709,8 @@
                         (await-database-state!
                          connection
                          (:seon.cluster.agent-test/events events)
-                         #(quiescent? % ["waiter"]))
+                         #(and (= 2 (terminal-receipt-count %))
+                                (quiescent? % ["waiter"])))
                         (finally
                           (stop-database-events! connection events)))]
                   (is (quiescent? terminal-db ["waiter"]))

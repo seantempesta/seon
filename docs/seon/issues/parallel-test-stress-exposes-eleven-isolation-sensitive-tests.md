@@ -196,6 +196,70 @@ tests and completed 92 tests / 510 assertions with no failures or errors.
 closes the current recurrence without a serial roster, reduced worker count,
 poll, or semantic clock.
 
+## 2026-08-13 terminal-fact await classification
+
+Three later failures were one test-observation class, not three production
+wake losses. The core.async dependency boundary was
+`1.10.874-alpha3` at `dc35f3e0d7bc2eef502e77982f48641f025c8051`
+(`reference-code/core.async`).
+
+The Datahike dependency boundary was
+`cdcb5792db8bd599487f099437265d18a31164a5`
+(`reference-code/datahike`). The first-party owners were
+`seon.cluster.agent/turn-step`, the test database listener, Flow's partial
+`ping`, and `seon.test-support/await-event!`.
+
+The suggested retained-store query could not answer the commit question. Both
+`tmp/test-runs/run.bmFHXJ/workers/pool-2/data/clusters/store` and
+`tmp/test-runs/run.G028Do/workers/pool-9/data/clusters/store` contained only
+the `:db` branch and contained none of the `parked`, `waiter`, `agent-a`,
+`m-2026072812`, `m-wait`, or `m-1` identities, closed runs, or receipts. The
+run-frozen `seon.test-support/with-database` used by all three tests instead
+forked a per-worker in-memory Datahike base and deleted the branch after each
+test. The retained worker file store was therefore a different database, not
+negative evidence about the terminal transaction.
+
+Direct probes against the actual fixture settled the (a)/(b) discriminator:
+
+- `park-wake-test` is verdict **(a)**. Six exact-test JVMs ran concurrently
+  with the two-namespace focused gate. Two missed the fixture's 5,025 ms
+  `await-until` polling window; their post-test database snapshots each held
+  exactly one `:seon.cluster.run/closed-at` fact and one terminal receipt.
+- `wait-closes-in-terminal-tx-test` is verdict **(a)**. Under contention its
+  `quiescent?` predicate returned a database value with `settle-tx` nil. The
+  same connection's terminal snapshot later held two closed runs, two wait
+  receipts, and no error facts. The focused namespace gate independently
+  reproduced the early snapshot, and its isolated confirmation returned the
+  same failure after 25,177 ms. Quiescence was weaker than the receipt fact the
+  assertions consumed.
+- `streaming-writes-zero-datoms-test` is verdict **(a)**. The terminal receipt
+  assertion had already passed. `await-streaming!` observed zero, while the
+  immediately repeated Flow ping returned nil under load. Flow ping is
+  timeout-bounded and partial, so absence meant that the render proc did not
+  answer that diagnostic call; it did not retract the already-observed
+  terminal fact. The fixture also allowed its initial zero to satisfy the
+  await before the partial had been consumed.
+
+The class fix stays entirely in tests. `await-until` now uses the declared
+20-second `seon.test-support/event-backstop-seconds` through
+`await-event!`; database-state waits use the same bounded event owner;
+the wait test requires the exact terminal receipt count before consuming its
+database value; and the streaming test first observes the partial, then
+asserts the value returned by the terminal wait instead of issuing a second
+partial ping. The three exact tests pass together after the repair. No source
+under `src/seon/cluster/` changed, and the `de66c1e4a` armer/self-wake design
+remains unchanged.
+
+The canonical focused gate then passed 73 tests / 491 assertions. The
+changed-path pooled runner repeated the class under nine workers and passed
+144 tests / 805 assertions with zero failures or errors. In that contention
+run `park-wake-test` took 7,003 ms,
+`wait-closes-in-terminal-tx-test` took 8,131 ms, and
+`streaming-writes-zero-datoms-test` took 5,424 ms. All exceeded the deleted
+5,025 ms poll except the streaming test, whose repaired causal observation
+also survived concurrent work. This proves the former timing sensitivity is
+dead without changing production wake or settlement semantics.
+
 ## Owner
 
 The test and production owner of each resource named during triage: clj-kondo
