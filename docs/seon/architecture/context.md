@@ -8,7 +8,7 @@ tags: [architecture, agent]
 
 > **Target design** (present tense). The block/render machinery lives in
 > [[ui]]; historical run reconstruction and inspection live in
-> [[observability]]; the measured laws that constrain this live in [[laws]].
+> [[observability]]; dated measurements that constrain this live in PRD research.
 > Implementation state lives in [[roadmap]]. A block is the informal name for
 > one render-function call, never a stored data type.
 
@@ -482,6 +482,6 @@ after the prompt database value has been chosen.
   selection chain, and the live channel.
 - [[data-model]] — admitted context, run, receipt, and program-graph facts.
 - [[observability]] — context captures, attempts, receipts, errors, and blobs.
-- [[laws]] — cache-stability, render-prominence, always-on-beats-skills.
+- Dated PRD research — cache-stability, render-prominence, and context trials.
 - [[think-in-clojure]] — a fn's specced in/out is the query substrate for
   both rendering and running.

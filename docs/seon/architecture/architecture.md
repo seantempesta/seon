@@ -80,10 +80,8 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    in/out is schema'd in the program graph, so "what can process what I'm
    holding" is a Datalog join — relevance is computed, not curated. Prose only
    for what cannot execute. Anchors: `schema/register!` + `:malli/schema`,
-   `:seon.fn`/`:seon.ns`, [[toolkit]]. (Trajectory, bounded by the measured
-   present: the minimal base plus relevant namespace source beats a standing
-   skills manual, and composition functions render their complete relevant
-   value — [[laws]].)
+   `:seon.fn`/`:seon.ns`, and the capability boundary below. Dated context
+   measurements remain in PRD research rather than this map.
    The program graph is cluster-shared: a committed function, schema, or test
    authored by one agent becomes available to every execution scope through
    the same database program delta. Agents build one coherent application
@@ -95,8 +93,7 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    twins —
    writing a function IS authoring context, tools, and UI at once. Both keys =
    twins: agent and human look at ONE derived value; shared situational
-   awareness is structural, not messaged (canvas-first mitigates fabrication —
-   prose is where agents lie, [[laws]]). Every specced fn an agent writes
+   awareness is structural, not messaged. Every specced fn an agent writes
    teaches the system when to surface it. Anchors: the render twins, the
    entity walk, current-ns auto-run — [[context]].
    Authorship provenance remains on the source transaction for attribution,
@@ -114,8 +111,8 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    plan-survives-restart bench is its measurement.) Anchors: [[context]] §order.
 5. **Measured, not asserted.** The context/tool surface is a fitness landscape:
    every dial is config data, so contexts are A/B'd and selected against frozen
-   benchmarks (`pass^k`, the eval ledger). The laws in [[laws]] are
-   measurements, not opinions. Every scorer check must be stated in the agent's
+   benchmarks (`pass^k`, the eval ledger). Dated measurements and model results
+   live in PRD research. Every scorer check must be stated in the agent's
    context, or the bench measures prompt-omission. Endgame: the agent adjusts
    its own initial-context config and the loop selects what works.
 6. **Failures are data; core faults fail admission.** Agent and user failures
@@ -140,7 +137,7 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    hand-mirrored wrappers are not an interface. Replacing an old tier means
    repointing consumers and deleting the superseded path, never preserving two
    run loops, renderers, or capability APIs. Anchors: `seon.db`, `seon.effect`,
-   [[toolkit]].
+   the capability seam below.
 8. **One human, one bond; local compute first.** The runtime serves ONE human;
    the canvas is the shared value the pair looks at together. Ordinary
    personal-data work executes on local models when the measured capability
@@ -400,7 +397,7 @@ virtual thread, deliberately not a graph: connections churn with browsers while
 graph topology is static.
 
 Every proc pins `:io` or `:compute` explicitly; the `:mixed` default pins a
-platform thread per proc and is the one scaling cliff ([[laws]]). Workload
+platform thread per proc and is the one scaling cliff. Workload
 classification is per-function and derived, never declared per call site: key
 capability leaves carry `:seon.workload` defn metadata lifted into the program
 graph at index time, chains classify by reachability over the indexed call
@@ -423,15 +420,21 @@ remain the durable work record.
 
 ### Capability seam
 
+Protected `seon.*` namespaces own the database, evaluation, lifecycle, bounds,
+policy, and external-effect crossings. Ordinary application namespaces compose
+those functions as shared program facts; `my.*` is a convention, not a fixed
+catalog or security boundary. Every indexed function is callable. Context
+selects what to render, while genuine filesystem, process, web, model, and
+database effects enter the one `seon.effect/request!` boundary with their
+request identity. Actual namespaces and contracts are queried from the program
+graph, never copied into architecture prose.
+
 An agent calls an ordinary schema'd function and does not select a runtime.
 Each capability family owns one portable `.cljc` core. The core holds the
 public call shape, validation, ordinary request and response data, decoding,
 and pure retry decisions. A platform leaf implements the family's small native
 contract for one tier: sessions and sockets, blocking or async work, ambient
-invocation context, clocks and UUIDs, and direct platform interop. Every
-agent-facing `my.*` tool call enters `seon.effect/request!`, which
-validates and carries the one request identity before selecting the admitted
-family leaf.
+invocation context, clocks and UUIDs, and direct platform interop.
 
 The entry function binds those halves. Reader conditionals occur only at entry
 expressions where an asynchronous tier awaits a leaf result and synchronous JVM
@@ -619,15 +622,12 @@ repaints current truth. The doc owns
 block/render/canvas/layout, the page tree, reitit + the gate, the SSE
 channel, and the derived-walk block model. See [[ui]].
 
-### Toolkit — [[toolkit]]
+### Capabilities and authored code
 
-The agent-facing tool surface is flat `my.*` namespaces:
-`my.blob`, **[TARGET]** `my.branch`, `my.canvas`, `my.data`, `my.fs`, `my.kb`, `my.ns`, `my.plan`,
-`my.shell`, `my.skills`, `my.ui`, and `my.web`. Every effectful entry calls the
-one guarded `seon.effect/request!` function with the request identity.
-Protected policy and platform leaves remain under `seon.*`. Exact function
-contracts are discoverable program facts, not a second catalog in architecture
-prose.
+Protected `seon.*` owners enforce runtime and effect boundaries. Agents compose
+ordinary functions and namespaced data in any application namespace, and every
+indexed function remains callable. The program graph is the exact namespace,
+function, schema, and test catalog; this map does not mirror it.
 
 ### Observability — [[observability]]
 
@@ -653,19 +653,13 @@ order, dates, measurements, and acceptance evidence.
 - [[ui]] — block/render/canvas/layout, the page tree, reitit + the capability gate,
   the selective Datastar live channel, configurable compression, and the
   derived-walk block model.
-- [[toolkit]] — the `my.*` function catalog over the protected `seon.*` floor.
 - [[observability]] — context captures, attempts, eval receipts, error facts,
   and cluster lifecycle evidence.
 - [[context]] — the dynamic context tree, per-function-call cache,
   last-bytes-changed ordering with branch tie-clustering, namespace-as-location,
   pull-first relevance retrieval, and the UI twin of every block.
-- [[laws]] — the drive-measured empirical laws (render-prominence,
-  cache-stability, canvas-first, pass^k, keep-iff-lifts-battery) that
-  constrain every design above. Not principles — measurements.
 - [[roadmap]] — current implementation state, gaps, work order, and evidence.
 - [[datahike-primer]] — the source-grounded "work in datahike's grain" mindset (db is
   a value, only values cross the database protocol, `:db.fn/cas` as assertion,
   exact database-value caching). Read before
   touching claim or transaction logic.
-- [[library-grounding]] — the current concept-to-source read map for Datahike,
-  Malli, SCI/JVM execution, Bun leaves, Reitit, Datastar, and the test selectors.

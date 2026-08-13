@@ -67,5 +67,5 @@ Supporting rules:
 
 ## Related
 
-- [[laws]] — the compact testing law register.
+- `AGENTS.md` §5 and the `clojure-testing` skill — the maintained test rules.
 - [[architecture]] — the dependency-aware test selection principle.

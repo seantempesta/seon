@@ -48,6 +48,18 @@ datom and derives its run from database truth. The HTTP response is not an
 execution-result channel; the page feed renders the later message, run, and
 eval facts.
 
+## Canvas and controls
+
+The canvas is the focal shared value on a namespace page: the surface the agent
+and human inspect together. Generalized agent-authored canvas and control
+constructors are **[TARGET]**; HEAD currently exposes derived namespace-page
+HTML, browser-local disclosure, and the fixed message form, not a `my.canvas`
+API or generic callback route. A future control produces ordinary render data.
+Its action is either a pure value interpreted by the run loop or a genuine
+capability request through `seon.effect/request!`; it never gains an effectful
+eval helper that mutates page state. Exact constructors and routes remain
+unnamed until their schemas and action contract are settled.
+
 ## The projection contract — three outputs, one selection chain
 
 Rendering is the complete output boundary. Every context unit crosses
@@ -559,7 +571,7 @@ link and read it.
   renders read.
 - [[agent-runtime]] — the agent graph that assembles the prompt and owns run
   transitions.
-- [[toolkit]] — the **[TARGET]** generalized canvas and control boundary.
+- The `ui-canvas` skill — the built-versus-target canvas/control boundary.
 - [[context-rebuild]] — the measured arc for knowledge-on-demand (cards +
   state-gated teaching + pull); imported `my.skills` bodies remain explicit
   overrides rather than a default context block.

@@ -28,4 +28,4 @@ the acquired base cluster `ctx`; later turn forks observe that installation.
 
 - [[agent-runtime]] — live context and evaluation target.
 - [[data-model]] — program and schema facts.
-- [[library-grounding]] — current Malli and SCI source seams.
+- The `data-oriented-clojure` and `repl` skills — current Malli and SCI seams.

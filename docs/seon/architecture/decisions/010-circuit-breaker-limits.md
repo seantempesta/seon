@@ -45,7 +45,7 @@ or the operation as a structured configuration error.
 
 ## Related
 
-- [[laws]] — the timeless limit laws.
+- `AGENTS.md` §2.3 — the binding event-driven and bounded-execution law.
 - [[data-model]] — configuration facts.
 - [[agent-runtime]] — SCI `time-limit` and cluster JVM bounds.
-- [[toolkit]] — flat capability steering errors.
+- [[architecture]] — the capability boundary and flat steering errors.

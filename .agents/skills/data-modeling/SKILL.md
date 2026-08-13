@@ -84,7 +84,7 @@ What the bridge installs for each (verify live with
 The bridge maps `:enum` (keyword members only), `:and` (bridges on its base),
 and same-type `:or`; a `[:maybe X]` on a stored attribute and any unmappable
 shape THROW — extend the bridge
-(`src/seon/schema/datahike.cljc:36-48,149-205`), never hand-write a
+(`src/seon/schema/datahike.clj:25-47,112-228`), never hand-write a
 `:db.type/*`. The other
 properties it reads are `{:seon.db/unique true}` (`:db.unique/value`),
 `{:seon.db/index true}`, and `{:seon.db/no-history? true}`. Full table +
@@ -366,7 +366,7 @@ worked pair: identity attributes, refs, and transition contracts.
 | `resources/seon/schemas/` | first-party attribute/entity/value schemas |
 | `src/seon/schema/edn.clj` | loading, config derivation, one admission gate |
 | `src/seon/schema.cljc` | registry, activation, entity-schema decomposition |
-| `src/seon/schema/datahike.cljc` | `malli->datahike-attr` — the bridge (extend it here) |
+| `src/seon/schema/datahike.clj` | `malli->datahike-attr` — the bridge (extend it here) |
 | `src/seon/schema/form.cljc` | shared form inspection the bridge and gates use |
 | `src/seon/fn.clj` | selective durable corpus admission |
 | `src/seon/instrument.clj` | computed public-contracted-var instrumentation |

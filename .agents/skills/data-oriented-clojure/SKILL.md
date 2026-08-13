@@ -328,4 +328,5 @@ Test fixtures, event backstops, and generative patterns live in the
 | Write tests, fixtures, generators | the **`clojure-testing`** skill |
 | Build a long-running owner, channel, or executor | `reference-code/core.async/.../flow/` + `src/seon/flow.clj` |
 | Confirm any library's actual behavior | the vendored source in `reference-code/<lib>/` — never guess |
+| Change program-graph source indexing | `src/seon/fn/analyzer.clj:1-174` + `reference-code/clj-kondo/src/clj_kondo/core.clj:67-217` |
 | What is settled, unsettled, and next | `docs/prds/sci-execution-runtime/plan/README.md` |

@@ -73,4 +73,5 @@ lease clock.
 
 - [[architecture]] — complete target topology.
 - [[agent-runtime]] — agent graphs, run transitions, and recovery.
-- [[library-grounding]] — exact dependency and first-party source seams.
+- The `datahike` and `seon-flow-architecture` skills — exact dependency and
+  first-party source seams.

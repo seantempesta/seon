@@ -26,4 +26,5 @@ same owners.
 ## Related
 
 - [[agent-runtime]] — per-agent graphs and message wakes.
-- [[laws]] — event-driven readiness and declared ownership.
+- `AGENTS.md` §2.3 and the `seon-flow-architecture` skill — event-driven
+  readiness, execution bounds, and declared ownership.

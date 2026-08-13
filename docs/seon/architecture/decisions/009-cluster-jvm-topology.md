@@ -23,4 +23,5 @@ process-root store and shared executors.
 
 - [[architecture]] — complete target topology.
 - [[agent-runtime]] — agent graphs and recovery.
-- [[library-grounding]] — current process, database, Flow, and SCI owners.
+- The `seon-flow-architecture`, `datahike`, and `repl` skills — current
+  process, database, Flow, and SCI seams.
