@@ -442,9 +442,10 @@ The loop:
    `mcp__seon__eval_clj` evaluates in the selected cluster's JVM (qualify
    the cluster when several are live — ambiguity must fail). Its `jvm`
    mode is the host prepl with NO cluster custody bound — `seon.db`'s
-   elided db/conn arities refuse there; `door` mode evaluates through the
-   cluster's SCI ctx where elision holds (and mutates that shared ctx, so
-   keep door probes disposable). **If these
+   elided db/conn arities refuse there; `(seon.operator/connection
+   "default")` supplies explicit custody. `door` mode evaluates through
+   the cluster's SCI ctx where elision holds (and mutates that shared ctx,
+   so keep door probes disposable). **If these
    tools are down, degraded, or missing, SAY SO IMMEDIATELY** — report it
    to the orchestrator/owner and file the issue before working around it. A
    silent workaround (hand-rolled prepl senders, blind file edits) is how

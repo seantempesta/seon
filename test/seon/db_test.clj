@@ -293,7 +293,8 @@
                  (db/q exam-query))]
     (is (= :seon.db/missing-connection-binding
            (:seon.error/kind result)))
-    (is (string? (:seon.error/message result)))
+    (is (str/includes? (:seon.error/message result)
+                       "(seon.operator/connection \"default\")"))
     (is (= 'seon.db/*conn*
            (get-in result [:seon.error/data :seon.db/binding])))))
 

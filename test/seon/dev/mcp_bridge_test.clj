@@ -568,6 +568,8 @@
                        "creates NO run or receipts"))
     (is (str/includes? (:description eval-tool)
                        "agent/orchestrator context"))
+    (is (str/includes? (:description eval-tool)
+                       "(seon.operator/connection \"default\")"))
     (is (= ["jvm" "door"]
            (get-in eval-tool [:inputSchema :properties :mode :enum])))
     (is (contains? (get-in eval-tool [:inputSchema :properties]) :root))

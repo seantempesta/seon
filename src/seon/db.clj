@@ -116,7 +116,9 @@
         ", and no cluster connection is bound on this thread. Custody is "
         "elided only inside an agent evaluation; elsewhere — a raw or "
         "virtual thread, a fixture, a REPL — pass the database value or "
-        "connection explicitly, as in (db/pull db selector eid).")
+        "connection explicitly, as in (db/pull db selector eid). "
+        "At a development REPL, (seon.operator/connection \"default\") "
+        "supplies that connection.")
    {::binding 'seon.db/*conn*
     ::needed needed}))
 

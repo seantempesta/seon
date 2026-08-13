@@ -23,6 +23,7 @@
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.fs :as fs]
             [seon.operator.runtime :as runtime]
             [seon.operator.state :as state]
@@ -79,6 +80,79 @@
     (if (error-value? stopped)
       stopped
       (start! (:seon.boot/config instance)))))
+
+(defn- custody-environments
+  []
+  (into (sorted-map)
+        (keep (fn [[cluster-name instance]]
+                (when-let [environment
+                           (some-> instance
+                                   :seon.cluster.loop/cluster
+                                   env/of)]
+                  [cluster-name environment])))
+        @runtime/running-instances))
+
+(defn- custody-selection-error
+  [kind message cluster-names requested-cluster]
+  (cond-> {:seon.error/kind kind
+           :seon.error/message message
+           :seon.error/data {::candidate-clusters cluster-names}}
+    requested-cluster
+    (assoc-in [:seon.error/data ::requested-cluster] requested-cluster)))
+
+(defn- selected-environment
+  [requested-cluster]
+  (let [environments (custody-environments)
+        cluster-names (vec (keys environments))]
+    (cond
+      requested-cluster
+      (or (get environments requested-cluster)
+          (custody-selection-error
+           ::cluster-custody-unavailable
+           (str "Cluster " (pr-str requested-cluster)
+                " supplies no live custody at this development REPL; "
+                "live clusters with custody are " (pr-str cluster-names) ".")
+           cluster-names
+           requested-cluster))
+
+      (= 1 (count environments))
+      (val (first environments))
+
+      (empty? environments)
+      (custody-selection-error
+       ::cluster-custody-unavailable
+       (str "No live cluster supplies custody at this development REPL; "
+            "live clusters with custody are [].")
+       cluster-names
+       nil)
+
+      :else
+      (custody-selection-error
+       ::ambiguous-cluster-custody
+       (str "Cluster custody is ambiguous at this development REPL; "
+            "live clusters with custody are " (pr-str cluster-names)
+            ". Pass one name to seon.operator/connection.")
+       cluster-names
+       nil))))
+
+(defn- selected-connection
+  [cluster-name]
+  (let [environment (selected-environment cluster-name)]
+    (if (error-value? environment)
+      environment
+      (db/supplied-connection environment))))
+
+(defn connection
+  "Return one selected live cluster's connection for development."
+  {:malli/schema
+   [:function
+    [:=> [:cat] [:or :seon.db/connection :seon.error/value]]
+    [:=> [:cat :seon.boot/cluster-name]
+     [:or :seon.db/connection :seon.error/value]]]}
+  ([]
+   (selected-connection nil))
+  ([cluster-name]
+   (selected-connection cluster-name)))
 
 (defn status
   "Derived readiness and Flow observations for this JVM's clusters."

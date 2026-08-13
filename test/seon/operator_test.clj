@@ -2,10 +2,12 @@
   "The in-JVM operator surface stays a thin, error-valued delegation."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [malli.instrument :as mi]
             [seon.cluster :as cluster]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
+            [seon.db :as db]
             [seon.instrument]
             [seon.operator :as operator]
             [seon.operator.runtime :as runtime]
@@ -25,6 +27,42 @@
   (let [root (str "tmp/operator-test/" (random-uuid))]
     (.mkdirs (io/file root))
     (.getCanonicalPath (io/file root))))
+
+(defn- custody-instance
+  [cluster-name connection]
+  {:seon.cluster.loop/cluster
+   {:seon.env/environment
+    (test-support/environment cluster-name connection)}})
+
+(deftest development-connection-selects-the-sole-or-named-cluster
+  (test-support/with-database
+   (fn [connection-a]
+     (test-support/with-database
+      (fn [connection-b]
+        (with-redefs [runtime/running-instances
+                      (atom {"alpha" (custody-instance "alpha" connection-a)})]
+          (is (identical? connection-a (operator/connection)))
+          (is (int? (db/basis-t (db/db (operator/connection))))))
+        (with-redefs [runtime/running-instances
+                      (atom {"alpha" (custody-instance "alpha" connection-a)
+                             "beta" (custody-instance "beta" connection-b)})]
+          (is (identical? connection-b (operator/connection "beta")))))))))
+
+(deftest development-connection-refuses-ambiguous-custody-with-the-list
+  (test-support/with-database
+   (fn [connection]
+     (with-redefs [runtime/running-instances
+                   (atom {"beta" (custody-instance "beta" connection)
+                          "alpha" (custody-instance "alpha" connection)})]
+       (let [result (operator/connection)]
+         (is (= :seon.operator/ambiguous-cluster-custody
+                (:seon.error/kind result)))
+         (is (= ["alpha" "beta"]
+                (get-in result
+                        [:seon.error/data
+                         :seon.operator/candidate-clusters])))
+         (is (str/includes? (:seon.error/message result)
+                            "[\"alpha\" \"beta\"]")))))))
 
 (deftest external-existence-survives-the-target-it-describes
   (let [repository-root (owned-root)
