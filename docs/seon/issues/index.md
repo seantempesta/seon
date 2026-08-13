@@ -61,7 +61,7 @@ See `README.md` for the convention.
 | [Bound agent-facing host crossings](agent-facing-host-crossings-can-wait-without-a-bound.md) | blocker | wedge class-kill continuation |
 | [Bound orderly-stop completion joins](orderly-stop-completion-joins-have-no-bound.md) | blocker | wedge class-kill continuation |
 
-## Friction (131)
+## Friction (126)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -82,7 +82,6 @@ See `README.md` for the convention.
 | [Make local updates unable to recompute global projections](class-local-updates-recompute-global-projections.md) | friction | class-kill queue |
 | [Translate dependency representations once at their boundary](class-dependency-representations-leak-past-boundaries.md) | friction | class-kill queue |
 | [Record posh's cardinality-one pull-analysis arity defect](posh-cardinality-one-pull-analysis-has-an-arity-defect.md) | friction | upstream-delta sweep |
-| [Derive the oversight fleet proof from the live proc roster](oversight-fleet-test-pins-a-stale-proc-roster.md) | friction | oversight test repair |
 | [Give `seon.cluster.loop/settle!` a complete public contract](settle-is-public-without-a-complete-contract.md) | friction | unreadable-reply lane coordination |
 | [Construct the schedule graph test from a real environment-bearing handle](schedule-graph-test-constructs-a-handle-without-an-environment.md) | friction | schedule fixture repair |
 | [Render a capability namespace by its API, not by its Malli source](namespace-units-render-error-schema-boilerplate.md) | friction | agent context repair wave (2026-08-10 audit) |
@@ -124,7 +123,6 @@ See `README.md` for the convention.
 | [Render adversarial roots outlive their fault experiment](render-adversarial-roots-outlive-their-experiment.md) | friction | operator directory-claim governor wave |
 | [Include non-installed operator and MCP leaves in the sink proof](output-sink-query-excludes-operator-and-mcp-scripts.md) | friction | program-index production-subject wave |
 | [Give open map unions explicit discriminants](map-unions-have-no-explicit-discriminants.md) | friction | open-maps accretion wave |
-| [Make the AI transport taxonomy test assert its premise](ai-transport-taxonomy-test-can-run-zero-assertions.md) | friction | AI provider-integrity wave |
 | [Give the SCI source-size cap a declared owner](sci-reader-hides-a-production-source-cap.md) | friction | SCI reader-limit wave |
 | [Derive render-walk connections without a function hand list](render-walk-maintains-a-derived-edge-hand-list.md) | friction | render connection-model wave |
 | [Skip unchanged renderer invocations in the package proc](render-package-proc-reruns-unchanged-renderers.md) | friction | render package economics wave |
@@ -146,7 +144,6 @@ See `README.md` for the convention.
 | [Split the turn and evaluation kernels at durable boundaries](runtime-turn-and-evaluate-kernels-conflate-boundaries.md) | friction | runtime boundary refactor |
 | [Give config-dial discovery one explicit authority](config-dial-discovery-has-three-authorities.md) | friction | config derivation wave |
 | [Derive changed-test ownership instead of classifying paths](changed-test-selector-classifies-hosts-by-path-prefix.md) | friction | changed-test selector repair |
-| [Make the public-contract census prove its subjects exist](public-contract-census-can-pass-with-no-subjects.md) | friction | contract-gate repair |
 | [Give thinking tool continuations one faithful request shape](thinking-tool-continuations-have-no-faithful-request-shape.md) | friction | future model-continuation wave |
 | [Fence the MCP parent watchdog by captured process identity](mcp-parent-watchdog-can-follow-a-reused-pid.md) | friction | MCP process-lifetime repair |
 | [Make the oversized terminal-refusal settle as one schema-valid error fact](terminal-refusal-error-fact-fails-on-oversized-data.md) | friction | settlement fix wave |
