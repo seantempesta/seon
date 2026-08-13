@@ -381,7 +381,7 @@ writing.
 | attributes + connections | the Datahike model | entity kind/type |
 | build, operator, artifact | the `bin/seon`/`bin/acme` supervisor scope; the digested publication output | flavor |
 | get-in, path | paged navigation into a nested value | drill |
-| **[TARGET] the todo** | the ONE task system: derived obligations plus authored item facts (ruling 49; [implementation PRD Phase 5](docs/prds/sci-execution-runtime/plan/evolving-session-implementation-2026-08-12.md)) — unbuilt; update this row when it lands | my.plan, bare "plan" |
+| **[TARGET] `my.plan`, "the plan"** | the ONE task system: derived obligations plus authored item facts with `:about` subject refs (ruling 49 as amended 2026-08-13; [PRD](docs/prds/sci-execution-runtime/plan/plan-context-prd-2026-08-13.md)) — in flight; update this row when it lands. The run-internal `plan-tx`/`plan-digest` spellings rename to `sources-*` | todo, bare "plan" for run sources |
 | provider descriptor row | one hosted provider's data row under the config singleton | adapter, integration |
 | packages/, package.json, deps.edn | each ecosystem's own manifest names | npm-pkgs, maven-pkgs |
 | contexts on hosts, binding tables | sci's own vocabulary for agent execution | sandbox, VM, jail |

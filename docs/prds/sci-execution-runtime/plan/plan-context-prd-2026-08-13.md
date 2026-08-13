@@ -4,10 +4,14 @@ status: active
 tags: [prd, agent, context, data-model]
 ---
 
-# The todo: resurrected plan mechanics, context-integrated
+# The plan: resurrected mechanics, context-integrated
+
+(Owner ruling 2026-08-13: the one task noun is **my.plan** — ruling 49's
+semantics unchanged, its noun amended; the colliding run-internal
+`plan-tx`/`plan-digest` spellings rename to `sources-*` in R2.)
 
 Owner-directed 2026-08-13: resurrect the proven `my.plan` lineage mechanisms
-in fact-first form under ruling 49's frame, and make the todo a first-class
+in fact-first form under ruling 49's frame, and make the plan a first-class
 citizen of the generated-context system. This supersedes the implementation
 PRD's thinner Phase 5 sketch
 ([evolving-session-implementation-2026-08-12.md](evolving-session-implementation-2026-08-12.md));
@@ -17,7 +21,7 @@ the quarry evidence is
 
 ## The frame that binds everything
 
-Ruling 49: the todo is THE one task system — **derived obligations ∪
+Ruling 49: the plan is THE one task system — **derived obligations ∪
 authored item facts** — and completed items vanish from its current-state
 render. Ruling 47: what survives rebirth is a fact with a declared render;
 the render IS the compaction. Ruling 48: everything re-bootstraps from
@@ -35,7 +39,7 @@ omission.
    verify-and-close — keep this detail), `open-work`, `leaf`, `descendant`
    as one readable Datalog rule set over authored items. Statuses are NOT
    stored (the old `:open/:active/:done/:blocked` enum dies): done-ness is
-   presence of `:my.todo.item/completed-at`; blocked-ness derives from
+   presence of `:my.plan.item/completed-at`; blocked-ness derives from
    `needs` edges; the ONE optional authored state is the current-position
    anchor (an agent-level ref to the item being worked).
 2. **Item facts** — from `099cdfa99^:src-old/my/plan.cljc:24-43`, trimmed
@@ -47,7 +51,7 @@ omission.
    `completed-at`, optional expected-result. No pace, no stored status, no
    escalation members (archaeology §7: scheduling/escalation stays out).
 3. **Whole-value reconciliation** — the archaeology's strongest quarry
-   (§"Whole-document reconciliation was real"): `todo!` accepts one
+   (§"Whole-document reconciliation was real"): `plan!` accepts one
    complete authored tree (labels + `:after`-style references), compiles a
    PURE diff against current item facts into ONE transaction, refuses
    ambiguity loudly, reports explicit add/change/retract counts, and
@@ -63,7 +67,7 @@ omission.
 
 ## New — the context integration (the forward-looking half)
 
-- **T-form**: the todo declares `:seon.render/form` — the READY query is
+- **T-form**: the plan declares `:seon.render/form` — the READY query is
   the form; the generated opening shows `(my.todo/ready)` (or the
   declared listing form) with its real receipt like any collection, and
   the since-basis delta algebra applies with zero todo-specific code.
@@ -83,8 +87,8 @@ omission.
 
 | Phase | Scope | Exit |
 |---|---|---|
-| T1 | `resources/seon/schemas/my.todo.edn` (registry-query-first; open maps; declared renders per ruling 35), `src/my/todo.clj` (`add!`, `complete!`, `ready`, `todo` read), the quarried Datalog rules, focused tests incl. the parent-verify-close property and a rebirth property (current facts alone render the honest current state) | Focused green; the derivation rules quarried, not reinvented |
-| T2 | `todo!` whole-value reconciliation + CAS fence + union guard | The archaeology's reconcile properties as tests: pure diff, explicit counts, ambiguity refusal, no-op convergence, derived arms untouchable |
+| T1 | `resources/seon/schemas/my.plan.edn` (registry-query-first; open maps; declared renders per ruling 35), `src/my/plan.clj` (`add!`, `complete!`, `ready`, `todo` read), the quarried Datalog rules, focused tests incl. the parent-verify-close property and a rebirth property (current facts alone render the honest current state) | Focused green; the derivation rules quarried, not reinvented |
+| T2 | `plan!` whole-value reconciliation + CAS fence + union guard | The archaeology's reconcile properties as tests: pure diff, explicit counts, ambiguity refusal, no-op convergence, derived arms untouchable |
 | T3 | `/form` + membership integration | Held for the owner's membership ruling; the falsifier above lands with it |
 
 Model the schema/verb/render idiom on `my.note` (`9b26cb7a7`) — the
