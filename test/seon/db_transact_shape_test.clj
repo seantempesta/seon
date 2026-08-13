@@ -33,7 +33,7 @@
           {:seon.boot/cluster-name "db-transact-shape-test"
            :seon.db/connection connection
            :seon.schema/projection (:seon.schema/projection base-ctx)}))
-        ctx (env/carry base-ctx environment)]
+        ctx (env/carry-state base-ctx (env/environment-state environment))]
     (sci.eval/evaluate
      {:seon.cluster.run.form/source
       "(seon.db-transact-shape-test/transaction-result-shape)"

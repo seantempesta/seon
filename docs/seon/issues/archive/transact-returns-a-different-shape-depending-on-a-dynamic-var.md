@@ -51,3 +51,14 @@ reference identities and the admitted artifact remains inline.
 The transaction return-shape blocker is removed. Model-authored functions may
 commit and consume the resulting database value under the same contract as
 system-side functions.
+
+## Overnight fixture follow-up — 2026-08-13
+
+The recurring proof went red after the cluster context's replacement reference
+became the authoritative environment carrier. Its fixture added a plain
+environment beside that state, so `env/of` correctly retained the state's
+construction-time value and call preparation had no live connection to
+supply. Program-fact and plan probes showed the function's connection slot was
+still derived exactly. The fixture now carries a complete environment state,
+matching the production ownership boundary; the native transaction-report
+contract is unchanged.
