@@ -113,7 +113,18 @@ fixed by REUSING the shared derivation (`0ea973301`, focused 72/454/0,
 issue archived). An overnight `small-owner-reds` lane is sweeping the
 remaining independent red owners (db fixtures, store codec, gen.loop,
 blob-publication, call-preparation, prompt, curate, custody-stability,
-oversight, operator) from the tally log's worklist.
+oversight, operator) from the tally log's worklist. That lane completed:
+every remaining red fixed or attributed (mostly stale fixtures; ONE
+production regression — internal materialized-branch reads crossing N5's
+agent-facing `seon.db/q` boundary — fixed in registry/operator,
+`24255dcfe`/`00232b834`), all focused gates green. The after-tally `--all`
+then wedged at a NEW boundary the fresh worker dumps name precisely
+(retained root `tmp/test-runs/run.czWGK6`): the wake-routing property
+parks in `await-database-state!` under the POOLED runner while passing
+focused, and the gen.loop goal test ran 758 s (the render-cost stall in
+[agent-flow-fixture-omits-render-interest](../../seon/issues/agent-flow-fixture-omits-render-interest.md)
+— possibly one cause). A `wake-routing-pool-hang` lane is on it; its exit
+is the complete honest tally.
 
 **Uncommitted foreign residue deliberately left:**
 `test/seon/public_contract_test.clj` (reader→analyzer refactor) and the
