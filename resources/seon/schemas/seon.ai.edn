@@ -294,6 +294,10 @@
           :invalid-extra-body-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must mark invalid provider-specific request data"} [:seon.ai/invalid-extra-body :seon.ai/invalid-extra-body] [:seon.error/message :seon.error/message]]
           :extra-body-conflict [:= true]
           :extra-body-conflict-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must mark provider-specific data that conflicts with governed fields"} [:seon.ai/extra-body-conflict :seon.ai/extra-body-conflict] [:seon.error/message :seon.error/message]]
+          :reasoning-without-answer [:= true]
+          :reasoning-without-answer-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must mark a provider response with reasoning but no answer"} [:seon.ai/reasoning-without-answer :seon.ai/reasoning-without-answer] [:seon.error/message :seon.error/message]]
+          :stream-truncated [:= true]
+          :stream-truncated-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must mark a provider stream that ended before its terminal event"} [:seon.ai/stream-truncated :seon.ai/stream-truncated] [:seon.error/message :seon.error/message]]
           :rate-limited :seon.ai/http-status
           :rate-limited-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the rate-limit response status"} [:seon.ai/rate-limited :seon.ai/rate-limited] [:seon.error/message :seon.error/message]]
           :provider-server-failure :seon.ai/http-status

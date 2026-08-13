@@ -606,7 +606,8 @@
            "The configured extra body must be an EDN map with string keys."
            :seon.error/data {::request-transmitted? false
                              ::response-started? false
-                             ::output-observed? false}}))
+                             ::output-observed? false}
+           :seon.ai/invalid-extra-body true}))
       (catch Throwable failure
         {:seon.error/kind ::invalid-extra-body
          :seon.error/message
@@ -614,7 +615,8 @@
               (ex-message failure))
          :seon.error/data {::request-transmitted? false
                            ::response-started? false
-                           ::output-observed? false}}))
+                           ::output-observed? false}
+         :seon.ai/invalid-extra-body true}))
     {}))
 
 (defn- request-headers
@@ -656,7 +658,8 @@
            :seon.error/data {::protected-keys (vec (sort conflicts))
                              ::request-transmitted? false
                              ::response-started? false
-                             ::output-observed? false}}
+                             ::output-observed? false}
+           :seon.ai/extra-body-conflict true}
           ;; LiteLLM's useful escape hatch, but with Seon's error-as-value
           ;; boundary: provider-owned fields merge last only after conflicts
           ;; with the builder's ACTUAL emitted keys have been refused.
@@ -675,7 +678,8 @@
    :seon.error/message
    (str "The provider stream carried unreadable data: " reason ".")
    :seon.error/data
-   {::body (subs payload 0 (min 500 (count payload)))}})
+   {::body (subs payload 0 (min 500 (count payload)))}
+   :seon.ai/unparseable-body true})
 
 (defn- stream-chunk-error
   [payload document]
@@ -835,18 +839,21 @@
       {:seon.error/kind ::unparseable-body
        :seon.error/message
        "The provider's assistant content was not text."
-       :seon.error/data evidence}
+       :seon.error/data evidence
+       :seon.ai/unparseable-body true}
 
       (and (some? reasoning-content) (not (string? reasoning-content)))
       {:seon.error/kind ::unparseable-body
        :seon.error/message
        "The provider's assistant reasoning was not text."
-       :seon.error/data evidence}
+       :seon.error/data evidence
+       :seon.ai/unparseable-body true}
 
       (and (string? reasoning-content)
            (seq reasoning-content)
            (str/blank? content))
       {:seon.error/kind ::reasoning-without-answer
+       :seon.ai/reasoning-without-answer true
        :seon.error/message
        (str "The provider finished after streaming "
             (count reasoning-content)
@@ -860,7 +867,8 @@
       {:seon.error/kind ::token-starvation
        :seon.error/message
        "The provider exhausted the completion budget before replying."
-       :seon.error/data evidence}
+       :seon.error/data evidence
+       :seon.ai/token-starvation true}
 
       (and (string? content) (seq content))
       (cond-> {:seon.ai/text content}
@@ -875,7 +883,8 @@
       {:seon.error/kind ::unparseable-body
        :seon.error/message
        "The provider's response carried no assistant text."
-       :seon.error/data evidence})))
+       :seon.error/data evidence
+       :seon.ai/unparseable-body true})))
 
 (defn completion-text
   "The assistant text in a decoded provider response, or a flat error.
@@ -892,7 +901,8 @@
     (if (and (map? body) (some? (get body "error")))
       {:seon.error/kind ::unparseable-body
        :seon.error/message "The provider returned an error document."
-       :seon.error/data {::body-shape body-shape}}
+       :seon.error/data {::body-shape body-shape}
+       :seon.ai/unparseable-body true}
       (let [choice (when (map? body) (some-> (get body "choices") first))
             message (some-> choice (get "message"))
             content (some-> message (get "content"))
@@ -1126,8 +1136,9 @@
         time-limit-fired? (caused-by? failure
                                       java.net.http.HttpTimeoutException)
         chain (cause-chain failure)]
-    {:seon.error/kind ::stream-truncated
-     :seon.error/message
+  {:seon.error/kind ::stream-truncated
+   :seon.ai/stream-truncated true
+   :seon.error/message
      (cond
        (pos? received)
        (str "The provider's stream ended after " received
@@ -1346,7 +1357,8 @@
                                  ;; a 2xx body EXISTS, so the provider
                                  ;; generated and charged for output
                                  ;; even though we cannot read it
-                                 ::output-observed? true}}))
+                                 ::output-observed? true}
+               :seon.ai/unparseable-body true}))
           (let [text (str (read-body))
                 body (subs text 0 (min 500 (count text)))]
             {:seon.error/kind ::provider-error
@@ -1359,7 +1371,8 @@
                                ::response-started? true
                                ;; a rejection carries no generated
                                ;; output; a 2xx would not be here
-                               ::output-observed? false}})))
+                               ::output-observed? false}
+             :seon.ai/provider-error status})))
       (catch java.net.http.HttpTimeoutException failure
         ;; an ordinary outcome: the model was slow. Never a bug report.
         ;; A CONNECT timeout never transmitted anything; any other
@@ -1378,7 +1391,8 @@
                                              :timeout)
                              ::request-transmitted? (not connect?)
                              ::response-started? false
-                             ::output-observed? false}}))
+                             ::output-observed? false}
+           :seon.ai/timeout timeout-ms}))
       (catch Throwable failure
         (let [before-send? (transport-before-send? failure)]
           {:seon.error/kind ::transport-failure
@@ -1391,7 +1405,8 @@
                                              :transport-unknown)
                              ::request-transmitted? (not before-send?)
                              ::response-started? false
-                             ::output-observed? false}})))))
+                             ::output-observed? false}
+           :seon.ai/transport-failure endpoint})))))
 
 (defn complete
   "Call the model once and return its text, or a flat error value.
@@ -1442,4 +1457,5 @@
                          ;; failure that is provably free.
                          ::request-transmitted? false
                          ::response-started? false
-                         ::output-observed? false}})))
+                         ::output-observed? false}
+       :seon.ai/no-credential true})))
