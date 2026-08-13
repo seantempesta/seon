@@ -15,6 +15,8 @@ direct dev tests repeat the same unbounded wait and can wedge the suite.
 
 ## Evidence
 
+- `src/seon/cluster/export.clj:118-125` drains merged clone-command output and
+  then calls un-timed `.waitFor`; a clone child that stays alive wedges export.
 - `script/seon/fresh_operator.clj:746-756` uses unbounded `slurp` then
   `.waitFor` for offline roster discovery.
 - `script/seon/fresh_operator.clj:1454-1470` launches the detached cluster path
@@ -29,7 +31,7 @@ direct dev tests repeat the same unbounded wait and can wedge the suite.
 
 ## Owner
 
-One operator child-process runner that owns concurrent output draining,
+One foreign child-process runner, shared by export and the operator, that owns concurrent output draining,
 process completion, exact-process termination, and a loud foreign-process
 deadline.
 

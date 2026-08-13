@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, test, runtime, class/p2, wave/test-platform]
+tags: [issue, test, runtime, class/p2, wave/flow-protocol]
 ---
 
 # Confirmation parallel-failure blocks reading worker protocol
@@ -27,6 +27,13 @@ requires this read to be bounded and its starvation to name the peer.
 last boundary
 `populated-stopped-cluster-reopens-after-full-operator-restart`, then the
 liveness backstop fired with coordinator and worker dumps retained.
+
+The source-wide await census on the same date found the protocol read at
+`src/seon/test/runner.clj:1098-1107,1165-1169` and its confirmation future join
+at `src/seon/test/runner.clj:1427-1431`. The 300-second suite silence watchdog
+eventually kills the JVM, but neither seam has a local bound naming the worker
+whose response or confirmation never arrived. Task and worker-launch future
+joins at `src/seon/test/runner.clj:1321-1322,1564` have the same local shape.
 
 ## Owner
 
