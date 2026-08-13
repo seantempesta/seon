@@ -80,11 +80,17 @@ registered-keys-self-explain.
   `r4-docs-census` (legacy-spelling census + doc-only fixes; src/test
   residue reported, never edited), `issue-class-kill` (top-ranked open
   class disjoint from the W2 census files), `class-member-tags`
-  (hand-maintained class member lists → `class/<id>` tag derivations),
-  plus one opus research agent drafting the R3 store-path priced options
-  (read-only; draft at
-  `../research/store-path-rename-options-2026-08-13.md`) for the owner's
-  review. Owner kept the instruction-facts PRD and all AWAITING ledger
+  (RETURNED COMPLETE `90eecdee5`: 13 hand lists dissolved into
+  `class/<id>` tag derivations, `bin/issues-index --class` query added
+  and documented, index green at 184 open), plus one opus research agent
+  (RETURNED: R3 priced options drafted at
+  [store-path-rename-options-2026-08-13](../research/store-path-rename-options-2026-08-13.md),
+  option 2 recommended; its archaeology surfaced two defects, filed and
+  scheduled in `c1576fa56`/`daa32aab8`). W2 RETURNED COMPLETE
+  (`2aacc58fe`–`5423c5a10`, accretion-reviewed clean; my.plan/bootstrap/
+  walk producers deferred to W2b as specced). The rebirth probe rerun is
+  IN FLIGHT on `tmp/rebirth/scratch-root-quiet` (`clojure -M:dev:test`,
+  the probe needs the test classpath); W2b launches when it completes. Owner kept the instruction-facts PRD and all AWAITING ledger
   items PARKED. Post-R2 order (T3-first vs drive-first) and the
   cheapest-form cost model are PENDING his answer after explanations
   delivered in chat.
