@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, flow, schema, config, class/n11, wave/core]
 ---
@@ -79,3 +79,17 @@ now the schema resource, while the root writer/build aliases still make
 `src-old/seon.config.resolve` executable beside it. The destination is the rot
 deletion wave that removes those live quarry readers; this must not receive an
 independent fresh config mechanism or a compatibility fix.
+
+## Closure verification — 2026-08-13
+
+**CONFIRMED-STALE at `06e654c76`; resolved by `099cdfa99`.** The remaining
+collision surface was deleted rather than patched:
+
+- `099cdfa99` removed `src-old/seon/config/resolve.cljc` and the quarry from the
+  working tree; `deps.edn:1-6` now names only `src` and `resources` as the
+  system paths, and no writer/host alias can load the deleted second owner.
+- The two dials have one declaration family under
+  `resources/seon/schemas/seon.config.flow.compute.edn`; current production
+  references consume those keys without declaring another copy.
+- `src/seon/schema/edn.clj:118-123,204-217,347-349` identifies duplicate
+  attributes and refuses them at the directory-backed population gate.

@@ -41,3 +41,18 @@ The database-derived namespace-context query used by the render walk.
   irrelevant `my.*` namespace, proving classification without changing code.
 - Every agent remains able to call every function; this projection never
   becomes a grant surface.
+
+## Re-grounded evidence — 2026-08-13
+
+**STILL-REAL at `06e654c76`.** The old `.cljc` and monolithic-schema anchors
+were renamed, but both prohibited mechanisms remain:
+
+- `src/seon/cluster/instruction.clj:32-57` still classifies toolkit namespaces
+  with `(str/starts-with? ... "my.")`.
+- `src/seon/cluster.clj:1694-1745` still derives that set, compares it with the
+  cluster's stored `:seon.cluster/toolkit`, retracts the old value, and writes
+  the projection back as durable refs.
+- `resources/seon/schemas/seon.cluster.edn:1-15` still makes that copied set an
+  attribute of every cluster entity, and
+  `test/seon/cluster/instruction_test.clj:115-142` still proves convergence by
+  corrupting and reconciling the stored copy.

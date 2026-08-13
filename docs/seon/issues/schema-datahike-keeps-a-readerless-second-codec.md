@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, schema, database, class/n11, wave/schema-codec-deletion]
 ---
@@ -34,3 +34,19 @@ One encoder remains. If explicit projection is required, the live seam takes
 it and the ambient duplicate is deleted; otherwise the readerless explicit
 codec and its public contracts are deleted. Round-trip properties exercise the
 surviving production path.
+
+## Closure verification — 2026-08-13
+
+**CONFIRMED-STALE at `06e654c76`; resolved by `8500755d6` and extended by
+`f51810f25`.** There is now one recursive codec:
+
+- `src/seon/schema/datahike.clj:439-492` owns the sole recursive transaction
+  walk in `encode-transaction-data-in`; `encode-transaction-in` applies it
+  against an explicit projection.
+- `src/seon/schema/datahike.clj:494-507` is only a thin convenience wrapper that
+  resolves one declaration projection and delegates to that same encoder; it
+  is not a second recursive implementation.
+- Production calls now use the explicit seam at `src/seon/db.clj:1456-1458`
+  and `src/seon/cluster/run.clj:1514-1518`.
+
+The readerless-duplicate mechanism described by this note no longer exists.

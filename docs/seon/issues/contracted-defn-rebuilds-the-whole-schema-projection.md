@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, sci, schema, class/n9, wave/per-cluster-live-graph]
 ---
@@ -77,3 +77,20 @@ The face itself was correctly `#'user/unicode-doc-edge`; the defect is the
 whole-registry work paid to produce it. Acceptance should therefore retain an
 allocation-class assertion as well as the latency comparison, so a fast heap-
 intensive rebuild cannot false-green the repair.
+
+## Closure verification — 2026-08-13
+
+**CONFIRMED-STALE at `06e654c76`; resolved by `fba6bc4c1`.** The structural
+cause measured here is gone:
+
+- `src/seon/sci/eval.clj:320-335` still validates each contracted definition
+  through `projection-with-function-contract`, preserving the admission seam.
+- `src/seon/schema.clj:2579-2653` now compiles only the supplied definition,
+  replaces that function's dependency/admission/fingerprint entries, and
+  validates the affected render contracts in place. It does not call
+  `build-projection` or walk every registered contract.
+
+This source verification closes the whole-projection-rebuild defect. It does
+not claim a fresh live latency/allocation measurement; any remaining current
+performance regression requires a new measurement against this incremental
+implementation.

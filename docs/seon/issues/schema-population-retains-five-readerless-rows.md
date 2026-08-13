@@ -78,3 +78,19 @@ the deletion of its now-unreferenced row. The Flow generator wave owns the
   with no transitive reader.
 - The check proves a nonempty root set and retains indirect live rows such as
   program AST/arity maps and dynamically consumed AI setting schemas.
+
+## Re-grounded evidence — 2026-08-13
+
+**STILL-REAL at `06e654c76`, narrowed from five rows to one.** Three named rows
+are absent (`:seon.render.data/window`, `:seon.render.block/band`, and
+`:seon.render/literal`). `:seon.cluster.loop/evaluation` is no longer
+readerless: `src/seon/cluster/run.clj:160-164` consumes it in
+`settlement-projection`'s contract.
+
+The remaining row is `:seon.flow/future`, declared in the namespaced map at
+`resources/seon/schemas/seon.flow.edn:84-88`. That resource contains its only
+schema-key occurrence; no function contract or other schema references it.
+`src/seon/flow.clj:98-100` still publishes the generator solely for that
+readerless declaration. Delete that pair or give the row a real contract
+reader, and retain the acceptance criterion for a recurring nonempty
+reachability check.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, schema, class/n1, wave/render-producers]
 ---
@@ -97,3 +97,19 @@ Still open. The exact remaining work is to add the named AI/HTML producer
 properties to the cluster, config, and bootstrap-plan declarations and
 implement their domain summaries in `seon.cluster`, `seon.config`, and the
 protected `src/seon/bootstrap.clj`. This lane did not edit that Phase-1 owner.
+
+## Closure verification — 2026-08-13
+
+**CONFIRMED-STALE at `06e654c76`; resolved by `d0c439e96` and
+`16f022fc9`.** The remaining disposition above no longer describes HEAD:
+
+- `resources/seon/schemas/seon.cluster.edn:1-9` declares
+  `seon.cluster/render-ai` and `seon.cluster/render-html` on the cluster entity.
+- `src/seon/schema/edn.clj:94-102` derives the config entity with
+  `seon.config/render-ai` and `seon.config/render-html`.
+- `test/seon/render_coverage_test.clj:135-173` exercises both producer pairs,
+  bounds the AI summaries, rejects raw `:db/id`, and proves the config face no
+  longer inlines the model catalog.
+- `16f022fc9` deleted the authored bootstrap-plan schema and replaced that
+  durable entity with generated opening episodes, so there is no third raw-map
+  subject left to render.

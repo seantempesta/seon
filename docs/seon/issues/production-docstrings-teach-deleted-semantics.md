@@ -45,3 +45,19 @@ An agent reading `doc`, the bootstrap, and the owning function docstrings gets
 one true account of context lifetime, run disposition, comment grammar, and
 plan reduction. Construction diaries and banned vocabulary are absent from
 fresh production source.
+
+## Re-grounded evidence — 2026-08-13
+
+**STILL-REAL at `06e654c76`, with a smaller current census.** Most renamed-file
+examples are gone, but two live agent-facing claims still teach ruled-out
+semantics:
+
+- `src/seon/cluster/instruction.clj:13-24` tells every new agent that prose is
+  retained as `;;` comments and demonstrates that spelling. The actual owner
+  emits single-`;` comments at `src/seon/cluster/reply.clj:91-97,225`.
+- `src/seon/flow.clj:1-6` still calls the production Flow owner a "standing
+  testbed", despite that namespace owning the running graph launchers.
+
+The earlier `my.message`, `my.run`, context-lifetime, construction-diary, and
+fold examples do not survive at HEAD; the two current lines above are the
+remaining work for this note.

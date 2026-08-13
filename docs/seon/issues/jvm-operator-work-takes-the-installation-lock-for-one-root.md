@@ -61,3 +61,18 @@ sites naming this note. Revisit only when the parallel suite's
 four-worker load measures real contention here. The per-root redesign
 (lock-handle ownership transfer to children) is the recorded end state
 if that day comes.
+
+## Re-grounded evidence — 2026-08-13
+
+**STILL-REAL at `06e654c76` as an unimplemented owner-ruling/documentation
+gap, not as authorization for the per-root redesign.** The accepted serial
+behavior remains at `src/seon/operator.clj:297-307,593-602,825-845,884-893`.
+No one of those sites names this ruling or explains the deliberate exception.
+At the same time, `resources/seon/operator/state.clj:402-408` says the
+installation-wide lock is only for cross-root work and that one-root lifecycle
+transitions take the per-root lock.
+
+The current source therefore contradicts both itself and the recorded ruling.
+Closure requires the promised honest annotation/contract reconciliation; a
+contention-driven lock redesign remains deferred until the owner's measured
+four-worker condition is met.

@@ -51,3 +51,20 @@ list of JVM defaults.
 - Positive imports and the existing alias/refer prelude remain exact.
 - The proof uses the maintained clj-kondo representation; no Seon-only
   default-import roster or regex rewrite is introduced.
+
+## Re-grounded evidence — 2026-08-13
+
+**STILL-REAL at `06e654c76`.** Current code preserves the runtime mask but
+still erases it from both static-analysis preludes:
+
+- `src/seon/sci/eval.clj:501-544` stores an import row with only
+  `:seon.ns.import/local` when SCI reports a nil target, and reconstructs the
+  nil entry for runtime acquisition.
+- `test/seon/cluster/turn_test.clj:645-696` proves that the `String` nil-mask is
+  durable and takes effect in a fresh SCI context.
+- `src/seon/fn/analyzer.clj:228-239` and `src/seon/fn.clj:470-481` both use
+  `(keep :seon.ns.import/target-class)`, so the same row contributes nothing to
+  clj-kondo's synthetic namespace form.
+
+The maintained clj-kondo checkout is now `57252e079`; a source search there
+still finds no negative-import representation to carry this fact.

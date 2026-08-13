@@ -49,3 +49,16 @@ run custody.
   cannot pass merely because one constant is below a deleted constant.
 - A repository search finds run-lease language only in historical/quarry
   material that is marked as such.
+
+## Re-grounded evidence — 2026-08-13
+
+**STILL-REAL at `06e654c76`.** The deleted `.cljc` anchor was only a rename;
+the stale authority remains in current production inputs and its regression:
+
+- `config/default.edn:407-416` still explains the total retry wait using the
+  deleted 60-second lease and a 60-second model deadline.
+- `test/seon/ai_test.clj:392-398` still says the shipped strategy is bounded by
+  the "RUN LEASE" and asserts only that the delay is below `60000`.
+- `src/seon/ai.clj:434-449` derives the strategy from the current dials; it
+  supplies no independent 60-second custody bound that could make either claim
+  current.

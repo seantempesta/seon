@@ -31,3 +31,16 @@ The single configured result/source limit family and `seon.sci.reader/read`.
 The cap is a schema-derived config fact passed by every production caller, or
 the owner explicitly proves and documents a different derived bound. No private
 fallback number decides production admission.
+
+## Re-grounded evidence — 2026-08-13
+
+**STILL-REAL at `06e654c76`.** The `.cljc` reply anchor was only renamed:
+
+- `src/seon/sci/reader.cljc:7-10,569-596` still owns the private 1 MiB fallback
+  and still claims there is no production caller.
+- `src/seon/sci/eval.clj:467-488` calls the reader for live evaluation without
+  `:seon.sci.reader/max-chars`.
+- `src/seon/cluster/reply.clj:129-145,303-312` calls it for reply freezing and
+  prose recovery without the bound.
+- No schema resource or shipped config fact declares
+  `:seon.sci.reader/max-chars`.

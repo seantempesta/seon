@@ -98,3 +98,16 @@ skills. Because those citations guide current work and carry repository-wide
 blast radius, repair and independently verify them before archiving this note.
 Historical PRDs and archived research remain archaeology and do not block
 closure.
+
+## Re-grounded evidence — 2026-08-13
+
+**STILL-REAL at `06e654c76`, narrowed to one active skill citation.** The
+production conversion itself remains complete: exactly eight `.cljc` files
+exist under `src/`, and none is one of the JVM-only files in the original
+census. However, `.agents/skills/datastar-web-ui/SKILL.md:85` still directs
+current work to deleted `src/seon/cluster/wake.cljc:163-228`; the live owner is
+`src/seon/cluster/wake.clj`.
+
+The 2026-08-03 closure condition therefore still fails on one current,
+high-blast-radius instruction. Historical citations do not matter; this active
+skill citation does.

@@ -97,3 +97,22 @@ duplicate debug cursor walk. Two current findings survive:
 The destination is the render-floor cleanup wave: one reverse-ref window owner,
 bounded cursor preparation before whole-value sorting, and one proven stable
 node identity across every supported tier.
+
+## Re-grounded evidence — 2026-08-13
+
+**STILL-REAL at `06e654c76`, narrowed to the same two live mechanisms but no
+longer to cross-tier node identity.** `seon.render.value` is now CLJ-only and
+`src/seon/render/value.clj:44-65` has one JVM node-id implementation, so that
+portability residue is gone.
+
+The remaining defects are current:
+
+- `src/seon/render/web.clj:464-508` still independently queries, groups, sorts,
+  caps, and writes reverse-ref elision prose instead of sharing the walk's
+  reverse-connection window at `src/seon/render/walk.clj:245-275`.
+- `src/seon/render/value.clj:119-143` still sorts every map key or set member by
+  `pr-str` in `stable-entries` before `window` drops the offset and takes one
+  bounded page.
+
+Closure is now one reverse-window owner plus bounded page preparation; the old
+CLJS node-id proof is no longer part of the live defect.

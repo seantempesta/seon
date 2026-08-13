@@ -104,3 +104,17 @@ speedup.** `:commit-graph? false` and `:sync-blob? false` remain inadmissible.
 The only unadopted performance candidate in this note is writer waiting; its
 coalescing benefit and serial cost are proven, while its Seon config acquisition
 mechanism remains design work.
+
+## Re-grounded evidence — 2026-08-13
+
+**STILL-REAL at `06e654c76`, only in the narrowed writer-wait sense already
+recorded above.** `src/seon/cluster/store.clj:148-165` still constructs the
+self writer as `{:backend :self}` with fused index roots and a 256-entry diff
+buffer, but supplies no `:commit-wait-time`. The retained
+`docs/prds/sci-execution-runtime/research/scripts/store-options-before-after-2026-08-02.clj`
+still contains the comparative serial/burst probe.
+
+The title's 18-object/five-fsync premise is stale and must not be scheduled as
+the current defect. What remains open is the measured coalescing tradeoff and
+its explicit acquisition/reconnect design, not adoption of the already-live
+fusion/diff settings.

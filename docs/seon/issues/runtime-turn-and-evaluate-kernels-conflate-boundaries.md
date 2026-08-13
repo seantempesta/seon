@@ -61,3 +61,17 @@ kept as the only orchestration entries.
   phase enum is introduced.
 - Existing state-transition properties and live turn evidence pass unchanged,
   and each extracted boundary has one direct falsifier.
+
+## Re-grounded evidence — 2026-08-13
+
+**STILL-REAL at `06e654c76`, narrowed to the evaluation half.** The old
+`loop.cljc` size claim is obsolete: `src/seon/cluster/loop.clj:1675-1706` now
+defines a thin `turn` dispatcher over `open-turn`, `call-turn`,
+`generate-turn`, `resume-turn`, and `close-turn`.
+
+`src/seon/sci/eval.clj:1923-2219`, however, still defines `evaluate` as a
+roughly 297-line orchestration body. It still owns arming/disarming, reader
+event consumption, SCI analysis and evaluation, namespace/session observation,
+declaration publication, value admission, printing, and failure normalization
+inside one entry. The turn half is complete; the current issue is the surviving
+evaluation-boundary concentration.
