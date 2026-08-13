@@ -1,1 +1,5 @@
-#:seon.config.agent{:turn-completion-backstop-ms [:int {:min 1}]}
+#:seon.config.agent{:turn-completion-backstop-ms
+                    [:int
+                     {:min 1
+                      :description
+                      "Milliseconds an agent graph may wait for its turn-completion permit, including orderly disarm. The permit remains the primary event; expiry is a core fault naming the agent and held run."}]}

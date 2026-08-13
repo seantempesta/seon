@@ -237,6 +237,59 @@
          [?run :seon.cluster.run/id ?id]]
        db agent-id process))
 
+(defn- turn-completion-backstop-failure
+  [agent-id run-id timeout-ms operation expected events]
+  (let [evidence
+        (cond->
+         {:seon.cluster.agent/id agent-id
+          :seon.config.agent/turn-completion-backstop-ms timeout-ms
+          :seon.cluster.agent/completion-events events}
+          run-id (assoc :seon.cluster.run/id run-id))
+        diagnostic
+        (error/diagnostic
+         (cond->
+          {:seon.error/kind ::turn-completion-backstop
+           :seon.error/message
+           (str "Agent " (pr-str agent-id)
+                (if run-id
+                  (str " run " (pr-str run-id))
+                  " with no observable held run")
+                " did not publish turn completion within " timeout-ms " ms.")
+           :seon.cluster.agent/id agent-id
+           :seon.cluster.agent/turn-completion-backstop agent-id
+           :seon.config.agent/turn-completion-backstop-ms timeout-ms
+           :seon.error/diagnostic-layer ::agent-graph
+           :seon.error/diagnostic-operation operation
+           :seon.error/diagnostic-member :seon.cluster.loop/completion
+           :seon.error/diagnostic-expected expected
+           :seon.error/diagnostic-offending evidence
+           :seon.error/diagnostic-cause ::turn-completion-backstop
+           :seon.error/diagnostic-evidence evidence}
+           run-id (assoc :seon.cluster.run/id run-id)))]
+    (ex-info (:seon.error/message diagnostic) diagnostic)))
+
+(defn- await-turn-permit!
+  [state]
+  (let [{connection :seon.db/connection
+         cluster-name :seon.cluster/name
+         process :seon.cluster.run/process
+         completion :seon.cluster.loop/completion}
+        (:seon.cluster.loop/cluster state)
+        agent-id (:seon.cluster.agent/id state)
+        database @connection
+        run-id (held-run-id database agent-id process)
+        timeout-ms
+        (:seon.config.agent/turn-completion-backstop-ms
+         (config/effective database cluster-name))
+        [value selected]
+        (async/alts!! [completion (async/timeout timeout-ms)] :priority true)]
+    (if (= selected completion)
+      value
+      (throw
+       (turn-completion-backstop-failure
+        agent-id run-id timeout-ms ::turn-start ::turn-permit
+        [:seon.cluster.loop/completion])))))
+
 (defn turn-step
   "The turn transform, in Flow's four arities: ONE episode pass.
   Settle this agent's orphan (the wedge fence, per-agent), pin one
@@ -279,7 +332,7 @@
   ([state _input _message]
    (let [cluster (:seon.cluster.loop/cluster state)
          completion (:seon.cluster.loop/completion cluster)]
-     (if-some [_ready (async/<!! completion)]
+     (if-some [_ready (await-turn-permit! state)]
        (try
          (let [agent-id (:seon.cluster.agent/id state)
                connection (:seon.db/connection cluster)
@@ -555,39 +608,11 @@
         (if (or (= selected completion)
                 (= selected turn-stopped))
           value
-          (let [evidence
-                (cond->
-                 {:seon.cluster.agent/id agent-id
-                  :seon.config.agent/turn-completion-backstop-ms timeout-ms
-                  :seon.cluster.agent/completion-events
-                  [:seon.cluster.loop/completion
-                   :seon.cluster.agent/turn-stopped]}
-                  run-id (assoc :seon.cluster.run/id run-id))
-                diagnostic
-                (error/diagnostic
-                 (cond->
-                  {:seon.error/kind ::turn-completion-backstop
-                   :seon.error/message
-                   (str "Agent " (pr-str agent-id)
-                        (if run-id
-                          (str " run " (pr-str run-id))
-                          " with no observable held run")
-                        " did not publish turn completion within "
-                        timeout-ms " ms.")
-                   :seon.cluster.agent/id agent-id
-                   :seon.cluster.agent/turn-completion-backstop agent-id
-                   :seon.config.agent/turn-completion-backstop-ms timeout-ms
-                   :seon.error/diagnostic-layer ::agent-graph
-                   :seon.error/diagnostic-operation ::disarm
-                   :seon.error/diagnostic-member
-                   :seon.cluster.loop/completion
-                   :seon.error/diagnostic-expected ::turn-completed
-                   :seon.error/diagnostic-offending evidence
-                   :seon.error/diagnostic-cause
-                   ::turn-completion-backstop
-                   :seon.error/diagnostic-evidence evidence}
-                   run-id (assoc :seon.cluster.run/id run-id)))
-                failure (ex-info (:seon.error/message diagnostic) diagnostic)
+          (let [failure
+                (turn-completion-backstop-failure
+                 agent-id run-id timeout-ms ::disarm ::turn-completed
+                 [:seon.cluster.loop/completion
+                  :seon.cluster.agent/turn-stopped])
                 fault
                 (cond->
                  {::flow/pid ::turn

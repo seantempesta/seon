@@ -112,9 +112,10 @@
  ; backstop and the process boundary, never by this.
  :seon.config.eval/time-limit-ms 30000
 
- ; ORDERLY AGENT STOP WAITS ON THE TURN'S OWN COMPLETION EVENTS. This is the
- ; loud last-resort bound when neither completion nor turn-stopped arrives;
- ; firing is a core-fault report, never successful teardown. Ten minutes is
+ ; EVERY TURN AND ORDERLY AGENT STOP WAIT ON THE TURN'S OWN COMPLETION EVENTS.
+ ; This is the loud last-resort bound when the permit, completion, or
+ ; turn-stopped event never arrives; firing is a core-fault report, never
+ ; successful execution or teardown. Ten minutes is
  ; above the shipped maximum primary-provider retry budget (3 × 180 s plus
  ; 3 s total retry delay) and leaves 57 s for prompt/eval/settlement after the
  ; last remote attempt, while making a missing internal event finite.

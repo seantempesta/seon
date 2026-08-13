@@ -870,6 +870,41 @@
             (.close server)
             (disarm-all! routing)))))))
 
+(deftest turn-start-has-the-same-declared-loud-completion-backstop
+  (with-connection
+    (fn [connection ctx]
+      (let [agent-id "lost-turn-permit"
+            timeout-ms 100]
+        (db/transact!
+         connection
+         [{:seon.cluster.agent/id agent-id}
+          (config-row
+           "lost-turn-permit"
+           {:seon.config.agent/turn-completion-backstop-ms timeout-ms})])
+        (let [cluster (assoc (handle connection ctx)
+                             :seon.cluster.loop/completion (async/chan))
+              started-at (System/nanoTime)
+              failure
+              (try
+                (agent/turn-step
+                 {:seon.cluster.agent/id agent-id
+                  :seon.cluster.loop/cluster cluster}
+                 ::agent/episode ::wake)
+                nil
+                (catch clojure.lang.ExceptionInfo caught caught))
+              elapsed-ms (/ (- (System/nanoTime) started-at) 1000000.0)]
+          (is (= ::agent/turn-completion-backstop
+                 (:seon.error/kind (ex-data failure))))
+          (is (= ::agent/turn-start
+                 (:seon.error/diagnostic-operation (ex-data failure))))
+          (is (= agent-id (:seon.cluster.agent/id (ex-data failure))))
+          (is (= timeout-ms
+                 (:seon.config.agent/turn-completion-backstop-ms
+                  (ex-data failure))))
+          (is (< elapsed-ms 1000.0)
+              (str "the lost permit failed within its declared 100 ms bound in "
+                   elapsed-ms " ms")))))))
+
 (deftest park-wake-test
   (with-connection
     (fn [connection ctx]
