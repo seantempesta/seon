@@ -4,13 +4,13 @@ status: active
 tags: [architecture, web, agent]
 ---
 
-# UI — pages, blocks, renders, and routes
+# UI — namespace pages, blocks, renders, and routes
 
 > **Target design** (present tense). Implementation state, gaps, order, and
 > evidence live only in [[roadmap]].
 
 The human's UI and the agent's prompt are the same acquired data projected as a
-form, a printed value, and Hiccup. Every settled page state is a derived
+form, a printed value, and Hiccup. Every settled web-surface state is a derived
 projection of the database; transient streamed prefixes and retained render
 entries are process-local values, and no rendered output is persisted as
 database truth. The context unit is the **block**; the engine is `seon.render`; the HTTP router is
@@ -19,7 +19,7 @@ normalized reactive registration and database-scoped selective interest per
 demanded computation. Loopback streams are uncompressed by
 default; remote compression is explicit configuration. Every layer is a
 symbol or a datom, so a third party overrides any of it — blocks, canvas,
-layout, the root agent’s view, routes, CSS, client — reusing the same
+layout, the root agent’s surface, routes, CSS, client — reusing the same
 primitives, with zero `src/seon` edits.
 
 The web UI runs inside the **cluster JVM** beside the writer and the agent
@@ -29,7 +29,7 @@ reads the cluster's current immutable database values directly. Agent-authored
 render functions run only through the one guarded SCI invocation boundary: the retained
 `ctx`/`fork`, one `:interrupt-fn`, the render invocation-class `time-limit`,
 value admission, and bounded output. No direct Var invocation or
-`requiring-resolve` path bypasses that door. Supervision, bounded evals, and
+`requiring-resolve` path bypasses that boundary. Supervision, bounded evals, and
 cheap flow-graph rebuilds protect the process; the UI does not rely on a
 process wall.
 
@@ -45,7 +45,7 @@ The only interactive mutation is the agent message form. Its POST route
 validates same-origin input, target identity, and bounded content, then commits
 one `:seon.cluster.message` row. The agent's own graph wakes from the `/to`
 datom and derives its run from database truth. The HTTP response is not an
-execution-result channel; the page feed renders the later message, run, and
+execution-result channel; the web UI feed renders the later message, run, and
 eval facts.
 
 ## Canvas and controls
@@ -57,14 +57,14 @@ HTML, browser-local disclosure, and the fixed message form, not a `my.canvas`
 API or generic callback route. A future control produces ordinary render data.
 Its action is either a pure value interpreted by the run loop or a genuine
 capability request through `seon.effect/request!`; it never gains an effectful
-eval helper that mutates page state. Exact constructors and routes remain
+eval helper that mutates web-surface state. Exact constructors and routes remain
 unnamed until their schemas and action contract are settled.
 
 ## The projection contract — three outputs, one selection chain
 
 Rendering is the complete output boundary. Every context unit crosses
 `:seon.render/form` for its producing form and `:seon.render/ai` for its printed
-value. Every semantic page value crosses `:seon.render/html`. Other
+value. Every semantic web UI value crosses `:seon.render/html`. Other
 consumer-visible text values—MCP or tool results, runner output, logs, faults,
 and terminal or operator faces—cross `:seon.render/ai`. JSON and SSE framing
 plus literal authored static copy are transport bytes after that boundary, not
@@ -72,8 +72,8 @@ additional projections. A **unit** is schema'd data acquired by the one
 schema-derived pull rooted at the agent. The boundary requests a projection,
 and the render function resolves it through the program graph. First-party Vars
 remain live under re-evaluation. A nonidentical base-Var redefinition is
-accepted and emits the ordinary Clojure-style warning. Agent-authored corpus
-functions are installed SCI values invoked through the guarded door, never
+accepted and emits the ordinary Clojure-style warning. Agent-authored program-graph
+functions are installed SCI values invoked through the guarded boundary, never
 host-resolved Vars.
 
 Explicit declarations ride on the value being projected; otherwise the
@@ -81,12 +81,12 @@ selector queries the program graph and schema metadata. A failure inside the
 projection machinery may emit one bounded emergency diagnostic; that escape is
 a fault to repair, not a third normal output path. Program rows declare
 `:seon.fn/external-sink` and `:seon.fn/projection-boundary`, so the remaining
-projected, bypass, and unresolved paths are graph queries rather than a roster.
+projected, bypass, and unresolved paths are graph queries rather than a maintained list.
 
 Failures are flat `:seon.error` values, never throws. No declaration is
 required: a value with no specialist reaches the structural floor. An
-ambiguous contract fit or a selected producer failure is loud and does not
-fall through to another producer. The browser receives only an unavailable
+ambiguous contract fit or a selected render-function failure is loud and does not
+fall through to another render function. The browser receives only an unavailable
 state; an explicitly assigned namespace owner receives the durable diagnostic
 message.
 
@@ -102,7 +102,7 @@ and `:seon.render/html` through one chain, most specific first:
 4. the structural floor.
 
 Function rows carry input and output schemas, so namespace candidate selection
-is one ordinary corpus query through the query cache. There is no producer rule
+is one ordinary program-graph query through the query cache. There is no render-function rule
 registry, slot redirect, or second floor. A broken render function yields a flat error
 unit and never promotes a different mechanism silently.
 
@@ -129,11 +129,11 @@ second visibility mechanism.
 stable element id. The render proc retains each logical call's dependency
 evidence, latest output, and serialized entries, so unchanged units reuse their
 bytes before fan-out. A refreshed render whose HTML is byte-equal still appends
-the basis-labelled history observation while equality suppresses its page patch.
-Whole-page morphing is not the live-update fallback: initial paint builds the
-page once, then every change targets the smallest stable block whose bytes
+the basis-labelled history observation while equality suppresses its web-surface patch.
+Whole-web-surface morphing is not the live-update fallback: initial paint builds the
+web surface once, then every change targets the smallest stable block whose bytes
 changed. Serialization, authored evaluation, and slow-reader pressure
-therefore scale with changed content rather than page size.
+therefore scale with changed content rather than web-surface size.
 
 ## Membership is the root pull — one derivation, no stored set
 
@@ -167,9 +167,9 @@ The render function scopes by the facts it queries. See [[data-model]].
 
 ## The render engine
 
-One engine, `seon.render`, renders every page and the prompt. Every render call
+One engine, `seon.render`, renders every web surface and the prompt. Every render call
 requires a complete immutable database value under `:seon.db/db`; absence is a
-flat `:core-bug`, never permission to consult an ambient latest value. The
+flat `:core-bug`, never permission to consult a process-global latest value. The
 engine performs one root pull and runs each acquired unit through one selection
 chain in three projections (`:form` → Clojure form, `:ai` → String, `:html` →
 Hiccup). Renders are retained process-locally and never persisted as database
@@ -177,15 +177,15 @@ truth. A failing
 render yields a flat error value (see [[data-model]] §6) for that render only;
 siblings never crash.
 
-**Prompt and page share one retained artifact by construction.** The prompt,
-root's preview of an attached agent, and that agent's page use the same retained
+**Prompt and namespace page share one retained artifact by construction.** The prompt,
+root's preview of an attached agent, and that agent's namespace page use the same retained
 block outputs at different fits. The history appends a block's form and AI
 projection; the web UI places its HTML projection. "What the agent saw for this
 model call" is the committed context capture: its exact prompt bytes plus the
 basis-labelled ordered contribution evidence.
 
 **The structural floor is one merged data browser.** It combines the bounded
-value skeleton with `/data`'s drill navigation on the admission codec's one
+value skeleton with `/data`'s `get-in` path navigation on the admission codec's one
 walk discipline. It can render any value without throwing, preserves
 identities/indices and explicit elision markers, and pays only for opened data.
 Specialized message, source, error, and hiccup projections sit above it through
@@ -193,8 +193,8 @@ the one resolution chain; they do not create another walker or floor.
 
 **Fit belongs to the consumer profile.** Profiles are database-derived config
 facts carrying token, depth, child, blob, and composition policy.
-`seon.print/fit` is the one owner that applies them after semantic producer
-selection. Producers never invent local truncation rules. A value that does
+`seon.print/fit` is the one owner that applies them after semantic render-function
+selection. Render functions never invent local truncation rules. A value that does
 not fit contains an ordinary elision value carrying its omitted count, known
 total, path, next offset, producing profile, and requery identity or explicit
 refusal. Elision can therefore be rendered and inspected like any other value.
@@ -211,7 +211,7 @@ observation. Database facts and blobs remain available through debug and
 form as agent- or system-authored. Only a terminal system-authored read with no
 successor may refresh, and its successor points uniquely to it while retaining
 the receipt's read evidence. Agent-authored forms never enter that transition.
-The page and prompt therefore display retained authored results; neither
+The web UI and prompt therefore display retained authored results; neither
 re-executes an agent's source to refresh presentation.
 
 **The database browser pays for opened data.** `/data` exposes the same
@@ -238,7 +238,7 @@ prove whether a next one exists. It never scans every entity or transaction to
 manufacture counts. Domain attributes lead by default; framework attributes
 remain reachable explicitly.
 
-A drilled page carries no feed: repainting a page under a reader would move the
+A `get-in` result carries no feed: repainting it under a reader would move the
 ground they are standing on, so reload is the refresh and the URL is the state.
 
 **Large context projections are concise first.** Plan roots render as compact
@@ -250,7 +250,7 @@ unbounded text.
 
 **Capability + cache.** The cluster JVM acquires authored program and ordinary
 inputs at one immutable database value and invokes authored code through the
-one SCI door with the `:interrupt-fn`, invocation-class `time-limit`, and value
+one SCI invocation boundary with the `:interrupt-fn`, invocation-class `time-limit`, and value
 admission. A function may raise the class default only through `defn` metadata
 lifted into its program row at index time; render owns no private timer dial.
 Render functions are pure and return ordinary data. Functions invoked outside a
@@ -261,7 +261,7 @@ history prefix is preserved for provider prefix-caching.
 **Byte identity is a design property.** The complete database value, verified
 configuration and file fingerprints, render inputs, and program artifact
 determine the cacheable bytes. Host timezone, process clocks, environment
-reads, ambient database state, and process-local result liveness cannot alter
+reads, process-global database state, and process-local result liveness cannot alter
 them. Process-local inputs are explicit render arguments and therefore part
 of the per-call identity; no free tail renders outside the block system.
 
@@ -280,14 +280,14 @@ value.
 
 Prompt assembly follows the same convergence. Context entries are form and AI
 projections of blocks, not strings assembled beside the render engine. As
-domains gain form, AI, and HTML projections, prompt and page become different
+domains gain form, AI, and HTML projections, prompt and namespace page become different
 bounded fits of the same units rather than parallel presentation systems.
 
 ## Streamed replies — the one high-churn path
 
 A streamed reply is the only genuinely high-churn thing the UI shows, and it
 rides a channel, never the writer. Partials are COALESCED COMPLETE VALUES
-offered onto one `(sliding-buffer 1)` conn from the model call's provider fold
+offered onto one `(sliding-buffer 1)` conn from the model call's provider reducer
 into the render proc's in-port. Provider attempts, frozen forms, eval receipts,
 run errors, and resulting messages are durable facts; streamed partials never
 touch a database attribute.
@@ -301,7 +301,7 @@ prefixes between the model and the eye, and the settled fact simply supersedes
 the last snapshot.
 
 **The producer side is isolated because it runs on the provider's socket
-thread.** The fold offers the newest complete prefix onto the sliding-1 conn
+thread.** The reducer offers the newest complete prefix onto the sliding-1 conn
 and returns; the put never parks. Presentation may lag and may DROP
 intermediate snapshots — both are correct — and it may never slow the model
 call. The governing invariant is the provider reference's own: partial display
@@ -309,7 +309,7 @@ cannot affect transport, parsing, usage, or evaluation. A streamed call and a
 one-shot call return the same completion value, so nothing downstream can tell
 which transport ran.
 
-The live token count derives from the SAME fold that produces the text, never a
+The live token count derives from the SAME reducer that produces the text, never a
 second mechanism counting the same thing twice: the provider's own usage once it
 has sent one, and the chunk count until then, which is an approximation and is
 named as one.
@@ -327,7 +327,7 @@ render tree. It receives blocks and branch relationships as data and owns only
 placement and CSS. It never names a block to trigger render-function resolution,
 redirects one render to another, or changes membership. No slot redirect exists.
 
-An agent page gives the newest-basis HTML block the large primary position and
+An agent web surface gives the newest-basis HTML block the large primary position and
 places every other HTML-bearing block in a vertical column of smaller blocks.
 The same newest-basis ranking places the freshest appended AI observations
 nearest the next model turn. The `/` layout uses one live-window card per
@@ -337,18 +337,18 @@ attached agent, each showing that agent's newest-basis block.
 the structural floor's node and child bounds. Stable identity detects an
 already emitted unit and produces a back-reference. Elision is explicit and
 drillable; a cycle, failed child render, or exhausted bound produces an in-place
-error/elision unit so one branch never blanks the page.
+error/elision unit so one branch never blanks the web surface.
 
-**Pages are bounded folds over the acquired tree.** An agent or namespace page
+**Web surfaces are bounded reductions over the acquired tree.** An agent web surface or namespace page
 uses the same schema-derived pull rooted at its resolved agent, resolves each
 schema'd value once through the one chain, and hands the resulting tree to its
 layout. The `/data` browser is the floor exposed directly: paged `get-in`
 navigation into any nested value uses the same bounded expansion and cursor
 discipline.
 
-## Pages — root, namespace, agent, debug, and data
+## Web surfaces — root, namespace, agent, debug, and data
 
-Every page is a projection over one database value and the same root-pull/block
+Every web surface is a projection over one database value and the same root-pull/block
 machinery:
 
 - `/` renders root's namespace page plus one live-window card per attached
@@ -358,26 +358,26 @@ machinery:
   `:seon.cluster.agent/namespace`, and the owner's root pull.
 - `/ns/{namespace}/debug` shows the exact AI context and every acquired unit
   side by side.
-- `/agent/{id}` resolves one `:seon.cluster.agent/id` and renders its agent page.
+- `/agent/{id}` resolves one `:seon.cluster.agent/id` and renders its agent web surface.
 - `/agent/{id}/debug` exposes the corresponding acquired tree and projections.
 - `/data` renders the structural database floor for inspection.
 
 Namespace pages are generic: adding one is adding the route-table line, not a
-new page-specific render function. Agent pages query received and sent messages, runs,
+new route-specific render function. Agent web surfaces query received and sent messages, runs,
 eval receipts, and routed errors using the refs named in [[data-model]]. Root is
 the ordinary agent whose identity is `"root"`; it has a specialized layout but
 no second route, parent, role, or render model.
 
-Page-local selection, scroll, disclosure, and input state remain in the browser.
+Browser-local selection, scroll, disclosure, and input state remain in the browser.
 No web-session, canvas pin, focus, route, or selected-agent entity is stored.
-The debug view preserves entity identities and refs for drill navigation but
+The debug surface preserves entity identities and refs for `get-in` path navigation but
 does not transact display choices.
 
 ## The shell and message action
 
-The shared shell links root and data inspection, includes the page content,
-opens the page's SSE feed, and adds the agent message form only when the page
-has an agent identity. `POST /agent/{id}/message` is the one browser mutation
+The shared shell links root and data inspection, includes the current web-surface content,
+opens its SSE feed, and adds the agent message form only when the route resolves
+an agent identity. `POST /agent/{id}/message` is the one browser mutation
 route. It applies same-origin middleware, validates the target agent and bounded
 content, and transacts one ordinary `:seon.cluster.message` row. No generic
 callback route or function descriptor crosses the browser boundary.
@@ -391,11 +391,11 @@ namespace load. The route entries are:
 |---|---|---|
 | `/` | GET | root namespace page |
 | `/ns/{namespace}` | GET | namespace page |
-| `/ns/{namespace}/debug` | GET | namespace debug page |
-| `/agent/{id}` | GET | agent page |
-| `/agent/{id}/debug` | GET | agent debug page |
+| `/ns/{namespace}/debug` | GET | namespace debug surface |
+| `/agent/{id}` | GET | agent web surface |
+| `/agent/{id}/debug` | GET | agent debug surface |
 | `/agent/{id}/message` | POST | bounded inbound message |
-| `/feed/{id}` | GET | page SSE feed |
+| `/feed/{id}` | GET | web-surface SSE feed |
 | `/data` | GET | database inspection |
 | `/css/{*path}` and `/js/{*path}` | GET | static assets |
 
@@ -430,7 +430,7 @@ The live channel uses `core.async.flow` graphs inside the cluster JVM:
    invocation-class `time-limit`, admission, and output caps;
 4. the render proc appends one immutable basis-labelled history entry for every
    refreshed call and independently equality-suppresses unchanged HTML patches;
-5. the render proc builds ONE REVISIONED COMPOSITE PACKAGE per page —
+5. the render proc builds ONE REVISIONED COMPOSITE PACKAGE per web surface —
    `{:seon.render.package/revision, /base-revision, /keyframe-bytes,
    /delta-bytes, /keyframe-size, /delta-size}` — where the keyframe is one
    complete Datastar event carrying every block and the delta is one
@@ -440,7 +440,7 @@ The live channel uses `core.async.flow` graphs inside the cluster JVM:
    thread per tab reads its tap and writes to that tab's single SSE
    connection with bounded writes.
 
-**Every pending value independently repairs the page.** A tab whose delivered
+**Every pending value independently repairs the web surface.** A tab whose delivered
 revision is contiguous applies the delta; a tab that detects a REVISION GAP —
 because it was late, stalled, or parked behind a slow write — applies the
 package's keyframe instead. There is no delta-only buffer and no accumulated
@@ -454,9 +454,9 @@ dereference it when joining. Like the equality cache, it is disposable derived
 memory — never a database fact, a replay log, or a second render owner. A proc
 restart simply derives a fresh keyframe from current database truth.
 
-**Initial page load is fully rendered and cached.** The initial document embeds
+**Initial document load is fully rendered and cached.** The initial document embeds
 the cached keyframe bytes rather than calling a render function, so a tab paints a
-complete page immediately and thereafter receives only changed blocks. That
+complete document immediately and thereafter receives only changed blocks. That
 preserves ONE serialization owner: bytes are produced once by the render proc
 and reused everywhere, never re-derived per connection.
 
@@ -494,7 +494,7 @@ does not promise the lost prompt generation's byte-identical prefix. There is
 no stored render snapshot, presentation attribute, or invalidation replay log.
 
 Streamed reply partials enter this same flow as another producer. The model
-call's provider fold reduces its byte stream to the completion value while
+call's provider reducer reduces its byte stream to the completion value while
 offering coalesced complete prefixes onto the render proc's sliding-1 in-port;
 a full buffer drops intermediate prefixes rather than delaying inference. The
 provider attempt and the completion's durable consequences remain the forensic
@@ -503,7 +503,7 @@ prefixes.
 
 ### Fine-grained Datastar element patches
 
-Initial paint is the only whole-page render. Later work is per visible render
+Initial paint is the only whole-web-surface render. Later work is per visible render
 unit: root cards, canvas, context, debug, `/data`, and shared header units keep
 their stable element IDs and emit independent Datastar patches. Conditional
 elements disappear through the same unit patch. Equivalent render-unit demands
@@ -520,7 +520,7 @@ Missing evidence uses the conservative revision, and code/schema changes use
 the process-local code revision. This process-local state affects performance
 only and never becomes database authority.
 
-The shim page and feed remain distinct GET routes. http-kit and the Datastar SDK
+The shell document and feed remain distinct GET routes. http-kit and the Datastar SDK
 own the one SSE response per tab; `Accept-Encoding` remains authoritative.
 Transient browser state lives in Datastar signals, never DOM attributes.
 Historical requests carry the complete
@@ -543,22 +543,22 @@ ancestors and siblings continue. At the SCI boundary the same failure enters
 durable problem routing as a fact naming the agent that ran the code. That
 agent's next context reaches it and root receives the escalation through the
 same graph; no exception crosses into a proc and no failure disappears after
-one page pass. Fixing the underlying function replaces the current error card
+one render pass. Fixing the underlying function replaces the current error card
 on the next render, while database history retains the forensic fact.
 Agent-authored route/layout failures follow the same guarantee.
 
 ## Downstream composition
 
 A downstream cluster composes the same public mechanisms: the code route table
-chooses page handlers, while schemas and entity facts choose render functions through
-the one resolution chain. Consumer-specific pages and routes belong in the
+chooses web handlers, while schemas and entity facts choose render functions through
+the one resolution chain. Consumer-specific web surfaces and routes belong in the
 downstream repository; Seon core does not persist route or canvas entities for
 them.
 
 ## Malli throughout
 
-Every render, page, feed, and message request has a registered Malli shape and
-is instrumented like the rest of the runtime. Reitit route-data remains plain
+Every render, web-surface, feed, and message request has a registered Malli shape and
+is instrumented like the rest of the running system. Reitit route-data remains plain
 code data; it is not mirrored into a database schema.
 
 ## See also

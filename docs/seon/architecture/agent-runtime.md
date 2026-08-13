@@ -23,14 +23,14 @@ their uncontracted definitions remain in their own agent-scoped facts.
 
 ## State is attribute presence
 
-The agent and run store primitives:
+The agent and run database primitives:
 
 - `:seon.cluster.agent/run` present means the agent has an open run; absence
   means idle.
 - `:seon.cluster.run/closed-at` absent means the run is open.
 - `:seon.cluster.run/process` present means a process holds custody; absence
   means unheld.
-- `:seon.cluster.run/plan-digest` present means the form plan is frozen.
+- `:seon.cluster.run/sources-digest` present means the ordered form sources are frozen.
 - An eval receipt carrying none of `:seon.cluster.eval/result-edn`, `/error`, or
   `/interrupted-at` is running. Presence of one of those facts is terminal.
 
@@ -71,7 +71,7 @@ or send observed-state fields.
 
 Release requires exact custody and retracts only `/process`. Close requires
 exact custody, asserts `/closed-at`, retracts custody, and retracts the owning
-agent's `/run` pointer atomically. Plan freeze and receipt settlement use the
+agent's `/run` pointer atomically. Source freeze and receipt settlement use the
 same held-run fence. A terminal receipt cannot be overwritten or reopened.
 
 ## One graph per agent
@@ -105,7 +105,7 @@ Agent creation commits identity and namespace ownership and wakes the cluster's
 arm owner. The new graph then opens a system-authored generated episode from
 live source-initialization facts. It appends and settles exactly one
 dependency-ready generated form at a time; the stored prefix and receipts are
-the recovery authority, so there is no separate bootstrap-plan row or
+the recovery authority, so there is no duplicate generated-opening row or
 process-local checklist to reconstruct.
 
 When the generated prefix is complete, the same held run advances to its model
@@ -114,23 +114,23 @@ ordered forms are frozen together before evaluation, then reduced one receipt
 at a time. Both paths use the same run custody, form, receipt, and settlement
 fences.
 
-## Prompt, model call, plan, and eval fold
+## Prompt, model call, sources, and eval reduce
 
 Before the unobservable model call, the loop commits one
 `:seon.context.capture` row containing the exact prompt, rendered basis, and
-ordered contribution evidence. The provider fold may stream complete prefixes
+ordered contribution evidence. The provider stream reducer may emit complete prefixes
 to the lossy render path, but only the settled attempt observations become
 facts. Each model call records a `:seon.ai.attempt` row after the call; error
 presence and wire-phase evidence determine failover or failure at read.
 
-A readable reply becomes one frozen plan:
+A readable reply becomes one frozen ordered source sequence:
 
-- `:seon.cluster.run/plan-digest` fences plan publication;
+- `:seon.cluster.run/sources-digest` fences source publication;
 - each `:seon.cluster.run.form` row carries `/run`, `/ordinal`, `/source`, and
   the reader's optional namespace ref; and
 - every form opens one `:seon.cluster.eval` receipt before evaluation.
 
-The fold starts from the plan transaction's `:db-after`. Each terminal receipt
+Reduction starts from the source-publication transaction's `:db-after`. Each terminal receipt
 transaction supplies the next immutable database value. A receipt records the
 form's admitted result, printed output, ending namespace, error, interruption,
 and optional blob projection. Pure `my.run` disposition values decide whether
@@ -150,7 +150,7 @@ Agent-driven evaluation uses the turn's fresh
 fork of the cluster base SCI `ctx`. `seon.sci.kernel` is the one guarded owner,
 with exactly two entrances: `seon.sci.eval/evaluate` for a form, and
 `seon.sci.kernel/invoke` for a named live Var — the entrance every renderer call
-takes. They share one process guard, one arming rule, one deadline, one
+takes. They share one interruption mechanism, one arming rule, one deadline, one
 admission, and one failure classifier, so their semantics cannot drift; the
 invoked symbol is the only difference between the two error faces.
 
@@ -246,7 +246,7 @@ trigger as the message's `/caused-by` ref, making conversation depth an
 ordinary ref walk.
 
 There is no durable parent tree, interaction entity, browser session, hop
-counter, or delivery acknowledgement in the runtime model. Subagents are
+counter, or delivery acknowledgement in the running data model. Subagents are
 ordinary agents connected by messages and namespace ownership.
 
 Scheduling is per agent. Declared task, schedule, and fire identities feed the
@@ -280,7 +280,7 @@ process-local boot value. The run stamp is not a summary of the receipt
 stamps: a process that died before its first receipt row existed leaves no
 receipt to stamp, and without the run fact that run would be indistinguishable
 from a normal close. Settled receipts remain untouched. Recovery never reopens, replans, retries a
-provider call, or evaluates an unstarted plan suffix. The run and receipt
+provider call, or evaluates an unstarted form-source suffix. The run and receipt
 renderers tell the next agent episode what may have happened and what did not
 run; the agent adapts from those facts.
 
@@ -312,7 +312,7 @@ platform worker.
 - The family declarations under `resources/seon/schemas/` own runtime shapes.
 - `src/seon/cluster/run.clj` owns in-transaction run and receipt transitions.
 - `src/seon/cluster/{agent,wake,work,loop}.clj*` owns per-agent graph lifecycle,
-  wake routing, work derivation, and the fold.
+  wake routing, work derivation, and the reduce.
 - `src/seon/sci/eval.clj` owns interruption, live context acquisition, and
   per-turn fork and rehydrating the agent's defs.
 - `src/seon/render/{agent,transcript}.clj` owns the current queries and renders

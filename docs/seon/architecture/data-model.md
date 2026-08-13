@@ -79,7 +79,7 @@ Stored facts express state without duplicate status rows:
 - an agent's `/run` ref is present exactly while it has an open run;
 - a run is open while `/closed-at` is absent;
 - run custody is the presence of `/process`;
-- `/plan-digest` records that ordinary reply forms are frozen;
+- `/sources-digest` records that ordinary reply forms are frozen;
 - an eval receipt is terminal when result, error, or interruption is present;
 - a run's `/interrupted-at` records recovery even when the dead process left no
   receipt to stamp; and

@@ -177,7 +177,7 @@ your own from an hour ago — are hypotheses until reproduced.
 **Fixture drift looks exactly like a regression.** Two separate
 "failures" on 2026-08-03 were hand-built test fixtures that had fallen
 behind the live boot shape (a missing render context channel), not
-broken runtime code. Before bisecting, diff the fixture against what
+broken running code. Before bisecting, diff the fixture against what
 the live path actually constructs — and prefer fixtures that build
 themselves from the live shape over ones that hand-assemble it.
 
@@ -209,7 +209,7 @@ measurement before redesigning the subject.
 Blind textual replacement turned "X is deleted in favour of Y" into
 "Y is deleted in favour of Y" across three planning documents.
 Sentences about a rename keep the old spelling as their historical
-referent; graduation searches prove cleanliness over code-bearing
+referent; verification searches prove cleanliness over code-bearing
 surfaces (src, resources, test, scripts, skills, architecture docs),
 never over ruling records, ledgers, or research.
 

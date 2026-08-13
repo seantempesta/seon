@@ -33,7 +33,7 @@ attributes and entity maps refer to it from the family declarations under
 
 - Application schemas never hand-write `:db/valueType`.
 - Lookup refs use an identity attribute and its stored value type.
-- Component ownership belongs to the reference attribute, not an entity kind.
+- Component ownership belongs to the reference attribute, not an entity-family stamp.
 - If the shared shape or bridge cannot express a required reference, fix that
   owner rather than inlining another union.
 

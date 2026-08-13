@@ -137,8 +137,8 @@ Context is a bounded derivation for the next model call; the web UI is a bounded
 human projection over the same render blocks. Stable identities permit package
 replacement and morphing without storing a second DOM or render snapshot.
 
-[[context]] owns context acquisition, ordering, continuity, and shared-view
-semantics. [[ui]] owns pages, blocks, the canvas/control boundary, routing, and
+[[context]] owns context acquisition, ordering, continuity, and shared-artifact
+semantics. [[ui]] owns namespace pages, blocks, the canvas/control boundary, routing, and
 human-visible delivery guarantees.
 
 ### Errors and evidence

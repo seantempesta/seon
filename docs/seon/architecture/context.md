@@ -26,7 +26,7 @@ three projections:
 
 - `:seon.render/form` is the form that produces the value;
 - `:seon.render/ai` is the value's printed representation for the prompt; and
-- `:seon.render/html` is the same value as Hiccup for the page.
+- `:seon.render/html` is the same value as Hiccup for the web UI.
 
 The history orders a parent listing before a child lookup and preserves
 define-before-use: a form never refers to a symbol that an earlier entry has not
@@ -146,7 +146,7 @@ the agent's own eval log rendered as a REPL session ("I evaluated X, got Y; a
 message arrived; I evaluated Z"). A snapshot section (plan, findings,
 subagents) is a photo of *now* with no story; a REPL narrative is inherently
 stateful, because it is the ordered record of what the agent actually did and
-what actually happened to it. The eval log is one view of the program graph
+what actually happened to it. The eval log is one projection of the program graph
 (code-as-data); the transcript is its faithful render, and it is the agent's
 primary memory. Everything else is **additive**.
 
@@ -190,16 +190,16 @@ long-lived agent does not depend on transcript archaeology.
 
 The consumer's render profile bounds the bytes it receives, including form
 source, result, and error envelope. Functions return bounded, structured,
-drillable values and errors before rendering; fitting is a projection of the
+values and errors navigable by `get-in` before rendering; fitting is a projection of the
 same retained entry, not a mutation of prompt history.
 
-Failure diagnostics retain the database-configured eval cap at every display
+Failure diagnostics retain the database-configured eval output bound at every display
 site. A caller may request a larger successful authored-source, stdout, or
 citable-result projection within the owning bound; no display option releases
 failed source, captured stdout, Malli
-diagnostics, read errors, or runtime errors. Large parse failures window the
+diagnostics, read errors, or running-system errors. Large parse failures bound the
 source excerpt around the exact reported source location before the transcript
-renderer applies that same cap. Exact raw replies and error evidence remain
+renderer applies that same display bound. Exact raw replies and error evidence remain
 separate database/blob facts, so bounded agent context never weakens forensic
 capture.
 
@@ -220,8 +220,8 @@ output is one of the three render shapes is a **render function**:
 
 - `:seon.render/form` → its Clojure form becomes the history entry's form.
 - `:seon.render/ai` → its string joins the agent's prompt.
-- `:seon.render/html` → its Hiccup is serialized for the agent's page.
-- the three declared contracts → the agent's history and the human's page show
+- `:seon.render/html` → its Hiccup is serialized for the agent's namespace page.
+- the three declared contracts → the agent's history and the human's namespace page show
   the same value as a form and its two typed representations.
 
 All three use the one selection chain. The `/form` structural floor is total:
@@ -237,13 +237,13 @@ agent-owned durable ref to a renderable value. The same value supplies its AI
 and HTML projections; retracting the ref returns focus to a derived default.
 The canvas schema and action/control boundary assign their attribute and
 function identities before any transaction, route, or agent call names them.
-No context-block manifest, captured runtime read-set, or effectful in-eval UI
+No context-block manifest, captured process-local read set, or effectful in-eval UI
 helper participates in that design.
 
 These are the block's three projections. Its explicit args contain the database
 value and any other declared inputs; hidden acquisition state never influences
 output. First-party render functions remain pure over those inputs. Every
-agent-authored render function executes only through the one SCI door. The
+agent-authored render function executes only through the one SCI invocation boundary. The
 boundary composes the uncatchable interrupt with wrap-and-catch: failed or
 runaway code becomes a flat `:seon.error` value, enters durable problem routing,
 appears in the running agent's next context, and escalates to root. No agent
@@ -262,12 +262,12 @@ system injects a form only when it is true and the agent has not already done
 the work; ordinary `require` forms execute once in the turn fork and settlement
 records the resulting namespace facts.
 
-## Shared view — the agent knows the human sees it
+## Shared artifact — the agent knows the human sees it
 
 Because one render call supplies the form, AI, and HTML projections, the agent
 and the human look at one retained artifact at different fits. An agent working
 with an authored intent value receives its form and printed value in history
-while the HTML projection puts the same value on the human's page. Root's
+while the HTML projection puts the same value on the human's namespace page. Root's
 preview of that agent uses the same retained AI bytes. The agent can rely on
 "my human is seeing this" — it is structurally true, no messaging required.
 
@@ -286,7 +286,7 @@ the process that first authored them. These facts use the settled top-level
 Every namespace has one owner agent, identified by the namespace's unique
 `:seon.cluster.agent/namespace` ref. An agent that needs a symbol changed in
 another namespace sends its owner a durable message and receives a commit or
-rejection by reply. When a message targets an unowned namespace, the runtime
+rejection by reply. When a message targets an unowned namespace, the running system
 creates an agent and assigns that namespace on demand before delivery. The
 owner's context includes current source, dependents, observed calls, failures,
 performance evidence, tests, and incoming change requests. Ownership is a
@@ -320,11 +320,11 @@ Render and context functions receive ordinary namespaced request data. The
 render call supplies the immutable `:seon.db/db`, the viewing
 `:seon.cluster.agent/id`, the selected render profile, live-process evidence
 when needed, and the pulled value. A render function declares the request it
-consumes and never reaches through an ambient connection or an injectable
+consumes and never reaches through a process-global connection or an injectable
 registry.
 
-The database value and agent identity describe one render request; they are not
-execution grants. A function's schema remains its complete contract, and
+The database value and agent identity describe one render request; they do not
+gate execution. A function's schema remains its complete contract, and
 instrumentation validates it at the SCI or host boundary that invokes it.
 Per-agent domain ownership is expressed by a real ref on the data, not inferred
 from the presence of an injected argument.
@@ -345,13 +345,13 @@ Root receives one concise role-specific block: understand the fleet, start or
 select an ordinary agent, route or delegate work, and respond to recovery
 notices. It does not receive a broad root manual. Its capabilities appear as
 compact, fully specified namespace entries. This is a rendering choice, never a
-grant: root can call exactly what every other agent can call, and the entries
+execution gate: root can call exactly what every other agent can call, and the entries
 only decide what root sees. When root enters an orchestration, database, or UI
 namespace, that namespace becomes current and its source plus applicable render
 functions enter context through the same root-pull and selection chain.
 
 Each attached agent contributes the retained AI projection of its newest-basis
-block to root's context. The `/` page presents the corresponding HTML projection
+block to root's context. Root's namespace page presents the corresponding HTML projection
 as that agent's live window. These are two fits of the same retained render
 artifact, not cards or a second fleet-summary mechanism. Root itself remains a
 summary-only row so the fleet projection never recursively renders itself.
@@ -404,9 +404,9 @@ attention, its author sends the agent a message.
 The render proc responds to that signal by dereferencing the latest immutable
 database value. Attribute revisions conservatively select candidate logical
 calls; replaying their retained read evidence decides exact semantic staleness.
-An equal replay result stops with no producer call and no append. Stale reads
+An equal replay result stops with no render-function call and no append. Stale reads
 re-derive once and append even when the resulting render bytes are equal; HTML
-patch equality may suppress a page morph without suppressing the historical
+patch equality may suppress a block morph without suppressing the historical
 observation. Sliding-one signal loss is free because each pass compares retained
 revisions through the latest database value. The listener carries no transaction
 report, changed-attribute payload, render result, or durable invalidation log.
@@ -416,18 +416,18 @@ report, changed-attribute payload, render result, or durable invalidation log.
 Agents relate through durable `:seon.cluster.message` rows, shared namespace
 ownership, and ordinary refs such as a message's optional `/about` fact. There
 is no persisted parent tree or orphan state. Root's namespace page derives the
-agent population by `:seon.cluster.agent/id`; an agent page derives received and
+agent population by `:seon.cluster.agent/id`; an agent web surface derives received and
 sent messages, runs, eval receipts, and routed errors by their current refs.
 Empty queries render nothing, so visibility needs no notification or
 acknowledgement state.
 
 ## Inspectability — the human twin of every position
 
-Every agent has a read-only debug view that begins at that agent's entity and
+Every agent has a read-only debug surface that begins at that agent's entity and
 uses the same root pull and structural floor. It exposes every reachable
-schema'd value—including system apparatus hidden from the curated page—preserves
-identities and refs for drill navigation, and never transacts a display choice.
-The view also shows each unit's form, AI, and HTML projections and their source
+schema'd value—including system apparatus hidden from the curated namespace page—preserves
+identities and refs for `get-in` path navigation, and never transacts a display choice.
+The surface also shows each unit's form, AI, and HTML projections and their source
 facts. Through [[observability]], the same surface reaches a run's exact
 `:seon.context.capture/prompt`, database basis transaction, ordered
 contributions, AI attempts, forms, eval receipts, and errors.
@@ -439,8 +439,8 @@ Fresh configuration is one compiled and reconciled database row per cluster.
 an explicitly selected sparse EDN overlay may replace those decisions for one
 start or apply operation. Omitted overlay keys inherit defaults, extra keys are
 ignored, and every declared key is rigorously validated. The caller may supply
-a typed environment map while compiling that input. Runtime consumers never
-read ambient environment variables or a configuration file.
+a typed environment map while compiling that input. Running consumers never
+read process environment variables or a configuration file.
 
 `seon.config/apply!` is the one exact reconciliation mechanism and
 `seon.config/effective` reads the ordinary effective map from an immutable
@@ -473,7 +473,7 @@ The manifest-owned config singleton remains a separate entity reached by
 Prompt acquisition resolves the system text and the agent's retained context
 generation under one selected render profile. That one ordinary result flows
 unchanged through context capture, token accounting, every retry, the provider
-adapter, and the debug view. None of those consumers re-resolves live config
+request owner, and the debug surface. None of those consumers re-resolves live config
 after the prompt database value has been chosen.
 
 ## See also

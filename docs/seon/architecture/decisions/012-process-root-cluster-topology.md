@@ -34,7 +34,7 @@ store holder and the bounded
 Database access is co-located. `seon.db` reads immutable database values from
 the current cluster connection; `seon.db/transact!` calls
 Datahike's writer and returns either the transaction report or a flat error
-value. No internal database wire, remote replica, protocol version, or second
+value. No internal database transport, remote replica, protocol version, or second
 mutation owner exists.
 
 Runs are claimable database state. Presence of

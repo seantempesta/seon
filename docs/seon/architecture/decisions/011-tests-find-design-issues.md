@@ -14,7 +14,7 @@ symptom: one point test per observed instance, accumulating suites that pin
 call-site discipline without removing the way the mistake is expressed. The
 structural one treats the failing test as a design finding: the invariant the
 tests keep re-asserting belongs in one mechanism, after which most of those
-tests are redundant. Wire values that could not serialize, attributes used
+tests are redundant. Serialized values that could not round-trip, attributes used
 without registration, test files invisible to every runner, and validation
 switched off per tier were each a class, not a bug list.
 

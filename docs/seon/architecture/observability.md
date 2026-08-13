@@ -91,7 +91,7 @@ happened. Recovery never retries it.
 ## Forms and eval receipts — the authentic REPL history
 
 The session displays messages through explicit query forms and their returned
-values beside eval receipts. A frozen plan records
+values beside eval receipts. A frozen source sequence records
 each form's exact source, ordinal, and optional reader namespace. Its matching
 receipt records the instant, ending namespace, printed output, admitted result,
 blob address and full size when large, error, or interruption.
@@ -105,7 +105,7 @@ Receipt state is presence:
 
 The receipt and form share `[run ordinal]`; neither stores `ok?`, status,
 error-data, turn, or phase. The run's own `/closed-at`, `/process`,
-`/plan-digest`, and `/error` facts explain whether work is open, held, planned,
+`/sources-digest`, and `/error` facts explain whether work is open, held, source-frozen,
 closed, or unable to start.
 
 Printed REPL text is rendered from durable source, output, and result data.
@@ -125,7 +125,7 @@ their relationship.
 
 Content-addressed blobs use SHA-256 `:seon.blob/digest`. A result above the
 configured eligibility floor moves to a blob only when the complete blob-side
-shape—bounded window, digest/size envelope, and binary payload—is smaller than
+shape—bounded projection, digest/size envelope, and binary payload—is smaller than
 the full inline receipt. Such receipts keep the bounded projection plus
 `:seon.cluster.eval/result-blob` and `/result-size`; provider attempts use the
 same digest family for large reasoning content; durable session definitions
@@ -210,12 +210,12 @@ The forensic answer is deliberately bounded:
 Nothing in the model claims automatic effect replay or exactly-once remote
 execution. Recovery closes the wreckage and the agent adapts from the evidence.
 
-## Page and operator inspection
+## Web UI and operator inspection
 
 The web UI exposes the same facts through `/`, `/ns/{namespace}`,
 `/ns/{namespace}/debug`, `/agent/{id}`, `/agent/{id}/debug`, and `/data`.
-Namespace and agent debug pages walk the current database value, retain refs for
-drill navigation, and show AI/HTML projections from the same render owners.
+Namespace and agent debug surfaces walk the current database value, retain refs for
+`get-in` path navigation, and show AI/HTML projections from the same render owners.
 They do not store a display selection or route entity.
 
 The operator separately reports process identities, branches, ports, readiness,
@@ -239,4 +239,4 @@ does not maintain a parallel source-file roster.
 - [[data-model]] — durable evidence relationships and schema authority.
 - [[agent-runtime]] — the transitions that create and settle them.
 - [[context]] — current context derivation.
-- [[ui]] — the pages that render the same facts for a human.
+- [[ui]] — the web surfaces that render the same facts for a human.
