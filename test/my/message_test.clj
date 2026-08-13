@@ -134,9 +134,10 @@
           bad [nil "" "   " "\n\t" 123 :failure {:id 1}]]
     (testing (str "declination " label " " (pr-str bad))
       (let [value (invoke bad)]
-        (is (= expected-kind (:seon.error/kind value)))
-        (is (= #{:seon.error/kind :seon.error/message}
-               (set (keys value))))
+        ;; the class IS the marker's presence — no exact key census
+        ;; (breaks on accretion), no kind dependence (deleted in W4/W5)
+        (is (true? (get value expected-kind ::absent)))
+        (is (string? (:seon.error/message value)))
         (is (seon.schema/valid-candidate-value? :seon.error/value value)))))
 
 (deftest the-error-value-is-the-registered-one
