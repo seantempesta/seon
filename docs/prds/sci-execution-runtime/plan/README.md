@@ -114,6 +114,34 @@ table).
 hypothesis, not work.** One cut discharged five rows on 2026-07-26, and a step
 carried stale evidence within a day. Re-verify before starting.
 
+### Rulings 2026-08-13 (owner)
+
+1. **The one task noun is `my.plan`** — ruling 49's semantics stand
+   unchanged (derived-obligations union, completed items vanish,
+   rebirth-proof current-state render, structural union guard); its noun is
+   amended after [the archaeology](../research/plan-code-archaeology-2026-08-13.md)
+   dissolved the never-built premise. The colliding run-internal
+   `plan-tx`/`plan-digest` spellings rename to `sources-*` in the R2 wave.
+   Spec: [plan-context PRD](plan-context-prd-2026-08-13.md).
+2. **T3 intent-directed membership APPROVED as specced**: ready items'
+   `:about` subject refs join the walk's pull membership through the
+   existing beyond-closure token budget (no new dial), with
+   resolution-validation at `plan!` (a ref that does not resolve refuses
+   loudly at planning time) and subject units rendering with their usage
+   demonstrations. Falsifier: a refless agent's opening is byte-identical.
+3. **R2 launches now, serial, red-tolerant**: kind→class W2–W5 first, the
+   `:seon.db/database-value` key migration and run `sources-*` rename
+   behind it; one `bin/test --all` closes the program.
+4. **Registered keys self-explain** in generation dependency analysis —
+   for everyone's keys: a key declared in the acquired registry counts as
+   explained (its meaning queryable via `doc` on demand); only
+   unregistered novel keys gate readiness. Identity, not name-matching,
+   decides sameness (the reference resolves to the declared row), and the
+   same rule covers agent-authored functions: once the fact exists in the
+   program graph, regeneration renders the declaration/doc face rather
+   than replaying the original definition form, with source queryable on
+   demand.
+
 ### Current dependency spine — 2026-08-12 wind-down
 
 W1 and W2 are landed. The evolving-session design is ruled complete through
