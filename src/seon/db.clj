@@ -451,8 +451,10 @@
 ;;; pays nothing, while a read that decodes a thousand attributes pays exactly
 ;;; one resolution. The delay is created fresh per operation and dies with it:
 ;;; operation-local, never a process-global cache of declaration facts.
-(defn- schema-database
+(defn schema-database
   "The database value that owns schema for a possibly temporal view."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value] :seon.db/database-value]}
   [database]
   (loop [candidate database]
     (if (satisfies? dbi/IHistory candidate)

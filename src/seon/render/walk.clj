@@ -69,7 +69,7 @@
   [database]
   (into (sorted-map-by #(compare (str %1) (str %2)))
         (filter (comp keyword? key))
-        (:schema database)))
+        (:schema (db/schema-database database))))
 
 (defn- reverse-attribute
   [attribute]
@@ -323,7 +323,8 @@
         cache (:seon.schema.projection/compiled projection)
         cache-key [::root-pull-plan
                    (:seon.schema.projection/fingerprint projection)
-                   (DatabaseSchemaIdentity. (:schema database))
+                   (DatabaseSchemaIdentity.
+                    (:schema (db/schema-database database)))
                    distance
                    caps]
         candidate
@@ -832,9 +833,18 @@
   (let [captured (or captured (atom {}))
         acquisition (or (:seon.render.walk/root-acquisition request)
                         (root-acquisition request))
+        direct-acquisition
+        (update acquisition :seon.render.walk/members
+                (fn [members]
+                  (into {}
+                        (map (fn [[lookup member]]
+                               [lookup
+                                (dissoc member
+                                        :seon.render.walk/attribute)]))
+                        members)))
         request (assoc request
                        :seon.render/captured-calls captured
-                       :seon.render.walk/root-acquisition acquisition)
+                       :seon.render.walk/root-acquisition direct-acquisition)
         form-units (neighborhood (assoc request :seon.render/output
                                         :seon.render/form))
         value-units (neighborhood (assoc request :seon.render/output

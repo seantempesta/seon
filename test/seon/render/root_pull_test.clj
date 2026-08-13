@@ -61,6 +61,67 @@
   [diff kind]
   (into #{} (map :seon.render.walk/lookup) (get diff kind)))
 
+(deftest temporal-root-selector-uses-the-origin-schema
+  (support/with-database
+   (fn [connection]
+     (db/transact!
+      connection
+      [{:seon.cluster.agent/id "temporal-root-agent"}
+       {:seon.cluster.message/id "temporal-root-message"
+        :seon.cluster.message/to
+        [:seon.cluster.agent/id "temporal-root-agent"]
+        :seon.cluster.message/at (java.util.Date. 1786400000000)
+        :seon.cluster.message/content "The opening message."}])
+     (db/transact!
+      connection
+      [{:seon.cluster.run/id "temporal-root-run"
+        :seon.cluster.run/agent
+        [:seon.cluster.agent/id "temporal-root-agent"]
+        :seon.cluster.run/trigger
+        [:seon.cluster.message/id "temporal-root-message"]
+        :seon.cluster.run/opened-at (java.util.Date. 1786400000001)}
+       {:seon.cluster.agent/id "temporal-root-agent"
+        :seon.cluster.agent/run
+        [:seon.cluster.run/id "temporal-root-run"]}])
+     (let [current @connection
+           temporal (db/as-of current (db/basis-t current))
+           current-selector (walk/root-selector current 1 caps)
+           temporal-selector (walk/root-selector temporal 1 caps)
+           acquisition
+           (walk/root-acquisition
+            {:seon.db/db temporal
+             :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+             :seon.render.walk/lookup
+             [:seon.cluster.agent/id "temporal-root-agent"]
+             :seon.render/distance 1
+             :seon.sci.admit/caps caps})
+           messages (get-in acquisition
+                            [:seon.render.walk/root
+                             :seon.cluster.message/_to])
+           history
+           (walk/history
+            {:seon.db/db temporal
+             :seon.cluster.agent/id "temporal-root-agent"
+             :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+             :seon.render.walk/lookup
+             [:seon.cluster.agent/id "temporal-root-agent"]
+             :seon.render/distance 1
+             :seon.sci.admit/caps caps
+             :seon.sci.eval/time-limit-ms 5000
+             :seon.config/on-core-error :record
+             :seon.render/captured-calls (atom {})
+             :seon.render.walk/root-acquisition acquisition})]
+       (is (= current-selector temporal-selector)
+           "current and as-of values derive one complete selector")
+       (is (not= [:db/id] temporal-selector))
+       (is (= ["The opening message."]
+              (mapv :seon.cluster.message/content messages))
+           "the as-of root retains the reverse message graph")
+       (is (some #(= '(my.message/read "temporal-root-message")
+                     (:seon.render.history/form %))
+                 history)
+           "history renders the acquired message as its identified value")))))
+
 (deftest root-acquisition-contract-is-projection-neutral
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}
