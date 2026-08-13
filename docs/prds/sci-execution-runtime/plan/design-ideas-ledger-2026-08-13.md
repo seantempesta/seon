@@ -91,6 +91,25 @@ one decision away from queued work. Ruled items cite their record.
     cheapest-form choice becomes full form vs this one helper.
     Implementation rides with T3; the key spelling follows the ruled
     `:seon.db/database-value` → `:seon.db/db` unification.
+    **AMENDED by the live REPL exploration
+    ([research](../research/generic-diff-exploration-2026-08-13.md)):**
+    no diff algorithm is built — `clojure.data/diff` over an
+    identity-keyed map (`(update-vals (group-by id coll) first)`) IS the
+    identity-aware diff; the helper's content is the double execution +
+    identity re-keying. Simplified contract, mirroring `as-of`'s own
+    positional shape (no options map, no quoted form — a var + varargs,
+    so no eval context and purity checks against the var's
+    `:seon.fn/external-sink` fact):
+    `(seon.db/diff basis-t #'my.message/inbox "root")` →
+    `#:seon.db.diff{:added :removed :changed}` +
+    `:seon.db/basis-t`/`:seon.db/current-basis-t`. Identity derives from
+    the function's declared `:seon.fn.arity/output-refs` row schema with
+    registry-alias chasing (`:seon.entity/id-attr` alone covers only
+    37/2231 keys — the exploration's measured gap); a collection with no
+    derivable identity REFUSES loudly, never a silent positional diff.
+    Datahike offers no diff/tx-range/since-datoms, and `since` is
+    add-only (measured: loses changed rows and retractions), so the
+    datom level cannot replace result diffing.
 
 ## AWAITING OWNER RESPONSE — surfaced, discussed, not ruled
 
