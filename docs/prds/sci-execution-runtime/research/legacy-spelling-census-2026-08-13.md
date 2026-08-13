@@ -123,7 +123,7 @@ so the table is also the negative census.
 | widget | 2 | `.agents/skills/seon-flow-architecture/references/render-delivery.md:57`; `test/seon/gen/loop_test.clj:444` |
 | component | 6 | `.agents/skills/seon-flow-architecture/references/render-delivery.md:57`; `docs/prds/sci-execution-runtime/plan/context-blocks-contracts-2026-07-28.md:390`; `docs/prds/sci-execution-runtime/plan/parse-primitives-plan-2026-07-29.md:60`; `docs/prds/sci-execution-runtime/plan/reference/scheduling-design-2026-07-26.md:707x2`; `docs/prds/sci-execution-runtime/plan/unsettled.md:2820` |
 | panel | 12 | `.agents/skills/seon-flow-architecture/references/render-delivery.md:57`; `docs/prds/sci-execution-runtime/plan/README.md:1350`; `docs/prds/sci-execution-runtime/plan/context-render-data-model-spec.md:287`; `docs/prds/sci-execution-runtime/plan/repl-transcript-context-prd-critique-2026-08-10.md:67`; `docs/prds/sci-execution-runtime/plan/ui-conversion-plan-2026-07-29.md:117,396`; `docs/prds/sci-execution-runtime/plan/w4-html-plan-2026-07-31.md:33,150,243,255,284,302` |
-| frame | 4 | `docs/prds/sci-execution-runtime/plan/evolving-session-implementation-2026-08-12.md:426`; `docs/prds/sci-execution-runtime/plan/unsettled.md:1828`; `src/seon/render/web.clj:691,692` |
+| frame | 9 | `docs/prds/sci-execution-runtime/plan/evolving-session-implementation-2026-08-12.md:426`; `docs/prds/sci-execution-runtime/plan/unsettled.md:1828`; `src/seon/render/web.clj:660,661,666,691,692,1283,1284` |
 | bundle | 0 | — |
 | the context (conflated sense) | 0 | — |
 | sandbox ctx | 0 | — |
