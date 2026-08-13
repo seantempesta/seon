@@ -318,21 +318,23 @@
         ;; already there, which makes self-re-entrance unconstructable
         ;; rather than merely unlikely.
         request (update request :seon.render/rendering
-                        (fnil conj #{}) selected)]
+                        (fnil conj #{}) selected)
+        argument (render-invocation-argument projection request selected)]
     (:seon.sci.admit/value
-     (sci.kernel/invoke
-      (cond->
-       {:seon.sci.eval/ctx ctx
-        :seon.db/db (:seon.db/db request)
-        :seon.fn/sym (str selected)
-        :seon.sci.eval/args
-        [(render-invocation-argument projection request selected)]
-        :seon.sci.eval/time-limit-ms time-limit-ms
-        :seon.sci.admit/caps caps
-        :seon.config/on-core-error on-core-error}
-        (:seon.render.call/captured-reads request)
-        (assoc :seon.db/read-evidence-sink
-               (:seon.render.call/captured-reads request)))))))
+     (schema/call-with-projection
+      projection
+      #(sci.kernel/invoke
+        (cond->
+         {:seon.sci.eval/ctx ctx
+          :seon.db/db (:seon.db/db request)
+          :seon.fn/sym (str selected)
+          :seon.sci.eval/args [argument]
+          :seon.sci.eval/time-limit-ms time-limit-ms
+          :seon.sci.admit/caps caps
+          :seon.config/on-core-error on-core-error}
+          (:seon.render.call/captured-reads request)
+          (assoc :seon.db/read-evidence-sink
+                 (:seon.render.call/captured-reads request))))))))
 
 (defn- valid-projection?
   [output value]

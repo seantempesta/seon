@@ -9,8 +9,9 @@
   configured depth, width, string, and node caps. Reference values with a
   registry-declared identity projection admit only that identity; other
   reference types and arrays are never entered. That registry question is
-  asked against ONE declaration projection handed with the admission, never
-  reached process-sideways and never once per node.
+  asked against ONE declaration projection handed with the admission request
+  or its enclosing operation, never reached process-sideways and never once
+  per node.
 
   `admit-value` returns the one bounded print node and its derived semantic
   value without constructing a print sink. `admit` adds
@@ -415,8 +416,8 @@
                  ::name (str "#'" (::print/name print-node))}
     ::print/type {::opaque "sci.lang.Type" ::name (::print/name print-node)}
     ::print/class {::opaque "java.lang.Class" ::name (::print/name print-node)}
-    ::print/object (if-let [identity (::print/value print-node)]
-                     (semantic-value identity)
+    ::print/object (if-let [identity-node (::print/value print-node)]
+                     (semantic-value identity-node)
                      {::opaque (::print/class print-node)})
     ::print/truncated-string {::truncated-string (::print/value print-node)
                               ::elided true}
@@ -449,9 +450,10 @@
 
 (defn- admit*
   [{::keys [value interrupt-fn caps record]
-    projection :seon.schema/projection
+    supplied-projection :seon.schema/projection
     on-core-error :seon.config/on-core-error}]
-  (let [state {:interrupt-fn interrupt-fn
+  (let [projection (or supplied-projection (schema/handed-projection))
+        state {:interrupt-fn interrupt-fn
                :caps caps
                :on-core-error on-core-error
                ;; Identity projection is handed by the operation boundary.
