@@ -75,6 +75,26 @@ it. The rebirth proof probe is repaired and running on the quiet tree.
 Also filed:
 [the armed-eval nested render refusal](../../seon/issues/public-walk-render-inside-an-armed-eval-hits-already-armed.md).
 
+**Endgame (2026-08-13 night).** THE REBIRTH PROOF RAN
+([report](../research/rebirth-capability-proof-2026-08-13.md), `d214e7075`):
+lived 5,602 tokens → reborn **640 tokens (88.6% reduction)**, byte-
+deterministic across two branches, six lived runs linked via supersedes;
+R45/R47 partial on two filed blockers
+([render-symbol encoding](../../seon/issues/agent-schema-render-symbol-bypasses-transaction-encoding.md),
+[authored results omitted](../../seon/issues/rebirth-opening-omits-agent-authored-results.md)).
+THE SUITE RUNS END TO END AGAIN: three wedge generations fixed at cause
+(agent lifecycle `de66c1e4a`; runner stop RPC bounded + worker dumps
+`0ef2750ef`; web fixture typed-value-as-profile `66cecb816`), then the
+confirmation launch class killed at root — concurrent confirmation JVMs
+shared one unlocked `.cpcache`; workers now get the coordinator's classpath
+via `-Scp`, identity publishes before readiness, and the tally is total
+(`fc92ddaac`). First complete honest tally at that frozen checkout: 1,200
+tests / 9,215 assertions / **120 F / 33 E across 65 failing tests**, zero
+unconfirmed. All nine earlier-confirmed reds then fixed — every one a stale
+expectation against the day's ruled changes, none a regression (`dc6604dac`,
+`0a39f71d6`). A fresh current-HEAD `--all` is the next number; the 65-test
+red ledger in `tmp/test-runs/run.QfMToj` is the next fix worklist.
+
 **Uncommitted foreign residue deliberately left:**
 `test/seon/public_contract_test.clj` (reader→analyzer refactor) and the
 regenerated `universal-output-floor-baseline-2026-08-04.edn` — unverified
