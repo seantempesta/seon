@@ -1,0 +1,40 @@
+#:my.plan{:anchor :seon.db/ref,
+          :anchor? :boolean,
+          :agent-state
+          [:map
+           {:seon.db/entity true}
+           [:seon.cluster.agent/id :seon.cluster.agent/id]
+           [:my.plan/anchor {:optional true} :my.plan/anchor]],
+          :obligation-source [:enum :message :run :test],
+          :obligation-id [:string {:min 1}],
+          :obligation-title [:string {:min 1}],
+          :obligation-ref :seon.db/ref,
+          :obligation
+          [:map
+           [:my.plan/obligation-source :my.plan/obligation-source]
+           [:my.plan/obligation-id :my.plan/obligation-id]
+           [:my.plan/obligation-title :my.plan/obligation-title]
+           [:my.plan/obligation-ref :my.plan/obligation-ref]],
+          :obligations [:vector :my.plan/obligation],
+          :ready [:vector :my.plan.item/item],
+          :blocked [:vector :my.plan.item/item],
+          :recent-completions [:vector :my.plan.item/item],
+          :older-completions :seon.print/elision,
+          :ready-items
+          [:vector
+           {:seon.render/ai my.plan/render-ready-items-ai,
+            :seon.render/html my.plan/render-ready-items-html}
+           :my.plan.item/item],
+          :view
+          [:map
+           {:seon.render/ai my.plan/render-plan-ai,
+            :seon.render/html my.plan/render-plan-html}
+           [:seon.cluster.agent/id :seon.cluster.agent/id]
+           [:my.plan/obligations :my.plan/obligations]
+           [:my.plan/ready :my.plan/ready]
+           [:my.plan/blocked :my.plan/blocked]
+           [:my.plan/recent-completions :my.plan/recent-completions]
+           [:my.plan/anchor {:optional true} :my.plan/anchor]
+           [:my.plan/older-completions
+            {:optional true}
+            :my.plan/older-completions]]}

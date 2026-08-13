@@ -1,0 +1,43 @@
+#:my.plan.item{:id [:string {:min 1, :seon.db/identity true}],
+               :title [:string {:min 1}],
+               :description [:string {:min 1}],
+               :agent :seon.db/ref,
+               :parent :seon.db/ref,
+               :needs [:set :seon.db/ref],
+               :about [:set :seon.db/ref],
+               :completed-at :inst,
+               :expected-result [:string {:min 1}],
+               :item
+               [:map
+                {:seon.db/entity true,
+                 :seon.render/ai my.plan/render-item-ai,
+                 :seon.render/html my.plan/render-item-html}
+                [:my.plan.item/id :my.plan.item/id]
+                [:my.plan.item/title :my.plan.item/title]
+                [:my.plan.item/agent :my.plan.item/agent]
+                [:my.plan.item/description
+                 {:optional true}
+                 :my.plan.item/description]
+                [:my.plan.item/parent {:optional true} :my.plan.item/parent]
+                [:my.plan.item/needs {:optional true} :my.plan.item/needs]
+                [:my.plan.item/about {:optional true} :my.plan.item/about]
+                [:my.plan.item/completed-at
+                 {:optional true}
+                 :my.plan.item/completed-at]
+                [:my.plan.item/expected-result
+                 {:optional true}
+                 :my.plan.item/expected-result]],
+               :add-request
+               [:map
+                [:my.plan.item/id :my.plan.item/id]
+                [:my.plan.item/title :my.plan.item/title]
+                [:my.plan.item/description
+                 {:optional true}
+                 :my.plan.item/description]
+                [:my.plan.item/parent {:optional true} :my.plan.item/parent]
+                [:my.plan.item/needs {:optional true} :my.plan.item/needs]
+                [:my.plan.item/about {:optional true} :my.plan.item/about]
+                [:my.plan.item/expected-result
+                 {:optional true}
+                 :my.plan.item/expected-result]
+                [:my.plan/anchor? {:optional true} :my.plan/anchor?]]}
