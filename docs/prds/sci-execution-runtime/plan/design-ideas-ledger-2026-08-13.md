@@ -196,6 +196,48 @@ one decision away from queued work. Ruled items cite their record.
     id, branch head commit id, Datahike's named branch. Folded into the
     r3-store-layout lane's resume.
 
+## Ruled in the 2026-08-13 night question round
+
+23. **#13 PROMOTED**: derive-or-die is AGENTS.md law text (landed under
+    §2.2 beside the regex rule, same commit as this entry).
+24. **#12 APPROVED as record-now-consume-later**: the render-cost
+    recording seam (small schema + the one receipt seam) lands so the
+    live drive accumulates real per-(shape, profile) token facts; no
+    consumers until evidence. Queued behind the drain.
+25. **#10 REJECTED — no demonstrated mistakes.** The owner: mistake
+    transcripts poison context ("half the transcript was garbage").
+    The design already has the right two mechanisms and needs no third:
+    the typed evidence-complete REFUSAL teaches at the moment of the
+    mistake (the error value IS the correction, in the live turn where
+    it helps), and REBIRTH structurally cleans mistakes on compaction —
+    regeneration derives from current facts, so a failed form that left
+    no durable fact simply does not appear in the reborn opening
+    (authorship fence + ruling 46 self-fade + supersedes edges). What
+    we know about a mistake is queryable (the form, its error receipt,
+    whether anything superseded it), and the compaction form that
+    cleans it is the one we already run: generate(current facts, empty
+    history). #9 (curation-mined lessons) HOLDS until curation has real
+    usage.
+26. **#8 NOT RULED — measurements first, live agents before pricing.**
+    The owner leans full-then-diffs-until-compaction but commits to
+    nothing before seeing real context and real DeepSeek agent behavior
+    live. Consequence: THE LIVE DRIVE MOVES UP — it now runs as soon as
+    the drain lands and the generated-opening live-pull wedge is fixed,
+    BEFORE W3-W5 (the producer accretion is complete and behaviorally
+    inert, so the system is clean for a drive; the consumer migration
+    waits behind the drive rather than in front of it).
+27. **Floor-first rendering** (owner direction, same round): lean on
+    `seon.render.value` — the total floor (`render-ai-data`,
+    `window`, `prepare`, elision values) — rather than hand-declaring
+    producers per shape. The floor should DERIVE good concise output
+    for any registered shape (identity attr first, required attrs as
+    columns, windowing, requery elision) from the schema facts it
+    already has; declared producers remain for genuinely special
+    surfaces (errors, messages), not as the price of decency. This
+    supersedes the earlier inbox-fix framing (declare producers per row
+    shape) — the exemplar becomes: make the floor render
+    `:my.message/inbox` well WITHOUT a declaration.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced

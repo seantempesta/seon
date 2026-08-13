@@ -78,7 +78,8 @@ produced. The boot order:
    Process identity is (pid, start-instant); per-cluster paths derive from
    the cluster name.
 2. **Store.** One process root owns one Datahike store (today at
-   `data/clusters/store`) under a lifetime `flock`; each cluster is one
+   `data/store`, with its lock at `data/store.lock`) under a lifetime
+   `flock`; each cluster is one
    named branch with one live connection. Datahike's writer is its own
    serial loop per connection — we never build writers, we call `transact`
    and it serializes ([writer](reference-code/datahike/src/datahike/writer.cljc)).
@@ -211,6 +212,14 @@ registry before declaring a key.
 ;; which functions need cluster custody? — declared arity input-refs:
 [?f :seon.fn.arity/input-refs :seon.db/connection]
 ```
+
+**Derive or die (owner law, 2026-08-13):** every hand-maintained mirror
+of derivable state — a member list, a count in prose, a roster, a
+reserved-name list, a vocabulary enumeration — must be DERIVED by a
+query, ENFORCED by a checker that fails on drift, or DATED as a
+point-in-time record. A bare mirror is a defect on sight: every one this
+project measured was stale within a day. Replace it with its derivation
+in the same commit when in scope, or file the issue when not.
 
 **A REGEX IN PRODUCTION CODE REQUIRES THE OWNER'S PERMISSION — STOP AND
 ASK.** The program graph answers questions about code, Malli schemas about
