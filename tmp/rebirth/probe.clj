@@ -16,6 +16,7 @@
             [seon.cluster.work :as work]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.render.transcript :as transcript]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
@@ -26,7 +27,6 @@
 (def ^:private namespace-name 'my.agents.rebirth)
 (def ^:private process-id "rebirth-capability-proof")
 (def ^:private root-user [:seon.cluster.agent/id "root"])
-(def ^:private repl-process [:seon.db.process/id :seon.db.process/repl])
 (def ^:private base-instant-ms 1786500000000)
 
 (defn- at [offset]
@@ -128,7 +128,7 @@
       run-id)))
 
 (defn- message!
-  [connection message-id content offset]
+  [connection process message-id content offset]
   (let [result
         (db/transact!
          connection
@@ -140,7 +140,8 @@
             :seon.cluster.message/content content
             :seon.cluster.message/at (at offset)}]
           :tx-meta {:seon.db/user root-user
-                    :seon.db/process repl-process}})]
+                    :seon.db/process
+                    [:seon.db.process/id process]}})]
     (when (error-value? result)
       (throw (ex-info "Probe message transaction was refused." result)))
     (db/basis-t (:db-after result))))
@@ -254,53 +255,89 @@
 (defn- run-generated-rebirth!
   [instance branch run-id]
   (let [store-value (:seon.store/store instance)
+        original-cluster (:seon.cluster.loop/cluster instance)
+        original-environment (env/of original-cluster)
         basis (db/commit-id @(:seon.boot/cluster-connection instance))]
     (registry/branch! {:seon.store/store store-value
                        :seon.cluster.registry/from basis
                        :seon.store/branch branch})
-    (let [connection (store/open-branch! store-value branch)]
+    (let [{projection :seon.schema/projection
+           projection-state :seon.sci.eval/projection-state}
+          (let [provisional (store/open-branch! store-value branch)]
+            (try
+              (let [database @provisional
+                    projection (schema/projection-from-database database)]
+                {:seon.schema/projection projection
+                 :seon.sci.eval/projection-state
+                 (sci.eval/projection-state database projection)})
+              (finally
+                (store/release-branch! provisional))))
+          connection
+          (schema/call-with-projection-state
+           projection-state
+           #(store/open-branch! store-value branch))]
       (try
-        (let [ctx (sci.eval/cluster-ctx @connection connection)
-              cluster-handle
-              (assoc (:seon.cluster.loop/cluster instance)
-                     :seon.db/connection connection
-                     :seon.sci.eval/ctx ctx
-                     :seon.cluster.run/process process-id)
-              opened
-              (db/transact!
-               connection
-               (run/generated-run-tx
-                @connection
-                {:seon.cluster.agent/id agent-id
-                 :seon.cluster.run/id run-id
-                 :seon.cluster.run/process process-id
-                 :seon.cluster.run/opened-at (at 90000)
-                 :seon.cluster.run/starting-ns [:seon.ns/name namespace-name]
-                 :seon.cluster.run.form/source
-                 (bootstrap/entry-source
-                  {:seon.repl/comment "; Reborn from current facts with empty history."
-                   :seon.repl/form '(help)})}))]
-          (when (error-value? opened)
-            (throw (ex-info "Rebirth run open was refused." opened)))
-          (loop [passes 0]
-            (when (> passes 200)
-              (throw (ex-info "Rebirth exceeded the probe pass bound."
-                              {:seon.cluster.run/id run-id})))
-            (when-let [next-work
-                       (work/next-agent-work
-                        @connection
-                        {:seon.cluster.agent/id agent-id
-                         :seon.cluster.run/process process-id})]
-              (when (= run-id (:seon.cluster.run/id next-work))
-                (if (= :call (:seon.cluster.work/situation next-work))
-                  :generated
-                  (do
-                    (loop/turn {:seon.cluster.loop/cluster cluster-handle
-                                :seon.cluster.work/next next-work}
-                               (at (+ 90000 passes)))
-                    (recur (inc passes)))))))
-          {:rebirth.probe/run-id run-id
-           :rebirth.probe/history (raw-run-history @connection)})
+        (schema/call-with-projection-state
+         projection-state
+         (fn []
+           (let [branch-environment
+                 (env/refuse-incomplete-environment!
+                  (env/environment
+                   (assoc (into {} original-environment)
+                          :seon.db/connection connection
+                          :seon.db/basis-t (db/basis-t @connection)
+                          :seon.schema/projection projection)))
+                 _ (env/replace-environment! projection-state
+                                             branch-environment)
+                 ctx (-> (sci.eval/cluster-ctx @connection connection
+                                               projection-state)
+                         (env/carry branch-environment)
+                         (env/carry-state projection-state))
+                 cluster-handle
+                 (assoc original-cluster
+                        :seon.env/environment branch-environment
+                        :seon.sci.eval/projection-state projection-state
+                        :seon.db/connection connection
+                        :seon.sci.eval/ctx ctx
+                        :seon.cluster.run/process process-id)
+                 opened
+                 (db/transact!
+                  connection
+                  (run/generated-run-tx
+                   @connection
+                   {:seon.cluster.agent/id agent-id
+                    :seon.cluster.run/id run-id
+                    :seon.cluster.run/process process-id
+                    :seon.cluster.run/opened-at (at 90000)
+                    :seon.cluster.run/starting-ns
+                    [:seon.ns/name namespace-name]
+                    :seon.cluster.run.form/source
+                    (bootstrap/entry-source
+                     {:seon.repl/comment
+                      "; Reborn from current facts with empty history."
+                      :seon.repl/form '(help)})}))]
+             (when (error-value? opened)
+               (throw (ex-info "Rebirth run open was refused." opened)))
+             (loop [passes 0]
+               (when (> passes 200)
+                 (throw (ex-info "Rebirth exceeded the probe pass bound."
+                                 {:seon.cluster.run/id run-id})))
+               (when-let [next-work
+                          (work/next-agent-work
+                           @connection
+                           {:seon.cluster.agent/id agent-id
+                            :seon.cluster.run/process process-id})]
+                 (when (= run-id (:seon.cluster.run/id next-work))
+                   (if (= :call (:seon.cluster.work/situation next-work))
+                     :generated
+                     (do
+                       (loop/turn
+                        {:seon.cluster.loop/cluster cluster-handle
+                         :seon.cluster.work/next next-work}
+                        (at (+ 90000 passes)))
+                       (recur (inc passes)))))))
+             {:rebirth.probe/run-id run-id
+              :rebirth.probe/history (raw-run-history @connection)})))
         (finally
           (store/release-branch! connection)
           (registry/retire-branch! {:seon.store/store store-value
@@ -352,42 +389,46 @@
         instance (cluster/start! {:seon.boot/cluster-name cluster-name
                                   :seon.boot/root root})]
     (try
-      (let [connection (:seon.boot/cluster-connection instance)
-            process (cluster/process-identity
-                     (:seon.boot/advertisement instance))]
-        (await-closed! connection (bootstrap/run-id "root"))
-        (cluster/ensure-entity!
-         connection process
-         {:seon.cluster.agent/id agent-id
-          :seon.cluster/name cluster-name
-          :seon.ns/name namespace-name})
-        (await-closed! connection (bootstrap/run-id agent-id))
-        (agent/disarm! {:seon.cluster.agent/id agent-id
-                        :seon.cluster.agent/routing
-                        (:seon.cluster.agent/routing instance)})
-        (let [basis-0 (message! connection "rebirth-artifacts"
-                                "Declare the fact-backed plan and its artifacts."
-                                1000)]
-          (open-agent-run! instance "rebirth-artifacts-run"
-                           "rebirth-artifacts" (artifact-reply) 1100)
-          (let [basis-1 (message! connection "rebirth-message-1"
-                                  "Create the initial plan items." 2000)]
-            (open-agent-run! instance "rebirth-plan-turn-1"
-                             "rebirth-message-1"
-                             (plan-create-reply basis-0) 2100)
-            (let [basis-2 (message! connection "rebirth-message-2"
-                                    "Refine the plan and complete early items."
-                                    3000)]
-              (open-agent-run! instance "rebirth-plan-turn-2"
-                               "rebirth-message-2"
-                               (plan-refine-reply basis-1) 3100)
-              (message! connection "rebirth-message-3"
-                        "Complete the centerpiece and leave follow-up work."
-                        4000)
-              (open-agent-run! instance "rebirth-plan-turn-3"
-                               "rebirth-message-3"
-                               (plan-finish-reply basis-2) 4100))))
-        (let [database @connection
+      (schema/call-with-projection-state
+       (get-in instance [:seon.cluster.loop/cluster
+                         :seon.sci.eval/projection-state])
+       (fn []
+        (let [connection (:seon.boot/cluster-connection instance)
+              process (cluster/process-identity
+                       (:seon.boot/advertisement instance))]
+          (await-closed! connection (bootstrap/run-id "root"))
+          (cluster/ensure-entity!
+           connection process
+           {:seon.cluster.agent/id agent-id
+            :seon.cluster/name cluster-name
+            :seon.ns/name namespace-name})
+          (await-closed! connection (bootstrap/run-id agent-id))
+          (agent/disarm! {:seon.cluster.agent/id agent-id
+                          :seon.cluster.agent/routing
+                          (:seon.cluster.agent/routing instance)})
+          (let [basis-0 (message! connection process "rebirth-artifacts"
+                                  "Declare the fact-backed plan and its artifacts."
+                                  1000)]
+            (open-agent-run! instance "rebirth-artifacts-run"
+                             "rebirth-artifacts" (artifact-reply) 1100)
+            (let [basis-1 (message! connection process "rebirth-message-1"
+                                    "Create the initial plan items." 2000)]
+              (open-agent-run! instance "rebirth-plan-turn-1"
+                               "rebirth-message-1"
+                               (plan-create-reply basis-0) 2100)
+              (let [basis-2 (message! connection process "rebirth-message-2"
+                                      "Refine the plan and complete early items."
+                                      3000)]
+                (open-agent-run! instance "rebirth-plan-turn-2"
+                                 "rebirth-message-2"
+                                 (plan-refine-reply basis-1) 3100)
+                (message! connection process "rebirth-message-3"
+                          "Complete the centerpiece and leave follow-up work."
+                          4000)
+                (open-agent-run! instance "rebirth-plan-turn-3"
+                                 "rebirth-message-3"
+                                 (plan-finish-reply basis-2) 4100))))
+          (let [database @connection
               lived (raw-run-history database)
               rendered-lived (transcript-entries instance database)
               first-rebirth (run-generated-rebirth!
@@ -424,9 +465,9 @@
                (db/pull database
                         '[* {:probe.rebirth.plan/items [*]}]
                         [:probe.rebirth.plan/id "rebirth-plan"])}]
-          (spit (io/file root "rebirth-evidence.edn")
-                (str (pr-str evidence) "\n"))
-          evidence))
+            (spit (io/file root "rebirth-evidence.edn")
+                  (str (pr-str evidence) "\n"))
+            evidence))))
       (finally
         (cluster/stop! instance)))))
 
