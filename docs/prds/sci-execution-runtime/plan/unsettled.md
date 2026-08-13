@@ -124,6 +124,20 @@ census; `seon.fn/output-path-report` bypass paths), then land ONE class
 regression that fails on new members — subject-present by construction,
 never absence-as-health.
 
+**2026-08-13 late-evening state:** W2b RETURNED COMPLETE (`d5f7c7a08`,
+focused gate 15/167/0) — the PRODUCER SIDE OF KIND→CLASS IS DONE. The
+stale exact-key assertion at `test/my/message_test.clj:138` that taxed
+three lanes' gates was fixed at the choke point (`70e298ed7`: marker
+presence only, no kind dependence, survives W4/W5). **T3 LAUNCHED**
+(`plan-t3` lane) per the owner's go-ahead, spec = the plan-context PRD +
+its new 'T3 amendments' section (`b0d787dfa`): membership via `:about`
+through the existing budget, `plan!` resolution validation, usage-demo
+rendering per the demo-vs-doc rule, basis-t rendered beside results;
+`seon.db/diff` EXCLUDED pending the live REPL exploration (opus agent
+running → `../research/generic-diff-exploration-2026-08-13.md`).
+`issue-class-kill` round 3 running on the operator status face. W3
+still HOLDS until wedge-kill + dump-kill return.
+
 **THE ORDERED QUEUE AFTER RETURNS:**
 1. R2 continuation, serial, red-tolerant: W2b (deferred producers in
    bootstrap/walk/plan once those lanes land) → W3 consumers dispatch on
