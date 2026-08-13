@@ -33,7 +33,8 @@ initialization before either fixture could exercise its subject.
 - The 2026-08-13 complete-run attribution found the third member in
   `test/seon/cluster/turn_test.clj`'s `render-proc-for`. Supplying the declared
   reference lets `streaming-rides-channels-and-only-the-settled-value-is-a-fact`
-  reach and pass its stream assertions under direct invocation.
+  reach and pass its stream assertions under direct invocation and the focused
+  repository runner.
 
 ## Owner
 

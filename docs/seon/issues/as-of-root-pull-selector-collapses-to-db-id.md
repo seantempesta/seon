@@ -26,6 +26,12 @@ connection unrepresentable to the walk.
   id.
 - Both failures reproduce by direct in-JVM invocation, so this is not the
   parallel isolation-sensitive class.
+- Focused `bin/test seon.cluster.run-test seon.cluster.turn-test
+  seon.cluster.work-test` at `100f03a40` ran 82 tests / 566 assertions with
+  exactly these two reproducibly isolated failing tests: four assertions in
+  `a-run-prompts-from-its-opening-database-value` and one in
+  `refused-terminal-program-transactions-settle-and-do-not-refire`; it reported
+  zero errors.
 - A direct probe after opening the run observed
   `seon.render.walk/root-acquisition` return selector `[:db/id]`, root
   `#:db{:id 27772}`, and no connections. An ordinary wildcard pull from the
