@@ -90,6 +90,36 @@ so namespace loading fails before this regression, the opening probe, or the
 integration gate can run. Per the shared-tree stop rule, this issue remains
 open until those three proofs can be rerun against a coherent tree.
 
+## Verification — 2026-08-13
+
+The protected render boundary cleared and the deferred chain ran in order.
+
+- `tmp/opening/probe.clj` on fresh root
+  `tmp/opening/scratch-root-7` closed `bootstrap:root` in 4.9 seconds and
+  `bootstrap:probe-agent` in 4.2 seconds. Each closed run carried one form and
+  one receipt. `tmp/opening/probe-post-fix-2.log` contains zero
+  `trigger-already-answered` occurrences. The later stop path hit the foreign
+  in-flight `seon.ai/agent-overlay` missing-projection error after both
+  acceptance events; it did not reopen or retry either trigger.
+- `bin/test seon.cluster.agent-test` completed 18 tests and 176 assertions
+  with zero failures and zero errors. The answered-trigger regression passed;
+  `n-agent-parallel-turns-property` completed in 65.8 seconds and
+  `wake-routing-conservation-property` completed in 143.1 seconds. Full output
+  is retained in `tmp/opening/agent-test-final.log`.
+- The one requested `bin/test --all` completed without a liveness wedge, but
+  stopped at the red platform tier: 71 tests, 384 assertions, one failure,
+  zero errors. The sole failure was
+  `seon.test-support-test/explicit-synthetic-schema-rows-extend-only-that-database`:
+  `test/seon/test_support.clj` treated `seon.db/q`'s flat invalid-read error for
+  an uninstalled synthetic attribute as query rows. The bulk tier's 1,125
+  tests did not run. Full output is retained in
+  `tmp/opening/bin-test-all-final.log`.
+
+The lifecycle acceptance behavior is proven and the original wedge did not
+recur. This issue remains open because the owner required all three gates to
+pass before closure, and the foreign `seon.test-support-test` platform failure
+prevented that final condition.
+
 ## Owner
 
 The work-derivation/arm seam that opens runs from triggers —

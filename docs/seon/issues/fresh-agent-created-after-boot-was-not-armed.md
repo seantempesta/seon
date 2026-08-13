@@ -84,6 +84,41 @@ can run. Per the shared-tree stop rule, this issue remains open until the
 generated-agent properties and live creation proof can be rerun against a
 coherent tree.
 
+## Verification — 2026-08-13
+
+The first focused rerun proved the original N-agent property completed, then
+retained a new worker dump when the routing property still waited. The dump at
+`tmp/opening/wake-routing-post-fix-worker-71261.json` showed the worker parked
+at the then-current `agent_test.clj:1533` while every Flow proc waited for
+input. A one-operation reduction named two stale fixture assumptions:
+
+- generated-agent creation requires the production process and cluster facts;
+  without them Datahike loudly refused the transaction before an agent could
+  exist; and
+- every generated agent adds one answered bootstrap trigger, so the old
+  message-only answer count could never reach quiescence.
+
+The property fixture now declares those facts and counts exactly one generated
+bootstrap answer per created agent. Those changes are commits `3227436ea` and
+`f68735799`. A direct one-agent trial returned all four conservation
+invariants true.
+
+The final `bin/test seon.cluster.agent-test` run completed 18 tests and 176
+assertions with zero failures and zero errors. In particular,
+`n-agent-parallel-turns-property` completed in 65.8 seconds and
+`wake-routing-conservation-property` completed in 143.1 seconds. The opening
+probe independently observed both root and fresh-agent bootstrap runs closed
+with one form and one receipt.
+
+The subsequent `bin/test --all` did not wedge, but its platform tier stopped
+with one foreign failure in
+`seon.test-support-test/explicit-synthetic-schema-rows-extend-only-that-database`:
+71 tests, 384 assertions, one failure, zero errors; the 1,125-test bulk tier
+did not run. The failure owner is `test/seon/test_support.clj`, whose
+`file-store-markers` helper treats `seon.db/q`'s flat invalid-read error for an
+uninstalled synthetic attribute as query rows. This issue remains open because
+the owner required all three gates to pass before closure.
+
 ## Acceptance
 
 - Creating an agent after boot arms it without a direct `arm!` call.
