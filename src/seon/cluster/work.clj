@@ -181,14 +181,6 @@
       (catch Throwable _
         nil))))
 
-(def ^:private lint-rejected-kind
-  :seon.cluster.loop/lint-rejected)
-
-(defn- lint-refusal-receipt?
-  [receipt]
-  (= lint-rejected-kind
-     (:seon.error/kind (receipt-value receipt))))
-
 (defn red-receipt?
   "True when a terminal receipt is red: error, interruption, or unbound."
   {:malli/schema [:=> [:cat :map] :boolean]}
@@ -460,63 +452,6 @@
     (or (nil? limit)
         (>= (episode-runs db agent-id) limit))))
 
-(defn- latest-closed-run
-  "The latest run this agent closed, ordered by its closing transaction."
-  [db agent-id]
-  (->> (db/q '[:find ?run ?run-id ?opened-tx ?closed-tx
-              :in $ ?agent-id
-              :where
-              [?agent :seon.cluster.agent/id ?agent-id]
-              [?run :seon.cluster.run/agent ?agent]
-              [?run :seon.cluster.run/id ?run-id ?opened-tx]
-              [?run :seon.cluster.run/closed-at _ ?closed-tx]]
-            db agent-id)
-       (sort-by (fn [[_ run-id opened-tx closed-tx]]
-                  [closed-tx opened-tx run-id]))
-       last))
-
-(defn- pre-provider-refusal?
-  "True when a run recorded an error before any model attempt existed."
-  [db run]
-  (and
-   (some? (db/q '[:find ?error .
-                  :in $ ?run
-                  :where [?error :seon.error/run ?run]]
-                db run))
-   (nil? (db/q '[:find ?attempt .
-                :in $ ?run
-                :where [?attempt :seon.ai.attempt/run ?run]]
-              db run))))
-
-(defn- refusal-continuation-trigger
-  "The latest closed run's trigger when work was refused.
-
-  Presence derives the continuation below the existing episode cap. The
-  trigger identity is reused; no message, timer, cursor, or retry fact is
-  created. Selecting the latest closed run before examining its receipts
-  prevents an older refusal from resurfacing after a later successful turn.
-  A lint refusal is present in a terminal receipt. A prompt/capture refusal is
-  structurally earlier: the run has a durable error fact and no model attempt."
-  [db agent-id]
-  (when-not (episode-capped? db agent-id)
-    (when-let [[run _run-id _opened-tx _closed-tx]
-               (latest-closed-run db agent-id)]
-      (when (or (pre-provider-refusal? db run)
-                (some lint-refusal-receipt?
-                      (db/q '[:find [(pull ?receipt
-                                      [:seon.cluster.eval/result-edn]) ...]
-                             :in $ ?run
-                             :where
-                             [?receipt :seon.cluster.eval/run ?run]
-                             [?receipt :seon.cluster.eval/result-edn _]]
-                           db run)))
-        (db/q '[:find ?trigger-id .
-               :in $ ?run
-               :where
-               [?run :seon.cluster.run/trigger ?trigger]
-               [?trigger :seon.cluster.message/id ?trigger-id]]
-             db run)))))
-
 (defn- openable-trigger
   "The trigger `agent-id`'s next run answers, under the episode gate.
   Below the cap: oldest-first over all unanswered triggers. AT the cap
@@ -603,10 +538,11 @@
   `:resume` carries the ordinal the fold restarts at — the first form
   ordinal with no terminal receipt — so a turn never recomputes it;
   when no such ordinal remains the situation is `:close`. With no open
-  run, a lint refusal on the latest closed run derives corrective `:open`
-  first below the episode cap; otherwise the `:open` arm selects an
-  unanswered trigger under that same gate. A deferred trigger simply
-  derives no work — no consumer ever sees a decision to refuse."
+  run, the `:open` arm selects an unanswered trigger under the episode
+  gate. A closed run already answers its trigger, including when that run
+  closed on a refusal; answered triggers never derive work again. A deferred
+  trigger simply derives no work — no consumer ever sees a decision to
+  refuse."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.work/agent-request]
                   [:maybe :seon.cluster.work/next]]}
@@ -638,10 +574,8 @@
       (some? run) nil
 
       :else
-      (let [trigger-id
-            (or (refusal-continuation-trigger db agent-id)
-                (:seon.cluster.message/id
-                 (openable-trigger db agent-id)))]
+      (let [trigger-id (:seon.cluster.message/id
+                        (openable-trigger db agent-id))]
         (when (or trigger-id (unanswered-background-result? db agent-id))
           (cond->
            {:seon.cluster.work/situation :open

@@ -1025,7 +1025,8 @@
                                          :seon.cluster.run/now now}))})]
       (cond
         (= ::trigger-already-answered (:seon.error/kind outcome))
-        (report :released 0)
+        (assoc (report :released 0)
+               ::trigger-already-answered true)
 
         (:seon.error/kind outcome)
         (do

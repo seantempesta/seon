@@ -303,10 +303,21 @@
                            {:seon.cluster.loop/cluster cluster
                             :seon.cluster.work/next next}
                            now)]
+               ;; Run closure is an armer wake because first-agent
+               ;; supervision is derived from closed-run and root-idle facts.
+               ;; The signal is disposable: the armer re-derives the complete
+               ;; supervision transition from the current database value.
+               (when (and (= :closed (:seon.cluster.loop/outcome report))
+                          (:seon.cluster.wake/armer-channel cluster))
+                 (async/offer!
+                  (:seon.cluster.wake/armer-channel cluster)
+                  ::wake))
                ;; self-rewake into this agent's OWN mailbox, coalescing on
                ;; its (sliding-buffer 1): it cannot recurse, because the pass
                ;; is only re-entered after this transform returns
-               (when (work/more-agent-work? @connection request)
+               (when (and
+                      (not (:seon.cluster.loop/trigger-already-answered report))
+                      (work/more-agent-work? @connection request))
                  (async/offer! (:seon.cluster.wake/channel cluster) ::wake))
                [(let [run-id (held-run-id @connection agent-id process)]
                   (cond-> (dissoc state :seon.cluster.run/id)
@@ -483,6 +494,8 @@
             turn-stopped (async/promise-chan)
             _ (async/>!! completion ::ready)
             agent-handle (assoc handle
+                                :seon.cluster.wake/armer-channel
+                                (:seon.cluster.wake/channel handle)
                                 :seon.cluster.wake/channel wake-channel
                                 :seon.schedule/channel schedule-channel
                                 :seon.cluster.loop/completion completion
@@ -716,40 +729,38 @@
            unarmed (remove #(contains? (::armed @routing) %) agents)
            non-root-agents (remove #{"root"} agents)
            first-agent (when (= 1 (count non-root-agents))
-                         (first non-root-agents))
-           arrived-first? (and first-agent (some #{first-agent} unarmed))]
+                         (first non-root-agents))]
        (doseq [agent-id (sort unarmed)]
          (arm! {:seon.cluster.loop/cluster handle
                 :seon.cluster.agent/id agent-id
                 :seon.cluster.agent/routing routing}))
-       (when arrived-first?
-         (let [ready (promise)
-               listener-key (random-uuid)
-               ready-db
-               (fn [database]
-                 (let [worker-closed?
-                       (some?
-                        (db/q '[:find ?closed .
-                                :in $ ?run-id
-                                :where
-                                [?run :seon.cluster.run/id ?run-id]
-                                [?run :seon.cluster.run/closed-at ?closed]]
-                              database (bootstrap/run-id first-agent)))
-                       root-idle?
-                       (nil?
-                        (db/q '[:find ?run .
-                                :where
-                                [?root :seon.cluster.agent/id "root"]
-                                [?root :seon.cluster.agent/run ?run]]
-                              database))]
-                   (when (and worker-closed? root-idle?)
-                     (deliver ready database))))]
-           (d/listen connection listener-key
-                     #(ready-db (:db-after %)))
-           (try
-             (ready-db @connection)
-             (let [database @ready
-                   supervision-tx
+       ;; Supervision is a fact-derived transition, never a wait inside this
+       ;; proc. Agent creation and every run closure wake the armer; each pass
+       ;; either commits the now-eligible transition or parks for the next
+       ;; fact. Thus later arm wakes cannot queue behind a generated opening.
+       (when first-agent
+         (let [database @connection
+               worker-closed?
+               (some?
+                (db/q '[:find ?closed .
+                        :in $ ?run-id
+                        :where
+                        [?run :seon.cluster.run/id ?run-id]
+                        [?run :seon.cluster.run/closed-at ?closed]]
+                      database (bootstrap/run-id first-agent)))
+               root-eid
+               (db/q '[:find ?root .
+                       :where [?root :seon.cluster.agent/id "root"]]
+                     database)
+               root-idle?
+               (and root-eid
+                    (nil?
+                     (db/q '[:find ?run .
+                             :in $ ?root
+                             :where [?root :seon.cluster.agent/run ?run]]
+                           database root-eid)))]
+           (when (and worker-closed? root-idle?)
+             (let [supervision-tx
                    (bootstrap/supervision-tx
                     database
                     (:seon.cluster.run/process handle)
@@ -764,7 +775,5 @@
                        {:seon.error/kind ::supervision-not-committed
                         :seon.error/data result}))))
                  (when-let [root (armed routing "root")]
-                   (async/offer! (:seon.cluster.wake/channel root) ::wake))))
-             (finally
-               (d/unlisten connection listener-key)))))
+                   (async/offer! (:seon.cluster.wake/channel root) ::wake)))))))
        [state nil]))))

@@ -21,6 +21,7 @@
             [seon.db :as db]
             [my.run :as my.run]
             [seon.ai :as ai]
+            [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.prompt :as prompt]
@@ -203,6 +204,14 @@
   {:seon.cluster.agent/id agent-id
    :seon.cluster.agent/namespace
    {:seon.ns/name (symbol (str "my.agents." agent-id))}})
+
+(defn- create-generated-agent!
+  [connection cluster-name agent-id]
+  (cluster/ensure-entity!
+   connection process
+   {:seon.cluster.agent/id agent-id
+    :seon.cluster/name cluster-name
+    :seon.ns/name (symbol (str "my.agents." agent-id))}))
 
 (defn- disarm-all!
   [routing]
@@ -458,6 +467,7 @@
                           :seon.cluster.wake/armer-channel armer-channel
                           :seon.cluster.wake/render-channel
                           (async/chan (async/sliding-buffer 1))
+                          :seon.render.web/interest (atom :all)
                           :seon.cluster.wake/fault-channel
                           (:seon.cluster.agent/fault-channel @routing)
                           :seon.cluster.wake/key ::route})
@@ -539,6 +549,67 @@
          :seed 2026072811)]
     (is (:pass? result)
         (str "shrunk counterexample: " (pr-str (:shrunk result))))))
+
+(deftest answered-trigger-is-a-terminal-work-verdict
+  (with-connection
+    (fn [connection ctx]
+      (let [agent-id "answered-trigger"
+            trigger-id "answered-trigger-message"
+            run-id "answered-trigger-run"
+            wake-channel (async/chan (async/sliding-buffer 1))
+            completion (async/chan 1)
+            request {:seon.cluster.agent/id agent-id
+                     :seon.cluster.run/process process}
+            stale-work {:seon.cluster.work/situation :open
+                        :seon.cluster.agent/id agent-id
+                        :seon.cluster.message/id trigger-id}
+            cluster (assoc (handle connection ctx)
+                           :seon.cluster.wake/channel wake-channel
+                           :seon.cluster.loop/completion completion)
+            refused-attempts (atom 0)
+            transact! db/transact!]
+        (db/transact!
+         connection
+         [{:seon.cluster.agent/id agent-id}
+          {:seon.cluster.message/id trigger-id
+           :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+           :seon.cluster.message/content "already answered"
+           :seon.cluster.message/at now}
+          {:seon.cluster.run/id run-id
+           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+           :seon.cluster.run/trigger
+           [:seon.cluster.message/id trigger-id]
+           :seon.cluster.run/opened-at now
+           :seon.cluster.run/closed-at now}
+          {:seon.error/id (str (random-uuid))
+           :seon.error/kind :seon.cluster.prompt/refused
+           :seon.error/message "the answered run closed on a refusal"
+           :seon.error/run [:seon.cluster.run/id run-id]}])
+        (is (nil? (work/next-agent-work @connection request))
+            "a closed refusal still answers its trigger")
+        (async/>!! completion ::agent/ready)
+        (with-redefs [work/next-agent-work (constantly stale-work)
+                      work/more-agent-work? (constantly true)
+                      db/transact!
+                      (fn [& args]
+                        (let [result (apply transact! args)]
+                          (when (= :seon.cluster.loop/trigger-already-answered
+                                   (:seon.error/kind result))
+                            (swap! refused-attempts inc))
+                          result))]
+          (let [[_ outputs]
+                (agent/turn-step
+                 {:seon.cluster.loop/cluster cluster
+                  :seon.cluster.agent/id agent-id}
+                 ::agent/episode
+                 ::agent/wake)
+                report (first (::flow/report outputs))]
+            (is (true?
+                 (:seon.cluster.loop/trigger-already-answered report)))
+            (is (= 1 @refused-attempts)
+                "one stale wake makes at most one refused open attempt")
+            (is (nil? (async/poll! wake-channel))
+                "the terminal refusal does not manufacture another wake")))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; 2. park-wake-test — seed 2026072812
@@ -1401,7 +1472,8 @@
         (try
           (with-redefs [ai/complete
                         (recording-completer
-                         ledger (fn [_] "(my.run/complete \"done\")"))]
+                         ledger (fn [_] "(my.run/complete \"done\")"))
+                        bootstrap/next-entry (constantly nil)]
             (wake/route! {:seon.cluster.wake/connection connection
                           :seon.cluster.wake/channels
                           (fn [] (agent/channels routing))
@@ -1411,6 +1483,7 @@
                           :seon.cluster.wake/armer-channel armer-channel
                           :seon.cluster.wake/render-channel
                           (async/chan (async/sliding-buffer 1))
+                          :seon.render.web/interest (atom :all)
                           :seon.cluster.wake/fault-channel
                           (:seon.cluster.agent/fault-channel @routing)
                           :seon.cluster.wake/key ::route-trial})
@@ -1425,8 +1498,8 @@
                   (let [agent-id (str "ra-" (count @created))]
                     (case op
                       :create
-                      (do (db/transact! connection
-                                        [(agent-row agent-id)])
+                      (do (create-generated-agent!
+                           connection "route-trial" agent-id)
                           (swap! created conj agent-id))
 
                       :create-and-message
@@ -1434,13 +1507,21 @@
                       ;; the recipient's graph cannot exist yet
                       (do (db/transact!
                            connection
-                           [(agent-row agent-id)
+                           {:tx-data
+                            [[:db.fn/call
+                              #'cluster/ensure-entity-call
+                              process
+                              (Date.)
+                              {:seon.cluster.agent/id agent-id
+                               :seon.cluster/name "route-trial"
+                               :seon.ns/name
+                               (symbol (str "my.agents." agent-id))}]
                             {:seon.cluster.message/id
                              (str "rm-" index)
                              :seon.cluster.message/to
                              {:seon.cluster.agent/id agent-id}
                              :seon.cluster.message/content "hello, newborn"
-                             :seon.cluster.message/at (Date.)}])
+                             :seon.cluster.message/at (Date.)}]})
                           (swap! created conj agent-id)
                           (swap! message-count inc))
 
