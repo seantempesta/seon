@@ -25,7 +25,8 @@
 
 (defn- flat-error
   [kind message data]
-  {:seon.error/kind kind
+  {kind true
+   :seon.error/kind kind
    :seon.error/message message
    :seon.error/data data})
 
@@ -34,9 +35,7 @@
   (let [classified (ex-data error)]
     (if (and (keyword? (:seon.error/kind classified))
              (string? (:seon.error/message classified)))
-      (flat-error (:seon.error/kind classified)
-                  (:seon.error/message classified)
-                  (:seon.error/data classified))
+      classified
       (flat-error kind message data))))
 
 (defn- strict-utf8
