@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, web, effect, render, class/n1, wave/capability-surface]
 ---
@@ -61,3 +61,28 @@ Still open at the web capability leaf. Decode a textual HTTP body according
 to its declared media type/charset before constructing the admitted receipt;
 retain bytes only for genuinely binary content and make the fallback an
 explicit flat value naming the chosen representation.
+
+## Resolution — 2026-08-13
+
+Resolved by `b6221e5c4` at the one response-capture boundary in
+`seon.web.jvm`. Inline
+responses whose declared media type is textual now decode with the declared
+charset (UTF-8 by default) under a strict decoder and carry
+`:my.web.body/text`; malformed text or non-text media types retain the exact
+`:my.web.body/octet-values` representation. Byte count and digest keep their
+existing meanings in both shapes, and oversized bodies still use the blob
+shape.
+
+Source-verified proof:
+
+- `src/seon/web/jvm.clj` passes the response Content-Type into
+  `capture-body!`, and `inline-body` selects text versus bytes once there.
+- `resources/seon/schemas/my.web.body.edn` declares the accreted text variant
+  beside the existing byte and blob variants.
+- `test/seon/web/jvm_test.clj` drives both an HTML response and binary response
+  through public `my.web/fetch`, then proves the returned values and both
+  durable effect receipts retain the selected representation.
+- The focused gate passed 7 tests / 38 assertions / 0 failures / 0 errors.
+- A hot-reloaded live JVM probe returned `:my.web.body/text` for UTF-8 HTML and
+  `:my.web.body/octet-values [0 1 255 2]` for
+  `application/octet-stream`.
