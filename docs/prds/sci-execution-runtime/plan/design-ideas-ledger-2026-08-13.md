@@ -52,6 +52,20 @@ one decision away from queued work. Ruled items cite their record.
     a domain function may accrete a DECLARED since parameter only on
     evidence the composed form is too clumsy.
 
+19. **Nothing rendered that will not run verbatim for the agent** (owner,
+    2026-08-13 evening): the generator only ever emits forms any agent
+    can replay identically — `seon.db` compositions, never a pretend
+    `:since` key on a domain function. Temporal ability is never coded
+    per function: it attaches to the DATABASE VALUE (Datahike's own
+    `since`/`as-of`/`history`, surfaced once through `seon.db`). Domain
+    read functions that should be retargetable DECLARE a database-value
+    argument; call preparation supplies the current database when the
+    caller omits it (caller wins) — visible in the rendered signature,
+    contract-validated, zero hidden keys. Teaching = the rendered doc
+    face (declared argument + supplied default) plus the generator's own
+    executed delta entries; the falsifier is replaying generated forms
+    in a fresh fork and comparing.
+
 ## AWAITING OWNER RESPONSE — surfaced, discussed, not ruled
 
 8. **The "cheapest form" cost model.** V1: one comparison in the one
