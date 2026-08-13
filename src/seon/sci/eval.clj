@@ -496,6 +496,7 @@
       :else
       (throw (ex-info "Evaluation requires exactly one reader event."
                       {:seon.error/kind ::reader-event-count
+                       ::reader-event-count (count events)
                        :seon.sci.reader/event-count (count events)})))))
 
 (defn- binding-rows
@@ -696,6 +697,7 @@
       (throw
        (ex-info "Selected function has no durable program row."
                 {:seon.error/kind ::missing-function-row
+                 ::missing-function-row function-symbol
                  :seon.fn/sym (str function-symbol)})))
     (sci/install-namespace-bindings!
        ctx namespace-name (assoc (row-bindings namespace-row) :refers {}))

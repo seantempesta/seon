@@ -13,7 +13,8 @@
 
 (defn- error-value
   [kind message data]
-  {:seon.error/kind kind
+  {kind (if (= ::refused-tag kind) (::tag data) true)
+   :seon.error/kind kind
    :seon.error/message message
    :seon.error/data data})
 

@@ -1,3 +1,9 @@
 {:seon.sci.reader/tag :symbol
+ :seon.sci.reader/unreadable [:= true]
+ :seon.sci.reader/unreadable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark unreadable Clojure source"} [:seon.sci.reader/unreadable :seon.sci.reader/unreadable] [:seon.error/message :seon.error/message]]
+ :seon.sci.reader/oversize [:= true]
+ :seon.sci.reader/oversize-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark Clojure source that exceeds its reader bound"} [:seon.sci.reader/oversize :seon.sci.reader/oversize] [:seon.error/message :seon.error/message]]
+ :seon.sci.reader/refused-tag :seon.sci.reader/tag
+ :seon.sci.reader/refused-tag-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the reader tag that was refused"} [:seon.sci.reader/refused-tag :seon.sci.reader/refused-tag] [:seon.error/message :seon.error/message]]
  :seon.sci.reader/keyword [:= true]
  :seon.sci.reader/keyword-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an invalid keyword read from agent source"} [:seon.sci.reader/keyword :seon.sci.reader/keyword] [:seon.error/message :seon.error/message]]}
