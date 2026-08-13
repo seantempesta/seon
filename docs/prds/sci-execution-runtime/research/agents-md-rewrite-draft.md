@@ -11,13 +11,18 @@ promotion — the root file carries none.)
 
 This is the one maintained repository instruction authority. Codex reads
 `AGENTS.md` directly; Claude reads the same bytes through the same-directory
-`CLAUDE.md -> AGENTS.md` compatibility link. The thin delegated-lane adapter
-lives in `AGENT.md`. When the tree contradicts a claim here, the claim is the
-bug: fix this file in the same commit as the change that exposed it.
+`CLAUDE.md -> AGENTS.md` compatibility link. When the tree contradicts a
+claim here, the claim is the bug: fix this file in the same commit as the
+change that exposed it.
 
-If you were spawned as a subagent, execute the assigned task directly. Do not
-spawn or delegate again. If the task is too broad, report that to the top-level
-orchestrator for rescoping.
+**If you were spawned as a lane or subagent:** execute the bounded
+assignment directly — never delegate or spawn again. Stay inside your owned
+paths and preserve every protected path and unrelated shared-tree edit.
+Never start, stop, reset, or mutate a shared cluster or process unless the
+assignment grants it. An out-of-scope finding gets a durable
+`docs/seon/issues/` note, never a silent scope expansion. Your report is an
+integration input for the orchestrator, not authority to claim the parent
+task complete. If the task is too broad, say so for rescoping.
 
 ## How we work here
 
@@ -572,6 +577,22 @@ operator's internals separately or kill its children blindly; use
 `bin/seon down` so the supervisor reaps its own. DESTRUCTIVE DRILLS AND
 SECOND DEPLOYMENTS USE `--root`. `bin/acme` is a thin root-scoped wrapper
 selecting cluster `acme`.
+
+**Session-start hygiene (standing order).** A fresh session begins by
+verifying the system it inherited, not by trusting it: check `bin/seon
+status` and that the MCP tools answer (a stale long-lived JVM serves old
+code — reset it onto current source rather than debugging phantoms);
+`git status` for another session's residue (preserve it, report it, never
+build on it unreviewed); and sweep the disposable exhaust — retained
+`tmp/test-runs/run.*` roots whose reds are superseded, scratch cluster
+roots under `tmp/`, and any store whose footprint has left its normal
+range. **Before deleting any run root, confirm no live runner holds it**
+(`bin/codex-agent status` for lanes plus the process table for `bin/test`
+JVMs) — sweeping an active root kills a foreign gate mid-run (`bin/seon status` prints it; database data is disposable by ruling —
+reset freely, never migrate). Everything under `tmp/` is throwaway until
+production; a disk filling with dead roots is a defect to fix in the
+minute it is noticed, and the [TARGET] root maintenance portfolio is the
+machinery that eventually owns this automatically.
 
 **Churn is weather, not a blocker.** Clusters, JVMs, and advertisements
 come and go while you work — ADAPT AND CONTINUE. Your cluster vanished:
