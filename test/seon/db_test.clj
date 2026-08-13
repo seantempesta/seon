@@ -3,9 +3,11 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [datahike.api :as d]
             [datahike.pull-api :as pull-api]
+            [my.message :as message]
             [seon.config :as config]
             [seon.db :as db]
             [seon.instrument :as instrument]
+            [seon.render :as render]
             [seon.render.value :as render.value]
             [seon.sci.admit :as admit]
             [seon.schema :as schema]
@@ -73,6 +75,16 @@
    {:db/ident ::component-value
     :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one}])
+
+(def ^:private diagnostic-fields
+  #{:seon.error/diagnostic-layer
+    :seon.error/diagnostic-operation
+    :seon.error/diagnostic-member
+    :seon.error/diagnostic-expected
+    :seon.error/diagnostic-offending
+    :seon.error/diagnostic-cause
+    :seon.error/diagnostic-evidence-availability
+    :seon.error/diagnostic-evidence})
 
 (deftest edn-backed-reads-return-distinguishable-logical-values
   (test-support/with-database
@@ -657,6 +669,114 @@
                           :where [_ :seon.cluster.message/id ?id]]
                         (db/since before-t))))))))))
 
+(defn- seed-diff-messages!
+  [connection]
+  (db/transact!
+   connection
+   [{:seon.cluster.agent/id "db-diff-alice"}
+    {:seon.cluster.agent/id "db-diff-bob"}
+    {:seon.cluster.message/id "db-diff-m1"
+     :seon.cluster.message/to
+     [:seon.cluster.agent/id "db-diff-bob"]
+     :seon.cluster.message/from
+     [:seon.cluster.agent/id "db-diff-alice"]
+     :seon.cluster.message/content "hello"
+     :seon.cluster.message/at
+     #inst "2026-08-13T20:00:00.000-00:00"}
+    {:seon.cluster.message/id "db-diff-m2"
+     :seon.cluster.message/to
+     [:seon.cluster.agent/id "db-diff-bob"]
+     :seon.cluster.message/content "removed"
+     :seon.cluster.message/at
+     #inst "2026-08-13T20:01:00.000-00:00"}]))
+
+(deftest ^{:seon.test/usage true} diff-replays-one-read-by-derived-identity
+  (test-support/with-database
+   (fn [connection]
+     (seed-diff-messages! connection)
+     (let [before (db/basis-t @connection)]
+       (db/transact!
+        connection
+        [[:db/add [:seon.cluster.message/id "db-diff-m1"]
+          :seon.cluster.message/content "hello, edited"]
+         [:db.fn/retractEntity
+          [:seon.cluster.message/id "db-diff-m2"]]
+         {:seon.cluster.message/id "db-diff-m3"
+          :seon.cluster.message/to
+          [:seon.cluster.agent/id "db-diff-bob"]
+          :seon.cluster.message/content "added"
+          :seon.cluster.message/at
+          #inst "2026-08-13T20:02:00.000-00:00"}])
+       (binding [db/*conn* connection]
+         (let [result (db/diff before #'message/inbox "db-diff-bob")
+               current (db/basis-t @connection)]
+           (is (= before (:seon.db/basis-t result)))
+           (is (= current (:seon.db/current-basis-t result)))
+           (is (= ["db-diff-m3"]
+                  (mapv :my.message/id (:seon.db.diff/added result))))
+           (is (= ["db-diff-m2"]
+                  (mapv :my.message/id (:seon.db.diff/removed result))))
+           (is (= [{:seon.db.diff/identity "db-diff-m1"
+                    :seon.db.diff/changed-attributes [:my.message/preview]
+                    :seon.db.diff/before
+                    {:my.message/id "db-diff-m1"
+                     :my.message/from "db-diff-alice"
+                     :my.message/at
+                     #inst "2026-08-13T20:00:00.000-00:00"
+                     :my.message/preview nil}
+                    :seon.db.diff/after
+                    {:my.message/id "db-diff-m1"
+                     :my.message/from "db-diff-alice"
+                     :my.message/at
+                     #inst "2026-08-13T20:00:00.000-00:00"
+                     :my.message/preview "hello, edited"}}]
+                  (:seon.db.diff/changed result)))
+           (is (= result (eval (:seon.db.diff/requery-id result)))
+               "the rendered requery form replays verbatim for an agent")
+           (let [rendered (db/render-diff-ai result)]
+             (is (str/includes? rendered "+1 -1 ~1"))
+             (is (str/includes? rendered "db-diff-m1"))
+             (is (str/includes? rendered ":my.message/preview"))
+             (is (str/includes? rendered "approximately"))
+             (is (str/includes? rendered "requery by")))))))))
+
+(deftest diff-no-change-is-empty
+  (test-support/with-database
+   (fn [connection]
+     (seed-diff-messages! connection)
+     (binding [db/*conn* connection]
+       (let [basis (db/basis-t @connection)
+             result (db/diff basis #'message/inbox "db-diff-bob")]
+         (is (= [] (:seon.db.diff/added result)))
+         (is (= [] (:seon.db.diff/removed result)))
+         (is (= [] (:seon.db.diff/changed result))))))))
+
+(deftest diff-refuses-missing-identity-and-external-sinks
+  (test-support/with-database
+   (fn [connection]
+     (binding [db/*conn* connection]
+       (let [basis (db/basis-t @connection)
+             identity-refusal (db/diff basis #'config/effective)
+             database-refusal (db/diff basis #'db/render-diff-ai {})
+             impurity-refusal (db/diff basis #'render/render-ai {})]
+         (doseq [refusal [identity-refusal database-refusal
+                          impurity-refusal]]
+           (is (true? (:seon.db/diff-refused refusal)))
+           (is (= diagnostic-fields
+                  (set (keys (:seon.error/data refusal))))))
+         (is (= :seon.db/row-identity-absent
+                (get-in identity-refusal
+                        [:seon.error/data :seon.error/diagnostic-cause])))
+         (is (= :seon.db/database-input-absent
+                (get-in database-refusal
+                        [:seon.error/data :seon.error/diagnostic-cause])))
+         (is (= :seon.db/external-sink-reachable
+                (get-in impurity-refusal
+                        [:seon.error/data :seon.error/diagnostic-cause])))
+         (is (= #{:ai-visible-text}
+                (get-in impurity-refusal
+                        [:seon.error/data :seon.error/diagnostic-offending]))))))))
+
 (deftest non-temporal-reads-return-one-flat-error-before-datahike
   (let [configuration
         {:store {:backend :memory :id (random-uuid)}
@@ -700,16 +820,6 @@
        (is (= :seon.db/invalid-read (:seon.error/kind result)))
        (is (string? (:seon.error/message result)))
        (is (map? (:seon.error/data result)))))))
-
-(def ^:private diagnostic-fields
-  #{:seon.error/diagnostic-layer
-    :seon.error/diagnostic-operation
-    :seon.error/diagnostic-member
-    :seon.error/diagnostic-expected
-    :seon.error/diagnostic-offending
-    :seon.error/diagnostic-cause
-    :seon.error/diagnostic-evidence-availability
-    :seon.error/diagnostic-evidence})
 
 (deftest invalid-read-identities-are-diagnostics-never-absence
   (test-support/with-database

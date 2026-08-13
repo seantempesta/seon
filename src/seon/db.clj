@@ -3,7 +3,9 @@
   an explicit immutable database value or connection, or, when custody is
   elided, the current connection of the calling agent's cluster (`*conn*`,
   bound per evaluation). Failures return flat `:seon.error` values."
-  (:require [clojure.string :as str]
+  (:require [clojure.data :as data]
+            [clojure.set :as set]
+            [clojure.string :as str]
             [clojure.walk :as walk]
             [datahike.api :as d]
             [datahike.connector :as connector]
@@ -16,10 +18,13 @@
             [datahike.store :as datahike.store]
             [datalog.parser.impl.proto :as parser]
             [clojure.test.check.generators :as gen]
+            [seon.ai.tokens :as tokens]
             [seon.env :as env]
             [seon.error.refusal :as error.refusal]
             [seon.schema :as schema]
-            [seon.schema.datahike :as schema.datahike])
+            [seon.schema.datahike :as schema.datahike]
+            [seon.schema.form :as schema.form]
+            [seon.schema.internal :as schema.internal])
   (:import [datahike.db AsOfDB]
            [datalog.parser.type BindScalar Constant FindColl FindRel FindScalar
             FindTuple Pattern Variable]))
@@ -1354,6 +1359,388 @@
    (database-view d/since (current-database-value) [time-point]))
   ([database time-point]
    (database-view d/since database [time-point])))
+
+;;; ---------------------------------------------------------------------------
+;;; Identity-aware result differences
+;;; ---------------------------------------------------------------------------
+
+(def ^:private external-sink-reach-rules
+  '[[(reaches-external-sink ?function ?sink)
+     [?function :seon.fn/calls ?sink]]
+    [(reaches-external-sink ?function ?sink)
+     [?function :seon.fn/calls ?called]
+     (reaches-external-sink ?called ?sink)]])
+
+(defn- diff-refusal
+  [message member expected offending cause evidence]
+  (diagnostic
+   {::diff-refused true
+    :seon.error/kind ::diff-refused
+    :seon.error/message message
+    :seon.error/diagnostic-layer :agent-boundary
+    :seon.error/diagnostic-operation 'seon.db/diff
+    :seon.error/diagnostic-member member
+    :seon.error/diagnostic-expected expected
+    :seon.error/diagnostic-offending offending
+    :seon.error/diagnostic-cause cause
+    :seon.error/diagnostic-evidence evidence}))
+
+(defn- callee-symbol
+  [callee]
+  (let [{namespace-value :ns name-value :name} (meta callee)]
+    (when (and namespace-value name-value)
+      (str namespace-value "/" name-value))))
+
+(defn- external-sinks
+  [database function-symbol]
+  (let [direct
+        (q '[:find [?sink ...]
+             :in $ ?function-symbol
+             :where
+             [?function :seon.fn/sym ?function-symbol]
+             [?function :seon.fn/external-sink ?sink]]
+           database function-symbol)
+        reached
+        (q '[:find [?sink-kind ...]
+             :in $ % ?function-symbol
+             :where
+             [?function :seon.fn/sym ?function-symbol]
+             (reaches-external-sink ?function ?sink)
+             [?sink :seon.fn/external-sink ?sink-kind]]
+           database external-sink-reach-rules function-symbol)]
+    (cond
+      (error-value? direct) direct
+      (error-value? reached) reached
+      :else (into (set direct) reached))))
+
+(defn- diff-plan
+  [database projection function-symbol supplied-count]
+  (let [snapshot
+        ((requiring-resolve 'seon.call-preparation/snapshot)
+         database projection)]
+    (if (error-value? snapshot)
+      snapshot
+      (let [plan
+            ((requiring-resolve 'seon.call-preparation/plan-for)
+             database snapshot function-symbol)
+            database-slots
+            (when-not (error-value? plan)
+              (->> (:seon.call-preparation/arities plan)
+                   (mapcat :seon.call-preparation/slots)
+                   (filter #(= :seon.db/db
+                               (:seon.call-preparation/key %)))
+                   vec))
+            candidates
+            (when-not (error-value? plan)
+              (->> (:seon.call-preparation/arities plan)
+                   (keep
+                    (fn [arity]
+                      (let [slots
+                            (filterv #(= :seon.db/db
+                                         (:seon.call-preparation/key %))
+                                     (:seon.call-preparation/slots arity))]
+                        (when (and (= 1 (count slots))
+                                   (= (inc supplied-count)
+                                      (:seon.fn.arity/argument-count arity)))
+                          {:seon.fn.arity/order
+                           (:seon.fn.arity/order arity)
+                           :seon.fn.argument/index
+                           (:seon.fn.argument/index (first slots))}))))
+                   vec))]
+        (cond
+          (error-value? plan) plan
+
+          (nil? plan)
+          (diff-refusal
+           "The supplied Var has no contracted program-graph row."
+           :seon.fn/sym :seon.fn/fn function-symbol
+           ::function-not-indexed
+           {:seon.fn/sym function-symbol})
+
+          (empty? database-slots)
+          (diff-refusal
+           "The supplied Var declares no database-value argument."
+           :seon.db/db :seon.db/database-value function-symbol
+           ::database-input-absent
+           {:seon.fn/sym function-symbol})
+
+          (empty? candidates)
+          (diff-refusal
+           "The remaining arguments match no diffable call shape."
+           :seon.schema/arguments
+           (:seon.call-preparation/arities plan)
+           supplied-count
+           ::call-shape-absent
+           {:seon.fn/sym function-symbol
+            :seon.call-preparation/supplied-count supplied-count})
+
+          (> (count candidates) 1)
+          (diff-refusal
+           "The remaining arguments select more than one call shape."
+           :seon.schema/arguments
+           candidates
+           supplied-count
+           ::ambiguous-call-shape
+           {:seon.fn/sym function-symbol
+            :seon.call-preparation/candidates candidates})
+
+          :else
+          (first candidates))))))
+
+(defn- output-schema-refs
+  [database function-symbol arity-order]
+  (q '[:find [?schema-key ...]
+       :in $ ?function-symbol ?arity-order
+       :where
+       [?function :seon.fn/sym ?function-symbol]
+       [?function :seon.fn/arities ?arity]
+       [?arity :seon.fn.arity/order ?arity-order]
+       [?arity :seon.fn.arity/output-refs ?schema]
+       [?schema :seon.schema/key ?schema-key]]
+     database function-symbol arity-order))
+
+(defn- terminal-schema-key
+  [forms schema-key]
+  (loop [current schema-key, seen #{}]
+    (let [definition (get forms current)]
+      (cond
+        (contains? seen current) nil
+        (and (keyword? definition) (contains? forms definition))
+        (recur definition (conj seen current))
+        :else current))))
+
+(defn- collection-entry-schemas
+  [forms schema-value]
+  (letfn [(entries [value seen]
+            (cond
+              (and (keyword? value)
+                   (contains? forms value)
+                   (not (contains? seen value)))
+              (entries (get forms value) (conj seen value))
+
+              (vector? value)
+              (let [body (remove map? (rest value))]
+                (case (first value)
+                  :vector [(last body)]
+                  :sequential [(last body)]
+                  :set [(last body)]
+                  :or (mapcat #(entries % seen) body)
+                  :and (mapcat #(entries % seen) body)
+                  []))
+
+              :else []))]
+    (entries schema-value #{})))
+
+(defn- row-identity-attribute
+  [forms row-schema identity-attributes]
+  (let [row-form
+        (loop [value row-schema, seen #{}]
+          (if (and (keyword? value)
+                   (contains? forms value)
+                   (not (contains? seen value)))
+            (recur (get forms value) (conj seen value))
+            value))]
+    (when (and (vector? row-form) (= :map (first row-form)))
+      (->> (schema.form/map-entries row-form)
+           (keep
+            (fn [[entry-key & declaration]]
+              (let [value-schema (last declaration)
+                    terminal-key
+                    (when (keyword? value-schema)
+                      (terminal-schema-key forms value-schema))]
+                (when (and terminal-key
+                           (not (some map? declaration))
+                           (contains? identity-attributes terminal-key))
+                  entry-key))))
+           (sort-by str)
+           first))))
+
+(defn- result-identity-attribute
+  [projection output-refs]
+  (let [forms (:seon.schema.projection/forms projection)
+        identity-attributes
+        (into #{}
+              (keep (fn [[_ definition]]
+                      (schema.internal/derive-entity-id-attr
+                       forms definition)))
+              forms)]
+    (->> output-refs
+         (mapcat #(collection-entry-schemas forms %))
+         (keep #(row-identity-attribute forms % identity-attributes))
+         distinct
+         (sort-by str)
+         first)))
+
+(defn- insert-database-argument
+  [arguments position database]
+  (let [arguments (vec arguments)]
+    (into (conj (subvec arguments 0 position) database)
+          (subvec arguments position))))
+
+(defn- invoke-diff-function
+  [function-var arguments position database]
+  (try
+    (apply function-var
+           (insert-database-argument arguments position database))
+    (catch Throwable cause
+      (diff-refusal
+       "The diffed function threw while replaying a database value."
+       :seon.fn/sym :seon.fn/fn (callee-symbol function-var)
+       ::function-threw
+       {:seon.db/basis-t (basis-t database)
+        :seon.error/exception-class (.getName (class cause))
+        :seon.error/dependency-data (ex-data cause)}))))
+
+(defn- identity-diff
+  [identity-attribute before after]
+  (let [before-by-id (update-vals (group-by identity-attribute before) first)
+        after-by-id (update-vals (group-by identity-attribute after) first)
+        [only-before only-after _] (data/diff before-by-id after-by-id)
+        before-keys (set (keys only-before))
+        after-keys (set (keys only-after))
+        added (sort-by pr-str (set/difference after-keys before-keys))
+        removed (sort-by pr-str (set/difference before-keys after-keys))
+        changed (sort-by pr-str (set/intersection before-keys after-keys))]
+    #:seon.db.diff
+    {:added (mapv after-by-id added)
+     :removed (mapv before-by-id removed)
+     :changed
+     (mapv (fn [identity-value]
+             (let [before-value (get before-by-id identity-value)
+                   after-value (get after-by-id identity-value)
+                   [before-only after-only _]
+                   (data/diff before-value after-value)]
+               #:seon.db.diff
+               {:identity identity-value
+                :changed-attributes
+                (->> (concat (keys before-only) (keys after-only))
+                     (filter qualified-keyword?)
+                     distinct
+                     (sort-by str)
+                     vec)
+                :before before-value
+                :after after-value}))
+           changed)}))
+
+(defn render-diff-ai
+  "Render one database result delta as concise replay guidance."
+  {:malli/schema [:=> [:cat :seon.db.diff/result] :seon.render/ai]}
+  [result]
+  (let [added (:seon.db.diff/added result)
+        removed (:seon.db.diff/removed result)
+        changed (:seon.db.diff/changed result)
+        requery-id (:seon.db.diff/requery-id result)
+        full-size (tokens/estimate (pr-str result))
+        change-lines
+        (mapv (fn [change]
+                (str "- " (pr-str (:seon.db.diff/identity change))
+                     ": "
+                     (str/join ", "
+                               (map str
+                                    (:seon.db.diff/changed-attributes change)))))
+              changed)]
+    (str "Database diff from t " (::basis-t result)
+         " to " (::current-basis-t result)
+         ": +" (count added) " -" (count removed)
+         " ~" (count changed) "."
+         (when (seq change-lines)
+           (str "\nChanged attributes:\n" (str/join "\n" change-lines)))
+         "\nFull data elided (approximately " full-size
+         " tokens); requery by "
+         (pr-str requery-id) ".")))
+
+(defn- perform-diff
+  [database projection plan basis function-var arguments function-symbol]
+  (let [output-refs
+        (output-schema-refs database function-symbol
+                            (:seon.fn.arity/order plan))
+        identity-attribute
+        (when-not (error-value? output-refs)
+          (result-identity-attribute projection output-refs))]
+    (cond
+      (error-value? output-refs) output-refs
+
+      (nil? identity-attribute)
+      (diff-refusal
+       "The declared result collection has no derivable row identity."
+       :seon.fn.arity/output-refs
+       :seon.entity/id-attr output-refs
+       ::row-identity-absent
+       {:seon.fn/sym function-symbol
+        :seon.fn.arity/order (:seon.fn.arity/order plan)
+        :seon.fn.arity/output-refs output-refs})
+
+      :else
+      (let [historical (as-of database basis)]
+        (if (error-value? historical)
+          historical
+          (let [position (:seon.fn.argument/index plan)
+                before (invoke-diff-function function-var arguments
+                                             position historical)
+                after (when-not (error-value? before)
+                        (invoke-diff-function function-var arguments
+                                              position database))]
+            (cond
+              (error-value? before) before
+              (error-value? after) after
+              (or (not (coll? before)) (not (coll? after)))
+              (diff-refusal
+               "The diffed function did not return collections."
+               :seon.fn.arity/output-refs
+               [:sequential :seon.schema/value]
+               [(type before) (type after)]
+               ::result-not-collections
+               {:seon.fn/sym function-symbol
+                :seon.fn.arity/output-refs output-refs})
+              :else
+              (assoc (identity-diff identity-attribute before after)
+                     ::basis-t basis
+                     ::current-basis-t (basis-t database)
+                     :seon.db.diff/requery-id
+                     (list* 'seon.db/diff basis
+                            (list 'var (symbol function-symbol))
+                            arguments)))))))))
+
+(defn diff
+  "Changes in one pure database read since a basis transaction."
+  {:malli/schema
+   [:=> [:cat :seon.db/basis-t :seon.test/var
+         [:* :seon.schema/value]]
+    [:or :seon.db.diff/result :seon.error/value]]}
+  [basis function-var & arguments]
+  (let [database (current-database-value)
+        function-symbol (callee-symbol function-var)]
+    (cond
+      (error-value? database) database
+
+      (nil? function-symbol)
+      (diff-refusal
+       "The diffed function must be a Var with a program identity."
+       :seon.fn/sym :seon.test/var function-var
+       ::function-var-required
+       {:seon.db/basis-t basis})
+
+      :else
+      (let [sinks (external-sinks database function-symbol)]
+        (cond
+          (error-value? sinks) sinks
+
+          (seq sinks)
+          (diff-refusal
+           "The diffed function reaches an external sink and is not replayable."
+           :seon.fn/external-sink #{} sinks
+           ::external-sink-reachable
+           {:seon.fn/sym function-symbol
+            :seon.fn/external-sink (vec (sort sinks))})
+
+          :else
+          (let [projection (schema/projection-from-database database)
+                plan (diff-plan database projection function-symbol
+                                (count arguments))]
+            (if (error-value? plan)
+              plan
+              (perform-diff database projection plan basis function-var
+                            arguments function-symbol))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Writes through the one synchronous transaction boundary

@@ -1,0 +1,24 @@
+#:seon.db.diff
+{:before :seon.schema/value,
+ :after :seon.schema/value,
+ :identity :seon.schema/value,
+ :changed-attributes [:vector :qualified-keyword],
+ :change
+ [:map
+  [:seon.db.diff/identity :seon.db.diff/identity]
+  [:seon.db.diff/changed-attributes :seon.db.diff/changed-attributes]
+  [:seon.db.diff/before :seon.db.diff/before]
+  [:seon.db.diff/after :seon.db.diff/after]],
+ :added [:vector :seon.schema/value],
+ :removed [:vector :seon.schema/value],
+ :changed [:vector :seon.db.diff/change],
+ :requery-id :seon.schema/value,
+ :result
+ [:map
+  {:seon.render/ai seon.db/render-diff-ai}
+  [:seon.db.diff/added :seon.db.diff/added]
+  [:seon.db.diff/removed :seon.db.diff/removed]
+  [:seon.db.diff/changed :seon.db.diff/changed]
+  [:seon.db.diff/requery-id :seon.db.diff/requery-id]
+  [:seon.db/basis-t :seon.db/basis-t]
+  [:seon.db/current-basis-t :seon.db/current-basis-t]]}

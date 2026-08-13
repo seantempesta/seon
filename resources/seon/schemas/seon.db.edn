@@ -119,6 +119,7 @@
            seon.db/database-value?],
           :database-name :keyword,
           :basis-t :int,
+          :current-basis-t :seon.db/basis-t,
           :database-value-identity
           [:map
            {:seon.render/ai seon.render.value/render-database-identity-ai}
@@ -195,4 +196,6 @@
  :seon.db/invalid-read [:= true]
  :seon.db/invalid-read-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.db/invalid-read class marker"} [:seon.db/invalid-read :seon.db/invalid-read] [:seon.error/message :seon.error/message]]
  :seon.db/invalid-request [:= true]
- :seon.db/invalid-request-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.db/invalid-request class marker"} [:seon.db/invalid-request :seon.db/invalid-request] [:seon.error/message :seon.error/message]]}
+ :seon.db/invalid-request-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.db/invalid-request class marker"} [:seon.db/invalid-request :seon.db/invalid-request] [:seon.error/message :seon.error/message]]
+ :seon.db/diff-refused [:= true]
+ :seon.db/diff-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.db/diff-refused class marker"} [:seon.db/diff-refused :seon.db/diff-refused] [:seon.error/message :seon.error/message]]}
