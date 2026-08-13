@@ -16,10 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (39)
+## Blocker (40)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Derive as-of walk selectors through the origin schema](as-of-root-pull-selector-collapses-to-db-id.md) | blocker | as-of-selector fix lane |
 | [Encode agent-declared render symbols through transaction encoding](agent-schema-render-symbol-bypasses-transaction-encoding.md) | blocker | rebirth-gap fix wave |
 | [Include agent-authored results in the reborn opening](rebirth-opening-omits-agent-authored-results.md) | blocker | rebirth-gap fix wave |
 | [Carry the agent-scoped environment into generated turn forks](generated-turn-fork-omits-the-agent-scoped-environment.md) | blocker | evolving-session implementation phases |
