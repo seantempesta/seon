@@ -92,6 +92,8 @@
                :seon.search/index :symbol}
               {:seon.search/field :seon.schema/key
                :seon.search/index :symbol}
+              {:seon.search/field :seon.test/failure-identity
+               :seon.search/index :exact}
               {:seon.search/field :seon.test/sym
                :seon.search/index :symbol}}
             (set (#'search/document-specs @connection)))))))

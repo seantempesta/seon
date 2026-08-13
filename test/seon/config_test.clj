@@ -187,18 +187,20 @@
         (.delete directory)))))
 
 (deftest apply-converts-a-flat-reconcile-error-to-a-refusal
-  (let [flat-error {:seon.error/kind :seon.db/rejected
-                    :seon.error/message "injected config refusal"}
-        result
-        (with-redefs [reconcile/plan (fn [& _] [{}])
-                      db/transact! (fn [& _] flat-error)]
-          (test-support/refusal-data
-           #(config/apply-compiled!
-             (atom :database)
-             (config/compile-manifest {}))))]
-    (is (= :seon.config/refused (:seon.error/kind result)))
-    (is (= :seon.config/reconcile-refused (:seon.config/rule result)))
-    (is (= flat-error (:seon.config/reconcile-result result)))))
+  (test-support/with-database
+    (fn [connection]
+      (let [flat-error {:seon.error/kind :seon.db/rejected
+                        :seon.error/message "injected config refusal"}
+            result
+            (with-redefs [reconcile/plan (fn [& _] [{}])
+                          db/transact! (fn [& _] flat-error)]
+              (test-support/refusal-data
+               #(config/apply-compiled!
+                 connection
+                 (config/compile-manifest {}))))]
+        (is (= :seon.config/refused (:seon.error/kind result)))
+        (is (= :seon.config/reconcile-refused (:seon.config/rule result)))
+        (is (= flat-error (:seon.config/reconcile-result result)))))))
 
 (deftest zero-overlay-compilation-resolves-every-registered-config-attribute
   (let [compiled (config/compile-manifest {})

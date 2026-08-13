@@ -523,7 +523,7 @@
             (first
              (filter #(= "parity/same-facts" (:seon.fn/sym %))
                      (#'seon.fn/desired-rows
-                      {:seon.fn/roots [(str root)]}
+                      {:seon.fn/roots ["src" (str root)]}
                       (fn [_phase]))))
             ctx (eval/build-base-ctx)
             runtime-row

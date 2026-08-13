@@ -351,6 +351,7 @@
               :seon.sci.admit/caps caps}
              {:seon.ai/target target
               :seon.error/value failure
+              :seon.ai.attempt/sent-body sent-body
               :seon.cluster.run/id "status-run"
               :seon.cluster.agent/id "status-agent"
               :seon.ai.attempt/ordinal 0}

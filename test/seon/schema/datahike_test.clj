@@ -184,16 +184,19 @@
    "unsupported database attribute refusal"))
 
 (deftest registered-shape-round-trips-through-datahike
-  (support/with-database
-    {:seon.test-support/extra-schema
-     [(schema.datahike/malli->datahike-attr ::title)]}
-    (fn [connection]
-      (testing "derive, install, transact, and read through the public call shape"
-        (db/transact! connection [{::title "Alpha"}])
-        (is (= "Alpha"
-               (db/q '[:find ?title .
-                      :where [_ ::title ?title]]
-                    (db/db connection))))))))
+  (let [projection
+        (schema/build-projection
+         {::title (schema/registration-delta-form schema-delta ::title)})]
+    (support/with-database
+      {:seon.test-support/extra-schema
+       [(schema.datahike/malli->datahike-attr-in projection ::title)]}
+      (fn [connection]
+        (testing "derive, install, transact, and read through the public call shape"
+          (db/transact! connection [{::title "Alpha"}])
+          (is (= "Alpha"
+                 (db/q '[:find ?title .
+                         :where [_ ::title ?title]]
+                       (db/db connection)))))))))
 
 (deftest encode-transaction-resolves-the-declaration-population-once
   ;; The class: the encode seam resolving the declaration population PER
