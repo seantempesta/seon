@@ -162,11 +162,12 @@
             (iterator-seq (.iterator paths)))))
 
 (defn- conditions
-  [root database]
+  [root database extra-agent-count]
   (let [operating-system (ManagementFactory/getOperatingSystemMXBean)]
     {:live-pull.probe/root (.getCanonicalPath (io/file root))
      :live-pull.probe/store-bytes (directory-bytes root)
      :live-pull.probe/eavt-datom-count (count (:eavt database))
+     :live-pull.probe/extra-agent-count extra-agent-count
      :live-pull.probe/basis-transaction (db/basis-t database)
      :live-pull.probe/commit-id (:datahike/commit-id database)
      :live-pull.probe/java-version (System/getProperty "java.version")
@@ -250,7 +251,7 @@
      boundaries)))
 
 (defn- run-probe!
-  [root connection]
+  [root connection extra-agent-count]
   (support/seed-cluster! connection "live-pull-probe")
   (let [agent-id "live-pull-probe-agent"
         _ (cluster/ensure-entity!
@@ -258,10 +259,17 @@
            {:seon.cluster.agent/id agent-id
             :seon.cluster/name "live-pull-probe"
             :seon.ns/name 'my.agents.live-pull-probe-agent})
+        _ (doseq [index (range extra-agent-count)]
+            (let [extra-agent-id (str "live-pull-extra-" index)]
+              (cluster/ensure-entity!
+               connection cluster/boot-process-identity
+               {:seon.cluster.agent/id extra-agent-id
+                :seon.cluster/name "live-pull-probe"
+                :seon.ns/name (symbol "my.agents" extra-agent-id)})))
         ctx (sci.eval/cluster-ctx @connection connection)
         generator-request (make-request connection ctx agent-id)
         observations (atom {})]
-    (println (pr-str (conditions root @connection)))
+    (println (pr-str (conditions root @connection extra-agent-count)))
     (schema/call-with-projection
      (sci.kernel/context-projection ctx)
      (fn []
@@ -292,12 +300,19 @@
 
 (defn -main
   "Run the decomposition against one new repository-local root."
-  [& [root]]
+  [& [root extra-agent-count]]
   (when-not root
     (throw (ex-info "Pass a new repository-local probe root."
                     {:live-pull.probe/usage
                      "tmp/live-pull/root-NAME"})))
-  (let [root-file (.getCanonicalFile (io/file root))]
+  (let [root-file (.getCanonicalFile (io/file root))
+        extra-agent-count (if extra-agent-count
+                            (parse-long extra-agent-count)
+                            0)]
+    (when-not (nat-int? extra-agent-count)
+      (throw (ex-info "The extra-agent count must be a natural integer."
+                      {:live-pull.probe/extra-agent-count
+                       extra-agent-count})))
     (when (.exists root-file)
       (throw (ex-info "The probe root already exists."
                       {:live-pull.probe/root (.getPath root-file)})))
@@ -308,5 +323,5 @@
     (support/with-published-file-database
       root-file :live-pull-probe
       (fn [connection]
-        (run-probe! root-file connection))))
+        (run-probe! root-file connection extra-agent-count))))
   (shutdown-agents))
