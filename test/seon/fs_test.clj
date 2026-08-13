@@ -46,3 +46,32 @@
         (is (Files/exists (.toPath sentinel) no-follow)))
       (finally
         (fs/delete-recursively! base base)))))
+
+(deftest recursive-deletion-publishes-rate-bounded-progress
+  (let [base (str "tmp/fs-progress-test/" (random-uuid))
+        root (io/file base "owned")
+        nested (io/file root "nested")
+        progress (atom [])]
+    (try
+      (.mkdirs nested)
+      (dotimes [ordinal 1000]
+        (spit (io/file nested (str ordinal)) ""))
+      (fs/delete-recursively!
+       base (.getPath root)
+       {:seon.fs/progress! #(swap! progress conj %)
+        :seon.fs/progress-backstop-ms 1})
+      (is (seq @progress) "a deletion exceeding its backstop reports progress")
+      (is (every? #(= (.getAbsolutePath nested)
+                      (:seon.fs/directory %))
+                  (butlast @progress))
+          "each file batch names the directory it is deleting")
+      (let [last-progress (peek @progress)]
+        (is (pos? (:seon.fs/deleted last-progress)))
+        (is (pos? (:seon.fs/files last-progress)))
+        (is (<= (+ (:seon.fs/files last-progress)
+                   (:seon.fs/directories last-progress)
+                   (:seon.fs/symlinks last-progress))
+                (:seon.fs/deleted last-progress)))
+        (is (pos? (:seon.fs/elapsed-ms last-progress))))
+      (finally
+        (fs/delete-recursively! base base)))))
