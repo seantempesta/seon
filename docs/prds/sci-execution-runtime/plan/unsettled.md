@@ -16,6 +16,47 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+## WORKING EDGE — 2026-08-13 issue campaign in flight
+
+Supersedes the 2026-08-12 wind-down block below for session state; the spine
+(gate → rebirth proof → drive → phases) is unchanged. Owner directive
+2026-08-12 evening: triage `docs/seon/issues/`, root-cause, fix in importance
+order with parallel sol/opus lanes.
+
+**Verified this session (PROVEN-LIVE):** generated openings derive and close
+on a fresh isolated root at HEAD (root 4.2 s, fresh agent 3.2 s;
+`tmp/opening/probe.clj`). The same probe found a NEW blocker: 4,885
+`trigger-already-answered` write rejections in 56 s — a ~90/sec hot retry
+loop, filed as
+[run-opening-retries-storm-against-an-answered-trigger](../../seon/issues/run-opening-retries-storm-against-an-answered-trigger.md)
+and a candidate mechanism for the `run.ZyS5O7` gate wedge. The wedge's
+"two agent-test properties" attribution remains a hypothesis (the retained
+dump is the coordinator's, parked on worker RPC).
+
+**Triage landed** (`1ea432ee1`,
+[issue-triage-2026-08-13](../research/issue-triage-2026-08-13.md)):
+139 current / 29 likely-stale / 42 unverified; N1 and N5 member lists were
+stale hand lists; P4 is structurally dead. Thirteen source-verified stale
+issues archived same session (197 open, 46 blocker; index green).
+
+**Lanes running** (all sol via `bin/codex-agent`, file-disjoint):
+`wedge-properties` (gate critical path: never-returning agent-test
+properties + retry storm + armer synchronous wait; exits with one honest
+`bin/test --all` tally), `live-pull-attribution` (diagnosis-only
+decomposition of the 24.2 s pull; bootstrap/walk stay reserved for Phase 1),
+`n5-completion` (four deferred members), `n1-total-render` (rank-1 class
+kill, 32 live members), `acquire-containment` (per-row containment —
+unblocks the rebirth proof), `provider-transport` (closed response body +
+reasoning-only stream, before the live drive), `test-platform-race`
+(worker-root cleanup keyed on child completion), `effect-connection`
+(background settlement reads no binding frame). Lanes do NOT touch the
+issue index or archive; the orchestrator reconciles at boundaries.
+
+**Uncommitted foreign residue deliberately left:**
+`test/seon/public_contract_test.clj` (reader→analyzer refactor) and the
+regenerated `universal-output-floor-baseline-2026-08-04.edn` — unverified
+prior-lane work awaiting the owner's eye.
+
 ## WORKING EDGE — 2026-08-12 session wind-down
 
 This block supersedes every older `CURRENT EDGE` and session-close block
