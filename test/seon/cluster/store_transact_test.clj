@@ -30,13 +30,17 @@
  {:seon.schema.admission/source :core}
  #(schema/register! ::mixed-value [:or :string :int]))
 
+(def ^:private fixture-projection
+  (schema/build-projection
+   @(:seon.schema.delta/candidate-forms schema-delta)))
+
 (use-fixtures
  :each
  (fn [test-body]
    (schema/call-with-registration-delta
     schema-delta
     {:seon.schema.admission/source :core}
-    test-body)))
+    #(schema/call-with-projection fixture-projection test-body))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; C6 — the pure cause-chain walk
@@ -147,7 +151,8 @@
     (try
       (db/transact!
        connection
-       [(schema.datahike/malli->datahike-attr ::mixed-value)])
+       [(schema.datahike/malli->datahike-attr-in
+         fixture-projection ::mixed-value)])
       (body connection)
       (finally
         (d/release connection)

@@ -108,3 +108,9 @@ now builds one immutable projection from its complete delta, uses the bridge's
 explicit `-in` entry points, and hands that same projection to every synthetic
 transaction and read. The three direct test vars pass; the focused namespace
 gate is the recurring proof.
+
+The two `seon.cluster.store-transact-test` codec failures were the same class:
+their synthetic `::mixed-value` registration was retained in a delta while
+the fixture called the canonical bridge entry point and handed transactions a
+different projection. That fixture now owns and hands one complete projection
+through derivation, encoding, and decoding.
