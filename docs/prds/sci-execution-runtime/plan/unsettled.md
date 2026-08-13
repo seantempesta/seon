@@ -36,10 +36,13 @@ The owner ruled: batch all renames, do NOT run full suites per step — the
 suite may go red until the end; one `bin/test --all` closes the program.
 The new AGENTS.md is LANDED (`3b7094fa9`, AGENT.md folded and deleted).
 
-- **R1 (in flight, `mechanical-renames` lane):** tower → boot/running;
-  database-value → db spellings (prose/names only — declared schema keys
-  never rename); the audit's 16 missing-frontmatter files. Focused
-  compile checks only.
+- **R1 — COMPLETE** (`542fa8f2a`, `af85d6fa3`): tower → boot/running in
+  code, tests, and active docs; the audit's 16 missing-frontmatter files
+  repaired. The database-value unit was RECLASSIFIED, not skipped: the
+  spelling is a declared schema key
+  ([issue](../../seon/issues/database-value-shape-name-duplicates-the-db-key.md)),
+  so it moves to R2 as a second accretion migration (new key beside old →
+  consumers flip → delete), never a mechanical rename.
 - **R2 (launches when R1 returns; serial, red-tolerated):** the
   kind → class-marker semantic migration per the error-model PRD's own
   W2–W5 order (289 writes / 153 reads / 64 files;
