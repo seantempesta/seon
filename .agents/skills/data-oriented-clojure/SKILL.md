@@ -19,7 +19,7 @@ what shape to declare and why → `data-modeling`; test patterns →
 **Where you are:** fresh `src/` and `test/` are the system, `bin/test` is the
 gate, and **the CLJS build is OFF — CLJ and the JVM only**. The old source trees
 were deleted; quarry them through `git show` and `git log`, never through an
-in-tree checkout (`AGENTS.md:247-254`).
+in-tree checkout (`AGENTS.md:24-26,65-67`).
 
 ## The one habit that causes the most wrong code
 
@@ -29,7 +29,7 @@ matters (datahike, malli, core.async + flow, sci) is checked out under
 `reference-code/`, grep-able, the same version we run. Use `clojure -M:dev` for
 a load-only JVM probe; create an explicit `:memory` database or use
 `seon.test-support/with-database` when database behavior is the subject
-(`test/seon/test_support.clj:184-216`). The default
+(`test/seon/test_support.clj:379-475`). The default
 failure mode is writing confident Clojure in a place/mutable mindset while
 *guessing* how a `:malli/schema` validates or what `:db.fn/cas` does — and being
 wrong. Ground the concept→file first, then write. A 30-second REPL experiment
@@ -46,14 +46,14 @@ transacting an uninstalled attribute throws.
 files under `resources/seon/schemas/`, loaded by `seon.schema.edn/load!` as one
 validated population. Shipped Clojure does not author those schemas with
 load-time `schema/register!`. Runtime agent registrations still pass through
-the same admission gate (`src/seon/schema/edn.clj:143-225,234-324`).
+the same admission gate (`src/seon/schema/edn.clj:142-359,361-539`).
 
 **One config authority:** declare a config attribute once in that EDN
 population. `seon.schema.edn/derive-config-forms` derives the open manifest,
 effective, agent-overlay, and database-entity composites from the leaf registrations.
 `config/default.edn` supplies one complete shipped decision map; never maintain
-a second dial roster (`src/seon/schema/edn.clj:95-130`;
-`src/seon/config.clj:137-229`).
+a second dial roster (`src/seon/schema/edn.clj:31-115`;
+`src/seon/config.clj:279-400`).
 
 **Program state has four boundaries.** Read the single checked semantic source,
 [`references/program-state.md`](references/program-state.md), before changing
@@ -96,6 +96,7 @@ keyword namespace is a real code namespace that owns that data's schema.
 ### Public fns carry `:malli/schema` — not `:pre`/`:post`, not hand-rolled checks
 
 ```clojure
+;; Illustrative contract shape; the named schemas and body are omitted.
 (defn do-thing
   {:malli/schema [:=> [:cat ::do-thing-request] ::do-thing-response]}
   [{::keys [id option]}] ...)
@@ -105,7 +106,7 @@ The `:malli/schema` is the contract of record: tests check it, generators
 derive from it, review reads it, and `seon.instrument/apply!` instruments every
 loaded public var carrying one in development. The selection is computed —
 public + contracted — with no namespace allow list. Reload and wrapper-restoration
-mechanics live in the **`repl`** skill (`src/seon/instrument.clj:180-215`).
+mechanics live in the **`repl`** skill (`src/seon/instrument.clj:571-613`).
 `:pre`/`:post` gets none of this — not
 discoverable, not generatively testable, not a database fact. Two sanctioned
 argument shapes: map-in/map-out
@@ -146,6 +147,7 @@ concise and current-state; the long-form stewardship format lives only in
 ### Agent-facing verbs return error envelopes — they never throw
 
 ```clojure
+;; Illustrative envelope shapes; these are not standalone map literals.
 {::ok? true  …data…}                          ; success
 {::ok? false ::error "guiding msg" ::raw-error "detail"}   ; failure
 ```
@@ -159,6 +161,7 @@ may still throw into the core fault path.
 ### Derive at render — don't store derived state or "mark-as-seen" flags
 
 ```clojure
+;; Illustrative contrast; the named dependencies are supplied by the owner.
 ;; WRONG — a stored counter / last-error / ack flag / notification queue
 (swap! warnings conj {:msg "stale" :seen? false})
 
@@ -186,6 +189,7 @@ joining the datom's tx. See the **`datahike`** skill, "Transaction metadata".
 ### A db is a VALUE, not a place — thread it, db-first
 
 ```clojure
+;; Illustrative contrast; `q1`, `q2`, and the connection are supplied.
 ;; WRONG — re-deref at each leaf (two DIFFERENT values; phantom "races")
 (let [a (q1 @*conn*) b (q2 @*conn*)] ...)
 
@@ -211,7 +215,7 @@ on current state, make the decision INSIDE the transaction — a
 refuses an ineligible request by throwing (aborting the whole transaction
 atomically), and returns plain tx-data otherwise. No observed-* request fields,
 no caller pre-reads, no window between deciding and acting. `:db.fn/cas` is the
-same idea for a single value. `src/seon/cluster/run.clj:562-730` is the worked
+same idea for a single value. `src/seon/cluster/run.clj:427-686` is the worked
 example.
 
 ### Prefer `reduce`/`map`/`into` over mutable accumulator loops
@@ -259,6 +263,7 @@ construct; the CLJS build is off and no new code uses it.
 ### `:or` doesn't fill a present-nil key — use explicit `or`
 
 ```clojure
+;; Illustrative definitions; `d` is the owner's default value.
 (defn impl [{::keys [model] :or {model d}}] ...)   ; WRONG — {::model nil} slips through
 (defn impl [{::keys [model]}] (let [model (or model d)] ...))  ; RIGHT
 ```
@@ -293,6 +298,7 @@ only what function code actually calls:
 ```
 
 ```clojure
+;; Illustrative schema-resource content, not a JVM form to evaluate.
 ;; resources/seon/schemas/ — owning expense family
 {:seon.expense/amount :int}
 ```
@@ -300,7 +306,7 @@ only what function code actually calls:
 `seon.schema.edn/load!` reads the directory-backed classpath population. Section comments are
 editorial only: duplicate keys refuse, every reference must resolve, and
 predicate schemas require registered predicates plus honest generators
-(`src/seon/schema/edn.clj:1-15,49-51,143-225,234-324`).
+(`src/seon/schema/edn.clj:1-15,31-115,142-359,361-539`).
 
 ### Write a real test ns — `clojure.test/deftest`, not inline `assert`
 
