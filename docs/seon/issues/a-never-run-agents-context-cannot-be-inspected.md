@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, context, observability]
 ---
@@ -58,3 +58,16 @@ the next transition. Feed that query result to `seon.error/diagnostic` as
 itself is unavailable, never when it returns an empty walk. Label the pane
 `prospective`. Add the focused `seon.render.web-test` case named in the class
 issue before closing this member.
+
+## Resolution — 2026-08-12
+
+Resolved in `fee09f551`. When no capture exists, the debug route now runs the
+same compiled root acquisition and `seon.render.walk/history` path used by the
+next context transition, renders the returned entries even when that walk is
+empty, and labels the pane `prospective`. Only an unavailable query becomes a
+flat `seon.error/diagnostic` whose evidence is `:seon.error/unknown`.
+
+`a-never-run-agents-debug-context-is-labeled-prospective` is the focused route
+regression: it creates an agent with no capture, observes the compiled root
+acquisition on the current database value, and proves the prospective label
+and bytes reach the HTML response.

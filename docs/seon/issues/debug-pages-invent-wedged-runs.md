@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, web]
 ---
@@ -46,3 +46,15 @@ transition. If that observation is unavailable, omit the set and construct the
 missing-input diagnostic with `seon.error/diagnostic`; its evidence is
 `:seon.error/unknown`, never an empty set. Add focused debug-route cases for
 one held live run and one held dead run.
+
+## Resolution — 2026-08-12
+
+Resolved in `fee09f551`. Debug derivation now carries the service's same
+observed run-holder process set as ordinary namespace derivation. If that
+observation is unavailable, the key is omitted and the result carries a flat
+`seon.error/diagnostic` with typed unknown evidence; no empty set is invented.
+
+`debug-pages-distinguish-held-live-and-dead-runs` is the focused debug-feed
+regression. It captures the liveness input delivered through the route and
+proves that the held dead run alone is derived as wedged while the run held by
+the service process is not.

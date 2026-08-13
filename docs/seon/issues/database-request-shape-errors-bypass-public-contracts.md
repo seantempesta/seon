@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, database, schema, diagnostics]
 ---
@@ -76,3 +76,16 @@ refusal calls `seon.error/diagnostic` with the public Var as operation and the
 missing key or malformed clause as member; its evidence is the same parsed
 request used for dispatch. Add the four focused `seon.db-test` cases in
 Acceptance.
+
+## Resolution — 2026-08-12
+
+Resolved in `d1c2828c9`. The public `seon.db` entry points now classify missing
+`:query`, `:selector`, and `:tx-data` members before dependency dispatch, and a
+malformed data pattern reports its parsed supplied clause and accepted shape.
+Every refusal is built by `seon.error/diagnostic` with the invoked public Var,
+structured offending request, cause, and available request evidence.
+
+The focused recurring proof is
+`malformed-public-database-requests-name-the-public-operation`. It completed in
+the focused `seon.db-test` run; the namespace's remaining foreign reds are
+listed in the N5 disposition rather than collapsed into this member's result.

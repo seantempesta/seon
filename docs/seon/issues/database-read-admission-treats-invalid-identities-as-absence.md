@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, database, schema, agent]
 ---
@@ -68,3 +68,19 @@ unknown attribute), offending is the supplied attribute/value, cause is the
 validation result, and evidence is the projection query result. Preserve nil
 only for a valid lookup ref with no entity. Add the three focused
 `seon.db-test` cases in Acceptance.
+
+## Resolution — 2026-08-12
+
+Resolved in `d1c2828c9` with the temporal schema-source correction in
+`e77ee306f`. `seon.db/q`, `pull`, and `entity` now classify invalid attributes
+and lookup refs from the installed declaration map and return one flat
+`seon.error/diagnostic`; valid missing entities retain ordinary absence.
+
+Schema observation and declaration projection derive from Datahike's
+`IHistory/-origin` chain for history, as-of, and since values. The recurring
+`temporal-database-identities-use-the-origin-schema` regression proves that an
+installed attribute is never reported uninstalled on any temporal view while
+a genuinely uninstalled attribute is still refused. `bin/test seon.db-test`
+ran 27 tests and 249 assertions without the former temporal-view failures;
+four unrelated registration-delta/native-report admission test vars remained
+red and are recorded in the N5 disposition.
