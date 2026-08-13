@@ -1279,7 +1279,7 @@
   complete package. Queue drain is permission for another write, never
   remote-delivery acknowledgement."
   {:seon.fn/external-sink :html-response
-   :seon.fn/projection-boundary :none}
+   :seon.fn/projection-boundary :seon.render/html}
   [channel generator frame]
   (if (http/send! channel frame false)
     (let [{pending-bytes :http-kit.write/pending-bytes
@@ -1655,7 +1655,7 @@
 
 (defn- page-response
   {:seon.fn/external-sink :html-response
-   :seon.fn/projection-boundary :none}
+   :seon.fn/projection-boundary :seon.render/html}
   [service
    agent-id]
   (let [page (:seon.render.package/keyframe

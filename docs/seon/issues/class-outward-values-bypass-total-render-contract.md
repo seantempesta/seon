@@ -79,3 +79,32 @@ Focused evidence:
 
 No protected Phase-1, N5, wedge-lane, database, or public-contract path was
 edited, and no issue note was moved to `archive/`.
+
+## Constructor and path-census slice — 2026-08-13
+
+The class remains open, but three members are resolved and archived:
+
+- contract refusals no longer repeat one artifact through a nested wrapper;
+- contract evidence is bounded semantic data rather than serialized print
+  syntax;
+- exact schema reuse reports suppress structureless markers and aggregate
+  genuine composite matches.
+
+The shared defect was `seon.instrument/violation` constructing several
+presentations of one value, followed by `seon.sci.kernel/failure-value`
+wrapping that refusal again. Those owners now construct one semantic flat
+error and leave presentation fitting to the terminal renderer.
+
+`seon.fn/output-path-report` now backs one recurring class regression. It
+first asserts a positive sink census and a non-empty agent/human-visible path
+population—preserving the resolved empty-census ruling—then fails on every
+visible `:bypass` or `:unresolved` path. Indexed AI and HTML sinks name their
+projection boundary; provider HTTP, codec, and test-runner sinks are not
+misclassified as agent-visible text.
+
+Live door evidence for
+`(seon.fn/tests-reaching (seon.db/db) 'seon.cluster.run/open-tx)` changed from
+a 9,266-character artifact with one digest repeated six times to the complete
+1,296-character semantic refusal, inline and uncapped. The unresolved-symbol
+member remains open: its MCP face still bypasses `seon.error/render-ai` at a
+foreign modified-uncommitted `src/seon/cluster.clj` boundary.

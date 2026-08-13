@@ -471,7 +471,9 @@
 (defn render-ai
   "Render one value as text through the unique selected live SCI Var."
   {:malli/schema [:=> [:cat :seon.render/call-request]
-                  [:or :nil :string :seon.error/value]]}
+                  [:or :nil :string :seon.error/value]]
+   :seon.fn/external-sink :ai-visible-text
+   :seon.fn/projection-boundary :seon.render/ai}
   [request]
   (let [rendered (invoke-producer request :seon.render/ai :seon.render/ai)]
     (if (or (nil? rendered) (string? rendered) (:seon.error/kind rendered))
@@ -484,7 +486,9 @@
 (defn render-html
   "Render one value as Hiccup through the unique selected live SCI Var."
   {:malli/schema [:=> [:cat :seon.render/call-request]
-                  [:or :nil :seon.render/hiccup :seon.error/value]]}
+                  [:or :nil :seon.render/hiccup :seon.error/value]]
+   :seon.fn/external-sink :html-response
+   :seon.fn/projection-boundary :seon.render/html}
   [request]
   (let [rendered (invoke-producer request :seon.render/html
                                   :seon.render/html)]

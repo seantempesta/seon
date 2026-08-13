@@ -21,7 +21,7 @@ buried in the middle. Cheap correct diagnosis is what makes the next defect
 cheap to kill; an expensive one discourages the probe.
 
 This is the SIZE half of the shape recorded in
-[contract-violation-serializes-print-tree-inside-error-data](contract-violation-serializes-print-tree-inside-error-data.md),
+[contract-violation-serializes-print-tree-inside-error-data](archive/contract-violation-serializes-print-tree-inside-error-data.md),
 which owns the structural half (evidence stored as EDN strings). Fixing that
 one is likely to shrink this one, but the acceptance here is a measured
 budget, not a shape.
@@ -60,3 +60,35 @@ this member still needs `seon.error` / `seon.instrument` to retain the full
 contract explanation by identity and render the short face from bounded
 ordinary evidence. Re-run one real unresolved-symbol receipt and paste both
 faces here before closure.
+
+## Live falsifier after the contract-constructor repair — 2026-08-13
+
+This member remains open. The shared contract-refusal constructor repair
+reduced the reproduced wrong-argument artifact from 9,266 to 1,296
+characters, but a genuinely unresolved symbol still misses this note's
+`<200`-character acceptance. Door evaluation of
+`my.web/no-such-fetch` returned a 4,493-character retrievable artifact. Its
+agent-facing text was:
+
+```clojure
+{:seon.error/message "Unable to resolve symbol: my.web/no-such-fetch", :seon.sci.eval/evaluation-failed
+  :evaluation, :seon.error/data {:seon.error/diagnostic-evidence #:seon.eval{:fn-entries
+      0, :host-interop-count 0, :duration-ms 3, :allocated-bytes 2749248,
+      :outcome :error}, :seon.error/diagnostic-expected :successful-evaluation,
+    :seon.error/diagnostic-member :throwable, :seon.sci.eval/throwable "clojure.lang.ExceptionInfo",
+    :seon.error/diagnostic-evidence-availability :seon.error/known, :seon.error/throw-site-message
+    "Unable to resolve symbol: my.web/no-such-fetch", :seon.sci.eval/data
+    {:type :sci/error, :line 1, :column 1, :file nil, :phase "analysis", :sci.impl/symbol
+      my.web/no-such-fetch}, :seon.sci.admit/record #:seon.eval{:fn-entries
+      0, :host-interop-count 0, :duration-ms 3, :allocated-bytes 2749248,
+      :outcome :error}, :seon.error/diagnostic-layer :sci, :seon.sci.eval/symbol
+    my.web/no-such-fetch, :seon.error/diagnostic-offending my.web/no-such-fetch,
+    :seon.error/diagnostic-operation :evaluation, :seon.error/diagnostic-cause
+    "Unable to resolve symbol: my.web/no-such-fetch"}, :seon.error/kind :seon.sci.eval/evaluation-failed}
+```
+
+The remaining choke point is the door/MCP evaluation face: it still emits the
+admitted error map instead of selecting `seon.error/render-ai` through the
+terminal `seon.render/render-ai` fit. `src/seon/cluster.clj`, which owns that
+projection, is modified-uncommitted by another lane and was protected from
+this class slice, so this evidence is recorded without crossing that boundary.

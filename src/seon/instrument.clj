@@ -89,7 +89,6 @@
             [seon.effect :as effect]
             [seon.env :as env]
             [seon.error :as error]
-            [seon.print :as print]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]))
 
@@ -123,27 +122,15 @@
 ;;; The reporter
 ;;; ---------------------------------------------------------------------------
 
-(defn- admitted-face
+(defn- admitted-value
   [caps value]
-  (let [admitted
-        (admit/admit
-         {:seon.sci.admit/value value
-          :seon.sci.admit/interrupt-fn (constantly nil)
-          :seon.sci.admit/caps caps
-          ;; the reporter may not panic on the way to reporting a panic
-          :seon.config/on-core-error :record})]
-    {:seon.instrument/edn (:seon.cluster.eval/result-edn admitted)
-     :seon.instrument/value (:seon.sci.admit/value admitted)
-     :seon.instrument/value-edn
-     (admit/canonical-edn (:seon.sci.admit/value admitted))
-     :seon.instrument/text
-     (print/emit-text
-      (:seon.sci.admit/print-node admitted)
-      {:seon.print/length
-       (:seon.config.eval.result/max-collection caps)
-       :seon.print/level (:seon.config.eval.result/max-depth caps)
-       :seon.print/width 0
-       :seon.print/table? false})}))
+  (:seon.sci.admit/value
+   (admit/admit
+    {:seon.sci.admit/value value
+     :seon.sci.admit/interrupt-fn (constantly nil)
+     :seon.sci.admit/caps caps
+     ;; the reporter may not panic on the way to reporting a panic
+     :seon.config/on-core-error :record})))
 
 (def ^:private contract-evidence-caps
   ;; The admitted inline ceiling is 4,096 characters. These structural caps
@@ -159,10 +146,6 @@
 (defn- evidence-caps
   [caps]
   (merge-with min caps contract-evidence-caps))
-
-(defn- admitted-value
-  [caps value]
-  (:seon.instrument/value (admitted-face caps value)))
 
 (defn- flat-error-value?
   [value]
@@ -346,76 +329,48 @@
           problems (:errors explanation)
           problem-count (count problems)
           bounded-caps (when caps (evidence-caps caps))
-          visible-explanation
-          (when bounded-caps
-            (assoc explanation
-                   :errors
-                   (into []
-                         (take (:seon.config.eval.result/max-collection
-                                bounded-caps))
-                         problems)))
-          all-problems
-          (me/humanize
-           (or visible-explanation explanation)
-           {:unknown false
-            :wrap #(select-keys % [:value :message])})
-          problem-face (when bounded-caps
-                         (admitted-face bounded-caps all-problems))
           first-problem (first problems)
+          problem-message (or (some-> first-problem me/error-message)
+                              "does not satisfy the declared schema")
+          representative-problem
+          (when (and bounded-caps first-problem)
+            (admitted-value
+             bounded-caps
+             {:seon.instrument.problem/message problem-message}))
           schema-form (m/form offended)
           expected (if (and (= :malli.core/invalid-input kind)
                             (= :cat (first schema-form))
                             (= 2 (count schema-form)))
                      (second schema-form)
                      schema-form)
-          expected-face (when bounded-caps
-                          (admitted-face bounded-caps expected))
-          argument-face (when (and bounded-caps first-problem)
-                          (admitted-face bounded-caps
-                                         (offending-value bounded-caps
-                                                          kind
-                                                          first-problem)))]
-      (cond->
-       (error/diagnostic
-        {:seon.error/kind ::contract-violated
-         :seon.instrument/contract-violated (str (:fn-name data))
-         ;; A representative problem context goes through the ONE general
-         ;; printer under the construction-time evidence caps. The complete
-         ;; count remains the broken-system signal without retaining every
-         ;; problem value.
-         :seon.error/message
-         (str (:fn-name data) " violated its contract ("
-              (name kind) "): "
-              (if caps
-                (:seon.instrument/text problem-face)
-                (pr-str all-problems)))
-         :seon.error/diagnostic-layer :instrumentation
-         :seon.error/diagnostic-operation (:fn-name data)
-         :seon.error/diagnostic-member
-         (if (= :malli.core/invalid-output kind) :return :arguments)
-         :seon.error/diagnostic-expected
-         (some-> expected-face :seon.instrument/value)
-         :seon.error/diagnostic-offending
-         (some-> argument-face :seon.instrument/value)
-         :seon.error/diagnostic-cause kind
-         :seon.error/diagnostic-evidence
-         (when problem-face
-           {:seon.instrument/problem-count problem-count
-            :seon.instrument/problems
-            (:seon.instrument/value problem-face)})
-         :seon.error/data
-         (cond-> {::malli kind
-                  ::arm (if (= :malli.core/invalid-output kind) :output :input)
-                  ::schema (if expected-face
-                             (:seon.instrument/text expected-face)
-                             (pr-str expected))
-                  ::problem-count problem-count}
-           (:fn-name data) (assoc ::fn (str (:fn-name data)))
-           problem-face
-           (assoc ::problems (:seon.instrument/edn problem-face)))})
-        argument-face
-       (update :seon.error/data assoc
-               ::args (:seon.instrument/value-edn argument-face))))))
+          expected-value (when bounded-caps
+                           (admitted-value bounded-caps expected))
+          offending (when (and bounded-caps first-problem)
+                      (offending-value bounded-caps kind first-problem))]
+      (error/diagnostic
+       {:seon.error/kind ::contract-violated
+        :seon.instrument/contract-violated (str (:fn-name data))
+        ;; Store semantic evidence once. The terminal render path owns the
+        ;; only presentation fit; embedding printed schemas, problem trees,
+        ;; and arguments here made it print a print and repeat one payload.
+        :seon.error/message
+        (str (:fn-name data) " violated its contract ("
+             (name kind) "): " problem-message)
+        :seon.error/diagnostic-layer :instrumentation
+        :seon.error/diagnostic-operation (:fn-name data)
+        :seon.error/diagnostic-member
+        (if (= :malli.core/invalid-output kind) :return :arguments)
+        :seon.error/diagnostic-expected expected-value
+        :seon.error/diagnostic-offending offending
+        :seon.error/diagnostic-cause kind
+        :seon.error/diagnostic-evidence
+        (when representative-problem
+          {:seon.instrument/problem-count problem-count
+           :seon.instrument/problems [representative-problem]})
+        :seon.error/data
+        {::malli kind
+         ::arm (if (= :malli.core/invalid-output kind) :output :input)
+         ::problem-count problem-count}}))))
       (catch Throwable _
         fallback))))
 

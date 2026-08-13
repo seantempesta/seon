@@ -16,10 +16,10 @@
   `docs/seon/issues/archive/loop-open-transaction-violates-transact-schema.md`.
   That is precisely the class instrumentation exists to catch, so the
   suite reproduces the shape rather than inventing one."
-  (:require [clojure.edn :as edn]
-            [clojure.test :refer [deftest is testing use-fixtures]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
             [malli.instrument :as mi]
+            [seon.ai.tokens :as tokens]
             [seon.dev.docstring :as docstring]
             [seon.dev.markdown :as markdown]
             [seon.db :as db]
@@ -122,12 +122,14 @@
            "and it arrives as OUR flat error kind, not as malli's — so
             when this throw escapes a proc, the fault path classifies it
             from the cause chain like any other refusal")
-       (is (= "seon.error/value" (:seon.instrument/fn (:seon.error/data data)))
+       (is (= 'seon.error/value
+              (:seon.error/diagnostic-operation (:seon.error/data data)))
            "naming the function whose contract was violated")
-       (is (= :input (:seon.instrument/arm (:seon.error/data data))))
-       (is (= ":seon.error/fact"
-              (:seon.instrument/schema (:seon.error/data data)))
-           "the single positional input is identified, not Malli's cat wrapper")
+       (is (= :arguments
+              (:seon.error/diagnostic-member (:seon.error/data data))))
+       (is (= :seon.error/unknown
+              (:seon.error/diagnostic-expected (:seon.error/data data)))
+           "without caps, evidence is honestly unavailable rather than printed")
        (is (re-find #"invalid-input" (ex-message failure)))))))
 
 (deftest projection-gates-inspect-the-complete-candidate-population
@@ -162,9 +164,9 @@
                      (catch Exception thrown thrown))]
     (is (= :seon.instrument/contract-violated
            (:seon.error/kind (ex-data failure))))
-    (is (= "my.agents.contract/value"
+    (is (= 'my.agents.contract/value
            (get-in (ex-data failure)
-                   [:seon.error/data :seon.instrument/fn])))
+                   [:seon.error/data :seon.error/diagnostic-operation])))
     (is (= original
            (instrument/wrap-interpreted
             'my.agents.contract/value
@@ -228,15 +230,16 @@
                           :seon.sci.admit/caps caps})
       (let [data (try (error/value "not a fact")
                       (catch Exception thrown (ex-data thrown)))]
-        (is (string? (:seon.instrument/args (:seon.error/data data)))
-            "args go through the ONE codec — an argument at these
-             boundaries can be a live connection"))
+        (is (= ["not a fact"]
+               (:seon.error/diagnostic-offending (:seon.error/data data)))
+            "arguments remain bounded ordinary data, never a printed value"))
       (finally (instrument/remove!))))
   (instrumented!
    (fn [_]
      (let [data (try (error/value "not a fact")
                      (catch Exception thrown (ex-data thrown)))]
-       (is (not (contains? (:seon.error/data data) :seon.instrument/args))
+       (is (= :seon.error/unknown
+              (:seon.error/diagnostic-offending (:seon.error/data data)))
            "and with no caps to bound them they are OMITTED, never
             printed unbounded")))))
 
@@ -264,7 +267,7 @@
                           :input [:cat :map]
                           :args [42]})))))))
 
-(deftest contract-problems-have-a-readable-inline-face-and-a-complete-tree
+(deftest contract-problems-are-semantic-once-never-a-serialized-print-tree
   (let [caps {:seon.config.eval.result/max-depth 8
               :seon.config.eval.result/max-collection 32
               :seon.config.eval.result/max-string 4096
@@ -280,18 +283,20 @@
             data (ex-data failure)
             message (:seon.error/message data)
             problems (get-in data
-                             [:seon.error/data :seon.instrument/problems])]
+                             [:seon.error/data
+                              :seon.error/diagnostic-evidence
+                              :seon.instrument/problems])]
         (is (str/includes? message "seon.instrument-test"))
-        (is (str/includes? message ":expected"))
-        (is (str/includes? message "\"not an int\""))
         (is (str/includes? message "should be an integer"))
         (is (not (str/includes? message ":seon.print/face"))
             "the print-node tree is rendered rather than serialized inline")
         (is (not (str/includes? message "\n"))
             "contract feedback is one readable line")
-        (is (string? problems))
-        (is (str/includes? (or problems "") "seon.print{:face")
-            "the complete admitted explanation remains in the failure data"))
+        (is (vector? problems))
+        (is (= 1 (count problems)))
+        (is (every? map? problems))
+        (is (not (str/includes? (pr-str data) ":seon.print/face"))
+            "error data contains semantic evidence, never a serialized print tree"))
       (finally
         (instrument/remove!)))))
 
@@ -321,10 +326,8 @@
             (is (str/includes? message function-name)
                 "the bounded headline still names the violated function")
             (is (str/includes? message (name expected-kind)))
-            (is (< (count message) 2000)
-                "all problems flow through the ONE general printer, so the
-                message stays bounded by the admission caps — never by a
-                second literal limit")
+            (is (< (tokens/estimate message) 64)
+                "the headline is a concise diagnosis measured in estimated tokens")
             (is (= 200 (:seon.instrument/problem-count instrument-data))
                 "the problem count is the broken-system signal"))))
       (finally
@@ -360,17 +363,16 @@
                          before)
             data (ex-data failure)
             instrument-data (:seon.error/data data)
-            received (some-> (:seon.instrument/args instrument-data)
-                             edn/read-string
-                             first)
+            received (first (:seon.error/diagnostic-offending instrument-data))
             [offending-key offending-value] (first received)]
-        (is (< (count (pr-str data)) inline-ceiling)
-            "the constructed error value fits the admitted inline ceiling")
+        (is (< (tokens/estimate (pr-str data)) 1024)
+            "the constructed error value stays below the estimated-token
+             equivalent of the former 4,096-character ceiling")
         (is (< allocated allocation-ceiling)
             (str "construction allocated " allocated
                  " bytes; the issue baseline was 150,063,304"))
         (is (= 1 (:seon.instrument/problem-count instrument-data)))
-        (is (= ":int" (:seon.instrument/schema instrument-data)))
+        (is (= :int (:seon.error/diagnostic-expected instrument-data)))
         (is (contains? registry offending-key)
             "the bounded argument retains an exact offending registry key")
         (is (some? offending-value)

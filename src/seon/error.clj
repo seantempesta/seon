@@ -367,10 +367,6 @@
     run-id :seon.cluster.run/id
     agent-id :seon.cluster.agent/id}]
   (let [failure (throwable source)
-        failure-data (when failure (refusal failure))
-        instrument-data (when (= :seon.instrument/contract-violated
-                                 (:seon.error/kind failure-data))
-                          (:seon.error/data failure-data))
         class-name (when failure (.getName (class failure)))
         error-kind (kind source failure)
         ;; :record UNCONDITIONALLY. The dial governs the failing site;
@@ -397,14 +393,6 @@
       (and flow? (::flow/pid source)) (assoc :seon.error/proc (::flow/pid source))
       (and flow? (::flow/op source)) (assoc :seon.error/op (::flow/op source))
       (and flow? (::flow/cid source)) (assoc :seon.error/cid (::flow/cid source))
-      (:seon.instrument/fn instrument-data)
-      (assoc :seon.instrument/fn (:seon.instrument/fn instrument-data))
-      (:seon.instrument/arm instrument-data)
-      (assoc :seon.instrument/arm (:seon.instrument/arm instrument-data))
-      (:seon.instrument/schema instrument-data)
-      (assoc :seon.instrument/expected (:seon.instrument/schema instrument-data))
-      (:seon.instrument/args instrument-data)
-      (assoc :seon.instrument/args (:seon.instrument/args instrument-data))
       basis-t (assoc :seon.error/basis-t basis-t)
       run-id (assoc :seon.error/run [:seon.cluster.run/id run-id])
       agent-id (assoc :seon.error/agent [:seon.cluster.agent/id agent-id]))))
@@ -458,7 +446,7 @@
 (defn- fact-source
   [fact]
   (try
-    (edn/read-string (:seon.error/data-edn fact))
+    (admit/semantic-value (edn/read-string (:seon.error/data-edn fact)))
     (catch Throwable _ {})))
 
 (defn- flat-data
@@ -500,28 +488,28 @@
 (defn instrumentation-prose
   "`:seon.render/ai` — detailed steering for a validation failure."
   {:malli/schema
-   [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
+  [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
   [error-value]
   (let [fact (or (:seon.error/fact error-value) error-value)
-        {instrument-fn :seon.instrument/fn
-         arm :seon.instrument/arm
-         expected :seon.instrument/expected
-         args :seon.instrument/args} fact
-        admitted-value (some-> args edn/read-string)
-        received (some-> (if (= :input arm)
-                           (first admitted-value)
-                           admitted-value)
-                         pr-str)]
-    (str "Contract violation"
-         (when instrument-fn (str " in " instrument-fn))
-         (when arm (str " " (name arm)))
-         ": expected " expected
-         (when received (str ", received " received))
-         (if (= :input arm)
-           ". The call was stopped before the function ran. "
-           ". The function returned an invalid value. ")
-         (when (:seon.error/id fact)
-           (evidence-prose fact)))))
+        data (if (:seon.error/data-edn fact)
+               (flat-data fact)
+               (:seon.error/data fact))
+        operation (:seon.error/diagnostic-operation data)
+        member (:seon.error/diagnostic-member data)
+        expected (:seon.error/diagnostic-expected data)
+        received (:seon.error/diagnostic-offending data)]
+    (if operation
+      (str "Contract violation in " operation " " (name member)
+           ": expected " (pr-str expected)
+           ", received " (pr-str received)
+           (if (= :arguments member)
+             ". The call was stopped before the function ran. "
+             ". The function returned an invalid value. ")
+           (when (:seon.error/id fact)
+             (evidence-prose fact)))
+      (str (:seon.error/message fact)
+           (when (:seon.error/id fact)
+             (str " " (evidence-prose fact)))))))
 
 (defn- notice-ai-prose
   "`:seon.render/ai` — the steering prose an agent is told, from a notice.
@@ -678,9 +666,7 @@
   recurrence, the `kind` to find the rule, and the run, process, proc,
   op, cid and basis-t refs to find everything around it. Each is omitted
   when absent."
-  {:malli/schema [:=> [:cat :seon.error/notice] [:string {:min 1}]]
-   :seon.fn/external-sink :ai-visible-text
-   :seon.fn/projection-boundary :none}
+  {:malli/schema [:=> [:cat :seon.error/notice] [:string {:min 1}]]}
   [notice]
   (let [fact (:seon.error/fact notice)
         {:seon.error/keys [id at kind message process signature
@@ -716,12 +702,6 @@
          (str "output=" (:seon.ai/output-observed? data)))
        (when (= :transport-before-send (:seon.ai/error-class data))
          "disposition=failover-now")
-       (when-let [instrument-fn (:seon.instrument/fn fact)]
-         (str "fn=" instrument-fn))
-       (when-let [arm (:seon.instrument/arm fact)] (str "arm=" (name arm)))
-       (when-let [expected (:seon.instrument/expected fact)]
-         (str "expected=" expected))
-       (when-let [args (:seon.instrument/args fact)] (str "args=" (pr-str args)))
        (str "id=" id)
        (str "message=" (pr-str (str/replace message #"\s+" " ")))
        (str "process=" process)

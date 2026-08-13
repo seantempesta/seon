@@ -129,15 +129,28 @@
          {::admission/declarations
           {:candidate.fixture/value [:string {:max 12 :min 1}]}
           ::admission/registry
-          {:existing.fixture/value [:string {:min 1 :max 12}]}})
+          {:existing.fixture/value [:string {:min 1 :max 12}]
+           :also-existing.fixture/value [:string {:max 12 :min 1}]}})
         exact (findings-of-type :schema-exact-reuse findings)]
     (is (= 1 (count exact)))
     (is (= :warning (:level (first exact))))
-    (is (= :existing.fixture/value
-           (:seon.schema.admission/similar-key (first exact))))
+    (is (= [:also-existing.fixture/value :existing.fixture/value]
+           (:seon.schema.admission/similar-keys (first exact))))
     (is (str/includes?
          (:message (first exact))
-         "delete :candidate.fixture/value and reuse :existing.fixture/value"))))
+         "delete :candidate.fixture/value and reuse that existing key"))))
+
+(deftest structureless-markers-do-not-produce-exact-reuse-noise
+  (let [findings
+        (admission/admit
+         {::admission/declarations
+          {:candidate.fixture/marker [:= true]
+           :candidate.fixture/reference :existing.fixture/value}
+          ::admission/registry
+          {:existing.fixture/marker [:= true]
+           :existing.fixture/reference :existing.fixture/value
+           :existing.fixture/value :string}})]
+    (is (empty? (findings-of-type :schema-exact-reuse findings)))))
 
 (deftest exact-key-collision-is-the-only-reuse-refusal
   (let [findings

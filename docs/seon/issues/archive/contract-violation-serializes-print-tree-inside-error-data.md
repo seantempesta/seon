@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, sci, class/n1, wave/instrumentation-error-data]
 ---
@@ -77,3 +77,33 @@ ordinary problem/argument evidence rather than `:seon.error/data-edn`, and
 `seon.error/instrumentation-prose` must render those values through the shared
 floor. `4bc8104d8` bounds terminal output but deliberately does not repair
 already serialized intermediate representation stored inside the error.
+
+## Resolution — 2026-08-13
+
+`seon.instrument/violation` now admits the expected and offending values once
+as ordinary semantic data. Its evidence contains one representative problem
+map and a total problem count; it no longer stores `:seon.instrument/edn`,
+`:seon.instrument/value-edn`, rendered text, or a `:seon.print/face` tree.
+`seon.error/instrumentation-prose` consumes the semantic data directly, so no
+error consumer calls `edn/read-string` on a newly constructed error field.
+
+Before:
+
+```clojure
+{:seon.instrument/problems
+ "#:seon.print{:face :seon.print/vector, :items [#:seon.print{...}]}"
+ :seon.instrument/args "[42]"}
+```
+
+After, read verbatim from the live contract refusal:
+
+```clojure
+:seon.error/diagnostic-evidence
+#:seon.instrument{:problem-count 1,
+                   :problems [#:seon.instrument.problem{:message "should be a string"}]}
+:seon.error/diagnostic-offending [seon.cluster.run/open-tx]
+```
+
+`contract-problems-are-semantic-once-never-a-serialized-print-tree` retains
+the constructor regression, including an assertion that no
+`:seon.print/face` survives anywhere in the error data.

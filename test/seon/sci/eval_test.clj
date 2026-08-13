@@ -1285,9 +1285,10 @@
                     failure (:seon.sci.admit/value evaluation)]
                 (is (= :seon.instrument/contract-violated
                        (:seon.error/kind failure)) moment)
-                (is (= "authored.contract/accept"
+                (is (= 'authored.contract/accept
                        (get-in failure
-                               [:seon.error/data :seon.instrument/fn]))
+                               [:seon.error/data
+                                :seon.error/diagnostic-operation]))
                     moment)))
               acquired-ctx (eval/build-base-ctx)]
           (eval/acquire! {:seon.sci.eval/ctx acquired-ctx
@@ -1937,7 +1938,7 @@
                        (:seon.sci.admit/record
                         (:seon.error/data invoked-cut))))))))))
 
-(deftest nested-refusal-keeps-the-throw-site-message-as-structured-evidence
+(deftest an-existing-refusal-is-not-wrapped-or-duplicated
   (let [failure
         (kernel/failure-value
          {::kernel/time-limit-kind :probe/time-limit
@@ -1951,10 +1952,15 @@
           :seon.eval/allocated-bytes 0
           :seon.eval/outcome :error})]
     (is (= "inner failure" (:seon.error/message failure)))
-    (is (= "result renderer exploded"
-           (:seon.error/throw-site-message (:seon.error/data failure))))
-    (is (= :nested-refusal
-           (:seon.error/diagnostic-member (:seon.error/data failure))))))
+    (is (= :probe/inner (:seon.error/kind failure)))
+    (is (= :error
+           (get-in failure [:seon.error/data
+                            :seon.sci.admit/record
+                            :seon.eval/outcome])))
+    (is (not (contains? (:seon.error/data failure) :seon.sci.eval/data))
+        "the refusal is not copied back into itself as throwable ex-data")
+    (is (not= :nested-refusal
+              (:seon.error/diagnostic-member (:seon.error/data failure))))))
 
 (deftest analysis-failure-exposes-scis-unresolved-symbol-as-data
   (let [failure (:seon.sci.admit/value

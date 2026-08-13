@@ -487,10 +487,20 @@
                           :seon.sci.admit/record diagnostic-record}
                    subject (assoc :seon.fn/sym subject))
         existing (error.refusal/refusal throwable)]
-    (error/diagnostic
-     (let [kind (or (:seon.error/kind existing)
-                    (if timed-out? time-limit-kind failure-kind))]
-       {kind (or subject :evaluation)
+    (if (:seon.error/kind existing)
+      ;; The refusal is already the boundary value. Wrapping it copied its
+      ;; data, its ex-data (the whole refusal), and its throw-site message into
+      ;; a `:nested-refusal` envelope, so the terminal renderer fitted six
+      ;; copies of one blob. Accrete this boundary's one new observation.
+      (cond-> (update existing :seon.error/data
+                      (fn [data]
+                        (merge (or data {}) evidence)))
+        (not (string? (:seon.error/message existing)))
+        (assoc :seon.error/message
+               (or (ex-message throwable) "The operation was refused.")))
+      (error/diagnostic
+       (let [kind (if timed-out? time-limit-kind failure-kind)]
+         {kind (or subject :evaluation)
         :seon.error/kind kind
       :seon.error/message
       (or (:seon.error/message existing)
@@ -502,8 +512,7 @@
             subject (str "Invocation of " subject " failed: ")))
       :seon.error/diagnostic-layer :sci
       :seon.error/diagnostic-operation (or subject :evaluation)
-      :seon.error/diagnostic-member
-      (if (:seon.error/kind existing) :nested-refusal :throwable)
+      :seon.error/diagnostic-member :throwable
       :seon.error/diagnostic-expected :successful-evaluation
       :seon.error/diagnostic-offending
       (or (:sci.impl/symbol (ex-data throwable)) subject)
@@ -511,15 +520,15 @@
       (or (ex-message throwable) (.getName (class throwable)))
       :seon.error/diagnostic-evidence diagnostic-record
       :seon.error/data
-      (cond-> (merge (:seon.error/data existing) evidence)
+      (cond-> evidence
         (ex-data throwable)
         (assoc :seon.sci.eval/data (ex-data throwable))
 
         (:sci.impl/symbol (ex-data throwable))
         (assoc :seon.sci.eval/symbol (:sci.impl/symbol (ex-data throwable)))
 
-        (and (:seon.error/message existing) (ex-message throwable))
-        (assoc :seon.error/throw-site-message (ex-message throwable)))}))))
+        (ex-message throwable)
+        (assoc :seon.error/throw-site-message (ex-message throwable)))})))))
 
 (defn unarmed-record
   "The diagnostic record for a failure that never reached an arm."

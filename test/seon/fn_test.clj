@@ -1231,36 +1231,27 @@
                  (:seon.fn.output/classification
                   (get by-source "sample.output/codec-root")))))))))
 
-(def ^:private output-floor-report-path
-  "docs/prds/sci-execution-runtime/research/universal-output-floor-baseline-2026-08-04.edn")
-
-(deftest ^{:seon.test/long
-           "Analyzes the complete indexed graph and updates a committed diagnostic artifact."
-           :doc
-           "Records transitional output-floor totals without asserting graduation. The final ladder step adds the zero-bypass and zero-unresolved assertion."}
-  current-output-floor-classification-is-recorded
+(deftest every-indexed-outward-path-crosses-its-total-render-projection
   (test-support/with-database
     (fn [connection]
       (let [report (seon.fn/output-path-report @connection)
             paths (:seon.fn.output/paths report)
-            counterexamples
-            (->> [:bypass :unresolved]
-                 (mapcat
-                  (fn [classification]
-                    (->> paths
-                         (filter #(= classification
-                                     (:seon.fn.output/classification %)))
-                         (sort-by (juxt (comp count :seon.fn.output/path)
-                                        :seon.fn.output/source
-                                        :seon.fn.output/sink))
-                         (take 10))))
-                 vec)
-            artifact
-            {:seon.fn.output/totals (:seon.fn.output/totals report)
-             :seon.fn.output/counterexamples counterexamples}]
-        (spit output-floor-report-path (str (pr-str artifact) "\n"))
-        (is (map? (:seon.fn.output/totals artifact)))
-        (is (every? int? (vals (:seon.fn.output/totals artifact))))))))
+            totals (:seon.fn.output/totals report)
+            visible-paths
+            (filterv #(contains? #{:ai-visible-text :html-response}
+                                 (:seon.fn.output/external-sink %))
+                     paths)
+            offenders
+            (filterv #(contains? #{:bypass :unresolved}
+                                 (:seon.fn.output/classification %))
+                     visible-paths)]
+        (is (pos? (:seon.fn.output/sinks totals))
+            "a census with no identity-bearing sink subjects is a failure")
+        (is (seq visible-paths)
+            "the class check must exercise agent- or human-visible paths")
+        (is (every? #(= :projected (:seon.fn.output/classification %))
+                    visible-paths)
+            (pr-str offenders))))))
 
 (deftest blocking-analysis-keeps-the-fresh-branch-unpublished
   (let [root (fixture-root)]

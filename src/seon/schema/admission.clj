@@ -297,19 +297,31 @@
 (defn- exact-reuse-findings
   [file declarations registry]
   (into []
-        (mapcat
+        (keep
          (fn [[declaration-key definition]]
-           (for [[existing-key existing-definition] (sort-by key registry)
-                 :when (and (not= declaration-key existing-key)
-                            (= definition existing-definition))]
-             (finding
-              file :warning :schema-exact-reuse
-              (str "Schema " declaration-key " has the same shape as existing "
-                   existing-key ". If this duplicates " existing-key
-                   ", delete " declaration-key " and reuse " existing-key
-                   ". Create a parallel schema only when the user explicitly chooses a separate system.")
-              {:seon.schema.admission/declaration declaration-key
-               :seon.schema.admission/similar-key existing-key})))
+           (let [structureless?
+                 (or (keyword? definition)
+                     (and (vector? definition)
+                          (= := (first definition))))
+                 matches
+                 (when-not structureless?
+                   (into []
+                         (keep (fn [[existing-key existing-definition]]
+                                 (when (and (not= declaration-key existing-key)
+                                            (= definition existing-definition))
+                                   existing-key)))
+                         (sort-by key registry)))]
+             (when (seq matches)
+               (finding
+                file :warning :schema-exact-reuse
+                (str "Schema " declaration-key
+                     " has the same composite shape as " (pr-str matches)
+                     ". If this duplicates one of those schemas, delete "
+                     declaration-key " and reuse that existing key. Create a"
+                     " parallel schema only when the user explicitly chooses"
+                     " a separate system.")
+                {:seon.schema.admission/declaration declaration-key
+                 :seon.schema.admission/similar-keys matches}))))
          (sort-by key declarations))))
 
 (defn- name-overlap-findings
