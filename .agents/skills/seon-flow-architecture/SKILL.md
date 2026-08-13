@@ -6,7 +6,7 @@ description: "How Seon is architected on core.async.flow — procs, workloads, b
 # Seon flow architecture
 
 Seon's runtime is `core.async.flow` graphs in one JVM process; one JVM may host
-several sovereign clusters (`src/seon/cluster.clj:1388-1405`). There is no
+several sovereign clusters (`src/seon/cluster.clj:2578-2760`). There is no
 central loop, no dispatcher, no scheduler entity — that shape is banned by
 owner ruling ("a JavaScript event loop inside Clojure"). If you are about to
 write one, stop and read *The banned shapes* below.
@@ -62,28 +62,28 @@ Boot is layered, each layer reading only the one below and publishing its
 own readiness (`src/seon/cluster.clj`):
 
 1. **Process** — REPL opens first. JVM process identity is exactly
-   `(pid, start-instant)` (`src/seon/cluster/process.clj:2-28`); the cluster
+   `(pid, start-instant)` (`src/seon/cluster/process.clj:1-49`); the cluster
    advertisement adds cluster name and the bound REPL endpoint to that
-   identity (`src/seon/cluster.clj:2023-2101`).
+   identity (`src/seon/cluster.clj:2578-2760`).
 2. **Store** — one process-root Datahike store under a lifetime lock; sibling
    clusters use distinct branches and reuse the held root store
-   (`src/seon/cluster.clj:1903-1942`).
+   (`src/seon/cluster.clj:2400-2760`).
 3. **Facts** — after opening the branch, boot refuses an incoherent program,
    accretes schema, settles interrupted work, applies config, and ensures the
-   cluster and root-agent facts (`src/seon/cluster.clj:1943-1969`).
+   cluster and root-agent facts (`src/seon/cluster.clj:2400-2760`).
 4. **Context** — boot creates the cluster's one live SCI ctx after recovery
    and config but before any agent graph. `cluster-ctx` acquires only the
    program graph into that base; the agent's defs restore later into a fresh turn
-   fork (`src/seon/cluster.clj:1975-1980`;
-   `src/seon/sci/eval.clj:1418-1492`).
+   fork (`src/seon/cluster.clj:2400-2760`;
+   `src/seon/sci/eval.clj:1-2219`).
 5. **Flow** — the work launcher is installed, then the cluster graph and one
    graph per agent are armed, and only then is the web UI served
-   (`src/seon/cluster.clj:1989-2005`).
+   (`src/seon/cluster.clj:2400-2760`).
 
 The complete current order is advertisement → store → source commit/fork →
 connection → coherent-program validation → schema accretion → recovery →
 config and root facts → program-only base ctx → work launcher → agent arm → web
-serve (`src/seon/cluster.clj:1903-2005`). Before adding a
+serve (`src/seon/cluster.clj:2400-2760`). Before adding a
 mechanism, ask which layer owns it. Most "new machinery" is a proc in an
 existing graph or a derivation over facts — not a new subsystem.
 
@@ -92,24 +92,24 @@ The executor owners are deliberately distinct:
 - Core.async constructs and memoizes the default `:io` executor: virtual
   thread per task when supported, cached-platform fallback. Seon's root pair
   holds that dependency-owned object (`reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj:82-105`;
-  `src/seon/cluster.clj:158-182`). The work-launcher definition supplies no
+  `src/seon/cluster.clj:544-552`). The work-launcher definition supplies no
   `:io-exec`, so its proc loop and ordinary cluster/agent/fault graphs all
   resolve this default (`reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:145-148`;
-  `src/seon/flow.clj:381-423,626-666`;
-  `src/seon/cluster.clj:1079-1096`;
-  `src/seon/cluster/agent.clj:337-390`).
+  `src/seon/flow.clj:494-692`;
+  `src/seon/cluster.clj:2123-2250`;
+  `src/seon/cluster/agent.clj:341-477`).
 - Seon constructs one fixed platform `:compute` executor at available-processor
   parallelism and supplies it only as the work-launcher graph's
-  `:compute-exec` (`src/seon/cluster.clj:158-182`;
-  `src/seon/flow.clj:381-423`).
+  `:compute-exec` (`src/seon/cluster.clj:544-552`;
+  `src/seon/flow.clj:595-692`).
 - The work launcher separately constructs one virtual-thread-per-task executor
   and submits each admitted evaluation task to it
-  (`src/seon/flow.clj:135-137,199-229,401-430`;
-  `src/seon/cluster/loop.clj:559-590`).
+  (`src/seon/flow.clj:441-692`;
+  `src/seon/cluster/loop.clj:1-1706`).
 - Core.async's unoverridden `:compute` and `:mixed` defaults are cached platform
   pools, but Seon's ordinary `var-process` refuses missing or `:mixed`
   workloads (`reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj:91-105`;
-  `src/seon/flow.clj:83-115`).
+  `src/seon/flow.clj:123-164`).
 
 ## Degraded start and stale JVMs
 
@@ -117,24 +117,24 @@ When a scratch cluster fails partway up the tower, read
 `references/degraded-start.md` before retrying. The short version:
 
 - inspect the carried `:seon.boot/instance`; absent keys identify the last
-  published layer (`src/seon/cluster.clj:1289-1386,1458-1485`);
+published layer (`src/seon/cluster.clj:2400-2760`);
 - inspect the advertisement and prove both the named cluster and any detached
   operator JVM are gone with `bin/seon status` (root-scoped; use
   `--root PATH` for an isolated operator root);
 - remember that `bin/seon start <name>` adds to an already-running JVM when
   this operator root has a reachable anchor, so its Var roots may predate the
-  source edit (`script/seon/fresh_operator.clj:1593-1654`). Use
+source edit (`script/seon/fresh_operator.clj:1-2824`). Use
   `bin/seon --root PATH ...` for a lane-owned operator root: process records,
   advertisements, logs, store observations, and anchor selection are scoped to
-  that canonical root (`bin/seon:4-18`;
-  `script/seon/fresh_operator.clj:789-866,1041-1113,1593-1627`); and
+that canonical root (`bin/seon:1-150`;
+`script/seon/fresh_operator.clj:1-2824`); and
 - if boot is blocked by shared-tree churn but the subject is a pure
   transformation, fall back to a separate `clojure -M:dev` JVM with immutable
   in-memory inputs and make no live-tower claim.
 
 ## Building a proc
 
-Use `seon.flow/var-process` (`src/seon/flow.clj:83-115`). Two things matter:
+Use `seon.flow/var-process` (`src/seon/flow.clj:123-164`). Two things matter:
 
 **Reference the step-fn as a var (`#'f`), never a value.** This is what
 makes live update work: re-evaluating a `defn` against the running system
@@ -148,13 +148,15 @@ losable by construction
 (`docs/prds/sci-execution-runtime/research/flow-dynamic-update-2026-07-27.md`).
 
 **Declare the workload explicitly.** `var-process` **refuses a missing or
-`:mixed` workload at construction** (`src/seon/flow.clj:91-100`) because the
+`:mixed` workload at construction** (`src/seon/flow.clj:123-164`) because the
 default `:mixed` execution path occupies one cached platform thread for the
 proc's blocking loop and inline transform. This is a scaling cliff; call it
 thread occupation, not Loom carrier pinning. Refusing at construction makes
 the mistake unrepresentable rather than discovered under load.
 
 ```clojure
+;; Illustrative construction; `turn-step` and `handle` are supplied by the
+;; graph owner.
 (seon.flow/var-process #'turn-step :io
                        {:seon.cluster.loop/cluster handle})
 ```
@@ -246,7 +248,7 @@ it at both (`flow/impl.clj:295,234`).
 Only `start` and `ping` are acknowledged. `pause`, `resume` and `stop` are
 channel puts — never treat one as a completion. Seon's own join is a
 proc-published completion promise-chan layered on flow's `::flow/stop`
-transition (`src/seon/cluster/agent.clj:190-194`, `src/seon/flow.clj:553-570`);
+transition (`src/seon/cluster/agent.clj:341-477`, `src/seon/flow.clj:930-1080`);
 that is not a second mechanism, it supplies the one guarantee flow omits.
 
 ### Two documented-vs-actual corrections — READ THESE
@@ -270,13 +272,15 @@ entire output is still written downstream; stop ⇒ the current transform
 completes and its *remaining* outputs are abandoned at the next message
 boundary. This is the mechanical justification for separating mailbox and
 turn procs: the mailbox answers control in microseconds while the turn's
-provider call is uninterruptible (`src/seon/cluster/agent.clj:286-318`).
+provider call is uninterruptible (`src/seon/cluster/agent.clj:198-477`).
 
 ### The ping reply, and what it costs
 
 `pong` (`flow/impl.clj:272-279`) writes per proc:
 
 ```clojure
+;; Illustrative datafied reply shape; angle-bracketed and ellipsis values are
+;; placeholders, not executable EDN.
 #:clojure.core.async.flow{:pid :sink, :status :paused   ; :paused | :running
                           :count 3                      ; transform passes
                           :ins {:in <datafied chan>}    ; minus ::control/::casts
@@ -297,13 +301,13 @@ fails to answer, because `ret-chan` is `(async/take n reply-chan)` and closes
 early only when all `n` reply (`flow/impl.clj:78,81-85`). An unknown pid
 returns `nil`, never an error — indistinguishable from a busy proc. Pair the
 ping with the graph's datafied `:procs` to tell them apart, as
-`src/seon/oversight.clj:126` already does. Oversight's budget is 20 ms
-(`src/seon/oversight.clj:39,90,125`).
+`src/seon/oversight.clj:1-301` already does. Oversight's budget is 20 ms
+(`src/seon/oversight.clj:1-301`).
 
 ### Procs start `:paused`
 
 `start` alone runs nothing (`flow/impl.clj:271`; `flow/spi.clj:30`) — `arm!`
-does `start` → `resume` (`src/seon/cluster/agent.clj:376-390`). A stopped graph
+does `start` → `resume` (`src/seon/cluster/agent.clj:457-477`). A stopped graph
 may be started again, which builds all-new channels and zeroed proc state
 (`flow/impl.clj:99-124`), so everything in flight at stop is lost — exactly the
 transport law's precondition.
@@ -315,12 +319,12 @@ is `:running` for its whole life; "parked" means each proc's `alts!!` is
 blocked on its input channels
 (`flow/impl.clj:295`) — an ordinary channel read on a virtual thread,
 woken by a datom-routed `offer!` onto the sliding-1 mailbox
-(`src/seon/cluster/wake.clj:163-228`). A flow-`paused` proc instead parks on
+(`src/seon/cluster/wake.clj:163-266`). A flow-`paused` proc instead parks on
 `(<!! control)` (`flow/impl.clj:284`). One blocked virtual thread either way,
 but different states: the measured ~8.5 KB is the **running-and-parked** shape
 and must not be cited as a paused-agent cost. `pause`, `pause-proc` and
 `resume-proc` have **no production call site in `src/`** — only
-`monitor-graph`'s passthrough arities (`src/seon/flow.clj:616-620`); the only
+`monitor-graph`'s passthrough arities (`src/seon/flow.clj:1002-1024`); the only
 `src/` uses of the protocol are `flow/start` + `flow/resume` at arm
 (`src/seon/cluster/agent.clj:380,390`), `flow/ping` in oversight
 (`src/seon/oversight.clj:90,125`), `flow/inject`, and `flow/stop`. The pause
@@ -336,18 +340,18 @@ Each agent graph includes a schedule proc. It owns one disposable timer and
 Datahike listener, derives due work from current facts, atomically claims a
 fire and maintenance receipt, invokes the declared Var directly, and settles
 the receipt without a model call; only an error settlement creates a message
-(`src/seon/cluster/agent.clj:286-318`;
-`src/seon/schedule.clj:282-360,534-616,681-748`). Root's five maintenance tasks
+(`src/seon/cluster/agent.clj:198-477`;
+`src/seon/schedule.clj:1-750`). Root's five maintenance tasks
 are seeded as database facts during root creation
-(`src/seon/schedule.clj:34-98`; `src/seon/cluster.clj:1371-1389`).
+(`src/seon/schedule.clj:1-750`; `src/seon/cluster.clj:2400-2760`).
 
 Two current shapes are **defects — do not copy them**:
 `seon.flow/work-launcher-proc` re-implements the control protocol by hand and
 its `alts!!` omits `:priority true`, violating `flow/spi.clj:32-34`
-(`src/seon/flow.clj:319`;
+(`src/seon/flow.clj:494-692`;
 `docs/seon/issues/work-launcher-control-alts-lacks-priority.md`), and
 `seon.flow/monitor-graph`'s `command-proc` arity delegates to the
-unimplemented protocol method and throws (`src/seon/flow.clj:623-624`;
+unimplemented protocol method and throws (`src/seon/flow.clj:1002-1024`;
 `docs/seon/issues/monitor-graph-command-proc-throws.md`).
 
 ## Workloads: the measured truth
@@ -356,9 +360,9 @@ unimplemented protocol method and throws (`src/seon/flow.clj:623-624`;
   virtual-thread-capable JDK with a cached-platform fallback; current Seon
   graph definitions do not override `:io-exec`, including the work launcher
   (`reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj:82-105`;
-  `src/seon/flow.clj:381-423,626-666`;
-  `src/seon/cluster.clj:1079-1096`;
-  `src/seon/cluster/agent.clj:337-390`). May block; must not compute.
+  `src/seon/flow.clj:494-692,930-1080`;
+  `src/seon/cluster.clj:2123-2250`;
+  `src/seon/cluster/agent.clj:341-477`). May block; must not compute.
   Ordinary parking releases a carrier. The documented probe found a
   `synchronized` sleep pinned on JDK 21 but not JDK 26.0.1; native or critical
   sections can still pin (`workload-scheduling-truth-2026-07-29.md`).
@@ -377,7 +381,7 @@ be split at an explicit boundary, or run on `:io` and stay honest about
 it. Classification is per-function and **derived** where possible: key
 capability leaves carry `^{:seon.workload :io}` or `:compute` metadata lifted
 at parse time into `:seon.fn/workload`
-(`src/seon/sci/reader.cljc:198-245`). **[TARGET]** No current runtime derives
+(`src/seon/sci/reader.cljc:1-638`). **[TARGET]** No current runtime derives
 workload by reachability over `:seon.fn/calls`, including the planned
 pure-implies-compute case. Until that owner exists, do not claim that
 unannotated program-graph functions have a derived workload.
@@ -391,7 +395,7 @@ or superseded by a newer complete value.
 
 | buffer | meaning | example |
 |---|---|---|
-| `(sliding-buffer 1)` | latest-wins mailbox; a wake says only "look" and the woken pass derives everything from facts | agent episode conn (`src/seon/cluster/agent.clj:286-318`), render/stream inputs (`src/seon/cluster.clj:1648-1818`), and page taps (`src/seon/render/web.clj:961-1026`) |
+| `(sliding-buffer 1)` | latest-wins mailbox; a wake says only "look" and the woken pass derives everything from facts | agent episode conn (`src/seon/cluster/agent.clj:198-477`), render/stream inputs (`src/seon/cluster.clj:2123-2250`), and page taps (`src/seon/render/web.clj:1267-1340`) |
 | fixed | backpressure — the producer must wait | bounded work submission |
 | counted-dropping | observation that must never block the producer | flow's error/report channels |
 
@@ -403,10 +407,10 @@ belongs in the database.
 
 Every agent is its own flow graph, created with the agent from one
 blueprint (three `:io` procs) and kicked off by messages and due schedules
-(`src/seon/cluster/agent.clj:286-318`). Between episodes it is **`:running`
+(`src/seon/cluster/agent.clj:198-477`). Between episodes it is **`:running`
 and parked on a channel read, never flow-`paused`** — see *Parked is not
 paused* above; the graph stays `:running` from `arm!` onward
-(`src/seon/cluster/agent.clj:376-390`). The ~8.5 KB and
+(`src/seon/cluster/agent.clj:457-477`). The ~8.5 KB and
 one-virtual-thread baseline was the steady 1,000 one-proc graph case on an
 18-core Mac, JDK 26, `-Xmx512m`; it is not a production-agent heap
 measurement:
@@ -416,7 +420,7 @@ measurement:
 - **`::turn`** (`:io`) — one episode pass per signal; claims the run,
   calls the model, evaluates, commits receipts.
 - **`::schedule`** (`:io`) — derives due scheduled work and invokes declared
-  maintenance handlers turn-free (`src/seon/schedule.clj:681-748`).
+  maintenance handlers turn-free (`src/seon/schedule.clj:682-750`).
 
 Parallelism across agents is by construction. Runaway protection is one
 per-agent dial (max consecutive runs per episode); **any race that could
@@ -433,34 +437,34 @@ one measured pass used 12 registrations
 (`agent-flow-render-falsification-2026-07-29.md`). It also exposed
 unresolved interest-narrowness and unbounded-memory seams. The proc and its
 contract are not authored: the current graph definition contains mailbox,
-turn, and schedule only (`src/seon/cluster/agent.clj:286-318`). Production
+turn, and schedule only (`src/seon/cluster/agent.clj:198-477`). Production
 delivery stays per-cluster.
 
 ## Wakes, faults, and streaming
 
 **Wakes are event-driven, never polled.** One `listen!` per cluster routes
 committed transactions to agent and render inputs
-(`src/seon/cluster/wake.clj:163-228`). Message/agent creation routing is
+(`src/seon/cluster/wake.clj:163-266`). Message/agent creation routing is
 datom-selective; the current render input receives every transaction report.
 Two rules that cost real debugging to learn (documented at
-`src/seon/cluster/wake.clj:6-63`): the listener **must never throw or park**
+`src/seon/cluster/wake.clj:1-266`): the listener **must never throw or park**
 (Datahike invokes it before transaction delivery), and re-asserting an identical value produces no
 datom and therefore no routed wake.
 
 **Faults ride flow's error channel** into `fault-committer-proc`
-(`src/seon/flow.clj:553-602`), which commits each as a durable fact with
+(`src/seon/flow.clj:930-1080`), which commits each as a durable fact with
 provenance — so "who should fix this" is a query, not a router. Agent
 *mistakes* are different: they never touch these channels, they become
 flat `:seon.error` values the agent sees. One config dial selects `:record` or
 `:panic` (`resources/seon/schemas/seon.config.edn:39-40`). In current `:panic` mode the
 cluster handler still commits the fault and prints it; it does not throw from
-the recorder (`src/seon/cluster.clj:1151-1190`).
+the recorder (`src/seon/cluster.clj:2123-2250`).
 
 **Streaming**: partials ride channels; only the settled reply commits. The
 current JVM renderer builds one revisioned package per changed page. Each
 package carries delta bytes plus a complete keyframe; contiguous tabs receive
 the smaller delta, while a revision gap receives the keyframe
-(`src/seon/render/web.clj:553-600,930-1026`).
+(`src/seon/render/web.clj:648-725,1267-1340`).
 Two runs on OpenJDK 26.0.1/18 processors and headless Chrome 150.0.7871.187
 with Datastar 1.0.0-RC.7 measured 0.872–1.171 ms p95 for once+mult at 50 tabs
 versus 31.783–42.479 ms p50 for per-tab serialization, and 1.2–1.5 ms p95 for
@@ -469,7 +473,7 @@ a 250-event Chrome block morph; the browser measurement excludes transport
 http-kit fork adds per-channel pending-byte state and a drain-or-close
 completion so the `:io` writer **parks** on real backpressure — stock
 `send!` reports channel openness, not socket drain
-(`src/seon/render/web.clj:701-725`;
+(`src/seon/render/web.clj:1267-1340`;
 `reference-code/http-kit/src/org/httpkit/server.clj:321-326`;
 `httpkit-write-path-2026-07-29.md`).
 
@@ -480,13 +484,13 @@ one `:interrupt-fn` with a time limit as the only limit. The selected agent's
 defs restore into that fork; terminal settlement records their rows, while
 committed program rows install into the base for later turns
 (`src/seon/sci/eval.clj:1418-1492`;
-`src/seon/cluster/loop.clj:1245-1264,1408-1417`;
+`src/seon/cluster/loop.clj:1-1706`;
 `reference-code/sci/src/sci/core.cljc:331-337`). SCI counts nothing and has no
 step concept; its interrupt hook runs at interpreted function-body entrances,
 while a host call with no interpreted entrance is the known ceiling
 (`reference-code/sci/doc/interrupt.md:6-8,50-65`). Evaluations go through the
 one bounded submission owner (`seon.flow/submit!!`,
-`src/seon/flow.clj:652-683`; `src/seon/cluster/loop.clj:559-590`) rather than
+`src/seon/flow.clj:775-829`; `src/seon/cluster/loop.clj:1-1706`) rather than
 inline on a turn thread, so eval concurrency is bounded and observable.
 
 ## The banned shapes
@@ -521,7 +525,7 @@ is a regression even if tests pass:
   never reset or bounce someone else's. Clusters have distinct database
   branches, live SCI contexts, and graph state even when sibling clusters share
   the process-root store and executors
-  (`src/seon/cluster.clj:1295-1311,1343-1348,1404-1405`).
+(`src/seon/cluster.clj:2400-2760`).
 - **Measure, never assert.** Every performance claim in this skill
   carries the conditions it was measured under, because this program has
   been misled twice by a number without its context.
