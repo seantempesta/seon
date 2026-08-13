@@ -4,7 +4,10 @@ status: active
 tags: [prd, agent, architecture, database]
 ---
 
-Terminology: this note records evidence from before the rename; the process holding a run is now `:seon.agent.run/process`.
+Terminology: the process holding a run is `:seon.cluster.run/process`
+(`resources/seon/schemas/seon.cluster.run.edn` ↔ `src/seon/cluster/run.clj`);
+an earlier note here claimed an `:seon.agent.run/process` rename that never
+landed — verified against HEAD 2026-08-13.
 
 # Seon runtime — the plan
 

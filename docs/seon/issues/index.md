@@ -61,10 +61,11 @@ See `README.md` for the convention.
 | [Return from the generated opening's second live pull](generated-opening-live-pull-does-not-return-after-help.md) | blocker | prefix-drift bootstrap performance diagnosis (held `bootstrap.clj`) |
 | [Explain the 24-second live root pull of 189 members](live-root-pull-of-189-members-takes-24-seconds.md) | blocker | render acquisition performance wave |
 
-## Friction (129)
+## Friction (130)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Make generation dependency analysis see keywords](generation-dependency-analysis-ignores-keywords.md) | friction | evolving-session phases |
 | [Delete bloated stores at IO pace with progress](reset-deletes-a-bloated-store-one-lstat-at-a-time.md) | friction | operator velocity fixes |
 | [Stop the opening walkthrough replicating its usage test per agent](opening-walkthrough-replicates-a-usage-test.md) | friction | evolving-session implementation phases |
 | [Supply every declared render dependency in the agent-flow fixture](agent-flow-fixture-omits-render-interest.md) | friction | flow join-wedge diagnosis |
