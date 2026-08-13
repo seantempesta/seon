@@ -61,16 +61,27 @@ reads because their deletion belongs to W3--W5. Dynamic constructors now use
 their selected keyword as the marker as well as the legacy kind, and
 `seon.error/diagnostic` preserves a supplied class marker.
 
-The protected live-lane owners `src/my/plan.clj`,
-`resources/seon/schemas/my.plan.edn`, `src/seon/bootstrap.clj`, and
-`src/seon/render/walk.clj` were deliberately deferred to W2b rather than
-being edited across lane ownership. All edited production namespaces loaded
-after publication. The direct regression
-`seon.error-test/exact-dispatch-producers-carry-their-class-markers` passes
-and constructs one representative of each of the twelve real exact-dispatch
+W2b completed the formerly protected producer slice in `d5f7c7a08`.
+`my.plan` refusals now retain the selected class marker, bootstrap root and
+prefix refusals carry their declared markers, and the render walk's elision
+and missing-entity values do the same. The paired declarations are present in
+`resources/seon/schemas/my.plan.edn` and
+`resources/seon/schemas/seon.bootstrap.edn`; source verification at committed
+HEAD found the marker writes beside the legacy kind writes in
+`src/my/plan.clj`, `src/seon/bootstrap.clj`, and
+`src/seon/render/walk.clj`.
+
+All edited production namespaces loaded after publication. The direct
+regression
+`seon.error-test/exact-dispatch-producers-carry-their-class-markers` passes and
+constructs one representative of each of the twelve real exact-dispatch
 classes through `seon.error/diagnostic`, proving that the constructor retains
 each marker and that the active registry recognizes the resulting class
 shape. No broad or `--all` test gate is W2 evidence.
+
+The issue remains open: W2/W2b accreted shape markers but did not correct the
+dated catalog or remove the surviving `:seon.error/kind` producers and
+consumers assigned to W3--W5.
 
 ## Owner
 
