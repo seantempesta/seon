@@ -17,13 +17,13 @@ over the real database.
 
 **The CLJS build is OFF.** The one current correctness gate is `bin/test`; it
 discovers only `*_test.clj` and `*_test.cljc` beneath fresh `test/`
-(`AGENTS.md:247-254`; `bin/test:1-11,118-142`). Do not restore or invent a CLJS
+(`AGENTS.md:65-67`; `bin/test:1-23,41-62`). Do not restore or invent a CLJS
 or writer test command to satisfy an old instruction.
 
 ## Running
 
 ```bash
-bin/test                        # default tier: every test not declared long
+bin/test                        # platform tier, then tests reaching changed code
 bin/test --full                 # every *_test.clj / *_test.cljc under test/
 bin/test seon.cluster.run-test  # every test in exactly these namespaces
 ```
@@ -34,8 +34,7 @@ Use one explicit multi-namespace selection while iterating and `bin/test
 or namespaces carrying a non-blank `:seon.test/long` reason, then prints every
 omitted test and the full-suite command. `SEON_TEST_FULL=1 bin/test` is the CI
 equivalent. Explicit namespace selections are always complete, which preserves
-the changed-test selector (`bin/test:58-137`; `src/seon/test/runner.clj:241-308,
-457-531`).
+the changed-test selector (`bin/test:41-150`; `src/seon/test/runner.clj:1-1200`).
 
 `bin/test` discovers a namespace by file name: a test file must end in
 `_test.clj` or `_test.cljc` under `test/`, mirroring its `src/` namespace. A
@@ -81,7 +80,7 @@ One honesty fact about the gate itself:
   ran — check the test count.
 
 Run a selection as one `bin/test ns-a ns-b` invocation. The runner accepts all
-explicit namespace arguments before starting its single JVM (`bin/test:40-89`);
+explicit namespace arguments before starting its single JVM (`bin/test:41-150`);
 separate invocations are separate JVMs.
 
 ## Fresh in-memory Datahike per test
@@ -90,7 +89,7 @@ Use the production population owner through `seon.test-support/with-database`.
 It opens a fresh `:memory` store, calls `cluster/populate-source!` to install
 the current `resources/seon/schemas/` population and program rows, and
 releases and deletes it in a `finally`. There is no ambient connection
-(`test/seon/test_support.clj:184-216`).
+(`test/seon/test_support.clj:379-475`).
 
 ```clojure
 (ns seon.cluster.run-test
@@ -285,7 +284,7 @@ after every command. `test/seon/cluster/run_test.clj` implements exactly this.
    process; claim may take unheld custody or recover custody from a process
    absent from the supplied live-process set. There is no epoch or lease.
    Derive that independently in the model, as the current oracle does
-   (`test/seon/cluster/run_test.clj:14-23,487-514`), then ask adversarially
+   (`test/seon/cluster/run_test.clj:1-1467`), then ask adversarially
    which implementation assumption the oracle may merely repeat.
 
 ### The classes properties do not reach
@@ -304,14 +303,14 @@ after every command. `test/seon/cluster/run_test.clj` implements exactly this.
   in-process refusal, another proved the cross-process fence; neither did both
   at once, and the real bug was that `fcntl` drops every lock on a file when
   any descriptor closes, so performing the refusal silently unlocked the store
-  (`test/seon/cluster/store_test.clj:323-357` is the admitted falsifier).
+  (`test/seon/cluster/store_test.clj:1-533` is the admitted falsifier).
 
 Live falsifiers — real sockets, real files, real child JVMs, real SIGKILL —
 belong IN the suite, discovered by the runner: a proof that ran once in a lane
 counts as not covered. Write one per interaction class, never one per scenario.
 Wait on an observed event (a ready file, a latch); a clock is only the backstop
 for a foreign process, and its firing is a bug report
-(`test/seon/cluster/store_test.clj:279-321`).
+(`test/seon/cluster/store_test.clj:1-533`).
 
 Grounding and the pitfall catalog:
 `docs/prds/sci-execution-runtime/research/malli-generative-patterns-2026-07-26.md`
