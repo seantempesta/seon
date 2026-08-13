@@ -264,20 +264,30 @@
         (.remove thread-arm)
         (throw failure)))))
 
+(defn- current-thread-arm
+  "The arm installed on this thread, never an arm from a sibling thread."
+  [guard]
+  (.get ^ThreadLocal (::thread-arm guard)))
+
+(defn- same-interpreter?
+  [armed ctx]
+  (identical? (:env (::ctx armed)) (:env ctx)))
+
 (defn arm
   "Arm `ctx` on this thread and return its stop, record, and observers.
 
   ONE re-entrancy rule for every entrance, because a second rule is how the
-  two boundaries diverged: work reached through the same SCI interpreter
-  context is identified by its `:env` reference and INHERITS that arm. Context
-  maps carrying a scoped environment may differ while still naming that same
-  interpreter. The outer deadline keeps governing, the returned `::stop!` is
-  inert, and no second timer exists, so nested work can never restart the clock
-  and outlive the limit that admitted it. A DIFFERENT SCI interpreter context
-  on an armed thread is refused, because one thread cannot honestly serve two
-  limits. A true `sci/fork` has a distinct `:env` reference and remains
-  different. `::built-in-calls` reports the governing arm's observations
-  either way.
+  two boundaries diverged: work inherits only the arm installed in THIS
+  thread's ThreadLocal and only when that arm names the same SCI interpreter
+  through its `:env` reference. Context maps carrying a scoped environment may
+  differ while still naming that same interpreter. A sibling thread sees no
+  current arm and therefore owns an independent one even when it evaluates the
+  same context concurrently. The outer deadline keeps governing nested work,
+  the returned `::stop!` is inert, and no second timer exists. A DIFFERENT SCI
+  interpreter context on an armed thread is refused, because one thread cannot
+  honestly serve two limits. A true `sci/fork` has a distinct `:env` reference
+  and remains different. `::built-in-calls` reports the governing arm's
+  observations either way.
 
   THE THREAD IS NOT THE ARM. Work that leaves this thread carries the arm as
   a value (`current-arm`) and the receiving thread installs it for the extent
@@ -293,9 +303,9 @@
       (throw
        (ex-info "SCI context has no stable interrupt guard."
                 {:seon.error/kind ::missing-interrupt-guard})))
-    (if-let [armed (.get ^ThreadLocal (::thread-arm guard))]
+    (if-let [armed (current-thread-arm guard)]
       (do
-        (when-not (identical? (:env ctx) (:env (::ctx armed)))
+        (when-not (same-interpreter? armed ctx)
           (throw
            (ex-info "A different SCI context is already armed on this thread."
                     {:seon.error/kind ::already-armed})))

@@ -1556,32 +1556,63 @@
                      (pr-str allocations)))))))))
 
 (deftest one-context-arms-concurrent-threads-independently
+  ;; The class is arm identity, not interpreter throughput. Both threads arm
+  ;; the SAME ctx before either proceeds. One waits for its 30ms latch; only
+  ;; after that interrupt is observed does its still-armed sibling call the
+  ;; shared interrupt function. A process-wide arm or context-wide arm makes
+  ;; the sibling observe the cut. A ThreadLocal arm cannot.
   (let [ctx (eval/build-base-ctx)
-        definition
-        (run-in
-         ctx
-         (str "(defn finite-spin [] "
-              "(loop [i 0] (if (< i 100000000) (recur (inc i)) i)))")
-         1000)
-        start (java.util.concurrent.CountDownLatch. 1)
-        submit
-        (fn [time-limit-ms]
-          (future
-            (.await start)
-            (run-in ctx "(finite-spin)" time-limit-ms)))
-        cut-task (submit 200)
-        complete-task (submit 10000)]
-    (is (ok? definition))
-    (.countDown start)
-    (let [cut-evaluation (deref cut-task 15000 ::hung)
-          complete-evaluation (deref complete-task 15000 ::hung)]
-      (is (not= ::hung cut-evaluation))
-      (is (not= ::hung complete-evaluation))
-      (is (cut? cut-evaluation))
-      (is (ok? complete-evaluation)
-          "arming and interrupting one thread never cuts its sibling")
-      (is (= 100000000
-             (:seon.sci.admit/value complete-evaluation))))))
+        ready (java.util.concurrent.CountDownLatch. 2)
+        begin (java.util.concurrent.CountDownLatch. 1)
+        cut-observed (java.util.concurrent.CountDownLatch. 1)
+        interrupt-fn (:interrupt-fn ctx)
+        cut-task
+        (future
+          (let [{stop! :seon.sci.kernel/stop!} (kernel/arm ctx 30)]
+            (.countDown ready)
+            (.await begin)
+            (try
+              (let [backstop
+                    (+ (System/nanoTime)
+                       (* test-support/event-backstop-seconds 1000000000))]
+                (loop []
+                  (if (> (System/nanoTime) backstop)
+                    ::cut-not-observed
+                    (let [interrupted-now?
+                          (try
+                            (interrupt-fn)
+                            false
+                            (catch Throwable failure
+                              (if (kernel/interrupted? failure)
+                                true
+                                (throw failure))))]
+                      (if interrupted-now?
+                        (do (.countDown cut-observed) ::cut)
+                        (do (Thread/onSpinWait) (recur)))))))
+              (finally (stop!)))))
+        sibling-task
+        (future
+          (let [{stop! :seon.sci.kernel/stop!} (kernel/arm ctx 30000)]
+            (.countDown ready)
+            (.await begin)
+            (try
+              (test-support/await-event! cut-observed ::sibling-observed-cut)
+              (try
+                (interrupt-fn)
+                ::sibling-live
+                (catch Throwable failure
+                  (if (kernel/interrupted? failure)
+                    ::sibling-cut
+                    (throw failure))))
+              (finally (stop!)))))]
+    (is (test-support/await-event! ready ::both-arms-ready))
+    (.countDown begin)
+    (let [cut-result (test-support/await-event! cut-task ::cut-task-settled)
+          sibling-result
+          (test-support/await-event! sibling-task ::sibling-task-settled)]
+      (is (= ::cut cut-result))
+      (is (= ::sibling-live sibling-result)
+          "arming and interrupting one thread never cuts its sibling"))))
 
 (deftest disarm-clears-the-current-threads-flag-exactly
   (let [ctx (eval/build-base-ctx)
