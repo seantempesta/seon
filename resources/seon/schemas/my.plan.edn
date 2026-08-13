@@ -79,4 +79,32 @@
            [:my.plan/anchor {:optional true} :my.plan/anchor]
            [:my.plan/older-completions
             {:optional true}
-            :my.plan/older-completions]]}
+            :my.plan/older-completions]],
+          :agent-not-found [:= true],
+          :agent-not-found-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan request whose agent does not exist"} [:my.plan/agent-not-found :my.plan/agent-not-found] [:seon.error/message :seon.error/message]],
+          :ambiguous-identity [:= true],
+          :ambiguous-identity-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark an authored plan identity with multiple candidates"} [:my.plan/ambiguous-identity :my.plan/ambiguous-identity] [:seon.error/message :seon.error/message]],
+          :completed-identity [:= true],
+          :completed-identity-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a completed identity that cannot be rewritten"} [:my.plan/completed-identity :my.plan/completed-identity] [:seon.error/message :seon.error/message]],
+          :dependency-not-found [:= true],
+          :dependency-not-found-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan dependency that does not exist"} [:my.plan/dependency-not-found :my.plan/dependency-not-found] [:seon.error/message :seon.error/message]],
+          :duplicate-identity [:= true],
+          :duplicate-identity-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark an identity repeated in one authored plan"} [:my.plan/duplicate-identity :my.plan/duplicate-identity] [:seon.error/message :seon.error/message]],
+          :duplicate-label [:= true],
+          :duplicate-label-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a label repeated in one authored plan"} [:my.plan/duplicate-label :my.plan/duplicate-label] [:seon.error/message :seon.error/message]],
+          :foreign-identity [:= true],
+          :foreign-identity-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark an authored identity owned by another agent"} [:my.plan/foreign-identity :my.plan/foreign-identity] [:seon.error/message :seon.error/message]],
+          :identity-exists [:= true],
+          :identity-exists-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a new plan item identity that already exists"} [:my.plan/identity-exists :my.plan/identity-exists] [:seon.error/message :seon.error/message]],
+          :item-reference-not-found [:= true],
+          :item-reference-not-found-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a referenced plan item that does not exist"} [:my.plan/item-reference-not-found :my.plan/item-reference-not-found] [:seon.error/message :seon.error/message]],
+          :item-reference-not-owned [:= true],
+          :item-reference-not-owned-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a referenced plan item owned by another agent"} [:my.plan/item-reference-not-owned :my.plan/item-reference-not-owned] [:seon.error/message :seon.error/message]],
+          :not-found [:= true],
+          :not-found-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan item that does not exist"} [:my.plan/not-found :my.plan/not-found] [:seon.error/message :seon.error/message]],
+          :not-owned [:= true],
+          :not-owned-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan item owned by another agent"} [:my.plan/not-owned :my.plan/not-owned] [:seon.error/message :seon.error/message]],
+          :subject-not-found [:= true],
+          :subject-not-found-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan subject that does not exist"} [:my.plan/subject-not-found :my.plan/subject-not-found] [:seon.error/message :seon.error/message]],
+          :unknown-label [:= true],
+          :unknown-label-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan dependency label that does not exist"} [:my.plan/unknown-label :my.plan/unknown-label] [:seon.error/message :seon.error/message]]}

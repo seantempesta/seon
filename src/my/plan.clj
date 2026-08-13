@@ -70,7 +70,8 @@
   [kind message data]
   (throw
    (ex-info message
-            {:seon.error/kind kind
+            {kind true
+             :seon.error/kind kind
              :seon.error/message message
              :seon.error/data data})))
 
@@ -563,9 +564,7 @@
   [throwable]
   (let [data (ex-data throwable)]
     (if (:seon.error/kind data)
-      (select-keys data [:seon.error/kind
-                         :seon.error/message
-                         :seon.error/data])
+      data
       (throw throwable))))
 
 (defn plan!
@@ -802,7 +801,8 @@
     (if (error-value? agent-entity)
       agent-entity
       (if-not agent-entity
-        {:seon.error/kind ::agent-not-found
+        {::agent-not-found true
+         :seon.error/kind ::agent-not-found
          :seon.error/message
          (str "There is no agent named " (pr-str agent-id) ".")
          :seon.error/data {:seon.cluster.agent/id agent-id}}

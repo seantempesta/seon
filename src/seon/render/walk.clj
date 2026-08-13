@@ -263,7 +263,8 @@
                                        (conj
                                         {:seon.render.walk/attribute attribute
                                          :seon.error/value
-                                         {:seon.error/kind ::elided
+                                         {::elided true
+                                          :seon.error/kind ::elided
                                           :seon.error/message
                                           (str "elided additional "
                                                (when reverse? "reverse ")
@@ -483,7 +484,8 @@
      :seon.render.walk/found-depth
      (inc (:seon.render.walk/found-depth member))
      :seon.error/value
-     {:seon.error/kind ::elided
+     {::elided true
+      :seon.error/kind ::elided
       :seon.error/message
       "elided connections at the requested distance cap"}}))
 
@@ -515,7 +517,8 @@
              :seon.render.walk/path []
              :seon.render.walk/found-depth 0
              :seon.error/value
-             {:seon.error/kind ::no-such-entity
+             {::no-such-entity true
+              :seon.error/kind ::no-such-entity
               :seon.error/message
               (str "Nothing in the database answers to " (pr-str lookup) ".")}}]
            (into []

@@ -36,7 +36,8 @@
                       [:seon.cluster.message/id]}]}]
                  [:seon.cluster.agent/id agent-id])]
     (if-not (:seon.cluster.agent/id agent)
-      {:seon.error/kind :seon.cluster.agent/no-such-agent
+      {:seon.cluster.agent/no-such-agent agent-id
+       :seon.error/kind :seon.cluster.agent/no-such-agent
        :seon.error/message (str "No agent has id " (pr-str agent-id) ".")
        :seon.error/data {:seon.cluster.agent/id agent-id}}
       (let [namespace (:seon.cluster.agent/namespace agent)
@@ -275,7 +276,8 @@
       root
 
       (or (nil? root) (empty? order))
-      {:seon.error/kind ::root-acquisition-empty
+      {::root-acquisition-empty true
+       :seon.error/kind ::root-acquisition-empty
        :seon.error/message
        "The generated opening root pull returned no membership data."
        :seon.error/data
@@ -354,11 +356,15 @@
             (mapv (fn [[_ source result]]
                     (let [candidate (get candidate-by-source source)]
                       (when-not candidate
-                        (throw
-                         (ex-info "A stored generated form is outside the pull."
-                                  {:seon.error/kind ::prefix-drift
-                                   :seon.cluster.run/id run-id
-                                   :seon.cluster.run.form/source source})))
+                        (let [message
+                              "A stored generated form is outside the pull."]
+                          (throw
+                           (ex-info message
+                                    {::prefix-drift true
+                                     :seon.error/kind ::prefix-drift
+                                     :seon.error/message message
+                                     :seon.cluster.run/id run-id
+                                     :seon.cluster.run.form/source source}))))
                       {:seon.repl/key (:seon.repl/key candidate)
                        :seon.sci.admit/print-node (edn/read-string result)}))
                   rows)
@@ -370,14 +376,17 @@
             prior-sources (mapv second rows)
             expected-sources (mapv entry-source (take index episode))]
         (when-not (= prior-sources expected-sources)
-          (throw
-           (ex-info
-            (str "The generated opening prefix differs from its receipts: expected "
-                 (pr-str expected-sources) " actual " (pr-str prior-sources))
-            {:seon.error/kind ::prefix-drift
-             :seon.cluster.run/id run-id
-             :seon.bootstrap/expected expected-sources
-             :seon.bootstrap/actual prior-sources})))
+          (let [message
+                (str "The generated opening prefix differs from its receipts: expected "
+                     (pr-str expected-sources) " actual " (pr-str prior-sources))]
+            (throw
+             (ex-info message
+                      {::prefix-drift true
+                       :seon.error/kind ::prefix-drift
+                       :seon.error/message message
+                       :seon.cluster.run/id run-id
+                       :seon.bootstrap/expected expected-sources
+                       :seon.bootstrap/actual prior-sources}))))
         (nth episode index nil)))))
 
 (defn- digest-value

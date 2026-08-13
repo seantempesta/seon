@@ -246,6 +246,7 @@
             refusal (plan/plan! ambiguous @connection connection "alice")]
         (is (= 2 (count children)))
         (is (= :my.plan/ambiguous-identity (:seon.error/kind refusal)))
+        (is (true? (:my.plan/ambiguous-identity refusal)))
         (is (= basis (db/basis-t @connection)))
         (let [exact
               [{:my.plan.item/id root-id

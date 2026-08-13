@@ -245,6 +245,8 @@
                   (bootstrap/next-entry request "bootstrap:missing"))]
             (is (map? result) label)
             (is (= expected-kind (:seon.error/kind result)) label)
+            (when (= :seon.bootstrap/root-acquisition-empty expected-kind)
+              (is (true? (:seon.bootstrap/root-acquisition-empty result)) label))
             (is (not (nil? result))
                 (str label " must not look like a completed frontier"))))))))
 

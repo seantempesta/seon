@@ -123,7 +123,11 @@
          (is (every? #(= :seon.render.walk/elided
                          (:seon.error/kind (:seon.error/value %)))
                      error-valued-units)
-             "every error-valued survivor is a distance-cap marker, not a renderer failure"))
+             "every error-valued survivor is a distance-cap marker, not a renderer failure")
+         (is (every? #(true? (:seon.render.walk/elided
+                              (:seon.error/value %)))
+                     error-valued-units)
+             "every distance-cap error carries its declared class marker"))
        (is (some #(str/includes? (str (:seon.render/output %)) "42") units)
            "the seeded transcript reaches database reads and print emission")
        (is (zero? @database-projection-resolutions)

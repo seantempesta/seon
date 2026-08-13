@@ -1,0 +1,22 @@
+#:seon.bootstrap{:root-acquisition-empty [:= true]
+                 :root-acquisition-empty-error
+                 [:map
+                  {:seon.error/class true
+                   :seon.render/ai seon.error/render-ai
+                   :seon.render/html seon.error/render-html
+                   :error/message
+                   "must mark a generated opening whose root acquisition is empty"}
+                  [:seon.bootstrap/root-acquisition-empty
+                   :seon.bootstrap/root-acquisition-empty]
+                  [:seon.error/message :seon.error/message]]
+                 :prefix-drift [:= true]
+                 :prefix-drift-error
+                 [:map
+                  {:seon.error/class true
+                   :seon.render/ai seon.error/render-ai
+                   :seon.render/html seon.error/render-html
+                   :error/message
+                   "must mark a generated opening whose settled prefix drifted"}
+                  [:seon.bootstrap/prefix-drift
+                   :seon.bootstrap/prefix-drift]
+                  [:seon.error/message :seon.error/message]]}
