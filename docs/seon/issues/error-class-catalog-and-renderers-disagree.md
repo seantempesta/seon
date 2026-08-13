@@ -51,11 +51,12 @@ problem.
 
 W2 producer accretion landed on 2026-08-13 in commits `2aacc58fe`,
 `2638370c5`, `e1f1fbe6d`, `72e093ae7`, `06e654c76`, `ff182e7e9`, and
-`1aacbc638`. Every in-scope producer found by the parsed census now retains
+`1aacbc638`, followed by the owner-completion commits from `111677a1e`
+through `335ed62ec`. Every in-scope producer found by the parsed census now retains
 its existing `:seon.error/kind` and also emits the marker member of its
 declared error-class shape. Registry-first declaration raised the current
 parsed count of declared error-class markers from 226 at the start of W2 to
-306 after the accretion; the source census still reports the kind writes and
+314 after the accretion; the source census still reports 306 kind writes and
 reads because their deletion belongs to W3--W5. Dynamic constructors now use
 their selected keyword as the marker as well as the legacy kind, and
 `seon.error/diagnostic` preserves a supplied class marker.
