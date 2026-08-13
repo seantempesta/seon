@@ -186,15 +186,9 @@
    [request]))
 
 (defn- admission
-  "The value-admission dials this request settles under, read ONCE on the
-  requesting thread.
-
-  A background request settles on whichever thread ran its work, so the
-  dials travel as data with the settlement rather than as a binding frame
-  the far side hopes it inherited."
-  []
-  {:seon.sci.admit/caps (:seon.sci.admit/caps *request-context*)
-   :seon.config/on-core-error (:seon.config/on-core-error *request-context*)})
+  [request-context]
+  {:seon.sci.admit/caps (:seon.sci.admit/caps request-context)
+   :seon.config/on-core-error (:seon.config/on-core-error request-context)})
 
 (defn- admitted-value
   [dials value]
@@ -461,15 +455,35 @@
               "The capability handler failed."
               {:seon.fn/sym (str owner-sym)}))
 
+(defn- background-settlement-request
+  "Capture everything background settlement needs on the requesting thread."
+  [request-context effect-id owner-sym opened-at threshold]
+  (merge
+   (select-keys request-context
+                [:seon.db/connection
+                 :seon.sci.admit/caps
+                 :seon.config/on-core-error])
+   {:seon.effect/id effect-id
+    :seon.effect/opened-at opened-at
+    ::owner-sym owner-sym
+    ::result-blob-threshold threshold}))
+
 (defn- settle-background-terminal!
-  ([connection dials effect-id owner-sym opened-at threshold terminal]
-   (if-let [throwable (::flow/throwable terminal)]
-     (if (instance? InterruptedException throwable)
-       (interrupt! connection effect-id)
-       (settle-value! connection dials effect-id opened-at threshold
-                      (handler-failure owner-sym)))
-     (settle-value! connection dials effect-id opened-at threshold
-                    (::flow/value terminal)))))
+  [{connection :seon.db/connection
+    effect-id :seon.effect/id
+    opened-at :seon.effect/opened-at
+    owner-sym ::owner-sym
+    threshold ::result-blob-threshold
+    :as settlement-request}
+   terminal]
+  (let [dials (admission settlement-request)]
+    (if-let [throwable (::flow/throwable terminal)]
+      (if (instance? InterruptedException throwable)
+        (interrupt! connection effect-id)
+        (settle-value! connection dials effect-id opened-at threshold
+                       (handler-failure owner-sym)))
+      (settle-value! connection dials effect-id opened-at threshold
+                     (::flow/value terminal)))))
 
 (defn- background-time-limit
   "The milliseconds bounding ONE detached capability request.
@@ -531,7 +545,7 @@
              ;; admission dials travel with that settlement as data instead
              ;; of being re-read from a binding frame the far side may not
              ;; have.
-             dials (admission)
+             dials (admission requesting-context)
              effect-ordinal (swap! (:seon.effect/counter *request-context*) inc)
              database @connection
              owner-row
@@ -620,7 +634,11 @@
                        ;; what `my.background` is for), and it must not be
                        ;; unbounded either — so it carries its own limit, the
                        ;; config default unless this form named another.
-                       (let [detached (kernel/detached-arm background-limit)]
+                       (let [detached (kernel/detached-arm background-limit)
+                             settlement-request
+                             (background-settlement-request
+                              requesting-context effect-id owner-sym opened-at
+                              threshold)]
                          (flow/submit!
                           (:seon.flow/work-launcher *request-context*)
                           {:seon.env/environment
@@ -641,8 +659,7 @@
                            (fn [terminal]
                              (kernel/release-arm! detached)
                              (settle-background-terminal!
-                              connection dials effect-id owner-sym opened-at
-                              threshold terminal))})
+                              settlement-request terminal))})
                          result-ref)
                        (let [outcome
                              (try

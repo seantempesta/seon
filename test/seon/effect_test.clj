@@ -12,6 +12,7 @@
             [seon.sci.kernel :as kernel]
             [seon.test-support :as test-support])
   (:import [java.util Date]
+           [java.util.concurrent CountDownLatch]
            [java.util.concurrent.atomic AtomicBoolean]))
 
 (def ^:private test-environment
@@ -158,7 +159,7 @@
     :seon.config/on-core-error :record
     :seon.effect/counter (atom -1)}))
 
-(deftest background-request-returns-its-notifying-receipt-and-settles-once
+(deftest background-settlement-carries-its-connection-across-a-thread-hop
   (test-support/with-database
     (fn [connection]
       (db/transact!
@@ -169,49 +170,63 @@
          :seon.cluster.run/agent
          [:seon.cluster.agent/id "effect-agent"]}])
       (install-capability! connection)
-      (let [events (async/chan 4)
-            listener-key (random-uuid)
-            _ (datahike/listen! connection listener-key #(async/put! events %))
-            launcher
-            (flow/start-work-launcher!
-             {:seon.env/environment @test-environment
-              ::flow/configuration
-              {:seon.config.flow.compute/queue-depth 1
-               :seon.config.flow.compute/concurrency 1
-               :seon.config.flow.io/queue-depth 1
-               :seon.config.flow.io/concurrency 1}})
+      (let [settled (CountDownLatch. 1)
+            observation (atom nil)
+            launcher ::fresh-thread-launcher
             effect-id (pr-str ["effect-run" 3 0])
             result-ref [:seon.effect/id effect-id]]
-        (try
+        (with-redefs
+          [flow/submit!
+           (fn [_ submission]
+             (.start
+              (Thread.
+               ^Runnable
+               (fn []
+                 (try
+                   (let [before-work
+                         [effect/*request-context* db/*conn*]
+                         terminal
+                         (try
+                           {::flow/value
+                            ((::flow/work-fn submission) {})}
+                           (catch Throwable throwable
+                             {::flow/throwable throwable}))
+                         before-settlement
+                         [effect/*request-context* db/*conn*]]
+                     ((::flow/complete! submission) terminal)
+                     (reset! observation
+                             {:before-work before-work
+                              :before-settlement before-settlement}))
+                   (catch Throwable throwable
+                     (reset! observation {:failure throwable}))
+                   (finally
+                     (.countDown settled))))))
+             true)]
           (is (= result-ref
                  (binding [effect/*request-context*
                            (request-context connection launcher)]
                    (effect/request!
                     #'capability-owner
                     {:seon.effect-test/value 7}
-                    {:seon.effect/background? true}))))
-          (test-support/await-event!
-           events
-           ::background-effect-settled
-           #(:seon.effect/to
-             (db/pull (:db-after %)
-                      [{:seon.effect/to [:seon.cluster.agent/id]}]
-                      [:seon.effect/id effect-id])))
-          (let [receipt
-                (db/pull @connection
-                         '[* {:seon.effect/to
-                              [:seon.cluster.agent/id]}]
-                         [:seon.effect/id effect-id])]
-            (is (= "effect-agent"
-                   (get-in receipt
-                           [:seon.effect/to :seon.cluster.agent/id])))
-            (is (nil? (:seon.effect/notify receipt)))
-            (is (int? (:seon.effect/duration-ms receipt)))
-            (is (not (neg? (:seon.effect/duration-ms receipt)))))
-          (finally
-            (datahike/unlisten! connection listener-key)
-            (async/close! events)
-            (flow/stop-work-launcher! launcher)))))))
+                    {:seon.effect/background? true})))))
+        (test-support/await-event! settled ::background-effect-settled)
+        (is (nil? (:failure @observation)) (pr-str @observation))
+        (is (= [[nil nil] [nil nil]]
+               ((juxt :before-work :before-settlement) @observation))
+            "the fresh worker has no effect or database binding frame")
+        (let [receipt
+              (db/pull @connection
+                       '[* {:seon.effect/to
+                            [:seon.cluster.agent/id]}]
+                       [:seon.effect/id effect-id])
+              result (read-string (:seon.effect/result-edn receipt))]
+          (is (= 7 (:seon.effect-test/value result)))
+          (is (= "effect-agent"
+                 (get-in receipt
+                         [:seon.effect/to :seon.cluster.agent/id])))
+          (is (nil? (:seon.effect/notify receipt)))
+          (is (int? (:seon.effect/duration-ms receipt)))
+          (is (not (neg? (:seon.effect/duration-ms receipt)))))))))
 
 (deftest the-door-runs-its-handler-under-the-requesting-evaluations-arm
   ;; THE CLASS: work that crosses a thread escapes the ONE limit. The

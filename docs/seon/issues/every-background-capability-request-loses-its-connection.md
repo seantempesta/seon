@@ -127,3 +127,33 @@ its peers) to take the environment as an argument is the seon.env Phase 3
 reader conversion, at which point `with-request-context` is deleted with
 them. The rebuild is honest about being transitional and its docstring says
 so.
+
+## Settlement fixed at cause — 2026-08-12; focused gate blocked by foreign source
+
+Background settlement no longer reads its connection or admission dials from
+the settling thread. `request*` now constructs one immutable settlement
+request on the requesting thread containing `:seon.db/connection`,
+`:seon.sci.admit/caps`, `:seon.config/on-core-error`, the effect identity,
+owner, opening instant, and blob threshold. The terminal callback consumes
+only that value and its terminal argument. A thread hop therefore has no
+binding frame from which it could drop settlement custody.
+
+The one class regression replaces the earlier indirect connection assertion:
+it runs the background work and terminal callback on a fresh raw `Thread`,
+asserts both `seon.effect/*request-context*` and `seon.db/*conn*` are `nil`
+before work and before settlement, then reads the committed result and
+notification facts through the original connection.
+
+Evidence obtained before the gate blocker:
+
+- a real `seon.flow` IO-launcher probe observed a virtual settling thread with
+  both dynamic roots `nil`, while `env/of` recovered the submission's carried
+  environment and the work value arrived;
+- `(require 'seon.effect :reload)` succeeded after the source change; and
+- `git diff --check` passed for the source and regression.
+
+The required focused `bin/test seon.effect-test` did not reach the namespace.
+Its shared published-base preparation refused the protected foreign file
+`test/seon/render/web_test.clj:505`: unresolved symbol `debug-feed-path`
+(`tmp/test-runs/run.JtBA4Q/test-run.txt`, `runner-exit=1`). Per lane ownership,
+this issue remains open and no foreign file was edited or rerun around.
