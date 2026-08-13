@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, schema, sci, performance]
+tags: [issue, schema, sci, performance, class/p1, wave/schema-projection-performance]
 ---
 
 # Stop rebuilding gigabytes of schema state for one declaration

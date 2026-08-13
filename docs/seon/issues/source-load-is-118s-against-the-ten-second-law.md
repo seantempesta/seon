@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, tooling, performance]
+tags: [issue, performance, wave/load-time]
 ---
 
 # Source load is 11.8 s, and the ten-second law is measured against it

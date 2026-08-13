@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, operator, boot]
+tags: [issue, operator, class/n1, wave/operator-lock-scope-follow-up]
 ---
 
 # Pre-rename root claims are unreadable noise on every `status`

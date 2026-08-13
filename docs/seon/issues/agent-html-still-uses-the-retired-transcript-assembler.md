@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, render, context, web, architecture]
+tags: [issue, render, web, class/n11, wave/transcript-deletion]
 ---
 
 # Delete the separate agent transcript assembler

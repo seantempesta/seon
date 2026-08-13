@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, operator, database]
+tags: [issue, operator, database, wave/operator-artifact-follow-up]
 ---
 
 # Give offline roster discovery a current read-only helper

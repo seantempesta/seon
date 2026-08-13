@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, render, web, live-drive]
+tags: [issue, render, web, wave/seon-env-p3]
 ---
 
 # Return `/data` without a five-second stall

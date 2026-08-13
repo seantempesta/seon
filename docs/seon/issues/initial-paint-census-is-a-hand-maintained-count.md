@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, render, testing]
+tags: [issue, render, test, class/n7, wave/render-test]
 ---
 
 # The initial-paint census is a hand-maintained count every lane must re-bump

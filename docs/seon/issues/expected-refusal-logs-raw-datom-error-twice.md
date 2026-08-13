@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, database, rendering]
+tags: [issue, database, render, class/n1, wave/datahike-fork-logging-seam]
 ---
 
 # An expected transaction refusal logs a raw Datom-heavy error before the bounded writer face

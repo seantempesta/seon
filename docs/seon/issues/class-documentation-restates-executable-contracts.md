@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: cleanup
-tags: [issue, documentation, contract, class-kill]
+tags: [issue, docs, schema, class/n12, class-kill, wave/class-kill-queue]
 ---
 
 # Derive callable shape documentation from executable contracts

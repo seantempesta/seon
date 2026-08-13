@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, agent, bootstrap, render, performance]
+tags: [issue, agent, render, performance, class/n9, wave/prefix-drift-bootstrap]
 ---
 
 # Generated opening live pull does not return after help

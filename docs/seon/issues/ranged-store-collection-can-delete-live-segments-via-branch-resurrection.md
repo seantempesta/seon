@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, database, datahike, konserve, gc]
+tags: [issue, database, class/n14, wave/exclusive-sweep]
 ---
 
 # Ranged store collection can delete live segments via branch resurrection

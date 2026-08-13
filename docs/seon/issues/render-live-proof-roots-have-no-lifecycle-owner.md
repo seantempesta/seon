@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, operator, rendering, storage]
+tags: [issue, operator, render, database, class/n4, wave/directory-claims]
 ---
 
 # Render live-proof roots have no declared lifecycle owner

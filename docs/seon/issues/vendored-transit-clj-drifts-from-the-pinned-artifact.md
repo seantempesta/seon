@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: cleanup
-tags: [issue, dependency, source-grounding]
+tags: [issue, database, class/p5, wave/upstream-delta]
 ---
 
 # Close the remaining vendored-versus-pinned dependency drift

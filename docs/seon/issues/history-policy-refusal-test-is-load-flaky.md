@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, testing, boot, runtime]
+tags: [issue, runtime, test, class/p1, wave/test-fixture]
 ---
 
 # `operator-root-history-policy-is-creation-fixed` fails intermittently under machine load, and looks exactly like a regression

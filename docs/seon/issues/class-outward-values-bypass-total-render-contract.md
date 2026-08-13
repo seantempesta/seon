@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, architecture, render, class-kill]
+tags: [issue, render, class/n1, class-kill, wave/class-kill-queue]
 ---
 
 # Make outward values unable to bypass one total render contract

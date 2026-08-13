@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, database, context, performance]
+tags: [issue, blob, render, performance, class/n11, wave/eval-scale-economics]
 ---
 
 # Route exact context captures through the blob owner

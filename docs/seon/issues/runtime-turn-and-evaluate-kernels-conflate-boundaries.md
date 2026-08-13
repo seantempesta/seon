@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, runtime, sci]
+tags: [issue, runtime, sci, wave/runtime-boundary-refactor]
 ---
 
 # Split the turn and evaluation kernels at durable boundaries

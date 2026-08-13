@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, render, sci, runtime]
+tags: [issue, render, sci, runtime, wave/render-arm]
 ---
 
 # Public walk render inside an armed eval hits already-armed

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, toolkit, render]
+tags: [issue, web, effect, render, class/n1, wave/capability-surface]
 ---
 
 # `my.web/fetch` returns plain UTF-8 HTML as a vector of integers

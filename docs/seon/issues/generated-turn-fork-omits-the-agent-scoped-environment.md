@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, agent, bootstrap, context, repl]
+tags: [issue, agent, sci, runtime, class/p1, wave/evolving-session-phases]
 ---
 
 # Generated turn fork omits the agent-scoped environment

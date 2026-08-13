@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, eval, testing, architecture]
+tags: [issue, sci, test, class/p2, wave/eval-driver-lifecycle]
 ---
 
 # Give eval episode backstops one declared owner

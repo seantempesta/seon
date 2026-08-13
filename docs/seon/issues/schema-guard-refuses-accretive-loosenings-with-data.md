@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, schema, runtime]
+tags: [issue, schema, runtime, wave/schema-lifecycle]
 ---
 
 # The runtime schema guard refuses accretive loosenings when data exists

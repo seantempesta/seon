@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, rendering, program-graph, operator, mcp]
+tags: [issue, operator, mcp, render, class/n2, wave/program-index-proof]
 ---
 
 # Include non-installed operator and MCP leaves in the sink proof

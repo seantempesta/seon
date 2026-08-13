@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, operator, observability, storage, process]
+tags: [issue, operator, database, class/n4, wave/directory-claims]
 ---
 
 # Observe and claim every deletable directory

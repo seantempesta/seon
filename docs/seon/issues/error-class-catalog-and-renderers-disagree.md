@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, error, schema, render, testing]
+tags: [issue, schema, render, test, class/n11, wave/error-class-contract]
 ---
 
 # Reconcile the error-class catalog with declared schemas and renderers

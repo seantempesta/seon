@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: cleanup
-tags: [issue, render, cluster, context]
+tags: [issue, render, wave/context-fixes]
 ---
 
 # Three small honesty defects left by the context wave

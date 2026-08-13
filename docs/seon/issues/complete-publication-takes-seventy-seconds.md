@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, operator, process, database]
+tags: [issue, operator, database, class/n9, wave/publication-velocity]
 ---
 
 # Complete source publication takes ~70 s against the ten-second law

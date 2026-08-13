@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, tooling, mcp, render, live-drive]
+tags: [issue, mcp, render, class/n1, wave/whole-system-arc]
 ---
 
 # Project an MCP value whose map keys are not keywords

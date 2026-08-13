@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, toolkit, rendering]
+tags: [issue, docs, effect, class/n12, wave/capability-surface]
 ---
 
 # `my.fs/write` and `my.shell/run` docstrings hide their own request shapes

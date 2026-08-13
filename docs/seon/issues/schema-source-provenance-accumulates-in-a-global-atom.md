@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: cleanup
-tags: [issue, schema, diagnostics, derived-state]
+tags: [issue, schema, class/p1, wave/schema-admission]
 ---
 
 # Carry schema source provenance as immutable admission data

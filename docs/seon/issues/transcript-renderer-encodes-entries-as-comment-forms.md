@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, render, context, architecture]
+tags: [issue, render, class/n1, wave/strict-repl-display]
 ---
 
 # Render transcript errors as execution errors

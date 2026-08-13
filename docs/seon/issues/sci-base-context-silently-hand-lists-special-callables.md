@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, sci, agent, context, architecture]
+tags: [issue, sci, agent, class/n7, wave/sci-base-context-derivation]
 ---
 
 # Derive or explain every special SCI base binding

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, operator, rendering]
+tags: [issue, operator, render, class/n1, wave/operator-status-face]
 ---
 
 # A failed `bin/seon init` dumps the entire prepl event history instead of the cause

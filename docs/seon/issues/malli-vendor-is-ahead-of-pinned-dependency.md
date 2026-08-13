@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, dependency, malli, source-grounding]
+tags: [issue, schema, class/p5, wave/general]
 ---
 
 # Align vendored Malli source with the pinned dependency

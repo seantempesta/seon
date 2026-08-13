@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, operator, process]
+tags: [issue, operator, class/n1, wave/operator-status-face]
 ---
 
 # `bin/seon status` floods eight unreadable-external-claim warnings

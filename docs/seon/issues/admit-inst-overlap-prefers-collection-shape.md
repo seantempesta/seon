@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, sci]
+tags: [issue, sci, class/n13, wave/verification-audit]
 ---
 
 # Preserve Inst semantics when a value is also collection-like

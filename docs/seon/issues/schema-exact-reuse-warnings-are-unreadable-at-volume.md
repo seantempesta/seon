@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, schema, tooling, render]
+tags: [issue, schema, render, class/n1, wave/dev-tooling-face-hygiene]
 ---
 
 # Exact-reuse warnings bury their own signal

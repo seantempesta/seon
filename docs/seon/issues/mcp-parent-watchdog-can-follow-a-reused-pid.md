@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, tooling, mcp, operator]
+tags: [issue, mcp, operator, wave/mcp-process-lifetime]
 ---
 
 # Fence the MCP parent watchdog by captured process identity

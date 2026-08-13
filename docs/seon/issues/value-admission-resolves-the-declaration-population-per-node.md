@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, schema, admission, performance, runtime]
+tags: [issue, schema, performance, runtime, class/p1, wave/seon-env-p3]
 ---
 
 > **2026-08-08 — the per-node shape is dead at the admission seam.**

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, architecture, operator, class-kill]
+tags: [issue, operator, runtime, class/n3, class-kill, wave/class-kill-queue]
 ---
 
 # Give every loaded artifact enforced source identity

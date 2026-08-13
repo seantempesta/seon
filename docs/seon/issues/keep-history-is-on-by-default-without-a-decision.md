@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, database, datahike, architecture]
+tags: [issue, database, wave/store-perf]
 ---
 
 # State a position on `:keep-history?` instead of inheriting it

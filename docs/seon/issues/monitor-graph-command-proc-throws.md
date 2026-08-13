@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: cleanup
-tags: [issue, flow, lifecycle]
+tags: [issue, flow, class/n11, wave/flow-protocol]
 ---
 
 # Delete the monitor graph's command-proc passthrough

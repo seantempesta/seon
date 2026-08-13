@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, program-graph, database, sci]
+tags: [issue, database, sci, wave/future-program-graph-binding]
 ---
 
 # Connect namespace alias and refer targets with refs

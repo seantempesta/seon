@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, datahike, architecture, evidence]
+tags: [issue, database, wave/store-perf]
 ---
 
 # A file-store commit writes 18 objects where 1 would do

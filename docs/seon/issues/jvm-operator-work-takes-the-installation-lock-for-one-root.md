@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, operator, concurrency]
+tags: [issue, operator, class/n4, wave/operator-lock-contention]
 ---
 
 # The JVM operator takes the installation lock for one root's own work

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, performance, architecture, class-kill]
+tags: [issue, performance, render, schema, class/n9, class-kill, wave/class-kill-queue]
 ---
 
 # Make local updates unable to recompute global projections

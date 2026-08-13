@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: cleanup
-tags: [issue, database, testing]
+tags: [issue, database, test, class/n8, wave/reconcile-evidence]
 ---
 
 # Select duplicate-identity refusal evidence deterministically

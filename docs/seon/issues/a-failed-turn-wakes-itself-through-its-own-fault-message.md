@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, runtime, agent, ai, live-drive]
+tags: [issue, runtime, agent, message, wave/live-drive-context]
 ---
 
 # Stop a failed turn from waking itself through its own fault message

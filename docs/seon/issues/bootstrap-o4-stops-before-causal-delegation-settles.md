@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, agent, runtime, test, bootstrap]
+tags: [issue, agent, runtime, test, class/n2, wave/causal-episode]
 ---
 
 # Make bootstrap O4 wait for the causal delegation

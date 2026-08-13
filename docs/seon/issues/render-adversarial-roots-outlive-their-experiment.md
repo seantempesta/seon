@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, operator, rendering, storage, errors]
+tags: [issue, operator, render, database, class/n4, wave/directory-claims]
 ---
 
 # Render adversarial roots outlive their fault experiment

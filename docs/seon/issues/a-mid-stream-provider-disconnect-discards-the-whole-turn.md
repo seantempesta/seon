@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, runtime, agent, ai, live-drive]
+tags: [issue, runtime, agent, ai, class/n10, wave/whole-system-arc]
 ---
 
 # Settle what arrived when a provider stream closes mid-body

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: cleanup
-tags: [issue, architecture, deletion, class-kill]
+tags: [issue, schema, database, flow, class/n11, class-kill, wave/class-kill-queue]
 ---
 
 # Reject readerless rows and duplicate mechanisms at publication

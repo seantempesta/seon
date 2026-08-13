@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, database, testing]
+tags: [issue, blob, database, test, class/n13, wave/blob-storage]
 ---
 
 # Blob get assumes the file-store callback shape

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, schema, architecture]
+tags: [issue, schema, wave/cluster-search-wiring]
 ---
 
 # Separate declared search metadata from the process index ID

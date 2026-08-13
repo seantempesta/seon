@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, operator, process, architecture]
+tags: [issue, operator, class/n7, wave/operator-process-identity]
 ---
 
 # Derive operator process identity without command substring lists

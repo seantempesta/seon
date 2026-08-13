@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, schema, contract, class-kill]
+tags: [issue, schema, class/n6, class-kill, wave/class-kill-queue]
 ---
 
 # Make every durable contract predicate identifiable

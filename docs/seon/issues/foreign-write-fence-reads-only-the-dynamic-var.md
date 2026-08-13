@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, database, runtime]
+tags: [issue, database, runtime, class/p1, wave/seon-env-p3]
 ---
 
 # The foreign-write custody fence reads only `seon.db/*conn*`

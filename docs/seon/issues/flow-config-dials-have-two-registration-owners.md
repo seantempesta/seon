@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: cleanup
-tags: [issue, flow, schema, config, architecture]
+tags: [issue, flow, schema, config, class/n11, wave/core]
 ---
 
 # Give Flow configuration dials one registration owner

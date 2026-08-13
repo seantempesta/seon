@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, render, context, performance]
+tags: [issue, render, performance, wave/render-acquisition-performance]
 ---
 
 # Explain the 24-second live root pull of 189 members

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, render, context, schema]
+tags: [issue, render, schema, class/n1, wave/render-producers]
 ---
 
 # Cluster, config, and bootstrap plan render as raw maps

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, schema]
+tags: [issue, schema, class/n13, wave/schema-form-extraction]
 ---
 
 # Extract Malli map entries by shape, not position

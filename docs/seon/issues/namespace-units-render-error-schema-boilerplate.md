@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, render, context, schema]
+tags: [issue, render, schema, class/n1, wave/agent-context]
 ---
 
 # Render a capability namespace by its API, not by its Malli source

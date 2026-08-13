@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, sci, config]
+tags: [issue, sci, config, wave/sci-reader-limit]
 ---
 
 # Give the SCI source-size cap a declared owner

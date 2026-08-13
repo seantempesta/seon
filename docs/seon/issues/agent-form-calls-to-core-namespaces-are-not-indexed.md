@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, program-graph, index, eval, agent]
+tags: [issue, agent, sci, class/n7, wave/program-graph-indexing]
 ---
 
 # Agent run forms record no call edge to a core function they call

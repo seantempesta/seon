@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: cleanup
-tags: [issue, dependency, database, datahike]
+tags: [issue, database, class/n11, wave/store-perf]
 ---
 
 # Delete the konserve LRU our fork allocates and never reads

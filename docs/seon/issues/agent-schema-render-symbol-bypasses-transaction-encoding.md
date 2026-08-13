@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, schema, render, database, agent]
+tags: [issue, schema, render, database, class/n13, wave/rebirth-gap]
 ---
 
 # Agent schema render symbol bypasses transaction encoding

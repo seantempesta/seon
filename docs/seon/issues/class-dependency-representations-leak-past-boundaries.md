@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, architecture, dependency, class-kill]
+tags: [issue, schema, database, class/n13, class-kill, wave/class-kill-queue]
 ---
 
 # Translate dependency representations once at their boundary

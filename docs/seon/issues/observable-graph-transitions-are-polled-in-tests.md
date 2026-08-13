@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, testing, flow]
+tags: [issue, flow, test, class/p2, wave/core]
 ---
 
 # Publish graph transitions instead of polling them in tests

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, architecture, process, testing, class-kill]
+tags: [issue, operator, runtime, test, class/n4, class-kill, wave/class-kill-queue]
 ---
 
 # Make mutable resources carry their root and lifetime

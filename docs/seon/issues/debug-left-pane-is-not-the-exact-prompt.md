@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, web, render, context]
+tags: [issue, web, render, class/n1, wave/visual-qa]
 ---
 
 # Make the debug left pane the exact bytes the agent received

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, sci, namespace, runtime, durability]
+tags: [issue, sci, runtime, class/p3, wave/per-run-fork-context]
 ---
 
 # Admit definitions after dynamically hidden namespace movement

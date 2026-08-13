@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, tooling, mcp, repl, observability]
+tags: [issue, mcp, sci, wave/dev-mcp]
 ---
 
 # Repair development MCP error locations and status scope

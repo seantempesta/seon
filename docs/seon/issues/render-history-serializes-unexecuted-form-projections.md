@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, render, context, runtime, architecture]
+tags: [issue, render, runtime, class/n11, wave/generated-receipts]
 ---
 
 # Execute generated form projections before they enter history

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, testing, runtime, flow]
+tags: [issue, runtime, flow, test, class/p3, wave/schedule-fixture]
 ---
 
 # Construct the schedule graph test from a real environment-bearing handle

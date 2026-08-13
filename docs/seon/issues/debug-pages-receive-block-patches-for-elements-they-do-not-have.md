@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, render, web, live-drive]
+tags: [issue, render, web, class/n1, wave/ui-watchability]
 ---
 
 # Debug pages receive block patches for elements they do not have

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, schema, testing, isolation, runtime]
+tags: [issue, schema, runtime, test, class/p1, wave/explicit-environment-proof]
 ---
 
 # Make the schema environment an explicit argument, not an ambient binding

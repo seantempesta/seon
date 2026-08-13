@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, agent, render, architecture]
+tags: [issue, agent, render, class/n1, wave/strict-repl-display]
 ---
 
 # Render run forms and receipts with strict REPL fidelity

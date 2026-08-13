@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: cleanup
-tags: [issue, contracts, runtime, testing]
+tags: [issue, runtime, schema, test, class/p1, wave/contract-generator]
 ---
 
 # Stop opaque contract generators from sharing live process objects

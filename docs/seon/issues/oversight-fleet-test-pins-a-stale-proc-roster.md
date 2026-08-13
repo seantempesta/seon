@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, testing, oversight, flow]
+tags: [issue, flow, test, class/n2, wave/oversight-test]
 ---
 
 # Derive the oversight fleet proof from the live proc roster

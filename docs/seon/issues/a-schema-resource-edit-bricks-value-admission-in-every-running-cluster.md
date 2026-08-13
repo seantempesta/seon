@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, schema, architecture, runtime]
+tags: [issue, schema, runtime, class/n3, wave/seon-env-p3]
 ---
 
 # A schema-resource edit bricks value admission in every running cluster

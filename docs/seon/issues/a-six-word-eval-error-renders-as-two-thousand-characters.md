@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, error, render, repl]
+tags: [issue, render, sci, class/n1, wave/error-face-budget]
 ---
 
 # A six-word evaluation error renders as 2,154 characters

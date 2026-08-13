@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, schema, database, datahike]
+tags: [issue, schema, database, wave/schema-lifecycle]
 ---
 
 # Refuse `:db.secondary/only` until a covering index exists

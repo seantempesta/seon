@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, render, web, performance]
+tags: [issue, render, web, performance, class/n9, wave/namespace-page-performance]
 ---
 
 # Attribute the seven-second core namespace-page derivation

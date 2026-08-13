@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, flow, architecture]
+tags: [issue, flow, class/n11, wave/flow-protocol]
 ---
 
 # Adopt flow's read-set control and sanctioned egress

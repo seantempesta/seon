@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, runtime, ordering]
+tags: [issue, runtime, class/n8, wave/work-ordering-follow-up]
 ---
 
 # Select the latest closed run without comparing run ids

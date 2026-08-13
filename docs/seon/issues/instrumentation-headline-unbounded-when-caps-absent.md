@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, instrumentation, schema, sci]
+tags: [issue, schema, sci, class/n1, wave/verification-audit]
 ---
 
 # Require the general printer bound for every contract headline

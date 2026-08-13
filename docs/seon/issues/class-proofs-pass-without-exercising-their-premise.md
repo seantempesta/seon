@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, testing, class-kill]
+tags: [issue, test, class/n2, class-kill, wave/class-kill-queue]
 ---
 
 # Make proofs unable to pass without exercising their premise

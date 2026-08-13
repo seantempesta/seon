@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, runtime, testing]
+tags: [issue, runtime, test, class/n4, wave/operator-launch-concurrency]
 ---
 
 # The dependency class-cache prepare races concurrent JVM launches

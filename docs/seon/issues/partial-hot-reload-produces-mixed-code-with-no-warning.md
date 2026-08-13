@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, tooling, repl]
+tags: [issue, runtime, operator, class/n3, wave/general]
 ---
 
 # Partial hot reload leaves a live JVM running mixed old and new code

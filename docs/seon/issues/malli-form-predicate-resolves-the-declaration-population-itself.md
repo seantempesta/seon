@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, schema, malli, performance, isolation]
+tags: [issue, schema, performance, class/p1, wave/seon-env-p3]
 ---
 
 # `seon.schema/malli-form?` resolves the declaration population itself

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, testing, contracts]
+tags: [issue, test, schema, class/n2, wave/contract-gate]
 ---
 
 # Make the public-contract census prove its subjects exist

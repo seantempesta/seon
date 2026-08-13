@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, testing, tooling]
+tags: [issue, test, class/n7, wave/changed-test-selector]
 ---
 
 # Derive changed-test ownership instead of classifying paths

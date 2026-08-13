@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, runtime, boot, performance]
+tags: [issue, runtime, performance, class/p2, wave/boot-velocity]
 ---
 
 # A co-hosted second boot takes ~11× the first and the 30 s silence backstop abandons a healthy cluster

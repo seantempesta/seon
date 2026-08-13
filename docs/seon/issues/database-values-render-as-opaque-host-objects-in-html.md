@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, render, database, web]
+tags: [issue, render, database, web, class/n1, wave/render-producers]
 ---
 
 # Render database identities in HTML instead of opaque host objects

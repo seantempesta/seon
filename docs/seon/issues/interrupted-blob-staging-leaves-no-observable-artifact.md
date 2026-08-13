@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, blob, testing]
+tags: [issue, blob, test, class/n10, wave/blob-staging]
 ---
 
 # Preserve the interrupted blob staging artifact until it can be observed

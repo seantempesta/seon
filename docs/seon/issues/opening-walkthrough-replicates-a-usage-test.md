@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, agent, bootstrap, test, context]
+tags: [issue, agent, test, render, class/n11, wave/evolving-session-phases]
 ---
 
 # Opening walkthrough replicates a usage test

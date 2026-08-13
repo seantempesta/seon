@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: cleanup
-tags: [issue, web, render]
+tags: [issue, web, render, class/n1, wave/visual-qa]
 ---
 
 # Keep the page body from scrolling sideways on a phone

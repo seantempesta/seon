@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, architecture, agent, class-kill]
+tags: [issue, agent, runtime, effect, class/n10, class-kill, wave/class-kill-queue]
 ---
 
 # Make accepted work require terminal evidence

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, runtime, ordering, render, errors, live-drive]
+tags: [issue, message, runtime, render, class/p3, wave/message-transaction-data]
 ---
 
 # Give system-generated messages arrival ordinals

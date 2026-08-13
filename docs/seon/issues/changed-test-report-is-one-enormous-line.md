@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, testing, rendering]
+tags: [issue, test, render, class/n1, wave/dev-tooling-face-hygiene]
 ---
 
 # The changed-test selector prints its report as one enormous line

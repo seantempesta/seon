@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, data-model, config, cluster]
+tags: [issue, config, schema, wave/config-cluster-identity]
 ---
 
 # Stop two identity attributes from naming one string

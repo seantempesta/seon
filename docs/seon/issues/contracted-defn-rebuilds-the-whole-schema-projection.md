@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, sci, schema, eval]
+tags: [issue, sci, schema, class/n9, wave/per-cluster-live-graph]
 ---
 
 # Every contracted `defn` rebuilds the whole schema projection (~21-30 ms)

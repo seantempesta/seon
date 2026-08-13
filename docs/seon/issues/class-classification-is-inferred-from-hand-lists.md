@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, architecture, database, class-kill]
+tags: [issue, database, class/n7, class-kill, wave/class-kill-queue]
 ---
 
 # Make classification query facts instead of text and hand lists

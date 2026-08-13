@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, agent, data-model, context]
+tags: [issue, agent, schema, database, wave/evolving-session-prd]
 ---
 
 # Agent plan has no declared database relationship

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, sci, program-graph, testing]
+tags: [issue, sci, test, wave/sci-static-admission]
 ---
 
 # Make static admission honor removed default imports

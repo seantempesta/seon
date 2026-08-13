@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, effect, ordering]
+tags: [issue, effect, database, class/n8, wave/effect-ordering-follow-up]
 ---
 
 # Order effect feedback by numeric facts

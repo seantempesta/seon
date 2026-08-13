@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, ai, config, testing, agent-runtime]
+tags: [issue, ai, config, test, class/n12, wave/ai-retry-evidence]
 ---
 
 # Remove the deleted run lease from the AI retry proof

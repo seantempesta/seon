@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: cleanup
-tags: [issue, deletion]
+tags: [issue, runtime, sci, wave/fresh-portability]
 ---
 
 # Make fresh CLJC namespaces portable or name them CLJ

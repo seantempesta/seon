@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, sci, agent, repl, live-drive]
+tags: [issue, sci, agent, wave/live-drive-context]
 ---
 
 # Make `clojure.pprint` available in the agent's REPL

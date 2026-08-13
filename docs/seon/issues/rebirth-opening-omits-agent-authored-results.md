@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, bootstrap, context, render, agent]
+tags: [issue, render, agent, wave/rebirth-gap]
 ---
 
 # Rebirth opening omits agent-authored results

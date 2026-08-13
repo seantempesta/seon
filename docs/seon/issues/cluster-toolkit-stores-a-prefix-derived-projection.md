@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, context, database, architecture]
+tags: [issue, database, render, class/n7, wave/context-derivation]
 ---
 
 # Derive namespace context without a stored `my.*` roster

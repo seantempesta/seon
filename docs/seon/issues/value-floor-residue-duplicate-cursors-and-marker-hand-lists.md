@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, render, schema, web]
+tags: [issue, render, schema, web, class/n11, wave/context-fixes]
 ---
 
 # Floor residue: a shipped second dial set, two cursor walks, and a marker hand list

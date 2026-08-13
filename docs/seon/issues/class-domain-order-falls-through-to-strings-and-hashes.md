@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, database, ordering, class-kill]
+tags: [issue, database, class/n8, class-kill, wave/class-kill-queue]
 ---
 
 # Make domain order come only from recorded order facts

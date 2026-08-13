@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, database, testing, performance]
+tags: [issue, database, performance, test, wave/eval-scale-economics]
 ---
 
 # Eval storage is dominated by retained database snapshots

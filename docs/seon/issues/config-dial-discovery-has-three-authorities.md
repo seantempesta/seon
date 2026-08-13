@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, config, schema, testing]
+tags: [issue, config, schema, test, class/n7, wave/config-derivation]
 ---
 
 # Give config-dial discovery one explicit authority

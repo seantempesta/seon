@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, schema, contracts]
+tags: [issue, schema, class/n6, wave/live-drive-context]
 ---
 
 # Name `index-step`'s predicate so its contract can be made durable

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, agent, render, architecture]
+tags: [issue, effect, agent, render, class/n1, wave/strict-repl-display]
 ---
 
 # Render effect notices as ordinary values

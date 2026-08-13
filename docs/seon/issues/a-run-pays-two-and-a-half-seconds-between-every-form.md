@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, runtime, observability]
+tags: [issue, runtime, class/n9, wave/run-loop-velocity]
 ---
 
 # A run pays ~2.4 s BETWEEN every form, and almost nothing in the work

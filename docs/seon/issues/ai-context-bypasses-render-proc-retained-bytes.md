@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, render, context, performance]
+tags: [issue, render, performance, class/n9, wave/render-context-cache]
 ---
 
 # Give AI context rendering the retained-bytes render path

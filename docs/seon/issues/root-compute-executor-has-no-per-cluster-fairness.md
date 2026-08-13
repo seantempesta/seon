@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, architecture, cluster, flow, scheduling]
+tags: [issue, flow, wave/shared-surface-scheduling]
 ---
 
 # Give the shared compute executor per-cluster fairness

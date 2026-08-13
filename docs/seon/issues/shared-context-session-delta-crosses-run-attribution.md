@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, sci, runtime, concurrency, durability]
+tags: [issue, sci, runtime, class/p1, wave/per-run-fork-context]
 ---
 
 # Isolate session deltas from other runs' context mutations

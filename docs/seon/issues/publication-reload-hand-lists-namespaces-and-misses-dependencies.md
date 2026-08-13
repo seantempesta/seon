@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, runtime, operator]
+tags: [issue, runtime, operator, class/n3, wave/operator-launch-concurrency]
 ---
 
 # Publication's live-JVM reload hand-lists namespaces and misses dependencies

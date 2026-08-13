@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, testing, flow, render]
+tags: [issue, flow, render, test, class/p3, wave/flow-join]
 ---
 
 # Supply every declared render dependency in the agent-flow fixture

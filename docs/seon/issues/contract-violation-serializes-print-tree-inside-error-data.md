@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, instrumentation, error, repl, render]
+tags: [issue, render, sci, class/n1, wave/instrumentation-error-data]
 ---
 
 # Keep contract-violation evidence as data

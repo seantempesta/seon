@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, tooling, sci]
+tags: [issue, sci, wave/future-runtime-lint]
 ---
 
 # Resolve namespace aliases before selecting runtime lint stubs

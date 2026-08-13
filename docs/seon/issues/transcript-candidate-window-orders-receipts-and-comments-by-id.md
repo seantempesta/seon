@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, render, ordering]
+tags: [issue, render, class/n8, wave/transcript-ordering-follow-up]
 ---
 
 # Order transcript receipt and comment candidates by numeric facts

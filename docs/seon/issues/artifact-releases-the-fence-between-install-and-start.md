@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, process, database]
+tags: [issue, database, class/n4, wave/artifact-startup]
 ---
 
 # Hold one store ownership interval across artifact install and start

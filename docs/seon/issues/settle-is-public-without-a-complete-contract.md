@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, contracts, runtime, testing]
+tags: [issue, runtime, schema, test, wave/unreadable-reply]
 ---
 
 # Give `seon.cluster.loop/settle!` a complete public contract

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, schema, config, flow, render]
+tags: [issue, schema, runtime, class/n6, wave/contract-gate]
 ---
 
 # Replace recurring anonymous runtime contracts with named predicates

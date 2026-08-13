@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, sci, eval, program-graph]
+tags: [issue, sci, wave/sci-eval-context-owner]
 ---
 
 # Bind first-party namespaces so value-position reads deref

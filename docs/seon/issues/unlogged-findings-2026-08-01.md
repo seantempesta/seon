@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, agent, sci, database]
+tags: [issue, agent, sci, database, wave/general]
 ---
 
 # Findings identified 2026-08-01 that had no issue until now

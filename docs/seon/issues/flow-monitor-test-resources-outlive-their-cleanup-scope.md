@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, testing, flow, lifecycle]
+tags: [issue, flow, test, class/n4, wave/test-fixture]
 ---
 
 # Acquire Flow test resources inside their cleanup scope

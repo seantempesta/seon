@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, architecture, schema, operator]
+tags: [issue, schema, operator, class/n3, wave/publication-provenance]
 ---
 
 # Derive predicate-owner readiness before live source publication

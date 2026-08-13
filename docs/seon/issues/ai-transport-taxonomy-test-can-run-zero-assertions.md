@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, ai, testing]
+tags: [issue, ai, test, class/n2, wave/ai-provider-integrity]
 ---
 
 # Make the AI transport taxonomy test assert its premise

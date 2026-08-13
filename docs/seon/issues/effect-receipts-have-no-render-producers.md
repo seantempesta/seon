@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, render, runtime, schema]
+tags: [issue, effect, render, schema, class/n1, wave/render-receipt-producer]
 ---
 
 # Effect receipts have no render producers

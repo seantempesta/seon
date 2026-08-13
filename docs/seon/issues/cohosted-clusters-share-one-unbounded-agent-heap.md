@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, architecture, cluster, runtime]
+tags: [issue, runtime, wave/no-crash]
 ---
 
 # Prevent one cluster from exhausting every co-hosted cluster's heap

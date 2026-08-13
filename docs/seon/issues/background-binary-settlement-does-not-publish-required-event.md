@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, testing, runtime, blob]
+tags: [issue, runtime, blob, effect, class/n10, wave/background-settlement]
 ---
 
 # Publish terminal evidence for every background binary result

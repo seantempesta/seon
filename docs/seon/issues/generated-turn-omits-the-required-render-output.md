@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, agent, bootstrap, render, contract]
+tags: [issue, agent, render, schema, class/p3, wave/generate-call-transition]
 ---
 
 # Generated turn omits the required render output

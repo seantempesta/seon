@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, operator, process, testing]
+tags: [issue, operator, test, wave/operator-child-lifecycle]
 ---
 
 # Bound operator subprocess reads and waits

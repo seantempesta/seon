@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, schema, datahike, deletion]
+tags: [issue, schema, database, class/n11, wave/schema-codec-deletion]
 ---
 
 # Delete the readerless second Datahike transaction codec

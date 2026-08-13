@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, testing, sci, concurrency]
+tags: [issue, sci, test, class/p2, wave/sci-eval-readiness]
 ---
 
 # Publish eval arming before testing concurrent interruption

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, cluster, error]
+tags: [issue, runtime, schema, wave/settlement]
 ---
 
 # Oversized terminal-refusal data breaks the durable error fact

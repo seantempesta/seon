@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, render, flow, performance]
+tags: [issue, render, flow, performance, class/n9, wave/render-package-economics]
 ---
 
 # Skip unchanged renderer invocations in the package proc

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, sci, testing]
+tags: [issue, sci, test, wave/print-path]
 ---
 
 # The REPL-parity gate proves 24 divergences from stock Clojure

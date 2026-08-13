@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, testing, render, context]
+tags: [issue, render, test, class/n2, wave/render-property-premise]
 ---
 
 # The render wave's seeded properties cannot produce their failing cases

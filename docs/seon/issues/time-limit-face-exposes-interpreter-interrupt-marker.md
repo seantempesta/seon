@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, sci, repl, error, diagnostics]
+tags: [issue, sci, class/n1, wave/sci-failure-face]
 ---
 
 # Keep interpreter-private markers out of the time-limit face

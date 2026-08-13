@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: cleanup
-tags: [issue, config, schema, program-graph]
+tags: [issue, config, schema, class/n7, wave/config-application-contract]
 ---
 
 # Declare the config-to-request ident route instead of string-building it

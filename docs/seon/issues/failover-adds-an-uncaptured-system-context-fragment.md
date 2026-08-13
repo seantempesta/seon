@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, ai, context, render, architecture]
+tags: [issue, ai, render, class/n11, wave/provider-context]
 ---
 
 # Route failover context through the captured rendered history

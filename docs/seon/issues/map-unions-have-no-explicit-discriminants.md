@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, architecture, schema]
+tags: [issue, schema, wave/open-maps-accretion]
 ---
 
 # Give open map unions explicit discriminants

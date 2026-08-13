@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: cleanup
-tags: [issue, schema, database, vocabulary]
+tags: [issue, schema, database, wave/post-gate-rename]
 ---
 
 # Unify :seon.db/database-value into :seon.db/db

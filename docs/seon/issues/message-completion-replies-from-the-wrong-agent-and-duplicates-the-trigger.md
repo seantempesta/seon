@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, agent, runtime, testing]
+tags: [issue, message, agent, runtime, wave/message-delivery]
 ---
 
 # Derive a completion reply from the triggering message

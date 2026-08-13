@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, runtime, research]
+tags: [issue, runtime, wave/upstream-delta]
 ---
 
 # Hyperlith pin is 23 commits behind the upstream lockstep rework

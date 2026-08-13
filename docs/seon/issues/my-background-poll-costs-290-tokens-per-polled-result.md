@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, toolkit, render]
+tags: [issue, render, effect, class/n1, wave/capability-surface]
 ---
 
 # `my.background/poll` costs ~290 tokens per polled result

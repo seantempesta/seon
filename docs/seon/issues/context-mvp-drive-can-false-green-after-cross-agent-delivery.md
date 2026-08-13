@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, agent, runtime, test]
+tags: [issue, agent, runtime, test, class/n2, wave/causal-episode]
 ---
 
 # Make the Context MVP drive prove its semantic exit

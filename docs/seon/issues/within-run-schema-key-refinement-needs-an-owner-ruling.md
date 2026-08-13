@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, schema, database, runtime, architecture]
+tags: [issue, schema, database, runtime, wave/schema-key-ruling]
 ---
 
 # May a run refine a schema key nothing depends on?

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, render, config, context]
+tags: [issue, render, config, class/p3, wave/context-fixes]
 ---
 
 # The transcript and namespace renderers invent private token dials

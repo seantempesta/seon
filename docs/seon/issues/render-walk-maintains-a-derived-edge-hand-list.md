@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, render, database, architecture]
+tags: [issue, render, database, class/n7, wave/render-connection-model]
 ---
 
 # Derive render-walk connections without a function hand list

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, runtime, boot, schema, concurrency]
+tags: [issue, runtime, schema, class/p1, wave/seon-env-p3]
 ---
 
 # The operator instruments the whole JVM under one cluster's projection state

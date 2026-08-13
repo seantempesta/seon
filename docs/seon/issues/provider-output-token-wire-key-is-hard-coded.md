@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, ai, config, architecture]
+tags: [issue, ai, config, wave/ai-provider-protocol]
 ---
 
 # Make the provider descriptor own its output-token wire key

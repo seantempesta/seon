@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, database, schema, agent-runtime]
+tags: [issue, database, schema, class/n13, wave/database-codec]
 ---
 
 # Make wildcard receipt pulls accept stored read dependency plans

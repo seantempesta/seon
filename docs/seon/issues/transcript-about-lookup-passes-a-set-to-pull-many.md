@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, render, database, errors, live-drive]
+tags: [issue, render, database, class/n13, wave/live-drive-render]
 ---
 
 # Pass ordered entity ids to transcript `pull-many`

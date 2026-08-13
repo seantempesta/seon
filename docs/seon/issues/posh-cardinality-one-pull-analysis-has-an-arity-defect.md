@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, dependency, research]
+tags: [issue, database, wave/upstream-delta]
 ---
 
 # Fix or record the Posh cardinality-one pull-analysis arity defect

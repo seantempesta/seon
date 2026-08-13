@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, observability, sci]
+tags: [issue, sci, class/n1, wave/error-face-budget]
 ---
 
 # An unmatched print face throws "No matching clause:" and names nothing

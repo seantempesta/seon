@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, database, runtime]
+tags: [issue, database, runtime, wave/my-branch]
 ---
 
 # `seon.db` has no branch or commit reads

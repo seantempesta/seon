@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, flow, render, clocks]
+tags: [issue, flow, render, class/p2, wave/render-oversight-event]
 ---
 
 # Derive fleet state from events, not a 20 ms ping absence

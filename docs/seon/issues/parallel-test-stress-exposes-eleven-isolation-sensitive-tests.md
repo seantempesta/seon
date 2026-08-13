@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, testing, concurrency, operator]
+tags: [issue, operator, test, wave/parallel-stress-triage]
 ---
 
 # Classify parallel-only test failures by their shared resource

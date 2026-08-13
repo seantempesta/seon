@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, boot, schema, runtime]
+tags: [issue, schema, runtime, class/p3, wave/boot-velocity]
 ---
 
 # The activation closure records zero schema keys and zero required attributes, so two of its five checks are vacuous

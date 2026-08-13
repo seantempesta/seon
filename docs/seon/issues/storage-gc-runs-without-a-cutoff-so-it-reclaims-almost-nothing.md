@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, database, datahike]
+tags: [issue, database, class/n14, wave/store-perf]
 ---
 
 # Give storage GC the cutoff that makes it actually reclaim

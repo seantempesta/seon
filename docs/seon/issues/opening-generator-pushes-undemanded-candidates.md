@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, agent, bootstrap, context, render]
+tags: [issue, agent, render, wave/prefix-drift-bootstrap]
 ---
 
 # Opening generator pushes undemanded candidates

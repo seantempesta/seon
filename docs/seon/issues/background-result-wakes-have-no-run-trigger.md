@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, agent, runtime, data-model]
+tags: [issue, agent, runtime, effect, class/p3, wave/why-awake]
 ---
 
 # Give every wake an explicit run trigger

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, sci, namespace, concurrency, durability]
+tags: [issue, sci, wave/per-run-fork-context]
 ---
 
 # Make namespace removal rebuild contracted definitions only

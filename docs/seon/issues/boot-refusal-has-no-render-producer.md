@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, render, boot, runtime]
+tags: [issue, render, runtime, class/n1, wave/operator-status-face]
 ---
 
 # A boot refusal prints one ~9,000-character line that repeats itself four times

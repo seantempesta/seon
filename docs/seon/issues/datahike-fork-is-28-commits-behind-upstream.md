@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, dependency, datahike, database]
+tags: [issue, database, wave/upstream-delta]
 ---
 
 # Merge the 28 upstream Datahike commits our fork is missing

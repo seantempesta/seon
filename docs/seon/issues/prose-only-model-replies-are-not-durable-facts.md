@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, runtime, observability, database]
+tags: [issue, runtime, database, class/n10, wave/reply-durability]
 ---
 
 # Store the model's raw reply as a durable fact even when it parses to no forms

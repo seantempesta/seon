@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, flow, runtime]
+tags: [issue, flow, runtime, class/p1, wave/seon-env-p3]
 ---
 
 # The work-launcher graph does not pass its root :io executor

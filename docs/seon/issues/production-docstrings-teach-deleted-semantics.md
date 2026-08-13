@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, documentation, agent, naming]
+tags: [issue, agent, docs, class/n12, wave/docs-honesty]
 ---
 
 # Make production docstrings describe the surviving runtime

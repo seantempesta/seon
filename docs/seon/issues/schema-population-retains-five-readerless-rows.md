@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: cleanup
-tags: [issue, schema, deletion]
+tags: [issue, schema, class/n11, wave/schema-population-deletion]
 ---
 
 # Delete five readerless schema rows left by completed cuts

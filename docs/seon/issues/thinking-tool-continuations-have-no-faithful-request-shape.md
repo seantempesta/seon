@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, ai, architecture]
+tags: [issue, ai, wave/future-model-continuation]
 ---
 
 # Give thinking tool continuations one faithful request shape

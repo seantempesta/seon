@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, architecture, database, gc, class-kill]
+tags: [issue, database, blob, class/n14, class-kill, wave/class-kill-queue]
 ---
 
 # Make destructive reachability changes atomic
