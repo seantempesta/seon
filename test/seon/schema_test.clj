@@ -53,8 +53,12 @@
      projection
      (fn []
        (is (schema/malli-form? definition))
+       ;; The probe namespace exists only for this test, but runner scans and
+       ;; analysis tooling may load every test-path namespace — construct the
+       ;; unloaded state instead of asserting the shared JVM never touched it.
+       (remove-ns 'seon.schema-test.probe-ns)
        (is (nil? (find-ns 'seon.schema-test.probe-ns))
-           "precondition: the arbitrary predicate namespace is not loaded")
+           "the arbitrary predicate namespace starts unloaded by construction")
        (is (false?
             (schema/malli-form?
              [:fn 'seon.schema-test.probe-ns/probe-predicate?]))
