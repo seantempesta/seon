@@ -91,3 +91,26 @@ N2 therefore defers this member to W2 without editing or grading its
 in-progress tests. W2 owns the required per-property failing-case generators,
 explicit floor weighting, nonempty production-derived subject assertions,
 and retained counterexamples.
+
+## Post-W2 verification — 2026-08-13
+
+**PARTIALLY RESOLVED across `2aacc58fe..5423c5a10`; transcript premises remain
+open.** The former walk P1/P5 property file has been replaced by focused
+production-query examples. Current `test/seon/render/walk_test.clj` contains no
+`p1-membership-is-complete-or-loudly-elided` or
+`p5-shared-instruction-leaves-are-byte-identical` property, so those two
+unproducible checks no longer survive.
+
+The transcript counterexamples remain source-verifiable at HEAD:
+
+- `a-tight-budget-degrades-then-elides-loudly` still uses `(+ floor 180)` and
+  still asserts the structurally positive `(pos? floor)`;
+- `tight-budgets-pull-only-a-budget-derived-newest-candidate-set` still
+  restates the candidate limit as `(<= % (max 6 floor))`;
+- the seeded property still draws `extra-budget` uniformly with
+  `(gen/choose 0 800)` rather than weighting the exact floor; and
+- `history-generator` still replaces blank alphanumeric strings with `"x"`,
+  so it produces no empty, Unicode, newline, quote, backslash, or clip-sized
+  content.
+
+The member remains open for those four non-falsifying transcript premises.

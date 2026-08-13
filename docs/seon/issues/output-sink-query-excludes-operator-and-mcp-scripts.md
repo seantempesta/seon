@@ -48,6 +48,17 @@ analyzable non-installed leaves, so a test-only concatenation would be a
 second roster. N2 leaves the member open for that production owner and does
 not mask it in `test/seon/fn_test.clj`.
 
+## Post-landing verification — 2026-08-13
+
+**STILL OPEN after `c5f9e7701`.** That commit strengthened the installed
+program-graph proof: visible AI/HTML sinks now declare their terminal render
+projection, and the standing output-path census fails on installed bypasses or
+unresolved paths. It did not change `seon.fn/source-roots`, add a production
+subject that combines installed and non-installed rows, or index either
+`script/seon/dev/mcp.clj` or `script/seon/fresh_operator.clj`. The diagnostic
+therefore remains non-vacuous for installed rows and still excludes the exact
+five script sink rows and six script boundary rows described above.
+
 ## Owner
 
 The program-index/build-fact boundary and the universal-output-floor standing

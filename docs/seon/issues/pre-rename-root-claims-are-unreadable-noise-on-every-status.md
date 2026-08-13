@@ -82,3 +82,18 @@ Still open in the operator-state owner. Reconcile and remove stale claim files
 whose recorded roots no longer exist, and make `read-claim-records` return one
 flat refusal naming the first unknown/mistyped key for a genuinely unreadable
 record. No claim was deleted by this lane.
+
+## Post-landing verification — 2026-08-13
+
+**PARTIALLY RESOLVED by `a073f7b51`; the stale-state owner remains open.**
+`resources/seon/operator/state.clj` now classifies an invalid record as either
+`:seon.operator.claim/absent-root` or
+`:seon.operator.claim/malformed-record`, and `script/seon/fresh_operator.clj`
+aggregates all invalid records into one counted status line without paths.
+That closes the repeated-noise face shared with the archived
+`status-prints-unexplained-invalid-claim-lines.md` member.
+
+The commit does not reclaim an absent-root claim, and the malformed branch
+still reports only the generic message "The external claim is invalid." It
+does not name the first unknown or mistyped key. The two acceptance criteria
+owned specifically by this note therefore remain unsatisfied.

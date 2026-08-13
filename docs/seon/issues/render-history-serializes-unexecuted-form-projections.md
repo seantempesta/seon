@@ -38,6 +38,23 @@ the situation form render, while `generic-history-entries` admits only a
 sequential form at `src/seon/render/walk.clj:777`. This audit does not edit
 either production owner.
 
+## Post-T3 verification — 2026-08-13
+
+**PARTIALLY RESOLVED by `9eae1664d`; the generic-history path remains open.**
+The generated-opening owner now derives each next entry from stored form and
+receipt rows: `seon.bootstrap/next-entry` queries matching form source,
+ordinal, and `:seon.cluster.eval/result-edn`, constructs the settled print
+node from that receipt result, and asks `seon.render.walk/ordered-episode` for
+at most one next executable entry. Intent-directed plan membership joins into
+that same receipt-driven opening.
+
+The independent retained generic-history path at
+`src/seon/render/walk.clj:849-893` still pairs a form unit with an AI value unit
+by lookup and path, then writes those projections directly as history bytes.
+It still queries no run, form row, receipt, or terminal result. T3 therefore
+closes the generated-opening subclass but not the provider-facing generic
+history defect described by this note.
+
 ## Owner
 
 `seon.render.walk/ordered-episode` owns generated form order;
