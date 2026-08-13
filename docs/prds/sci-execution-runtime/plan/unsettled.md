@@ -30,6 +30,30 @@ rules landed in AGENTS.md so the classes stay dead. The standing no-fleet
 constraint is lifted; the spine (rebirth-gap wave → drive → phases)
 proceeds on a green base.
 
+## RENAME PROGRAM — 2026-08-13 (owner-directed: red-tolerant, one final gate)
+
+The owner ruled: batch all renames, do NOT run full suites per step — the
+suite may go red until the end; one `bin/test --all` closes the program.
+The new AGENTS.md is LANDED (`3b7094fa9`, AGENT.md folded and deleted).
+
+- **R1 (in flight, `mechanical-renames` lane):** tower → boot/running;
+  database-value → db spellings (prose/names only — declared schema keys
+  never rename); the audit's 16 missing-frontmatter files. Focused
+  compile checks only.
+- **R2 (launches when R1 returns; serial, red-tolerated):** the
+  kind → class-marker semantic migration per the error-model PRD's own
+  W2–W5 order (289 writes / 153 reads / 64 files;
+  [audit](../research/error-kind-audit-2026-08-12.md)): W2 producers emit
+  class shapes beside kind → W3 consumers dispatch on class presence →
+  W4 delete kind writes → W5 delete readers and the member. Compile +
+  focused smoke per step; ONE full gate at the end.
+- **R3 (owner design gate first):** `data/clusters/store` path and any
+  operator noun cleanup — priced options before edits (breaks existing
+  roots).
+- **R4 (docs, parallel with R2):** legacy-spelling residue census over the
+  vocabulary table's third column across src/test/active docs, batched by
+  owner; archives keep their words.
+
 ## WORKING EDGE — 2026-08-13 issue campaign in flight
 
 Supersedes the 2026-08-12 wind-down block below for session state; the spine
