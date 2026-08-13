@@ -141,6 +141,15 @@ carried stale evidence within a day. Re-verify before starting.
    program graph, regeneration renders the declaration/doc face rather
    than replaying the original definition form, with source queryable on
    demand.
+5. **`{:seon.db/entity true}` is deleted** (late evening, priced options
+   round). Our invention, no Datahike counterpart, a schema-level kind
+   stamp against the entity-IS-its-attributes law, and measured
+   indefensible (41 flagged of 671 map shapes; 163 carry identity attrs;
+   the difference is genuine envelopes). Each consumer derives its real
+   question instead: walk cataloguing from attributes present in actual
+   datoms; identity from the installed schema's `:db.unique/identity`;
+   entity-vs-envelope from `storable-attribute-in?`. Detail: ledger
+   entry 21. Implementation queued behind plan-t3's return.
 
 ### Current dependency spine — 2026-08-12 wind-down
 

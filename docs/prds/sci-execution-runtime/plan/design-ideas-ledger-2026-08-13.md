@@ -143,16 +143,23 @@ one decision away from queued work. Ruled items cite their record.
     plus whether the exclusive sweep should run on a schedule NOW rather
     than waiting for the maintenance portfolio.
 
-21. **`{:seon.db/entity true}` challenged as fragile** (owner, 2026-08-13
-    late): an opt-in boolean whose false nobody asserts — absence cannot
-    distinguish "not an entity" from "forgot" (37/2231 declarations).
-    Candidate dissolution: derive entity-kind-ness from possession of an
-    installed unique-identity attribute (the database already knows);
-    the envelope counterexample is a MEASUREMENT, not an argument —
-    query (shapes with derivable identity attrs) vs (shapes declaring
-    the flag) and read the disagreement set. Folded into the
-    general-diff research brief; the diff identity path already ignores
-    the flag either way.
+21. **`{:seon.db/entity true}` RULED DELETED** (owner, 2026-08-13 late,
+    via the priced options round). The measurement (671 map shapes, 41
+    flagged, 163 carrying identity attrs — the 122 unflagged are genuine
+    request/error/report envelopes) proved identity-possession cannot
+    define entity-ness, and the flag is our invention with no Datahike
+    counterpart — a schema-level kind stamp violating our own
+    entity-IS-its-attributes law. Ruling: delete the flag and derive
+    each consumer's real question — the walk catalogues kinds from
+    attributes present in ACTUAL DATOMS (live truth; empty kinds have
+    nothing to browse); identity derives from `:db.unique/identity` in
+    the installed schema (Datahike's own fact, `datahike.clj:256`);
+    entity-vs-envelope = `storable-attribute-in?` at the bridge
+    (`datahike.clj:284`). ~3 consumer call sites
+    (`schema/internal.cljc` derive path, `render.clj:509`,
+    `bootstrap.clj:294`, `walk.clj:151`) + 31 declaration deletions.
+    IMPLEMENTATION QUEUED after plan-t3 returns (it holds walk.clj and
+    bootstrap.clj).
 
 ## Parked explicitly (owner said not yet / needs design first)
 
