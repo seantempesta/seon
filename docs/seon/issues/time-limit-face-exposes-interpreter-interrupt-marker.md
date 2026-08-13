@@ -58,3 +58,11 @@ A timed-out eval returns kind, message, and the complete
 `:seon.sci.admit/record`, including `:seon.eval/fn-entries`, without exposing
 `:sci.impl/interrupt` or an opaque host object. Internal triage may retain the
 original throwable independently of the agent face.
+
+## N1 disposition — 2026-08-12
+
+Still open outside this lane. `seon.sci.kernel/failure-value` must recognize
+the time-limit result structurally, construct the declared flat time-limit
+value with the complete admission record, and retain the internal throwable
+only in fault evidence; `:sci.impl/interrupt` must never enter the outward
+projection.

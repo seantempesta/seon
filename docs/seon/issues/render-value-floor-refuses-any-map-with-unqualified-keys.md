@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, schema]
 ---
@@ -72,3 +72,12 @@ Whether `:seon.render/html` has the same refusal (probe only covered
 `:seon.render/ai`), and whether any live surface currently reaches the floor
 with an unqualified-key map — the namespace page for `my.agents.root` rendered
 clean (200, 339,914 bytes, no contract-violation text) on this drive.
+
+## Resolution
+
+Resolved by `4bc8104d8`. The floor invocation is now always a qualified render
+unit whose arbitrary value exists only at `:seon.render/value`; declared
+entity producers retain their established qualified-attribute argument.
+`floor-totality-uses-one-prepared-value` covers `{:a 1 :b 2}` and
+`{:rows [{:a 1}]}` in both AI and HTML while the existing declared-producer
+selection regressions remain green.

@@ -38,3 +38,11 @@ The one contract-violation projector in `seon.instrument`.
 - No contract headline uses raw unbounded printing.
 - The many-problem regression covers both public request arms and preserves the
   full problem count as the diagnostic fact.
+
+## N1 disposition — 2026-08-12
+
+Still open outside this lane. Although `4bc8104d8` bounds output that reaches
+`seon.render`, `seon.instrument/apply!` still admits a no-caps request and can
+construct the headline before that boundary. Remove that request shape or
+require caps in both public arms, then render the problem collection through
+the one fitted floor while retaining the total count.

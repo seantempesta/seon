@@ -38,3 +38,11 @@ remain honest values, and background guidance moves to `(help)` or an explicit
 query result. No `Form N …` narration, comment framing, result annotation, or
 comment-only pseudo-entry remains. Recurring render coverage asserts forms and
 values rather than English sentence templates.
+
+## N1 disposition — 2026-08-12
+
+Skipped because protected `src/seon/cluster/run.clj` belongs to the wedge
+lane. The exact edit is to make the form producer return submitted source plus
+the receipt's actual rendered value/error data, delete `Form N` and background
+guidance narration, and update the focused run-render assertions to compare
+forms and values rather than English templates.

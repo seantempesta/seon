@@ -69,3 +69,11 @@ the 4.25 MB worst case of the original report but above the 158 KB the
 2026-08-08 observer measured, and the shape is the same: evidence stored as
 serialized print syntax instead of bounded ordinary data. These faults recur
 on every boot, so the cost is not incidental.
+
+## N1 disposition — 2026-08-12
+
+Still open outside this lane. `seon.instrument/violation` must retain bounded
+ordinary problem/argument evidence rather than `:seon.error/data-edn`, and
+`seon.error/instrumentation-prose` must render those values through the shared
+floor. `4bc8104d8` bounds terminal output but deliberately does not repair
+already serialized intermediate representation stored inside the error.

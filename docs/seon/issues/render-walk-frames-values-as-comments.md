@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, context, architecture]
 ---
@@ -71,3 +71,13 @@ moved since the original note: `prose` is now
 `:606-635`. Measurement context:
 [context quality audit 2026-08-10](../../prds/sci-execution-runtime/research/context-quality-audit-2026-08-10.md),
 finding 5.
+
+## Resolution
+
+Resolved at the outward crossing by `4bc8104d8`. The public
+`seon.render/walk` no longer calls the protected historical
+`seon.render.walk/prose` assembler. It returns one printed ordinary map with
+the lookup, distance, selected units, optional branch, and REPL state; its
+error arm returns a printed flat error value. Prompt assembly already uses the
+history projection, and its focused prompt regressions prohibit the former
+`;; (seon.render/walk` and `;; REPL state` framing.

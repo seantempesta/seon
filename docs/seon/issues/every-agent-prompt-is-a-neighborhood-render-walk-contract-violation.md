@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, context, runtime, agent]
 ---
@@ -143,3 +143,12 @@ contract design decision — owner/render-owner call, not a lane one-liner.
   "A renderer in <ns> failed… repair its declared contract", and root owns
   `my.agents.root`, so each collapse re-wakes root with another broken prompt.
 </content>
+
+## Resolution
+
+Resolved before this lane by `80ae69ad1`, which split the request selector
+`:seon.render/output` from the walk unit's rendered value
+`:seon.render/rendered`. The current schema declares the latter as text,
+Hiccup, or form, and the focused render-neighborhood tests now pass producer
+strings without the former enum violation. N1 re-verification found no
+remaining occurrence of this overloaded field.

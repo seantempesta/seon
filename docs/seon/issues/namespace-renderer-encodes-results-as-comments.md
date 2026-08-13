@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, context, architecture]
 ---
@@ -33,3 +33,11 @@ Every namespace AI result is displayed as an ordinary computed value without
 comment prefixes, decorative comment framing, or `;; =>` annotations. Empty
 and elided states remain explicit values, and the HTML twin conveys the same
 facts without embedding comment syntax as content.
+
+## Resolution
+
+Resolved by `5e449b275`. Compact namespace AI output is now one readable EDN
+vector of namespace form, function/schema values, and complete elision or
+empty values. Distance-one source remains source; computed summaries no longer
+pretend to be comments. The HTML twin uses ordinary text with the same facts.
+`seon.render.ns-test` passed 5 tests and 134 assertions.

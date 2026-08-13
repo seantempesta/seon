@@ -36,3 +36,10 @@ Pending work, completed background results, long foreground effects, and await
 guidance render as ordinary computed data or printed values without comment
 prefixes. Absence still omits the projection, and no new stored notice path is
 introduced.
+
+## N1 disposition — 2026-08-12
+
+Still open outside this lane. Replace the comment-prefixed branches in
+`seon.effect`'s context suffix with ordinary maps for pending, settled, long,
+and await states, and declare the paired AI/HTML producer on that value shape.
+Absence remains `nil`; no notice queue is needed.

@@ -52,3 +52,11 @@ inlined into every context that meets the error.
 - A contract violation's rendered face fits a stated token budget, with the
   full explanation retrievable by identity.
 - Both faces are read verbatim in this note when it is closed.
+
+## N1 disposition — 2026-08-12
+
+Still open. `4bc8104d8` bounds terminal producer output in `seon.render`, but
+this member still needs `seon.error` / `seon.instrument` to retain the full
+contract explanation by identity and render the short face from bounded
+ordinary evidence. Re-run one real unresolved-symbol receipt and paste both
+faces here before closure.

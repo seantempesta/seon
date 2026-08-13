@@ -55,3 +55,10 @@ findings are all `:warning`, so nothing is blocked — only unreadable.
   key.
 - The rule that decides "carries no structure" is computed from the form, not
   a maintained list of exempt keys.
+
+## N1 disposition — 2026-08-12
+
+Still open outside this lane. In `src/seon/schema/admission.clj`, derive
+whether a declaration carries reusable composite structure from its parsed
+form, suppress scalar/reference markers, and return one aggregate finding with
+the candidate plus all matching existing keys.

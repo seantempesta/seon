@@ -76,3 +76,13 @@ walk-level section rendered once per walk rather than once per unit, and no
 schema the agent is forbidden to write is shown to it as a registration
 example. One recurring measurement pins the toolkit-namespace share of a
 rendered context so the ratio cannot silently invert again.
+
+## N1 disposition — 2026-08-12
+
+Partially resolved by `5e449b275`: compact AI and HTML namespace projections
+now render an error declaration as its `:error/message` sentence, never its
+render-producer property map. Still open because the referenced-schema closure
+must be hoisted and deduplicated in protected `src/seon/render/walk.clj`, and a
+recurring whole-context share measurement must be added there. Exact Phase-1
+edit: accumulate referenced schema identities across selected units, emit one
+walk-level section, and exclude declarations the agent cannot author.

@@ -28,3 +28,10 @@ complete findings reachable in the retained report file it already writes
 
 A changed-test run over one file prints a face a human reads at a glance;
 complete findings remain in the retained EDN report.
+
+## N1 disposition — 2026-08-12
+
+Still open outside this lane. The changed-test report constructor must retain
+its EDN report by identity and send its summary through a declared render
+producer/profile; the CLI leaf should print that bounded face rather than the
+one-line `pr-str` of the complete report.

@@ -65,3 +65,11 @@ intermediate representation instead of the render.
   forensics but are not the default face.
 - `:seon.instrument/problems` reaches a reader as rendered text, never as
   `pr-str`'d `:seon.print` face data.
+
+## N1 disposition — 2026-08-12
+
+Still open outside this lane. Declare named AI and HTML producers on the boot
+refusal schema, implement them in the `seon.cluster` owner, and make
+`script/seon/fresh_operator.clj` print that projection instead of exception or
+prepl-event internals. The nested `:seon.instrument/problems` value must enter
+the ordinary render call, not be stringified as print-node data.

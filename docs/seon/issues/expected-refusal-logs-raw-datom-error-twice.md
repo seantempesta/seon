@@ -35,3 +35,10 @@ Owner: the Datahike fork's transaction/writer logging seam
 An expected unique-constraint refusal produces one log line; the flat error
 value still carries Datahike's own `:error`/`:attribute` data (proven by the
 gate-fix-db-refusal regression).
+
+## N1 disposition — 2026-08-12
+
+Still open in the protected database owner. The exact edit is to classify the
+known Datahike unique-constraint refusal once at `seon.db`, return its flat
+error value without core-fault logging, and leave one structured log only for
+an unexpected fault. This lane did not touch `src/seon/db.clj`.

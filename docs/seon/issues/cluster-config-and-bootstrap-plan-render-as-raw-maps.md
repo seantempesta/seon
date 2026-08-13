@@ -90,3 +90,10 @@ The three owning entity schemas and their owning namespaces:
 - The bootstrap-plan face names plan identity/digest and form purpose without
   copying full instruction/context payloads.
 - AI context and the namespace page remain two projections of the same walk.
+
+## N1 disposition — 2026-08-12
+
+Still open. The exact remaining work is to add the named AI/HTML producer
+properties to the cluster, config, and bootstrap-plan declarations and
+implement their domain summaries in `seon.cluster`, `seon.config`, and the
+protected `src/seon/bootstrap.clj`. This lane did not edit that Phase-1 owner.

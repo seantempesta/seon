@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, repl, architecture]
 ---
@@ -35,3 +35,10 @@ context line itself.
 `seon.render/walk` returns ordinary structured or printable values for its
 state and failures. The REPL displays the call and then that value, with no
 comment-prefixed system notice or comment-only output entry.
+
+## Resolution
+
+Resolved by `4bc8104d8`. `walk-error` now prints a flat
+`:seon.render/walk-failed` value, REPL state is an ordinary map, and successful
+walks print a map containing their selected units and metadata. No public
+return constructor prefixes those values with comment syntax.

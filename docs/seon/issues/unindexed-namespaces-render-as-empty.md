@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, context, honesty]
 ---
@@ -58,3 +58,10 @@ absence of facts from absence of definitions, or is not rendered as a walk
 unit at all. No rendered namespace unit asserts emptiness it has not
 established. One regression covers a namespace that is required but not
 first-party-indexed.
+
+## Resolution
+
+Resolved by `5e449b275`. Empty AI and HTML namespace projections now say
+exactly “No indexed members are recorded for this namespace,” optionally
+naming the owner agent. The source-less namespace regression pins that honest
+absence claim and the focused namespace gate passed.

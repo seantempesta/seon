@@ -47,3 +47,10 @@ rather than falling to the value floor.
   measured the same way.
 - The receipt descriptor has a declared `:seon.render/ai` producer, and a
   polled result's rendered face is read verbatim in the issue when closed.
+
+## N1 disposition — 2026-08-12
+
+Still open outside this lane. Declare the background receipt descriptor's AI
+producer and render only identity, disposition, and completion summary through
+the shared profile; keep the complete polled value behind its receipt/requery
+identity and repeat the eight-ref token measurement.

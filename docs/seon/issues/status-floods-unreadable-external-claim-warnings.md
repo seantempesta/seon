@@ -41,3 +41,10 @@ gate-fix-operator lane's owned paths (or a follow-up operator hygiene lane).
 A clean root prints no claim warnings; a root with genuinely invalid external
 claims prints one summarizing line; the underlying stale claims here are
 explained (and reconciled away if stale).
+
+## N1 disposition — 2026-08-12
+
+Still open in `resources/seon/operator/state.clj` and
+`script/seon/fresh_operator.clj`. Reconcile stale managed-root claims away,
+retain genuine failures as structured values, and print one counted summary
+line with an explicit drill identity instead of one warning per file.

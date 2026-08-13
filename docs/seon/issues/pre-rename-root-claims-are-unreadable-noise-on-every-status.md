@@ -75,3 +75,10 @@ The managed paths are also mixed, which rules out "all foreign" and "all
 already absent" explanations: five still exist and three are absent. Every
 path is a historical test/proof root below this checkout's `tmp/` or `target/`.
 No record was deleted during verification.
+
+## N1 disposition — 2026-08-12
+
+Still open in the operator-state owner. Reconcile and remove stale claim files
+whose recorded roots no longer exist, and make `read-claim-records` return one
+flat refusal naming the first unknown/mistyped key for a genuinely unreadable
+record. No claim was deleted by this lane.

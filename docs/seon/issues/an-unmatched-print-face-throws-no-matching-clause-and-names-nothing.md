@@ -50,3 +50,12 @@ arm is the writable shape of this class; a dispatch that cannot miss silently
 `src/seon/sci/admit.clj` — unassigned. Filed by the turn-test triage lane;
 not fixed here because the file is outside this lane's boundary and the
 finding is independent of the turn-test attribution.
+
+## N1 disposition — 2026-08-12
+
+Still open at the unowned semantic boundary. `4bc8104d8` made terminal
+`seon.print` emission total for absent and unknown faces, but the acceptance
+probe calls `seon.sci.admit/semantic-value` first. The exact remaining edit is
+to replace its closed `case` miss in `src/seon/sci/admit.clj` with the same
+flat error shape naming the observed face and sorted node keys, with one
+absent/unknown regression in `test/seon/sci/admit_test.clj`.

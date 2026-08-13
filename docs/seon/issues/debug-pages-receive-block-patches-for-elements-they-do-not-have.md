@@ -79,3 +79,11 @@ set differs.
   sending less real content.
 - One recurring proof asserts that every patch a tab receives targets
   an element that tab has, so the class cannot silently return.
+
+## N1 disposition — 2026-08-12
+
+Skipped because protected `src/seon/render/web.clj` belongs to the live N5
+completion lane. Its exact edit is to derive each tab's subscribed block IDs
+from the elements created by that page and filter/package deltas against that
+set before delivery; the recurring proof must assert every patch target exists
+in that tab's DOM.

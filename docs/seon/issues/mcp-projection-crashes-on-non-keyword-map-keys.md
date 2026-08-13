@@ -73,3 +73,11 @@ same shape recurs for any `(into (sorted-map) …)` over string keys.
   naming the value shape it could not present.
 - One regression proves the class: `(sorted-map "a" 1)` through `eval_clj`
   returns the map.
+
+## N1 disposition — 2026-08-12
+
+Still open at the MCP result projection. `4bc8104d8` proves ordinary maps with
+unqualified keyword keys reach the render floor, but this member requires the
+MCP recognition/projection code to stop assuming every map key is a keyword.
+Project `(sorted-map "a" 1)` as an ordinary map and return a flat shape error
+for genuine projection failures; do not stringify a stack trace.

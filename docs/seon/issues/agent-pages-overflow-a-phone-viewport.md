@@ -28,3 +28,11 @@ clipped. Wide content is not confined to its own scroll container.
 At 375 px the body has no horizontal scrollbar; each wide table or code block
 scrolls inside its own `overflow-x` container and no value is visually
 truncated without an affordance to see it.
+
+## N1 disposition — 2026-08-12
+
+Still open outside this lane's owned paths. The exact edit belongs in
+`resources/public/css/input.css`: make the page grid shrinkable and give wide
+table/code/value containers their own horizontal scrolling at 375 px, then
+verify the body has no horizontal scrollbar. The N1 terminal fit does not
+replace viewport layout.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, rendering, repl, mcp]
 ---
@@ -34,3 +34,10 @@ A sequence of maps nested inside another structural value renders as coherent
 bounded structural text. Standalone tabular query results retain their useful
 table face. A recurring regression covers both cases through the ordinary
 print floor and the live door projection.
+
+## Resolution
+
+Resolved by `4bc8104d8`. `seon.print` derives table presentation only for a
+depth-zero sequence; the same sequence nested under `{:rows ...}` remains
+structural text. `derived-table-is-one-text-and-html-face` pins both sides of
+the class and passed in the focused print gate.

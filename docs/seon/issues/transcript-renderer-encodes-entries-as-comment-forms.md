@@ -47,3 +47,14 @@ and HTML projections without string classification, comment-prefixed prose,
 annotations, or comment-only pseudo-entries. A real failed form on an isolated
 scratch cluster provides the final before/after proof once the foreign boot
 and capture-context boundary is green.
+
+## N1 disposition — 2026-08-12
+
+The comment-form subclass remains fixed by `c6a81988c`: the focused
+`error-receipt-without-triage-has-an-execution-error-face` check passed again,
+and entries are source followed by computed value/error with no comment frame.
+The note remains open for its required live failed-form proof. The complete
+`seon.render.transcript-test` namespace is independently red in
+`same-instant-bootstrap-prefix-and-newest-tail-preserve-plan-order` because the
+generated bootstrap task is absent from the prefix; that ordering defect is
+not a comment-render regression and was not edited here.

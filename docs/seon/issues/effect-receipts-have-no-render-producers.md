@@ -58,3 +58,10 @@ pair on an important durable receipt is the defect. Full census:
   blob-backed; raw database entity IDs do not lead either face.
 - A recurring walk test commits one receipt and proves both projections select
   the declared producers through the ordinary agent/run neighbourhood.
+
+## N1 disposition — 2026-08-12
+
+Still open outside this lane. Add named AI and HTML producer properties to
+`:seon.effect/receipt` in `resources/seon/schemas/seon.effect.edn`, implement
+the bounded domain projections in `seon.effect`, and prove ordinary
+`seon.render/render-call` selection from one committed receipt.

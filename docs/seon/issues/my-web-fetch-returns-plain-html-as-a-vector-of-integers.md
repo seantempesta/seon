@@ -54,3 +54,10 @@ that genuinely is not text. The digest and byte count stay either way.
   real capability receipt.
 - A fetch of genuinely binary content still returns bytes, and the refusal
   or fallback says which it chose.
+
+## N1 disposition — 2026-08-12
+
+Still open at the web capability leaf. Decode a textual HTTP body according
+to its declared media type/charset before constructing the admitted receipt;
+retain bytes only for genuinely binary content and make the fallback an
+explicit flat value naming the chosen representation.

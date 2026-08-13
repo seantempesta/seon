@@ -27,3 +27,9 @@ Owner: `script/seon/fresh_operator.clj` init failure rendering
 
 A deliberately failing publication prints a face whose first lines name the
 cause; full event history remains reachable explicitly.
+
+## N1 disposition — 2026-08-12
+
+Still open in the operator publication leaf. Retain the complete prepl event
+history by report identity and make `bin/seon init` print a declared bounded
+failure face whose first fields are phase, cause, and source path.

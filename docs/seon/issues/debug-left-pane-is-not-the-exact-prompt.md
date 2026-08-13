@@ -60,3 +60,10 @@ can therefore change the pane after the model call. The remaining destination
 is the visual-QA context-capture wave: select the latest capture for the agent
 and render those exact bytes, with current-walk inspection remaining a
 separately labelled surface if retained.
+
+## N1 disposition — 2026-08-12
+
+Still open in protected `src/seon/render/web.clj`. Change `debug-response` to
+select the latest committed `:seon.context.capture/prompt` for the agent and
+put those exact bytes in the left pane; retain current-walk inspection only as
+a separately labelled value. The N5 completion lane owns this file.
