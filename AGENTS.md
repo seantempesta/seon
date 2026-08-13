@@ -23,7 +23,7 @@ to build it properly. That fact should reorganize how you work: almost
 everything you are asked to build has been built before, and the previous
 version is readable through Git history. `git show` and `git log` are the
 quarry; `docs/prds/*/research/` holds dated investigations with `file:line`
-evidence and measured numbers; `reference-code/` vendors ~90 dependencies as
+evidence and measured numbers; `reference-code/` vendors over a hundred dependencies as
 submodules so their semantics can be READ rather than remembered. The prime
 directive is not "write good code" — it is **do the archaeology before you
 design, then design something better than what you found**. The fresh tree is
@@ -530,8 +530,10 @@ class updates both in the same commit.
 
 `bin/test` is the one correctness gate, tiered: the declared
 `:seon.test/platform` regressions run FIRST and stop the run when red; bare
-adds only tests reaching code changed since the recorded green basis
-(derived from `:seon.fn/calls` edges, never mtimes); `--all` adds every
+adds tests reaching code changed since the recorded green basis (derived
+from `:seon.fn/calls` edges, never mtimes) — deliberately widening to every
+eligible test when the basis is missing, a file was removed, or a changed
+gate input sits outside the program graph; `--all` adds every
 non-long test; explicit namespaces run complete. The runner enforces the
 bounded-execution law: a liveness watchdog dumps coordinator AND worker
 JVMs, and the tally is total — unlaunchable or unconfirmed work is typed,
@@ -578,10 +580,15 @@ verifying the system it inherited, not by trusting it: check `bin/seon
 status` and that the MCP tools answer (a stale long-lived JVM serves old
 code — reset it onto current source rather than debugging phantoms);
 `git status` for another session's residue (preserve it, report it, never
-build on it unreviewed); and sweep the disposable exhaust — retained
-`tmp/test-runs/run.*` roots whose reds are superseded, scratch cluster
-roots under `tmp/`, and any store whose footprint has left its normal
-range (`bin/seon status` prints the root footprint). **Before deleting any
+build on it unreviewed); and sweep the disposable exhaust. Operationally: a retained
+`tmp/test-runs/run.*` root is sweepable when no live runner holds it and
+its recorded failures have since been fixed or re-observed at HEAD (when
+in doubt, a holderless root older than a day is exhaust); scratch cluster
+roots under `tmp/` are sweepable when their creating probe or lane has
+returned; and the shared root's store footprint (`bin/seon status` prints
+it) is judged against its size after the last reset — an
+order-of-magnitude growth is the investigation signal, not a number to
+tune. **Before deleting any
 run root, confirm no live runner holds it** (`bin/codex-agent status` for
 lanes plus the process table for `bin/test` JVMs) — sweeping an active
 root kills a foreign gate mid-run. Database data is disposable by ruling:
