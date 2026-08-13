@@ -134,6 +134,22 @@ one decision away from queued work. Ruled items cite their record.
     explicit `:about` + validation stays the contract). Cheap, unruled.
 12. **Per-(shape, profile) render-cost facts** as the general learned
     constant enabling #8 — a small schema + one recording seam.
+12c. **Fidelity before economy — the objective ordering** (owner,
+    2026-08-13 night): context generation optimizes for the agent
+    holding everything it needs — complete, true, replayable — and only
+    then picks the cheapest true form among equal-fidelity
+    representations. Token reductions are a COST REPORT, never the
+    achievement; completeness falsifiers (authored results present,
+    refless byte-identical, replay-identical) lead every acceptance,
+    ratios trail. Elision is legal only with a requery identity;
+    membership decides what belongs — a budget bounds the speculative
+    tail, never squeezes the explained closure. The governing goal, in
+    the owner's words: figure out the best ways to get GOOD context that
+    is not hacked together — one derivation pipeline from facts
+    (membership → explained closure → cheapest true form → declared
+    renders → replayable entries), never hand-assembled fragments,
+    templates, or special cases. Every acceptance asks "is this
+    derived?" before "is this small?".
 12b. **Beyond-closure budget as a declared fraction, not an absolute**
     (owner exchange, 2026-08-13 night): the dial itself is ruled and
     honest (declared config fact, one gate, estimated-token unit), but
