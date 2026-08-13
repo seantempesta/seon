@@ -32,9 +32,13 @@ proceeds on a green base.
 
 ## WORKING EDGE — 2026-08-13 afternoon (THE resumption authority)
 
-A compacted/fresh session resumes HERE. Read this block, then the
-2026-08-13 ruling batch in [README](README.md#rulings-2026-08-13-owner),
-then act. The owner is away; the work below is AUTHORIZED — continue
+A compacted/fresh session resumes HERE — and reads this block, the
+[design-ideas ledger](design-ideas-ledger-2026-08-13.md), and the
+2026-08-13 ruling batch in [README](README.md#rulings-2026-08-13-owner)
+IN THEIR ENTIRETY (never skimmed) before acting. Owner standing order:
+keep these documents CURRENT as progress lands — every lane fold, ruling,
+or queue change updates this block in the same beat, so the written plan
+never trails the real one. The owner is away; the work below is AUTHORIZED — continue
 autonomously, push at every landing, reconcile the issues index only at
 boundaries (lanes never touch it).
 
