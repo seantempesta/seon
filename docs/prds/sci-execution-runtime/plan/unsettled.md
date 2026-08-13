@@ -16,6 +16,20 @@ invalidation shape, slot redirect, and banded/hysteresis ordering — is
 superseded by README "Ruling 2026-07-31" and "Rulings 2026-07-31 #2". The
 dated blocks stay as the record of what was believed when.]
 
+## GREEN GATE — 2026-08-13 12:xx
+
+**`bin/test --all` is GREEN: 1,200 tests / 9,356 assertions / 0 failures /
+0 errors** (log `tmp/orchestrator/green-gate-tally-2026-08-13d.log`), the
+first complete green full gate in the fresh system's recorded history. The
+path there, from the 2026-08-12 unwedgeable suite: five wedge generations
+fixed at cause, ~50 reds classified (nearly all stale fixtures/expectations
+against the day's ruled changes; a handful of real regressions fixed), the
+runner made honest by construction (worker dumps, total tally, immutable
+confirmation classpath, bounded child completion), and the seven fixture
+rules landed in AGENTS.md so the classes stay dead. The standing no-fleet
+constraint is lifted; the spine (rebirth-gap wave → drive → phases)
+proceeds on a green base.
+
 ## WORKING EDGE — 2026-08-13 issue campaign in flight
 
 Supersedes the 2026-08-12 wind-down block below for session state; the spine
