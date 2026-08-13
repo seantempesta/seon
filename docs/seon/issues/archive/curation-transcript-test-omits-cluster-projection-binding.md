@@ -49,3 +49,14 @@ executor/acquisition bindings used by live graphs. The fixture now invokes the
 schema-declared session producer so its budget is database-derived rather than
 a synthetic million-token request. Focused verification completed 1 test with
 15 assertions, 0 failures, and 0 errors under the unchanged backstop.
+
+The 2026-08-13 complete run failed earlier, while the fixture manually seeded
+its original system run: the live root agent already held a run and the now
+terminal trigger verdict refused `agent-already-running`, followed by the
+wanted terminal settlement refusals. A current-HEAD direct rerun no longer
+raised that error after the run/turn fixes landed, but its cleanup remained
+parked in `cluster.agent/await-turn-completion!` after more than five minutes.
+The virtual-thread-aware dump at `tmp/overnight-curate-threads.json` showed the
+active agent still waiting on `prompt/acquire-within-budget` while the render
+proc computed `render.walk/history`; this liveness/cost boundary remains open
+and was not converted into a test-only workaround.
