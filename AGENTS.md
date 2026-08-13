@@ -1179,6 +1179,45 @@ everyone) rather than a private scratch directory.
 
 ## Dev feedback and testing
 
+### Test fixtures — the one right way (owner-directed 2026-08-13)
+
+The 2026-08-13 tally repair classified ~40 reds; nearly every one was a
+WRONG FIXTURE, not a production defect. These rules are mandatory for every
+new or edited test; each was proven by a same-day fix commit:
+
+1. **Never hand-roster schema.** A test never builds its own attribute list
+   or partial schema population; it uses the canonical database fixture
+   (`seon.test-support/with-database`, which installs the complete
+   population) plus `::test-support/extra-schema` for genuinely synthetic
+   attributes. A hand roster missing one attribute silently broke 12 tests
+   at once (`100f03a40`).
+2. **Hand the projection/environment explicitly.** Registration, admission,
+   codec, and transact fixtures pass the schema projection / environment as
+   an argument, exactly like production callers — never rely on an ambient
+   registry or dynamic var (`b7bd25c34`, `8377a4a69`, `464fd5ddb`,
+   `e8e37eb50`).
+3. **Supply every declared proc input.** A flow/render fixture supplies the
+   proc's declared inputs (cluster name, render interest, profile) — a
+   missing input becomes a typed refusal value that then poisons downstream
+   consumers (`66cecb816`, `677f84f85`, `0ef66e742`).
+4. **Fixed render profiles in fixtures.** A fixture supplies the shipped
+   render profile; letting the proc DERIVE profiles per call cost 217 s vs
+   6.2 s and read as a hang under the pooled runner (`1930dacd1`).
+5. **Every await is bounded and loud.** No unbounded
+   `await-database-state!`/event wait, ever: bound it with the declared
+   `seon.test-support/event-backstop-seconds` so a broken wake fails in
+   seconds with a message instead of wedging the pool for 300 s and burning
+   every agent's discovery time. A HANGING TEST IS A WORSE DEFECT THAN A
+   FAILING ONE.
+6. **Assert current ruled behavior.** Typed diagnostics are the contract —
+   an uninstalled attribute read is a flat refusal, never `#{}`; an answered
+   trigger is terminal; renders are total and bounded. A test expecting the
+   old lenient shape is stale, and the fix is the expectation
+   (`26e8cf84a`, `dc6604dac`, `0a39f71d6`).
+
+Deeper mechanics stay in `.agents/skills/clojure-testing/SKILL.md`; when a
+new fixture class is discovered, update BOTH in the same commit.
+
 Live diagnosis and narrow behavioral verification start through the repository
 MCP server loaded by `.codex/config.toml` and `.mcp.json`:
 
