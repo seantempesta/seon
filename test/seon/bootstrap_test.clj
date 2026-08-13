@@ -3,6 +3,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [my.plan :as plan]
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as cluster.agent]
@@ -18,6 +19,10 @@
 
 (defn- seed-cluster! [connection cluster-name]
   (support/seed-cluster! connection cluster-name)
+  (db/transact!
+   connection
+   [{:seon.config/cluster cluster-name
+     :seon.config.bootstrap/beyond-closure-token-budget 1024}])
   (cluster/ensure-cluster-entity!
    connection cluster-name cluster/boot-process-identity))
 
@@ -217,6 +222,100 @@
   (doseq [old '[packaged-forms population-tx ordered-sources agent-sources
                 plan-digest help-text]]
     (is (nil? (ns-resolve 'seon.bootstrap old)) (str old " is deleted"))))
+
+(defn- candidate-sources
+  [pull]
+  (mapv (comp bootstrap/entry-source :seon.repl/entry)
+        (:seon.repl/candidates pull)))
+
+(deftest intent-membership-is-the-only-opening-delta-and-is-budgeted
+  (support/with-database
+    (fn [connection]
+      (seed-cluster! connection "intent-membership")
+      (cluster/ensure-entity!
+       connection cluster/boot-process-identity
+       {:seon.cluster.agent/id agent-id
+        :seon.cluster/name "intent-membership"
+        :seon.ns/name namespace-name})
+      (db/transact!
+       connection
+       [{:seon.ns/name 'fixture.intent}
+        {:seon.fn/sym "fixture.intent/target"
+         :seon.fn/ns [:seon.ns/name 'fixture.intent]
+         :seon.fn/source "(defn target [x] (inc x))"
+         :seon.fn/arglists "([x])"
+         :seon.fn/private? false
+         :seon.fn/spec "[:=> [:cat :int] :int]"}
+        {:seon.test/sym "fixture.intent/target-usage"
+         :seon.test/ns [:seon.ns/name 'fixture.intent]
+         :seon.test/source
+         "(clojure.test/deftest target-usage (clojure.test/is (= 2 (target 1))))"
+         :seon.test/usage true
+         :seon.fn/calls [[:seon.fn/sym "fixture.intent/target"]]
+         :seon.test/pass-count 1
+         :seon.test/fail-count 0
+         :seon.test/error-count 0
+         :seon.test/run-basis-t (db/basis-t @connection)
+         :seon.test/run-at (java.util.Date. 1786500000000)}])
+      (plan/add! {:my.plan.item/id "use-target"
+                  :my.plan.item/title "Use the target"}
+                 connection agent-id)
+      (let [request (generator-request connection)
+            before (bootstrap/pull-result request)
+            before-bytes (candidate-sources before)]
+        (is (= before-bytes
+               (candidate-sources (bootstrap/pull-result request)))
+            "an agent with no :about refs has a byte-identical opening")
+        (db/transact!
+         connection
+         [[:db/add [:my.plan.item/id "use-target"]
+           :my.plan.item/about
+           [:seon.fn/sym "fixture.intent/target"]]])
+        (let [after (bootstrap/pull-result (generator-request connection))
+              before-sources (set (candidate-sources before))
+              delta (into []
+                          (remove before-sources)
+                          (candidate-sources after))]
+          (is (= ["(db/pull db (quote [*]) [:seon.fn/sym \"fixture.intent/target\"])"
+                  "(dir fixture.intent)"
+                  (str "; First real use — the indexed call-edge demonstration.\n"
+                       "(clojure.test/test-var (var fixture.intent/target-usage))")]
+                 delta)
+              "the subject doc and owning namespace join membership")
+          (is (some #(str/includes? % "target-usage") delta)
+              "first real use carries its call-edge usage demonstration")
+          (is (= [[:seon.fn/sym "fixture.intent/target"]]
+                 (:my.plan/intent-subjects after)))
+          (is (= (set delta)
+                 (set (remove before-sources (candidate-sources after))))
+              "the opening delta is exactly the admitted subject units"))
+        (db/transact!
+         connection
+         [[:db/add
+           (db/q '[:find ?config .
+                   :where
+                   [?cluster :seon.cluster/name "intent-membership"]
+                   [?cluster :seon.cluster/config ?config]]
+                 @connection)
+           :seon.config.bootstrap/beyond-closure-token-budget 1]])
+        (let [capped (bootstrap/pull-result (generator-request connection))]
+          (is (empty? (remove (set (candidate-sources before))
+                              (candidate-sources capped)))
+              "whole entries exceeding the budget are not admitted"))))))
+
+(deftest absent-intent-budget-refuses-loudly
+  (support/with-database
+    (fn [connection]
+      (support/seed-cluster! connection "missing-intent-budget")
+      (cluster/ensure-entity!
+       connection cluster/boot-process-identity
+       {:seon.cluster.agent/id agent-id
+        :seon.cluster/name "missing-intent-budget"
+        :seon.ns/name namespace-name})
+      (let [result (bootstrap/pull-result (generator-request connection))]
+        (is (= :seon.config/required-absent (:seon.error/kind result)))
+        (is (= :seon.config.bootstrap/beyond-closure-token-budget
+               (:seon.config/required-absent result)))))))
 
 (deftest missing-or-failed-membership-is-not-a-fixed-point
   (support/with-database

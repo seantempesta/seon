@@ -59,6 +59,7 @@
            [:my.plan/obligation-ref :my.plan/obligation-ref]],
           :obligations [:vector :my.plan/obligation],
           :ready [:vector :my.plan.item/item],
+          :intent-subjects [:vector :seon.db/ref],
           :blocked [:vector :my.plan.item/item],
           :recent-completions [:vector :my.plan.item/item],
           :older-completions :seon.print/elision,

@@ -1,6 +1,8 @@
 (ns seon.bootstrap
   "The live-fact generated bootstrap run shared by every new agent."
   (:require [clojure.edn :as edn]
+            [my.plan :as plan]
+            [seon.ai.tokens :as tokens]
             [seon.cluster.run :as run]
             [seon.db :as db]
             [seon.render :as render]
@@ -264,6 +266,207 @@
                 :seon.render.walk/root-acquisition acquisition
                 :seon.render/output :seon.render/form))))
 
+(defn- beyond-closure-budget
+  [database agent-id]
+  (let [attribute :seon.config.bootstrap/beyond-closure-token-budget
+        budget
+        (db/q '[:find ?budget .
+                :in $ ?agent-id
+                :where
+                [?agent :seon.cluster.agent/id ?agent-id]
+                [?agent :seon.cluster.agent/cluster ?cluster]
+                [?cluster :seon.cluster/config ?config]
+                [?config :seon.config.bootstrap/beyond-closure-token-budget
+                 ?budget]]
+              database agent-id)]
+    (cond
+      (:seon.error/kind budget) budget
+      (int? budget) budget
+      :else
+      {:seon.config/required-absent attribute
+       :seon.error/kind :seon.config/required-absent
+       :seon.error/message
+       (str "Generated opening intent membership requires config key "
+            attribute ".")})))
+
+(defn- demonstrated-namespace-names
+  [database agent-id]
+  (set
+   (concat
+    (db/q '[:find [?target-name ...]
+            :in $ ?agent-id
+            :where
+            [?agent :seon.cluster.agent/id ?agent-id]
+            [?agent :seon.cluster.agent/namespace ?own-namespace]
+            [?artifact :seon.fn/ns ?own-namespace]
+            [?artifact :seon.fn/private? false]
+            [?artifact :seon.fn/spec]
+            [?artifact :seon.fn/calls ?target]
+            [?target :seon.fn/ns ?target-namespace]
+            [?target-namespace :seon.ns/name ?target-name]]
+          database agent-id)
+    (db/q '[:find [?target-name ...]
+            :in $ ?agent-id
+            :where
+            [?agent :seon.cluster.agent/id ?agent-id]
+            [?agent :seon.cluster.agent/namespace ?own-namespace]
+            [?artifact :seon.test/ns ?own-namespace]
+            [?artifact :seon.test/usage true]
+            [?artifact :seon.test/pass-count ?passes]
+            [(< 0 ?passes)]
+            [?artifact :seon.test/fail-count 0]
+            [?artifact :seon.test/error-count 0]
+            [?artifact :seon.fn/calls ?target]
+            [?target :seon.fn/ns ?target-namespace]
+            [?target-namespace :seon.ns/name ?target-name]]
+          database agent-id))))
+
+(defn- intent-acquisition
+  [request subject]
+  (let [lookup (walk/entity-lookup (:seon.db/db request) subject)]
+    (if (:seon.error/kind lookup)
+      {:seon.render.walk/root lookup
+       :seon.render.walk/members {}
+       :seon.render.walk/order []}
+      (walk/root-acquisition
+       (-> request
+           (assoc :seon.render.walk/lookup lookup
+                  :seon.render/distance 1)
+           (dissoc :seon.render.walk/root-acquisition
+                   :seon.render.walk/root-pull-plan))))))
+
+(defn- registered-schema-key-subject?
+  [acquisition]
+  (some? (get-in acquisition [:seon.render.walk/root :seon.schema/key])))
+
+(defn- usage-demonstration-candidates
+  [database subject subject-lookup]
+  (into []
+        (map
+         (fn [test-symbol]
+           {:seon.repl/key [[:seon.test/sym test-symbol] :demonstration]
+            :seon.repl/subject subject-lookup
+            :seon.repl/entry
+            {:seon.repl/comment
+             "; First real use — the indexed call-edge demonstration."
+             :seon.repl/form
+             (list 'clojure.test/test-var
+                   (list 'var (symbol test-symbol)))}}))
+        (db/q '[:find [?test-symbol ...]
+                :in $ ?subject
+                :where
+                [?test :seon.test/usage true]
+                [?test :seon.test/sym ?test-symbol]
+                [?test :seon.fn/calls ?subject]
+                [?test :seon.test/pass-count ?passes]
+                [(< 0 ?passes)]
+                [?test :seon.test/fail-count 0]
+                [?test :seon.test/error-count 0]]
+              database subject)))
+
+(defn- subject-candidates
+  [request demonstrated subject acquisition]
+  (let [registered-key? (registered-schema-key-subject? acquisition)
+        subject-lookup (walk/entity-lookup (:seon.db/db request) subject)
+        owner-namespace
+        (get-in acquisition [:seon.render.walk/root :seon.fn/ns :seon.ns/name])
+        owner-lookup (when owner-namespace [:seon.ns/name owner-namespace])
+        direct
+        (into []
+              (filter
+               (fn [candidate]
+                 (let [[lookup index] (:seon.repl/key candidate)]
+                   (and (or (= lookup subject-lookup)
+                            (= lookup owner-lookup))
+                        (not (and (= lookup owner-lookup)
+                                  (pos? index)
+                                  (or registered-key?
+                                      (contains? demonstrated
+                                                 owner-namespace))))))))
+              (direct-candidates request acquisition))
+        direct
+        (into []
+              (remove (comp integer? :seon.repl/subject))
+              direct)]
+    (if (or registered-key? (contains? demonstrated owner-namespace))
+      direct
+      (into direct (usage-demonstration-candidates
+                    (:seon.db/db request) subject subject-lookup)))))
+
+(defn- candidate-cost
+  [candidate]
+  (long (or (tokens/estimate
+             (entry-source (:seon.repl/entry candidate)))
+            0)))
+
+(defn- restrict-acquisition
+  [acquisition candidates]
+  (let [lookups (set (map (comp first :seon.repl/key) candidates))]
+    (-> acquisition
+        (update :seon.render.walk/members select-keys lookups)
+        (update :seon.render.walk/order #(into [] (filter lookups) %)))))
+
+(defn- admitted-intent
+  [request subjects budget excluded-keys]
+  (let [demonstrated
+        (demonstrated-namespace-names
+         (:seon.db/db request)
+         (second (:seon.render.walk/lookup request)))
+        units
+        (mapv (fn [subject]
+                (let [acquisition (intent-acquisition request subject)]
+                  {:my.plan/subject subject
+                   :my.plan/acquisition acquisition
+                   :my.plan/candidates
+                   (subject-candidates request demonstrated subject
+                                       acquisition)}))
+              subjects)
+        state
+        (reduce
+         (fn [{spent :my.plan/spent seen :my.plan/seen :as state} unit]
+           (let [fresh (remove #(contains? seen (:seon.repl/key %))
+                               (:my.plan/candidates unit))
+                 admission
+                 (reduce
+                  (fn [{entry-spent :my.plan/spent :as admitted} candidate]
+                    (let [next-spent (+ entry-spent (candidate-cost candidate))]
+                      (if (<= next-spent budget)
+                        (-> admitted
+                            (assoc :my.plan/spent next-spent)
+                            (update :my.plan/candidates conj candidate)
+                            (update :my.plan/seen conj (:seon.repl/key candidate)))
+                        (reduced (assoc admitted :my.plan/full? true)))))
+                  {:my.plan/spent spent
+                   :my.plan/candidates []
+                   :my.plan/seen seen}
+                  fresh)
+                 admitted (:my.plan/candidates admission)
+                 state-with-candidates
+                 (-> state
+                     (assoc :my.plan/spent (:my.plan/spent admission)
+                            :my.plan/seen (:my.plan/seen admission))
+                     (update :my.plan/candidates into admitted))
+                 next-state
+                 (if (seq admitted)
+                   (-> state-with-candidates
+                       (update :my.plan/subjects conj
+                               (walk/entity-lookup
+                                (:seon.db/db request)
+                                (:my.plan/subject unit)))
+                       (update :my.plan/acquisitions conj
+                               (restrict-acquisition
+                                (:my.plan/acquisition unit) admitted)))
+                   state-with-candidates)]
+             (if (:my.plan/full? admission) (reduced next-state) next-state)))
+         {:my.plan/spent 0
+          :my.plan/seen excluded-keys
+          :my.plan/subjects []
+          :my.plan/candidates []
+          :my.plan/acquisitions []}
+         units)]
+    (select-keys state [:my.plan/subjects :my.plan/candidates
+                        :my.plan/acquisitions])))
+
 (defn pull-result
   "Pull and render the bounded candidate neighborhood for one opening."
   {:malli/schema [:=> [:cat :seon.render.walk/request] :map]}
@@ -287,17 +490,36 @@
         (count (:seon.render.walk/members acquisition))}}
 
       :else
-      (let [identities
-            (->> (vals (:seon.schema.projection/shape-rows
-                        (sci.kernel/context-projection
-                         (:seon.sci.eval/ctx request))))
-                 (keep :seon.entity/id-attr)
-                 set)]
-        {:seon.repl/root-key [(first order) 0]
-         :seon.repl/candidates
-         (into (direct-candidates request acquisition)
-               (listing-candidates request acquisition))
-         :seon.print/identity-attributes identities}))))
+      (let [agent-id (second (:seon.render.walk/lookup request))
+            budget (beyond-closure-budget (:seon.db/db request) agent-id)
+            subjects (when-not (:seon.error/kind budget)
+                       (plan/ready-subjects (:seon.db/db request) agent-id))]
+        (cond
+          (:seon.error/kind budget) budget
+          (:seon.error/kind subjects) subjects
+          :else
+          (let [base-candidates
+                (into (direct-candidates request acquisition)
+                      (listing-candidates request acquisition))
+                admitted
+                (admitted-intent request subjects budget
+                                 (set (map :seon.repl/key base-candidates)))
+                intent-candidates (:my.plan/candidates admitted)
+                joined
+                (walk/join-membership
+                 acquisition (:my.plan/acquisitions admitted))
+                identities
+                (->> (vals (:seon.schema.projection/shape-rows
+                            (sci.kernel/context-projection
+                             (:seon.sci.eval/ctx request))))
+                     (keep :seon.entity/id-attr)
+                     set)]
+            {:seon.repl/root-key [(first order) 0]
+             :seon.repl/candidates (into base-candidates intent-candidates)
+             :seon.print/identity-attributes identities
+             :my.plan/intent-subjects
+             (:my.plan/subjects admitted)
+             :seon.render.walk/root-acquisition joined}))))))
 
 (defn- root-candidate
   [request root-key]

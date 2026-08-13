@@ -150,6 +150,7 @@
      :seon.cluster.eval/at (at 2000)
      :seon.cluster.eval/ns [:seon.ns/name 'my.agents.transcript]
      :seon.cluster.eval/output "side effect\n"
+     :seon.cluster.eval/read-basis-transaction 41
      :seon.cluster.eval/result-edn "42"}
     {:seon.cluster.message/id "send-2"
      :seon.cluster.message/from [:seon.cluster.agent/id agent-id]
@@ -218,6 +219,8 @@
           (is (str/includes?
                ai
                "Agent transcript-peer said to transcript-agent: Repair the owning namespace."))
+          (is (str/includes? ai "t=41 42")
+              "the receipt's read basis is rendered beside its result")
           (is (str/includes?
                ai
                "Agent transcript-agent said to transcript-peer: I cannot make the requested edit."))
@@ -230,7 +233,7 @@
                ai
                (str "my.agents.transcript=> ;; calculate the answer\n"
                     "(do (println \"side effect\") (+ 20 22))\n"
-                    "side effect\n42")))
+                    "side effect\nt=41 42")))
           (is (str/includes? ai "waiting for the peer review"))
           (is (str/includes? ai "Execution error (ArithmeticException) at"))
           (is (str/includes? ai "Divide by zero"))

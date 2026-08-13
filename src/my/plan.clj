@@ -649,13 +649,34 @@
 (defn ready
   "List this agent's authored items that are ready now."
   {:malli/schema
-   [:=> [:cat :seon.db/database-value :seon.cluster.agent/id]
+   [:=> [:cat :seon.db/db :seon.cluster.agent/id]
     [:or :my.plan/ready-items :seon.error/value]]}
   [database agent-id]
   (let [eids (db/q ready-query database rules agent-id)]
     (if (error-value? eids)
       eids
       (items-for-eids database (anchor-id database agent-id) eids))))
+
+(defn ready-subjects
+  "List the resolved subject entities named by this agent's ready items.
+
+  Ready-item order is retained and each item's cardinality-many subjects are
+  ordered by database identity. Repeated subjects collapse at their first
+  occurrence. The result contains entity ids because the walk derives the
+  stable declared lookup identity from the same database value it pulls."
+  {:malli/schema
+   [:=> [:cat :seon.db/db :seon.cluster.agent/id]
+    [:or :my.plan/intent-subjects :seon.error/value]]}
+  [database agent-id]
+  (let [items (ready database agent-id)]
+    (if (error-value? items)
+      items
+      (into []
+            (comp
+             (mapcat (fn [item]
+                       (sort (:my.plan.item/about item))))
+             (distinct))
+            items))))
 
 (defn- message-obligations
   [database agent-id]

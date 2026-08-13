@@ -300,3 +300,53 @@
         (is (= #{"question" "later"} before))
         (is (= before after))
         (is (= 1 (:my.plan/added (:my.plan/diff applied))))))))
+
+(deftest plan-refuses-unresolved-subjects-before-transacting
+  (with-plan
+    (fn [connection]
+      (let [basis (db/basis-t @connection)
+            result
+            (plan/plan!
+             [{:my.plan.item/title "Investigate the missing subject"
+               :my.plan.item/about [[:seon.fn/sym
+                                     "fixture.plan/does-not-exist"]]}]
+             @connection connection "alice")]
+        (is (= :my.plan/subject-not-found (:seon.error/kind result)))
+        (is (true? (:my.plan/subject-not-found result)))
+        (is (= {:my.plan.item/about
+                [:seon.fn/sym "fixture.plan/does-not-exist"]}
+               (:seon.error/data result)))
+        (is (= basis (db/basis-t @connection)))
+        (is (zero? (item-count @connection)))))))
+
+(deftest ready-subjects-follow-only-ready-items-in-stable-order
+  (with-plan
+    (fn [connection]
+      (db/transact!
+       connection
+       [{:seon.fn/sym "fixture.plan/alpha"
+         :seon.fn/ns [:seon.ns/name 'fixture.plan]
+         :seon.fn/source "(defn alpha [] :alpha)"
+         :seon.fn/arglists "([])"
+         :seon.fn/private? false}
+        {:seon.fn/sym "fixture.plan/beta"
+         :seon.fn/ns [:seon.ns/name 'fixture.plan]
+         :seon.fn/source "(defn beta [] :beta)"
+         :seon.fn/arglists "([])"
+         :seon.fn/private? false}])
+      (add connection "dependency" "Dependency")
+      (add connection "blocked" "Blocked"
+           {:my.plan.item/needs #{[:my.plan.item/id "dependency"]}
+            :my.plan.item/about #{[:seon.fn/sym "fixture.plan/beta"]}})
+      (add connection "ready" "Ready"
+           {:my.plan.item/about
+            #{[:seon.fn/sym "fixture.plan/beta"]
+              [:seon.fn/sym "fixture.plan/alpha"]}})
+      (let [subjects (plan/ready-subjects @connection "alice")]
+        (is (= 2 (count subjects)))
+        (is (= #{"fixture.plan/alpha" "fixture.plan/beta"}
+               (set (map #(db/q '[:find ?sym .
+                                   :in $ ?entity
+                                   :where [?entity :seon.fn/sym ?sym]]
+                                 @connection %)
+                         subjects))))))))

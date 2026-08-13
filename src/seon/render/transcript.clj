@@ -46,6 +46,7 @@
    :seon.cluster.eval/id
    :seon.cluster.eval/ordinal
    :seon.cluster.eval/at
+   :seon.cluster.eval/read-basis-transaction
    :seon.cluster.eval/result-edn
    :seon.cluster.eval/result-blob
    :seon.cluster.eval/result-size
@@ -417,6 +418,7 @@
                                       :seon.cluster.run/opened-at])
      ::source (get sources receipt-eid)
      ::namespace (get-in receipt [:seon.cluster.eval/ns :seon.ns/name])
+     ::read-basis (:seon.cluster.eval/read-basis-transaction receipt)
      ::result (:seon.cluster.eval/result-edn receipt)
      ::result-blob (:seon.cluster.eval/result-blob receipt)
      ::result-size (:seon.cluster.eval/result-size receipt)
@@ -631,12 +633,14 @@
 
 (defn- receipt-text
   [unit entry _detail]
-  (let [error (some->> (::error entry) (bounded-scalar unit))
+  (let [bounded-result-text
+        (some->> (::result entry) (bounded-result unit))
+        error (some->> (::error entry) (bounded-scalar unit))
         entity
         (cond-> (::entity entry)
           (::result entry)
           (assoc :seon.cluster.eval/result-edn
-                 (bounded-result unit (::result entry)))
+                 bounded-result-text)
           error
           (assoc :seon.cluster.eval/error
                  (if (::triage-edn entry)
@@ -647,9 +651,16 @@
           (::output entry)
           (assoc :seon.cluster.eval/output
                  (bounded-scalar unit (::output entry))))
-        result (rendered-family unit entity 2)]
+        result (rendered-family unit entity 2)
+        shown-result
+        (if (and (::read-basis entry)
+                 (seq bounded-result-text)
+                 (str/ends-with? result bounded-result-text))
+          (str (subs result 0 (- (count result) (count bounded-result-text)))
+               "t=" (::read-basis entry) " " bounded-result-text)
+          result)]
     (str (prompted-source entry)
-         (when (seq result) (str "\n" result)))))
+         (when (seq shown-result) (str "\n" shown-result)))))
 
 (defn- undisposed-run-text
   [_unit entry _detail]
@@ -936,7 +947,8 @@
                    :run (run/render-ai (::entity entry)))]
              {:seon.render.history/call-id
               [:seon.render.transcript/entry (::kind entry) (::id entry)]
-              :seon.render.history/basis-transaction (entry-basis db entry)
+              :seon.render.history/basis-transaction
+              (or (::read-basis entry) (entry-basis db entry))
               :seon.render.history/form form
               :seon.render.history/printed-value printed-value
               :seon.render.history/bytes

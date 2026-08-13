@@ -95,8 +95,10 @@
   (let [installed (installed-attributes database)
         ref-attributes (into []
                              (keep (fn [[attribute properties]]
-                                     (when (= :db.type/ref
-                                              (:db/valueType properties))
+                                     (when (and (= :db.type/ref
+                                                   (:db/valueType properties))
+                                                (not= :my.plan.item/about
+                                                      attribute))
                                        attribute)))
                              installed)
         identity-attributes (into []
@@ -169,6 +171,17 @@
             id-attributes)
       (:db/id entity)))
 
+(defn entity-lookup
+  "Resolve one entity id to its stable declared lookup identity."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.db/ref]
+    [:or :seon.render.walk/lookup :seon.error/value]]}
+  [database entity]
+  (let [pulled (db/pull database '[*] entity)]
+    (if (:seon.error/kind pulled)
+      pulled
+      (stable-lookup (installed-identity-attributes database) pulled))))
+
 (defn- pulled-values
   [value]
   (cond
@@ -192,7 +205,8 @@
                 (mapv #(ref-identity id-attributes %) value)
                 :else value))
        result))
-   (apply dissoc entity (map reverse-attribute ref-attributes))
+   (apply dissoc entity :my.plan.item/about
+          (map reverse-attribute ref-attributes))
    ref-attributes))
 
 (defn- acquisition-members
@@ -200,7 +214,9 @@
   (let [installed (installed-attributes database)
         refs (into []
                    (keep (fn [[attribute properties]]
-                           (when (= :db.type/ref (:db/valueType properties))
+                           (when (and (= :db.type/ref
+                                        (:db/valueType properties))
+                                      (not= :my.plan.item/about attribute))
                              attribute)))
                    installed)
         identities (installed-identity-attributes database)
@@ -235,8 +251,11 @@
                           (if (:seon.ns/name entity)
                             [[:seon.ns/requires false]
                              [:seon.ns/requires true]]
-                            (concat (map vector refs (repeat false))
-                                    (map vector refs (repeat true))))
+                            (concat
+                             (map vector
+                                  (remove #{:my.plan.item/about} refs)
+                                  (repeat false))
+                             (map vector refs (repeat true))))
                           connections
                           (into []
                                 (mapcat
@@ -308,6 +327,29 @@
                root (long distance) [] nil)
         {:seon.render.walk/members {}
          :seon.render.walk/order []}))))
+
+(defn join-membership
+  "Join additional walk acquisitions into one stable membership.
+
+  The original root and member order stay byte-identical. Each new member is
+  appended at its first occurrence; repeated subjects collapse to the member
+  already acquired from the same immutable database value."
+  {:malli/schema [:=> [:cat :map [:vector :map]] :map]}
+  [acquisition additions]
+  (reduce
+   (fn [joined addition]
+     (reduce
+      (fn [result lookup]
+        (if (contains? (:seon.render.walk/members result) lookup)
+          result
+          (-> result
+              (assoc-in [:seon.render.walk/members lookup]
+                        (get-in addition [:seon.render.walk/members lookup]))
+              (update :seon.render.walk/order conj lookup))))
+      joined
+      (:seon.render.walk/order addition)))
+   acquisition
+   additions))
 
 (defn root-pull-plan
   "Acquire one immutable compiled pull plan for a schema generation and fit."
@@ -752,13 +794,14 @@
   [{root-key :seon.repl/root-key
     candidates :seon.repl/candidates
     settled :seon.repl/settled
-    identity-attributes :seon.print/identity-attributes}]
+    identity-attributes :seon.print/identity-attributes
+    intent-subjects :my.plan/intent-subjects}]
   (let [settled-by-key
         (into {} (map (juxt :seon.repl/key
                             :seon.sci.admit/print-node)) settled)
         ordered-candidates (vec candidates)]
     (loop [remaining ordered-candidates
-           frontier #{}
+           frontier (into #{} (mapcat reference-keys) intent-subjects)
            explained #{}
            episode []]
       (let [selected
