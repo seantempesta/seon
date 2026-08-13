@@ -136,6 +136,7 @@
       message (admitted-message message)
       :else
       {:seon.error/kind ::not-found
+       :my.message/not-found message-id
        :seon.error/message (str "There is no message named " (pr-str message-id) ".")
        :seon.error/data {:seon.cluster.message/id message-id}})))
 
@@ -151,17 +152,20 @@
     ;; that must not throw
     (or (not (string? to)) (str/blank? to))
     {:seon.error/kind ::no-recipient
+     :my.message/no-recipient true
      :seon.error/message
      "send needs the id of the agent to message, as a string."}
 
     (or (not (string? content)) (str/blank? content))
     {:seon.error/kind ::no-content
+     :my.message/no-content true
      :seon.error/message
      "send needs the message to deliver, as a string."}
 
     (and about?
          (or (not (string? about)) (str/blank? about)))
     {:seon.error/kind ::no-about
+     :my.message/no-about true
      :seon.error/message
      "send's about argument must be a non-blank identity string."}
 
@@ -202,16 +206,19 @@
   (cond
     (or (not (string? to)) (str/blank? to))
     {:seon.error/kind ::no-recipient
+     :my.message/no-recipient true
      :seon.error/message
      "decline needs the id of the assigning agent, as a string."}
 
     (or (not (string? about)) (str/blank? about))
     {:seon.error/kind ::no-about
+     :my.message/no-about true
      :seon.error/message
      "decline's about argument must be a non-blank identity string."}
 
     (or (not (string? reason)) (str/blank? reason))
     {:seon.error/kind ::no-reason
+     :my.message/no-reason true
      :seon.error/message
      "decline needs a reader-facing reason, as a string."}
 

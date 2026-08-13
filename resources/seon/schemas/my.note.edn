@@ -18,4 +18,14 @@
             :seon.render/ai my.note/render-notes-ai,
             :seon.render/html my.note/render-notes-html,
             :seon.render/form my.note/render-notes-form}
-           :my.note/note]}
+           :my.note/note],
+          :agent-not-found :seon.cluster.agent/id,
+          :agent-not-found-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the agent that does not exist"} [:my.note/agent-not-found :my.note/agent-not-found] [:seon.error/message :seon.error/message]],
+          :identity-owned-by-another-agent :my.note/id,
+          :identity-owned-by-another-agent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the note owned by another agent"} [:my.note/identity-owned-by-another-agent :my.note/identity-owned-by-another-agent] [:seon.error/message :seon.error/message]],
+          :about-not-found :my.note/about,
+          :about-not-found-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the note subject that does not exist"} [:my.note/about-not-found :my.note/about-not-found] [:seon.error/message :seon.error/message]],
+          :not-found :my.note/id,
+          :not-found-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the current note that does not exist"} [:my.note/not-found :my.note/not-found] [:seon.error/message :seon.error/message]],
+          :not-owned :my.note/id,
+          :not-owned-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the note not owned by the caller"} [:my.note/not-owned :my.note/not-owned] [:seon.error/message :seon.error/message]]}

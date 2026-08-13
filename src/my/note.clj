@@ -111,9 +111,10 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- refuse!
-  [kind message data]
+  [marker subject message data]
   (throw (ex-info message
-                  {:seon.error/kind kind
+                  {marker subject
+                   :seon.error/kind marker
                    :seon.error/message message
                    :seon.error/data data})))
 
@@ -149,14 +150,17 @@
         about (:my.note/about request)]
     (when-not agent-entity
       (refuse! ::agent-not-found
+               agent-id
                (str "There is no agent named " (pr-str agent-id) ".")
                {:seon.cluster.agent/id agent-id}))
     (when (and existing (not= agent-entity existing-agent))
       (refuse! ::identity-owned-by-another-agent
+               id
                (str "Note " (pr-str id) " belongs to another agent.")
                {:my.note/id id}))
     (when (and about? (nil? (db/entity database about)))
       (refuse! ::about-not-found
+               about
                (str "The note subject " (pr-str about) " does not exist.")
                {:my.note/about about}))
     [(cond-> {:my.note/id id
@@ -178,10 +182,12 @@
                 database note))]
     (when-not note
       (refuse! ::not-found
+               id
                (str "There is no current note named " (pr-str id) ".")
                {:my.note/id id}))
     (when (not= agent-entity owner)
       (refuse! ::not-owned
+               id
                (str "Note " (pr-str id) " belongs to another agent.")
                {:my.note/id id
                 :seon.cluster.agent/id agent-id}))

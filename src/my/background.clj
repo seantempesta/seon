@@ -34,7 +34,8 @@
   {:seon.error/kind ::invalid-call
    :seon.error/message
    "background needs exactly one direct capability call with one request value, optionally preceded by an options map."
-   :seon.error/data {}})
+   :seon.error/data {}
+   :my.background/invalid-call true})
 
 (defmacro background
   "Start one capability request without waiting for its result.
@@ -89,7 +90,8 @@
                (string? (second result-ref)))
     {:seon.error/kind ::invalid-result
      :seon.error/message "poll needs a :seon.effect/id lookup ref."
-     :seon.error/data {:my.background/result result-ref}}
+     :seon.error/data {:my.background/result result-ref}
+     :my.background/invalid-result true}
     (if-let [receipt
              (db/pull (db/db db/*conn*)
                       [:seon.effect/id
@@ -114,7 +116,8 @@
                (:seon.effect/interrupted-at receipt)))
       {:seon.error/kind ::missing-result
        :seon.error/message "The background effect receipt does not exist."
-       :seon.error/data {:my.background/result result-ref}})))
+       :seon.error/data {:my.background/result result-ref}
+       :my.background/missing-result true})))
 
 (defn await
   "Wait for a background request or return its finished result.

@@ -33,4 +33,6 @@
          :blank-note [:= true]
          :blank-note-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a run wait whose note is blank"} [:my.run/blank-note :my.run/blank-note] [:seon.error/message :seon.error/message]]
          :blank-result [:= true]
-         :blank-result-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a run completion whose result is blank"} [:my.run/blank-result :my.run/blank-result] [:seon.error/message :seon.error/message]]}
+         :blank-result-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a run completion whose result is blank"} [:my.run/blank-result :my.run/blank-result] [:seon.error/message :seon.error/message]]
+         :usage-walkthrough-absent [:= true]
+         :usage-walkthrough-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark my.run when its usage walkthrough is absent"} [:my.run/usage-walkthrough-absent :my.run/usage-walkthrough-absent] [:seon.error/message :seon.error/message]]}

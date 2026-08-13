@@ -107,6 +107,9 @@
       (throw
        (ex-info "my.run has no declared usage walkthrough."
                 {:seon.error/kind ::usage-walkthrough-absent
+                 :my.run/usage-walkthrough-absent true
+                 :seon.error/message
+                 "my.run has no declared usage walkthrough."
                  :seon.ns/name 'my.run})))
     (into [{:seon.repl/form '(dir 'my.run)}] (walkthrough))))
 
@@ -125,6 +128,7 @@
   [note]
   (if (or (not (string? note)) (str/blank? note))
     {:seon.error/kind ::blank-note
+     :my.run/blank-note true
      :seon.error/message
      "wait needs a note saying what you are waiting for, as a string."}
     {:my.run/disposition :wait
@@ -143,6 +147,7 @@
   ; value answers, str/blank? on a non-string would throw
   (if (or (not (string? result)) (str/blank? result))
     {:seon.error/kind ::blank-result
+     :my.run/blank-result true
      :seon.error/message
      "complete needs the reply text you want delivered, as a string."}
     {:my.run/disposition :completed
