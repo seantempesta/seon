@@ -134,6 +134,13 @@ one decision away from queued work. Ruled items cite their record.
     explicit `:about` + validation stays the contract). Cheap, unruled.
 12. **Per-(shape, profile) render-cost facts** as the general learned
     constant enabling #8 — a small schema + one recording seam.
+12b. **Beyond-closure budget as a declared fraction, not an absolute**
+    (owner exchange, 2026-08-13 night): the dial itself is ruled and
+    honest (declared config fact, one gate, estimated-token unit), but
+    the absolute 1024 silently changes meaning when the model's context
+    window changes; a declared fraction of the provider context-window
+    fact stays proportional, and the live drive's measurements (with
+    #12's receipts) decide the value. Do not tune before the drive.
 13. **Derive-or-die for every mirror.** The session's meta-lesson: every
     hand-maintained mirror of the tree (member lists, IN-FLIGHT blocks,
     vocabulary, counts in prose) must be derived, checker-enforced, or
