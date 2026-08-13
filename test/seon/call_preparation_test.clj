@@ -586,7 +586,7 @@
               (env/environment {:seon.boot/cluster-name "acquired"
                                 :seon.db/connection connection
                                 :seon.schema/projection acquired-projection}))
-             live (env/carry ctx environment)]
+             live (env/carry-state ctx (env/environment-state environment))]
          (is (cp/state? (get ctx cp/carrier))
              "acquisition installs the call-preparation state; without this
               the hook reads nil and is silently inert at every call site")

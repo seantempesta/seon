@@ -37,6 +37,14 @@ shortcut changed meaning; and the class regression
 cluster context, never a scratch one. Recurring gate:
 `bin/test seon.call-preparation-test` — 14 tests, 127 assertions, 0 failures.
 
+The 2026-08-13 complete run caught a stale construction in that same class
+regression after the environment became state carried by the acquired ctx.
+The fixture used `env/carry`, whose supplied plain environment cannot replace
+the acquired ctx's authoritative state, so the two elided calls were evaluated
+without the fixture connection. The regression now installs the fixture's
+environment state with `env/carry-state`; production call preparation remains
+unchanged.
+
 **Live proof, the arc's exact call**, on cluster `s3` in an isolated root
 through the shared SCI ctx: `(seon.cluster/ensure-entity! "91331-…" {…})`
 with two arguments returned its creation result and committed the agent.
