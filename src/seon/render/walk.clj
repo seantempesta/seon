@@ -471,6 +471,22 @@
                                     :seon.cluster.agent/namespace])]
     (when (map? namespace-ref) (:db/id namespace-ref))))
 
+(defn- distance-cap-unit
+  [member remaining]
+  (when (and (zero? remaining)
+             (seq (:seon.render.walk/connections member)))
+    {:seon.render.walk/lookup (:seon.render.walk/lookup member)
+     :seon.render/distance remaining
+     :seon.render.walk/path
+     (conj (:seon.render.walk/path member)
+           :seon.render.walk/neighbours 0)
+     :seon.render.walk/found-depth
+     (inc (:seon.render.walk/found-depth member))
+     :seon.error/value
+     {:seon.error/kind ::elided
+      :seon.error/message
+      "elided connections at the requested distance cap"}}))
+
 (defn neighborhood
   "Render the root acquisition's stable members without further discovery."
   {:malli/schema [:=> [:cat :seon.render.walk/request] :seon.render.walk/units]}
@@ -505,7 +521,7 @@
            (into []
                  (comp
                   (take node-limit)
-                  (map
+                  (mapcat
                    (fn [member-lookup]
                      (let [member (get members member-lookup)
                            entity (:seon.render/value member)
@@ -533,26 +549,31 @@
                              (render/renderer-failure
                               {:seon.db/db database
                                :seon.render/namespace owner
-                               :seon.error/value failure}))]
-                       (cond->
-                        (-> member
-                            (dissoc :seon.render.walk/eid
-                                    :seon.render.walk/connections
-                                    :seon.render/value)
-                            (assoc :seon.render/distance render-distance))
-                         failure
-                         (assoc :seon.error/value failure
-                                :seon.render/output
-                                (or (get failure-outcome output)
-                                    (if (= output :seon.render/html)
-                                      [:div {:class "seon-render-unavailable"}
-                                       "renderer unavailable"]
-                                      "Renderer unavailable.")))
-                         (seq (:seon.db/tx-data failure-outcome))
-                         (assoc :seon.db/tx-data
-                                (:seon.db/tx-data failure-outcome))
-                         (not failure)
-                         (assoc :seon.render/output rendered))))))
+                               :seon.error/value failure}))
+                           member-unit
+                           (cond->
+                            (-> member
+                                (dissoc :seon.render.walk/eid
+                                        :seon.render.walk/connections
+                                        :seon.render/value)
+                                (assoc :seon.render/distance render-distance))
+                             failure
+                             (assoc :seon.error/value failure
+                                    :seon.render/output
+                                    (or (get failure-outcome output)
+                                        (if (= output :seon.render/html)
+                                          [:div
+                                           {:class "seon-render-unavailable"}
+                                           "renderer unavailable"]
+                                          "Renderer unavailable.")))
+                             (seq (:seon.db/tx-data failure-outcome))
+                             (assoc :seon.db/tx-data
+                                    (:seon.db/tx-data failure-outcome))
+                             (not failure)
+                             (assoc :seon.render/output rendered))
+                           marker (distance-cap-unit member remaining)]
+                       (cond-> [member-unit]
+                         marker (conj marker))))))
                  order)))))))
 
 ;;; ---------------------------------------------------------------------------

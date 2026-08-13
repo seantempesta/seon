@@ -110,7 +110,7 @@
    (some #(when (= attribute (:seon.render.walk/attribute %)) %) units)))
 
 (deftest important-runtime-entities-declare-and-use-readable-faces
-  (is (= {:seon.render/ai `transcript/render-session-ai
+  (is (= {:seon.render/ai `agent/render-situation-ai
           :seon.render/html `transcript/render-session-html}
          (select-keys (family-properties :seon.cluster.agent/agent)
                       [:seon.render/ai :seon.render/html])))

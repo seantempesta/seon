@@ -98,7 +98,7 @@
      (seed-agent-and-transcript! connection)
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
-           projection-resolutions (atom 0)
+           database-projection-resolutions (atom 0)
            schema-resource-reads (atom 0)
            projection-from-database schema/projection-from-database
            read-schema-resource @#'schema.edn/read-schema-resource
@@ -106,9 +106,9 @@
            units
            (binding [*err* warnings]
              (with-redefs
-              [schema/projection-from-database
+               [schema/projection-from-database
                (fn [& arguments]
-                 (swap! projection-resolutions inc)
+                 (swap! database-projection-resolutions inc)
                  (apply projection-from-database arguments))
                schema.edn/read-schema-resource
                (fn [resource]
@@ -126,8 +126,8 @@
              "every error-valued survivor is a distance-cap marker, not a renderer failure"))
        (is (some #(str/includes? (str (:seon.render/output %)) "42") units)
            "the seeded transcript reaches database reads and print emission")
-       (is (= 1 @projection-resolutions)
-           "one walk resolves its exact-basis declaration projection once")
+       (is (zero? @database-projection-resolutions)
+           "the walk reuses its context-carried projection without rebuilding")
        (is (zero? @schema-resource-reads)
            "the exact-basis database projection reads no schema resources")
        (is (not (str/includes? (str warnings)

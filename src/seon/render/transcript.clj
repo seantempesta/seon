@@ -228,6 +228,14 @@
          [?receipt :seon.cluster.eval/run ?run]]
        db active-runs-rules agent-id (bootstrap/run-id agent-id)))
 
+(defn- bootstrap-task-message-eid
+  [db agent-id]
+  (db/q '[:find ?message .
+          :in $ ?message-id
+          :where
+          [?message :seon.cluster.message/id ?message-id]]
+        db (bootstrap/task-message-id agent-id)))
+
 (defn- candidate-entity-ids
   [db agent-id limit]
   (let [recent
@@ -250,13 +258,21 @@
              (group-by first)
              (reduce-kv (fn [ids kind rows]
                           (assoc ids kind (mapv second rows)))
-                        {}))]
-    (update recent :eval
-            (fn [receipt-ids]
-              (into []
-                    (distinct
-                     (concat (pinned-receipt-ids db agent-id)
-                             receipt-ids)))))))
+                        {}))
+        task-message-eid (bootstrap-task-message-eid db agent-id)]
+    (-> recent
+        (update :message
+                (fn [message-eids]
+                  (into []
+                        (distinct
+                         (concat (when task-message-eid [task-message-eid])
+                                 message-eids)))))
+        (update :eval
+                (fn [receipt-ids]
+                  (into []
+                        (distinct
+                         (concat (pinned-receipt-ids db agent-id)
+                                 receipt-ids))))))))
 
 (defn- form-sources
   [db receipt-ids]
@@ -508,9 +524,10 @@
                 (assoc entry
                        ::root (entry-root identity-attrs entry)
                        ::pinned?
-                       (and (contains? #{:eval :input} (::kind entry))
-                            (= (bootstrap/run-id agent-id)
-                               (::run-id entry))))))
+                       (or (::bootstrap-trigger? entry)
+                           (and (contains? #{:eval :input} (::kind entry))
+                                (= (bootstrap/run-id agent-id)
+                                   (::run-id entry)))))))
          (sort-by entry-order)
          vec)))
 

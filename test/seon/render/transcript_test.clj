@@ -380,7 +380,7 @@
             (mapv #(.indexOf ai (str "user=> (identity " % ")\n" %))
                   (range bootstrap-count))
             task-position
-            (.indexOf ai (str "(my.message/read \"" bootstrap-task-id "\")"))
+            (.indexOf ai (bootstrap/task-message))
             pinned-end
             (.indexOf ai (str "user=> (identity " (dec bootstrap-count)
                               ")\n" (dec bootstrap-count)))
