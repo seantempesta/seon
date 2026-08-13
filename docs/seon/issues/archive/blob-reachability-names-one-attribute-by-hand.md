@@ -71,3 +71,21 @@ attribute from the admitted schema, and `branch-blobs` queries a Datahike
 history value for each roster branch. The same commit added the superseded-
 datom regression and the second live digest attribute
 `:seon.code.def/blob`.
+
+The 2026-08-13 complete run exposed a typed-read regression in that derivation:
+after `seon.db/q` began returning the logical values of EDN-backed attributes,
+`blob-digest-attributes` still passed each already-decoded schema form to
+`edn/read-string`. A keyword form therefore raised `ClassCastException` before
+collection issued a batch. The correction consumes the query's logical values
+directly; `seon.blob-publication-test/publication-and-collection-are-exclusive-in-both-orderings`
+is the retained production-path regression. Its direct rerun crossed the
+previous latch failure and passed 15 of 17 assertions, but the final reopen
+found both rooted blob contents absent. The root datoms survived and the crash
+orphan was collected; the remaining post-reopen reachability defect is not yet
+isolated.
+
+`seon.operator/digest-attributes` carried the same obsolete second decode.
+Both operator collection regressions reached only partial result data because
+the evidence pass failed on a decoded keyword form. It now consumes the same
+logical query rows directly. A combined direct rerun of the exact-store and
+nonzero-verification tests passed with no reports.

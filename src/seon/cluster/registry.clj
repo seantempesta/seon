@@ -61,8 +61,7 @@
   - mid concurrent `branch!` from two connections: covered by the fork
     fix above. Without it this row was NOT DETECTABLE — the caller was
     told `:ok` and the branch was gone (b2-plan §0.3)."
-  (:require [clojure.edn :as edn]
-            [datahike.api :as d]
+  (:require [datahike.api :as d]
             [seon.db :as db]
             [datahike.connections :as connections]
             [datahike.store :as datahike.store]
@@ -316,8 +315,6 @@
   [db]
   (let [forms
         (into {}
-              (map (fn [[schema-key serialized-form]]
-                     [schema-key (edn/read-string serialized-form)]))
               (db/q '[:find ?schema-key ?form
                       :where
                       [?schema :seon.schema/key ?schema-key]
