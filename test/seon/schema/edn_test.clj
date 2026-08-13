@@ -339,47 +339,52 @@
                   delta :seon.schema.edn.gate/agent-honest)))))))
 
 (deftest one-config-registration-derives-every-structural-contract
-  (let [scratch :seon.config.scratch/enabled
-        delta (schema/begin-registration-delta
-               (schema/build-projection (schema/registered-schemas)))
-        entries
-        (fn [forms schema-key]
-          (into {} (map (juxt first identity))
-                (schema.form/map-entries
-                 (get forms schema-key))))]
-    (schema/call-with-registration-delta
-     delta
-     (fn []
-       (schema/register!
-        scratch
-        [:boolean {:seon.config/default false
-                   :seon.config/per-agent true}])))
-    (let [forms @(:seon.schema.delta/candidate-forms delta)]
-      (testing "the public registration producer derives every contract"
-        (is (contains? (entries forms :seon.config/manifest) scratch))
-        (is (contains? (entries forms :seon.config/effective) scratch))
-        (is (contains? (entries forms :seon.config/agent-overlay) scratch))
-        (is (contains? (entries forms :seon.config/entity) scratch))
-        (is (contains? (set (schema/canonical-database-attributes forms)) scratch))
-        (is (= [scratch
-                {:optional true}
-                [:or scratch [:= :seon.config/absent]]]
-               (get (entries forms :seon.config/manifest) scratch))
-            "manifest derivation retains both optionality and explicit absence")
-        (is (= [scratch {:optional true} scratch]
-               (get (entries forms :seon.config/agent-overlay) scratch))
-            "agent absence inherits through one derived optional entry")
-        (is (= false
-               (schema/call-with-forms
-                forms #(get (config/default-decisions) scratch)))
-            "the same registration is defaults-checkable"))
-      (testing "structural config attributes never become manifest entries"
-        (is (not (contains? (entries forms :seon.config/manifest)
-                            :seon.config/cluster)))
-        (is (not (contains? (entries forms :seon.config/manifest)
-                            :seon.config/applied-manifest-digest)))))
-    (is (not (contains? (schema/registered-schemas) scratch))
-        "the scratch declaration never mutates packaged facts")))
+  (test-support/with-database
+    (fn [connection]
+      (let [scratch :seon.config.scratch/enabled
+            delta (schema/begin-registration-delta
+                   (schema/projection-from-database @connection))
+            entries
+            (fn [forms schema-key]
+              (into {} (map (juxt first identity))
+                    (schema.form/map-entries
+                     (get forms schema-key))))]
+        (schema/call-with-registration-delta
+         delta
+         (fn []
+           (schema/register!
+            scratch
+            [:boolean {:seon.config/default false
+                       :seon.config/per-agent true}])))
+        (let [forms @(:seon.schema.delta/candidate-forms delta)]
+          (testing "the public registration producer derives every contract"
+            (is (contains? (entries forms :seon.config/manifest) scratch))
+            (is (contains? (entries forms :seon.config/effective) scratch))
+            (is (contains? (entries forms :seon.config/agent-overlay) scratch))
+            (is (contains? (entries forms :seon.config/entity) scratch))
+            (is (contains? (set (schema/canonical-database-attributes forms)) scratch))
+            (is (= [scratch
+                    {:optional true}
+                    [:or scratch [:= :seon.config/absent]]]
+                   (get (entries forms :seon.config/manifest) scratch))
+                "manifest derivation retains both optionality and explicit absence")
+            (is (= [scratch {:optional true} scratch]
+                   (get (entries forms :seon.config/agent-overlay) scratch))
+                "agent absence inherits through one derived optional entry")
+            (is (= false
+                   (:seon.config/default
+                    (schema.form/attr-form-properties
+                     (get forms scratch))))
+                "the same registration retains its declared default")
+            (is (not (contains? (config/default-decisions) scratch))
+                "uncommitted scratch data never changes shipped decisions"))
+          (testing "structural config attributes never become manifest entries"
+            (is (not (contains? (entries forms :seon.config/manifest)
+                                :seon.config/cluster)))
+            (is (not (contains? (entries forms :seon.config/manifest)
+                                :seon.config/applied-manifest-digest)))))
+        (is (not (contains? (schema/registered-schemas) scratch))
+            "the scratch declaration never mutates packaged facts")))))
 
 (deftest per-agent-config-overlay-is-one-derived-optional-surface
   (let [forms (schema/registered-schemas)

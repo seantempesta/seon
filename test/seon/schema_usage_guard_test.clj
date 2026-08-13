@@ -1,6 +1,7 @@
 (ns seon.schema-usage-guard-test
   "Schema replacement/removal safety at the terminal transaction boundary."
   (:require [clojure.test :refer [deftest is testing]]
+            [datahike.api :as d]
             [seon.db :as db]
             [datahike.db.interface :as dbi]
             [seon.cluster.run :as run]
@@ -436,7 +437,7 @@
                             [:seon.schema/key base-key])))
           (is (not (contains? (:schema @connection) base-key)))
           (is (= 7
-                 (db/q '[:find ?value .
+                 (d/q '[:find ?value .
                         :in $ ?attribute
                         :where [_ ?attribute ?value]]
                       past base-key))

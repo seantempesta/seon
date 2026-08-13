@@ -17,13 +17,18 @@
  {:seon.schema.admission/source :core}
  #(schema/register! ::title :string))
 
+(defn- fixture-projection
+  []
+  (schema/declaration-projection
+   @(:seon.schema.delta/candidate-forms schema-delta)))
+
 (use-fixtures
  :each
  (fn [test-body]
    (schema/call-with-registration-delta
     schema-delta
     {:seon.schema.admission/source :core}
-    test-body)))
+    #(schema/call-with-projection (fixture-projection) test-body))))
 
 (def ^:private scalar-generator
   (gen/elements
@@ -81,8 +86,10 @@
     (schema/register! ::alias-base direct)
     (schema/register! ::alias-middle ::alias-base)
     (schema/register! ::aliased ::alias-middle)
-    (mapv #(dissoc (schema.datahike/malli->datahike-attr %) :db/ident)
-          [::direct ::wrapped ::aliased])))
+    (let [projection (fixture-projection)]
+      (mapv #(dissoc (schema.datahike/malli->datahike-attr-in projection %)
+                     :db/ident)
+            [::direct ::wrapped ::aliased]))))
 
 (deftest supported-ast-wrappers-and-aliases-have-one-declaration
   (support/assert-check!
@@ -110,7 +117,8 @@
       (schema/register! ::literal [:= literal])
       (is (= expected
              (:db/valueType
-              (schema.datahike/malli->datahike-attr ::literal)))))))
+              (schema.datahike/malli->datahike-attr-in
+               (fixture-projection) ::literal)))))))
 
 (deftest schema-row-properties-lift-only-when-their-declarations-are-storable
   (let [forms {:seon.error/class [:= true]
@@ -148,17 +156,18 @@
                             (read-one resource))]
               (let [value (without-bindings operation)]
                 {:resource-reads @reads :value value}))))
-        one-population
-        (:resource-reads (resource-reads schema/declaration-population))
+        acquired (resource-reads schema.edn/packaged-forms)
+        one-population (:resource-reads acquired)
         result
-        (resource-reads schema/canonical-database-attributes)]
-    (testing "the route-shaped bridge operation resolves once, not per attribute"
+        (resource-reads
+         #(schema/canonical-database-attributes (:value acquired)))]
+    (testing "the bridge consumes one explicitly acquired population"
       (is (pos? one-population)
-          "the fallback must read resources or the count is vacuous")
+          "the explicit acquisition must read resources or the count is vacuous")
       (is (> (count (:value result)) 500)
           "the regression must exercise the production-wide attribute walk")
-      (is (= one-population (:resource-reads result))
-          "one operation carries one population through every bridge question"))))
+      (is (zero? (:resource-reads result))
+          "one operation carries the supplied population through every question"))))
 
 (def ^:private refused-form-generator
   (gen/elements
@@ -174,7 +183,8 @@
     (prop/for-all [{:keys [form]} refused-form-generator]
       (let [data (try
                    (schema/register! ::refused form)
-                   (schema.datahike/malli->datahike-attr ::refused)
+                   (schema.datahike/malli->datahike-attr-in
+                    (fixture-projection) ::refused)
                    support/committed
                    (catch clojure.lang.ExceptionInfo error
                      (ex-data error)))]

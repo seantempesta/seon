@@ -6,7 +6,7 @@
             [malli.error :as me]
             [seon.db]
             [seon.schema :as schema]
-            [seon.schema.edn]
+            [seon.schema.edn :as schema.edn]
             [seon.schema.internal :as schema.internal]))
 
 (defn- refusal
@@ -45,15 +45,20 @@
 (deftest canonical-definition-keeps-admitted-predicate-symbols
   (let [definition
         [:=> [:cat :qualified-symbol [:fn 'clojure.core/ifn?]]
-         :qualified-symbol]]
+         :qualified-symbol]
+        projection
+        (schema/declaration-projection (schema.edn/packaged-forms))]
     (is (= definition (schema/canonical-definition definition {})))
-    (is (schema/malli-form? definition))
-    (is (nil? (find-ns 'clojure.java.shell))
-        "precondition: the arbitrary predicate namespace is not loaded")
-    (is (false? (schema/malli-form? [:fn 'clojure.java.shell/sh]))
-        "schema validation never loads an arbitrary predicate namespace")
-    (is (nil? (find-ns 'clojure.java.shell))
-        "and asking the question did not load it either")))
+    (schema/call-with-projection
+     projection
+     (fn []
+       (is (schema/malli-form? definition))
+       (is (nil? (find-ns 'clojure.java.shell))
+           "precondition: the arbitrary predicate namespace is not loaded")
+       (is (false? (schema/malli-form? [:fn 'clojure.java.shell/sh]))
+           "schema validation never loads an arbitrary predicate namespace")
+       (is (nil? (find-ns 'clojure.java.shell))
+           "and asking the question did not load it either")))))
 
 (deftest two-projections-never-exchange-a-compiled-validator
   ;; CLASS: compiled validators and explainers are a pure function of the
@@ -213,11 +218,16 @@
                     (swap! builds inc)
                     (apply original-build arguments))]
       (project! forms)
-      (project! equal-copy))
-    ;; `build-projection`'s one-argument entry delegates to its three-argument
-    ;; entry, so the redefined Var observes two calls for one complete build.
-    (is (= 2 @builds)
-        "resource reads do not start a second complete projection build")))
+      (let [after-first @builds]
+        (project! equal-copy)
+        ;; An explicitly handed projection performs zero fallback builds. With
+        ;; no handed projection, `build-projection`'s one-argument entry
+        ;; delegates to its three-argument entry, so one complete build is
+        ;; observed as two Var calls. Either way, the equal second population
+        ;; must not start another build.
+        (is (contains? #{0 2} after-first))
+        (is (= after-first @builds)
+            "an equal population does not start a second projection build")))))
 
 (deftest acquired-projection-owns-schema-introspection
   (let [forms {:seon.schema-test/acquired :string}

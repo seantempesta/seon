@@ -9,7 +9,6 @@
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
-            [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
 
 (def ^:private seal-digest (apply str (repeat 64 "a")))
@@ -113,9 +112,9 @@
   (with-history-policy
     false
     (fn [connection]
-      (db/transact!
-       connection
-       (schema/canonical-schema-rows (schema.edn/packaged-forms)))
+      (seon.cluster/populate-source!
+       {:seon.db/connection connection
+        :seon.fn/manifest @test-support/source-manifest})
       (let [projection (schema/projection-from-database @connection)]
         (is (= :core
                (get-in
