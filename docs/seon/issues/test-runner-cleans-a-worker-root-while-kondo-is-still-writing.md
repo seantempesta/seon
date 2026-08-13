@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, testing, concurrency, operator]
 ---
@@ -47,6 +47,62 @@ writer lifetime.
 The test-runner interruption/completion boundary and the worker-root cleanup
 that consumes it. `seon.fs/delete-recursively!` is the visible refusal site,
 not yet an attributed cause.
+
+## Root cause
+
+`seon.test.runner/stop-process-tree!` signaled the worker and its captured
+descendants but awaited only the worker `Process`. A descendant could therefore
+survive the worker's `Process.waitFor` completion and keep writing beneath the
+worker root after the coordinator had published its own completion to
+`bin/test`. The launcher correctly keyed successful-root deletion to that
+coordinator completion; the coordinator's value was incomplete because it did
+not include its worker child's exit publication.
+
+`script/seon/dev/changed_test.clj` does not share this defect or the worker-root
+cleanup owner. It already awaits the exact launched `bin/test` process through
+`ProcessHandle.onExit`, and `bin/test` owns the successful-root deletion.
+
+## Resolution
+
+Commit `b2b3aa185` makes the worker ownership value carry the root process,
+every captured descendant, their individual `ProcessHandle.onExit` futures,
+and one `CompletableFuture.allOf` completion. Shutdown captures those futures
+before signaling, signals descendants before the worker root, and returns only
+after every captured process publishes exit. The ten-second wait is retained
+only as a loud backstop: it reports the still-live process ids, forces them,
+and refuses if their recorded exit completion still does not arrive
+(`src/seon/test/runner.clj:1156-1218`).
+
+The regression uses filesystem creation events and a FIFO rather than sleeps.
+A child publishes that it still owns the root, blocks, then writes into that
+root and publishes completion. The test proves cleanup has not begun while the
+child is blocked and fires exactly once after the recorded completion. Its
+fixture teardown continues through the existing no-follow recursive deletion
+owner; the production delete path was not changed
+(`test/seon/test_runner_test.clj:470-563`).
+
+Dependency grounding: OpenJDK 26.0.1's `java.lang.ProcessHandle#onExit`
+returns a `CompletableFuture` completed on process termination; the installed
+OpenJDK source explicitly documents `onExit().get()` as the event-driven wait.
+The first-party precedent is commit `7eeff3e70`, which changed the launcher to
+await its exact runner before retaining the root. This repair applies the same
+law to the runner's worker children.
+
+## Resolution evidence
+
+- Before the fix, the bounded regression reproduced the class with 2 failures
+  and 3 errors: cleanup ran once and removed the worker root while the child
+  was still blocked and able to perform its late write.
+- After `b2b3aa185`, `bin/test seon.test-runner-test` ran 13 tests containing
+  132 assertions with 0 failures and 0 errors, then removed its successful
+  isolated operator root.
+- `git diff --check` passed for the production owner, regression, and this
+  issue note.
+
+The complete `bin/test --all` integration gate was deliberately not run in
+this lane; the disjoint wedge-properties lane owns that one full gate after its
+agent-test repair. Its result remains the integrated confirmation of the final
+acceptance bullet below, not evidence attributed to this focused run.
 
 ## Acceptance
 
