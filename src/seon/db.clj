@@ -451,11 +451,22 @@
 ;;; pays nothing, while a read that decodes a thousand attributes pays exactly
 ;;; one resolution. The delay is created fresh per operation and dies with it:
 ;;; operation-local, never a process-global cache of declaration facts.
+(defn- schema-database
+  "The database value that owns schema for a possibly temporal view."
+  [database]
+  (loop [candidate database]
+    (if (satisfies? dbi/IHistory candidate)
+      (let [origin (dbi/-origin candidate)]
+        (if (identical? candidate origin)
+          candidate
+          (recur origin)))
+      candidate)))
+
 (defn- read-declarations
   [database]
   (delay
     (or (schema/handed-projection)
-        (schema/projection-from-database database))))
+        (schema/projection-from-database (schema-database database)))))
 
 (defn- ask-declarations
   "Ask one declaration question with the population both PASSED and SUPPLIED.
@@ -526,7 +537,7 @@
         (keep (fn [[attribute declaration]]
                 (when (qualified-keyword? attribute)
                   [attribute declaration])))
-        (dbi/-schema database)))
+        (dbi/-schema (schema-database database))))
 
 (defn- registered-attribute-candidates
   [declarations attribute]
@@ -571,7 +582,8 @@
           declaration (::installed-declaration evidence)
           valid-value? (and declaration
                             (datahike.schema/value-valid?
-                             attribute value (dbi/-schema database)))]
+                             attribute value
+                             (dbi/-schema (schema-database database))))]
       (cond
         (nil? declaration)
         (unknown-attribute-error operation database attribute entity-id)
@@ -678,7 +690,8 @@
              database (get databases source-symbol)]
          (when (and database
                     (keyword? attribute)
-                    (nil? (get (dbi/-schema database) attribute)))
+                    (nil? (get (dbi/-schema (schema-database database))
+                               attribute)))
            (unknown-attribute-error 'seon.db/q database attribute
                                     (parsed-pattern-value pattern)))))
      (query-patterns parsed-query))))

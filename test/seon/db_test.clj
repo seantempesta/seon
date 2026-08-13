@@ -765,6 +765,34 @@
                          "identity-admission-missing"]]
                       @connection))))))))
 
+(deftest temporal-database-identities-use-the-origin-schema
+  (test-support/with-database
+   (fn [connection]
+     (db/transact! connection
+                   [{:seon.cluster.agent/id "temporal-schema-present"}])
+     (let [database @connection
+           basis (db/basis-t database)
+           views [(db/history database)
+                  (db/as-of database basis)
+                  (db/since database (dec basis))]]
+       (doseq [view views]
+         (testing (str (class view))
+           (let [installed
+                 (db/q '[:find ?entity
+                         :where [?entity :seon.cluster.agent/id _]]
+                       view)
+                 uninstalled
+                 (db/q '[:find ?entity
+                         :where [?entity :seon.cluster.agent/idd _]]
+                       view)]
+             (is (not= :seon.db/invalid-read (:seon.error/kind installed))
+                 "an installed attribute is never classified as uninstalled")
+             (is (= :seon.db/invalid-read (:seon.error/kind uninstalled)))
+             (is (= :seon.db/attribute-not-installed
+                    (get-in uninstalled
+                            [:seon.error/data
+                             :seon.error/diagnostic-cause]))))))))))
+
 (deftest malformed-public-database-requests-name-the-public-operation
   (test-support/with-database
    (fn [connection]
