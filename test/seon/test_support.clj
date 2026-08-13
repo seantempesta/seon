@@ -302,16 +302,21 @@
     :db/unique :db.unique/identity}])
 
 (defn file-store-markers
-  "Read every value of a file-store test's synthetic marker attribute."
+  "Read every value of a file-store test's synthetic marker attribute.
+
+  A flat read refusal (an uninstalled marker attribute) is returned as that
+  error value, never poured element-wise into the marker set."
   [connection marker-attribute]
-  (set
-   (db/q
-    '[:find [?marker ...]
-      :in $ ?marker-attribute
-      :where
-      [_ ?marker-attribute ?marker]]
-    @connection
-    marker-attribute)))
+  (let [result (db/q
+                '[:find [?marker ...]
+                  :in $ ?marker-attribute
+                  :where
+                  [_ ?marker-attribute ?marker]]
+                @connection
+                marker-attribute)]
+    (if (map? result)
+      result
+      (set result))))
 
 (defn refusal-data
   "Return a flat error value, deepest thrown ex-data, or `committed`."

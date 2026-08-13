@@ -98,18 +98,25 @@
   (let [options
         {::test-support/extra-schema
          (test-support/file-store-probe-schema ::marker)}]
-    (is (= [#{"installed"} [false #{}]]
-           [(test-support/with-database
-              options
-              (fn [connection]
-                (db/transact! connection [{::marker "installed"}])
-                (test-support/file-store-markers connection ::marker)))
-            (test-support/with-database
-              (fn [connection]
-                [(contains? (:schema @connection) ::marker)
-                 (test-support/file-store-markers connection ::marker)]))])
-        "a released lease is rebranched from the immutable base; neither its
-         child-only schema state nor its rows can leak into the next test")))
+    (is (= #{"installed"}
+           (test-support/with-database
+             options
+             (fn [connection]
+               (db/transact! connection [{::marker "installed"}])
+               (test-support/file-store-markers connection ::marker))))
+        "the leased database sees its own synthetic marker rows")
+    (let [[installed? markers]
+          (test-support/with-database
+            (fn [connection]
+              [(contains? (:schema @connection) ::marker)
+               (test-support/file-store-markers connection ::marker)]))]
+      (is (false? installed?)
+          "a released lease is rebranched from the immutable base; the
+           child-only schema state cannot leak into the next test")
+      (is (= :seon.db/attribute-not-installed
+             (get-in markers [:seon.error/data :seon.error/diagnostic-cause]))
+          "reading the leaked-attribute candidate is a typed refusal naming
+           attribute-not-installed — stronger leak evidence than absence"))))
 
 (deftest shared-support-observes-events-refusals-and-cleanup
   (let [events (async/chan 1)
