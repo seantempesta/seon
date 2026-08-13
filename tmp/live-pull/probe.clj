@@ -16,6 +16,7 @@
             [seon.db :as db]
             [seon.render :as render]
             [seon.render.walk :as walk]
+            [seon.schema :as schema]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as sci.kernel]
@@ -261,29 +262,33 @@
         generator-request (make-request connection ctx agent-id)
         observations (atom {})]
     (println (pr-str (conditions root @connection)))
-    (with-redefs-fn
-      (replacements observations)
-      (fn []
-        (let [pull-plan
-              (measure observations :cold-root-pull-plan
-                       #(walk/root-pull-plan generator-request))
-              request-with-plan
-              (assoc generator-request
-                     :seon.render.walk/root-pull-plan pull-plan)
-              _ (measure observations :cold-root-acquisition
-                         #(walk/root-acquisition request-with-plan))
-              _ (measure observations :warm-root-acquisition
-                         #(walk/root-acquisition request-with-plan))
-              _ (measure observations :cold-pull-result
-                         #(bootstrap/pull-result generator-request))
-              _ (measure observations :warm-pull-result
-                         #(bootstrap/pull-result generator-request))]
-          (settle-help! connection agent-id)
-          (let [settled-request (assoc generator-request
-                                       :seon.db/db @connection)]
-            (measure observations :next-entry-after-help
-                     #(bootstrap/next-entry settled-request
-                                            (bootstrap/run-id agent-id)))))))))
+    (schema/call-with-projection
+     (sci.kernel/context-projection ctx)
+     (fn []
+       (with-redefs-fn
+         (replacements observations)
+         (fn []
+           (let [pull-plan
+                 (measure observations :cold-root-pull-plan
+                          #(walk/root-pull-plan generator-request))
+                 request-with-plan
+                 (assoc generator-request
+                        :seon.render.walk/root-pull-plan pull-plan)
+                 _ (measure observations :cold-root-acquisition
+                            #(walk/root-acquisition request-with-plan))
+                 _ (measure observations :warm-root-acquisition
+                            #(walk/root-acquisition request-with-plan))
+                 _ (measure observations :cold-pull-result
+                            #(bootstrap/pull-result generator-request))
+                 _ (measure observations :warm-pull-result
+                            #(bootstrap/pull-result generator-request))]
+             (settle-help! connection agent-id)
+             (let [settled-request (assoc generator-request
+                                          :seon.db/db @connection)]
+               (measure observations :next-entry-after-help
+                        #(bootstrap/next-entry settled-request
+                                               (bootstrap/run-id
+                                                agent-id)))))))))))
 
 (defn -main
   "Run the decomposition against one new repository-local root."
