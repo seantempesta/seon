@@ -274,7 +274,7 @@
         arity? (= :malli.core/invalid-arity kind)]
     (error/diagnostic
      {:seon.error/kind ::contract-violated
-      :seon.instrument/contract-violated function-symbol
+      :seon.instrument/contract-violated (str function-symbol)
       :seon.error/message
       (if arity?
         (str "Wrong number of args (" (:arity data) ") passed to: "
@@ -322,7 +322,7 @@
                 (diagnostic-arglists function-symbol)]
             (cond-> (error/diagnostic
                      {:seon.error/kind ::contract-violated
-                      :seon.instrument/contract-violated function-symbol
+                      :seon.instrument/contract-violated (str function-symbol)
                       :seon.error/message (:seon.error/message fallback)
                       :seon.error/diagnostic-layer :instrumentation
                       :seon.error/diagnostic-operation function-symbol
@@ -378,7 +378,7 @@
       (cond->
        (error/diagnostic
         {:seon.error/kind ::contract-violated
-         :seon.instrument/contract-violated (:fn-name data)
+         :seon.instrument/contract-violated (str (:fn-name data))
          ;; A representative problem context goes through the ONE general
          ;; printer under the construction-time evidence caps. The complete
          ;; count remains the broken-system signal without retaining every
