@@ -16,13 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (40)
+## Blocker (38)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Attribute and bound the store's one-day 69 GB growth](store-grew-to-69-gigabytes-in-one-day-of-lanes.md) | blocker | exclusive sweep implementation wave |
-| [Encode agent-declared render symbols through transaction encoding](agent-schema-render-symbol-bypasses-transaction-encoding.md) | blocker | rebirth-gap fix wave |
-| [Include agent-authored results in the reborn opening](rebirth-opening-omits-agent-authored-results.md) | blocker | rebirth-gap fix wave |
 | [Carry the agent-scoped environment into generated turn forks](generated-turn-fork-omits-the-agent-scoped-environment.md) | blocker | evolving-session implementation phases |
 | [Give background-result wakes a queryable run trigger](background-result-wakes-have-no-run-trigger.md) | blocker | why-awake situation work (generator lane) |
 | [Make wildcard receipt pulls accept stored read dependency plans](wildcard-receipt-pull-refuses-a-stored-dependency-plan.md) | blocker | database codec repair wave |
@@ -65,6 +63,7 @@ See `README.md` for the convention.
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Bound the disarm turn-completion await](cluster-disarm-awaits-turn-completion-without-a-bound.md) | friction | evolving-session implementation phases |
 | [Refuse cluster names that collide with the store directory](cluster-named-store-collides-with-the-store-directory.md) | friction | R3 store-path decision |
 | [Carry the operator root explicitly instead of guessing from names](operator-root-inference-guesses-from-directory-names.md) | friction | R3 store-path decision |
 | [Bound the parallel-only confirmation protocol exchange](confirmation-parallel-failure-blocks-reading-worker-protocol.md) | friction | test-platform follow-up |
@@ -137,7 +136,6 @@ See `README.md` for the convention.
 | [Hold one store ownership interval across artifact install and start](artifact-releases-the-fence-between-install-and-start.md) | friction | artifact startup wave |
 | [Make production docstrings describe the surviving runtime](production-docstrings-teach-deleted-semantics.md) | friction | production documentation-honesty wave |
 | [Cut the 11.8 s source load back under the ten-second law](source-load-is-118s-against-the-ten-second-law.md) | friction | load-time incident |
-| [Remove the deleted run lease from the AI retry proof](ai-retry-proof-still-cites-the-deleted-run-lease.md) | friction | AI retry evidence wave |
 | [Derive fleet state from events, not a 20 ms ping absence](oversight-treats-a-20ms-ping-absence-as-state.md) | friction | render oversight event wave |
 | [Reject negative imports at the escape/static admission boundary](negative-import-masks-escape-static-admission.md) | friction | SCI static-admission repair wave |
 | [Derive the initial-paint census instead of hand-maintaining it](initial-paint-census-is-a-hand-maintained-count.md) | friction | render test repair |

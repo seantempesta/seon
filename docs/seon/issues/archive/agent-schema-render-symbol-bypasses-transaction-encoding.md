@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, schema, render, database, class/n13, wave/rebirth-gap]
 ---
@@ -81,3 +81,12 @@ projection exists; no renderer-specific string coercion and no second codec.
   incompatible render function.
 - The rebirth probe publishes the current-plan declaration and renders the
   current plan without a production workaround.
+
+## Resolution — 2026-08-13
+
+Closed by the quiet-tree rebirth probe rerun (`tmp/rebirth/probe.clj` on
+`tmp/rebirth/scratch-root-quiet`, evidence `rebirth-evidence.edn`, basis-t
+536871027): raw and rendered regeneration DETERMINISTIC, the agent-authored
+function and its green usage test PRESENT in the reborn opening, 5,743
+lived -> 1,560 reborn tokens. Mechanism landed in `61136c874` (authored
+results + render-symbol transaction encoding via `592e62159`).
