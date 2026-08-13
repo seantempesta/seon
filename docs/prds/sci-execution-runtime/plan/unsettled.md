@@ -105,6 +105,20 @@ registered-keys-self-explain.
   cheapest-form cost model are PENDING his answer after explanations
   delivered in chat.
 
+**OWNER PRIORITY (2026-08-13 late): wedges and agent-facing context
+dumps are fixed ASAP AND AS CLASSES.** Two lanes launched: `wedge-kill`
+(the disarm await bound first — fresh jstack evidence — then the
+unbounded-await census of src/ as a research note; the live-pull-after-help
+wedge queued behind W2b's hold on `bootstrap.clj`) and `dump-kill` (the
+outward-values-bypass class at its choke point: the fit-owner routing, the
+shared constructor behind digest repetition and print-tree-in-error-data,
+verified by READING live rendered output). W3 HOLDS until both return
+(their files overlap the consumer migration). Prevention pattern, applies
+to both: make the banned shape a program-graph QUERY (unbounded-await
+census; `seon.fn/output-path-report` bypass paths), then land ONE class
+regression that fails on new members — subject-present by construction,
+never absence-as-health.
+
 **THE ORDERED QUEUE AFTER RETURNS:**
 1. R2 continuation, serial, red-tolerant: W2b (deferred producers in
    bootstrap/walk/plan once those lanes land) → W3 consumers dispatch on
