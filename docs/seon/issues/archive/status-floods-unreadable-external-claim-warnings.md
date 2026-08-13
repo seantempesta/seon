@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, operator, class/n1, wave/operator-status-face]
 ---
@@ -48,3 +48,20 @@ Still open in `resources/seon/operator/state.clj` and
 `script/seon/fresh_operator.clj`. Reconcile stale managed-root claims away,
 retain genuine failures as structured values, and print one counted summary
 line with an explicit drill identity instead of one warning per file.
+
+## Resolution — 2026-08-13
+
+Resolved by `a073f7b51` at the existing claim-reader and status-render seams.
+`resources/seon/operator/state.clj` derives an invalid claim's cause as either
+an absent root or a malformed record and retains the path in structured
+evidence. `script/seon/fresh_operator.clj` renders all invalid claims as one
+counted line split by those causes, names `bin/seon reset --force`, and no
+longer prints one full-path warning per file. The focused regression constructs
+one absent-root and one malformed-present-root claim, asserts the exact
+aggregate, and proves the absent root path is not rendered.
+
+This note is the same repeated-status-face defect as the already archived
+`status-prints-unexplained-invalid-claim-lines.md`. Its cleanup remainder is
+not silently closed: absent-root reclamation and key-level malformed-record
+diagnosis remain owned by
+`pre-rename-root-claims-are-unreadable-noise-on-every-status.md`.
