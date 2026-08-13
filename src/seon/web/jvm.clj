@@ -12,7 +12,9 @@
            [java.net URI]
            [java.net.http HttpClient HttpClient$Redirect HttpRequest HttpRequest$Builder
             HttpRequest$BodyPublishers HttpResponse HttpResponse$BodyHandlers]
-           [java.nio.charset StandardCharsets]
+           [java.nio ByteBuffer]
+           [java.nio.charset Charset CodingErrorAction IllegalCharsetNameException
+            StandardCharsets UnsupportedCharsetException]
            [java.time Duration]
            [java.util Optional]))
 
@@ -149,18 +151,52 @@
              (when (pos? observed) (vswap! read-count + observed))
              observed)))))))
 
+(declare content-type-base content-charset)
+
+(defn- textual-content-type?
+  [content-type]
+  (let [base (content-type-base content-type)]
+    (and base
+         (or (str/starts-with? base "text/")
+             (str/ends-with? base "/json")
+             (str/ends-with? base "+json")
+             (str/ends-with? base "/xml")
+             (str/ends-with? base "+xml")
+             (some? (content-charset content-type))))))
+
+(defn- strict-text
+  [octets charset-name]
+  (let [charset (Charset/forName (or charset-name "UTF-8"))
+        decoder (doto (.newDecoder charset)
+                  (.onMalformedInput CodingErrorAction/REPORT)
+                  (.onUnmappableCharacter CodingErrorAction/REPORT))]
+    (str (.decode decoder (ByteBuffer/wrap ^bytes octets)))))
+
+(defn- decoded-text
+  [octets content-type]
+  (when (textual-content-type? content-type)
+    (try
+      (strict-text octets (content-charset content-type))
+      (catch java.nio.charset.CharacterCodingException _ nil)
+      (catch IllegalCharsetNameException _ nil)
+      (catch UnsupportedCharsetException _ nil))))
+
 (defn- inline-body
-  [octets]
-  {:my.web.body/bytes (long (alength ^bytes octets))
-   :my.web.body/digest (schema/sha-256 [octets])
-   :my.web.body/octet-values (mapv #(bit-and 0xff %) ^bytes octets)})
+  [octets content-type]
+  (let [base {:my.web.body/bytes (long (alength ^bytes octets))
+              :my.web.body/digest (schema/sha-256 [octets])}]
+    (if-let [text (decoded-text octets content-type)]
+      (assoc base :my.web.body/text text)
+      (assoc base :my.web.body/octet-values
+             (mapv #(bit-and 0xff %) ^bytes octets)))))
 
 (defn- capture-body!
-  [connection ^InputStream input max-inline max-response url force-blob?]
+  [connection ^InputStream input max-inline max-response url content-type
+   force-blob?]
   (with-open [^InputStream bounded (bounded-input input max-response url)]
     (let [prefix (.readNBytes bounded (int (inc max-inline)))]
       (if (and (not force-blob?) (<= (alength ^bytes prefix) max-inline))
-        {:seon.web.jvm/body (inline-body prefix)
+        {:seon.web.jvm/body (inline-body prefix content-type)
          :seon.web.jvm/octet-array prefix}
         (let [source (SequenceInputStream.
                       (ByteArrayInputStream. prefix) bounded)
@@ -306,7 +342,7 @@
                   (ensure-declared-length! response max-response final-url)
                   (let [captured
                         (capture-body! db/*conn* body max-inline max-response
-                                       final-url false)
+                                       final-url content-type false)
                         octets (captured-octets db/*conn* captured)
                         base
                         (cond->
@@ -389,12 +425,13 @@
               _ (ensure-declared-length!
                  response (:seon.config.web/max-response-bytes effective)
                  final-url)
+              content-type (response-header response "content-type")
               captured
               (capture-body!
                db/*conn* (.body ^HttpResponse response)
                (:seon.config.web/max-inline-bytes effective)
                (:seon.config.web/max-response-bytes effective)
-               final-url true)
+               final-url content-type true)
               body (:seon.web.jvm/body captured)
               raw (captured-octets db/*conn* captured)]
           (if-not (<= 200 status 299)

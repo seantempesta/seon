@@ -2,8 +2,13 @@
               :bytes :my.fs/byte-count
               :digest :seon.blob/digest
               :octet-values :my.fs/bytes
+              :text :string
               :value
               [:or
+               [:map
+                [:my.web.body/bytes :my.web.body/bytes]
+                [:my.web.body/digest :my.web.body/digest]
+                [:my.web.body/text :my.web.body/text]]
                [:map
                 [:my.web.body/bytes :my.web.body/bytes]
                 [:my.web.body/digest :my.web.body/digest]

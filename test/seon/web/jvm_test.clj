@@ -113,6 +113,17 @@
          "<html><head><title>Page title</title><style>hidden</style></head><body><h1>Hello</h1><script>hidden</script><p>world</p></body></html>"
          StandardCharsets/UTF_8))))
     (.createContext
+     server "/small-html"
+     (http-handler
+      #(response! % 200 {"Content-Type" "text/html; charset=UTF-8"}
+                  (.getBytes "<html>hello</html>"
+                             StandardCharsets/UTF_8))))
+    (.createContext
+     server "/binary"
+     (http-handler
+      #(response! % 200 {"Content-Type" "application/octet-stream"}
+                  (byte-array (map unchecked-byte [0 1 255 2])))))
+    (.createContext
      server "/redirect-loop"
      (http-handler
       (fn [exchange]
@@ -362,3 +373,48 @@
             (is (inst? (:seon.effect/opened-at receipt)))
             (is (inst? (:seon.effect/settled-at receipt)))
             (is (nil? (:seon.effect/interrupted-at receipt)))))))))
+
+(deftest public-fetch-settles-text-and-binary-body-representations
+  (with-file-database
+    (fn [connection]
+      (with-server
+        (fn [{:keys [base-url]}]
+          (db/transact!
+           connection
+           [(merge (seon-config/defaults)
+                   {:seon.config/cluster "default"}
+                   (config base-url)
+                   {:seon.config.web/max-inline-bytes 4096})
+            {:seon.cluster.agent/id "web-agent"}
+            {:seon.cluster.run/id "web-receipt-run"
+             :seon.cluster.run/agent
+             [:seon.cluster.agent/id "web-agent"]}])
+          (let [context (effect-context connection)
+                [text-result binary-result]
+                (binding [db/*conn* connection
+                          effect/*request-context* context]
+                  [(web/fetch {:my.web/url (str base-url "/small-html")})
+                   (web/fetch {:my.web/url (str base-url "/binary")})])
+                receipts
+                (mapv
+                 (fn [ordinal]
+                   (db/pull
+                    @connection '[*]
+                    [:seon.effect/id
+                     (pr-str ["web-receipt-run" 0 ordinal])]))
+                 [0 1])
+                stored-results
+                (mapv #(edn/read-string (:seon.effect/result-edn %))
+                      receipts)]
+            (is (= "<html>hello</html>"
+                   (get-in text-result [:my.web/body
+                                        :my.web.body/text])))
+            (is (not (contains? (:my.web/body text-result)
+                                :my.web.body/octet-values)))
+            (is (= [0 1 255 2]
+                   (get-in binary-result [:my.web/body
+                                          :my.web.body/octet-values])))
+            (is (not (contains? (:my.web/body binary-result)
+                                :my.web.body/text)))
+            (is (= [text-result binary-result] stored-results))
+            (is (every? #(inst? (:seon.effect/settled-at %)) receipts))))))))
