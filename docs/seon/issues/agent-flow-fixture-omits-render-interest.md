@@ -35,11 +35,17 @@ initialization before either fixture could exercise its subject.
   reference lets `streaming-rides-channels-and-only-the-settled-value-is-a-fact`
   reach and pass its stream assertions under direct invocation and the focused
   repository runner.
+- The same tally exposed a fourth stale construction in
+  `seon.cluster.message-test/inbound-wakes-the-named-agent-test`: its direct
+  `wake/route!` request omitted `:seon.render.web/interest`, so the listener
+  caught a nil dereference before routing Bob's message. The fixture now
+  supplies `(atom :all)`, matching the production request contract.
 
 ## Owner
 
 The hand-built render graph fixtures in `test/seon/cluster/agent_test.clj`,
-`test/seon/cluster/loop_test.clj`, and `test/seon/cluster/turn_test.clj`.
+`test/seon/cluster/loop_test.clj`, `test/seon/cluster/turn_test.clj`, and
+`test/seon/cluster/message_test.clj`.
 
 ## Acceptance
 

@@ -619,6 +619,7 @@
                   :seon.cluster.wake/fenced? (fn [_ _] false)
                   :seon.cluster.wake/armer-channel armer
                   :seon.cluster.wake/render-channel render
+                  :seon.render.web/interest (atom :all)
                   :seon.cluster.wake/fault-channel faults
                   :seon.cluster.wake/key ::inbound-route})]
         (try
