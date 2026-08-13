@@ -16,8 +16,9 @@
            (java.nio.charset StandardCharsets)
            (java.lang.management ManagementFactory ThreadInfo)
            (java.time Instant)
-           (java.util.concurrent Executors LinkedBlockingQueue ThreadFactory
-                                 TimeUnit))
+           (java.util.concurrent CompletableFuture Executors
+                                 LinkedBlockingQueue ThreadFactory TimeUnit
+                                 TimeoutException))
   (:gen-class))
 
 (defn var-reference?
@@ -1152,21 +1153,69 @@
                  ::worker-result result})))
     worker))
 
+(def ^:private process-tree-exit-backstop-seconds
+  "The loud last-resort bound after signaling a worker process tree."
+  10)
+
+(defn- process-tree-ownership
+  "Capture one process tree and every exact exit publication before signaling."
+  [^Process process]
+  (let [root (.toHandle process)
+        descendant-handles (vec (.toList (.descendants root)))
+        handles (conj descendant-handles root)
+        exits (mapv #(.onExit ^ProcessHandle %) handles)]
+    {::process-root root
+     ::process-descendants descendant-handles
+     ::process-handles handles
+     ::process-exits exits
+     ::process-tree-exit
+     (CompletableFuture/allOf
+      (into-array CompletableFuture exits))}))
+
+(defn- await-process-tree-exit
+  [{::keys [process-tree-exit]}]
+  (try
+    (.get ^CompletableFuture process-tree-exit
+          process-tree-exit-backstop-seconds TimeUnit/SECONDS)
+    true
+    (catch TimeoutException _
+      false)))
+
+(defn- signal-process-tree!
+  [{::keys [process-root process-descendants]} forcibly?]
+  (doseq [^ProcessHandle handle (concat (reverse process-descendants)
+                                        [process-root])]
+    (when (.isAlive handle)
+      (if forcibly?
+        (.destroyForcibly handle)
+        (.destroy handle)))))
+
 (defn- stop-process-tree!
   [^Process process]
-  (doseq [^ProcessHandle descendant
-          (reverse (vec (.toList (.descendants (.toHandle process)))))]
-    (when (.isAlive descendant)
-      (.destroy descendant)))
-  (when (.isAlive process)
-    (.destroy process))
-  (when-not (.waitFor process 10 TimeUnit/SECONDS)
-    (doseq [^ProcessHandle descendant
-            (reverse (vec (.toList (.descendants (.toHandle process)))))]
-      (when (.isAlive descendant)
-        (.destroyForcibly descendant)))
-    (.destroyForcibly process)
-    (.waitFor process 10 TimeUnit/SECONDS)))
+  (let [{::keys [process-handles] :as ownership}
+        (process-tree-ownership process)]
+    (signal-process-tree! ownership false)
+    (when-not (await-process-tree-exit ownership)
+      (binding [*out* *err*]
+        (println "bin/test: WORKER PROCESS-TREE EXIT BACKSTOP fired; forcing"
+                 (str/join ","
+                           (map #(.pid ^ProcessHandle %)
+                                (filter #(.isAlive ^ProcessHandle %)
+                                        process-handles))))
+        (flush))
+      (signal-process-tree! ownership true)
+      (when-not (await-process-tree-exit ownership)
+        (throw
+         (ex-info "A worker process tree did not publish every child exit."
+                  {:seon.error/kind ::process-tree-exit-backstop
+                   ::processes
+                   (mapv (fn [^ProcessHandle handle]
+                           {::process-id (.pid handle)
+                            ::process-alive? (.isAlive handle)})
+                         process-handles)}))))
+    ;; The exact root exit is already published; this only releases Process
+    ;; streams and makes the exit value available to the JVM owner.
+    (.waitFor process)))
 
 (defn- stop-worker!
   [worker]

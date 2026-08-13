@@ -49,6 +49,22 @@
   (let [[before _] (swap-vals! tasks #(if (seq %) (subvec % 1) %))]
     (first before)))
 
+(defn- await-created!
+  [^java.nio.file.WatchService watcher filename]
+  (loop []
+    (let [watch-key (.poll watcher 10 TimeUnit/SECONDS)]
+      (when-not watch-key
+        (throw
+         (ex-info "The child did not publish its filesystem event."
+                  {:seon.test-runner/expected-file filename})))
+      (let [created?
+            (some #(= filename (str (.context ^java.nio.file.WatchEvent %)))
+                  (.pollEvents watch-key))]
+        (.reset watch-key)
+        (if created?
+          filename
+          (recur))))))
+
 (deftest root-owning-tasks-never-co-run-inside-one-worker-group
   (let [group-a-tasks (atom [:a-1 :a-2])
         group-b-tasks (atom [:b-1])
@@ -444,6 +460,101 @@
                  (str/index-of record "retained-reason="))
               "the runner exit publication precedes root retention")))
       (finally
+        (when-let [^Process launched @process]
+          (when (.isAlive launched)
+            (.destroyForcibly launched)
+            (.get (.onExit (.toHandle launched)) 10 TimeUnit/SECONDS)))
+        (when (.exists fixture-root)
+          (test-support/delete-recursively! fixture-root))))))
+
+(deftest worker-root-cleanup-awaits-recorded-child-completion
+  (let [fixture-root
+        (io/file project-root "tmp" "test-runner-child-completion"
+                 (str (random-uuid)))
+        worker-root (io/file fixture-root "worker-root")
+        release-fifo (io/file fixture-root "release")
+        child-ready (io/file fixture-root "child-ready")
+        child-stopping (io/file fixture-root "child-stopping")
+        child-complete (io/file fixture-root "child-complete.txt")
+        child-source (io/file fixture-root "late-writer.py")
+        parent-script (io/file fixture-root "worker-parent")
+        child-program
+        (str
+         "import os, signal, sys\n"
+         "worker_root, release_fifo, child_ready, child_stopping, child_complete = sys.argv[1:]\n"
+         "def publish(path, text):\n"
+         "    with open(path, 'w') as event:\n"
+         "        event.write(text)\n"
+         "def stop(_signal, _frame):\n"
+         "    publish(child_stopping, 'child still owns root')\n"
+         "    with open(release_fifo, 'r') as release:\n"
+         "        release.read(1)\n"
+         "    with open(os.path.join(worker_root, 'late.txt'), 'w') as late:\n"
+         "        late.write('late write completed')\n"
+         "    publish(child_complete, 'child completion published')\n"
+         "    sys.exit(0)\n"
+         "signal.signal(signal.SIGTERM, stop)\n"
+         "publish(child_ready, 'child ready')\n"
+         "signal.pause()\n")
+        parent-program
+        (str
+         "#!/usr/bin/env bash\n"
+         "set -euo pipefail\n"
+         "/usr/bin/mkfifo \"$2\"\n"
+         "/usr/bin/python3 \"$1\" \"$3\" \"$2\" \"$4\" \"$5\" \"$6\" &\n"
+         "wait \"$!\"\n")
+        process (atom nil)
+        watcher (.newWatchService (java.nio.file.FileSystems/getDefault))]
+    (try
+      (.mkdirs worker-root)
+      (.register (.toPath fixture-root)
+                 watcher
+                 (into-array
+                  java.nio.file.WatchEvent$Kind
+                  [java.nio.file.StandardWatchEventKinds/ENTRY_CREATE]))
+      (spit child-source child-program)
+      (spit parent-script parent-program)
+      (is (.setExecutable parent-script true false))
+      (let [launched
+            (.start
+             (doto
+              (ProcessBuilder.
+               ^java.util.List
+               [(str parent-script)
+                (.getCanonicalPath child-source)
+                (.getCanonicalPath release-fifo)
+                (.getCanonicalPath worker-root)
+                (.getCanonicalPath child-ready)
+                (.getCanonicalPath child-stopping)
+                (.getCanonicalPath child-complete)])
+              (.directory fixture-root)
+              (.redirectErrorStream true)))
+            _ (reset! process launched)]
+        (is (= "child-ready" (await-created! watcher "child-ready")))
+        (let [cleanup-count (atom 0)
+              cleanup
+              (future
+                (#'runner/stop-process-tree! launched)
+                (swap! cleanup-count inc)
+                (test-support/delete-recursively! worker-root))]
+          (is (= "child-stopping"
+                 (await-created! watcher "child-stopping")))
+          (is (zero? @cleanup-count)
+              "cleanup cannot run while a recorded child still owns the root")
+          (is (.isDirectory worker-root))
+          (with-open [release (io/writer release-fifo)]
+            (.write release "x")
+            (.flush release))
+          (is (= "child-complete.txt"
+                 (await-created! watcher "child-complete.txt")))
+          (is (not= ::cleanup-backstop
+                    (deref cleanup 10000 ::cleanup-backstop)))
+          (is (= 1 @cleanup-count)
+              "root cleanup fires exactly once after child completion")
+          (is (= "child completion published" (slurp child-complete)))
+          (is (not (.exists worker-root)))))
+      (finally
+        (.close watcher)
         (when-let [^Process launched @process]
           (when (.isAlive launched)
             (.destroyForcibly launched)
