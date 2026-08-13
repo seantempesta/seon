@@ -259,9 +259,8 @@
       (println "\tlocked synchronizer" synchronizer))))
 
 (defn- liveness-diagnostic
-  [progress silence-seconds suite-start virtual-thread-dump]
+  [progress silence-seconds suite-start child-processes virtual-thread-dumps]
   (let [process (ProcessHandle/current)
-        child-processes (vec (.toList (.descendants process)))
         thread-bean (ManagementFactory/getThreadMXBean)
         deadlocked (some-> (.findDeadlockedThreads thread-bean) vec)]
     {::child-processes child-processes
@@ -288,7 +287,12 @@
          (doseq [child-process child-processes]
            (println "bin/test:  " (process-description child-process)))
          (println "bin/test:   none"))
-       (println "bin/test: virtual-thread-aware JVM dump" virtual-thread-dump)
+       (println "bin/test: virtual-thread-aware JVM dumps")
+       (doseq [{::keys [dump-process dump-path dump-error]}
+               virtual-thread-dumps]
+         (println "bin/test:  "
+                  (process-description dump-process)
+                  (or dump-path (str "unavailable: " dump-error))))
        (println "bin/test: platform-thread MXBean supplement")
        (doseq [info (.dumpAllThreads thread-bean true true)]
          (print (thread-info-text info))))}))
@@ -298,15 +302,15 @@
   10)
 
 (defn- persist-virtual-thread-dump!
-  []
+  [^ProcessHandle target]
   (let [directory (io/file "tmp" "test-liveness")
         _ (.mkdirs directory)
         file (io/file directory
-                      (str (.pid (ProcessHandle/current)) "-"
+                      (str (.pid target) "-"
                            (System/currentTimeMillis) "-threads.json"))
         jcmd (io/file (System/getProperty "java.home") "bin" "jcmd")
         command [(str jcmd)
-                 (str (.pid (ProcessHandle/current)))
+                 (str (.pid target))
                  "Thread.dump_to_file"
                  "-format=json"
                  (.getCanonicalPath file)]
@@ -325,6 +329,29 @@
                    ::exit (.exitValue process)
                    ::output output}))))
     (.getCanonicalPath file)))
+
+(defn- persist-virtual-thread-dumps!
+  "Persist concurrent virtual-thread-aware dumps for every supplied JVM."
+  [processes]
+  (let [executor (Executors/newVirtualThreadPerTaskExecutor)
+        futures
+        (mapv
+         (fn [^ProcessHandle process]
+           (.submit
+            executor
+            ^java.util.concurrent.Callable
+            (fn []
+              (try
+                {::dump-process process
+                 ::dump-path (persist-virtual-thread-dump! process)}
+                (catch Throwable failure
+                  {::dump-process process
+                   ::dump-error (ex-message failure)})))))
+         processes)]
+    (try
+      (mapv #(.get ^java.util.concurrent.Future %) futures)
+      (finally
+        (.shutdownNow executor)))))
 
 (defn- persist-diagnostic!
   {:seon.fn/external-sink :codec-storage
@@ -348,14 +375,13 @@
   {:seon.fn/external-sink :ai-visible-text
    :seon.fn/projection-boundary :none}
   [progress silence-seconds suite-start]
-  (let [virtual-thread-dump
-        (try
-          (persist-virtual-thread-dump!)
-          (catch Throwable failure
-            (str "unavailable: " (ex-message failure))))
+  (let [process (ProcessHandle/current)
+        child-processes (vec (.toList (.descendants process)))
+        virtual-thread-dumps
+        (persist-virtual-thread-dumps! (into [process] child-processes))
         {::keys [child-processes text]}
         (liveness-diagnostic progress silence-seconds suite-start
-                             virtual-thread-dump)
+                             child-processes virtual-thread-dumps)
         log-path (try
                    (persist-diagnostic! text)
                    (catch Throwable failure
@@ -1190,41 +1216,39 @@
         (.destroyForcibly handle)
         (.destroy handle)))))
 
-(defn- stop-process-tree!
-  [^Process process]
-  (let [{::keys [process-handles] :as ownership}
-        (process-tree-ownership process)]
-    (signal-process-tree! ownership false)
-    (when-not (await-process-tree-exit ownership)
+(defn- stop-owned-process-tree!
+  [{::keys [process-handles process-root] :as ownership}]
+  (signal-process-tree! ownership false)
+  (when-not (await-process-tree-exit ownership)
+    (let [stuck-processes
+          (mapv (fn [^ProcessHandle handle]
+                  {::process-id (.pid handle)
+                   ::process-description (process-description handle)})
+                (filter #(.isAlive ^ProcessHandle %) process-handles))]
       (binding [*out* *err*]
         (println "bin/test: WORKER PROCESS-TREE EXIT BACKSTOP fired; forcing"
-                 (str/join ","
-                           (map #(.pid ^ProcessHandle %)
-                                (filter #(.isAlive ^ProcessHandle %)
-                                        process-handles))))
+                 (str/join "," (map ::process-id stuck-processes)))
         (flush))
       (signal-process-tree! ownership true)
-      (when-not (await-process-tree-exit ownership)
+      (let [forced-completion? (await-process-tree-exit ownership)]
         (throw
-         (ex-info "A worker process tree did not publish every child exit."
+         (ex-info "A worker process tree exceeded its exit backstop."
                   {:seon.error/kind ::process-tree-exit-backstop
-                   ::processes
-                   (mapv (fn [^ProcessHandle handle]
-                           {::process-id (.pid handle)
-                            ::process-alive? (.isAlive handle)})
-                         process-handles)}))))
-    ;; The exact root exit is already published; this only releases Process
-    ;; streams and makes the exit value available to the JVM owner.
-    (.waitFor process)))
+                   ::processes stuck-processes
+                   ::forced-completion? forced-completion?})))))
+  ;; The exact root exit is already one of process-tree-exit's publications.
+  (.get (.onExit ^ProcessHandle process-root)))
 
 (defn- stop-worker!
   [worker]
   (let [process ^Process (::worker-process worker)]
     (when (.isAlive process)
-      (try
-        (worker-rpc! worker {::worker-command :stop})
-        (catch Throwable _))
-      (stop-process-tree! process))))
+      (let [ownership (process-tree-ownership process)]
+        (try
+          (write-command! (::worker-writer worker) {::worker-command :stop})
+          (catch Throwable _))
+        (stop-owned-process-tree! ownership)
+        (.waitFor process)))))
 
 (defn- drain-worker-tasks!
   "Execute tasks one at a time until `next-task` returns nil."

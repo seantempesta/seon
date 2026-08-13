@@ -65,6 +65,12 @@
           filename
           (recur))))))
 
+(defn- install-single-worker-getconf!
+  [fake-bin]
+  (let [fake-getconf (io/file fake-bin "getconf")]
+    (spit fake-getconf "#!/usr/bin/env bash\necho 2\n")
+    (is (.setExecutable fake-getconf true false))))
+
 (deftest root-owning-tasks-never-co-run-inside-one-worker-group
   (let [group-a-tasks (atom [:a-1 :a-2])
         group-b-tasks (atom [:b-1])
@@ -342,29 +348,96 @@
     (is (= :seon.test.runner/default-cluster-refused
            (:seon.error/kind refusal)))))
 
-(deftest liveness-dump-includes-virtual-threads
+(deftest liveness-dump-includes-coordinator-and-worker-virtual-threads
   (let [release (CountDownLatch. 1)
-        path (volatile! nil)
+        paths (volatile! [])
+        fixture-root
+        (io/file project-root "tmp" "test-runner-worker-dump"
+                 (str (random-uuid)))
+        child-source (io/file fixture-root "WorkerDump.java")
+        child-ready (io/file fixture-root "child-ready")
+        child-program
+        (str
+         "import java.nio.file.*;\n"
+         "import java.util.concurrent.CountDownLatch;\n"
+         "public class WorkerDump {\n"
+         "  public static void main(String[] args) throws Exception {\n"
+         "    var release = new CountDownLatch(1);\n"
+         "    Thread.ofVirtual().name(\"seon-worker-virtual-thread-proof\")"
+         ".start(() -> { try { release.await(); } catch (Exception ignored) {} });\n"
+         "    Files.writeString(Path.of(args[0]), \"ready\");\n"
+         "    Thread.currentThread().join();\n"
+         "  }\n"
+         "}\n")
+        watcher (.newWatchService (java.nio.file.FileSystems/getDefault))
+        child* (atom nil)
         thread
         (-> (Thread/ofVirtual)
-            (.name "seon-test-runner-virtual-thread-proof")
+            (.name "seon-coordinator-virtual-thread-proof")
             (.start
              (reify Runnable
                (run [_]
                  (.await release)))))]
     (try
-      (let [dump-path (#'runner/persist-virtual-thread-dump!)
-            _ (vreset! path dump-path)
-            dump (slurp dump-path)]
-        (is (str/includes? dump
-                           "seon-test-runner-virtual-thread-proof"))
-        (is (str/includes? dump "\"virtual\": true")
-            "the retained diagnostic is not the platform-only MXBean view"))
+      (.mkdirs fixture-root)
+      (.register (.toPath fixture-root)
+                 watcher
+                 (into-array
+                  java.nio.file.WatchEvent$Kind
+                  [java.nio.file.StandardWatchEventKinds/ENTRY_CREATE]))
+      (spit child-source child-program)
+      (let [child (.start
+                   (ProcessBuilder.
+                    ^java.util.List
+                    [(str (io/file (System/getProperty "java.home")
+                                   "bin" "java"))
+                     (.getCanonicalPath child-source)
+                     (.getCanonicalPath child-ready)]))
+            _ (reset! child* child)
+            _ (is (= "child-ready" (await-created! watcher "child-ready")))
+            dumps (#'runner/persist-virtual-thread-dumps!
+                   [(java.lang.ProcessHandle/current) (.toHandle child)])
+            _ (vreset! paths (mapv ::runner/dump-path dumps))
+            by-pid (into {} (map (juxt #(-> % ::runner/dump-process .pid)
+                                       identity)) dumps)
+            coordinator-dump
+            (slurp (::runner/dump-path
+                    (by-pid (.pid (java.lang.ProcessHandle/current)))))
+            worker-dump
+            (slurp (::runner/dump-path (by-pid (.pid child))))
+            diagnostic
+            (#'runner/liveness-diagnostic
+             (atom {::runner/description "test diagnostic"
+                    ::runner/at-nanos (System/nanoTime)
+                    ::runner/at (java.time.Instant/now)})
+             300
+             (java.time.Instant/now)
+             [(.toHandle child)]
+             dumps)
+            diagnostic-text (::runner/text diagnostic)]
+        (is (= 2 (count dumps)))
+        (is (str/includes? coordinator-dump
+                           "seon-coordinator-virtual-thread-proof"))
+        (is (str/includes? worker-dump
+                           "seon-worker-virtual-thread-proof"))
+        (is (every? #(str/includes? % "\"virtual\": true")
+                    [coordinator-dump worker-dump])
+            "both retained diagnostics are virtual-thread-aware JVM dumps")
+        (is (every? #(str/includes? diagnostic-text %)
+                    @paths)
+            "the liveness diagnostic names both retained JVM dumps"))
       (finally
         (.countDown release)
         (.join thread)
-        (when-let [dump-path @path]
-          (io/delete-file dump-path true))))))
+        (.close watcher)
+        (when-let [^Process child @child*]
+          (when (.isAlive child)
+            (.destroyForcibly child)
+            (.get (.onExit (.toHandle child)) 10 TimeUnit/SECONDS)))
+        (doseq [dump-path @paths]
+          (io/delete-file dump-path true))
+        (when (.exists fixture-root)
+          (test-support/delete-recursively! fixture-root))))))
 
 (deftest interrupted-launcher-awaits-its-runner-before-retaining-the-root
   (let [fixture-root
@@ -395,6 +468,7 @@
     (try
       (.mkdirs fake-bin)
       (.mkdirs run-parent)
+      (install-single-worker-getconf! fake-bin)
       (spit fake-clojure fake-runner)
       (is (.setExecutable fake-clojure true false))
       (let [builder
@@ -467,6 +541,67 @@
         (when (.exists fixture-root)
           (test-support/delete-recursively! fixture-root))))))
 
+(deftest worker-exit-backstop-names-and-fails-a-stuck-child
+  (let [fixture-root
+        (io/file project-root "tmp" "test-runner-stuck-child"
+                 (str (random-uuid)))
+        parent-script (io/file fixture-root "worker-parent")
+        child-script (io/file fixture-root "stuck-child.py")
+        child-program
+        (str
+         "import signal\n"
+         "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+         "print('READY', flush=True)\n"
+         "signal.pause()\n")
+        parent-program
+        (str
+         "#!/usr/bin/env bash\n"
+         "set -euo pipefail\n"
+         "/usr/bin/python3 \"$1\" &\n"
+         "child=$!\n"
+         "echo \"CHILD_PID $child\"\n"
+         "wait \"$child\"\n")
+        process* (atom nil)]
+    (try
+      (.mkdirs fixture-root)
+      (spit child-script child-program)
+      (spit parent-script parent-program)
+      (is (.setExecutable parent-script true false))
+      (let [process (.start
+                     (doto
+                      (ProcessBuilder.
+                       ^java.util.List
+                       [(str parent-script) (.getCanonicalPath child-script)])
+                      (.redirectErrorStream true)))
+            _ (reset! process* process)
+            reader (io/reader (.getInputStream process))
+            child-pid-line (.readLine ^java.io.BufferedReader reader)
+            child-pid (Long/parseLong (subs child-pid-line
+                                            (count "CHILD_PID ")))
+            _ (is (= "READY" (.readLine ^java.io.BufferedReader reader)))
+            refusal
+            (with-redefs-fn
+              {#'runner/process-tree-exit-backstop-seconds 1}
+              #(test-support/refusal-data
+                (fn []
+                  (#'runner/stop-owned-process-tree!
+                   (#'runner/process-tree-ownership process)))))]
+        (is (= :seon.test.runner/process-tree-exit-backstop
+               (:seon.error/kind refusal)))
+        (is (true? (:seon.test.runner/forced-completion? refusal)))
+        (is (contains? (into #{} (map ::runner/process-id)
+                             (::runner/processes refusal))
+                       child-pid)
+            "the loud refusal names the exact child that ignored termination")
+        (is (not (.isAlive process))))
+      (finally
+        (when-let [^Process process @process*]
+          (when (.isAlive process)
+            (.destroyForcibly process)
+            (.get (.onExit (.toHandle process)) 10 TimeUnit/SECONDS)))
+        (when (.exists fixture-root)
+          (test-support/delete-recursively! fixture-root))))))
+
 (deftest worker-root-cleanup-awaits-recorded-child-completion
   (let [fixture-root
         (io/file project-root "tmp" "test-runner-child-completion"
@@ -534,7 +669,9 @@
         (let [cleanup-count (atom 0)
               cleanup
               (future
-                (#'runner/stop-process-tree! launched)
+                (#'runner/stop-owned-process-tree!
+                 (#'runner/process-tree-ownership launched))
+                (.waitFor launched)
                 (swap! cleanup-count inc)
                 (test-support/delete-recursively! worker-root))]
           (is (= "child-stopping"
@@ -583,6 +720,7 @@
     (try
       (.mkdirs fake-bin)
       (.mkdirs run-parent)
+      (install-single-worker-getconf! fake-bin)
       (spit fake-clojure fake-runner)
       (is (.setExecutable fake-clojure true false))
       (let [builder
