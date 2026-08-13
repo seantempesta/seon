@@ -517,7 +517,8 @@
          "child=$!\n"
          "echo \"FAKE_RUNNER_READY $child\"\n"
          "wait \"$child\"\n")
-        process (atom nil)]
+        process (atom nil)
+        output-reader (atom nil)]
     (try
       (.mkdirs fake-bin)
       (.mkdirs run-parent)
@@ -545,17 +546,32 @@
             _ (reset! process launched)
             ready-prefix "FAKE_RUNNER_READY "
             ready (promise)
-            output
-            (future
-              (with-open [reader (io/reader (.getInputStream launched))]
-                (loop [lines []]
-                  (if-let [line (.readLine ^java.io.BufferedReader reader)]
-                    (do
-                      (when (str/starts-with? line ready-prefix)
-                        (deliver ready line))
-                      (recur (conj lines line)))
-                    lines))))
-            ready-line (deref ready 20000 ::readiness-backstop)
+            output (promise)
+            reader-thread
+            (Thread.
+             ^Runnable
+             (fn []
+               (deliver
+                output
+                (try
+                  (with-open [reader (io/reader (.getInputStream launched))]
+                    (loop [lines []]
+                      (if-let [line
+                               (.readLine ^java.io.BufferedReader reader)]
+                        (do
+                          (when (str/starts-with? line ready-prefix)
+                            (deliver ready line))
+                          (recur (conj lines line)))
+                        lines)))
+                  (catch Throwable failure
+                    failure)))))
+            _ (.setName reader-thread "test-runner-readiness-reader")
+            _ (reset! output-reader reader-thread)
+            _ (.start reader-thread)
+            readiness-backstop-millis
+            (* 3 1000 test-support/event-backstop-seconds)
+            ready-line
+            (deref ready readiness-backstop-millis ::readiness-backstop)
             _ (when (= ::readiness-backstop ready-line)
                 (throw
                  (ex-info "The fake runner did not publish readiness."
@@ -591,6 +607,9 @@
           (when (.isAlive launched)
             (.destroyForcibly launched)
             (.get (.onExit (.toHandle launched)) 10 TimeUnit/SECONDS)))
+        (when-let [^Thread reader-thread @output-reader]
+          (.join reader-thread
+                 (* 1000 test-support/event-backstop-seconds)))
         (when (.exists fixture-root)
           (test-support/delete-recursively! fixture-root))))))
 
