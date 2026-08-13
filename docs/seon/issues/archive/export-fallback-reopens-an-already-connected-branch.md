@@ -60,3 +60,10 @@ Verification on 2026-08-11:
 - `bin/test --changed src/seon/cluster/export.clj --changed
   src/seon/cluster/registry.clj --changed test/seon/cluster/export_test.clj`:
   108 tests, 604 assertions, green.
+
+The 2026-08-13 complete run found that the standing exact custody census had
+not recorded this newly declared return. The function is now explicitly
+reviewed in `seon.custody-stability-test`: it returns only the connection
+already registered for the exact store ID and branch, without acquiring or
+releasing a reference, so it introduces no new custody. The production
+contract and the derived census query remain unchanged.

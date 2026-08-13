@@ -38,7 +38,12 @@
     ;; `fork-cluster-ctx` replaces connection custody with its explicit branch.
     ["seon.cluster/source-base!" :seon.store/store]
     ["seon.cluster/source-base!" :seon.sci.eval/ctx]
-    ["seon.sci.eval/fork-cluster-ctx" :seon.sci.eval/ctx]})
+    ["seon.sci.eval/fork-cluster-ctx" :seon.sci.eval/ctx]
+    ;; Export fallback borrows the already-registered branch connection; it
+    ;; neither creates custody nor changes its reference count. Returning that
+    ;; exact connection is the function's declared purpose.
+    ["seon.cluster.registry/active-branch-connection"
+     :seon.db/connection]})
 
 (def ^:private custody-returning-query
   '[:find ?function-symbol ?schema-key
