@@ -33,28 +33,25 @@
   (Object.))
 
 (defn- flat-error
-  [kind message data]
-  {:seon.error/kind kind
+  [marker subject message data]
+  {marker subject
+   :seon.error/kind marker
    :seon.error/message message
    :seon.error/data data})
 
 (defn- refuse!
-  [kind message data]
+  [marker subject message data]
   (throw
    (ex-info message
-            {:seon.error/kind kind
-             :seon.error/message message
-             :seon.error/data data})))
+            (flat-error marker subject message data))))
 
 (defn- error-value
-  [error fallback-kind fallback-message data]
+  [error fallback-marker fallback-subject fallback-message data]
   (let [classified (ex-data error)]
     (if (and (keyword? (:seon.error/kind classified))
              (string? (:seon.error/message classified)))
-      (flat-error (:seon.error/kind classified)
-                  (:seon.error/message classified)
-                  (:seon.error/data classified))
-      (flat-error fallback-kind fallback-message data))))
+      classified
+      (flat-error fallback-marker fallback-subject fallback-message data))))
 
 (defn- digest-string
   [^MessageDigest digest]
@@ -81,6 +78,7 @@
         root (first (filter #(.startsWith target ^Path %) roots))]
     (when-not root
       (refuse! :my.fs/path-refused
+               path
                "The path is outside every declared filesystem root."
                {:my.fs/path path}))
     {:seon.fs.jvm/root root
@@ -136,12 +134,14 @@
     (when (or (:seon.fs.jvm/symbolic-link? before)
               (not (:seon.fs.jvm/directory? before)))
       (refuse! :my.fs/path-refused
+               public-path
                "A declared filesystem root is not a no-follow directory."
                {:my.fs/path public-path}))
     (let [opened (Files/newDirectoryStream root)]
       (when-not (instance? SecureDirectoryStream opened)
         (.close opened)
         (refuse! :my.fs/path-refused
+                 public-path
                  "This filesystem cannot provide race-free directory access."
                  {:my.fs/path public-path}))
       (let [secure ^SecureDirectoryStream opened
@@ -151,6 +151,7 @@
                         (:seon.fs.jvm/file-key after)))
           (.close opened)
           (refuse! :my.fs/path-refused
+                   public-path
                    "The declared filesystem root changed while it was opened."
                    {:my.fs/path public-path}))
         {:seon.fs.jvm/directory secure
@@ -169,11 +170,13 @@
      (let [attrs (relative-observation directory segment)]
        (when-not attrs
          (refuse! :my.fs/not-found
+                  public-path
                   "A filesystem path segment does not exist."
                   {:my.fs/path public-path}))
        (when (or (:seon.fs.jvm/symbolic-link? attrs)
                  (not (:seon.fs.jvm/directory? attrs)))
          (refuse! :my.fs/path-refused
+                  public-path
                   "A filesystem path crosses a non-directory or symbolic link."
                   {:my.fs/path public-path}))
        (let [child (.newDirectoryStream
@@ -181,6 +184,7 @@
          (when-not (instance? SecureDirectoryStream child)
            (.close child)
            (refuse! :my.fs/path-refused
+                    public-path
                     "This filesystem cannot securely traverse the path."
                     {:my.fs/path public-path}))
          (-> state
@@ -196,6 +200,7 @@
         segments (relative-segments relative)]
     (when (empty? segments)
       (refuse! :my.fs/path-refused
+               path
                "This operation requires a path beneath a declared root."
                {:my.fs/path path}))
     (assoc (descend (open-root root path) (butlast segments) path)
@@ -216,12 +221,14 @@
         (when-not attrs
           (close-streams! (:seon.fs.jvm/streams parent-state))
           (refuse! :my.fs/not-found
+                   path
                    "The filesystem path does not exist."
                    {:my.fs/path path}))
         (when (or (:seon.fs.jvm/symbolic-link? attrs)
                   (not (:seon.fs.jvm/directory? attrs)))
           (close-streams! (:seon.fs.jvm/streams parent-state))
           (refuse! :my.fs/not-directory
+                   path
                    "The glob root is not a no-follow directory."
                    {:my.fs/path path}))
         (let [child (.newDirectoryStream
@@ -230,6 +237,7 @@
             (.close child)
             (close-streams! (:seon.fs.jvm/streams parent-state))
             (refuse! :my.fs/path-refused
+                     path
                      "This filesystem cannot securely traverse the glob root."
                      {:my.fs/path path}))
           (-> parent-state
@@ -239,6 +247,7 @@
 (defn- read-limit-refusal!
   [path observed-bytes read-limit]
   (refuse! :my.fs/read-limit
+           path
            (str "The whole file exceeds the configured read ceiling; read a "
                 "bounded window with :my.fs/max-bytes instead.")
            {:my.fs/path path
@@ -275,6 +284,7 @@
 
             (zero? read-count)
             (refuse! :my.fs/read-failed
+                     true
                      "The file read made no progress."
                      {})
 
@@ -311,6 +321,7 @@
 
           (zero? read-count)
           (refuse! :my.fs/read-failed
+                   true
                    "The file read made no progress."
                    {})
 
@@ -343,14 +354,17 @@
   [^SecureDirectoryStream directory ^Path entry-name path]
   (let [before (relative-observation directory entry-name)]
     (when-not before
-      (refuse! :my.fs/not-found "The file does not exist."
+      (refuse! :my.fs/not-found path
+               "The file does not exist."
                {:my.fs/path path}))
     (when (:seon.fs.jvm/symbolic-link? before)
       (refuse! :my.fs/path-refused
+               path
                "The final filesystem path is a symbolic link."
                {:my.fs/path path}))
     (when-not (:seon.fs.jvm/regular-file? before)
       (refuse! :my.fs/not-regular-file
+               path
                "The filesystem path is not a regular file."
                {:my.fs/path path}))
     before))
@@ -367,6 +381,7 @@
                        (= (:seon.fs.jvm/size before)
                           (:seon.fs.jvm/file-bytes pass)))
           (refuse! :my.fs/changed-during-read
+                   path
                    "The file changed while its digest was read."
                    {:my.fs/path path}))
         pass))))
@@ -409,6 +424,7 @@
             after (relative-observation directory entry-name)]
         (when-not (same-observation? before after)
           (refuse! :my.fs/changed-during-read
+                   path
                    "The file changed while it was read."
                    {:my.fs/path path}))
         (let [window (:seon.fs.jvm/window pass)
@@ -433,6 +449,7 @@
               (assoc base :my.fs/text (strict-utf8 window))
               (catch java.nio.charset.CharacterCodingException _
                 (refuse! :my.fs/invalid-utf8-window
+                         path
                          (str "The requested byte window is not complete "
                               "UTF-8; read it as :bytes instead.")
                          {:my.fs/path path
@@ -453,7 +470,7 @@
           (finally
             (close-streams! streams))))
       (catch Throwable error
-        (error-value error :my.fs/read-failed "The file read failed."
+        (error-value error :my.fs/read-failed true "The file read failed."
                      {:my.fs/path path})))))
 
 (defn- read
@@ -497,6 +514,7 @@
           (let [values (:my.fs/bytes content)]
             (when (> (count values) write-limit)
               (refuse! :my.fs/write-limit
+                       write-limit
                        "The write content exceeds the configured ceiling."
                        {:seon.config.fs/max-write-bytes write-limit}))
             (byte-array (map unchecked-byte values)))
@@ -504,6 +522,7 @@
           :else nil)]
     (when (and octets (> (alength ^bytes octets) write-limit))
       (refuse! :my.fs/write-limit
+               write-limit
                "The write content exceeds the configured ceiling."
                {:seon.config.fs/max-write-bytes write-limit}))
     octets))
@@ -515,6 +534,7 @@
       (when (.hasRemaining buffer)
         (when (zero? (.write channel buffer))
           (refuse! :my.fs/write-failed
+                   true
                    "The staged file write made no progress."
                    {}))
         (recur)))))
@@ -531,11 +551,13 @@
             {:seon.fs.jvm/digest (digest-string digester)
              :seon.fs.jvm/file-bytes (long offset)}
             (refuse! :my.fs/blob-unavailable
+                     digest
                      "The content-addressed blob is unavailable."
                      {:seon.blob/digest digest}))
 
           (> (+ offset (alength ^bytes octets)) write-limit)
           (refuse! :my.fs/write-limit
+                   write-limit
                    "The blob exceeds the configured write ceiling."
                    {:seon.blob/digest digest
                     :seon.config.fs/max-write-bytes write-limit})
@@ -562,6 +584,7 @@
           actual (blob-pass expected write-limit nil)]
       (when-not (= expected (:seon.fs.jvm/digest actual))
         (refuse! :my.fs/blob-unavailable
+                 expected
                  "The blob bytes do not match their content digest."
                  {:seon.blob/digest expected
                   :my.fs/digest (:seon.fs.jvm/digest actual)}))
@@ -575,9 +598,11 @@
         (when attrs
           (if (:seon.fs.jvm/symbolic-link? attrs)
             (refuse! :my.fs/path-refused
+                     path
                      "The final filesystem path is a symbolic link."
                      {:my.fs/path path})
             (refuse! :my.fs/already-exists
+                     path
                      "The file already exists."
                      {:my.fs/path path})))
         {:my.fs/created? true})
@@ -586,6 +611,7 @@
             actual (:seon.fs.jvm/digest current)]
         (when-not (= expected actual)
           (refuse! :my.fs/stale-digest
+                   path
                    "The file no longer has the expected digest."
                    {:my.fs/path path
                     :my.fs/expected-digest expected
@@ -610,10 +636,12 @@
                                          :seon.fs.jvm/file-bytes])
                        written)
             (refuse! :my.fs/blob-unavailable
+                     (:seon.fs.jvm/blob info)
                      "The blob changed while it was staged."
                      {:seon.blob/digest (:seon.fs.jvm/blob info)}))))
       (when-not (instance? FileChannel channel)
         (refuse! :my.fs/atomic-write-unsupported
+                 true
                  "This filesystem cannot force the staged file."
                  {}))
       (.force ^FileChannel channel true))
@@ -667,6 +695,7 @@
                            before)
                     (catch AtomicMoveNotSupportedException _
                       (refuse! :my.fs/atomic-write-unsupported
+                               true
                                "The filesystem refused an atomic file move."
                                {:my.fs/path path}))
                     (finally
@@ -678,7 +707,7 @@
             (finally
               (close-streams! streams)))))
       (catch Throwable error
-        (error-value error :my.fs/write-failed "The file write failed."
+        (error-value error :my.fs/write-failed true "The file write failed."
                      {:my.fs/path path})))))
 
 (defn- directory-entries
@@ -694,6 +723,7 @@
               attrs (relative-observation directory entry-name)]
           (when-not attrs
             (refuse! :my.fs/glob-failed
+                     (str entry)
                      "A path changed while the directory was examined."
                      {:my.fs/path (str entry)}))
           (recur (conj entries {:seon.fs.jvm/name entry-name
@@ -729,6 +759,7 @@
                              directory entry-name no-follow-links)]
             (when-not (instance? SecureDirectoryStream child)
               (refuse! :my.fs/glob-failed
+                       (str child-relative)
                        "This filesystem cannot securely traverse the tree."
                        {:my.fs/path (str child-relative)}))
             (glob-walk child child-relative (inc depth)
@@ -798,12 +829,12 @@
           (finally
             (close-streams! streams))))
       (catch java.util.regex.PatternSyntaxException error
-        (error-value error :my.fs/invalid-glob
+        (error-value error :my.fs/invalid-glob (:my.fs/pattern request)
                      "The JDK glob pattern is invalid."
                      {:my.fs/root root
                       :my.fs/pattern (:my.fs/pattern request)}))
       (catch Throwable error
-        (error-value error :my.fs/glob-failed "The filesystem glob failed."
+        (error-value error :my.fs/glob-failed root "The filesystem glob failed."
                      {:my.fs/root root})))))
 
 (defn- stat
@@ -826,7 +857,7 @@
                     (relative-observation directory (last segments)))]
         (try
           (when-not attrs
-            (refuse! :my.fs/not-found "The filesystem path does not exist."
+            (refuse! :my.fs/not-found path "The filesystem path does not exist."
                      {:my.fs/path path}))
           (cond-> {:my.fs/path path
                    :my.fs/regular-file?
@@ -843,6 +874,6 @@
           (finally
             (close-streams! (:seon.fs.jvm/streams opened)))))
       (catch Throwable error
-        (error-value error :my.fs/read-failed
+        (error-value error :my.fs/read-failed true
                      "The filesystem attributes could not be read."
                      {:my.fs/path path})))))
