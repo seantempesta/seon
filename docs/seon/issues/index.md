@@ -61,7 +61,7 @@ See `README.md` for the convention.
 | [Return from the generated opening's second live pull](generated-opening-live-pull-does-not-return-after-help.md) | blocker | prefix-drift bootstrap performance diagnosis (held `bootstrap.clj`) |
 | [Explain the 24-second live root pull of 189 members](live-root-pull-of-189-members-takes-24-seconds.md) | blocker | render acquisition performance wave |
 
-## Friction (132)
+## Friction (131)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -97,7 +97,6 @@ See `README.md` for the convention.
 | [Name the face when `semantic-value` cannot match one](an-unmatched-print-face-throws-no-matching-clause-and-names-nothing.md) | friction | error-face budget wave |
 | [Cut `my.background/poll`'s ~290 tokens per polled result](my-background-poll-costs-290-tokens-per-polled-result.md) | friction | capability surface repair wave |
 | [Bound a six-word evaluation error to something near six words](a-six-word-eval-error-renders-as-two-thousand-characters.md) | friction | error-face budget wave |
-| [Return a UTF-8 `my.web/fetch` body as text, not integers](my-web-fetch-returns-plain-html-as-a-vector-of-integers.md) | friction | capability surface repair wave |
 | [Scope the JVM operator's per-root work off the installation lock](jvm-operator-work-takes-the-installation-lock-for-one-root.md) | friction | RULED keep-serial 2026-08-08; annotated, revisit at measured four-worker contention |
 | [Clear the pre-rename root claims that make every status noisy](pre-rename-root-claims-are-unreadable-noise-on-every-status.md) | friction | operator lock-scope follow-up |
 | [Record the activation closure's schema keys and required attributes](activation-closure-records-no-schema-keys.md) | friction | boot velocity incident (co-hosted second boot) |
