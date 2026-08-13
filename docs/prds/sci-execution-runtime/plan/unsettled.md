@@ -62,12 +62,17 @@ registered-keys-self-explain.
   (membership + `:about` resolution-validation + usage-demo rendering) is
   APPROVED and next — owners add src/seon/bootstrap.clj +
   src/seon/render/walk.clj, so serialize behind the rebirth lane.
-- `rebirth-gap-authored-results` — reborn openings must include the
-  agent's namespace results; closes
-  [its issue](../../seon/issues/rebirth-opening-omits-agent-authored-results.md)
-  and re-runs the rebirth probe (which also live-verifies the landed
-  render-symbol fix `592e62159`, closing
-  [that issue](../../seon/issues/agent-schema-render-symbol-bypasses-transaction-encoding.md)).
+- `rebirth-gap-authored-results` — RETURNED: mechanism landed in
+  `61136c874` (authored results from public functions + green usage-test
+  facts, content-bearing namespace prioritized after `(help)`, ruling-46
+  skipping via call edges). VERIFICATION DEFERRED to the quiet tree: the
+  orchestrator reruns `tmp/rebirth/probe.clj` on a fresh scratch root
+  after W2 and plan-T2 land; acceptance = determinism restored, results
+  included, both gap issues
+  ([authored-results](../../seon/issues/rebirth-opening-omits-agent-authored-results.md),
+  [render-symbol](../../seon/issues/agent-schema-render-symbol-bypasses-transaction-encoding.md))
+  closed on that evidence. Last diagnostic (NOT accepted proof): 5,743
+  lived → 1,095 reborn tokens with results included.
 - `kind-class-w2` — R2 stage W2 (producers emit class markers beside
   kind; census in
   [error-kind-audit-2026-08-12](../research/error-kind-audit-2026-08-12.md)).
