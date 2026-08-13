@@ -172,6 +172,8 @@ chain, never from the wrapper
 ([versioning](reference-code/datahike/src/datahike/versioning.cljc)).
 
 ```clojure
+;; Illustrative shape; `projection` and the remaining request keys come from
+;; the caller or fixture.
 ;; a caller or fixture hands the projection explicitly, like production:
 (schema/register! {:seon.schema/projection projection, ...})
 ;; not: register! silently reading a process-global registry
@@ -203,7 +205,8 @@ registry before declaring a key.
 
 ```clojure
 ;; which tests exercise this function? — a query, not a naming convention:
-(seon.fn/tests-reaching (seon.db/db) "seon.cluster.run/open-tx") ;=> 67 tests
+(seon.fn/tests-reaching (seon.db/db) "seon.cluster.run/open-tx")
+;; Illustrative Datalog clause (not a standalone executable form):
 ;; which functions need cluster custody? — declared arity input-refs:
 [?f :seon.fn.arity/input-refs :seon.db/connection]
 ```
