@@ -952,9 +952,9 @@
           (doseq [t (sort (db/q '[:find [?tx ...]
                                  :where [?tx :db/txInstant _]]
                                db))]
-            (is (empty? (db/q '[:find [?e ...]
-                               :where [?e :seon.ai.stream/text _]]
-                             (db/as-of db t)))
+            (is (empty?
+                 (filter #(= :seon.ai.stream/text (:a %))
+                         (db/datoms (db/as-of db t) :eavt)))
                 (str "no partial row at basis " t))))))))
 
 ;;; Seal revision, 2026-07-29 — terminal facts supersede partials
