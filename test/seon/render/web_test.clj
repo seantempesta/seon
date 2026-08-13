@@ -39,6 +39,7 @@
             [seon.db :as db]
             [seon.flow :as flow]
             [seon.oversight :as oversight]
+            [seon.problems :as problems]
             [seon.render :as render]
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
@@ -453,6 +454,86 @@
               (is (str/includes? body
                                  "Loading the current HTML projection")
                   "the pending pane states what has not derived yet"))))))))
+
+(deftest a-never-run-agents-debug-context-is-labeled-prospective
+  (with-server
+    (fn [connection server _context]
+      (db/transact!
+       connection
+       (cluster.agent/creation-tx
+        {:seon.cluster.agent/id "prospective-agent"
+         :seon.cluster/name "web-test"
+         :seon.ns/name 'my.agents.prospective-agent}))
+      (let [observed (atom nil)
+            prospective
+            [{:seon.render.history/call-id
+              [[:seon.cluster.agent/id "prospective-agent"] []]
+              :seon.render.history/basis-transaction (db/basis-t @connection)
+              :seon.render.history/form '(help)
+              :seon.render.history/printed-value "prospective help"
+              :seon.render.history/bytes
+              "my.agents.prospective-agent=> (help)\nprospective help"}]]
+        (with-redefs [render.walk/history
+                      (fn [request]
+                        (reset! observed request)
+                        prospective)]
+          (let [response (fetch server "/agent/prospective-agent/debug")
+                body (.body response)]
+            (is (= 200 (.statusCode response)))
+            (is (= [:seon.cluster.agent/id "prospective-agent"]
+                   (:seon.render.walk/lookup @observed)))
+            (is (contains? @observed :seon.render.walk/root-acquisition)
+                "debug uses the next transition's compiled root acquisition")
+            (is (identical? @connection (:seon.db/db @observed))
+                "the prospective query reads the current immutable database")
+            (is (str/includes? body
+                               "seon-debug-context-status\">prospective"))
+            (is (str/includes? body "prospective help"))
+            (is (not (str/includes? body
+                                    "No recorded context capture exists")))))))))
+
+(deftest debug-pages-distinguish-held-live-and-dead-runs
+  (with-server
+    (fn [connection server _context]
+      (db/transact!
+       connection
+       [{:seon.cluster.run/id "debug-held-live"
+         :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+         :seon.cluster.run/opened-at (java.util.Date.)
+         :seon.cluster.run/process process}
+        {:seon.cluster.run/id "debug-held-dead"
+         :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+         :seon.cluster.run/opened-at (java.util.Date.)
+         :seon.cluster.run/process "web-test-dead-process"}])
+      (let [observed (atom nil)
+            unit oversight/unit]
+        (with-redefs [oversight/unit
+                      (fn [request]
+                        (reset! observed request)
+                        (unit request))]
+          (let [stream
+                (open-feed
+                 server
+                 (str "/feed/" agent-id
+                      "?debug=true&path="
+                      (java.net.URLEncoder/encode (pr-str []) "UTF-8")
+                      "&offset=0"))]
+            (try
+              (read-patches! stream 1)
+              (is (= #{process}
+                     (:seon.cluster.run/live-processes @observed))
+                  "debug passes the service's observed process set")
+              (is (= #{"debug-held-dead"}
+                     (into #{}
+                           (map :seon.cluster.run/id)
+                           (:seon.problems/wedged-runs
+                            (problems/problems
+                             @connection
+                             (select-keys
+                              @observed
+                              [:seon.cluster.run/live-processes])))))
+                  "the dead holder is wedged and the live holder is not")
+              (finally (.close stream)))))))))
 
 (deftest static-resources-come-off-the-classpath
   (with-server

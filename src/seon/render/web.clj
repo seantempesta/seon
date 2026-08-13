@@ -229,7 +229,7 @@
 ;;; Painting
 ;;; ---------------------------------------------------------------------------
 
-(declare walk-request)
+(declare walk-request root-call-id acquire-root)
 
 (defn- unit-id
   [agent-id unit]
@@ -527,18 +527,69 @@
           :order-by '[?basis-t :desc ?capture-id :desc]
           :limit 1})))
 
+(defn- debug-diagnostic
+  [kind message operation member expected offending cause evidence]
+  ((requiring-resolve 'seon.error/diagnostic)
+   {:seon.error/kind kind
+    :seon.error/message message
+    :seon.error/diagnostic-layer :debug-page
+    :seon.error/diagnostic-operation operation
+    :seon.error/diagnostic-member member
+    :seon.error/diagnostic-expected expected
+    :seon.error/diagnostic-offending offending
+    :seon.error/diagnostic-cause cause
+    :seon.error/diagnostic-evidence evidence}))
+
+(defn- prospective-prompt
+  [db connection agent-id caps render-context]
+  (let [request
+        (assoc (walk-request db caps agent-id :seon.render/ai
+                             connection render-context)
+               :seon.render.walk/lookup
+               [:seon.cluster.agent/id agent-id]
+               :seon.render/distance 2)]
+    (try
+      (let [call-id (root-call-id :seon.render/ai agent-id)
+            [acquisition _entry] (acquire-root request call-id)
+            entries
+            (render.walk/history
+             (assoc request
+                    :seon.render.walk/root-acquisition acquisition))]
+        {:seon.render.debug/prompt
+         (str/join "\n\n" (map :seon.render.history/bytes entries))
+         :seon.render.debug/prompt-kind :prospective
+         :seon.render.debug/evidence entries})
+      (catch Throwable cause
+        {:seon.render.debug/prompt-kind :unavailable
+         :seon.error/value
+         (debug-diagnostic
+          ::prospective-context-unavailable
+          "The prospective agent context is unavailable."
+          'seon.render.walk/history
+          [:seon.cluster.agent/id agent-id]
+          :seon.cluster.prompt/text
+          [:seon.cluster.agent/id agent-id]
+          (or (ex-data cause) (ex-message cause) (class cause))
+          :seon.error/unknown)}))))
+
 (defn- debug-prompt
-  [db agent-id]
-  (or (latest-captured-prompt db agent-id)
-      "No recorded context capture exists for this agent."))
+  [db connection agent-id caps render-context]
+  (if-let [captured (latest-captured-prompt db agent-id)]
+    {:seon.render.debug/prompt captured
+     :seon.render.debug/prompt-kind :captured
+     :seon.render.debug/evidence captured}
+    (prospective-prompt db connection agent-id caps render-context)))
 
 (defn- debug-ai-html
-  [agent-id prompt]
+  [agent-id prompt-result]
   (let [element-id (str "debug-ai-" agent-id)]
     (hiccup/->string
      [:section {:id element-id
                 :class "seon-debug-body seon-debug-body-ai"}
-      [:pre prompt]])))
+      [:span {:class "seon-debug-context-status"}
+       (name (:seon.render.debug/prompt-kind prompt-result))]
+      [:pre (or (:seon.render.debug/prompt prompt-result)
+                (:seon.error/message (:seon.error/value prompt-result)))]])))
 
 (defn- debug-html-id
   [agent-id]
@@ -556,8 +607,10 @@
 
 (defn- debug-page-result
   [db connection agent-id root-agent-id caps handle]
-  (let [result (page-result
-                {:seon.db/db db
+  (let [live-processes
+        (when-some [process (:seon.cluster.run/process handle)] #{process})
+        page-request
+        (cond-> {:seon.db/db db
                  :seon.cluster.agent/id agent-id
                  :seon.render.web/root-agent-id root-agent-id
                  :seon.sci.admit/caps caps
@@ -566,14 +619,31 @@
                  (:seon.config.eval/time-limit-ms handle)
                  :seon.config/on-core-error
                  (:seon.config/on-core-error handle)
-                 :seon.db/connection connection
-                 :seon.cluster.run/live-processes #{}})
+                 :seon.db/connection connection}
+          live-processes
+          (assoc :seon.cluster.run/live-processes live-processes))
+        liveness-diagnostic
+        (when-not live-processes
+          (debug-diagnostic
+           ::live-processes-unavailable
+           "The debug page cannot observe which run-holder processes are alive."
+           'seon.render.web/debug-page-result
+           :seon.cluster.run/live-processes
+           [:set :seon.cluster.run/process]
+           [:seon.cluster.agent/id agent-id]
+           ::observation-unavailable
+           :seon.error/unknown))
+        result (page-result page-request)
         page (dissoc (:seon.render.web/page result) stream-strip-id)
         ai-id (str "debug-ai-" agent-id)
-        html-id (debug-html-id agent-id)]
-    (assoc result :seon.render.web/page
-           {ai-id (debug-ai-html agent-id (debug-prompt db agent-id))
-            html-id (debug-html agent-id (vals page))})))
+        html-id (debug-html-id agent-id)
+        prompt-result (debug-prompt db connection agent-id caps handle)]
+    (cond->
+     (assoc result :seon.render.web/page
+            {ai-id (debug-ai-html agent-id prompt-result)
+             html-id (debug-html agent-id (vals page))})
+      liveness-diagnostic
+      (assoc :seon.error/value liveness-diagnostic))))
 
 (defn join-package
   "Return the render proc's settled package unchanged.
@@ -1609,9 +1679,12 @@
                    (route/path ::route/feed {:id agent-id})})}))
 
 (defn- debug-response
-  [{connection :seon.store/connection-object}
+  [{connection :seon.store/connection-object
+    caps :seon.sci.admit/caps
+    :as service}
    agent-id]
-  (let [prompt (debug-prompt @connection agent-id)]
+  (let [prompt-result (debug-prompt @connection connection agent-id
+                                    caps service)]
     {:status 200
      :headers {"content-type" "text/html; charset=utf-8"}
      :body
@@ -1624,7 +1697,7 @@
          [:div {:class "seon-debug-grid"}
           [:section {:class "seon-debug-pane seon-debug-pane-ai"}
            [:h2 {:class "seon-debug-caption"} ":seon.render/ai"]
-           (hiccup/raw (debug-ai-html agent-id prompt))]
+           (hiccup/raw (debug-ai-html agent-id prompt-result))]
           [:section {:class "seon-debug-pane seon-debug-pane-html"}
            [:h2 {:class "seon-debug-caption"} ":seon.render/html"]
            (hiccup/raw (debug-html agent-id nil))]]]]
