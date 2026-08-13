@@ -184,7 +184,11 @@ database-value/sources renames → ONE closing --all → live drive.
 Wedge-continuation classes (host crossings, orderly-stop joins, web
 delivery) interleave where file-disjoint from W3.
 
-**R3 RULED (option 2) AND LAUNCHED** (`r3-store-layout` lane: layout
+**db-diff LANDED** (`42a32183c`: positional `seon.db/diff`, identity
+with alias chasing, typed refusals, AI render producer, 30/286/0
+focused, live verbatim map whose `:seon.db.diff/requery-id` form
+replayed identically). plan-t3 and dump-kill RELEASED in parallel to
+verify + commit. **R3 RULED (option 2) AND LAUNCHED** (`r3-store-layout` lane: layout
 move + reserved-name refusal + doc updates, isolated-root proof only)
 alongside `test-premise` (the proofs-without-premise class at its test
 infrastructure choke point). Both file-disjoint from the drain
