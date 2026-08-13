@@ -12,7 +12,9 @@
 (defn- refuse!
   [message data]
   (throw (ex-info message
-                  (assoc data :seon.error/kind ::refused))))
+                  (assoc data
+                         :seon.error/kind ::refused
+                         ::refused true))))
 
 (defn- parse-arguments
   [arguments]

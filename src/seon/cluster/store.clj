@@ -182,6 +182,7 @@
   (throw (ex-info message
                   (assoc data
                          :seon.error/kind ::refused
+                         ::refused rule
                          ::rule rule))))
 
 ;;; The flock. Non-blocking and exclusive: a foreign holder makes
