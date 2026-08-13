@@ -113,7 +113,7 @@ are `src/seon/render.clj`, `src/seon/print.cljc`, and
 | `cluster-config-and-bootstrap-plan-render-as-raw-maps` | Open | Cluster/config and protected bootstrap producers. |
 | `collection-render-drops-209-of-210-results-without-an-elision-value` | Resolved | Pre-existing complete collection elision. |
 | `contract-violation-serializes-print-tree-inside-error-data` | Open | Instrumentation stores intermediate print syntax. |
-| `database-values-render-as-opaque-host-objects-in-html` | Open | Identity-only admission projection; focused test is red. |
+| `database-values-render-as-opaque-host-objects-in-html` | Partial | `e8e37eb50` hands the database-derived projection through the selected invocation and nested admission; the database identity still has no HTML producer. |
 | `debug-left-pane-is-not-the-exact-prompt` | Open | Protected web owner. |
 | `debug-pages-receive-block-patches-for-elements-they-do-not-have` | Skipped | Protected N5 web owner. |
 | `effect-context-suffix-returns-comment-notices` | Open | Effect-state value and producers. |
@@ -143,10 +143,17 @@ are `src/seon/render.clj`, `src/seon/print.cljc`, and
 Focused evidence:
 
 - `seon.render.ns-test`: 5 tests, 134 assertions, green.
-- `seon.print-test` plus `seon.render-simplification-test`: all new N1
-  regressions green; the gate is red only in
-  `nested-values-render-their-declared-faces` (five assertions), where full
-  Datahike internals bypass identity-only projection.
+- `seon.render-simplification-test`: 11 tests, 134 assertions, green after
+  `e8e37eb50`; nested database values use their AI identity face and nested
+  transaction reports use their declared AI and HTML faces.
+- The combined `seon.print-test`, `seon.render.value-test`, and
+  `seon.sci.eval-test` gate reached 87 tests and 457 assertions, then retained
+  two independently reproducible failures: the in-flight `my.background`
+  declaration has no compatible render input contract, and the public walk
+  attempts a selected render invocation while a different SCI context is
+  already armed. Neither failure is in the nested admission handoff. The
+  database identity's missing HTML producer remains this member's open
+  boundary.
 - `seon.render.transcript-test`: the execution-error/comment regression is
   green; the namespace is red only in the independently existing generated
   bootstrap-prefix ordering regression.
