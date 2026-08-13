@@ -194,4 +194,6 @@
             :configuration [:= true]
             :configuration-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an invalid flow configuration"} [:seon.flow/configuration :seon.flow/configuration] [:seon.error/message :seon.error/message]]
             :timeout :seon.flow/proc-id
-            :timeout-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the proc whose observable completion timed out"} [:seon.flow/timeout :seon.flow/timeout] [:seon.error/message :seon.error/message]]}
+            :timeout-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the proc whose observable completion timed out"} [:seon.flow/timeout :seon.flow/timeout] [:seon.error/message :seon.error/message]]
+ :seon.flow/fault-channel-overflow [:= true]
+ :seon.flow/fault-channel-overflow-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.flow/fault-channel-overflow class marker"} [:seon.flow/fault-channel-overflow :seon.flow/fault-channel-overflow] [:seon.error/message :seon.error/message]]}

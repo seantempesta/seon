@@ -482,7 +482,7 @@
                     {:seon.schema/error
                      :seon.schema/noncanonical-projection-data
                      :seon.schema/value value
-                     :seon.error/kind :core-bug}))))
+                     :seon.error/kind :core-bug :seon.schema/noncanonical-projection-data true}))))
 
 (defn byte-array?
   "True when `value` is a platform byte array."
@@ -862,7 +862,7 @@
       {:seon.error/kind ::missing-projection
        :seon.error/message
        "No declaration projection was handed to this schema operation."
-       :seon.error/data {:seon.schema/caller (fallback-caller)}}))))
+       :seon.error/data {:seon.schema/caller (fallback-caller)} :seon.schema/missing-projection true}))))
 
 (defn call-with-forms
   "Call `f` with one immutable declaration population for this operation."
@@ -1294,7 +1294,7 @@
                         {:seon.schema/error :seon.schema/unreadable-form
                          :seon.schema/key k
                          :seon.schema/definition v
-                         :seon.error/kind :user-input}
+                         :seon.error/kind :user-input :seon.schema/unreadable-form k}
                         e))))]
     (when-not (= v decoded)
       (throw
@@ -1304,7 +1304,7 @@
           {:seon.schema/error :seon.schema/non-round-tripping-form
            :seon.schema/key k
            :seon.schema/definition v
-           :seon.error/kind :user-input}))))
+           :seon.error/kind :user-input :seon.schema/non-round-tripping-form k}))))
   ;; The schema authority's own shapes are the computed bootstrap population:
   ;; they must exist before the EDN loader and its admission gate can compile.
   ;; Every other JVM registration flows through seon.schema.edn/admit once that
@@ -1335,7 +1335,7 @@
       "schema/unregister! requires an evaluation registration delta."
       {:seon.schema/error :seon.schema/unregister-outside-delta
        :seon.schema/key k
-       :seon.error/kind :user-input})))
+       :seon.error/kind :user-input :seon.schema/unregister-outside-delta k})))
   (swap! *candidate-forms-overlay* dissoc k)
   k)
 
@@ -1539,7 +1539,7 @@
            :seon.render/property property
            :seon.render/function renderer
            :seon.fn/spec render-contract
-           :seon.fn/input render-input}})]
+           :seon.fn/input render-input} :seon.schema/render-contract-incoherent true})]
     (throw (ex-info (:seon.error/message diagnostic) diagnostic))))
 
 (defn- assert-render-contracts!
@@ -2251,7 +2251,7 @@
                                   {:seon.schema/error
                                    :seon.schema/malformed-projection-row
                                    :seon.schema/row row
-                                   :seon.error/kind :core-bug})))
+                                   :seon.error/kind :core-bug :seon.schema/malformed-projection-row true})))
                 (let [[raw-identity form-string asserting-tx-eid] row
                       identity (identity-fn raw-identity)]
                   (when-not (string? form-string)
@@ -2260,7 +2260,7 @@
                                     {:seon.schema/error
                                      :seon.schema/malformed-projection-form
                                      :seon.schema/row row
-                                     :seon.error/kind :core-bug})))
+                                     :seon.error/kind :core-bug :seon.schema/malformed-projection-form true})))
                   (when (contains? parsed identity)
                     (throw (ex-info (str "Duplicate committed " identity-label
                                          " " identity ".")
@@ -2284,7 +2284,7 @@
                                       {:seon.schema/error
                                        :seon.schema/malformed-projection-identity
                                        :seon.schema/identity identity
-                                       :seon.error/kind :core-bug}))))
+                                       :seon.error/kind :core-bug :seon.schema/malformed-projection-identity true}))))
                   "schema")
           contracts
           (parse-rows function-contract-rows
@@ -2299,13 +2299,13 @@
                                           {:seon.schema/error
                                            :seon.schema/malformed-projection-identity
                                            :seon.schema/identity identity
-                                           :seon.error/kind :core-bug}))))
+                                           :seon.error/kind :core-bug :seon.schema/malformed-projection-identity true}))))
                       :else
                       (throw (ex-info "Committed function identity is malformed."
                                       {:seon.schema/error
                                        :seon.schema/malformed-projection-identity
                                        :seon.schema/identity identity
-                                       :seon.error/kind :core-bug}))))
+                                       :seon.error/kind :core-bug :seon.schema/malformed-projection-identity true}))))
                    "function contract")
           source-admissions
           (reduce
@@ -2315,7 +2315,7 @@
                                {:seon.schema/error
                                 :seon.schema/malformed-projection-row
                                 :seon.schema/row row
-                                :seon.error/kind :core-bug})))
+                                :seon.error/kind :core-bug :seon.schema/malformed-projection-row true})))
              (let [[raw-identity source asserting-tx-eid] row
                    identity (cond
                               (qualified-symbol? raw-identity) raw-identity
@@ -2326,7 +2326,7 @@
                                  {:seon.schema/error
                                   :seon.schema/malformed-projection-row
                                   :seon.schema/row row
-                                  :seon.error/kind :core-bug})))
+                                  :seon.error/kind :core-bug :seon.schema/malformed-projection-row true})))
                (when (contains? admissions identity)
                  (throw (ex-info (str "Duplicate committed function source "
                                       identity ".")
@@ -2352,14 +2352,14 @@
                                        {:seon.schema/error
                                         :seon.schema/malformed-artifact-export
                                         :seon.schema/export export
-                                        :seon.error/kind :core-bug}))))
+                                        :seon.error/kind :core-bug :seon.schema/malformed-artifact-export true}))))
                          :else
                          (throw
                           (ex-info "Artifact export is malformed."
                                    {:seon.schema/error
                                     :seon.schema/malformed-artifact-export
                                     :seon.schema/export export
-                                    :seon.error/kind :core-bug})))))
+                                    :seon.error/kind :core-bug :seon.schema/malformed-artifact-export true})))))
                 artifact-exports)
           forms
           (into {} (map (fn [[k row]]
@@ -3244,7 +3244,7 @@
     (throw (ex-info (str "Unknown projected map schema " schema-key ".")
                     {:seon.schema/error :seon.schema/unknown-shape
                      :seon.schema/key schema-key
-                     :seon.error/kind :core-bug})))
+                     :seon.error/kind :core-bug :seon.schema/unknown-shape schema-key})))
   ((cached-compiler-in!
      projection :seon.schema.shape/explainers projection-explainer schema-key)
    value))

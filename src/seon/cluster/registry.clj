@@ -378,7 +378,7 @@
           (ex-info "A roster branch has no readable head commit ID."
                    {:seon.error/kind
                     :seon.cluster.registry/branch-head-absent
-                    :seon.store/branch branch})))
+                    :seon.store/branch branch :seon.cluster.registry/branch-head-absent true})))
        {:seon.store/branch branch
         :seon.source/commit-id commit-id}))
    (sort-by str branches)))
@@ -426,7 +426,7 @@
                 {:seon.error/kind
                  :seon.cluster.registry/candidate-file-absent
                  :seon.cluster.registry/missing-candidate-files
-                 (vec missing)})))
+                 (vec missing) :seon.cluster.registry/candidate-file-absent true})))
     {:seon.cluster.registry/retained-files
      (- (:files inventory) (:candidate-files inventory))
      :seon.cluster.registry/file-bytes (:bytes inventory)
@@ -476,7 +476,7 @@
                     (ex-info "Dry-run candidate enumeration is complete."
                              {:seon.error/kind
                               :seon.cluster.registry/dry-run-complete
-                              :seon.cluster.registry/dry-run-token token}))))))
+                              :seon.cluster.registry/dry-run-token token :seon.cluster.registry/dry-run-complete true}))))))
           (catch Throwable failure
             failure))]
     (cond
@@ -497,7 +497,7 @@
       (throw
        (ex-info "Dry-run collection returned without its delete barrier."
                 {:seon.error/kind
-                 :seon.cluster.registry/dry-run-barrier-absent})))))
+                 :seon.cluster.registry/dry-run-barrier-absent :seon.cluster.registry/dry-run-barrier-absent true})))))
 
 (defn collect!
   "Collect or inventory this store's unreachable objects.

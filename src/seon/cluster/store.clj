@@ -95,6 +95,9 @@
          (ex-info
           "The file-lock generator could not acquire its fresh lock."
           {:seon.error/kind :core-bug
+           :seon.cluster.store/file-lock-generator-failed (.getPath lock-file)
+           :seon.error/message
+           "The file-lock generator could not acquire its fresh lock."
            ::lock-file (.getPath lock-file)})))))
 
 (def connection-generator db/connection-generator)

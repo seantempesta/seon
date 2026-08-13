@@ -98,4 +98,8 @@
               :nilable-value-schema :seon.schema/key
               :nilable-value-schema-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify a durable value schema that permits nil"} [:seon.schema/nilable-value-schema :seon.schema/nilable-value-schema] [:seon.error/message :seon.error/message]]
               :single-segment-namespace :symbol
-              :single-segment-namespace-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the single-segment namespace that cannot own durable data"} [:seon.schema/single-segment-namespace :seon.schema/single-segment-namespace] [:seon.error/message :seon.error/message]]}
+              :single-segment-namespace-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the single-segment namespace that cannot own durable data"} [:seon.schema/single-segment-namespace :seon.schema/single-segment-namespace] [:seon.error/message :seon.error/message]]
+ :seon.schema/missing-projection [:= true]
+ :seon.schema/missing-projection-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schema/missing-projection class marker"} [:seon.schema/missing-projection :seon.schema/missing-projection] [:seon.error/message :seon.error/message]]
+ :seon.schema/render-contract-incoherent [:= true]
+ :seon.schema/render-contract-incoherent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schema/render-contract-incoherent class marker"} [:seon.schema/render-contract-incoherent :seon.schema/render-contract-incoherent] [:seon.error/message :seon.error/message]]}

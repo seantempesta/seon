@@ -40,4 +40,8 @@
                     :tree :seon.print/node,
                     :truncated? :boolean,
                     :window-failed :seon.blob/digest
-                    :window-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the blob whose display window could not be read"} [:seon.render.value/window-failed :seon.render.value/window-failed] [:seon.error/message :seon.error/message]]}
+                    :window-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the blob whose display window could not be read"} [:seon.render.value/window-failed :seon.render.value/window-failed] [:seon.error/message :seon.error/message]]
+                    :window-realization-failed [:= true]
+                    :window-realization-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an ordinary value whose display window could not be realized"} [:seon.render.value/window-realization-failed :seon.render.value/window-realization-failed] [:seon.error/message :seon.error/message]]
+ :seon.render.value/missing-root-identity [:= true]
+ :seon.render.value/missing-root-identity-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.render.value/missing-root-identity class marker"} [:seon.render.value/missing-root-identity :seon.render.value/missing-root-identity] [:seon.error/message :seon.error/message]]}

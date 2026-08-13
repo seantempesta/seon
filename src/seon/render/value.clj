@@ -58,7 +58,7 @@
        "A rendered value root requires a caller-supplied block id."
        :seon.error/data
        {:seon.cluster.agent/id (:seon.cluster.agent/id unit)
-        :seon.render.data/path path}}
+        :seon.render.data/path path} :seon.render.value/missing-root-identity true}
       (let [address [(:seon.cluster.agent/id unit) root-address path]
             digest (schema/sha-256
                     [(.getBytes ^String (pr-str address) "UTF-8")])]
@@ -163,6 +163,7 @@
     (catch Throwable failure
       {:seon.render.value/window
        {:seon.error/kind :seon.render.value/window-failed
+        :seon.render.value/window-realization-failed true
         :seon.error/message (or (ex-message failure) "realization failed")}
        :seon.render.value/steps []
        :seon.render.value/offset offset

@@ -60,7 +60,7 @@
    (ex-info
     (str "Reconciliation refused: " (name rule) ".")
     (merge {:seon.error/kind ::refused
-            ::rule rule}
+            ::rule rule :seon.reconcile/refused rule}
            data))))
 
 (defn- identity-attributes
@@ -70,7 +70,7 @@
   ;; — measured 2026-08-07 at 25,916 ms and 286,672 resource reads for this one
   ;; function (issue packaged-forms-rereads-every-schema-resource-per-call).
   ([] (throw (ex-info "Reconciliation requires explicit declaration forms."
-                      {:seon.error/kind ::missing-declarations})))
+                      {:seon.error/kind ::missing-declarations :seon.reconcile/missing-declarations true})))
   ([forms]
    (into #{}
          (filter #(schema/identity-attr? forms %))

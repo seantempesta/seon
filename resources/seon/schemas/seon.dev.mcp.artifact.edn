@@ -4,4 +4,6 @@
  :entity
  [:map {:seon.db/entity true}
   [:seon.dev.mcp.artifact/id :seon.dev.mcp.artifact/id]
-  [:seon.dev.mcp.artifact/digest :seon.dev.mcp.artifact/digest]]}
+  [:seon.dev.mcp.artifact/digest :seon.dev.mcp.artifact/digest]],
+ :root-not-committed :seon.blob/digest,
+ :root-not-committed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the durable MCP artifact root that did not commit"} [:seon.dev.mcp.artifact/root-not-committed :seon.dev.mcp.artifact/root-not-committed] [:seon.error/message :seon.error/message]]}

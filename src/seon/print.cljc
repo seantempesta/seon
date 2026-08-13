@@ -567,7 +567,7 @@
             :seon.error/message "The admitted value has no declared print face."
             :seon.error/data
             {::face (::face node)
-             ::node-keys (vec (sort-by str (keys node)))}})))
+             ::node-keys (vec (sort-by str (keys node)))} :seon.print/unknown-face (:?_current-ns_?/face node)})))
 
 (defn- scalar-node-value
   [node]

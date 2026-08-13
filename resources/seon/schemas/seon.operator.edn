@@ -116,4 +116,12 @@
                  [:map
                   [:seon.operator/clusters :seon.operator/clusters]],
                  :failed [:= true]
-                 :failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an operator command that failed"} [:seon.operator/failed :seon.operator/failed] [:seon.error/message :seon.error/message]]}
+                 :failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an operator command that failed"} [:seon.operator/failed :seon.operator/failed] [:seon.error/message :seon.error/message]]
+ :seon.operator/cluster-cleanup-incomplete [:= true]
+ :seon.operator/cluster-cleanup-incomplete-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.operator/cluster-cleanup-incomplete class marker"} [:seon.operator/cluster-cleanup-incomplete :seon.operator/cluster-cleanup-incomplete] [:seon.error/message :seon.error/message]]
+ :seon.operator/collection-incomplete [:= true]
+ :seon.operator/collection-incomplete-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.operator/collection-incomplete class marker"} [:seon.operator/collection-incomplete :seon.operator/collection-incomplete] [:seon.error/message :seon.error/message]]
+ :seon.operator/process-census-incomplete [:= true]
+ :seon.operator/process-census-incomplete-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.operator/process-census-incomplete class marker"} [:seon.operator/process-census-incomplete :seon.operator/process-census-incomplete] [:seon.error/message :seon.error/message]]
+ :seon.operator/reap-incomplete [:= true]
+ :seon.operator/reap-incomplete-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.operator/reap-incomplete class marker"} [:seon.operator/reap-incomplete :seon.operator/reap-incomplete] [:seon.error/message :seon.error/message]]}

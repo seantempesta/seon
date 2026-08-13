@@ -40,7 +40,7 @@
      (ex-info "Program indexing transaction was refused."
               {:seon.error/kind ::index-refused
                :seon.fn/index-phase phase
-               :seon.fn/transaction-result result})))
+               :seon.fn/transaction-result result :seon.fn/index-refused true})))
   result)
 
 (defn- project-root
@@ -51,7 +51,7 @@
        (ex-info
         "Program indexing requires a source checkout."
         {:seon.error/kind ::index-refused
-         ::resource (str resource)})))
+         ::resource (str resource) :seon.fn/index-refused true})))
     (-> resource
         .toURI
         io/file
@@ -118,7 +118,7 @@
     (when-not (every? some? [row col end-row end-col])
       (throw (ex-info "Static declaration has no exact source span."
                       {:seon.error/kind ::index-refused
-                       ::analysis-entry entry})))
+                       ::analysis-entry entry :seon.fn/index-refused true})))
     (subs text
           (+ (nth line-starts (dec row)) (dec col))
           (+ (nth line-starts (dec end-row)) (dec end-col)))))
@@ -330,7 +330,7 @@
         {:seon.error/kind ::index-refused
          :seon.fn/capability-rule :invalid-handler-symbol
          :seon.fn/sym (str qualified)
-         :seon.effect/capability capability})))
+         :seon.effect/capability capability :seon.fn/index-refused true})))
     (cond
       (::analyzer/test entry)
       (cond-> {:seon.test/sym (str qualified)
@@ -630,7 +630,7 @@
   (when (seq (blocking-findings analysis))
     (throw (ex-info "Static program analysis found blocking errors."
                     {:seon.error/kind ::index-refused
-                     ::findings (publication-findings analysis)}))))
+                     ::findings (publication-findings analysis) :seon.fn/index-refused true}))))
 
 (defn- analysis-rows-by-file
   [analysis first-party-functions]
@@ -977,7 +977,7 @@
     "The declared capability graph is malformed."
     (merge {:seon.error/kind ::index-refused
             :seon.fn/capability-rule rule
-            :seon.fn/sym function-symbol}
+            :seon.fn/sym function-symbol :seon.fn/index-refused true}
            data))))
 
 (defn- reaches?
@@ -1064,7 +1064,7 @@
     (when-not (source-file? file)
       (throw (ex-info "A file artifact requires one existing Clojure file."
                       {:seon.error/kind ::index-refused
-                       :seon.fn.file/path (.getCanonicalPath file)})))
+                       :seon.fn.file/path (.getCanonicalPath file) :seon.fn/index-refused true})))
     (let [canonical-path (.getCanonicalPath file)
           analysis (analyzer/analyze {::analyzer/paths [canonical-path]})
           findings (publication-findings analysis)
@@ -1139,7 +1139,7 @@
                    (frequencies (map :seon.fn.file/path desired-artifacts)))]
     (throw (ex-info "Manifest replacement carries a duplicate file path."
                     {:seon.error/kind ::index-refused
-                     :seon.fn.file/path duplicate-path})))
+                     :seon.fn.file/path duplicate-path :seon.fn/index-refused true})))
   (let [desired-by-path
         (into {} (map (juxt :seon.fn.file/path identity)) desired-artifacts)
         retained
@@ -1329,7 +1329,7 @@
                (build-manifest request))
              (throw
               (ex-info "Program rows require a manifest or source roots."
-                       {:seon.error/kind ::index-refused}))))))
+                       {:seon.error/kind ::index-refused :seon.fn/index-refused true}))))))
 
 (defn- assert-one-row-per-identity!
   [desired]
@@ -1341,7 +1341,7 @@
      (ex-info
       "Source indexing refused a duplicate program identity."
       {:seon.error/kind ::index-refused
-       ::identity duplicate}))))
+       ::identity duplicate :seon.fn/index-refused true}))))
 
 (defn- assert-populated!
   [desired]
@@ -1352,7 +1352,7 @@
         (str "Source indexing produced no " identity-attr
              " rows; refusing a partial program graph.")
         {:seon.error/kind ::index-refused
-         ::missing-population identity-attr})))))
+         ::missing-population identity-attr :seon.fn/index-refused true})))))
 
 (defn- add-contract-facts
   [rows progress!]
@@ -1552,7 +1552,7 @@
         (throw
          (ex-info "Source indexing refused a non-Malli schema declaration."
                   {:seon.error/kind ::index-refused
-                   :seon.schema/key schema-key}))))
+                   :seon.schema/key schema-key :seon.fn/index-refused true}))))
     (add-contract-facts
      (mapv #(assoc % :seon.schema.admission/source :core)
            (into (into (vec source-only) external-namespace-rows)
@@ -1602,7 +1602,7 @@
      (when existing
        (throw (ex-info "Program indexing requires a fresh source scratch branch."
                        {:seon.error/kind ::index-refused
-                        ::existing-program-entity existing})))
+                        ::existing-program-entity existing :seon.fn/index-refused true})))
      (let [namespaces (filterv :seon.ns/name rows)
           namespace-bases
           (mapv #(dissoc % :seon.ns/requires) namespaces)

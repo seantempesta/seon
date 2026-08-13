@@ -191,4 +191,8 @@
           :transaction-refused [:= true]
           :transaction-refused-error [:map {:seon.error/class true :seon.render/ai seon.db/render-rejection-ai :seon.render/html seon.db/render-rejection-html :error/message "must mark a database transaction that was refused"} [:seon.db/transaction-refused :seon.db/transaction-refused] [:seon.error/message :seon.error/message]]
           :transaction-outcome-unknown [:= true]
-          :transaction-outcome-unknown-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a database transaction whose outcome is unknown"} [:seon.db/transaction-outcome-unknown :seon.db/transaction-outcome-unknown] [:seon.error/message :seon.error/message]]}
+          :transaction-outcome-unknown-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a database transaction whose outcome is unknown"} [:seon.db/transaction-outcome-unknown :seon.db/transaction-outcome-unknown] [:seon.error/message :seon.error/message]]
+ :seon.db/invalid-read [:= true]
+ :seon.db/invalid-read-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.db/invalid-read class marker"} [:seon.db/invalid-read :seon.db/invalid-read] [:seon.error/message :seon.error/message]]
+ :seon.db/invalid-request [:= true]
+ :seon.db/invalid-request-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.db/invalid-request class marker"} [:seon.db/invalid-request :seon.db/invalid-request] [:seon.error/message :seon.error/message]]}

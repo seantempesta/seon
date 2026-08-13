@@ -28,7 +28,7 @@
   {:seon.error/kind ::proof-failed
    :seon.error/message message
    :seon.error/data data
-   ::predicate predicate})
+   ::predicate predicate :seon.cluster.curate/proof-failed true})
 
 (defn- candidate-span [database run-ids]
   (let [runs (mapv #(db/pull
@@ -267,7 +267,7 @@
               :seon.cluster.curate/throwable (str (class failure))
               :seon.cluster.curate/cause (ex-data failure)
               :seon.cluster.curate/frame
-              (some-> failure .getStackTrace first str)}}))))))
+              (some-> failure .getStackTrace first str)} :seon.cluster.curate/proof-fault true}))))))
 
 (def ^:private receipt-selector
   [:seon.cluster.eval/id :seon.cluster.eval/ordinal :seon.cluster.eval/at

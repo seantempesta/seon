@@ -161,7 +161,8 @@
 
 (defn- flat-error
   [kind message data]
-  {:seon.error/kind kind
+  {kind true
+   :seon.error/kind kind
    :seon.error/message message
    :seon.error/data data})
 
@@ -210,7 +211,7 @@
       {:seon.error/kind :seon.effect/already-recorded
        :seon.error/message
        "This effect request was already recorded and was not dispatched again."
-       :seon.error/data {:seon.effect/id (:seon.effect/id request)}}))
+       :seon.error/data {:seon.effect/id (:seon.effect/id request)} :seon.effect/already-recorded true}))
     [request]))
 
 (defn settle-call
@@ -225,13 +226,13 @@
       (nil? receipt)
       (throw
        (ex-info "The effect receipt does not exist."
-                {:seon.error/kind :seon.effect/missing-receipt}))
+                {:seon.error/kind :seon.effect/missing-receipt :seon.effect/missing-receipt true}))
 
       (or (:seon.effect/result-edn receipt)
           (:seon.effect/interrupted-at receipt))
       (throw
        (ex-info "The effect receipt is already terminal."
-                {:seon.error/kind :seon.effect/already-settled}))
+                {:seon.error/kind :seon.effect/already-settled :seon.effect/already-settled true}))
 
       :else
       (cond->
@@ -274,13 +275,13 @@
       (nil? receipt)
       (throw
        (ex-info "The effect receipt does not exist."
-                {:seon.error/kind :seon.effect/missing-receipt}))
+                {:seon.error/kind :seon.effect/missing-receipt :seon.effect/missing-receipt true}))
 
       (or (:seon.effect/result-edn receipt)
           (:seon.effect/interrupted-at receipt))
       (throw
        (ex-info "The effect receipt is already terminal."
-                {:seon.error/kind :seon.effect/already-settled}))
+                {:seon.error/kind :seon.effect/already-settled :seon.effect/already-settled true}))
 
       :else
       (cond->

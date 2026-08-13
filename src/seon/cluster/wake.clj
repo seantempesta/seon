@@ -156,6 +156,9 @@
       (async/offer! fault-channel
                     (ex-info "a wake route refused delivery"
                              {:seon.error/kind ::undeliverable-wake
+                              :seon.cluster.wake/undeliverable-wake key
+                              :seon.error/message
+                              "A wake route refused delivery."
                               ::key key
                               ::route route})))
     outcome))

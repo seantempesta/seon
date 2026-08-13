@@ -262,6 +262,7 @@
 (defn- submission-capacity-error
   [submission-id workload]
   {:seon.error/kind ::submission-capacity
+   :seon.flow/submission-capacity workload
    :seon.error/message "The bounded work submission queue is full."
    :seon.error/data {::submission-id submission-id
                      ::workload workload}})
@@ -589,6 +590,9 @@
        (ex-info
         "The work launcher is not ready: required config facts are missing."
         {:seon.error/kind :configuration
+         :seon.flow/configuration true
+         :seon.error/message
+         "The work launcher is not ready: required config facts are missing."
          ::missing-config-facts (vec missing)})))
     selected))
 
@@ -705,6 +709,7 @@
        {::started-at (System/nanoTime)
         ::value
         {:seon.error/kind ::launcher-stopped
+         :seon.flow/launcher-stopped ::work-launcher
          :seon.error/message
          "The work launcher stopped before the background call completed."
          :seon.error/data {::submission-id (::submission-id work)}}}))
@@ -756,6 +761,7 @@
              {::started-at (System/nanoTime)
               ::value
               {:seon.error/kind ::launcher-stopped
+               :seon.flow/launcher-stopped ::work-launcher
                :seon.error/message
                "The work launcher is no longer accepting background calls."
                :seon.error/data {::submission-id submission-id}}})
@@ -766,6 +772,7 @@
           {::started-at (System/nanoTime)
            ::value
            {:seon.error/kind ::launcher-stopped
+            :seon.flow/launcher-stopped ::work-launcher
             :seon.error/message
             "A background call requires a running work launcher."
             :seon.error/data {::submission-id submission-id}}}
@@ -788,7 +795,10 @@
     (throw
      (ex-info
       "A compute submission must name its cluster's work launcher."
-      {:seon.error/kind :configuration})))
+      {:seon.error/kind :configuration
+       :seon.flow/configuration true
+       :seon.error/message
+       "A compute submission must name its cluster's work launcher."})))
   (env/refuse-absent-environment! submission ::submit!!)
   (let [{::keys [submission-id workload work-fn time-limit-ms] :as submission}
         (with-current-arm submission)
@@ -879,7 +889,7 @@
      {:seon.error/kind ::fault-channel-overflow
       ::dropped-fault-count dropped-fault-count
       ::dropped-fault-digest dropped-fault-digest
-      ::dropped-fault dropped-fault})
+      ::dropped-fault dropped-fault :seon.flow/fault-channel-overflow true})
     ::dropped-fault-count dropped-fault-count
     ::dropped-fault-digest dropped-fault-digest
     ::dropped-fault dropped-fault}

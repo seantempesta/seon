@@ -38,4 +38,18 @@
                  [:seon.config.error/escalate-to
                   {:optional true}
                   :seon.config.error/escalate-to]],
-                :fire-count [:int {:min 0}]}
+                :fire-count [:int {:min 0}]
+ :seon.schedule/incomplete-task [:= true]
+ :seon.schedule/incomplete-task-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schedule/incomplete-task class marker"} [:seon.schedule/incomplete-task :seon.schedule/incomplete-task] [:seon.error/message :seon.error/message]]
+ :seon.schedule/invalid-fire-id [:= true]
+ :seon.schedule/invalid-fire-id-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schedule/invalid-fire-id class marker"} [:seon.schedule/invalid-fire-id :seon.schedule/invalid-fire-id] [:seon.error/message :seon.error/message]]
+ :seon.schedule/invalid-task-owner [:= true]
+ :seon.schedule/invalid-task-owner-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schedule/invalid-task-owner class marker"} [:seon.schedule/invalid-task-owner :seon.schedule/invalid-task-owner] [:seon.error/message :seon.error/message]]
+ :seon.schedule/invalid-terminal-arm [:= true]
+ :seon.schedule/invalid-terminal-arm-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schedule/invalid-terminal-arm class marker"} [:seon.schedule/invalid-terminal-arm :seon.schedule/invalid-terminal-arm] [:seon.error/message :seon.error/message]]
+ :seon.schedule/missing-execution-handle [:= true]
+ :seon.schedule/missing-execution-handle-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schedule/missing-execution-handle class marker"} [:seon.schedule/missing-execution-handle :seon.schedule/missing-execution-handle] [:seon.error/message :seon.error/message]]
+ :seon.schedule/missing-receipt [:= true]
+ :seon.schedule/missing-receipt-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schedule/missing-receipt class marker"} [:seon.schedule/missing-receipt :seon.schedule/missing-receipt] [:seon.error/message :seon.error/message]]
+ :seon.schedule/unresolved-handler [:= true]
+ :seon.schedule/unresolved-handler-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schedule/unresolved-handler class marker"} [:seon.schedule/unresolved-handler :seon.schedule/unresolved-handler] [:seon.error/message :seon.error/message]]}

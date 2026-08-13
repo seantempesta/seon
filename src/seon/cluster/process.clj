@@ -23,6 +23,8 @@
        (ex-info
         "The process start instant is unavailable."
         {:seon.error/kind :seon.cluster.process/start-instant-unavailable
+         :seon.cluster.process/start-instant-unavailable (.pid handle)
+         :seon.error/message "The process start instant is unavailable."
          :seon.boot/pid (.pid handle)})))
     {:seon.boot/pid (.pid handle)
      :seon.boot/start-instant (java.util.Date/from (.get start))}))

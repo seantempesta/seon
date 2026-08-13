@@ -28,4 +28,6 @@
                  :duplicate-identity [:= true]
                  :duplicate-identity-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark duplicate identities in a reconciled population"} [:seon.reconcile/duplicate-identity :seon.reconcile/duplicate-identity] [:seon.error/message :seon.error/message]]
                  :identity-outside-scope [:= true]
-                 :identity-outside-scope-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a reconciled identity outside the declared scope"} [:seon.reconcile/identity-outside-scope :seon.reconcile/identity-outside-scope] [:seon.error/message :seon.error/message]]}
+                 :identity-outside-scope-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a reconciled identity outside the declared scope"} [:seon.reconcile/identity-outside-scope :seon.reconcile/identity-outside-scope] [:seon.error/message :seon.error/message]]
+ :seon.reconcile/missing-declarations [:= true]
+ :seon.reconcile/missing-declarations-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.reconcile/missing-declarations class marker"} [:seon.reconcile/missing-declarations :seon.reconcile/missing-declarations] [:seon.error/message :seon.error/message]]}

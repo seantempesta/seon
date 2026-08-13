@@ -3,4 +3,8 @@
  :seon.dev.mcp/value-not-found :seon.blob/digest
  :seon.dev.mcp/value-not-found-error [:map {:seon.error/class true :seon.render/ai seon.error/mcp-prose :seon.render/html seon.error/render-html :error/message "must identify the value digest that MCP could not find"} [:seon.dev.mcp/value-not-found :seon.dev.mcp/value-not-found] [:seon.error/message :seon.error/message]]
  :seon.dev.mcp/remainder-not-retrievable :seon.blob/digest
- :seon.dev.mcp/remainder-not-retrievable-error [:map {:seon.error/class true :seon.render/ai seon.error/mcp-prose :seon.render/html seon.error/render-html :error/message "must identify the value whose clipped remainder cannot be retrieved"} [:seon.dev.mcp/remainder-not-retrievable :seon.dev.mcp/remainder-not-retrievable] [:seon.error/message :seon.error/message]]}
+ :seon.dev.mcp/remainder-not-retrievable-error [:map {:seon.error/class true :seon.render/ai seon.error/mcp-prose :seon.render/html seon.error/render-html :error/message "must identify the value whose clipped remainder cannot be retrieved"} [:seon.dev.mcp/remainder-not-retrievable :seon.dev.mcp/remainder-not-retrievable] [:seon.error/message :seon.error/message]]
+ :seon.dev.mcp/nil-deref [:= true]
+ :seon.dev.mcp/nil-deref-error [:map {:seon.error/class true :seon.render/ai seon.error/mcp-prose :seon.render/html seon.error/render-html :error/message "must mark a development evaluation that dereferenced nil"} [:seon.dev.mcp/nil-deref :seon.dev.mcp/nil-deref] [:seon.error/message :seon.error/message]]
+ :seon.dev.mcp/jvm-exception [:= true]
+ :seon.dev.mcp/jvm-exception-error [:map {:seon.error/class true :seon.render/ai seon.error/mcp-prose :seon.render/html seon.error/render-html :error/message "must mark a development evaluation that threw on the JVM"} [:seon.dev.mcp/jvm-exception :seon.dev.mcp/jvm-exception] [:seon.error/message :seon.error/message]]}

@@ -76,7 +76,7 @@
   (throw
    (ex-info message
             (merge {:seon.error/kind :seon.program/declaration-refused
-                    :seon.program/identities identities}
+                    :seon.program/identities identities :seon.program/declaration-refused true}
                    data))))
 
 (defn- read-edn
@@ -199,7 +199,7 @@
             (throw
              (ex-info "Sequential destructuring has a malformed rest binding."
                       {:seon.error/kind :seon.fn.binding/unsupported
-                       :seon.fn.binding/form (pr-str binding)})))
+                       :seon.fn.binding/form (pr-str binding) :seon.fn.binding/unsupported true})))
 
           (= :as value)
           (if (and (next remaining) (nil? (next (next remaining))))
@@ -209,7 +209,7 @@
             (throw
              (ex-info "Sequential destructuring has a malformed :as binding."
                       {:seon.error/kind :seon.fn.binding/unsupported
-                       :seon.fn.binding/form (pr-str binding)})))
+                       :seon.fn.binding/form (pr-str binding) :seon.fn.binding/unsupported true})))
 
           :else
           (recur (next remaining) (inc order)
@@ -256,7 +256,7 @@
     (throw
      (ex-info "Function declaration has an unsupported binding form."
               {:seon.error/kind :seon.fn.binding/unsupported
-               :seon.fn.binding/form (pr-str binding)}))))
+               :seon.fn.binding/form (pr-str binding) :seon.fn.binding/unsupported true}))))
 
 (defn- schema-reference-keys
   [compiled canonical-keys]
@@ -448,7 +448,7 @@
                 {:seon.error/kind :seon.fn/signature-refused
                  :seon.fn.signature/reason reason
                  :seon.fn.signature/join-key join-key
-                 :seon.fn.signature/count (count matches)})))
+                 :seon.fn.signature/count (count matches) :seon.fn/signature-refused true})))
     (into {} (map (fn [[join-key matches]]
                     [join-key (first matches)])) grouped)))
 
@@ -469,7 +469,7 @@
      (ex-info "Function input contract must be a :cat or :catn schema."
               {:seon.error/kind :seon.fn/signature-refused
                :seon.fn.signature/reason :unsupported-input-schema
-               :seon.fn.signature/input (pr-str (m/form input))}))))
+               :seon.fn.signature/input (pr-str (m/form input)) :seon.fn/signature-refused true}))))
 
 (defn- label-facts
   [label]
@@ -525,7 +525,7 @@
                       {:seon.error/kind :seon.fn/signature-refused
                        :seon.fn.signature/reason :unmatched-slot
                        :seon.fn.signature/source-count expected-count
-                       :seon.fn.signature/malli-count (count slots)})))
+                       :seon.fn.signature/malli-count (count slots) :seon.fn/signature-refused true})))
         arguments (mapv (fn [argument-order slot]
                           (argument-row function-symbol order source-signature
                                         argument-order slot schema-forms
@@ -605,7 +605,7 @@
                 {:seon.error/kind :seon.fn/signature-refused
                  :seon.fn.signature/reason :unmatched-arity
                  :seon.fn.signature/source-arities source-keys
-                 :seon.fn.signature/malli-arities malli-keys})))
+                 :seon.fn.signature/malli-arities malli-keys :seon.fn/signature-refused true})))
     (cond->
      {:seon.fn/arities
       (mapv (fn [order arity]

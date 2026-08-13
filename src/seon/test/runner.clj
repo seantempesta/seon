@@ -507,7 +507,7 @@
           {:seon.error/kind ::invalid-marker-reason
            :seon.test/sym (str (var-symbol test-var))
            ::marker marker-attribute
-           ::value marker})))
+           ::value marker :seon.test.runner/invalid-marker-reason true})))
       marker)))
 
 (defn- long-reason
@@ -617,7 +617,7 @@
              (ex-info
               "A namespace test hook cannot select around long test vars."
               {:seon.error/kind ::long-test-ns-hook
-               :seon.ns/name namespace-name})))
+               :seon.ns/name namespace-name :seon.test.runner/long-test-ns-hook namespace-name})))
           (test/test-vars namespace-vars))
         (test/do-report {:type :end-test-ns :ns namespace-object}))
       @test/*report-counters*)))
@@ -709,7 +709,7 @@
               (throw
                (ex-info "A worker could not resolve a selected test Var."
                         {:seon.error/kind ::unresolved-test-var
-                         :seon.test/sym test-symbol}))))
+                         :seon.test/sym test-symbol :seon.test.runner/unresolved-test-var true}))))
         (::task-symbols task)))
 
 (defn- run-task!
@@ -839,7 +839,7 @@
           (throw
            (ex-info "A test worker received an unknown command."
                     {:seon.error/kind ::unknown-worker-command
-                     ::command command})))))))
+                     ::command command :seon.test.runner/unknown-worker-command true})))))))
 
 (defn- worker-main!
   [worker-id]
@@ -1141,7 +1141,7 @@
              (ex-info "A test worker process could not launch."
                       {:seon.error/kind ::worker-launch-failure
                        ::worker-id worker-id
-                       ::worker-error-log (.getCanonicalPath error-log)}
+                       ::worker-error-log (.getCanonicalPath error-log) :seon.test.runner/worker-launch-failure true}
                       failure))))
         worker {::worker-id worker-id
                 ::worker-process process
@@ -1158,14 +1158,14 @@
                  ::worker-id worker-id
                  ::worker-exit (when-not (.isAlive process)
                                  (.exitValue process))
-                 ::worker-error-log (::worker-error-log worker)})))
+                 ::worker-error-log (::worker-error-log worker) :seon.test.runner/worker-launch-failure true})))
     (when-not (= :ready (::worker-event ready))
       (throw
        (ex-info "A test worker published an invalid readiness value."
                 {:seon.error/kind ::worker-launch-failure
                  ::worker-id worker-id
                  ::worker-ready ready
-                 ::worker-error-log (::worker-error-log worker)})))
+                 ::worker-error-log (::worker-error-log worker) :seon.test.runner/worker-launch-failure true})))
     worker))
 
 (defn- worker-rpc!
@@ -1250,7 +1250,7 @@
          (ex-info "A worker process tree exceeded its exit backstop."
                   {:seon.error/kind ::process-tree-exit-backstop
                    ::processes stuck-processes
-                   ::forced-completion? forced-completion?})))))
+                   ::forced-completion? forced-completion? :seon.test.runner/process-tree-exit-backstop true})))))
   ;; The exact root exit is already one of process-tree-exit's publications.
   (.get (.onExit ^ProcessHandle process-root)))
 
@@ -1516,7 +1516,7 @@
       "The test selection mode is not one this runner knows."
       {:seon.error/kind ::invalid-selection-mode
        ::selection-mode selection-mode
-       ::known selection-modes})))
+       ::known selection-modes :seon.test.runner/invalid-selection-mode selection-mode})))
   (let [namespaces (mapv symbol namespace-names)
         progress (atom {::description "JVM runner initialized"
                         ::at-nanos (System/nanoTime)

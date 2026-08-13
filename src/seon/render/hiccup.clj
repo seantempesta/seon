@@ -278,6 +278,7 @@
   [head]
   (if-not (or (keyword? head) (symbol? head) (string? head))
     {:seon.error/kind ::unparseable-tag
+     :seon.render.hiccup/unparseable-tag (pr-str head)
      :seon.error/message (str "A tag must be a keyword, symbol or string, not "
                               (if (nil? head) "nil" (.getName (class head))) ".")
      :seon.error/data {::head (pr-str head)}}
@@ -300,6 +301,7 @@
           tag (subs text 0 stop)]
       (if (zero? (count tag))
         {:seon.error/kind ::unparseable-tag
+         :seon.render.hiccup/unparseable-tag (pr-str head)
          :seon.error/message "A tag shorthand carries no tag name."
          :seon.error/data {::head (pr-str head)}}
         (loop [index stop
@@ -315,6 +317,7 @@
                   token (subs text (inc index) stop)]
               (if (zero? (count token))
                 {:seon.error/kind ::unparseable-tag
+                 :seon.render.hiccup/unparseable-tag (pr-str head)
                  :seon.error/message
                  (str "A tag shorthand carries an empty " marker " segment.")
                  :seon.error/data {::head (pr-str head)}}
@@ -424,7 +427,9 @@
                  (shorthand (nth element 0))
                  ;; `[]` has no head at all; `hiccup?` refuses it, and so
                  ;; must this, without indexing past the end
-                 {:seon.error/kind ::unparseable-tag})]
+                 {:seon.error/kind ::unparseable-tag
+                  :seon.render.hiccup/unparseable-tag "[]"
+                  :seon.error/message "An empty vector has no Hiccup tag."})]
     (if (:seon.error/kind parsed)
       false
       (let [body (subvec element 1)

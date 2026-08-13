@@ -18,4 +18,6 @@
                     :seon.fn.binding/children]
                    [:seon.fn.binding/entries
                     {:optional true}
-                    :seon.fn.binding/entries]]}
+                    :seon.fn.binding/entries]]
+ :seon.fn.binding/unsupported [:= true]
+ :seon.fn.binding/unsupported-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.fn.binding/unsupported class marker"} [:seon.fn.binding/unsupported :seon.fn.binding/unsupported] [:seon.error/message :seon.error/message]]}

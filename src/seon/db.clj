@@ -76,7 +76,8 @@
 
 (defn- error-value
   [kind message data]
-  {:seon.error/kind kind
+  {kind true
+   :seon.error/kind kind
    :seon.error/message message
    :seon.error/data data})
 
@@ -575,7 +576,7 @@
        ::registered-candidates (::registered-candidates evidence)}
       :seon.error/diagnostic-offending offending
       :seon.error/diagnostic-cause ::attribute-not-installed
-      :seon.error/diagnostic-evidence evidence})))
+      :seon.error/diagnostic-evidence evidence :seon.db/invalid-read true})))
 
 (defn- lookup-ref-error
   [operation database entity-id]
@@ -604,7 +605,7 @@
           :seon.error/diagnostic-expected declaration
           :seon.error/diagnostic-offending entity-id
           :seon.error/diagnostic-cause ::lookup-attribute-not-unique
-          :seon.error/diagnostic-evidence evidence})
+          :seon.error/diagnostic-evidence evidence :seon.db/invalid-read true})
 
         (not valid-value?)
         (diagnostic
@@ -622,7 +623,7 @@
           :seon.error/diagnostic-cause
           {::validation ::value-does-not-match-installed-type
            ::value-type (:db/valueType declaration)}
-          :seon.error/diagnostic-evidence evidence})))))
+          :seon.error/diagnostic-evidence evidence :seon.db/invalid-read true})))))
 
 (defn- query-input-bindings
   [parsed-query arguments]
@@ -667,7 +668,7 @@
         [:entity :attribute :value :transaction :added]
         :seon.error/diagnostic-offending offending
         :seon.error/diagnostic-cause ::malformed-data-pattern
-        :seon.error/diagnostic-evidence request}))))
+        :seon.error/diagnostic-evidence request :seon.db/invalid-read true}))))
 
 (defn- query-source-databases
   [query-form arguments]
@@ -981,7 +982,7 @@
       :seon.error/diagnostic-expected [:map [:query :seon.db/query]]
       :seon.error/diagnostic-offending query-input
       :seon.error/diagnostic-cause ::missing-required-key
-      :seon.error/diagnostic-evidence query-input})))
+      :seon.error/diagnostic-evidence query-input :seon.db/invalid-read true})))
 
 (defn q
   "Run a Datalog query over explicit inputs or the current database value."
@@ -1054,7 +1055,7 @@
         [:map [:selector :seon.db/pull-selector]]
         :seon.error/diagnostic-offending request
         :seon.error/diagnostic-cause ::missing-required-key
-        :seon.error/diagnostic-evidence request}))))
+        :seon.error/diagnostic-evidence request :seon.db/invalid-read true}))))
 
 (defn- pull-entity-id
   [arguments]
@@ -1472,7 +1473,7 @@
                    :seon.error/message
                    (or (ex-message throwable)
                        (.getName (class throwable)))
-                   :seon.error/data (or data {})}]
+                   :seon.error/data (or data {}) :seon.db/transaction-outcome-unknown true}]
               (when (panic-on-core-error? connection)
                 (throw
                  (ex-info (:seon.error/message failure)
@@ -1495,7 +1496,7 @@
       [:map [:tx-data :seon.store/transaction-data]]
       :seon.error/diagnostic-offending transaction
       :seon.error/diagnostic-cause ::missing-required-key
-      :seon.error/diagnostic-evidence transaction})))
+      :seon.error/diagnostic-evidence transaction :seon.db/invalid-request true})))
 
 (defn- rendered-value
   [unit]

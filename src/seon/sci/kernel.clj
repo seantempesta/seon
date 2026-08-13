@@ -172,7 +172,7 @@
       (throw
        (ex-info "SCI context has no database-program installer."
                 {:seon.error/kind ::missing-function-installer
-                 :seon.fn/sym (str function-symbol)}))))
+                 :seon.fn/sym (str function-symbol) :seon.sci.kernel/missing-function-installer (str function-symbol)}))))
   function-symbol)
 
 (defn context-projection
@@ -302,13 +302,13 @@
     (when-not guard
       (throw
        (ex-info "SCI context has no stable interrupt guard."
-                {:seon.error/kind ::missing-interrupt-guard})))
+                {:seon.error/kind ::missing-interrupt-guard :seon.sci.kernel/missing-interrupt-guard true})))
     (if-let [armed (current-thread-arm guard)]
       (do
         (when-not (same-interpreter? armed ctx)
           (throw
            (ex-info "A different SCI context is already armed on this thread."
-                    {:seon.error/kind ::already-armed})))
+                    {:seon.error/kind ::already-armed :seon.sci.kernel/already-armed true})))
         {:interrupt-fn (::interrupt-fn guard)
          ::built-in-calls (fn [] @(::built-in-calls armed))
          ::stop! (constantly nil)
@@ -488,9 +488,10 @@
                    subject (assoc :seon.fn/sym subject))
         existing (error.refusal/refusal throwable)]
     (error/diagnostic
-     {:seon.error/kind
-      (or (:seon.error/kind existing)
-          (if timed-out? time-limit-kind failure-kind))
+     (let [kind (or (:seon.error/kind existing)
+                    (if timed-out? time-limit-kind failure-kind))]
+       {kind (or subject :evaluation)
+        :seon.error/kind kind
       :seon.error/message
       (or (:seon.error/message existing)
           (cond->> (if timed-out?
@@ -518,7 +519,7 @@
         (assoc :seon.sci.eval/symbol (:sci.impl/symbol (ex-data throwable)))
 
         (and (:seon.error/message existing) (ex-message throwable))
-        (assoc :seon.error/throw-site-message (ex-message throwable)))})))
+        (assoc :seon.error/throw-site-message (ex-message throwable)))}))))
 
 (defn unarmed-record
   "The diagnostic record for a failure that never reached an arm."
@@ -562,7 +563,7 @@
               (throw
                (ex-info (str function-symbol " is not an installed SCI Var.")
                         {:seon.error/kind ::unresolved-invocation
-                         :seon.fn/sym function-symbol-string})))
+                         :seon.fn/sym function-symbol-string :seon.sci.kernel/unresolved-invocation function-symbol-string})))
             (let [;; The SECOND of the two ruled call-preparation
                   ;; entrances. SCI's analyzed call path hooks itself; a
                   ;; named invocation applies the Var directly, so it
@@ -610,7 +611,7 @@
                          (.getName (class admission-failure))))
                 :seon.error/data
                 {:seon.sci.eval/throwable
-                 (.getName (class admission-failure))}}
+                 (.getName (class admission-failure))} :seon.sci.kernel/failure-admission-failed true}
                :seon.sci.admit/capped? false
                :seon.sci.admit/record record-value}))))
       (finally

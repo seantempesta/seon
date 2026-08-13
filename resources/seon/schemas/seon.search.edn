@@ -47,4 +47,6 @@
                [:seon.search/unavailable :seon.search/unavailable]
                [:seon.error/message :seon.error/message]],
               :response
-              [:or :seon.search/results :seon.search/unavailable-error]}
+              [:or :seon.search/results :seon.search/unavailable-error]
+ :seon.search/missing-resource [:= true]
+ :seon.search/missing-resource-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.search/missing-resource class marker"} [:seon.search/missing-resource :seon.search/missing-resource] [:seon.error/message :seon.error/message]]}

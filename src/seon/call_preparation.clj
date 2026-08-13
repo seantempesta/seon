@@ -107,7 +107,8 @@
 
 (defn- error-value
   [kind message data]
-  {:seon.error/kind kind
+  {kind true
+   :seon.error/kind kind
    :seon.error/message message
    :seon.error/data data})
 

@@ -360,7 +360,7 @@
         (throw (ex-info (str "value admission could not project a "
                              (.getName (class value)))
                         {:seon.error/kind ::projection-failed
-                         ::class (.getName (class value))}
+                         ::class (.getName (class value)) :seon.sci.admit/projection-failed true}
                         failure)))
       ;; a marker is a structure, so at the depth cap the elision scalar
       ;; is the only thing that fits — the same rule the walk itself

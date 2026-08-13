@@ -191,7 +191,7 @@
    :seon.error/data
    {:seon.render/namespace namespace-name
     :seon.render/output output
-    :seon.render/candidates (vec candidate-symbols)}})
+    :seon.render/candidates (vec candidate-symbols)} :seon.render/ambiguous true})
 
 (defn- explicit-producer
   [request output]
@@ -477,6 +477,7 @@
     (if (or (nil? rendered) (string? rendered) (:seon.error/kind rendered))
       (fit-terminal request :seon.render/ai rendered)
       {:seon.error/kind ::invalid-ai-output
+       :seon.render/invalid-output :ai
        :seon.error/message "The selected AI renderer did not return text."
        :seon.error/data {:seon.render/output rendered}})))
 
@@ -492,6 +493,7 @@
             (hiccup/hiccup? rendered))
       (fit-terminal request :seon.render/html rendered)
       {:seon.error/kind ::invalid-html-output
+       :seon.render/invalid-output :html
        :seon.error/message "The selected HTML renderer did not return Hiccup."
        :seon.error/data {:seon.render/output rendered}})))
 
@@ -538,6 +540,7 @@
     (if (valid-projection? projection :seon.render/form rendered)
       rendered
       {:seon.error/kind ::invalid-form-output
+       :seon.render/invalid-output :form
        :seon.error/message "The selected form renderer did not return a form."
        :seon.error/data {:seon.render/output rendered}})))
 
@@ -728,7 +731,7 @@
   [message]
   (pr-str
    {:seon.error/kind ::walk-failed
-    :seon.error/message message}))
+    :seon.error/message message :seon.render/walk-failed true}))
 
 (defn- ambient-database-value
   []

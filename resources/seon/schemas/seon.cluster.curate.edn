@@ -49,4 +49,8 @@
                        [:map
                         [:seon.cluster.run/id :seon.cluster.run/id]
                         [:seon.cluster.curate/run-ids :seon.cluster.curate/run-ids]
-                        [:seon.cluster.curate/adopted-commit-id :seon.cluster.curate/adopted-commit-id]]}
+                        [:seon.cluster.curate/adopted-commit-id :seon.cluster.curate/adopted-commit-id]]
+ :seon.cluster.curate/proof-failed [:= true]
+ :seon.cluster.curate/proof-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.cluster.curate/proof-failed class marker"} [:seon.cluster.curate/proof-failed :seon.cluster.curate/proof-failed] [:seon.error/message :seon.error/message]]
+ :seon.cluster.curate/proof-fault [:= true]
+ :seon.cluster.curate/proof-fault-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.cluster.curate/proof-fault class marker"} [:seon.cluster.curate/proof-fault :seon.cluster.curate/proof-fault] [:seon.error/message :seon.error/message]]}

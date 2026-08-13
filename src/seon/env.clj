@@ -82,7 +82,7 @@
     (throw
      (ex-info "Environment state requires a complete environment value."
               {:seon.error/kind ::invalid-environment-state
-               :seon.env/supplied (str (type environment))})))
+               :seon.env/supplied (str (type environment)) :seon.env/invalid-environment-state true})))
   (atom environment))
 
 (defn replace-environment!
@@ -95,7 +95,7 @@
     (throw
      (ex-info "Environment replacement requires an environment value."
               {:seon.error/kind ::invalid-environment-replacement
-               :seon.env/supplied (str (type environment))})))
+               :seon.env/supplied (str (type environment)) :seon.env/invalid-environment-replacement true})))
   (reset! state environment))
 
 (defn advance-projection!
@@ -151,7 +151,7 @@
         (throw
          (ex-info
           "The :seon.env/environment schema is not registered."
-          {:seon.error/kind ::schema-absent})))
+          {:seon.error/kind ::schema-absent :seon.env/schema-absent true})))
       (into []
             (map (fn [[member properties]]
                    (let [properties (if (map? properties) properties {})]
@@ -196,14 +196,14 @@
         member "; an environment is never partially handed out.")
    :seon.error/data {:seon.env/layer layer
                      :seon.env/member member
-                     :seon.env/supplied (vec (sort (keys supplied)))}})
+                     :seon.env/supplied (vec (sort (keys supplied)))} :seon.env/incomplete-environment true})
 
 (defn- construct
   [supplied boot?]
   (if-not (map? supplied)
     {:seon.error/kind ::invalid-member
      :seon.error/message "An environment is constructed from a map of members."
-     :seon.error/data {:seon.env/supplied (str (type supplied))}}
+     :seon.error/data {:seon.env/supplied (str (type supplied))} :seon.env/invalid-member true}
     (or
      ;; Dependency order is the schema's entry order, so the FIRST absent
      ;; member names the earliest layer that did not stand. Member SHAPES
@@ -263,13 +263,13 @@
      (ex-info
       "Scoping requires an environment; there is nothing to narrow."
       {:seon.error/kind ::absent-environment
-       :seon.error/data {:seon.env/supplied (str (type carried))}})))
+       :seon.error/data {:seon.env/supplied (str (type carried))} :seon.env/absent-environment true})))
   (let [outside (vec (sort (remove @turn-members (keys supplied))))]
     (if (seq outside)
       {:seon.error/kind ::unscopable-member
        :seon.error/message
        "Only turn-layer members may be scoped onto an existing environment."
-       :seon.error/data {:seon.env/member outside}}
+       :seon.error/data {:seon.env/member outside} :seon.env/unscopable-member true}
       (merge carried supplied))))
 
 ;;; ---------------------------------------------------------------------------
@@ -312,7 +312,7 @@
     {:seon.error/kind ::agent-id-absent
      :seon.error/message
      "This call's environment carries no agent id; pass one explicitly."
-     :seon.error/data {:seon.env/member :seon.cluster.agent/id}}))
+     :seon.error/data {:seon.env/member :seon.cluster.agent/id} :seon.env/agent-id-absent true}))
 
 (defn require-environment
   "Return the carried environment or a flat error naming the boundary."
@@ -327,7 +327,7 @@
             carrier ".")
        :seon.error/data
        {:seon.env/boundary boundary
-        :seon.env/supplied (vec (sort (keys carrier-map)))}}))
+        :seon.env/supplied (vec (sort (keys carrier-map)))} :seon.env/absent-environment true}))
 
 (defn refuse-incomplete-environment!
   "Return a constructed environment, or throw its flat refusal.
@@ -376,4 +376,4 @@
     (throw
      (ex-info "A long-lived environment owner requires environment state."
               {:seon.error/kind ::invalid-environment-state
-               :seon.env/supplied (str (type state))}))))
+               :seon.env/supplied (str (type state)) :seon.env/invalid-environment-state true}))))

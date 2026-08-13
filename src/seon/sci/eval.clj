@@ -638,7 +638,7 @@
           (throw
            (ex-info "Agent def has no available stored value."
                     {:seon.error/kind ::def-blob-unavailable
-                     :seon.blob/digest digest})))]
+                     :seon.blob/digest digest :seon.sci.eval/def-blob-unavailable digest})))]
     (edn/read-string serialized)))
 
 (defn- def-root-row
@@ -668,7 +668,7 @@
                 {:seon.error/kind ::function-root-identity-mismatch
                  :seon.fn/sym (str function-symbol)
                  :sci.root/sym (str descriptor-symbol)
-                 :seon.def/id (:seon.def/id row)}))
+                 :seon.def/id (:seon.def/id row) :seon.sci.eval/function-root-identity-mismatch true}))
 
       (:sci.root/function root-data)
       (do
@@ -710,7 +710,7 @@
                         {:seon.error/kind ::unrestorable-function-root
                          :seon.fn/sym (str function-symbol)
                          :seon.def/unrestorable-reason
-                         "No fact-backed SCI function root was found."})))]
+                         "No fact-backed SCI function root was found." :seon.sci.eval/unrestorable-function-root true})))]
         (when function-installed?
           (install-function-contract!
            ctx (db/pull db '[*] [:seon.fn/sym (str function-symbol)])
@@ -747,7 +747,7 @@
                        (get committed source-attribute))))
       (throw (ex-info "Committed declaration source does not match install request."
                       {:seon.error/kind ::install-source-mismatch
-                       :seon.program/identity [identity-attribute value]})))
+                       :seon.program/identity [identity-attribute value] :seon.sci.eval/install-mismatch true})))
     (let [installed
           (case identity-attribute
       :seon.ns/name
@@ -808,7 +808,7 @@
                          value)]
           (throw (ex-info "Deleted declaration is still present after commit."
                           {:seon.error/kind ::install-delete-mismatch
-                           :seon.program/identity remaining})))
+                           :seon.program/identity remaining :seon.sci.eval/install-mismatch true})))
         (when (and (not schema-deletion?)
                    (nil? (::namespace-state row)))
           (let [event (one-event (:seon.program/source row)
@@ -898,7 +898,7 @@
               (str "First-party program namespace " namespace-name
                    " could not be loaded for the evaluation context.")
               {:seon.error/kind ::namespace-unloadable
-               :seon.ns/name namespace-name}
+               :seon.ns/name namespace-name :seon.sci.eval/namespace-unloadable true}
               failure))))
         (or (find-ns namespace-name)
             (throw
@@ -906,7 +906,7 @@
               (str "First-party program namespace " namespace-name
                    " loaded without defining a namespace.")
               {:seon.error/kind ::namespace-unloadable
-               :seon.ns/name namespace-name}))))))
+               :seon.ns/name namespace-name :seon.sci.eval/namespace-unloadable true}))))))
 
 (defn- install-first-party-namespaces!
   "Bind every first-party program namespace as its actual compiled JVM Vars.
@@ -1214,7 +1214,7 @@
       {::acquisition-row identity
        ::acquisition-cause-kind cause-kind
        ::acquisition-cause-message cause-message
-       ::acquisition-throwable-class (.getName (class failure))}})))
+       ::acquisition-throwable-class (.getName (class failure))} :seon.sci.eval/acquisition-refused true})))
 
 (defn- acquisition-refusal-id
   [refusal]
@@ -1421,7 +1421,7 @@
                  (ex-info
                   "Program acquisition found a namespace binding cycle."
                   {:seon.error/kind ::namespace-binding-cycle
-                   :seon.sci.eval/dependencies remaining})))
+                   :seon.sci.eval/dependencies remaining :seon.sci.eval/namespace-binding-cycle true})))
               (let [released (set ready)]
                 (recur
                  (into {}
@@ -1717,7 +1717,7 @@
                   "Schema deletion did not unregister its reader identity."
                   {:seon.error/kind ::schema-refused
                    :seon.schema/key unregister-key
-                   :seon.sci.eval/value schema-value})))
+                   :seon.sci.eval/value schema-value :seon.sci.eval/schema-refused unregister-key})))
               ;; Dependency validation is pure here. Current database data
               ;; is fenced by the terminal transaction against db-before.
               (schema/projection-without-schema projection unregister-key)
@@ -1731,7 +1731,7 @@
                   "Schema declaration did not register its reader identity."
                   {:seon.error/kind ::schema-refused
                    :seon.schema/key schema-key
-                   :seon.sci.eval/value schema-value})))
+                   :seon.sci.eval/value schema-value :seon.sci.eval/schema-refused schema-key})))
               ;; Validate the actual evaluated value while the overlay is
               ;; isolated. The terminal transaction repeats this pure
               ;; candidate validation against its mid-transaction db value.

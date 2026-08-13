@@ -50,4 +50,6 @@
               :required-absent :seon.config/key
               :required-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the required configuration key that is absent"} [:seon.config/required-absent :seon.config/required-absent] [:seon.error/message :seon.error/message]]
               :unknown-key :seon.config/key
-              :unknown-key-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unknown configuration key"} [:seon.config/unknown-key :seon.config/unknown-key] [:seon.error/message :seon.error/message]]}
+              :unknown-key-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unknown configuration key"} [:seon.config/unknown-key :seon.config/unknown-key] [:seon.error/message :seon.error/message]]
+ :seon.config/missing-result-cap [:= true]
+ :seon.config/missing-result-cap-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.config/missing-result-cap class marker"} [:seon.config/missing-result-cap :seon.config/missing-result-cap] [:seon.error/message :seon.error/message]]}

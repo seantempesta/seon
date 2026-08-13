@@ -102,4 +102,6 @@
               :ambiguous [:= true]
               :ambiguous-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a value matching more than one declared render producer"} [:seon.render/ambiguous :seon.render/ambiguous] [:seon.error/message :seon.error/message]]
               :invalid-output :keyword
-              :invalid-output-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the render projection whose producer returned invalid output"} [:seon.render/invalid-output :seon.render/invalid-output] [:seon.error/message :seon.error/message]]}
+              :invalid-output-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the render projection whose producer returned invalid output"} [:seon.render/invalid-output :seon.render/invalid-output] [:seon.error/message :seon.error/message]]
+ :seon.render/walk-failed [:= true]
+ :seon.render/walk-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.render/walk-failed class marker"} [:seon.render/walk-failed :seon.render/walk-failed] [:seon.error/message :seon.error/message]]}

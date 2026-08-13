@@ -9,7 +9,7 @@
   (throw
    (ex-info "Function source and Malli contract do not join bijectively."
             (merge {:seon.error/kind :seon.fn/signature-refused
-                    :seon.fn.signature/reason reason}
+                    :seon.fn.signature/reason reason :seon.fn/signature-refused true}
                    data))))
 
 #?(:clj

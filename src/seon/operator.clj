@@ -35,11 +35,14 @@
 
 (defn- flat-error
   [error]
-  (let [data (ex-data error)]
-    {:seon.error/kind (or (:seon.error/kind data) ::failed)
-     :seon.error/message (or (ex-message error)
-                             "The operator call failed.")
-     :seon.error/data (or data {})}))
+  (let [data (ex-data error)
+        kind (or (:seon.error/kind data) ::failed)]
+    (merge (or data {})
+           {kind true
+            :seon.error/kind kind
+            :seon.error/message (or (ex-message error)
+                                    "The operator call failed.")
+            :seon.error/data (or data {})})))
 
 (defn- attempt
   [f]
@@ -94,7 +97,8 @@
 
 (defn- custody-selection-error
   [kind message cluster-names requested-cluster]
-  (cond-> {:seon.error/kind kind
+  (cond-> {kind true
+           :seon.error/kind kind
            :seon.error/message message
            :seon.error/data {::candidate-clusters cluster-names}}
     requested-cluster
@@ -238,7 +242,7 @@
          (ex-info
           "The process census could not read every external claim."
           {:seon.error/kind :seon.operator/process-census-incomplete
-           :seon.operator.process-census/result result}))))))
+           :seon.operator.process-census/result result :seon.operator/process-census-incomplete true}))))))
 
 (defn- low-space?
   [footprint request]
@@ -434,12 +438,12 @@
            (throw
             (ex-info "The reaper cannot read every external claim."
                      {:seon.error/kind :seon.operator/reap-incomplete
-                      :seon.operator.reap/result result})))
+                      :seon.operator.reap/result result :seon.operator/reap-incomplete true})))
          (when (seq refused)
            (throw
             (ex-info "One or more ephemeral roots were refused."
                      {:seon.error/kind :seon.operator/reap-incomplete
-                      :seon.operator.reap/result result})))
+                      :seon.operator.reap/result result :seon.operator/reap-incomplete true})))
          result))))))
 
 (defn- archive-path
@@ -531,7 +535,7 @@
                 {:seon.error/kind
                  :seon.operator/cluster-cleanup-incomplete
                  :seon.operator.claim/root managed-root
-                 :seon.boot/cluster-name cluster-name})))
+                 :seon.boot/cluster-name cluster-name :seon.operator/cluster-cleanup-incomplete true})))
     (let [cluster-root (.getCanonicalPath
                         (io/file managed-root "data" "clusters"))
           paths (cluster/cluster-paths cluster-root cluster-name)
@@ -585,7 +589,7 @@
              (ex-info "Cluster cleanup left claimed state."
                       {:seon.error/kind
                        :seon.operator/cluster-cleanup-incomplete
-                       :seon.operator.cluster-cleanup/result result})))
+                       :seon.operator.cluster-cleanup/result result :seon.operator/cluster-cleanup-incomplete true})))
         result)
       (finally
         (when release? (store/release-store! operation-store))))))
@@ -709,7 +713,7 @@
    (ex-info
     "Collection did not preserve and verify every recorded root."
     {:seon.error/kind :seon.operator/collection-incomplete
-     :seon.operator.collect/result result}
+     :seon.operator.collect/result result :seon.operator/collection-incomplete true}
     failure)))
 
 (def ^:private projected-delete-ms-per-file

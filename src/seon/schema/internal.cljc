@@ -303,7 +303,7 @@
                  (cond-> {:seon.schema/error :seon.schema/invalid-schema
                           :seon.schema/key   k
                           :seon.schema/definition v
-                          :seon.error/kind   :user-input}
+                          :seon.error/kind   :user-input :seon.schema/invalid-schema k}
                    missing
                    (assoc :seon.schema/missing-reference missing
                           :seon.schema/missing-reference-namespace
@@ -342,7 +342,7 @@
                {:seon.schema/error :seon.schema/nilable-value-schema
                 :seon.schema/key   k
                 :seon.schema/definition v
-                :seon.error/kind   :user-input})))))
+                :seon.error/kind   :user-input :seon.schema/nilable-value-schema k})))))
 
 (defn assert-multi-segment-namespace!
   "register!-time gate: reject attrs whose keyword NAMESPACE is

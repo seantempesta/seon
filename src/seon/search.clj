@@ -525,7 +525,7 @@
             :seon.search/completion] :as state}]
    (when-not (and index channel completion)
      (throw (ex-info "The search index proc is missing a required resource."
-                     {:seon.error/kind ::missing-resource})))
+                     {:seon.error/kind ::missing-resource :seon.search/missing-resource true})))
    (assoc state
           ::flow/in-ports {::transactions channel}
           ::flow/out-ports {}

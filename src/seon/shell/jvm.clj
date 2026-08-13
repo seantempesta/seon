@@ -134,7 +134,7 @@
       {:seon.error/kind :my.shell/stdin-limit
        :seon.error/message
        "Child stdin exceeds the configured byte ceiling."
-       :seon.error/data {:seon.config.shell/stdin-max-bytes limit}})))
+       :seon.error/data {:seon.config.shell/stdin-max-bytes limit} :my.shell/stdin-limit true})))
   (.write output octets))
 
 (defn- copy-blob-stdin!
@@ -148,7 +148,7 @@
           {:seon.error/kind :my.shell/stdin-limit
            :seon.error/message
            "Child stdin exceeds the configured byte ceiling."
-           :seon.error/data {:seon.config.shell/stdin-max-bytes limit}})))
+           :seon.error/data {:seon.config.shell/stdin-max-bytes limit} :my.shell/stdin-limit true})))
       (let [remaining (- limit offset)
             requested (int (min io-buffer-bytes (inc remaining)))
             octets (blob/read-chunk connection content-digest offset requested)]
@@ -161,7 +161,7 @@
                 "The stdin blob is unavailable."
                 {:seon.error/kind :my.shell/blob-unavailable
                  :seon.error/message "The stdin blob is unavailable."
-                 :seon.error/data {:seon.blob/digest content-digest}})))
+                 :seon.error/data {:seon.blob/digest content-digest} :my.shell/blob-unavailable true})))
             (when-not (= content-digest actual)
               (throw
                (ex-info
@@ -170,7 +170,7 @@
                  :seon.error/message
                  "The stdin blob is unavailable or failed verification."
                  :seon.error/data {:seon.blob/digest content-digest
-                                   :seon.blob/actual-digest actual}}))))
+                                   :seon.blob/actual-digest actual} :my.shell/blob-unavailable true}))))
           (let [read-count (alength ^bytes octets)]
             (when (zero? read-count)
               (throw
@@ -179,7 +179,7 @@
                 {:seon.error/kind :my.shell/blob-unavailable
                  :seon.error/message
                  "The stdin blob reader made no progress."
-                 :seon.error/data {:seon.blob/digest content-digest}})))
+                 :seon.error/data {:seon.blob/digest content-digest} :my.shell/blob-unavailable true})))
             (.update digester ^bytes octets)
             (.write output ^bytes octets)
             (recur (+ offset read-count))))))))

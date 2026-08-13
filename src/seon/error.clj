@@ -265,6 +265,13 @@
   [value]
   (if (nil? value) ::unknown value))
 
+(def ^:private diagnostic-request-keys
+  #{:seon.error/kind :seon.error/message :seon.error/data
+    :seon.error/diagnostic-layer :seon.error/diagnostic-operation
+    :seon.error/diagnostic-member :seon.error/diagnostic-expected
+    :seon.error/diagnostic-offending :seon.error/diagnostic-cause
+    :seon.error/diagnostic-evidence})
+
 (defn diagnostic
   "An evidence-complete flat diagnostic from one boundary observation.
 
@@ -300,22 +307,24 @@
     :as request}]
   (let [evidence-known? (and (contains? request ::diagnostic-evidence)
                              (some? diagnostic-evidence))]
-    {:seon.error/kind (or kind unclassified)
-     :seon.error/message
-     (if (and (string? message) (not-empty message))
-       message
-       "A diagnostic was constructed without a message.")
-     :seon.error/data
-     (merge
-      (or data {})
-      {::diagnostic-layer (known-or-unknown diagnostic-layer)
-       ::diagnostic-operation (known-or-unknown diagnostic-operation)
-       ::diagnostic-member (known-or-unknown diagnostic-member)
-       ::diagnostic-expected (known-or-unknown diagnostic-expected)
-       ::diagnostic-offending (known-or-unknown diagnostic-offending)
-       ::diagnostic-cause (known-or-unknown diagnostic-cause)
-       ::diagnostic-evidence-availability (if evidence-known? ::known ::unknown)
-       ::diagnostic-evidence (known-or-unknown diagnostic-evidence)})}))
+    (merge
+     (apply dissoc request diagnostic-request-keys)
+     {:seon.error/kind (or kind unclassified)
+      :seon.error/message
+      (if (and (string? message) (not-empty message))
+        message
+        "A diagnostic was constructed without a message.")
+      :seon.error/data
+      (merge
+       (or data {})
+       {::diagnostic-layer (known-or-unknown diagnostic-layer)
+        ::diagnostic-operation (known-or-unknown diagnostic-operation)
+        ::diagnostic-member (known-or-unknown diagnostic-member)
+        ::diagnostic-expected (known-or-unknown diagnostic-expected)
+        ::diagnostic-offending (known-or-unknown diagnostic-offending)
+        ::diagnostic-cause (known-or-unknown diagnostic-cause)
+        ::diagnostic-evidence-availability (if evidence-known? ::known ::unknown)
+        ::diagnostic-evidence (known-or-unknown diagnostic-evidence)})})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The normalizer

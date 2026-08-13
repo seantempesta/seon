@@ -266,7 +266,8 @@
                   (str (or (:cause value) (:message cause-entry))))]
     (cond->
      (error/diagnostic
-      {:seon.error/kind kind
+      {kind true
+       :seon.error/kind kind
        :seon.error/message message
        :seon.error/diagnostic-layer :development-mcp
        :seon.error/diagnostic-operation :evaluate-jvm
@@ -348,6 +349,9 @@
                       (ex-info
                        "The durable MCP artifact root did not commit."
                        {:seon.error/kind :core-bug
+                        :seon.dev.mcp.artifact/root-not-committed content-digest
+                        :seon.error/message
+                        "The durable MCP artifact root did not commit."
                         :seon.dev.mcp.artifact/digest content-digest
                         :seon.dev.mcp.artifact/transaction-result result})))
                    content-digest))))]

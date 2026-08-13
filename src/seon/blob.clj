@@ -71,6 +71,8 @@
        (ex-info
         "Blob threshold is not a positive integer."
         {:seon.error/kind :core-bug
+         :seon.blob/invalid-threshold threshold
+         :seon.error/message "Blob threshold is not a positive integer."
          :seon.config.eval.result/blob-threshold threshold})))
     (Math/toIntExact (long threshold))))
 
@@ -83,6 +85,8 @@
        (ex-info
         "The file-backed blob store has no process root."
         {:seon.error/kind :core-bug
+         :seon.blob/store-root-absent (str store-base)
+         :seon.error/message "The file-backed blob store has no process root."
          :seon.blob/store-base store-base})))
     (let [directory (io/file process-root "blob-staging")]
       (Files/createDirectories (.toPath directory)
@@ -127,6 +131,8 @@
        (ex-info
         "Stored blob does not match its digest and size."
         {:seon.error/kind :core-bug
+         :seon.blob/stored-content-mismatch content-digest
+         :seon.error/message "Stored blob does not match its digest and size."
          :seon.blob/digest content-digest
          :seon.blob/size expected-size
          :seon.blob/actual actual}))))
@@ -230,6 +236,8 @@
            (ex-info
             "Blob input stream made no progress."
             {:seon.error/kind :core-bug
+             :seon.blob/input-stalled total-size
+             :seon.error/message "Blob input stream made no progress."
              :seon.blob/size total-size}))
 
           :else
@@ -350,6 +358,8 @@
          (ex-info
           "Blob content does not match its digest."
           {:seon.error/kind :core-bug
+           :seon.blob/content-digest-mismatch content-digest
+           :seon.error/message "Blob content does not match its digest."
            :seon.blob/digest content-digest
            :seon.blob/actual-digest actual})))
       (String. ^bytes octets StandardCharsets/UTF_8))))

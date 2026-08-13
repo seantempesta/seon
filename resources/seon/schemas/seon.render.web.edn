@@ -1,4 +1,8 @@
-#:seon.render.web{:feed-request
+#:seon.render.web{:prospective-context-unavailable [:= true]
+                  :prospective-context-unavailable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a prospective context that cannot be observed"} [:seon.render.web/prospective-context-unavailable :seon.render.web/prospective-context-unavailable] [:seon.error/message :seon.error/message]]
+                  :live-processes-unavailable [:= true]
+                  :live-processes-unavailable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark live process state that cannot be observed"} [:seon.render.web/live-processes-unavailable :seon.render.web/live-processes-unavailable] [:seon.error/message :seon.error/message]]
+                  :feed-request
                   [:map
                    [:seon.cluster.agent/id :seon.cluster.agent/id]
                    [:seon.render.web/root-agent-id

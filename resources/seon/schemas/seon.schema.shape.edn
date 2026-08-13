@@ -28,4 +28,10 @@
                       :seon.schema.shape/children]
                      [:seon.schema.shape/entries
                       {:optional true}
-                      :seon.schema.shape/entries]]}
+                      :seon.schema.shape/entries]]
+ :seon.schema.shape/fingerprint-collision [:= true]
+ :seon.schema.shape/fingerprint-collision-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schema.shape/fingerprint-collision class marker"} [:seon.schema.shape/fingerprint-collision :seon.schema.shape/fingerprint-collision] [:seon.error/message :seon.error/message]]
+ :seon.schema.shape/noncanonical-compiled-form [:= true]
+ :seon.schema.shape/noncanonical-compiled-form-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schema.shape/noncanonical-compiled-form class marker"} [:seon.schema.shape/noncanonical-compiled-form :seon.schema.shape/noncanonical-compiled-form] [:seon.error/message :seon.error/message]]
+ :seon.schema.shape/unsupported-map-key [:= true]
+ :seon.schema.shape/unsupported-map-key-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.schema.shape/unsupported-map-key class marker"} [:seon.schema.shape/unsupported-map-key :seon.schema.shape/unsupported-map-key] [:seon.error/message :seon.error/message]]}

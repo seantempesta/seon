@@ -89,4 +89,8 @@
           :schema-declaration-invalid :seon.schema/key
           :schema-declaration-invalid-error [:map {:seon.error/class true :seon.render/ai seon.error/index-refusal-prose :seon.render/html seon.error/render-html :error/message "must identify the declaration that is not a Malli schema"} [:seon.fn/schema-declaration-invalid :seon.fn/schema-declaration-invalid] [:seon.error/message :seon.error/message]]
           :scratch-not-fresh :seon.fn/existing-program-entity
-          :scratch-not-fresh-error [:map {:seon.error/class true :seon.render/ai seon.error/index-refusal-prose :seon.render/html seon.error/render-html :error/message "must identify the program entity already present on a source scratch branch"} [:seon.fn/scratch-not-fresh :seon.fn/scratch-not-fresh] [:seon.error/message :seon.error/message]]}
+          :scratch-not-fresh-error [:map {:seon.error/class true :seon.render/ai seon.error/index-refusal-prose :seon.render/html seon.error/render-html :error/message "must identify the program entity already present on a source scratch branch"} [:seon.fn/scratch-not-fresh :seon.fn/scratch-not-fresh] [:seon.error/message :seon.error/message]]
+ :seon.fn/index-refused [:= true]
+ :seon.fn/index-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.fn/index-refused class marker"} [:seon.fn/index-refused :seon.fn/index-refused] [:seon.error/message :seon.error/message]]
+ :seon.fn/signature-refused [:= true]
+ :seon.fn/signature-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.fn/signature-refused class marker"} [:seon.fn/signature-refused :seon.fn/signature-refused] [:seon.error/message :seon.error/message]]}

@@ -95,4 +95,10 @@
                [:seon.effect/duration-ms :seon.effect/duration-ms]
                [:seon.effect/settled-at :seon.effect/settled-at]],
               :settled-at :inst,
-              :to [:and #:seon.db{:index true} :seon.db/ref]}
+              :to [:and #:seon.db{:index true} :seon.db/ref]
+ :seon.effect/already-recorded [:= true]
+ :seon.effect/already-recorded-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.effect/already-recorded class marker"} [:seon.effect/already-recorded :seon.effect/already-recorded] [:seon.error/message :seon.error/message]]
+ :seon.effect/already-settled [:= true]
+ :seon.effect/already-settled-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.effect/already-settled class marker"} [:seon.effect/already-settled :seon.effect/already-settled] [:seon.error/message :seon.error/message]]
+ :seon.effect/missing-receipt [:= true]
+ :seon.effect/missing-receipt-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.effect/missing-receipt class marker"} [:seon.effect/missing-receipt :seon.effect/missing-receipt] [:seon.error/message :seon.error/message]]}

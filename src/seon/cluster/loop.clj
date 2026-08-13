@@ -265,6 +265,7 @@
     (sci.eval/unrun-evaluation
      {:seon.sci.admit/value
       {:seon.error/kind :seon.flow/time-limit
+       :seon.flow/time-limit ::turn
        :seon.error/message message
        :seon.error/data {:seon.flow/submission-wait-ms submission-wait-ms}}
       :seon.cluster.run.form/ns (:seon.cluster.run.form/ns request)
@@ -395,7 +396,7 @@
     (catch Throwable failure
       (merge {:seon.error/kind ::phase-failed
               :seon.error/message
-              (or (ex-message failure) (.getName (class failure)))}
+              (or (ex-message failure) (.getName (class failure))) :seon.cluster.loop/phase-failed true}
              (error/refusal failure)))))
 
 (defn- evaluation-terminal-data
@@ -610,6 +611,8 @@
           (throw
            (ex-info "Terminal refusal settlement was refused."
                     {:seon.error/kind ::terminal-refusal-settlement-refused
+                     :seon.cluster.loop/terminal-refusal-settlement-refused
+                     (:seon.cluster.run/rule outcome)
                      ::settlement refused
                      ::refused-outcome outcome})))
         (assoc refusal
@@ -991,7 +994,7 @@
         "run opening refused: the trigger already has an answering run"
         {:seon.error/kind ::trigger-already-answered
          :seon.cluster.run/trigger trigger
-         :seon.cluster.run/id answering-run}))
+         :seon.cluster.run/id answering-run :seon.cluster.loop/trigger-already-answered true}))
       (run/open-call database request))))
 
 (defn- open-turn

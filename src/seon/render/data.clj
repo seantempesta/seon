@@ -68,6 +68,6 @@
                  {:seon.error/kind ::no-such-path
                   :seon.error/message (str "There is nothing at " (pr-str step)
                                            " in this value.")
-                  :seon.error/data {:seon.render.data/step (pr-str step)}}))))
+                  :seon.error/data {:seon.render.data/step (pr-str step)} :seon.render.data/no-such-path true}))))
           {:seon.render.data/value value}
           path))

@@ -265,7 +265,7 @@
       (db/as-of database opening-tx)
       {:seon.error/kind ::missing-opening-datom
        :seon.error/message "The run has no opening datom."
-       :seon.error/data {::id id}})))
+       :seon.error/data {::id id} :seon.cluster.run/missing-opening-datom true})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Transitions — pure functions OF THE MID-TRANSACTION DATABASE VALUE,
@@ -292,7 +292,7 @@
                   {:seon.error/kind ::refused
                    ::transition transition
                    ::rule rule
-                   ::request request})))
+                   ::request request :seon.cluster.run/refused rule})))
 
 (defn- current-run
   "The run's current facts on `db`, or nil when no such run exists.
@@ -1122,8 +1122,9 @@
       (throw
        (ex-info
         (str "Schema change refused: current data uses " attributes ".")
-        {:seon.schema/error :seon.schema/current-data-blocks-change
-         :seon.schema/keys schema-keys
+    {:seon.schema/error :seon.schema/current-data-blocks-change
+     :seon.schema/current-data-blocks-change true
+     :seon.schema/keys schema-keys
          :seon.schema/data-attributes attributes
          :seon.error/kind :user-input})))))
 

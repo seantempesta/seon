@@ -326,12 +326,12 @@
       (throw (ex-info "The scheduled fire identity is not nominal-derived."
                       {:seon.error/kind ::invalid-fire-id
                        :seon.schedule.fire/id requested-fire-id
-                       :seon.schedule.fire/derived-id derived-fire-id}))
+                       :seon.schedule.fire/derived-id derived-fire-id :seon.schedule/invalid-fire-id true}))
 
       (nil? declaration)
       (throw (ex-info "The scheduled task declaration is incomplete."
                       {:seon.error/kind ::incomplete-task
-                       :seon.schedule.task/id task-id}))
+                       :seon.schedule.task/id task-id :seon.schedule/incomplete-task true}))
 
       :else
       (let [[task-eid declared-owner function-eid declared-function]
@@ -343,7 +343,7 @@
                     {:seon.error/kind ::invalid-task-owner
                      :seon.schedule.task/id task-id
                      :seon.cluster.agent/id agent-id
-                     :seon.fn/sym function})))
+                     :seon.fn/sym function :seon.schedule/invalid-task-owner true})))
         (let [fire-tempid (str "schedule-fire/" derived-fire-id)
               request-tempid (str fire-tempid "/request")]
           [{:db/id fire-tempid
@@ -392,7 +392,7 @@
       (nil? receipt)
       (throw (ex-info "The maintenance receipt does not exist."
                       {:seon.error/kind ::missing-receipt
-                       :seon.maintenance.receipt/id claimed-receipt-id}))
+                       :seon.maintenance.receipt/id claimed-receipt-id :seon.schedule/missing-receipt true}))
 
       (seq (:seon.maintenance.receipt/terminal-attributes receipt))
       []
@@ -418,7 +418,7 @@
       :else
       (throw (ex-info "The maintenance terminal arm is invalid."
                       {:seon.error/kind ::invalid-terminal-arm
-                       :seon.maintenance.settlement/arm arm})))))
+                       :seon.maintenance.settlement/arm arm :seon.schedule/invalid-terminal-arm true})))))
 
 (defn- interrupt-call
   "Mark every unterminated receipt for one agent interrupted."
@@ -539,7 +539,7 @@
       (when-not handler
         (throw (ex-info "The scheduled handler Var does not resolve."
                         {:seon.error/kind ::unresolved-handler
-                         :seon.fn/sym function})))
+                         :seon.fn/sym function :seon.schedule/unresolved-handler true})))
       {:seon.maintenance.settlement/result (handler request)})
     (catch Throwable failure
       {:seon.maintenance.settlement/failure failure})))
@@ -568,7 +568,7 @@
      (when-not cluster
        (throw (ex-info "The cluster execution handle is unavailable."
                        {:seon.error/kind ::missing-execution-handle
-                        :seon.cluster/name cluster-name})))
+                        :seon.cluster/name cluster-name :seon.schedule/missing-execution-handle true})))
      (fire-due! connection agent-id observed-at
                 (assoc (execution-context @connection cluster)
                        :seon.cluster.loop/cluster cluster))))

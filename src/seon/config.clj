@@ -121,7 +121,7 @@
        (cond-> {::key missing}
          (:seon.config/missing-effective effective)
          (assoc :seon.config/missing-effective
-                (:seon.config/missing-effective effective)))}
+                (:seon.config/missing-effective effective))) :seon.config/missing-result-cap true}
       (select-keys effective result-cap-attributes))))
 
 ;;; Every function below asks the declaration population one question per
@@ -176,7 +176,7 @@
    (ex-info
     (str "Configuration refused: " (name rule) ".")
     (merge {:seon.error/kind ::refused
-            ::rule rule}
+            ::rule rule :seon.config/refused rule}
            data)
     cause)))
 

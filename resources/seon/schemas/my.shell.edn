@@ -31,4 +31,8 @@
              my.shell/stdin?]]
            :stdin-bytes :my.fs/bytes
            :stdin-text :string
-           :stdout :my.shell.output/value}
+           :stdout :my.shell.output/value
+ :my.shell/blob-unavailable [:= true]
+ :my.shell/blob-unavailable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :my.shell/blob-unavailable class marker"} [:my.shell/blob-unavailable :my.shell/blob-unavailable] [:seon.error/message :seon.error/message]]
+ :my.shell/stdin-limit [:= true]
+ :my.shell/stdin-limit-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :my.shell/stdin-limit class marker"} [:my.shell/stdin-limit :my.shell/stdin-limit] [:seon.error/message :seon.error/message]]}

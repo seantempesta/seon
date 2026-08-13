@@ -505,7 +505,7 @@
                                    (str "elided " elided " reverse " attribute
                                         " connection"
                                         (when-not (= 1 elided) "s")
-                                        " at the configured collection cap")}))]))))))]
+                                        " at the configured collection cap") :seon.render.walk/elided true}))]))))))]
     (cond-> direct
       (and reverse? (seq reverse-groups))
       (assoc :seon.render.debug/reverse-refs reverse-groups))))
@@ -530,7 +530,8 @@
 (defn- debug-diagnostic
   [kind message operation member expected offending cause evidence]
   ((requiring-resolve 'seon.error/diagnostic)
-   {:seon.error/kind kind
+   {kind true
+    :seon.error/kind kind
     :seon.error/message message
     :seon.error/diagnostic-layer :debug-page
     :seon.error/diagnostic-operation operation
@@ -1628,7 +1629,7 @@
               {:seon.error/kind ::owner-not-ensured
                :seon.error/message
                (str "The namespace owner for " namespace-name
-                    " was not created.")})))))
+                    " was not created.") :seon.render.web/owner-not-ensured true})))))
 
 (def ^:private namespace-walk-options
   {:depth 2})
@@ -1782,7 +1783,7 @@
               (value/artifact-value (value/read-artifact content))
               {:seon.error/kind :seon.render.web/value-not-found
                :seon.error/message "No stored value has this digest."
-               :seon.blob/digest value-digest})
+               :seon.blob/digest value-digest :seon.render.web/value-not-found value-digest})
             (catch Throwable failure
               {:seon.error/kind :seon.render.web/value-unreadable
                :seon.error/message (or (ex-message failure)
