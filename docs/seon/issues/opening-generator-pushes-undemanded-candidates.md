@@ -48,3 +48,19 @@ render owner.
 - An acquisition member unrelated to every action form adds no generated entry.
 - Every discovery entry has a downstream demanded-symbol path to an action.
 - The ordered episode remains deterministic when irrelevant facts accrete.
+
+## Evidence — 2026-08-13 live-pull attribution
+
+The isolated full-publication probe in
+[the dated attribution report](../../prds/sci-execution-runtime/research/live-pull-attribution-2026-08-13.md)
+expanded 37 direct and 37 listing members into 78 candidates. Cold direct and
+listing expansion consumed 88 ms and 39 ms respectively, while the enclosing
+database acquisition consumed 3,188 ms and Datahike `pull-spec` alone consumed
+3,045 ms.
+
+Demand-first selection remains the correct owner-level fix for undemanded
+opening content, but it is not the dominant live-pull performance fix: the
+schema-wide database pull has already paid its cost before
+`seon.bootstrap/pull-result` filters candidates. The issue remains open for
+the demanded-symbol closure contract; performance claims should distinguish
+that downstream candidate reduction from Datahike pull execution.

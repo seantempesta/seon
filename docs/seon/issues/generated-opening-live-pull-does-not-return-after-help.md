@@ -47,3 +47,22 @@ do not patch the observed stall at a neighboring render seam.
 - Counters name pull acquisition, candidate rendering, and fixed-point work.
 - The result reaches the next dependency-ready form without unbounded CPU or
   database growth.
+
+## Evidence — 2026-08-13 live-pull attribution
+
+The isolated HEAD probe in
+[the dated attribution report](../../prds/sci-execution-runtime/research/live-pull-attribution-2026-08-13.md)
+called `seon.bootstrap/next-entry` after a settled `help` receipt. It returned
+`(dir (quote my.run))` normally in 2,801 ms on a 68,885,520-byte database with
+37 acquisition members. Root acquisition consumed 2,768 ms, of which Datahike
+`pull-spec` consumed 2,650 ms; candidate expansion, `ordered-episode`, and the
+final candidate choice together consumed tens of milliseconds.
+
+The historical approximately 27-second non-return at `16f022fc9` therefore
+does not reproduce at HEAD under these conditions. The dominant inner owner is
+Datahike `pull-pattern-frame` × `pull-attr` execution of the schema-wide
+selector. Phase 1 should acquire/expand once per generation invocation and
+carry the immutable result through one-entry-at-a-time generation state,
+rather than rerunning this seconds-long acquisition after every settled form.
+The issue remains open pending that structural change and an interactive
+single-acquisition result.

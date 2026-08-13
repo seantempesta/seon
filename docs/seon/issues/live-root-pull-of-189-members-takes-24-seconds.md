@@ -42,3 +42,22 @@ consumer work after the compiled database pull.
   resolved selector parser is responsible.
 - The exact live path completes below its declared interactive latency bound
   without an elapsed-time correctness verdict or a second acquisition path.
+
+## Evidence — 2026-08-13 live-pull attribution
+
+The isolated HEAD probe in
+[the dated attribution report](../../prds/sci-execution-runtime/research/live-pull-attribution-2026-08-13.md)
+returned 198 acquisition members from a 78,974,355-byte database in
+4,465–5,251 ms. It did not reproduce 24.2 seconds, but 4,228–5,006 ms of the
+wall time was inside Datahike `pull-spec`; selector-plan generation was only
+40 ms. The historical 1.22 GiB database was approximately 15.5 times larger
+than this probe database, so the result supports content/graph-size scaling
+without asserting a linear law.
+
+Bounded counters attribute one 198-member acquisition to 1,775,664
+`datahike.pull-api/pull-pattern-frame` calls and 1,770,912 `pull-attr` calls.
+The specific inner owner is Datahike's per-entity execution of the schema-wide
+recursive selector supplied by `seon.render.walk/root-acquisition`, not
+selector parsing or downstream rendering. The issue remains open because one
+HEAD acquisition is still seconds rather than interactive and the historical
+24.2-second condition was not reproduced exactly.
