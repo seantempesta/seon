@@ -61,11 +61,12 @@ See `README.md` for the convention.
 | [Bound agent-facing host crossings](agent-facing-host-crossings-can-wait-without-a-bound.md) | blocker | wedge class-kill continuation |
 | [Bound orderly-stop completion joins](orderly-stop-completion-joins-have-no-bound.md) | blocker | wedge class-kill continuation |
 
-## Friction (130)
+## Friction (131)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Bound web delivery awaits](web-delivery-awaits-have-no-bound.md) | friction | wedge class-kill continuation |
+| [Render db diffs through fit with an html producer](db-diff-render-bypasses-print-fit-and-has-no-html.md) | friction | db-diff completion gate |
 | [Refuse cluster names that collide with the store directory](cluster-named-store-collides-with-the-store-directory.md) | friction | R3 store-path decision |
 | [Carry the operator root explicitly instead of guessing from names](operator-root-inference-guesses-from-directory-names.md) | friction | R3 store-path decision |
 | [Bound the parallel-only confirmation protocol exchange](confirmation-parallel-failure-blocks-reading-worker-protocol.md) | friction | test-platform follow-up |
