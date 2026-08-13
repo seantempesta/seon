@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (42)
+## Blocker (41)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -49,7 +49,6 @@ See `README.md` for the convention.
 | [Prevent ranged collection from deleting resurrected branch data](ranged-store-collection-can-delete-live-segments-via-branch-resurrection.md) | blocker | exclusive sweep implementation wave |
 | [Make bootstrap O4 wait for the causal delegation](bootstrap-o4-stops-before-causal-delegation-settles.md) | blocker | projection lane — causal episode production query |
 | [Cut the ~42 MB of store each eval sample costs](eval-samples-cost-42mb-of-store-each.md) | blocker | eval-scale economics wave |
-| [Give `acquire!` per-row containment on the cold path](acquire-has-no-per-row-containment.md) | blocker | per-cluster live-graph wave |
 | [Prevent one cluster from exhausting every co-hosted cluster's heap](cohosted-clusters-share-one-unbounded-agent-heap.md) | blocker | no-crash architecture design gate |
 | [Repair development MCP error locations and status scope](dev-mcp-envelopes-misdirect-errors-and-sprawl-status.md) | blocker | development MCP envelope repair |
 | [Isolate session deltas from other runs' context mutations](shared-context-session-delta-crosses-run-attribution.md) | blocker | per-run fork context wave |
