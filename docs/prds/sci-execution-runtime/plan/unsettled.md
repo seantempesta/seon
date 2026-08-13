@@ -123,8 +123,21 @@ then wedged at a NEW boundary the fresh worker dumps name precisely
 parks in `await-database-state!` under the POOLED runner while passing
 focused, and the gen.loop goal test ran 758 s (the render-cost stall in
 [agent-flow-fixture-omits-render-interest](../../seon/issues/agent-flow-fixture-omits-render-interest.md)
-— possibly one cause). A `wake-routing-pool-hang` lane is on it; its exit
-is the complete honest tally.
+— possibly one cause). The `wake-routing-pool-hang` lane closed it: the cause was
+per-call render-profile DERIVATION (217 s vs 6.2 s with the shipped profile
+supplied — the derive-per-call class), not lost wake delivery; fixtures now
+supply fixed profiles (`1930dacd1`) and the wake property passes under pool
+load in 112.7 s.
+
+**FINAL TALLY — 2026-08-13 ~04:30**: `bin/test --all` complete and honest:
+**1,199 tests / 9,312 assertions / 13 failures / 12 errors** (from 102 F /
+29 E at the first complete tally the same night). Retained root
+`tmp/test-runs/run.zx60Tx`. Of the 15 remaining red tests, TWO errors are
+in the uncommitted foreign `test/seon/public_contract_test.clj`
+(reader→analyzer refactor residue, `LazySeq` cast to `IFn`) — that
+preserved residue is now load-bearing and needs the owner's ruling (commit,
+fix, or discard); the rest span render, schema, SCI eval, and runner owners
+with attributed output in the retained root — the next wave's worklist.
 
 **Uncommitted foreign residue deliberately left:**
 `test/seon/public_contract_test.clj` (reader→analyzer refactor) and the
