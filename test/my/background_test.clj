@@ -2,7 +2,28 @@
   (:require [clojure.test :refer [deftest is]]
             [my.background :as background]
             [seon.db :as db]
+            [seon.schema :as schema]
             [seon.test-support :as test-support]))
+
+(deftest background-error-renderers-cover-every-declared-class
+  (doseq [[schema-key marker message]
+          [[:my.background/invalid-call-error
+            :my.background/invalid-call
+            "The background call is invalid."]
+           [:my.background/invalid-result-error
+            :my.background/invalid-result
+            "The background result ref is invalid."]
+           [:my.background/missing-result-error
+            :my.background/missing-result
+            "The background result is missing."]]]
+    (let [error {marker true :seon.error/message message}
+          ai (background/render-ai error)
+          html (background/render-html error)]
+      (is (schema/valid-candidate-value? schema-key error))
+      (is (= message ai))
+      (is (= [:p message] html))
+      (is (schema/valid-candidate-value? :seon.render/ai ai))
+      (is (schema/valid-candidate-value? :seon.render/hiccup html)))))
 
 (deftest background-macro-expands-one-direct-call
   (is (= '(seon.effect/request!

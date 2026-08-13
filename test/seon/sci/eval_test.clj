@@ -973,9 +973,10 @@
             uncontracted-output
             (:seon.cluster.eval/output uncontracted-doc)
             giant-output (:seon.cluster.eval/output giant-doc)]
-        (is (= "decline\nsend\n"
+        (is (= "decline\ninbox\nread\nsend\n"
                (:seon.cluster.eval/output directory)))
-        (is (= ['my.message/decline 'my.message/send]
+        (is (= ['my.message/decline 'my.message/inbox
+                'my.message/read 'my.message/send]
                (:seon.sci.admit/value directory))
             "dir's settled value introduces the qualified symbols it lists")
         (testing "one contracted function resolves both sides of its contract"

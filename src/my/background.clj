@@ -7,6 +7,28 @@
 
 (schema.edn/load! {})
 
+(defn render-ai
+  "Render a background error as steering text."
+  {:malli/schema
+   [:=>
+    [:cat [:or :my.background/invalid-call-error
+           :my.background/invalid-result-error
+           :my.background/missing-result-error]]
+    :seon.render/ai]}
+  [error]
+  (:seon.error/message error))
+
+(defn render-html
+  "Render a background error as Hiccup."
+  {:malli/schema
+   [:=>
+    [:cat [:or :my.background/invalid-call-error
+           :my.background/invalid-result-error
+           :my.background/missing-result-error]]
+    :seon.render/hiccup]}
+  [error]
+  [:p (:seon.error/message error)])
+
 (defn- invalid-call
   []
   {:seon.error/kind ::invalid-call
