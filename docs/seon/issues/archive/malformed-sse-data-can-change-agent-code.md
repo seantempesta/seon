@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, ai, agent]
 ---
@@ -101,3 +101,7 @@ Evidence on 2026-08-02:
   provider call and needed no credential.
 
 The issue stays open for orchestrator review as requested.
+
+## Closure — 2026-08-13
+
+An unreadable `data:` payload now returns `unreadable-stream-data` as a flat error instead of being dropped (`src/seon/ai.clj:672,713,745`, verified 2026-08-13).

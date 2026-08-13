@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, runtime, contracts]
 ---
@@ -45,3 +45,7 @@ lands.
   field is introduced.
 - One regression injects a post-receipt phase failure and asserts both durable
   settlement facts and the returned turn outcome.
+
+## Closure — 2026-08-13
+
+`:seon.cluster.loop/failure` has zero readers and zero writers left in `src/` (verified 2026-08-13); the mismatch no longer exists.

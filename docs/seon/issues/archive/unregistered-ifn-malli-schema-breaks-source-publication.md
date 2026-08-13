@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, schema, malli, boot]
 ---
@@ -66,3 +66,7 @@ relaunched into `-02` roots. **The class is still open** — see acceptance.
 The lane editing `src/seon/flow.clj` (graph-construction / fanout-join work,
 `git status` also shows `src/seon/cluster.clj`, `src/seon/cluster/agent.clj`,
 `test/seon/flow_test.clj`).
+
+## Closure — 2026-08-13
+
+No `:ifn` remains anywhere in `src/seon/flow.clj`; the cited declaration was rewritten and publication succeeds. The fresh inline `[:fn clojure.core/ifn?]` predicate at `seon.flow/start-graph!` is a new instance of the anonymous-contract class (N6), recorded in [the 2026-08-13 triage](../../prds/sci-execution-runtime/research/issue-triage-2026-08-13.md).

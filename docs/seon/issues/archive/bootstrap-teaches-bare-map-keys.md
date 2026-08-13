@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, agent, schema]
 ---
@@ -31,3 +31,7 @@ The one shipped bootstrap plan in `resources/seon/bootstrap.edn`.
 The example uses one coherent namespaced row shape and demonstrates shared
 schema reuse rather than teaching an inline bare-key record. A bootstrap
 regression parses its source and refuses bare map keys in agent examples.
+
+## Closure — 2026-08-13
+
+`resources/seon/bootstrap.edn` is deleted; openings are generated from live facts (ruling 24), so no authored teaching rows exist to carry bare keys.

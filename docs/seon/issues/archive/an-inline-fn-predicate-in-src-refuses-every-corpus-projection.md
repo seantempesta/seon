@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, schema, test]
 ---
@@ -65,3 +65,7 @@ the return with an already-registered file shape.
 
 `bin/test seon.render-coverage-test` builds its corpus projection without this
 exception.
+
+## Closure — 2026-08-13
+
+`seon.test.selection/basis-file` is now a plain private `defn-` with no `:malli/schema` (`src/seon/test/selection.clj:190-196`, verified 2026-08-13); the refusing inline predicate is gone.

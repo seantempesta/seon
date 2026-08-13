@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, flow, concurrency, agent]
 ---
@@ -90,3 +90,7 @@ third future was already settled at the 120 ms checkpoint.
 Focused gate: `bin/test seon.flow-test` ran 21 tests containing 126 assertions
 with zero failures and zero errors. This note remains open for orchestrator
 review as requested.
+
+## Closure — 2026-08-13
+
+`seon.flow/submit!!` now implements non-blocking admission returning the flat `:seon.flow/submission-capacity` error value (`src/seon/flow.clj:262-273`, verified 2026-08-13).

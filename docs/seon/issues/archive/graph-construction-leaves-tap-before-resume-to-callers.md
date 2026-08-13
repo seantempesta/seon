@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, architecture, flow, testing]
 ---
@@ -59,3 +59,7 @@ taps remain part of the tab lifecycle rather than a second graph constructor.
 - `bin/test --changed` passes for the converted source and test paths.
 - The resolving commit records the converted call-site inventory and the issue
   moves to `archive/` with the proof.
+
+## Closure — 2026-08-13
+
+`seon.flow/start-graph!` runs declared `::joins` between `flow/start` and `flow/resume` (`src/seon/flow.clj:62-85`, verified 2026-08-13); callers cannot order the tap after resume. The P4 falsifier regression remains recommended by [the 2026-08-13 triage](../../prds/sci-execution-runtime/research/issue-triage-2026-08-13.md).

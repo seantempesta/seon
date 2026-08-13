@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, operator, diagnostics, contract]
 ---
@@ -43,3 +43,7 @@ secondary contract wall.
 - In-JVM `status` returns the healthy cluster status value.
 - Empty readiness problems validate as the success shape.
 - A real operator failure returns the flat error arm with required error keys.
+
+## Closure — 2026-08-13
+
+`seon.operator/status` now declares `[:or :seon.operator/status :seon.error/value]` (`src/seon/operator.clj:83-86`, verified 2026-08-13).

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, bootstrap, context, architecture]
 ---
@@ -62,3 +62,7 @@ receipts.
 - The resulting system run records ordinary forms and terminal receipts; no
   manually authored preamble, demonstration list, or completion text enters
   context through a second path.
+
+## Closure — 2026-08-13
+
+Ruling 24 is implemented: `resources/seon/bootstrap.edn` is deleted and `seon.bootstrap/next-entry` generates the opening from live pulls (verified 2026-08-13; W1/W2 landed).

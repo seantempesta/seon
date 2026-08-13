@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, testing, error, flow]
 ---
@@ -53,3 +53,7 @@ the recurring real-boot proof in `test/seon/cluster/armed_test.clj`.
 Verification is pending the W1 integration landing. Current armed-cluster runs
 fail before the injection while W1's bootstrap/run/loop settlement work is in
 flight; that foreign boundary blocks the green gate, not this coherent fix.
+
+## Closure — 2026-08-13
+
+The cluster graph installs its error fanout as a `start-graph!` `::error-fanout` join before resume (`src/seon/cluster.clj:2231-2243`, verified 2026-08-13); the first injected fault cannot precede the committer.

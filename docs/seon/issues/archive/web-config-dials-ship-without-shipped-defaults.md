@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, config, web]
 ---
@@ -94,3 +94,7 @@ The acceptance boundary now includes a live `config apply` of the shipped
 manifest into a new named cluster. The selected projection must be a resolvable
 declared function at that boundary; a shipped default that cannot be resolved
 is not a default the system can apply.
+
+## Closure — 2026-08-13
+
+All the cited `:seon.config.web/*` dials now ship decided defaults in `config/default.edn:259-282` (verified 2026-08-13); the refusal premise is gone.

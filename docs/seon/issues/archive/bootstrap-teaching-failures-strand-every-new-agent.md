@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocker
 tags: [issue, agent, bootstrap, error, context]
 ---
@@ -127,3 +127,7 @@ text, which already states them correctly. A newly created agent reaches its
 first recorded `:seon.context.capture` with no error facts bound to its
 bootstrap run — one regression asserts exactly that for a freshly created
 agent.
+
+## Closure — 2026-08-13
+
+`resources/seon/bootstrap.edn` is deleted; the deliberate teaching failures no longer exist as authored rows under generated openings (ruling 24).

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocker
 tags: [issue, bootstrap, context, live-drive]
 ---
@@ -97,3 +97,7 @@ One consequence for whoever fixes this: because the three runtime agents' `in-ns
 succeeded, the `No such namespace: arc.inventory` error they still hit at
 `(largest)` is *not* caused by this issue. That is a separate defect, filed as
 [Report a wrong-arity call as an arity error, not a missing namespace](wrong-arity-call-reports-no-such-namespace.md).
+
+## Closure — 2026-08-13
+
+No authored plan EDN and no placeholder substitution survive in `src/seon/bootstrap.clj`; openings are generated (ruling 24).
