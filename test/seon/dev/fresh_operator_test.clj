@@ -625,6 +625,29 @@
           (str (operator.state/root-claim-path project-root root))))
         (delete-recursively! root)))))
 
+(deftest status-aggregates-invalid-external-claim-causes
+  (let [repository-root (fresh-root)
+        absent-root (io/file repository-root "absent-root")
+        present-root (io/file repository-root "present-root")]
+    (try
+      (.mkdirs present-root)
+      (doseq [root [absent-root present-root]]
+        (operator.state/write-edn!
+         (operator.state/root-claim-path repository-root root)
+         {:seon.operator.claim/id
+          (operator.state/root-claim-id root)
+          :seon.operator.claim/root (.getCanonicalPath root)}))
+      (let [errors (:errors (operator.state/root-claims repository-root))
+            line (operator-private-value 'invalid-claims-line errors)]
+        (is (= (str "invalid external claims: 2 total "
+                    "(1 orphaned for absent roots; 1 malformed); "
+                    "reclaim with `bin/seon reset --force`.")
+               line))
+        (is (not (str/includes? line (.getCanonicalPath absent-root)))
+            "the status face aggregates evidence instead of repeating paths"))
+      (finally
+        (delete-recursively! repository-root)))))
+
 (defn- await-child-readiness!
   [^ServerSocket ready-server ^Process child child-output]
   (let [readiness

@@ -719,7 +719,9 @@
          (mapv
           (fn [error]
             {:seon.fresh-operator/path (:seon.operator.claim/path error)
-             :seon.fresh-operator/error (:seon.error/message error)})
+             :seon.fresh-operator/error (:seon.error/message error)
+             :seon.operator.claim/invalid-cause
+             (:seon.operator.claim/invalid-cause error)})
           (:seon.operator.state/claim-errors observations))
          advertisements
          (into
@@ -2253,6 +2255,17 @@
     :else
     "stale"))
 
+(defn- invalid-claims-line
+  [errors]
+  (when (seq errors)
+    (let [orphaned (count (filter #(= :seon.operator.claim/absent-root
+                                      (:seon.operator.claim/invalid-cause %))
+                                  errors))
+          malformed (- (count errors) orphaned)]
+      (str "invalid external claims: " (count errors) " total ("
+           orphaned " orphaned for absent roots; " malformed
+           " malformed); reclaim with `bin/seon reset --force`."))))
+
 (defn- status!
   {:seon.fn/external-sink :ai-visible-text
    :seon.fn/projection-boundary :none}
@@ -2359,10 +2372,8 @@
        (str "recorded JVM pid " (:seon.boot/pid record)
             " generation " (:seon.operator.process-record/generation record)
             " " (if (record-alive? record) "alive" "not alive"))))
-    (doseq [error process-record-errors]
-      (println
-       (str "record unreadable " (:seon.fresh-operator/path error)
-            ": " (:seon.fresh-operator/error error))))
+    (when-let [line (invalid-claims-line process-record-errors)]
+      (println line))
     (println
      (str "orphan seon JVMs: "
           (if (seq orphan-pids)

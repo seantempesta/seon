@@ -557,6 +557,27 @@
                 {:seon.error/kind :seon.operator/unreadable-claim
                  :seon.operator.claim/path (str path)})))))
 
+(defn- invalid-claim-error
+  [path message record]
+  (let [root (when (map? record)
+               (or (:seon.operator.claim/root record)
+                   (:seon.operator.process-record/root record)))
+        absent-root? (and (string? root) (not (fs/exists? root)))
+        data (cond-> {:seon.operator.claim/path (str path)
+                      :seon.operator.claim/invalid-cause
+                      (if absent-root?
+                        :seon.operator.claim/absent-root
+                        :seon.operator.claim/malformed-record)}
+               (string? root) (assoc :seon.operator.claim/root root))]
+    (cond->
+     {:seon.error/kind :seon.operator/unreadable-claim
+      :seon.error/message message
+      :seon.error/data data
+      :seon.operator.claim/path (str path)
+      :seon.operator.claim/invalid-cause
+      (:seon.operator.claim/invalid-cause data)}
+      (string? root) (assoc :seon.operator.claim/root root))))
+
 (defn- read-claim-records
   [directory valid?]
   (if-not (fs/directory? directory)
@@ -568,16 +589,11 @@
            (if (valid? record)
              (update result :records conj record)
              (update result :errors conj
-                     {:seon.error/kind :seon.operator/unreadable-claim
-                      :seon.error/message "The external claim is invalid."
-                      :seon.error/data {:seon.operator.claim/path (str path)}
-                      :seon.operator.claim/path (str path)})))
+                     (invalid-claim-error
+                      path "The external claim is invalid." record))))
          (catch Throwable error
            (update result :errors conj
-                   {:seon.error/kind :seon.operator/unreadable-claim
-                    :seon.error/message (ex-message error)
-                    :seon.error/data {:seon.operator.claim/path (str path)}
-                    :seon.operator.claim/path (str path)}))))
+                   (invalid-claim-error path (ex-message error) nil)))))
      {:records [] :errors []}
      (sort-by str (fs/list-dir directory)))))
 
