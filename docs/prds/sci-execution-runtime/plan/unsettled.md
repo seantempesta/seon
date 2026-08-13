@@ -75,6 +75,19 @@ registered-keys-self-explain.
 - `kind-class-w2` — R2 stage W2 (producers emit class markers beside
   kind; census in
   [error-kind-audit-2026-08-12](../research/error-kind-audit-2026-08-12.md)).
+- **2026-08-13 evening, owner back online — three parallel side-lanes
+  launched with his approval** (all file-disjoint from W2):
+  `r4-docs-census` (legacy-spelling census + doc-only fixes; src/test
+  residue reported, never edited), `issue-class-kill` (top-ranked open
+  class disjoint from the W2 census files), `class-member-tags`
+  (hand-maintained class member lists → `class/<id>` tag derivations),
+  plus one opus research agent drafting the R3 store-path priced options
+  (read-only; draft at
+  `../research/store-path-rename-options-2026-08-13.md`) for the owner's
+  review. Owner kept the instruction-facts PRD and all AWAITING ledger
+  items PARKED. Post-R2 order (T3-first vs drive-first) and the
+  cheapest-form cost model are PENDING his answer after explanations
+  delivered in chat.
 
 **THE ORDERED QUEUE AFTER RETURNS:**
 1. R2 continuation, serial, red-tolerant: W2b (deferred producers in
