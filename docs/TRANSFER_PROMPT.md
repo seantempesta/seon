@@ -74,7 +74,6 @@ mode: too many separate processes, with bugs and slowness concentrated at the
 boundaries between them, and context that was hand-built instead of derived.
 Everything built now should reduce boundaries and derive more.
 
-
 ## Handoff details
 
 Whoever hands off a session appends the three things that actually change:
@@ -99,7 +98,6 @@ overstepping.
 copies of the same guidance drift, and drifted guidance misleads everyone who
 reads it.*
 
-
 ## Evergreen orchestration lessons (accumulated; add to this, never reset)
 
 These cost real time to learn. They are about HOW to run this program,
@@ -115,10 +113,7 @@ settlement slowdown). Reproduce before repeating; prove the
 counterfactual before promising a saving.
 
 **Read the whole spec; never grep it.** Promoted to a standing AGENTS.md
-rule. The evidence is stark: on the day partial reads were normal, three
-wrong conclusions came from documents that were correct; on the day
-every lane attested a whole read, zero such incidents across ~25 lane
-launches.
+rule.
 
 **A quiet green proves nothing about a concurrency fix.** A lane once
 reported a control-priority fix "passing" with zero lines changed. Only
@@ -131,10 +126,8 @@ explicitly in the spec and say that other lanes' churn is weather. The
 genuine boundary is a hunk YOU need inside a file someone else is
 editing — everything else proceeds.
 
-**Shared single files serialize the whole program.** One 690-entry
-schema resource deadlocked two lanes in one night and forced an
-orchestrator splice. When a file becomes every lane's contention point,
-that is a structural cost, not bad luck.
+**Shared single files serialize the whole program.** When a file becomes
+every lane's contention point, that is a structural cost, not bad luck.
 
 **The fixture path is not the live path.** A fully green suite coexisted
 with a broken live boot: schema provenance was stamped on the fixture
@@ -149,18 +142,13 @@ process-global launcher that killed sibling clusters' work, a silent
 (first) over an ambiguous schema match, and a non-idempotent
 reconciliation. A verifier that can pass by agreeing is worthless.
 
-**Provider filters reject security-flavored wording.** A verification
-lane was refused launch for the words "attack" and "kill". Write specs
-in neutral engineering language; it is also the accurate description.
-
 **Stopping a lane is cheap.** Resume loses only the in-flight turn and
 keeps full context. Stop the moment new information invalidates a
 direction; never let a lane keep working on a dead premise.
 
-**Commit in slices, always.** A lane once had 63 files uncommitted in
-one step. Small path-limited commits are what make any of this
-reversible, and they are the only honest heartbeat — judge lanes by git
-log, never by the process table.
+**Commit in slices, always.** Small path-limited commits are what make any
+of this reversible, and they are the only honest heartbeat — judge lanes
+by git log, never by the process table.
 
 **Rejecting a dependency is not the end of the analysis — mine it.**
 Integrant and clj-reload were both evaluated at source and rejected on
@@ -183,10 +171,7 @@ into a query with dead-dial detection for free. Standing rule: index
 what the analysis computes; DISCARDING is the decision that needs
 justification.
 
-**A count you did not produce is a guess.** A single-line regex said
-~31 error kinds; the real census found 160, because seven local error
-constructors hid their kinds from a text search. The catalog agent's
-count changed the shape of the wave. Numbers in reports — including
+**A count you did not produce is a guess.** Numbers in reports — including
 your own from an hour ago — are hypotheses until reproduced.
 
 **Fixture drift looks exactly like a regression.** Two separate
