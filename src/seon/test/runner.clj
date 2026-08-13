@@ -409,6 +409,7 @@
            (ex-info
             "SEON_TEST_SILENCE_SECONDS must be a positive integer."
             {:seon.error/kind ::invalid-silence-seconds
+             ::invalid-silence-seconds seconds
              ::configured configured})))
         seconds))))
 
@@ -968,6 +969,7 @@
      (ex-info
       "Test results may not be written into the default cluster."
       {:seon.error/kind ::default-cluster-refused
+       ::default-cluster-refused cluster-name
        :seon.boot/cluster-name cluster-name})))
   (let [instance (start-cluster! cluster-name root)]
     (try
