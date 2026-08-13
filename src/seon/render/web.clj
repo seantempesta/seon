@@ -1172,6 +1172,7 @@
                                          ports)))]
        (throw (ex-info "the render proc is missing an in/out port"
                        {:seon.error/kind ::missing-port
+                        ::missing-port (first missing)
                         ::missing (vec missing)}))))
    (assoc args
           ::flow/in-ports
@@ -1786,6 +1787,7 @@
                :seon.blob/digest value-digest :seon.render.web/value-not-found value-digest})
             (catch Throwable failure
               {:seon.error/kind :seon.render.web/value-unreadable
+               :seon.render.web/value-unreadable value-digest
                :seon.error/message (or (ex-message failure)
                                        "The stored value is unreadable.")}))
 

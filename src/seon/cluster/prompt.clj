@@ -66,7 +66,9 @@
       :else
       (let [effective (config/effective database cluster-name)]
         (if (:seon.config/missing-effective effective)
-          (assoc effective :seon.error/kind ::missing-config)
+          (assoc effective
+                 :seon.error/kind ::missing-config
+                 ::missing-config agent-id)
           (ai/settings effective (ai/agent-overlay database agent-id)))))))
 
 (defn model-calibration
