@@ -92,8 +92,16 @@ via `-Scp`, identity publishes before readiness, and the tally is total
 tests / 9,215 assertions / **120 F / 33 E across 65 failing tests**, zero
 unconfirmed. All nine earlier-confirmed reds then fixed — every one a stale
 expectation against the day's ruled changes, none a regression (`dc6604dac`,
-`0a39f71d6`). A fresh current-HEAD `--all` is the next number; the 65-test
-red ledger in `tmp/test-runs/run.QfMToj` is the next fix worklist.
+`0a39f71d6`). THE CURRENT-HEAD TALLY (complete, zero unconfirmed, full log
+`tmp/orchestrator/final-all-tally-2026-08-13.log`): **1,200 tests / 9,228
+assertions / 102 failures / 29 errors**. The dominant coherent red cluster
+is the run lifecycle family (12 `run-test` + 9 `turn-test` + 2 `work-test`)
+— likely one shared cause from the day's run-lifecycle changes, possibly the
+parallel-isolation class (tests green under direct invocation earlier the
+same night); a `run-family-reds` attribution lane is on it. The remaining
+reds span blob-publication, curate, db/store codec, gen.loop, operator, and
+custody-stability owners — the next session's fix worklist, each with
+attributed output in the retained log.
 
 **Uncommitted foreign residue deliberately left:**
 `test/seon/public_contract_test.clj` (reader→analyzer refactor) and the
