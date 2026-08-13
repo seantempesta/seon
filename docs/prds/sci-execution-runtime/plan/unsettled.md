@@ -100,14 +100,17 @@ registered-keys-self-explain.
 5. Keep the issue campaign beside the spine: class-kill by mining rank,
    staleness archival with source-verified evidence only.
 
-**ON OWNER RETURN (his standing instruction):** open with ONE
-AskUserQuestion round covering the pending design decisions below, and
-give him the link to
-[the draft instruction-facts PRD](instruction-facts-prd-2026-08-13.md)
-(its five numbered decisions are the core of the round; add R3 and the
-ledger's cheapest-cost-model item; a second round only if he engages).
-Meanwhile: RESUME ANY CRASHED LANE with its context (stop/resume mechanics
-in the orchestrator manual) — lane crashes are weather.
+**OWNER REPRIORITIZATION (2026-08-13 evening):** the
+[instruction-facts PRD](instruction-facts-prd-2026-08-13.md) is PARKED —
+all five decisions held for his digestion; AGENTS.md-as-generated is a
+LONG-TERM goal. The focus is IMPROVING THE AGENT CONTEXT GENERATION
+SYSTEM — i.e., exactly the specced spine below (rebirth verification →
+T3 intent membership with usage-demo-on-first-use → the live drive).
+The demo-vs-doc rule was settled conversationally: docs for lookup
+(registered self-explains), demonstrations on first real use (intent via
+`:about` refs + no prior demonstrating artifact, ruling 46). RESUME ANY
+CRASHED/TIMED-OUT LANE with its context — crashes are weather; keep the
+engine on specced work only.
 
 **PENDING THE OWNER (do not decide):** R3 `data/clusters/store` path
 rename options; the drafted
