@@ -14,7 +14,8 @@
   `status` describes this JVM's current instances; the foreign-process
   `bin/seon status` additionally reconciles process records and possibly stale
   advertisements."
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.java.io :as io]
             [datahike.api :as d]
             [konserve.core :as k]
@@ -552,15 +553,17 @@
 (defn- digest-attributes
   [database]
   (let [rows
-        (db/q '[:find ?attribute ?form
-                :where
-                [?schema :seon.schema/key ?attribute]
-                [?schema :seon.schema/form ?form]]
-              database)
-        forms (into {} rows)]
+        (d/q '[:find ?attribute ?form
+               :where
+               [?schema :seon.schema/key ?attribute]
+               [?schema :seon.schema/form ?form]]
+             database)
+        forms (into {} (map (fn [[schema-key form]]
+                              [schema-key (edn/read-string form)]))
+                    rows)]
     (into []
           (keep (fn [[attribute form]]
-                  (when (resolves-to-digest? forms form)
+                  (when (resolves-to-digest? forms (edn/read-string form))
                     attribute)))
           rows)))
 
@@ -576,10 +579,10 @@
         (into #{}
               (mapcat
                (fn [attribute]
-                 (db/q '[:find [?digest ...]
-                         :in $ ?attribute
-                         :where [_ ?attribute ?digest]]
-                       searchable attribute)))
+                 (d/q '[:find [?digest ...]
+                        :in $ ?attribute
+                        :where [_ ?attribute ?digest]]
+                      searchable attribute)))
               (digest-attributes database)))
       (finally
         (d/release-materialized-db database)))))
