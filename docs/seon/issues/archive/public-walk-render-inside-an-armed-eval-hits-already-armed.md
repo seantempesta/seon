@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, sci, runtime, wave/render-arm]
 ---
@@ -49,3 +49,7 @@ one mechanism: the nested invocation inherits the live arm (the
   the requesting eval's existing `time-limit`.
 - One class regression: a render function invoked from inside an armed eval
   and the same function invoked from an unarmed system path both succeed.
+
+## Closure — 2026-08-13
+
+Resolved by `9108d47ab`: environment-carriage wrappers sharing the interpreter's `:env` inherit the active arm (genuine `sci/fork` contexts still refuse); the two-direction regression covers armed nested rendering, unarmed rendering, and outer time-limit inheritance. `bin/test seon.sci.eval-test` 61/362/0 including the pinned public-walk test.
