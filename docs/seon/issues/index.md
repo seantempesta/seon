@@ -16,10 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (39)
+## Blocker (40)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Attribute and bound the store's one-day 69 GB growth](store-grew-to-69-gigabytes-in-one-day-of-lanes.md) | blocker | exclusive sweep implementation wave |
 | [Encode agent-declared render symbols through transaction encoding](agent-schema-render-symbol-bypasses-transaction-encoding.md) | blocker | rebirth-gap fix wave |
 | [Include agent-authored results in the reborn opening](rebirth-opening-omits-agent-authored-results.md) | blocker | rebirth-gap fix wave |
 | [Carry the agent-scoped environment into generated turn forks](generated-turn-fork-omits-the-agent-scoped-environment.md) | blocker | evolving-session implementation phases |
@@ -60,10 +61,11 @@ See `README.md` for the convention.
 | [Return from the generated opening's second live pull](generated-opening-live-pull-does-not-return-after-help.md) | blocker | prefix-drift bootstrap performance diagnosis (held `bootstrap.clj`) |
 | [Explain the 24-second live root pull of 189 members](live-root-pull-of-189-members-takes-24-seconds.md) | blocker | render acquisition performance wave |
 
-## Friction (128)
+## Friction (129)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Delete bloated stores at IO pace with progress](reset-deletes-a-bloated-store-one-lstat-at-a-time.md) | friction | operator velocity fixes |
 | [Stop the opening walkthrough replicating its usage test per agent](opening-walkthrough-replicates-a-usage-test.md) | friction | evolving-session implementation phases |
 | [Supply every declared render dependency in the agent-flow fixture](agent-flow-fixture-omits-render-interest.md) | friction | flow join-wedge diagnosis |
 | [Make proofs unable to pass without exercising their premise](class-proofs-pass-without-exercising-their-premise.md) | friction | class-kill queue |
