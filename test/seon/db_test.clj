@@ -692,3 +692,114 @@
        (is (= :seon.db/invalid-read (:seon.error/kind result)))
        (is (string? (:seon.error/message result)))
        (is (map? (:seon.error/data result)))))))
+
+(def ^:private diagnostic-fields
+  #{:seon.error/diagnostic-layer
+    :seon.error/diagnostic-operation
+    :seon.error/diagnostic-member
+    :seon.error/diagnostic-expected
+    :seon.error/diagnostic-offending
+    :seon.error/diagnostic-cause
+    :seon.error/diagnostic-evidence-availability
+    :seon.error/diagnostic-evidence})
+
+(deftest invalid-read-identities-are-diagnostics-never-absence
+  (test-support/with-database
+   (fn [connection]
+     (db/transact! connection
+                   [{:seon.cluster.agent/id "identity-admission-present"}])
+     (let [unknown-attribute
+           (db/q '[:find ?entity
+                   :where [?entity :seon.cluster.agent/idd _]]
+                 @connection)
+           wrong-pull
+           (db/pull @connection '[*]
+                    [:seon.cluster.agent/id 'identity-admission-present])
+           wrong-entity
+           (db/entity @connection
+                      [:seon.cluster.agent/id 'identity-admission-present])]
+       (testing "an uninstalled query attribute names registered candidates"
+         (is (= :seon.db/invalid-read (:seon.error/kind unknown-attribute)))
+         (is (= diagnostic-fields
+                (set (keys (:seon.error/data unknown-attribute)))))
+         (is (= 'seon.db/q
+                (get-in unknown-attribute
+                        [:seon.error/data
+                         :seon.error/diagnostic-operation])))
+         (is (= :seon.cluster.agent/idd
+                (get-in unknown-attribute
+                        [:seon.error/data :seon.error/diagnostic-member])))
+         (is (some #{:seon.cluster.agent/id}
+                   (get-in unknown-attribute
+                           [:seon.error/data :seon.error/diagnostic-evidence
+                            :seon.db/registered-candidates]))))
+       (testing "wrong-typed lookup refs retain the installed declaration"
+         (doseq [[operation result]
+                 [['seon.db/pull wrong-pull]
+                  ['seon.db/entity wrong-entity]]]
+           (is (= :seon.db/invalid-read (:seon.error/kind result)))
+           (is (= operation
+                  (get-in result
+                          [:seon.error/data
+                           :seon.error/diagnostic-operation])))
+           (is (= :db.type/string
+                  (get-in result
+                          [:seon.error/data :seon.error/diagnostic-expected
+                           :db/valueType])))
+           (is (= {:seon.db/attribute :seon.cluster.agent/id
+                   :seon.db/value 'identity-admission-present}
+                  (get-in result
+                          [:seon.error/data
+                           :seon.error/diagnostic-offending])))))
+       (testing "valid absence remains ordinary absence"
+         (is (nil? (db/pull @connection '[*]
+                            [:seon.cluster.agent/id
+                             "identity-admission-missing"])))
+         (is (nil? (db/entity @connection
+                              [:seon.cluster.agent/id
+                               "identity-admission-missing"])))
+         (is (= #{}
+                (db/q '[:find ?entity
+                        :where
+                        [?entity :seon.cluster.agent/id
+                         "identity-admission-missing"]]
+                      @connection))))))))
+
+(deftest malformed-public-database-requests-name-the-public-operation
+  (test-support/with-database
+   (fn [connection]
+     (let [cases
+           [[(db/q @connection {:args []}) 'seon.db/q :query]
+            [(db/pull @connection
+                      {:eid [:seon.cluster.agent/id "root"]})
+             'seon.db/pull :selector]
+            [(db/transact! connection {:not-tx-data []})
+             'seon.db/transact! :tx-data]
+            [(db/q @connection
+                   '[:find ?entity
+                     :where
+                     [?entity :seon.cluster.agent/id "root"
+                      ?transaction true :extra]])
+             'seon.db/q
+             '[?entity :seon.cluster.agent/id "root"
+               ?transaction true :extra]]]]
+       (doseq [[result operation member] cases]
+         (is (contains? #{:seon.db/invalid-read
+                          :seon.db/invalid-request}
+                        (:seon.error/kind result)))
+         (is (= diagnostic-fields
+                (set (keys (:seon.error/data result)))))
+         (is (= operation
+                (get-in result
+                        [:seon.error/data
+                         :seon.error/diagnostic-operation])))
+         (is (= member
+                (get-in result
+                        [:seon.error/data :seon.error/diagnostic-member]))))
+       (let [malformed (first (last cases))]
+         (is (= [:entity :attribute :value :transaction :added]
+                (get-in malformed
+                        [:seon.error/data
+                         :seon.error/diagnostic-expected])))
+         (is (not (str/includes? (pr-str malformed)
+                                 "resolve-pattern-lookup-entity-id"))))))))

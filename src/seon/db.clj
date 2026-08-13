@@ -12,6 +12,7 @@
             [datahike.db.interface :as dbi]
             [datahike.db.utils :as db.utils]
             [datahike.query :as query]
+            [datahike.schema :as datahike.schema]
             [datahike.store :as datahike.store]
             [datalog.parser.impl.proto :as parser]
             [clojure.test.check.generators :as gen]
@@ -78,6 +79,10 @@
   {:seon.error/kind kind
    :seon.error/message message
    :seon.error/data data})
+
+(defn- diagnostic
+  [request]
+  ((requiring-resolve 'seon.error/diagnostic) request))
 
 (defn- dependency-error
   [operation error]
@@ -393,6 +398,8 @@
           response (d/q-with-evidence query-request)]
       (decode-query-result (read-declarations database)
                            query-request
+                           (query/memoized-parse-query
+                            (:query query-request))
                            (:datahike.query/result response)))
 
     :pull
@@ -513,6 +520,94 @@
                :else nil)
             root))
 
+(defn- installed-attribute-declarations
+  [database]
+  (into (sorted-map)
+        (keep (fn [[attribute declaration]]
+                (when (qualified-keyword? attribute)
+                  [attribute declaration])))
+        (dbi/-schema database)))
+
+(defn- registered-attribute-candidates
+  [declarations attribute]
+  (let [same-namespace
+        (when (qualified-keyword? attribute)
+          (filter #(= (namespace attribute) (namespace %))
+                  (keys declarations)))]
+    (into [] (take 12) (or (seq same-namespace) (keys declarations)))))
+
+(defn- attribute-observation
+  [database attribute]
+  (let [declarations (installed-attribute-declarations database)]
+    {::attribute attribute
+     ::installed-declaration (get declarations attribute)
+     ::registered-candidates
+     (registered-attribute-candidates declarations attribute)}))
+
+(defn- unknown-attribute-error
+  [operation database attribute offending]
+  (let [evidence (attribute-observation database attribute)]
+    (diagnostic
+     {:seon.error/kind ::invalid-read
+      :seon.error/message
+      (str operation " cannot read uninstalled attribute "
+           (pr-str attribute) ".")
+      :seon.error/diagnostic-layer :database-read
+      :seon.error/diagnostic-operation operation
+      :seon.error/diagnostic-member attribute
+      :seon.error/diagnostic-expected
+      {::installed-declaration :seon.error/unknown
+       ::registered-candidates (::registered-candidates evidence)}
+      :seon.error/diagnostic-offending offending
+      :seon.error/diagnostic-cause ::attribute-not-installed
+      :seon.error/diagnostic-evidence evidence})))
+
+(defn- lookup-ref-error
+  [operation database entity-id]
+  (when (and (sequential? entity-id) (= 2 (count entity-id)))
+    (let [[attribute value] entity-id
+          evidence (when (keyword? attribute)
+                     (attribute-observation database attribute))
+          declaration (::installed-declaration evidence)
+          valid-value? (and declaration
+                            (datahike.schema/value-valid?
+                             attribute value (dbi/-schema database)))]
+      (cond
+        (nil? declaration)
+        (unknown-attribute-error operation database attribute entity-id)
+
+        (nil? (:db/unique declaration))
+        (diagnostic
+         {:seon.error/kind ::invalid-read
+          :seon.error/message
+          (str operation " requires a unique lookup-ref attribute; "
+               (pr-str attribute) " is not unique.")
+          :seon.error/diagnostic-layer :database-read
+          :seon.error/diagnostic-operation operation
+          :seon.error/diagnostic-member attribute
+          :seon.error/diagnostic-expected declaration
+          :seon.error/diagnostic-offending entity-id
+          :seon.error/diagnostic-cause ::lookup-attribute-not-unique
+          :seon.error/diagnostic-evidence evidence})
+
+        (not valid-value?)
+        (diagnostic
+         {:seon.error/kind ::invalid-read
+          :seon.error/message
+          (str operation " received " (pr-str value) " for "
+               (pr-str attribute) ", whose installed value type is "
+               (pr-str (:db/valueType declaration)) ".")
+          :seon.error/diagnostic-layer :database-read
+          :seon.error/diagnostic-operation operation
+          :seon.error/diagnostic-member attribute
+          :seon.error/diagnostic-expected declaration
+          :seon.error/diagnostic-offending
+          {::attribute attribute ::value value}
+          :seon.error/diagnostic-cause
+          {::validation ::value-does-not-match-installed-type
+           ::value-type (:db/valueType declaration)}
+          :seon.error/diagnostic-evidence evidence})))))
+
 (defn- query-input-bindings
   [parsed-query arguments]
   (into {}
@@ -522,6 +617,71 @@
                              (instance? Variable variable))
                     [(:symbol variable) value]))))
         (map vector (:qin parsed-query) arguments)))
+
+(defn- query-patterns
+  [parsed-query]
+  (filter #(instance? Pattern %) (parsed-nodes (:qwhere parsed-query))))
+
+(defn- parsed-node-value
+  [node]
+  (cond
+    (instance? Variable node) (:symbol node)
+    (instance? Constant node) (:value node)
+    :else node))
+
+(defn- parsed-pattern-value
+  [pattern]
+  (let [source-symbol (:symbol (:source pattern))
+        values (mapv parsed-node-value (:pattern pattern))]
+    (cond-> values source-symbol (into [source-symbol]))))
+
+(defn- malformed-query-pattern-error
+  [request parsed-query]
+  (when-let [pattern (some #(when (> (count (:pattern %)) 5) %)
+                           (query-patterns parsed-query))]
+    (let [offending (parsed-pattern-value pattern)]
+      (diagnostic
+       {:seon.error/kind ::invalid-read
+        :seon.error/message
+        "seon.db/q received a data pattern with more than five positions."
+        :seon.error/diagnostic-layer :database-read
+        :seon.error/diagnostic-operation 'seon.db/q
+        :seon.error/diagnostic-member offending
+        :seon.error/diagnostic-expected
+        [:entity :attribute :value :transaction :added]
+        :seon.error/diagnostic-offending offending
+        :seon.error/diagnostic-cause ::malformed-data-pattern
+        :seon.error/diagnostic-evidence request}))))
+
+(defn- query-source-databases
+  [query-form arguments]
+  (into {}
+        (keep (fn [{source-symbol :datahike.query.source/symbol
+                    position :datahike.query.source/argument-position}]
+                (let [argument (nth arguments position nil)]
+                  (when (db.utils/db? argument)
+                    [source-symbol argument]))))
+        (d/query-source-bindings query-form)))
+
+(defn- query-attribute-error
+  [request parsed-query]
+  (let [arguments (:args request)
+        input-bindings (query-input-bindings parsed-query arguments)
+        databases (query-source-databases (:query request) arguments)]
+    (some
+     (fn [pattern]
+       (let [attribute-node (nth (:pattern pattern) 1 nil)
+             attribute (if (instance? Constant attribute-node)
+                         (:value attribute-node)
+                         (get input-bindings (:symbol attribute-node)))
+             source-symbol (or (:symbol (:source pattern)) '$)
+             database (get databases source-symbol)]
+         (when (and database
+                    (keyword? attribute)
+                    (nil? (get (dbi/-schema database) attribute)))
+           (unknown-attribute-error 'seon.db/q database attribute
+                                    (parsed-pattern-value pattern)))))
+     (query-patterns parsed-query))))
 
 (defn- query-variable-attributes
   [parsed-query arguments]
@@ -591,9 +751,8 @@
      result)))
 
 (defn- decode-query-result
-  [declarations normalized result]
-  (let [parsed-query (query/memoized-parse-query (:query normalized))
-        attributes (query-find-attributes
+  [declarations normalized parsed-query result]
+  (let [attributes (query-find-attributes
                     declarations parsed-query (:args normalized))
         find-clause (:qfind parsed-query)
         return-maps (:qreturnmaps parsed-query)
@@ -790,6 +949,23 @@
       ;; acceptance; `q-with-evidence` alone decides whether they are valid.
       :else arguments)))
 
+(defn- missing-query-error
+  [query-input]
+  (when (and (map? query-input)
+             (contains? query-input :args)
+             (not (contains? query-input :query)))
+    (diagnostic
+     {:seon.error/kind ::invalid-read
+      :seon.error/message
+      "seon.db/q argument maps require :query."
+      :seon.error/diagnostic-layer :database-read
+      :seon.error/diagnostic-operation 'seon.db/q
+      :seon.error/diagnostic-member :query
+      :seon.error/diagnostic-expected [:map [:query :seon.db/query]]
+      :seon.error/diagnostic-offending query-input
+      :seon.error/diagnostic-cause ::missing-required-key
+      :seon.error/diagnostic-evidence query-input})))
+
 (defn q
   "Run a Datalog query over explicit inputs or the current database value."
   {:malli/schema
@@ -815,7 +991,8 @@
         (if explicit-database?
           (rest arguments)
           arguments)]
-    (try
+    (or (missing-query-error query-input)
+        (try
       ;; This disambiguates a Datalog map query from Datahike's argument map
       ;; before Seon decides where the ambient database belongs.
       (let [normalized (query/normalize-q-input query-input argument-inputs)
@@ -827,23 +1004,56 @@
         (if (error-value? aligned)
           aligned
           (let [request (assoc normalized :args aligned)
-                response (d/q-with-evidence request)
-                result (decode-query-result
-                        (read-declarations
-                         (some #(when (db.utils/db? %) %) aligned))
-                        request (:datahike.query/result response))]
-            (append-query-evidence! request response result)
-            result)))
+                parsed-query (query/memoized-parse-query (:query request))]
+            (or (malformed-query-pattern-error request parsed-query)
+                (query-attribute-error request parsed-query)
+                (let [response (d/q-with-evidence request)
+                      result (decode-query-result
+                              (read-declarations
+                               (some #(when (db.utils/db? %) %) aligned))
+                              request parsed-query
+                              (:datahike.query/result response))]
+                  (append-query-evidence! request response result)
+                  result)))))
         (catch Throwable cause
           (when explicit-database?
             (append-database-evidence! query-or-database :all))
-          (dependency-error ::q cause))))))
+          (dependency-error ::q cause)))))))
+
+(defn- missing-pull-selector-error
+  [public-operation arguments]
+  (when (and (= 1 (count arguments))
+             (map? (first arguments))
+             (not (contains? (first arguments) :selector)))
+    (let [request (first arguments)]
+      (diagnostic
+       {:seon.error/kind ::invalid-read
+        :seon.error/message
+        (str public-operation " argument maps require :selector.")
+        :seon.error/diagnostic-layer :database-read
+        :seon.error/diagnostic-operation public-operation
+        :seon.error/diagnostic-member :selector
+        :seon.error/diagnostic-expected
+        [:map [:selector :seon.db/pull-selector]]
+        :seon.error/diagnostic-offending request
+        :seon.error/diagnostic-cause ::missing-required-key
+        :seon.error/diagnostic-evidence request}))))
+
+(defn- pull-entity-id
+  [arguments]
+  (if (map? (first arguments))
+    (:eid (first arguments))
+    (second arguments)))
 
 (defn- pull-call
-  [database arguments operation operation-key result-key]
+  [database arguments operation operation-key result-key public-operation]
   (if (error-value? database)
     database
-    (try
+    (or (missing-pull-selector-error public-operation arguments)
+        (when (#{'seon.db/pull 'seon.db/entity} public-operation)
+          (lookup-ref-error public-operation database
+                            (pull-entity-id arguments)))
+        (try
       (let [response (apply operation database arguments)
             result (decode-pull-result
                     (read-declarations database)
@@ -854,7 +1064,7 @@
         result)
       (catch Throwable cause
         (append-database-evidence! database :all)
-        (dependency-error result-key cause)))))
+        (dependency-error result-key cause))))))
 
 (defn pull
   "Pull one entity over an explicit or current database value."
@@ -877,7 +1087,8 @@
               [options]
               pull-plan-with-evidence
               :pull
-              :datahike.pull/result))
+              :datahike.pull/result
+              'seon.db/pull))
   ([database-or-selector options-or-eid]
    (if (or (db.utils/db? database-or-selector)
            (error-value? database-or-selector))
@@ -885,18 +1096,21 @@
                 [options-or-eid]
                 pull-plan-with-evidence
                 :pull
-                :datahike.pull/result)
+                :datahike.pull/result
+                'seon.db/pull)
      (pull-call (current-database-value)
                 [database-or-selector options-or-eid]
                 pull-plan-with-evidence
                 :pull
-                :datahike.pull/result)))
+                :datahike.pull/result
+                'seon.db/pull)))
   ([database selector entity-id]
    (pull-call database
               [selector entity-id]
               pull-plan-with-evidence
               :pull
-              :datahike.pull/result)))
+              :datahike.pull/result
+              'seon.db/pull)))
 
 (defn pull-many
   "Pull aligned entities over an explicit or current database value."
@@ -921,7 +1135,8 @@
               [options]
               pull-many-plan-with-evidence
               :pull-many
-              :datahike.pull-many/result))
+              :datahike.pull-many/result
+              'seon.db/pull-many))
   ([database-or-selector options-or-eids]
    (if (or (db.utils/db? database-or-selector)
            (error-value? database-or-selector))
@@ -929,18 +1144,21 @@
                 [options-or-eids]
                 pull-many-plan-with-evidence
                 :pull-many
-                :datahike.pull-many/result)
+                :datahike.pull-many/result
+                'seon.db/pull-many)
      (pull-call (current-database-value)
                 [database-or-selector options-or-eids]
                 pull-many-plan-with-evidence
                 :pull-many
-                :datahike.pull-many/result)))
+                :datahike.pull-many/result
+                'seon.db/pull-many)))
   ([database selector entity-ids]
    (pull-call database
               [selector entity-ids]
               pull-many-plan-with-evidence
               :pull-many
-              :datahike.pull-many/result)))
+              :datahike.pull-many/result
+              'seon.db/pull-many)))
 
 (defn- entity-call
   [database entity-id]
@@ -950,7 +1168,8 @@
              [['*] entity-id]
              pull-plan-with-evidence
              :pull
-             :datahike.pull/result))
+             :datahike.pull/result
+             'seon.db/entity))
 
 (defn entity
   "Eager ordinary data for one entity in an explicit or current database."
@@ -1244,6 +1463,23 @@
                           throwable)))
               failure)))))))
 
+(defn- missing-transaction-data-error
+  [transaction]
+  (when (and (map? transaction)
+             (not (contains? transaction :tx-data)))
+    (diagnostic
+     {:seon.error/kind ::invalid-request
+      :seon.error/message
+      "seon.db/transact! argument maps require :tx-data."
+      :seon.error/diagnostic-layer :database-write
+      :seon.error/diagnostic-operation 'seon.db/transact!
+      :seon.error/diagnostic-member :tx-data
+      :seon.error/diagnostic-expected
+      [:map [:tx-data :seon.store/transaction-data]]
+      :seon.error/diagnostic-offending transaction
+      :seon.error/diagnostic-cause ::missing-required-key
+      :seon.error/diagnostic-evidence transaction})))
+
 (defn- rendered-value
   [unit]
   (if (map? (:seon.render/value unit))
@@ -1325,21 +1561,24 @@
   connection ID. An absent binding means the caller is outside an agent
   evaluation, so a live explicit connection is allowed."
   {:malli/schema
-   [:function
+  [:function
     [:=> [:cat :seon.store/transaction]
      [:or :map :seon.error/value]]
     [:=> [:cat :seon.db/connection :seon.store/transaction]
      [:or :map :seon.error/value]]]}
   ([transaction]
-   (transact-call (current-connection) transaction))
+   (or (missing-transaction-data-error transaction)
+       (transact-call (current-connection) transaction)))
   ([connection transaction]
-   (cond
-     (not (connection? connection))
-     (dependency-error
-      ::transact!
-      (ex-info "The explicit transaction connection is not live."
-               {::connection connection}))
+   (or
+    (missing-transaction-data-error transaction)
+    (cond
+      (not (connection? connection))
+      (dependency-error
+       ::transact!
+       (ex-info "The explicit transaction connection is not live."
+                {::connection connection}))
 
-     :else
-     (or (foreign-connection-error connection)
-         (transact-call connection transaction)))))
+      :else
+      (or (foreign-connection-error connection)
+          (transact-call connection transaction))))))
