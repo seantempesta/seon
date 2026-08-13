@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, database, context]
 ---
@@ -64,3 +64,22 @@ the lifecycle lane did not edit it.
   generic value floor.
 - One regression proves the class at the root-selector boundary for current
   and as-of database values, not only the two observed prompts.
+
+## Resolution
+
+Resolved by `0ea973301`. `seon.db/schema-database` now exposes the one N5
+origin-chain derivation, and the render walk uses it for installed attributes
+and compiled-plan schema identity. History renders each acquired identity as
+the entity's direct form, so a message reached through a run trigger remains a
+`my.message/read` entry rather than inheriting the traversal edge's listing
+form.
+
+Focused evidence on 2026-08-13:
+
+- `bin/test seon.render.root-pull-test` — 11 tests, 113 assertions, zero
+  failures and zero errors.
+- `bin/test seon.cluster.turn-test seon.render.root-pull-test
+  seon.render.history-test` — 72 tests, 454 assertions, zero failures and zero
+  errors. This includes both originally failing turn tests.
+- A source-classpath reload of `seon.db` and `seon.render.walk` completed
+  successfully after the edit.
