@@ -16,22 +16,8 @@ never exercised.
 
 ## Evidence
 
-Seven open issues recur from 2026-07-31 through 2026-08-10:
-[[ai-transport-taxonomy-test-can-run-zero-assertions]],
-[[bootstrap-o4-stops-before-causal-delegation-settles]],
-[[context-mvp-drive-can-false-green-after-cross-agent-delivery]],
-[[output-sink-query-excludes-operator-and-mcp-scripts]],
-[[oversight-fleet-test-pins-a-stale-proc-roster]],
-[[public-contract-census-can-pass-with-no-subjects]], and
-[[render-wave-properties-cannot-produce-their-failing-cases]].
-
-The recent archive repeats the class on 2026-08-07, 2026-08-10, and
-2026-08-11 in [[archive/flow-generators-reuse-one-mutable-sample]],
-[[archive/blob-economics-test-used-a-now-windowed-string]],
-[[archive/reader-policy-test-used-refused-sci-init-options]],
-[[archive/concurrency-plans-open-unplanned-follow-up-runs]],
-[[archive/activation-closure-fixtures-lag-lookup-ref-prerequisites]], and
-[[archive/generative-loop-fixture-commits-no-run-facts]].
+Current open members carry `class/n2` and are derived with
+`bin/issues-index --class class/n2`.
 
 ## Owner
 

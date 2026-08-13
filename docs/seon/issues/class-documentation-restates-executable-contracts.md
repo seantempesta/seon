@@ -16,11 +16,8 @@ behavior.
 
 ## Evidence
 
-Four open issues recur from 2026-08-01 through 2026-08-07:
-[[ai-retry-proof-still-cites-the-deleted-run-lease]],
-[[bootstrap-teaches-bare-map-keys]],
-[[my-fs-write-docstring-hides-its-own-request-shape]], and
-[[production-docstrings-teach-deleted-semantics]].
+Current open members carry `class/n12` and are derived with
+`bin/issues-index --class class/n12`.
 
 ## Owner
 

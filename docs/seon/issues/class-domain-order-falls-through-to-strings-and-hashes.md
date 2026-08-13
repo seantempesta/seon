@@ -16,11 +16,8 @@ layout.
 
 ## Evidence
 
-Four open issues recur on 2026-08-02 and 2026-08-04:
-[[duplicate-identity-refusal-evidence-is-unordered]],
-[[effect-feedback-orders-receipts-by-id]],
-[[latest-closed-run-orders-by-id-string]], and
-[[transcript-candidate-window-orders-receipts-and-comments-by-id]].
+Current open members carry `class/n8` and are derived with
+`bin/issues-index --class class/n8`.
 
 ## Owner
 

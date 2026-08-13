@@ -17,23 +17,8 @@ remembered conventions instead of consequences of construction.
 
 ## Evidence
 
-Nine open issues span 2026-08-02 through 2026-08-11:
-[[artifact-releases-the-fence-between-install-and-start]],
-[[concurrent-provider-calls-fail-with-a-closed-response-body]],
-[[deletable-directories-have-no-claim-or-size-facts]],
-[[dependency-class-cache-prepare-races-concurrent-jvm-launches]],
-[[flow-monitor-test-resources-outlive-their-cleanup-scope]],
-[[jvm-operator-work-takes-the-installation-lock-for-one-root]],
-[[render-adversarial-roots-outlive-their-experiment]],
-[[render-live-proof-roots-have-no-lifecycle-owner]], and
-[[test-runner-cleans-a-worker-root-while-kondo-is-still-writing]].
-
-The archive repeats resource reacquisition and shared-root contention on
-2026-08-07, 2026-08-08, and 2026-08-11 in
-[[archive/refork-held-a-store-across-the-arm-that-released-it]],
-[[archive/init-force-destroys-the-branch-then-refuses-its-own-second-store-open]],
-[[archive/an-isolated-operator-root-locks-the-shared-repository-root]], and
-[[archive/export-fallback-reopens-an-already-connected-branch]].
+Current open members carry `class/n4` and are derived with
+`bin/issues-index --class class/n4`.
 
 ## Owner
 

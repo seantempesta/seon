@@ -6,6 +6,9 @@
 
 (def ^:private legal-severities #{"blocker" "friction" "cleanup"})
 (def ^:private legal-closed-statuses #{"resolved" "superseded"})
+(def ^:private legal-class-tags
+  (set (concat (map #(str "class/p" %) (range 1 6))
+               (map #(str "class/n" %) (range 1 15)))))
 (def ^:private severity-order ["blocker" "friction" "cleanup"])
 (def ^:private non-note-files #{"AGENTS.md" "README.md" "index.md"})
 
@@ -199,16 +202,42 @@
     (println (str path ": " (name problem) " "
                   (pr-str (dissoc error ::path ::problem))))))
 
+(defn- class-member-paths [root class-tag]
+  (let [{::keys [indexable-notes errors]} (issue-state root)]
+    (require-valid! nil errors)
+    (when-not (contains? legal-class-tags class-tag)
+      (throw (ex-info "Unknown class tag."
+                      {::expected (sort legal-class-tags)
+                       ::actual class-tag})))
+    (->> indexable-notes
+         (filter #(and (= :open (::location %))
+                       (contains? (::tags %) class-tag)
+                       (not (contains? (::tags %) "class-kill"))))
+         (map #(str "docs/seon/issues/" (::relative-path %)))
+         sort
+         vec)))
+
 (defn run!
   "Run the issue-index command for one repository root."
   [root arguments]
   (try
-    (let [result (case (vec arguments)
-                   [] (check! root)
-                   ["--check"] (check! root)
-                   (throw (ex-info "Usage: bin/issues-index [--check]" {})))]
-      (println (pr-str result))
-      result)
+    (let [arguments (vec arguments)]
+      (cond
+        (or (empty? arguments) (= ["--check"] arguments))
+        (let [result (check! root)]
+          (println (pr-str result))
+          result)
+
+        (and (= 2 (count arguments)) (= "--class" (first arguments)))
+        (let [paths (class-member-paths root (second arguments))]
+          (doseq [path paths]
+            (println path))
+          paths)
+
+        :else
+        (throw (ex-info
+                "Usage: bin/issues-index [--check | --class class/<id>]"
+                {}))))
     (catch Exception error
       (binding [*out* *err*]
         (println (.getMessage error))

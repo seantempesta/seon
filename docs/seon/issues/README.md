@@ -76,6 +76,17 @@ Named-class members then carry one of `class/p1` through `class/p5` or
 `class-kill`. Deliberate singletons and uncertain post-mining findings carry no
 class tag.
 
+Derive a class's current members with one command:
+
+```bash
+bin/issues-index --class class/n1
+```
+
+The command first validates the complete issue authority, then prints sorted
+repository-relative paths for open notes carrying that exact class tag. It
+excludes the `class-kill` note itself; archived notes are historical evidence,
+not current members.
+
 Every open issue ends with one `wave/<slug>` tag mirroring its destination in
 `index.md`; the index remains the schedule. For an unlisted destination, remove
 Markdown links and parenthetical scheduling annotations, kebab-case the text,

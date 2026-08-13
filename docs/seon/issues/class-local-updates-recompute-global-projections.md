@@ -15,16 +15,8 @@ dependency closure instead scale with the complete database/program graph.
 
 ## Evidence
 
-Six open issues span 2026-08-01 through 2026-08-10:
-[[a-run-pays-two-and-a-half-seconds-between-every-form]],
-[[ai-context-bypasses-render-proc-retained-bytes]],
-[[complete-publication-takes-seventy-seconds]],
-[[contracted-defn-rebuilds-the-whole-schema-projection]],
-[[core-namespace-pages-spend-seven-seconds-without-declaration-fallbacks]], and
-[[render-package-proc-reruns-unchanged-renderers]].
-
-The archive repeats render-owner bypass and redundant derivation on
-2026-08-11 in [[archive/transcript-history-render-bypassed-retained-call]].
+Current open members carry `class/n9` and are derived with
+`bin/issues-index --class class/n9`.
 
 ## Owner
 

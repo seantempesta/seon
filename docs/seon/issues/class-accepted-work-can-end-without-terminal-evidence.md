@@ -15,18 +15,8 @@ distinguish completion, refusal, interruption, partial response, or lost work.
 
 ## Evidence
 
-Four open blockers/frictions span 2026-08-05 through 2026-08-10:
-[[a-mid-stream-provider-disconnect-discards-the-whole-turn]],
-[[a-runs-last-form-can-close-without-a-receipt]],
-[[background-binary-settlement-does-not-publish-required-event]], and
-[[interrupted-blob-staging-leaves-no-observable-artifact]].
-
-The archive repeats terminal loss on 2026-08-08 and 2026-08-10 in
-[[archive/recovery-closes-an-interrupted-run-without-marking-it]],
-[[archive/an-interrupted-my-shell-run-orphans-its-child-and-its-receipt]],
-[[archive/an-unreadable-reply-closes-a-run-with-no-forms-and-no-trace]], and
-[[archive/dropped-core-fault-count-is-not-durable]], with the 2026-08-11
-reconstruction recurrence [[archive/agent-definition-restore-reexecutes-authored-source]].
+Current open members carry `class/n10` and are derived with
+`bin/issues-index --class class/n10`.
 
 ## Owner
 

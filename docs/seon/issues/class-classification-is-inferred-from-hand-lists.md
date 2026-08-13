@@ -15,20 +15,8 @@ Each list is a second authority that silently misses the next valid member.
 
 ## Evidence
 
-Eight open issues span 2026-08-01 through 2026-08-11:
-[[agent-form-calls-to-core-namespaces-are-not-indexed]],
-[[changed-test-selector-classifies-hosts-by-path-prefix]],
-[[cluster-toolkit-stores-a-prefix-derived-projection]],
-[[config-ai-request-idents-are-derived-by-string-surgery]],
-[[config-dial-discovery-has-three-authorities]],
-[[initial-paint-census-is-a-hand-maintained-count]],
-[[operator-classifies-processes-by-command-substrings]], and
-[[render-walk-maintains-a-derived-edge-hand-list]].
-
-The archive repeats the class on 2026-08-11 in
-[[archive/render-walk-spells-declared-identities-as-raw-eids]]; the same-day
-walk repair demonstrated that querying `:seon.entity/id-attr` removes the
-roster.
+Current open members carry `class/n7` and are derived with
+`bin/issues-index --class class/n7`.
 
 ## Owner
 

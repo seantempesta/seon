@@ -15,19 +15,8 @@ Supported variants then behave differently or fail far from the boundary.
 
 ## Evidence
 
-Four open issues span 2026-08-01 through 2026-08-06:
-[[admit-inst-overlap-prefers-collection-shape]],
-[[blob-get-assumes-file-store-callback-shape]],
-[[schema-map-extraction-still-depends-on-position-two]], and
-[[transcript-about-lookup-passes-a-set-to-pull-many]].
-
-The archive repeats the class on 2026-08-07, 2026-08-08, and 2026-08-11 in
-[[archive/a-cohosted-second-cluster-cannot-boot]],
-[[archive/a-component-value-is-refused-by-its-own-ref-shape]],
-[[archive/walk-refuses-an-as-of-database-value-and-empties-the-agent-context]],
-[[archive/capture-basis-read-through-the-identity-reader-kills-the-turn]],
-[[archive/root-data-metadata-erased-named-sci-arity-identity]], and
-[[archive/datahike-pull-evidence-misses-automatic-component-expansion]].
+Current open members carry `class/n13` and are derived with
+`bin/issues-index --class class/n13`.
 
 ## Owner
 

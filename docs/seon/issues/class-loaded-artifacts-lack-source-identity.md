@@ -16,13 +16,8 @@ constructible whenever an owner or dependency moves.
 
 ## Evidence
 
-Five open issues span 2026-07-29 through 2026-08-08:
-[[a-schema-resource-edit-bricks-value-admission-in-every-running-cluster]],
-[[live-publication-has-a-hand-maintained-predicate-owner-reload]],
-[[partial-hot-reload-produces-mixed-code-with-no-warning]],
-[[publication-reload-hand-lists-namespaces-and-misses-dependencies]], and
-[[stale-language-specific-kondo-cache-blocks-correct-code]]. The latter two
-notes each record two separate occurrences on 2026-08-07 or 2026-08-08.
+Current open members carry `class/n3` and are derived with
+`bin/issues-index --class class/n3`.
 
 ## Owner
 

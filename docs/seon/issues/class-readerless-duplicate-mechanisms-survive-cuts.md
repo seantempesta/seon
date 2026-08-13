@@ -16,19 +16,8 @@ through its surviving owner.
 
 ## Evidence
 
-Nine open issues span 2026-07-27 through 2026-08-05:
-[[context-capture-prompts-bypass-the-blob-splitter]],
-[[datahike-allocates-a-konserve-cache-it-never-reads]],
-[[error-class-catalog-and-renderers-disagree]],
-[[flow-config-dials-have-two-registration-owners]],
-[[flow-has-no-read-set-control-and-a-hand-rolled-egress]],
-[[monitor-graph-command-proc-throws]],
-[[schema-datahike-keeps-a-readerless-second-codec]],
-[[schema-population-retains-five-readerless-rows]], and
-[[value-floor-residue-duplicate-cursors-and-marker-hand-lists]].
-
-The recent archive adds another duplicate-decision owner on 2026-08-08:
-[[archive/schema-key-immutability-swallows-the-usage-guard]].
+Current open members carry `class/n11` and are derived with
+`bin/issues-index --class class/n11`.
 
 ## Owner
 
