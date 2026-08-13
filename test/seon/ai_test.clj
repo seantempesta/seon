@@ -390,12 +390,26 @@
    :seon.ai.retry/maximum-total-delay-ms 100000})
 
 (deftest the-shipped-strategy-is-derived-from-the-shipped-dials
-  (let [derived (ai/retry-strategy @dials)]
+  (let [shipped-dials @dials
+        derived (ai/retry-strategy shipped-dials)
+        midpoint-schedule (ai/delays derived (constantly 0.5))]
     (is (schema/valid-candidate-value? :seon.ai.retry/strategy derived))
-    (testing "and the shipped budget is bounded by the RUN LEASE, not by
-    patience: a backed-off turn that outlives its own claim is worse
-    than a turn that gave up"
-      (is (< (:seon.ai.retry/maximum-total-delay-ms derived) 60000)))))
+    (is (= {:seon.ai.retry/base-delay-ms 500
+            :seon.ai.retry/multiplier 2.0
+            :seon.ai.retry/jitter-fraction 0.25
+            :seon.ai.retry/maximum-delay-ms 4000
+            :seon.ai.retry/maximum-retries 2
+            :seon.ai.retry/maximum-total-delay-ms 3000}
+           derived)
+        "every shipped retry dial reaches the one derived strategy")
+    (is (= [500 1000] midpoint-schedule)
+        "midpoint jitter preserves the exact base-plus-doubled schedule")
+    (is (<= (reduce + 0 midpoint-schedule)
+            (:seon.ai.retry/maximum-total-delay-ms derived))
+        "the complete shipped schedule fits its cumulative wait budget")
+    (is (< (:seon.ai.retry/maximum-total-delay-ms derived)
+           (:seon.config.ai/timeout-ms shipped-dials))
+        "the cumulative retry bound stays below the current call deadline")))
 
 (deftest with-no-jitter-the-schedule-is-exactly-the-doubling
   (is (= [100 200 400 800 1000]

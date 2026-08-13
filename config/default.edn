@@ -406,13 +406,10 @@
 
  ; Unit: milliseconds of TOTAL waiting across all retries.
  ; Provenance: THE BINDING BOUND, and it is bound by responsiveness,
- ; not by patience. (It was originally sized against the 60 s run
- ; lease; leases are DELETED — custody is presence, 2026-07-28 — and
- ; the number survives on its own merits.) The model call itself may
- ; take the full 60 s deadline, so the waiting budget has to stay small
- ; against the one deadline a turn already carries; three seconds
- ; covers the base + one doubled wait without making a backed-off turn
- ; feel wedged.
+ ; not by patience. The call deadline is the sibling `timeout-ms` dial;
+ ; the retry proof derives this wait budget's relationship to that shipped
+ ; fact instead of duplicating it here. Three seconds covers the base plus
+ ; one doubled wait without making a backed-off turn feel wedged.
  :seon.config.ai.retry/maximum-total-delay-ms 3000
 
  ; DECLARED INITIALIZATION ROWS. Provider wire facts live only on provider
