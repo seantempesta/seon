@@ -194,6 +194,25 @@ alongside `test-premise` (the proofs-without-premise class at its test
 infrastructure choke point). Both file-disjoint from the drain
 (db-diff → plan-t3 → dump-kill) and from each other.
 
+**2026-08-13 late-night drain state:** dump-kill LANDED (`c5f9e7701`:
+shared violation constructor deleted, flat refusals preserved, non-empty
+bypass census fails on new members; three members archived; the
+six-word-error MCP face waits on R3's `cluster.clj`). test-premise
+LANDED the runner choke point (`ad3d13e9b`: `{pass 0, fail 0, error 0}`
+at `:end-test-var` synthesizes an attributed failure on every runner
+path — assertionless green is unconstructable). The night question
+round ruled: derive-or-die into AGENTS.md §2.2; render-cost seam
+approved record-now; NO demonstrated mistakes (refusal teaches in the
+moment, rebirth cleans on compaction); #8 pricing NOT ruled — THE
+LIVE DRIVE MOVES UP, running after the drain + live-pull fix and
+BEFORE W3-W5; floor-first rendering ruled (`seon.render.value` derives
+good output for any registered shape; declared producers only for
+genuinely special surfaces — ledger 23-27). Index 177 open. Everything
+converges on plan-t3's return (R3 wedged twice through its uncommitted
+walk state — `walk/neighborhood → history` under render acquisition, a
+suspect hang in the T3 membership code itself for plan-t3's own gate to
+surface).
+
 **THE ORDERED QUEUE AFTER RETURNS:**
 1. R2 continuation, serial, red-tolerant: W2b (deferred producers in
    bootstrap/walk/plan once those lanes land) → W3 consumers dispatch on
