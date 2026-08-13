@@ -39,6 +39,19 @@ one decision away from queued work. Ruled items cite their record.
    issue's hand list with its `class/<id>` tag derivation (hand lists
    were provably stale within a day).
 
+## Ruled 2026-08-13 evening (owner, conversational)
+
+17. **Render the basis `t` beside every entry's result.** The receipt
+    already records the read-basis transaction; rendering it makes
+    incremental reasoning agent-operable (the agent anchors its own
+    `since` forms on a shown value, never a guess). Lands with T3.
+18. **No optional `:since` keys on domain functions.** Open maps ignore
+    unknown keys, so an unimplemented `:since` would silently return the
+    full listing while claiming to be a delta. The one honest idiom is
+    the composed `seon.db/since` + pull form the generator demonstrates;
+    a domain function may accrete a DECLARED since parameter only on
+    evidence the composed form is too clumsy.
+
 ## AWAITING OWNER RESPONSE — surfaced, discussed, not ruled
 
 8. **The "cheapest form" cost model.** V1: one comparison in the one
