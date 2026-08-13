@@ -372,7 +372,7 @@
         (is (schema/valid-candidate-value? :seon.error/value failure)
             "the missing input is already the loop's admitted error shape")))))
 
-(deftest prompt-refusals-stop-at-the-existing-episode-cap
+(deftest prompt-refusal-answers-its-trigger-once
   (with-connection
     (fn [connection ctx]
       (let [routing (armory)
@@ -401,28 +401,28 @@
               (async/offer! (:seon.cluster.wake/channel entry) ::wake)
               (test-support/await-event!
                (:seon.cluster.agent-test/events events)
-               ::prompt-refusal-cap
+               ::prompt-refusal-terminal
                #(let [db (:db-after %)]
-                  (and (= 3 (work/episode-runs db
+                  (and (= 1 (work/episode-runs db
                                                "prompt-refusal-cap"))
                        (quiescent? db ["prompt-refusal-cap"]))))
               (is (empty? @requests)
                   "no provider call occurs without a valid prompt")
-              (is (= 3 (work/episode-runs @connection
+              (is (= 1 (work/episode-runs @connection
                                           "prompt-refusal-cap")))
-              (is (= 3 (or (db/q '[:find (count ?error) .
+              (is (= 1 (or (db/q '[:find (count ?error) .
                                    :where
                                    [?error :seon.error/kind
                                     :seon.cluster.prompt/refused]]
                                  @connection)
                            0))
-                  "each bounded turn records one flat prompt refusal")
+                  "the answering run records one flat prompt refusal")
               (is (nil? (work/next-agent-work
                          @connection
                          {:seon.cluster.agent/id "prompt-refusal-cap"
                           :seon.cluster.run/process process
                           :seon.cluster.work/now (Date.)}))
-                  "the existing episode cap derives no fourth turn")))
+                  "the refused answering run derives no retry")))
           (finally
             (stop-database-events! connection events)
             (disarm-all! routing)))))))
@@ -1135,7 +1135,8 @@
                 _ (flow/resume control)]
             (try
               ;; let both graphs finish any prime pass under v1 first
-              (is (await-until #(pos? (::flow/count (turn-ping entry)))))
+              (is (await-until
+                   #(some-> (::flow/count (turn-ping entry)) pos?)))
               (alter-var-root #'agent/turn-step (constantly
                                                  (wrap original)))
               (testing "the armed graph's next pass observably runs v2,
@@ -1147,13 +1148,14 @@
               (testing "the fn-value control proc still runs v1"
                 (let [before @v2-ran
                       control-passes
-                      (::flow/count
-                       (flow/ping-proc control ::agent/turn))]
+                      (await-until
+                       #(some-> (flow/ping-proc control ::agent/turn)
+                                ::flow/count))]
                   (async/offer! control-channel ::wake)
                   (is (await-until
-                       #(> (::flow/count
-                            (flow/ping-proc control ::agent/turn))
-                           control-passes))
+                       #(some-> (flow/ping-proc control ::agent/turn)
+                                ::flow/count
+                                (> control-passes)))
                       "the control proc ran a pass")
                   (is (= before @v2-ran)
                       "and it never touched v2 — closures captured at
