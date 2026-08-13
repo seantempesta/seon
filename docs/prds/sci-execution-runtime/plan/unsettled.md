@@ -55,13 +55,12 @@ intent-membership approved as specced, R2 now/serial/red-tolerant,
 registered-keys-self-explain.
 
 **LANES RUNNING (fold each return before refilling):**
-- `todo-t1-t2` — my.plan T1+T2 per
-  [plan-context-prd-2026-08-13.md](plan-context-prd-2026-08-13.md)
-  (renamed mid-flight from my.todo; owns my.plan{,.item}.edn,
-  src/my/plan.clj, test/my/plan_test.clj). After it lands: T3
-  (membership + `:about` resolution-validation + usage-demo rendering) is
-  APPROVED and next — owners add src/seon/bootstrap.clj +
-  src/seon/render/walk.clj, so serialize behind the rebirth lane.
+- `todo-t1-t2` — RETURNED COMPLETE: T1 `d8a545a3e`, T2 `cd755d92d`
+  (whole-value `plan!` reconciliation with every quarried property green:
+  fenced tx via Datahike's native `:datahike/expected-basis-t`, explicit
+  counts, ambiguity refusal, no-op convergence, union guard). T3
+  (membership + `:about` validation + usage-demo rendering) is APPROVED
+  and queued after W2b frees bootstrap/walk.
 - `rebirth-gap-authored-results` — RETURNED: mechanism landed in
   `61136c874` (authored results from public functions + green usage-test
   facts, content-bearing namespace prioritized after `(help)`, ruling-46
