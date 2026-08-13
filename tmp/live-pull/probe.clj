@@ -216,6 +216,9 @@
          [#'db/pull :seon-db-pull]
          [#'db/q :seon-db-query]
          [#'pull-api/pull-spec :datahike-pull-execution]
+         [#'pull-api/pull-pattern-frame :datahike-pull-pattern-frame]
+         [#'pull-api/pull-attr :datahike-pull-attribute]
+         [#'pull-api/pull-attr-datoms :datahike-pull-attribute-datoms]
          [#'pull-api/pull-dependency-plan :datahike-dependency-plan]
          [(private-var 'seon.db 'decode-pull-result) :pull-result-decode]
          [(private-var 'seon.render.walk 'acquisition-members)
