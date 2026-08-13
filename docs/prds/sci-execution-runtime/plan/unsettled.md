@@ -227,6 +227,18 @@ declarations). After those: six-word-error MCP face (frees with R3),
 remaining premise members, reset + live-pull fix → THE DRIVE (before
 W3-W5 per ruling 26).
 
+**T3 REGRESSION CONFIRMED (2026-08-13 night):** the walk wedge
+reproduces against COMMITTED `9eae1664d` — `walk/neighborhood` hangs
+under a HISTORY database in
+`seon.cluster.boot-test/incremental-source-refresh…`, wedging
+`cluster/stop!`. Filed + scheduled as the blocker
+[walk-neighborhood-under-history-can-wedge-cluster-stop](../../seon/issues/walk-neighborhood-under-history-can-wedge-cluster-stop.md)
+(R3's watchdog + thread-dump evidence). The `entity-flag-deletion` lane
+(owns walk.clj) was redirected: fix this FIRST at cause with the class
+regression (temporal walk terminates or refuses within the bound),
+commit alone, then its original scope. R3 holds on that fix — it is the
+critical path to the drive.
+
 **THE ORDERED QUEUE AFTER RETURNS:**
 1. R2 continuation, serial, red-tolerant: W2b (deferred producers in
    bootstrap/walk/plan once those lanes land) → W3 consumers dispatch on
