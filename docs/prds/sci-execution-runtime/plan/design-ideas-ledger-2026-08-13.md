@@ -71,6 +71,27 @@ one decision away from queued work. Ruled items cite their record.
     executed delta entries; the falsifier is replaying generated forms
     in a fresh fork and comparing.
 
+20. **`seon.db/diff` — the one generic delta helper** (owner, 2026-08-13
+    late; supersedes the per-function temporal-options emphasis of 18):
+    no function is ever taught the basis. Any form whose function
+    declares a `:seon.db/db` input (a program-graph arity input-ref
+    query, never a roster) is diffable from outside:
+    `(seon.db/diff {:seon.db/form '(my.message/inbox) :seon.db/basis-t 1200})`
+    executes the same form against `(as-of db basis-t)` and the current
+    database (purity over the db value — no external sink, also a graph
+    query — guarantees honest replay), then diffs by derived identity
+    (`:seon.entity/id-attr`), `clojure.data/diff` fallback for
+    identity-less values. Returns
+    `#:seon.db.diff{:added :changed :removed}` +
+    `:seon.db/basis-t`/`:seon.db/current-basis-t`. Undiffable input =
+    loud typed refusal. v2 optimization behind the same contract: diff
+    current against the receipt's stored prior result instead of
+    replaying. Existing declared options like `:my.message/inbox-options`
+    stay as harmless accretion; no new function adds one. The generator's
+    cheapest-form choice becomes full form vs this one helper.
+    Implementation rides with T3; the key spelling follows the ruled
+    `:seon.db/database-value` → `:seon.db/db` unification.
+
 ## AWAITING OWNER RESPONSE — surfaced, discussed, not ruled
 
 8. **The "cheapest form" cost model.** V1: one comparison in the one
