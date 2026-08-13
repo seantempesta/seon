@@ -2,1503 +2,679 @@
 
 This is the one maintained repository instruction authority. Codex reads
 `AGENTS.md` directly; Claude reads the same bytes through the same-directory
-`CLAUDE.md -> AGENTS.md` compatibility link. The thin delegated-lane adapter
-lives in `AGENT.md`.
+`CLAUDE.md -> AGENTS.md` compatibility link. When the tree contradicts a
+claim here, the claim is the bug: fix this file in the same commit as the
+change that exposed it.
 
-If you were spawned as a subagent, execute the assigned task directly. Do not
-spawn or delegate again. If the task is too broad, report that to the top-level
-orchestrator for rescoping.
+**If you were spawned as a lane or subagent:** execute the bounded
+assignment directly — never delegate or spawn again. Stay inside your owned
+paths and preserve every protected path and unrelated shared-tree edit.
+Never start, stop, reset, or mutate a shared cluster or process unless the
+assignment grants it. An out-of-scope finding gets a durable
+`docs/seon/issues/` note, never a silent scope expansion. Your report is an
+integration input for the orchestrator, not authority to claim the parent
+task complete. If the task is too broad, say so for rescoping.
 
-The top-level agent owns user communication, the active roadmap, cross-lane
-integration, final design judgment, and proof that separately completed work
-forms one system. Delegate only a coherent independent result, not fragments
-whose integration requires the delegate to reconstruct the whole question.
-Returned reports are claims to review: read enough source to judge them,
-falsify risky conclusions independently, and keep overlapping shared files at
-the top level.
+## How we work here
 
-## Standing goal — delete the old system at full throttle (owner-ruled 2026-07-24 PM)
+**This is the second implementation.** The first one worked — for months —
+and was torn down deliberately by its author, because he had learned enough
+to build it properly. That fact should reorganize how you work: almost
+everything you are asked to build has been built before, and the previous
+version is readable through Git history. `git show` and `git log` are the
+quarry; `docs/prds/*/research/` holds dated investigations with `file:line`
+evidence and measured numbers; `reference-code/` vendors ~90 dependencies as
+submodules so their semantics can be READ rather than remembered. The prime
+directive is not "write good code" — it is **do the archaeology before you
+design, then design something better than what you found**. The fresh tree is
+not zero knowledge; it is zero *baggage*: every piece re-earns its place.
 
-THE GREAT DELETION IS THE SPINE. The pod's self-host/child execution
-machinery — the cljs.js self-host engine, eval.cljs, the execution
-child and its bands, every pod-only duplicate of a mechanism the JVM
-now owns — gets DELETED, slice by slice, starting immediately, without
-waiting for green suites. Old tests that pin a deleted path are deleted
-in the same commit; the tests that replace them assert the SURVIVING
-mechanism, written from the lessons learned, never green-washed. Do not
-port old code into new homes: design the replacement fresh from the
-architecture target, and prefer NO replacement when the JVM path
-already owns the behavior.
+**Ask what the dependency already does before you build anything.** sci keeps
+a live env; konserve has GC and content-addressed blobs; Datahike branches
+are head pointers, not copies. If your design recomputes something a
+dependency already maintains, the design is wrong — this exact mistake once
+put a 283 ms cold-start rebuild on every agent turn. The cheapest place to
+delete code is before it exists: build the smallest real thing and let live
+falsifiers attack the design while it is still a decision.
 
-THE CONVERSION TEST IS SIMPLIFICATION, not relocation (owner ruling
-2026-07-24 night, after the R52/R53 pattern): a function that "runs on
-the new tier" but keeps its old-model shape is NOT converted — it is a
-ported defect. Under the stateless claim-native model EFFECTS reduce to three
-shapes: pure code returning VALUES the run loop interprets (lifecycle,
-dispositions, plans); genuine capability requests through the one
-guarded door (fs, web, llm, db); and durable FACTS the run loop commits
-(memory, messages, receipts). THIS IS A RULE ABOUT HOW EFFECTS HAPPEN,
-NEVER ABOUT WHAT IS CALLABLE: every agent may call every function in
-its cluster's program graph (ruling #20), and any reading of "three
-shapes" as a restricted toolkit is the poisoned inversion that ruling
-overturned. Anything
-agent-facing that performs runtime semantics effectfully from inside
-an eval — leaf-bound lifecycle calls, in-eval turn/run mutation,
-side-channel delivery — is old-engine residue: redesign it into one of
-the three shapes and DELETE the old form, never bind it into the new
-tier. When reviewing any surviving surface, ask first: "is this
-simpler than it was?" If it is equally complex, the model was ported,
-not applied.
+**Prefer dissolution to addition.** The best change deletes a mechanism.
+When you meet a tuned constant, ask what observable event it stands in for.
+When a fix feels like hardening a mechanism against its own normal
+operation, stop and ask whether the mechanism belongs on that path at all.
 
-CUT FIRST, SEAM-FIX SECOND (owner ruling 2026-07-24 night): when a
-deletion/conversion list exists, land the ENTIRE wave of cuts before
-polishing any individual seam. A discovered seam defect during a cut
-wave gets a one-line issue and the cutting continues; seam repair is
-its own later wave over the finished wreckage. Never let one seam's
-perfection gate the next cut — that sequencing inverts the refactor
-and is how old shapes survive. A deletion slice is blocked ONLY by a real
-implementation dependency — something live still calls the path and the
-surviving owner genuinely cannot serve it yet. Name that dependency,
-fix it at the surviving owner, resume deleting. Let it crash: breakage
-exposed by deletion is discovery, not failure — fix forward, never
-restore the deleted path.
+**Derive state; do not remember it.** This project has had six of six
+assumptions falsified in one sitting. Verify prose — including this file —
+with one live command before acting on it. Nothing stores what a query can
+derive: `open?` means no `closed-at`; a boolean is legitimate only when
+someone genuinely asserts the false.
 
-The morning goal's mechanics stay in force: multiple lanes ALWAYS,
-limited only by real conflicts (same-file ownership, a frozen-tree
-checkpoint, an exhausted budget) — an idle slot with dependency-ready
-work queued is an orchestrator bug. Supervision every ≤15 minutes of
-wall time: verify each lane's transcript shows REAL work (long is fine,
-quiet is not); stop + resume with the correction the same minute; lanes
-commit coherent gains as they go so progress lives in git. Shared-tree
-churn, rebuilds, restarts, and database resets are normal weather and
-FREE resilience drills — abandon a unit only when it genuinely cannot
-proceed, recording why. Research and implementation always run
-concurrently. Timeouts are last resorts; interfaces express their
-dependencies and publish their own readiness.
+**The recurring failure class of this whole project is a check that reads
+ABSENCE OF SIGNAL as health** — a query against a descriptor that no longer
+exists, a regression walking less than the writer admits, a monitor that
+stays silent through a crash. When you write any check, ask what it reports
+when its subject is absent. If the answer is "fine," the check is worse than
+nothing.
 
-DEVELOPMENT VELOCITY OUTRANKS THE QUEUE (owner-ruled 2026-07-24 PM):
-anything extremely slow that taxes every fix cycle — a 300s restart, a
-14s JVM load, a blocked test runner, a stale artifact gate, a rebuild
-that recomputes what a cache already knows — is attacked IMMEDIATELY in
-a parallel lane the moment it is identified, never waited on and never
-parked behind feature work. The fix loop's speed is the multiplier on
-everything else; treat a slow loop as a production incident for
-development.
+**Write it down in the same beat.** Rulings into the plan README, state into
+the working edge, settled terms into the vocabulary table, defects into
+issues — in the turn it happens, path-limited commit. Conversation memory is
+never the only record.
 
-## Sustained program cadence
-
-The top-level agent keeps the complete active-program ledger visible while it
-works on the dependency-critical slice. At the start of a work period and
-after context compaction, read the high-level program roadmap plus the current
-chunk roadmap, reconcile the working plan with both, and name the next ordered
-implementation boundary and every independent lane that can advance safely.
-
-Use available subagents continuously when concrete independent work exists:
-
-- keep one integration/implementation lane on the critical dependency path;
-- fill other slots with coherent non-overlapping source audits, downstream
-  research, test/proof design, or bounded implementation in separate owners;
-- give each lane the relevant architecture/roadmap context, dependency-ledger
-  and `reference-code/` requirement, owned paths, protected paths, and an exact
-  durable report or code/proof deliverable;
-- do not wait idly for a lane when the top-level agent can advance another
-  safe task, and do not parallelize edits to the same mechanism merely to keep
-  slots busy; and
-- review and integrate each returned result promptly, then refill the slot
-  from the remaining program ledger when another independent task is ready.
-
-Before a long verification run or likely compaction boundary, update the
-current PRD roadmap with durable current state/evidence and leave the working
-plan ordered. Conversation memory, an agent's private context, and a running
-subagent are never the only record of what remains. Parallel throughput never
-overrides dependency order, one-mechanism ownership, shared-tree safety, or
-the requirement that the top-level agent prove the integrated system.
-
-A build, restart, reset, or live-proof checkpoint is a coordinated source
-freeze for every path included in its artifact digest. Before starting one,
-pause source-editing lanes and wait for their owned files to be coherent; do
-not count the checkpoint if a build input changes before readiness. Release
-the lanes immediately after the checkpoint ends. If an interrupted operator
-leaves a recorded child alive, use `bin/seon down` so the supervisor reaps its
-own processes rather than killing the child directly.
-
-Periodically (and after any fork sync), commission an UPSTREAM-DELTA
-SWEEP of the vendored forks under `reference-code/`: what upstream
-shipped since our pin, and what sits IN our pin unevaluated (the
-2026-07-31 precedent: Datahike's opt-in index-root fusion — a 5×
-write-amplification win authored upstream in May — sat unnoticed until
-a perf dig read the writer source). Every adoptable delta gets an issue
-with an owner; experimental features gate on our own falsifiers, never
-upstream's word.
-
-After every big landing wave (a rung completing, a multi-lane day, a
-deletion wave), commission an INDEPENDENT adversarial audit of the
-changed tree — an agent that trusts no lane's report, sweeps for the
-past's known failure modes (second mechanisms, hand lists,
-stored-derived creep, unjustified clocks, symptom patches, lying
-docstrings), REPL-falsifies suspicions, files ranked issues, and
-reports what is genuinely in good shape (calibration, not just alarm).
-Fix lanes dispatch on its return; blockers at the newest seams are the
-expected yield (owner-ruled standing cadence, 2026-07-29).
-
-Run the same control loop after every returned lane, material discovery, or
-completed commit:
-
-1. compare the result with the persistent goal and the complete program ledger;
-2. update the current chunk's evidence, state, dependency edge, and next exit;
-3. review and integrate or reject the returned claim before building on it;
-4. advance the earliest dependency-ready implementation at the top level; and
-5. refill every other safe slot from the documented queue.
-
-This reconciliation is the scheduling clock for the whole program. Perform it
-before accepting follow-on work from a returned lane, before expanding a local
-investigation, and before reporting cumulative status. The answer must still
-name the earliest unsettled contract, every occupied parallel lane, the next
-dependency-ready refill, and the final graduation gate. A locally green slice
-does not change the persistent goal or make later units disappear.
-
-The top-level working plan is a compact projection of that ledger, not a second
-roadmap. Keep it current, with exactly one in-progress critical-path item and
-explicit pending integration/proof boundaries. If the current work cannot be
-traced to one of those exits, stop, record the finding if useful, and resume
-the ordered program.
-
-Keep four durable fields visible in the active PRD whenever several lanes are
-running: the earliest unsettled contract, the integrated proof that closes it,
-the dependency-ready parallel portfolio, and the next refill for each occupied
-slot. A lane report without one of those destinations is context, not a reason
-to displace the spine. Begin every investigation with the shortest falsifier
-for a named exit; once evidence shows that the finding is independent, record
-or delegate it and return to the ordered boundary instead of exhaustively
-polishing it in the top-level context.
-
-When the harness provides a persistent goal, its objective names the complete
-program outcome and final graduation gate, never only the current lane. Check
-that goal against the program ledger after every compaction and lane return.
-Do not mark the program blocked because one lane is waiting: keep the goal
-active while any dependency-ready spine, integration, research, or proof work
-can advance, and record the local wait in its owning roadmap or issue instead.
-
-Separate sequencing from concurrency explicitly. The earliest unsettled
-contract and its integrated proof form the ordered spine; no consumer may
-invent or assume that contract. Everything else is a rolling parallel
-portfolio: later-unit source grounding, independent consumer implementation
-against already-settled contracts, downstream packaging, and bounded proof
-work may occupy the remaining slots. Keep the top level available to review
-cross-boundary decisions, resolve overlaps, update the ledger, and integrate
-proof; it should not duplicate a delegated implementation merely to appear
-busy. A returned lane frees a slot only after its claims and owned diff are
-reviewed, but unrelated lanes never wait for that review.
-
-Do not let a locally interesting defect silently replace the program. Before
-expanding an investigation, name the roadmap exit measure it blocks. If it
-does not block the active slice and can be isolated safely, record it in the
-owning issue/PRD with evidence and acceptance criteria, then return to the
-earliest dependency-ready work. A bug becomes an interrupt only when it
-invalidates current proof, threatens data or shared-tree safety, or prevents
-the next ordered boundary from being implemented.
-
-## A FOREIGN LANE'S BREAKAGE NEVER BLOCKS YOUR COMMIT
-
-Shared-tree work means another lane's in-flight edits will break your
-gate, your publication, or your fixture population. That blocks
-VERIFICATION only. It never blocks holding or committing your own
-coherent, path-limited work — and it never justifies deleting your own
-diff. Six lanes hit this on 2026-08-03; one deleted its finished
-falsifier and launcher changes at a foreign boundary and had to redo
-them. The correct moves are: commit your coherent slice path-limited
-(noting in the message that final verification awaits the foreign fix),
-name whose breakage it is, and stop. Report it — a foreign blocker is
-information the orchestrator needs, and it is usually a real defect in
-the other lane worth fixing in minutes.
-
-## Verify the claim before you name the cause
-
-An attribution is a hypothesis until a probe confirms it. On
-2026-08-03 the orchestrator attributed a suite hang to a missing
-completion delivery (a lane refuted it with a virtual-thread-aware
-dump: the turn was still running), attributed a stale-class incident to
-a cache refresh (a later probe found soft-reference eviction explains
-it with no refresh involved), and named a wrong commit as a wedge's
-lead (the vulnerable code predated it). Each wrong attribution cost a
-lane real time. THREAD DUMPS THAT OMIT VIRTUAL THREADS LIE — use a
-virtual-thread-aware dump. A lane that refutes its assignment with
-evidence has done its job well; say so, and redispatch on what the
-evidence actually shows.
-
-## Instruction discovery and localization
-
-Before changing a subtree, find and read the closest nested `AGENTS.md`, and
-recheck it after context compaction. Never edit a `CLAUDE.md`; a regular
-first-party `CLAUDE.md` is drift that must be reconciled into the adjacent
-authority before restoring the symlink.
-
-Claude discovers descendant links when it reads in that subtree. Codex builds
-its native chain only from the Git root to the task's selected working
-directory: a root-started task must read the closest nested file explicitly,
-while `codex --cd <subtree>` guarantees native root-to-leaf loading. Project
-config raises the combined instruction budget, but localized files must still
-stay tight.
-
-Localized files contain durable ownership, invariants, runbooks, and links—not
-status diaries. One fact lives in the deepest file that owns it. If a change
-invalidates that fact, update the localized authority in the same commit.
-
-## How Seon runs at its core
+## 1. What Seon is and how it runs
 
 One JVM process runs everything, from source, REPL-first. CLJ only — the
-CLJS build is off (owner, 2026-07-27). Fresh `src/`+`test/` are the
-system. The old system's quarry (`src-old/`/`test-old/`) was deleted
-from the working tree on 2026-08-05 (owner sweep ruling); git history
-is the archive — quarrying is `git show`/`git log`, never a checkout
-directory.
+CLJS build is off and the pod/self-host engine is deleted; git history is
+the archive for everything deleted. Fresh `src/` + `test/` are the system.
 
-Boot is a tower; each layer reads only the one below it and publishes
-its own readiness:
+The system has exactly two states: **boot** and **running**. Boot is the
+0→1 construction in dependency order, and it opens the REPL at second zero
+so a boot failure is always fixable live; each layer reads only the one
+below it and publishes its own readiness. Then running code takes over:
+platform infrastructure plus agents, all receiving the environment boot
+produced. The boot order:
 
 1. **Process.** Start reads a closed, tiny bootstrap config (process-root
-   store path, prepl bind, log dir — nothing the database could own) and
-   opens the selected cluster's REPL at second zero. Process identity is
-   (pid, start-instant); a cluster advertisement adds the cluster name and
-   its own REPL coordinate. Per-cluster paths derive from the cluster name.
-2. **Store.** One process root owns one Datahike store
-   (`data/clusters/store`) under a lifetime `flock`; each cluster is one
-   named branch with one live connection. Datahike's writer is its own serial
-   loop per connection — we never build writers, we call `transact` and it
-   serializes. Two JVMs on one physical store once destroyed 40/40 commits
-   silently, so the store fence is process-root-wide. One JVM may host many
-   cluster instances; they share only the process-root store holder and root
-   executors, while branch facts, connections, graphs, and lifecycle remain
-   cluster-specific. Nothing may assume "the" cluster.
-3. **Facts.** A config manifest reconciles into database facts;
-   runtime reads the database, never files or env vars. One non-executing
-   `:current-src` branch holds indexed code plus initialization pages; a new
-   cluster forks its exact published commit ID — near-instant, never a
-   re-index. An existing cluster remains a sovereign older program until the
-   operator destructively reforks it; startup never migrates code facts.
-4. **Flow.** EVERY AGENT IS ITS OWN FLOW GRAPH (owner ruling
-   2026-07-28), created with the agent from one blueprint, parked
-   between episodes (two procs, ~8.5 KB per parked proc — measured in
-   `flow-mechanics-2026-07-28.md`), kicked off by the messages it
-   receives, pausable/resumable per agent. Per cluster, a few shared
-   plumbing graphs: render pipeline and fault committer.
-   There is NO central loop, dispatcher, or scheduler — that shape is
-   rejected as "a JavaScript event loop inside Clojure." The process
-   root owns one bounded `:compute` executor and one `:io` (virtual
-   threads) executor shared by every graph. Every proc pins `:io` or
-   `:compute` explicitly — the `:mixed` default pins a platform thread
-   per proc and is the one scaling cliff.
+   store path, prepl bind, log dir — nothing the database could own).
+   Process identity is (pid, start-instant); per-cluster paths derive from
+   the cluster name.
+2. **Store.** One process root owns one Datahike store (today at
+   `data/clusters/store`) under a lifetime `flock`; each cluster is one
+   named branch with one live connection. Datahike's writer is its own
+   serial loop per connection — we never build writers, we call `transact`
+   and it serializes ([writer](reference-code/datahike/src/datahike/writer.cljc)).
+   The `flock` is ours: nothing in Datahike stops a second process opening
+   the same store, and two JVMs on one store once destroyed 40/40 commits
+   silently. One JVM may host many cluster instances; nothing may assume
+   "the" cluster.
+3. **Facts.** A config manifest reconciles into database facts; running
+   code reads the database, never files or env vars. One non-executing
+   `:current-src` branch holds indexed code; a new cluster forks its exact
+   published commit ID — near-instant, never a re-index. An existing
+   cluster remains a sovereign older program until destructively reforked.
+4. **Flow.** EVERY AGENT IS ITS OWN FLOW GRAPH, created with the agent from
+   one blueprint, parked between episodes, kicked off by the messages it
+   receives; per cluster, a few shared plumbing graphs (render pipeline,
+   fault committer). There is NO central loop, dispatcher, or scheduler.
+   The process root owns one bounded `:compute` executor and one `:io`
+   (virtual threads) executor; every proc pins `:io` or `:compute`
+   explicitly — the `:mixed` default pins a platform thread per proc and is
+   the one scaling cliff
+   ([dispatch](reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj)).
+
+A **cluster** is one database branch, its agents, and their shared plumbing;
+boot produces ONE environment value per cluster (`seon.env` ↔
+`resources/seon/schemas/seon.env.edn`), and each agent receives a scoped
+view of it (`seon.env/scope` carries the agent id). The cluster is the
+shared substrate; the scoped environment is what an agent's code actually
+holds.
 
 **Live update is two cases, one mechanism each.** Graph definitions
-reference transforms as vars (`#'f`), so re-evaluating a `defn` against
-the running system changes proc behavior immediately — zero restart.
-Topology changes (procs, conns, buffers) rebuild the graph — stop →
-`create-flow` → start, measured ~0.3 ms — which is safe because
-channel contents are losable by construction; all durable work
-re-derives from database facts.
+reference transforms as vars (`#'f`), so re-evaluating a `defn` against the
+running system changes proc behavior immediately. Topology changes rebuild
+the graph (stop → `create-flow` → start), safe because channel contents are
+losable by construction.
 
-**Hot reload is not program-graph indexing.** Re-evaluating a Var changes the
-behavior of code already loaded in that JVM, but file edits do not mutate the
-database's `:seon.fn`, `:seon.ns`, `:seon.schema`, or `:seon.test` facts.
-The edit hook statically analyzes changed first-party files and publishes safe
-same-identity upserts to the one `:current-src` branch without evaluating
-application forms. Deletions, new identities, schema-resource changes, missing
-artifacts, and uncertain projections fall back to a complete scratch build and
-one guarded branch-head publication. `bin/seon init` performs that complete
-publication explicitly; `bin/seon init --changed PATH...` is the incremental
-surface. Existing clusters are sovereign and are never synchronized.
-`bin/seon init CLUSTER --force` destroys that branch and reforks it from the
-published commit. A live proof after file edits must name whether it exercised
-only a hot-reloaded Var or a cluster forked from the newly published commit.
+**Hot reload is not program-graph indexing.** Re-evaluating a Var changes
+loaded behavior; file edits do not mutate the database's program facts. The
+edit hook statically analyzes changed first-party files and publishes safe
+same-identity upserts to `:current-src`; uncertain projections fall back to
+a complete build. `bin/seon init` is the explicit complete publication;
+existing clusters are never synchronized. A live proof after file edits must
+name whether it exercised a hot-reloaded Var or a cluster forked from the
+newly published commit.
 
-**Transport law (owner ruling 2026-07-28, revising "disposable values
-only"):** anything recovery or another process could ever need is a
-DATABASE FACT — identities, receipts, messages, errors, the settled
-reply — with bulky payloads as blobs and the row carrying
-identity/digest/size. Everything IN FLIGHT rides channels however
-large (8 MB crosses a channel ~7,000× faster than a file-store
-transact), provided loss is free: re-derivable from facts or
-superseded by a newer complete value. The buffer encodes the loss
-semantics: sliding-1 for latest-wins (streamed tokens), fixed for
-backpressure, counted-dropping for observation. Any design where
-channel loss breaks recovery is wrong by definition.
+**Transport law:** anything recovery or another process could ever need is
+a DATABASE FACT — identities, receipts, messages, errors, the settled
+reply — with bulky payloads as blobs. Everything IN FLIGHT rides channels,
+provided loss is free: re-derivable from facts or superseded by a newer
+complete value. The buffer encodes the loss semantics: sliding-1 for
+latest-wins, fixed for backpressure, counted-dropping for observation.
+Any design where channel loss breaks recovery is wrong by definition.
 
 **Crash model: nothing re-executes.** Recovery = reopen the store, mark
 dangling receipts `:interrupted`, re-derive the graph; the agent adapts
-from derived context. Runs are claimable database state: custody is presence of
-`:seon.cluster.run/process`, and the process is the holder — never say
-"claimant". There is no claim epoch or lease clock.
+from derived context. Runs are claimable database state: custody is
+presence of `:seon.cluster.run/process`
+(`resources/seon/schemas/seon.cluster.run.edn` ↔ `src/seon/cluster/run.clj`).
+No claim epoch, no lease clock. Absence is the one representation a dead
+process cannot corrupt.
 
 **Errors are two classes, never mixed.** An agent mistake becomes a flat
-`:seon.error` value the agent sees — nothing throws into the loop, and
-sci containment catches mistakes but is not a security boundary. A core
-fault rides flow's error-chan into the fault-committer proc, which
-commits it as a durable fact with provenance — so "who should fix this"
-is a query. One config dial: dev panics, prod degrades.
-
-**Scheduling is core.async's own enum, derived never declared.**
-`:compute` = bounded ≈ cores, must never block — sci evals run here on
-platform threads under the one `:interrupt-fn`; `:io` = blocking
-transport (model calls, SSE writes), must never compute; `:mixed` =
-fail-closed default for code the graph cannot resolve (its own
-platform thread — safe, expensive, the incentive to annotate).
-Classification is per-function and DERIVED (owner ruling 2026-07-28,
-`workload-classification-2026-07-28.md`): key capability leaves carry
-`^{:seon.workload :io}`/`:compute` defn metadata lifted into
-`:seon.fn/workload` at index time; chains derive by reachability over
-`:seon.fn/calls` — only-compute ⇒ `:compute`, only-io ⇒ `:io`, both in
-one chain ⇒ `:mixed`, unresolved ⇒ `:mixed`. Never annotate everything;
-scheduling acts at exactly two seams (proc workload tags and the eval/
-capability door) — per-function classification, per-proc execution.
-
-Orientation for anyone new: `docs/TRANSFER_PROMPT.md` (what Seon is, why
-archaeology precedes design, which skills to load, the warts, the
-mentality). Deeper: plan `README.md` (rulings + ladder), research
-docs `flow-mechanics-2026-07-28.md`, `flow-inventory-2026-07-28.md`,
-`workload-classification-2026-07-28.md` (the agents-are-flows model,
-measured), `flow-per-cluster-2026-07-27.md`,
-`datahike-multistore-2026-07-27.md`, `flow-dynamic-update-2026-07-27.md`
-(every claim above carries file:line evidence there), and the sources
-themselves: `reference-code/core.async/.../flow.clj` + `flow/impl.clj` +
-`flow/spi.clj`, `reference-code/datahike/src/datahike/writer.cljc` +
-`writing.cljc`, `reference-code/konserve/`.
-
-Gotchas: the `flock` is ours — nothing in Datahike stops a second
-process opening the same store; `listen!` fires on transact only, so
-register interest before deriving current work; never block a
-`:compute` thread or compute on `:io`.
+`:seon.error` value the agent sees — nothing throws into the loop. A core
+fault rides flow's error-chan into the fault committer, which commits it as
+a durable fact with provenance, so "who should fix this" is a query. One
+config dial: dev panics, prod degrades.
 
 Seon is the core: consumer-specific UI, vendor integrations, and domain
 models belong in downstream repositories, never `src/` or `docs/`.
+Orientation for anyone new: [docs/TRANSFER_PROMPT.md](docs/TRANSFER_PROMPT.md).
 
-## Portable code, platform edges, and SCI
+## 2. The five design laws
 
-Write portable `.cljc` by default. A `.cljc` is wrong only if it
-contains unconditional platform code.
+These constructions prevent the defect classes that filled the issue
+archive. Design with them from the start; a review asks first "which law
+does this shape obey or break?"
 
-- **Family core + one leaf per tier.** Every capability family (fs,
-  shell, web, blob, LLM, db) is a pure portable core plus one thin
-  platform leaf per tier; the entry functions are the only
-  reader-conditional site. Platform residue (js/Date, node:fs,
-  java.net.http, SDK objects) lives in leaves or reader-tag islands,
-  never mid-logic.
-- **Async is contagious upward — push it down.** The CLJ path is plain
-  synchronous (virtual threads park); the CLJS leaf awaits. Logic above
-  the leaf is plain portable Clojure; `^:async` markers exist only at
-  the one executor/leaf call.
-- **Agent code needs no conditionals, ever.** Agents write plain Clojure
-  into the corpus (database facts); SCI is one interpreter on every
-  tier, so pure corpus code runs anywhere. Portability is DERIVED, not
-  declared: `plan-execution` computes placement from the indexed call
-  graph (capability edges, package prefixes, purity), and a contract
-  predicate is admissible exactly when its call graph is pure and
-  capability-free.
-- **Every sci invocation passes the one guarded door** (fuel, deadline,
-  and output caps, all config facts); durable defns REQUIRE a complete
-  `:malli/schema` (no `:any` — use named predicate schemas for genuine
-  polymorphism); registrations are committed `:seon.schema` facts that
-  tiers ACQUIRE at a basis — loading a namespace never publishes
-  schema.
-- **Boundaries turn values into data.** Wire crossings carry
-  schema-projected ordinary values; tier-local objects cross as
-  result-symbol references; failures are flat error values. The writer
-  compiles core predicates via `requiring-resolve` — it never needs
-  SCI.
-- **Prove portability, don't assume it.** A `.cljc` rename is not a
-  portability proof: require the namespace on the JVM immediately, and
-  put dual-tier tests below a namespace directory so both runners
-  discover them. Read `docs/prds/sci-execution-runtime/conversion-wiki.md`
-  before portable-core work and append new scars.
+### 2.1 Values carry their world
 
-## Documentation authority
+Everything a computation needs travels WITH it as ordinary data: the
+environment (`seon.env`), the schema projection, the database value or
+connection, the render profile, an effect request's settlement inputs.
+Running code receives its world — through the sci ctx/fork, submission
+data, proc `:args`, or the request map — as arguments and values. It never
+fetches its inputs from somewhere else at call time: not from a dynamic
+var, not from a process-global registry or atom, not by re-deriving them
+fresh on every call. Derived state rides the value it derives from (a
+validator on its projection, a writer on its connection), so staleness and
+cross-environment reads are structurally impossible. Temporal database
+values (`history`/`as-of`/`since`) derive schema through Datahike's origin
+chain, never from the wrapper
+([versioning](reference-code/datahike/src/datahike/versioning.cljc)).
 
-There are two documentation layers and no third:
-
-- `docs/seon/architecture/` is the single always-current description of the
-  aspirational intended system. It is target-written in present tense, but
-  present tense never claims that source already implements the target. Read
-  `architecture.md` first, then the relevant domain document. Update it when a
-  design decision changes; never put current implementation state, gaps,
-  sequencing, evidence, graduation status, or a migration diary there.
-- The active program roadmap (currently
-  `docs/prds/sci-execution-runtime/plan/README.md`, with `plan/unsettled.md`
-  for the working edge) is the high-level ledger of current state, remaining
-  architecture deltas, dependency order, and success measures. It points to
-  bounded successor PRDs; it does not absorb their detailed audits or
-  implementation plans. `program-synthesis-2026-07-21.md` is the superseded
-  historical anchor and sequences nothing.
-- `docs/prds/<chunk>/` contains one implementable roadmap chunk on its own
-  branch. Its `roadmap.md` owns that chunk's exact source inventory, built/gap
-  state, implementation order, evidence, and graduation status. Its localized
-  `AGENTS.md` is a tight runbook/index, and dated audits/raw evidence live in
-  its `research/` directory. Carve the folder before doing deep research for
-  the chunk, then finish and merge it before starting dependent implementation.
-
-After a material change, update the affected architecture target, the active
-PRD roadmap, and any localized authority whose durable guidance changed.
-Research depth lives in dated `docs/prds/<chunk>/research/` files with evidence
-and raw external responses; conversations are not durable research artifacts.
-
-Architecture map:
-
-- `context.md` — database-derived blocks, namespace context, cache gradient;
-- `data-model.md` — entities, attributes, refs, and `my.*` schemas;
-- `agent-runtime.md` — loop/run/turn, lifecycle, isolation, nothing wedges;
-- `ui.md` — blocks/renders/surfaces/canvas/cards/slots and live updates;
-- `observability.md` — turn capture, blobs, reproduction, and forensics;
-- `toolkit.md` — agent-facing function surface;
-- `laws.md`, `library-grounding.md`, and `decisions/` — measured laws,
-  source read-map, and settled ADRs.
-
-Supporting docs: `docs/conventions.md` for code/schema patterns and
-`docs/seon/vision/` for the thesis and aspirational capabilities.
-
-### Markdown
-
-Every `docs/**/*.md` file has YAML frontmatter with valid `type`, `status`, and
-`tags`. `seon.dev.markdown` auto-fixes spacing/trailing whitespace and reports
-structural errors. Use ATX headings, one H1, no heading jumps, dash lists,
-existing wikilink targets, and no bare URLs.
-
-## Model, research, and source policy
-
-The top-level orchestrator designs, grounds specs, reviews diffs, rules on
-stops, and runs serial integration gates; implementation goes to capable code
-agents. Haiku is only for quick reads. Never haiku for coding. Codex uses its
-configured coding model—Claude aliases are not portable model names.
-
-**The orchestrator determines how code agents are launched; a code agent never
-chooses or changes that mechanism.** A Codex orchestrator launches and manages
-its own code-agent lanes with Codex's collaboration tools (`spawn_agent`,
-`send_message`, `followup_task`, `interrupt_agent`, and `wait_agent`). It MUST
-NOT launch new agents through `bin/codex-agent`. The native task tree is the
-ownership and supervision surface; give every agent the same bounded paths,
-protected paths, grounding, and exact deliverable required of any lane.
-
-A Claude orchestrator has no Codex-native collaboration tree. **Claude agents
-therefore launch and manage Codex code agents through the repository's
-`bin/codex-agent` file**, as harness-tracked background commands (Bash
-`run_in_background: true`, description naming the lane — never `nohup`/`&`,
-never hand-rolled shell):
-
-```bash
-bin/codex-agent run <name> "<the full spec>"   # or spec on stdin (heredoc)
+```clojure
+;; a caller or fixture hands the projection explicitly, like production:
+(schema/register! {:seon.schema/projection projection, ...})
+;; not: register! silently reading a process-global registry
 ```
 
-A Codex orchestrator inheriting a Claude-started `bin/codex-agent` lane may
-inspect, stop, or collect that existing lane for a safe handoff, but launches
-all NEW work through its native collaboration tools. It does not run
-`bin/codex-agent` to create a substitute task tree. A Claude orchestrator uses
-the harness lifecycle below for every code-agent lane it owns.
+Fetch-at-call-time is also the recurring performance killer: the same
+defect that reads stale state also recomputes a projection on every call
+(measured 217 s vs 6.2 s in one wake path). Grounding:
+[seon-env PRD](docs/prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md);
+open members are tagged `class/p1` in `docs/seon/issues/`.
 
-**NEVER SANDBOX A LANE** (owner ruling 2026-07-26). There is no sandbox
-dial and there must not be one: a read-only audit finished a 63-file
-inventory and then had its one `apply_patch` rejected, losing every
-per-file evidence sentence it had produced. A sandbox does not make an
-audit safer — it makes the audit's output unrecordable, and every lane
-must commit its own report and file its own issue notes. Ownership is
-enforced by NAMING OWNED PATHS in the spec, path-limited commits, and
-your review of the diff. An audit is kept read-only by its spec and
-proven by its diff.
+### 2.2 Facts over inference
 
-For Claude-started lanes, the script owns the conventions: model/effort dials
-(`LANE_MODEL`, `LANE_EFFORT`), the `-o` summary
-in `tmp/orchestrator/<name>-summary.txt`, and `tee`-streamed stdout so
-the user's task panel shows the live transcript while
-`<name>-stdout.log` persists. THE WRAPPER'S STDOUT IS THE OWNER'S LIVE
-VIEW: run `bin/codex-agent run|resume` BARE as the tracked background
-command — never pipe it through `tail`/`head`/`grep` and never redirect
-it, because any filter reduces the owner's panel to one line at exit
-(this happened 2026-08-01; the owner had to ask why lanes were
-invisible). For a lane already running whose wrapper you do not own,
-give the owner a tracked background `tail -n 40 -f
-tmp/orchestrator/<name>-stdout.log` follower whose description names
-the lane. Tracked means lane exit re-invokes the
-orchestrator — no watcher loops. Lane stdout never enters the
-orchestrator's context: read the summary (`bin/codex-agent summary <name>`),
-then query the log selectively with `tail`/`rg`, never a whole-file
-read. Also: `bin/codex-agent status | watch <name> | stop <name> |
-resume <name> "<followup>"` (resume auto-reads the session id and keeps
-the lane's full context).
+EVERYTHING IN THE SYSTEM IS EXPLICITLY DECLARED AND RECORDED IN THE
+DATABASE, AND IT IS ALL QUERYABLE. Every question — what a function
+accepts, whether it is private, which schema a value satisfies, which
+function renders a shape, which tests reach a function — is a Datalog
+query over facts we already store. **If answering a question requires a
+convoluted reconstruction — joining text, guessing from names, walking
+files — stop: the missing fact is the root problem. Declare it at the one
+indexing/declaration seam, then query it.** Queryability is also how bugs
+get FOUND: a question the database cannot answer is a defect report about
+the data model, not an inconvenience to work around. The three banned
+substitutes are one mistake in different clothes: a hand-maintained list, a
+naming convention, and a regex over text. Classification rules are computed
+from provenance, the program graph, or declared metadata — never
+name-based. Schema discovery is registry-query-first: search the merged
+registry before declaring a key.
 
-Never let a lane keep working on a direction that new information has
-invalidated (owner ruling 2026-07-24). A Codex orchestrator uses its native
-message/interrupt/follow-up tools; a Claude orchestrator spot-checks the
-harness transcript selectively and uses `stop` then `resume` with the
-correction. Stopping is cheap because resume loses nothing but the in-flight
-turn. Claude harness mechanics, resume recipe, and model dials:
-`docs/seon/reference/driving-codex-agents.md`.
+```clojure
+;; which tests exercise this function? — a query, not a naming convention:
+(seon.fn/tests-reaching db 'seon.cluster.run/open-tx)
+;; which functions need cluster custody? — declared arity input-refs:
+[?f :seon.fn.arity/input-refs :seon.db/connection]
+```
 
-For research, use one agent with the complete relevant context rather than many
-agents with slivers. Independent source domains may run in parallel, but one
-question gets one coherent audit. External research uses `agy`; long prompts
-go through stdin. Every research agent writes its durable report under the
-active PRD's `research/` directory.
+**A REGEX IN PRODUCTION CODE REQUIRES THE OWNER'S PERMISSION — STOP AND
+ASK.** The program graph answers questions about code, Malli schemas about
+shape, the reader about forms, Datalog about facts. (`rg` while working is
+ordinary tooling.)
 
-For multi-unit program work, the top-level agent maintains one ordered
-dependency spine and uses every other safe slot for a coherent independent
-implementation, proof, or source-grounded audit. After every lane return,
-material commit, context compaction, or newly discovered blocker, reread the
-complete program ledger—not only the local task—record the changed dependency
-or evidence, integrate or reject the return, and refill the slot from the
-earliest dependency-ready unit. A deep investigation stays on the spine only
-while it blocks a named exit measure; otherwise preserve the finding in its
-owning issue/PRD and resume forward progress. Never invent parallel edits in a
-shared owner merely to keep a slot busy.
+### 2.3 Bounded, event-driven execution — both halves, always together
 
-Every research or implementation unit begins with a dependency ledger. Name
-the exact libraries and existing Seon mechanisms the unit depends on, their
-selected versions/SHAs, the relevant `reference-code/` paths, and the
-first-party call sites/tests that already demonstrate the desired idiom. This
-ledger is part of the plan and durable research evidence, not an optional step
-after a design has already been invented.
+Detection is event-driven: interfaces express their dependencies and
+publish their own readiness (a start returns a completion, a resource
+announces attached, cleanup keys on child-exit events, `listen!` before
+derive). AND nothing in this system is allowed to run indefinitely: every
+execution surface carries its declared bound, enforced at the seam that
+admits the work — sci evals run under the one `time-limit`/`:interrupt-fn`
+([interrupt](reference-code/sci/doc/interrupt.md)); capability calls cross
+the effect door with deadline and output caps as config facts; test events
+wait under the declared `seon.test-support/event-backstop-seconds`; the
+suite has a liveness watchdog that dumps every worker JVM. A bound firing
+is itself a bug report naming what never arrived — never a silent retry.
+Dropping either half is the defect: a bare tuned timeout hides the
+observable event, and an unbounded event wait turns one missing fact into a
+silent wedge that burns every agent's diagnosis time. **A hang is a worse
+defect than a failure** — it gives the diagnosing agent nothing. When you
+build a new execution surface, its bound is part of the seam's contract,
+not an option; unbounded work should be unconstructable.
 
-Before planning a change or writing code:
+### 2.4 Total, honest, bounded boundaries
 
-1. Read the closest localized `AGENTS.md` and the active roadmap's current
-   state, gap, evidence, and success measure.
-2. Identify the exact dependencies/mechanisms, then read their actual source
-   in `reference-code/` and the best idiomatic Clojure usages in this checkout.
-   Never plan from remembered library behavior or unzip installed packages. If
-   the exact pinned or maintained source is absent, locate or mirror it before
-   continuing; a plan that names only an API is not grounded.
-3. Observe the live system and define a falsifiable failure plus acceptance
-   evidence.
-4. Read the existing implementation and tests that own that behavior.
-5. Probe the critical dependency assumption directly in the REPL or with the
-   smallest executable experiment.
-6. Implement by strengthening the one existing mechanism in place.
+Every failure at an agent or runtime boundary is a flat `:seon.error`
+value — nothing throws into the loop. All public functions carry complete
+Malli contracts and are instrumented from the program graph; a function
+whose declared contract fails does not run — the violation is a typed value
+naming the function and the offending argument. A refusal names what was
+missing: the layer, the member, the expected shape, the offending value
+(`seon.error/diagnostic` is the evidence-complete constructor). An
+unavailable observation is the typed unknown, never absence, success, or
+silence. A silent fallback that "happens to be right" is a defect even
+while it works — it survives exactly until the second cluster, thread, or
+caller. Diagnostics tell the truth or say nothing: a thread dump that omits
+virtual threads lies.
 
-For Clojure work, use `data-oriented-clojure` before the plan, not only before
-the edit. Treat immutable data, pure transformations, attributes/connections,
-ambient database values, and errors-as-values as design inputs. If a plan is
-organized around mutable steps, object-like kinds, imperative accumulators, or
-stored derived state, stop and re-ground it in good Clojure source before
-implementation.
+Outward values cross one total render contract: renders never throw and
+never refuse an ordinary value; output is bounded through the one
+`seon.print/fit` owner; omitted detail is an elision value — ordinary data
+carrying count, path, and requery identity — never bare truncation; a floor
+hit is counted, never silent. UGLY OUTPUT IS A DEFECT (standing order):
+every agent that meets an unreadable rendered result reports it or files
+the issue naming the shape and where it surfaced. Display sizes for humans
+are estimated tokens via `seon.ai.tokens/estimate` — the design intent;
+character counts are storage projections, and surfaces still showing them
+are defects to file, not precedents to copy.
 
-Parallel agents divide independent dependency/source domains or independent
-implementation units. They do not split one semantic question into partial
-answers. Research agents return grounded constraints and success measures;
-implementation agents receive that complete evidence and retain authority to
-work out local details within the named owner and acceptance boundary.
+### 2.5 One mechanism, accreted in place
 
-After writing code, verify the running system—not only the tests. Falsify the
-change with an observed datom, page/feed, log line, or REPL result. Report what
-is still broken honestly.
-
-## Loud failures, unrepresentable classes (owner ethos, ruled 2026-08-07)
-
-"I want loud and correct failures to make entire error classes
-unrepresentable." This is a REQUIREMENT on how anything gets built or
-fixed in this project, not a taste note:
-
-- **Fix the class, not the instance.** Before fixing any defect, name the
-  CLASS it belongs to; the fix restructures so the class cannot be
-  WRITTEN, and lands with exactly one regression proving the class dead.
-  A fix that leaves the class representable is a symptom patch.
-- **Prefer structures with no field to forget over validation that checks
-  the field.** Custody derived from one source cannot disagree with
-  itself; a value handed to work cannot be dropped by a thread hop; an
-  argument that does not exist cannot be passed wrongly. Making the wrong
-  state unconstructable beats checking for it every time.
-- **A refusal is loud, typed, flat, and names what was missing** — the
-  layer that failed, the member that was absent, the key that was
-  unknown. A silent fallback or default that "happens to be right" is a
-  defect EVEN WHILE IT WORKS: it survives exactly until the second
-  cluster, the second thread, or the second caller, and then lies. The
-  guarded-door fallback that was "right under one cluster" and the
-  option keys sci silently dropped for years are the canonical scars.
-- **Diagnostics must tell the truth or say nothing.** A thread dump that
-  omits virtual threads, a counter that under-reports across threads, a
-  warning wall that buries the one real signal — each is a defect to fix
-  at its owner, because cheap correct diagnosis is what makes the next
-  class cheap to kill. The flywheel is real: the 2026-08-07 environment
-  work killed six classes in one day BECAUSE each loud fix made the next
-  defect pattern-match a named class instead of a novel mystery
-  (ledger: [seon-env-prd-2026-08-07.md](docs/prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)).
-- **Derived state rides the value it derives from** (a validator on its
-  projection, a writer on its connection, an index on its db value), so
-  staleness and cross-environment reads are structurally impossible —
-  never a process-wide slot with a check-then-act fence.
-
-## One mechanism, no hacks
-
-### Owner design gate — stop before hairy semantics
-
-When a decision would create hours of cross-owner implementation, has unclear
-or overlapping semantics, or is likely to produce bugs because the guarantees
-cannot be stated simply, STOP before production edits. Pause affected lanes
-and bring the owner exactly three concrete options. Put the simplest viable
-constraint first and mark the recommendation; for each option state the
-guarantee, implementation cost/risk, operational trade-off, and capability we
-give up. Ask for a ruling. Do not convert uncertainty into a migration layer,
-compatibility path, or generalized Clojure subset merely because it is
-implementable. Seon optimizes for a stable accretion environment where agents
-write high-quality, high-performance code; a clear non-onerous constraint is a
-feature. Resume implementation only after the ruling is explicit and recorded.
-
-Do not create `foo-v2`, `foo-new`, a compatibility namespace, or a second
+Do not create `foo-v2`, a compatibility namespace, or a second
 registry/renderer/feed/retry/config/test path to avoid fixing the existing
-owner. Fix cycles, callers, and schemas in place; delete the superseded path in
-the same refactor. Git is the archive.
+owner. Fix cycles, callers, and schemas in place; delete the superseded
+path in the same refactor — git is the archive. Maps are OPEN: if something
+declares it needs `foo` and `bar`, those are validated rigorously and a
+supplied `bat` is ignored, never refused (`{:closed true}` does not appear
+under `resources/seon/schemas/`). Adding is free; CHANGING is breakage: a
+key's definition and its relationship to the output never change —
+different semantics means a NEW KEY with a new name. Widening an input is
+accretion; narrowing an input, requiring an optional key, or promising less
+in an output is breakage even when the schema still validates. The standing
+test, from the owner: **is this simpler than it was?** If it is equally
+complex, the model was ported, not applied.
 
-When an agent misbehaves, the context is wrong or the code is wrong. Find and
-remove that cause. Regex-rewriting model output, warning/scold prose, marker
-layers, and post-hoc containment merely hide symptoms. If the cause is not yet
-known, record the evidence and continue the investigation.
+**Owner design gate:** when a decision would create hours of cross-owner
+work or its guarantees cannot be stated simply, STOP before production
+edits and bring the owner exactly three concrete options — simplest viable
+constraint first, marked recommendation, each with guarantee, cost, and
+what we give up.
 
-Assume inconsistencies, coercions, stale schemas, and duplicate mutable state
-are bugs until proven otherwise. Fix an understood in-scope smell. Otherwise
-report the file/line, observed mismatch, expected owner, and uncertainty; never
-silently work around it.
+## 3. Data and schema
 
-When you discover a bug, code smell, duplicate implementation, stale or broken
-test, unsafe edge, or documentation mismatch, report it to the agent that
-launched you and search `docs/seon/issues/` for the root cause. Create or update
-one issue note before returning. If you fix it in the same unit, close and
-archive the note with the commit plus behavioral or live proof; otherwise leave
-it open with current evidence, owner, and acceptance criteria. Never add a row
-to a private registry or leave the finding only in chat. This records the
-problem; it does not authorize unrelated production edits.
+Use the `data-oriented-clojure` skill before writing or reviewing Seon
+Clojure — at design time, not only before the edit. The compact invariants:
 
-## Vocabulary
-
-Use discoverable code names, not umbrella nouns or synonyms:
-
-| Say | Never | Meaning |
-|---|---|---|
-| functions, schemas, tests | verbs | ordinary Clojure constructs |
-| database or `db` | store, inventory, memory | the `seon.db` authority |
-| boot, environment, running | the runtime, the platform, the tower, ambient | the triad (owner ruling 2026-08-07): BOOT is the 0→1 construction in dependency order; the ENVIRONMENT is the one per-cluster value it produces (`seon.env` ↔ `resources/seon/schemas/seon.env.edn`); RUNNING code receives it — via the sci ctx/fork, submission data, proc `:args`, or the request map — and never constructs or reaches sideways for it. "Runtime"/"platform" as umbrella nouns are retired; historical doc/dir titles keep their names |
-| call preparation, supplied defaults | ambient injection, batteries | sci's own name for the hook seam (`:call-preparation-hook`, `reference-code/sci/src/sci/core.cljc` init docstring at the `seon-env-hook` pin) supplying a function's declared-and-absent arguments from the environment; caller wins; unavailable is a flat error |
-| canvas | tile, live-tile, world | `:seon.render.canvas/content`, the focal agent surface |
-| surface; card for CSS only | tile | a context render; a visual component |
-| web UI | inspector | `/`, `/agent/{id}`, debug, and `/data` |
-| subagents | collaboration system | agents connected through database refs |
-| cluster | environment | one database, pod, root, and task agents |
-| attributes + connections | entity kind/type | the Datahike model |
-| build, operator, artifact | flavor | shadow-cljs's build; the `bin/seon`/`bin/acme` supervisor scope; the digested output |
-| get-in, path | drill | paged navigation into a nested value by `get-in` path |
-| execution plan, `plan-execution` | bare "plan" for placement | the derived placement/manifest value; the retired `my.plan` toolkit was never built — the TODO (derived obligations plus authored item facts, owner ruling 2026-08-12 #49) is the one task noun |
-| provider descriptor row | adapter, integration | one hosted provider's data row under the config singleton |
-| packages/, package.json, deps.edn, node_modules | npm-pkgs, maven-pkgs | per-cluster `data/clusters/<name>/packages/` using each ecosystem's own manifest names |
-| contexts on hosts, binding tables | sandbox, VM, jail | sci's own vocabulary for agent execution |
-| `:interrupt-fn` | the guard, the door, the cage | the ONE zero-arg fn sci calls on every fn body entrance; `reference-code/sci/doc/interrupt.md:6` ↔ `seon.sci.eval` (arm/stop!) |
-| `interrupt!` | stop!, steering-error! | how an `:interrupt-fn` stops an eval uncatchably; `reference-code/sci/src/sci/interrupt.cljc:32` |
-| `time-limit` | fuel, gas, interpreter-step budget, deadline-ms | the ONLY limit. Sci counts nothing — it has no step concept; `reference-code/sci/doc/interrupt.md:32` |
-| `:seon.eval/fn-entries` | a step budget | a RECORDED DIAGNOSTIC, never a limit: 271M entries in 500ms reads as a spin, 12 reads as blocked in a host call |
-| every `fn` body entrance | safepoint | where sci calls the `:interrupt-fn`. A JVM safepoint is a different real thing (GC); `reference-code/sci/doc/interrupt.md:50` |
-| `ctx`, `fork` | warm base, sandbox, the agent's world | sci's own names; `reference-code/sci/src/sci/core.cljc:318` |
-| `:io` / `:compute` / `:mixed` | eval pool, wait pool | core.async's workload tags: `:io` may block but must not compute, `:compute` must not block; `reference-code/core.async/.../impl/dispatch.clj:122-134` |
-| `:seon.cluster.run/process` | **claimant** | the process holding a run; `resources/seon/schemas/seon.cluster.run.edn` + `src/seon/cluster/run.clj` ↔ `src/seon/cluster/process.clj` and JDK `ProcessHandle` |
-| accretion / breakage | graduation, nursery, graduated | a change that requires no more and provides no less. **Attribution to Rich Hickey's Spec-ulation is UNVERIFIED** — do not cite it as established |
-| source initialization rows, transaction data | bootstrap-plan rows, seed bundle, sidecar | static source population is admitted transaction data; a fresh agent's opening instead derives a generated episode from live facts and retained receipts; `src/seon/cluster.clj` (`populate-source!`) + `src/seon/fn.clj` (`index!`) ↔ `src/seon/bootstrap.clj` (`pull-result`, `next-entry`) + `src/seon/render/walk.clj` (`ordered-episode`) |
-| process record, generation, (pid, start-instant) identity | orphan registry, liveness flag | operator-managed process descriptors; `script/seon/fresh_operator.clj` + `script/seon/dev/state.clj` ↔ `src/seon/cluster/process.clj` and JDK `ProcessHandle` |
-| pre-processing, apply, resume | warmup, hydration | the explicit derive-once/install/attach operations (R45); `docs/prds/sci-execution-runtime/research/preprocessing-design-2026-07-23.md` until code owners land |
-| generated opening episode; reduce (authored plan execution) | bootstrap plan, fold | the opening appends and settles one dependency-ready generated form at a time, while an ordinary model reply still reduces its frozen ordered forms; `src/seon/bootstrap.clj` (`next-entry`) + `src/seon/render/walk.clj` (`ordered-episode`) ↔ `src/seon/cluster/loop.clj` (`generate-turn`, `resume-turn`) + `src/seon/cluster/run.clj` (`append-generated-tx`, `generation-complete-tx`, `system-plan-tx`) |
-| run loop | driver, driving | the per-agent proc advances one claimed run through generated opening entries or an authored reply's ordered forms; `src/seon/cluster/loop.clj` (`generate-turn`, `resume-turn`) ↔ custody and situation transitions in `src/seon/cluster/run.clj` |
-| `seon.effect`, `effect/request!` | the door, capability dispatch, call center | the one system-side owner every CAPABILITY request enters (fs, web, llm, db writes) — the door is about effects crossing out, never about which functions an agent may call (ruling #20); effects carry the one request identity |
-| every function is callable | toolkit, grants, home-requires, agent-facing surface (as a limit), allowlist | ruling #20: an agent may call ANY function in its cluster's program graph. Per-agent GRANTS do not exist; what differs per agent is only what is RENDERED into its context, which never gates execution. The guarded door bounds EFFECTS (fs/web/llm/db), not callability |
-| program graph | corpus | the collective name for the established top-level `:seon.fn`/`:seon.ns`/`:seon.schema`/`:seon.test` facts |
-| proc, step-fn, conns, graph-def, report channel | invented scheduler nouns | `clojure.core.async.flow`'s own vocabulary — adopted Path A, `seon.flow` implements `flow.spi`; `reference-code/core.async/src/main/clojure/clojure/core/async/flow/spi.clj` |
-| `(sliding-buffer 1)` tap | latest-wins mailbox | core.async's own newest-only delivery; `reference-code/core.async/src/main/clojure/clojure/core/async/impl/buffers.clj` |
-| tuple (`:db/tupleType`) | small limited vector, ordered many | Datahike's single-value ordered construct — one datom, whole-value replace; homogeneous cap 8 (fork lift queued); cardinality-many is a SET (`reference-code/datahike/src/datahike/index/persistent_set.cljc:133`) |
-| `my.agents.<id>` | agent workspace, sandbox ns | the DEFAULT namespace for a temp/undifferentiated agent only (owner ruling 2026-07-31); real agents own namespaces anywhere in the tree, including seon core, and any namespace has at most one assigned agent (`:seon.cluster.agent/namespace`, unique) |
-| render function; `:seon.render/form` | producer, view, read form, unit (for a walk emission) | an ordinary function a render schema property names — never "producer" (owner ruling 2026-08-11); `:seon.render/form` is the third declared projection beside `/ai` and `/html`: the FORM that produces the rendered value, selected by the same chain, with computed floors (attribute → listing query, entity → identity pull); a walk emission is a render call (`:seon.render.call/*`, `src/seon/render.clj`); [self-generating-context-prd-2026-08-11.md](docs/prds/sci-execution-runtime/plan/self-generating-context-prd-2026-08-11.md) |
-| `:seon.render/ai` | prose, text render, AI projection | the string consumed by agent context OR a fully qualified symbol naming a function that returns that string; the symbol names the declared render function, while its resolved Var is only an execution artifact and never crosses the contract (`resources/seon/schemas/seon.render.edn` ↔ `src/seon/render.clj`) |
-| `:seon.render/html` | hiccup, HTML projection, human render | the Hiccup consumed by the web UI OR a fully qualified symbol naming a function that returns that Hiccup; Hiccup is this schema's definition, never a second `:seon.render/hiccup` contract (`resources/seon/schemas/seon.render.edn` ↔ `src/seon/render/hiccup.clj`) |
-| wire (external crossings only) | wire for anything in-process | "wire" is reserved for a crossing that LEAVES the process to an external service — the provider HTTP request, the browser SSE connection (owner ruling 2026-07-29). Internal transport is channels, flow, and database facts, and is never called a wire; this refactor deleted the internal wire protocols and nothing may reintroduce the word for them |
-| namespace page | page, screen, view, dashboard | one namespace's web surface (owner ruling 2026-07-31): the route resolves the namespace → its owner agent → the walk rendered in the `:seon.render/html` projection; `/` is root's namespace page; the debug variant is the same walk, two panes (exact AI context left, all walked units right). Adding a namespace page is adding a route line — never per-page render code |
-| block | widget, component, panel | ONE render function's identified output: the function + its stable element id + its current bytes — the unit of rendering, morph targeting, equality suppression, and churn ranking (owner ruling 2026-07-29). The ONE render unit in both projections — `:seon.render/ai` into agent context and `:seon.render/html` to the page are two projections of the same block; there is no static scaffold path — system message and global instruction files are blocks rendered from instruction facts reached through the cluster entity (owner ruling 2026-07-31) |
-| package, keyframe, delta | frame, bundle, snapshot-stream | the DELIVERY units (render-pipeline-design-2026-07-29.md): one revisioned package per change carries delta fragments (changed blocks) and/or the keyframe (every block, serialized once, multed to all tabs); a revision gap snaps to keyframe; new page loads serve from the latest keyframe with zero re-render |
-| base SCI context (`ctx`), turn fork, agent context | "the context" for all three | THREE DIFFERENT THINGS. The base `ctx` is the cluster's acquired program-only evaluation context; each turn gets a fresh generation-aware `sci/fork`, so interpreter mutations are turn-private, committed program rows install into the live base for the next turn, and the selected agent's defs rehydrate into the fork. An agent's context is what `:seon.render/ai` renders into its prompt and never gates execution. There are no per-agent interpreter contexts; `src/seon/sci/eval.clj:1309-1392` ↔ `reference-code/sci/src/sci/core.cljc:331-337` ↔ `src/seon/render.clj` |
-| candidate context | sandbox ctx, scratch fork | a BUILT context used to test a definition before installing it in the cluster's. `sci/fork` is ADMISSIBLE for this since the pinned generation-aware fork: forked Vars are copy-on-write, so `def`, `intern`, and `alter-var-root` in the fork stay isolated from the parent (verified 2026-08-04 — live probe in `research/session-curation-namespace-semantics-2026-08-04.md` plus `reference-code/sci/src/sci/core.cljc:337` and the "Make forked Vars copy on write" pin commit; this SUPERSEDES the 2026-08-02 leak probe, which predated the pin) |
-| editor, revision, proof (session curation) | Agent A/B, curator, repair agent, fixer | the ruled curation roles (owner, 2026-08-04): an EDITOR is any agent revising a session it did not author, in its own fork and scratch branch; its deliverable is the REVISION — an ordered vector of form sources as data, never its own messy session; the system pulls a PROOF — a mechanical re-execution of the revision on a fresh fork at the original opening basis, no model call — and only a clean, equivalent, self-contained proof is ADOPTED via the run-to-runs `:seon.cluster.run/supersedes` connection; [session-curation-prd-2026-08-04.md](docs/prds/sci-execution-runtime/plan/session-curation-prd-2026-08-04.md) ↔ Datahike branches (`reference-code/datahike/src/datahike/versioning.cljc`) |
-| render profile | cap, window, local limit | the database-derived consumer fit policy for tokens, depth, children, and composition; the render function supplies semantics and the one `seon.print/fit` owner applies the selected profile. `resources/seon/schemas/seon.render.profile.edn` ↔ `src/seon/render.clj` ↔ `src/seon/print.cljc:750-785` |
-| elision value | ellipsis, truncation marker, clipped string | ordinary data describing omitted count, known total, path, next offset, producing profile, and requery identity or explicit refusal; it is rendered and inspected like any other value. `resources/seon/schemas/seon.print.edn:214-263` ↔ `src/seon/print.cljc:602-613,669-718` |
-| `:seon.fn/external-sink`, `:seon.fn/projection-boundary` | sink roster, output allowlist, crossing list | queryable program-graph leaf facts lifted from function metadata; `seon.fn/output-path-report` derives projected, bypass, and unresolved shortest paths. `resources/seon/schemas/seon.fn.edn:30-33` ↔ `src/seon/fn.clj:292-353,461-506` |
-| identity-only admission | object serialization, database-value traversal | a registered reference predicate names `:seon.schema/identity-only` plus a qualified projection, and admission retains only that identity data at every depth. `resources/seon/schemas/seon.db.edn:8-34` ↔ `src/seon/schema.clj:2572-2640` ↔ `src/seon/sci/admit.clj:141-149` |
-| **[TARGET] root maintenance portfolio** | maintenance daemon, central ticker, cleanup registry | root's declared scheduled tasks for database/blob reclamation, footprint inspection, dead-root cleanup, log retention, and repair; per-agent schedule procs deliver ordinary messages, and explicit operator work invokes the same owners. [scheduler mining and GC design](docs/prds/sci-execution-runtime/research/scheduler-mining-and-gc-design-2026-08-04.md) ↔ `src/seon/cluster/agent.clj` and `script/seon/fresh_operator.clj` |
-| **[TARGET] `my.branch`** | my.git, my.repo, my.vc | the agent-facing branch/history verbs (checkout, log, diff, status, fork) over the cluster's database branches — git VOCABULARY without claiming to be git ("my.git would imply normal git", owner 2026-08-05); ff-only, no index, no remotes; real git on disk stays raw CLI via `my.shell`; [agent-desk-and-checkout-prd-2026-08-05.md](docs/prds/sci-execution-runtime/plan/agent-desk-and-checkout-prd-2026-08-05.md) |
-| the agent's defs, `:seon.def/*` | **the desk** (renamed, owner 2026-08-10), session image, `:seon.code.def/*`, scratch persistence | the agent's temporary defs + atoms, taught as such, committed as agent-scoped facts at turn settlement through the one admission seam — pure form, else faithful value, else honest `unrestorable-reason`; atoms snapshot-stated; session end explicit only (owner 2026-08-05); the name matches the `:seon.def/*` family exactly |
-| the agent's history; a form + value entry | session units, transcript entries (as a mechanism noun) | the ordered derivation of an agent's REPL session from message/run-form/result facts — each element one form and the value it produced (owner ruling 2026-08-10); REPL vocabulary, qualified as "the agent's history" wherever Datahike's `:history` time axis could confuse; [repl-transcript-context-prd-2026-08-10.md](docs/prds/sci-execution-runtime/plan/repl-transcript-context-prd-2026-08-10.md) |
-| `docs` (bare, injected); printed value | `seon.program/docs` as the agent-facing spelling, faces, bulk faces tool, print face (as API vocabulary) | the bulk documentation function (plural of `clojure.repl`'s own `doc`, bare at the REPL exactly like `doc`/`dir`) returning data for an array of functions/schema keys/tests/namespaces; INJECTED into every agent session, never indexed corpus code, so the system upgrades it for everyone at once (owner ruling 2026-08-10); the qualified implementation Var is plumbing agents never type; a value's rendered output is its "printed value/representation"; same PRD |
-| the acquired candidates | roster, producer roster | the per-program-generation index of contract-fitting render producers consulted at each visited node — the existing `candidates` (`src/seon/render.clj`) vocabulary, derived once per program publication (owner-accepted design 2026-08-10); same PRD |
-| `seon.db` | facade, read facade, data-access layer, wrapper | the one database namespace for all things Datahike (owner ruling 2026-08-02 #41): every core data function with Datahike's own positional AND argument-map interfaces, db/conn elidable to the calling agent's cluster's current database, failures as flat error values; `reference-code/datahike/src/datahike/api/specification.cljc` ↔ `src/seon/db.clj` |
-
-This table is maintained: when a boundary term is settled, add its row in the
-same change, and when the meaning spans an integration boundary, name the
-defining source on BOTH sides (ours ↔ the dependency's) so a reader can
-verify what the word really means without archaeology.
-
-Database vocabulary is the dependency's vocabulary, never a Seon wrapper noun:
-
-- **database value** — the immutable ordinary value sent across the protocol;
-  it carries `:db-name`, basis transaction `:t`, `:as-of`, `:since`,
-  `:history`, and `:datahike/commit-id`;
-- **basis transaction** — the database value's `:t`;
-- **commit ID** — Datahike/Proximum's `:datahike/commit-id`;
-- **connection ID** — Datahike's process-local connection identity, whose
-  self-writer form is `[store-id branch]` and whose remote form also includes
-  the writer backend;
-- **store ID**, **branch**, and **branch head** — the individual Datahike and
-  Proximum facts used by branch management; and
-- **transaction report**, **db-before**, and **db-after** — the committed-change
-  vocabulary.
-
-Do not introduce or preserve generic database “coordinate”, “point”, or
-“attachment” maps. `seon.db` clients exchange database values. Internal code
-that must call Datahike or Proximum passes the required store ID, branch, basis
-transaction, or commit ID by those names. A UI screen location or ordinary
-English coordination is unrelated and is not covered by this database rule.
-
-Name every interface only after reading the maintained sources on both sides
-of that interface. Reuse the producer's concrete output terms and the
-consumer's concrete input terms; when they differ, translate fields directly
-at the boundary. Never invent a third umbrella noun merely to make the two
-sides sound uniform. Record the source files and selected dependency revisions
-that establish those names in the owning PRD's dependency ledger.
-
-Ground every name in the source material (owner ruling, 2026-07-23). Seon is
-transaction processing: data arrives from sources (user, scheduled fires,
-remote-call responses), is transformed, partly stored, and partly emitted as
-side effects. Stay close to the metal — no clever coinages, no
-object-oriented reconceptualization of what the dependency already names.
-Before naming anything at an integration point: vendor the dependency as a
-git submodule under `reference-code/`, read its code, find the ideal
-integration point, and use the same names it uses (Datahike says transaction
-id — never rename that to "coordination"; a build artifact of pre-parsed rows
-is transaction data for initialization pages, not a novel noun). Invented
-vocabulary drifts from the dependency and causes integration and debugging
-mistakes; grounded vocabulary is free documentation.
-
-Current route truth is the one table in `src/seon/render/route.clj`: `/` is the
-root namespace page; `/ns/{namespace}` and its debug variant are canonical;
-agent routes are aliases; `POST /agent/{id}/message` submits a message; and
-`/feed/{id}`, `/data`, `/css/{*path}`, and `/js/{*path}` serve live transport,
-database inspection, and static assets.
-
-## Everything is declared, recorded, and queryable
-
-**EVERYTHING IN THE SYSTEM IS EXPLICITLY DECLARED AND RECORDED IN THE DATABASE.
-IT IS ALL QUERYABLE** (owner, 2026-08-02). This is the principle the rest of
-this document keeps restating. Every question about the system — what a
-function accepts, what it returns, whether it is private, which schema a value
-satisfies, which function renders a shape, what a namespace contains — is a
-DATALOG QUERY over facts we already store, never an inference, a convention, or
-a list somebody maintains.
-
-**If you cannot answer a question by query, the MISSING FACT is the defect.**
-Declare it. Do not work around it. The three banned shapes are all the same
-mistake wearing different clothes: a hand-maintained list, a naming convention
-(`render-<kind>` built from a namespace name), and a regex over text — each one
-is reaching for a substitute because the fact was never recorded.
-
-Schema discovery is registry-query-first. Before declaring a key, search the
-merged schema registry for the attribute or value shape the work needs; reuse
-the existing globally identified declaration when it already expresses that
-meaning, and create a new declaration only when the query proves the fact is
-absent. Files under `resources/seon/schemas/` organize the one registry; their
-names never scope declarations or shorten fully qualified keys.
-
-Worked examples, all measured on 2026-08-02:
-
-- "Which functions need cluster custody?" — 9 declare
-  `:seon.db/connection` and 42 declare `:seon.db/database-value` in
-  some arity's `:seon.fn.arity/input-refs`. Nobody maintains that roster.
-- "Which public functions hand out a custody object?" — exactly 4, by querying
-  `:seon.fn.arity/output-refs`. Because it is a query and not a list, a fifth
-  such function appears in it automatically; that is the whole value.
-- "Which function renders this shape?" — the render functions declare their
-  output (`:seon.render/ai` or `:seon.render/html`) and what they accept, so the renderer is
-  found by querying both sides rather than by naming it `render-html`.
-- "Is this var part of the agent-facing surface?" — `:seon.fn/private?`, the
-  computed fact every agent-facing projection already honors.
-- "Which tests exercise this function?" — answerable since 2026-08-04
-  (F11): `:seon.test` rows carry the same `:seon.fn/calls` edges as
-  functions (one mechanism, `src/seon/fn.clj`), and
-  `seon.fn/tests-reaching` derives the transitive answer the
-  dependents-test quality gate needs. This was the standing
-  counterexample for a missing fact; it is now the worked example of
-  fixing one — the edge was declared at the one index pass, never a
-  `foo`/`foo-test` naming convention.
-
-## Data-oriented Clojure rules
-
-Use the `data-oriented-clojure` skill before writing or reviewing Seon Clojure.
-The compact invariants are:
-
-- immutable data and pure transformations first;
-- derive projections instead of storing them;
+- immutable data and pure transformations first; derive projections instead
+  of storing them;
 - fully namespaced map keys and database attributes, without exceptions;
 - globally identified schemas declared once under `resources/seon/schemas/`;
 - errors as values at agent/runtime boundaries;
-- one namespaced map in/out for API-like functions, or fully named/spec'd
+- one namespaced map in/out for API-like functions, or fully named
   positional arguments for ordinary functions;
-- every public function has a correct Malli input/output schema;
-- no `:type`/`:kind` entity taxonomy, stored nil, `[:maybe X]`, bare key, or
-  `:any` without a proven genuinely polymorphic boundary;
-- **maps are OPEN — we do not write closed checks** (owner ruling #48).
+- every public function has a correct Malli input/output schema — no
+  `:any`/`:some`/`[:maybe X]` without a proven genuinely polymorphic
+  boundary; absent = no key, never stored nil.
 
-### Accretion is the goal, so nothing is closed
+**An entity IS its attributes, values, and refs — never a stamped kind.**
+Do not add `:type`/`:kind` discriminator attributes: query attribute
+presence to find entities, use a unique identity attribute to identify one,
+follow refs to relate one (`:seon.entity/id-attr` enumerates identity
+attributes; it is not a kind stamp). We accrete functionality with fully
+Malli-spec'ed, code-validatable understanding of every shape — a kind stamp
+freezes taxonomy where attributes would have kept growing. The narrow
+exception: a genuinely bounded, closed set of states (a disposition, a
+workload tag) may be an enum-valued attribute — rare, justified in the
+schema's docstring, and still an attribute describing the entity, never a
+table-picker.
 
-THE SYSTEM EXISTS TO ACCRETE FUNCTIONALITY. Owner ruling 2026-08-02 #48,
-verbatim: "I want functions to accrete functionality which means they are not
-closed and every function can accept other data and if the function doesn't
-use it then that's fine."
+**Presence, absence, and the `contains?` trap.** `contains?` answers "is
+this key/index present" — on a vector it checks INDICES
+(`(contains? [:x :y] 1)` is true; `(contains? [:x :y] :x)` is false), and
+on a map a key stored as nil still answers true. Since Seon never stores
+nil, prefer `(get m k default)` with a sentinel default, or `find` when you
+need presence-and-value in one step. Reach for `contains?` only when you
+genuinely mean key membership and the collection is a map or set.
 
-The rule in one sentence: **if something declares it needs `foo` and `bar`,
-then `foo` and `bar` are validated RIGOROUSLY, and a supplied `bat` is simply
-IGNORED.** Never refused. This holds for function arguments and for entity and
-value shapes alike — functions accrete for the same reason data does.
+`seon.db` is the ONE database namespace: all of Datahike's core data
+functions, agent-first, each with Datahike's own positional AND
+argument-map arities, both able to elide db/conn to the calling agent's
+cluster's current database. Failures return flat `:seon.error` values.
+Direct `datahike.api` calls survive only inside `seon.db`, the
+store/registry and classified branch-custody owners, and system-side
+listeners
+([specification](reference-code/datahike/src/datahike/api/specification.cljc)
+↔ `src/seon/db.clj`).
 
-So `{:closed true}` does not appear under `resources/seon/schemas/`, and a
-reviewer treats a new one as a defect. Malli's maps are already open by
-default (`reference-code/malli/README.md:294`); the strictness was ours and it
-contradicted everything else here — an entity IS its attributes, extra ones
-never change what it is, and a change should require no more and provide no
-less, yet a closed map also FORBIDS more, so adding a key broke every producer
-validating against it.
+Config reconciles from an explicitly selected manifest into database facts;
+running code reads the database. Provenance is minimal transaction metadata
+(resolvable `:seon.db/user` and `:seon.db/process`) — never copied onto
+domain entities. Database vocabulary is the dependency's vocabulary:
+database value, basis transaction `:t`, commit ID, connection ID, store ID,
+branch, branch head, transaction report.
 
-What this does NOT relax: a MISSING REQUIRED key still fails, and declared
-keys are still validated against their declared shapes. The only thing given
-up is that a misspelled OPTIONAL key is ignored as extra data rather than
-refused.
+### Vocabulary — grounded names, never invented ones
 
-**Ignored today, validated tomorrow.** An extra key is ignored only because
-nothing has declared it yet. The moment `bat` IS declared it is validated like
-any other — so ignoring is provisional, never permission for junk. That is
-what makes growth safe: today's unknown key is tomorrow's contract, and
-nothing had to break in between.
+Inventing new vocabulary causes serious system problems: invented nouns
+drift from the dependency, hide existing mechanisms, and poison every later
+reader. The law, in order of preference:
 
-**The other half of the contract, and the one that constrains us: A KEY'S
-DEFINITION AND ITS RELATIONSHIP TO THE OUTPUT NEVER CHANGE** (owner, same
-ruling). Adding is free. Changing is breakage, and the silent kind is the
-worst: a key that keeps its name while its meaning, its shape, or its effect
-on the result drifts will break every caller written against the old meaning
-WITHOUT failing a single validation. So:
+1. **Use Clojure's own name for the concept**; else
+2. **the closest integration seam's name** — Datahike, Malli, SCI,
+   core.async already named their things; read the seam's source in
+   `reference-code/` and take its name AND its semantics;
+3. only when a concept is genuinely ours, coin once, record it here with
+   sources on BOTH sides of the boundary, and use it everywhere.
 
-- widening what an input ACCEPTS is accretion — it requires no more;
-- narrowing an input, or making an optional key required, is BREAKAGE;
-- promising less in an output, or making an output's shape depend on an
-  existing key differently than it did, is BREAKAGE even when the schema
-  still validates;
-- needing different semantics means a NEW KEY WITH A NEW NAME, never a
-  redefinition of the old one. Globally identified keys are declared once
-  (`resources/seon/schemas/`), so editing a declaration IS changing every
-  consumer's contract at once — treat such an edit as a design decision, not
-  a correction.
+Never assume you understand a row from its name alone: follow its links and
+read that slice of code before building against it — that is how we avoid
+rebuilding what a core library already built. Rows marked **[TARGET]** are
+ruled-but-unbuilt: design toward them with this vocabulary, and when you
+instantiate one, update its row with real source links in the same commit.
 
-(The accretion/breakage framing is often attributed to Rich Hickey's
-Spec-ulation talk; that attribution is UNVERIFIED here and should not be cited
-as established.)
+**Standing order — retire drift on sight:** when you meet older code, docs,
+or comments using a legacy spelling from this table, update them to the
+current term in the same commit when in scope, or file the issue when not.
+Deferring this is how garbage accumulates. Newly ruled terms land in this
+table in the same turn they are ruled.
 
-The hazard this dissolved, as the worked example of why closedness costs more
-than it gives: `matching-shapes-in` (`src/seon/schema.clj`) selects schemas
-that VALIDATE a value, so under closed maps a render unit carrying extra
-render attributes matched NOTHING and silently fell through to the generic
-render floor. Opening the declarations removed the failure rather than
-patching the matcher.
+The third column lists legacy spellings you may still meet in older
+material — they are recognition aids for reading, never options for
+writing.
 
-An entity is its attributes and connections. Query attribute presence to find
-entities, use a unique identity attribute to identify one, and follow refs to
-relate/remove it. `:seon.entity/id-attr` enumerates identity attributes; it is
-not a kind stamp.
+| Term | Meaning and grounding | Legacy spellings |
+|---|---|---|
+| functions, schemas, tests | ordinary Clojure constructs | verbs |
+| database, `db` | the `seon.db` authority | store, inventory, memory |
+| boot / environment / running | boot is the 0→1 construction in dependency order (REPL first); the environment is the one per-cluster value it produces (`seon.env` ↔ `resources/seon/schemas/seon.env.edn`), scoped per agent; running code receives it | the runtime, the platform, the tower, ambient |
+| call preparation, supplied defaults | sci's hook seam supplying a function's declared-and-absent arguments from the environment; caller wins; unavailable is a flat error (`reference-code/sci/src/sci/core.cljc` init docstring) | ambient injection, batteries |
+| **[TARGET] canvas** | the focal agent surface; design lives in `docs/seon/architecture/ui.md`; no declared attribute exists yet — update this row when it lands | tile, live-tile, world |
+| surface; card (CSS only) | a context render; a visual component | tile |
+| web UI | `/`, `/agent/{id}`, debug, and `/data` | inspector |
+| subagents | agents connected through database refs | collaboration system |
+| cluster | one database branch, its agents, and shared plumbing; produces one environment | environment (for the cluster itself) |
+| attributes + connections | the Datahike model | entity kind/type |
+| build, operator, artifact | the `bin/seon`/`bin/acme` supervisor scope; the digested publication output | flavor |
+| get-in, path | paged navigation into a nested value | drill |
+| the todo | the ONE task system: derived obligations plus authored item facts | my.plan, bare "plan" |
+| provider descriptor row | one hosted provider's data row under the config singleton | adapter, integration |
+| packages/, package.json, deps.edn | each ecosystem's own manifest names | npm-pkgs, maven-pkgs |
+| contexts on hosts, binding tables | sci's own vocabulary for agent execution | sandbox, VM, jail |
+| `:interrupt-fn` | the ONE zero-arg fn sci calls on every fn body entrance (`reference-code/sci/doc/interrupt.md` ↔ `src/seon/sci/eval.clj`) | the guard, the door, the cage |
+| `interrupt!` | stops an eval uncatchably (`reference-code/sci/src/sci/interrupt.cljc`) | stop!, steering-error! |
+| `time-limit` | the ONLY limit; sci counts nothing (`reference-code/sci/doc/interrupt.md`) | fuel, gas, step budget |
+| `:seon.eval/fn-entries` | a RECORDED DIAGNOSTIC, never a limit | a step budget |
+| every `fn` body entrance | where sci calls the `:interrupt-fn` | safepoint |
+| `ctx`, `fork` | sci's own names (`reference-code/sci/src/sci/core.cljc`) | warm base, the agent's world |
+| `:io` / `:compute` / `:mixed` | core.async's workload tags: `:io` may block but not compute, `:compute` must not block (`reference-code/core.async/.../impl/dispatch.clj`) | eval pool, wait pool |
+| `:seon.cluster.run/process` | the process holding a run (`resources/seon/schemas/seon.cluster.run.edn` ↔ `src/seon/cluster/run.clj`) | claimant |
+| accretion / breakage | a change that requires no more and provides no less | graduation, nursery |
+| source initialization rows, transaction data | static source population is admitted transaction data; a fresh agent's opening derives a GENERATED episode from live facts (`src/seon/bootstrap.clj` ↔ `src/seon/render/walk.clj`) | bootstrap-plan rows, seed bundle |
+| process record, generation, (pid, start-instant) | operator-managed process descriptors (`script/seon/fresh_operator.clj` ↔ `src/seon/cluster/process.clj`) | orphan registry, liveness flag |
+| generated opening episode; reduce | the opening appends and settles one dependency-ready generated form at a time; an ordinary model reply reduces its frozen ordered forms (`src/seon/cluster/loop.clj` ↔ `src/seon/cluster/run.clj`) | bootstrap plan, fold |
+| run loop | the per-agent proc advancing one claimed run (`src/seon/cluster/loop.clj`) | driver, driving |
+| `seon.effect`, `effect/request!` | the one system-side owner every CAPABILITY request enters (fs, web, llm, db writes) — about effects crossing out, never about which functions an agent may call | the door, capability dispatch |
+| every function is callable | an agent may call ANY function in its cluster's program graph; what differs per agent is only what is RENDERED into its context, which never gates execution | toolkit, grants, allowlist |
+| program graph | the collective `:seon.fn`/`:seon.ns`/`:seon.schema`/`:seon.test` facts | corpus |
+| proc, step-fn, conns, graph-def | `clojure.core.async.flow`'s own vocabulary (`reference-code/core.async/.../flow/spi.clj`) | invented scheduler nouns |
+| `(sliding-buffer 1)` tap | core.async's own newest-only delivery | latest-wins mailbox |
+| tuple (`:db/tupleType`) | Datahike's single-value ordered construct; cardinality-many is a SET (`reference-code/datahike/src/datahike/index/persistent_set.cljc`) | small limited vector |
+| `my.agents.<id>` | the DEFAULT namespace for a temp agent only; real agents own namespaces anywhere; a namespace has at most one assigned agent | agent workspace, sandbox ns |
+| render function; `:seon.render/form` | an ordinary function a render schema property names; `/form` is the third declared projection beside `/ai` and `/html` (`resources/seon/schemas/seon.render.edn` ↔ `src/seon/render.clj`) | producer, view, read form |
+| `:seon.render/ai` | the string consumed by agent context, or the symbol naming its function | prose, text render |
+| `:seon.render/html` | the Hiccup consumed by the web UI, or the symbol naming its function (`src/seon/render/hiccup.clj`) | hiccup contract |
+| identity-only admission | a registered reference predicate names `:seon.schema/identity-only` plus a qualified projection; admission retains only that identity at every depth (`resources/seon/schemas/seon.db.edn` ↔ `src/seon/sci/admit.clj`) | object serialization |
+| wire (external crossings only) | a crossing that LEAVES the process (provider HTTP, browser SSE); internal transport is channels, flow, facts | wire (internal) |
+| namespace page | one namespace's web surface: route → namespace → owner agent → walk in `/html` (`src/seon/render/route.clj`) | page, screen, dashboard |
+| block | ONE render function's identified output — the unit of rendering, morph targeting, equality suppression; both projections are the same block | widget, component, panel |
+| package, keyframe, delta | the delivery units: one revisioned package per change; a revision gap snaps to keyframe | frame, bundle |
+| base SCI context / turn fork / agent context | THREE THINGS: the cluster's acquired program-only ctx; each turn's fresh generation-aware `sci/fork`; what `/ai` renders into the prompt — which never gates execution (`src/seon/sci/eval.clj`) | "the context" for all three |
+| candidate context | a built context used to test a definition before installing it; `sci/fork` is admissible (copy-on-write Vars) | sandbox ctx, scratch fork |
+| editor, revision, proof (curation) | a revision is ordered form sources as data; a proof is mechanical re-execution on a fresh fork; adoption via `:seon.cluster.run/supersedes` ([PRD](docs/prds/sci-execution-runtime/plan/session-curation-prd-2026-08-04.md)) | curator, repair agent |
+| render profile | the database-derived consumer fit policy applied by the one `seon.print/fit` owner (`resources/seon/schemas/seon.render.profile.edn` ↔ `src/seon/print.cljc`) | cap, window |
+| elision value | ordinary data describing omitted count, path, next offset, and requery identity (`resources/seon/schemas/seon.print.edn` ↔ `src/seon/print.cljc`) | ellipsis, truncation marker |
+| `:seon.fn/external-sink`, `:seon.fn/projection-boundary` | queryable program-graph leaf facts; `seon.fn/output-path-report` derives projected/bypass/unresolved paths (`resources/seon/schemas/seon.fn.edn` ↔ `src/seon/fn.clj`) | sink roster, output allowlist |
+| **[TARGET] root maintenance portfolio** | root's declared scheduled reclamation/inspection/repair tasks ([design](docs/prds/sci-execution-runtime/research/scheduler-mining-and-gc-design-2026-08-04.md)); update this row when the owners land | maintenance daemon |
+| **[TARGET] `my.branch`** | agent-facing branch/history verbs over database branches — git vocabulary without claiming to be git ([PRD](docs/prds/sci-execution-runtime/plan/agent-desk-and-checkout-prd-2026-08-05.md)); update this row when it lands | my.git, my.repo |
+| the agent's defs, `:seon.def/*` | the agent's temporary defs + atoms, committed as agent-scoped facts at turn settlement | the desk, session image |
+| the agent's history; a form + value entry | the ordered derivation of an agent's REPL session from message/run-form/result facts ([PRD](docs/prds/sci-execution-runtime/plan/repl-transcript-context-prd-2026-08-10.md)) | session units, transcript entries |
+| `doc`, `dir` (bare, injected); printed value | the injected REPL documentation functions over public program rows. **[TARGET]** the bulk `docs` plural is ruled, not yet installed | faces tool, print face |
+| candidates (per-render selection) | the contract-fitting render producer selection consulted per render call (`src/seon/render.clj`) | roster, acquired index |
 
-Register shared shapes once and reference them. If the Malli→Datahike bridge
-cannot express the required referenced shape, fix the bridge rather than
-inlining copies.
+## 4. REPL-driven development
 
-`seon.db` is the ONE database namespace (owner ruling 2026-08-02 #41):
-all of Datahike's core data functions, agent-first. Every function has
-TWO interfaces — Datahike's own positional arity and Datahike's own
-argument-map arity (`{:query :args}`, `{:selector :eid}`,
-`{:tx-data :tx-meta}`, `{:index :components}` — the dependency's keys,
-never an invented envelope) — and BOTH may elide the db/conn argument
-to assume the current database of the calling agent's cluster.
-Failures return as flat `:seon.error` values; returns are
-SCI-admit-clean. It is not a "facade" — never use that word for it; it
-is the db namespace, intercepting Datahike's calls only for
-error-value and ambient-custody semantics. All first-party core data
-reads and writes call `seon.db`; `transact!` lives there rather than in
-`seon.cluster.store`. Direct `datahike.api` calls remain only inside
-`seon.db`, the store/registry and explicitly classified branch-custody
-owners, and the system-side listeners ruling #41 keeps out of the agent
-surface. New code never adds another direct core read/write call site.
-There is no pod, remote replica, or second writer.
+**Start every Clojure change at a running system, not at a file.** The
+tools that connect you to the metal are the difference between guessing and
+knowing — the REPL is the first design and diagnosis surface; checked-in
+source and tests are the durable authority.
 
-An explicitly selected config manifest reconciles its declared subset into
-database facts. Runtime reads the database, not environment variables or the
-file. Config is optional when reopening an existing database; explicit apply
-repairs drift and writes nothing when converged.
+The loop:
 
-Provenance is minimal transaction metadata: resolvable `:seon.db/user` and
-`:seon.db/process`. Do not copy provenance onto domain entities as
-`created-by`, `created-at`, eval, or turn projections.
-
-## Reactive context and code as data
-
-Agents see derived views of the database. A new warning/status/context feature
-is a render function that queries current facts and omits itself when the facts
-are absent—not a notification queue, acknowledgement flag, or stored render.
-Cross-agent visibility follows naturally from queries that do not filter by
-agent. Cache measured expensive derivations; do not bifurcate the architecture
-into stored-fast and derived-slow paths.
-
-**Important schemas declare their render functions** (owner-directed
-2026-08-03): a shape that reaches agent context or a page deserves a
-declared `:seon.render/ai` and `:seon.render/html` render function rather than
-the generic value floor. Static prose may be inline (the string form);
-anything computed is a NAMED function in the owning namespace referenced
-by its fully qualified symbol (ruling #50's representation —
-never an inline anonymous function). The floor is the honest fallback,
-not the destination for shapes people actually read.
-
-**UGLY OUTPUT IS A DEFECT — standing order** (owner, 2026-08-03): every
-agent and lane that meets an ugly, noisy, cryptic, or unreadable rendered
-result — a REPL face, an error value, a context block, an envelope —
-reports it in its summary or files the issue, naming the shape and where
-it surfaced. Render quality improves through this feedback loop
-continuously, never through periodic cleanup campaigns. The dogfood
-precedent: every MCP envelope fix on 2026-08-03 came from an agent
-reporting its own friction.
-
-Live/streaming-style updates stay on the ONE database path, made cheap by
-construction rather than by a side channel:
-
-- high-churn presentation state (streamed reply partials, progress text)
-  rides CHANNELS under the transport law above (owner ruling 2026-07-28,
-  superseding the earlier no-history-attribute design): a sliding-1
-  channel into the render proc gives latest-wins by construction, the
-  database commits only the settled fact at the terminal, and a crash
-  loses nothing recovery needs;
-- efficiency is the existing chain, not new machinery: attribute-indexed
-  interest delivery wakes only subscribed renders → equality suppression
-  skips unchanged renders → the per-tab sliding-1 tap gives a slow
-  browser the newest morph only. The settled UI remains a pure function
-  of the database value; reconnect = repaint (in-flight partials are
-  superseded, never replayed).
-
-Ephemeral display state belongs on channels; durable truth belongs in the
-database. The transport law above is the one fence — do not add a second
-durable path and do not commit in-flight partials as facts.
-
-Core source, eval history, and analyzer state are views of one program graph.
-Build-time `:seon.fn`, `:seon.ns`, and `:seon.test` facts come from the one
-clj-kondo analysis of first-party `src/` and `test/` plus exact source spans;
-global `:seon.schema` facts come from the admitted schema EDN population.
-Dependency/classpath caches improve resolution but never publish external code
-as Seon facts. Do not add another graph builder, replay every eval to resume,
-or introduce a generated bootstrap authority.
-
-Comment grammar is a SOURCE-writing convention only: `;` is prose/inline
-explanation, `;;` is a code-block comment above a form, and `;;;` demarcates
-runtime structure in source. Agents may write comments before their own forms,
-and the reply parser preserves that input. Displays model a real REPL: the form,
-then its actual computed value. Rendered results, doc/dir output, system notices,
-and lessons never use comment-prefixed prose, `;; =>` annotations, decorative
-comment framing, or comment-only pseudo-entries as output.
-
-## Runtime contracts
-
-- Timeouts and magic numbers are design smells until proven backstops
-  (owner ruling 2026-07-24). A deadline may only guard genuinely
-  unobservable external state (a remote HTTP call, a foreign process).
-  For anything the process or database can observe — a thread
-  completing/dying, a datom committing, a child exiting, a phase
-  settling — detection must be event-driven (supervision, completion
-  callbacks, `listen!`), with the clock kept only as a loud last-resort
-  backstop whose firing is itself a bug report, never the primary
-  failure path. When you meet a tuned constant, first ask what
-  observable event it is standing in for. Corollary (explicit goal,
-  same ruling): wherever an interface can be changed to EXPRESS its
-  dependencies and publish its own readiness — a start that returns a
-  completion, a resource that announces attached, a consumer that
-  declares what it awaits — change the interface; do not bolt
-  detection onto an interface that hides the event.
-- Nothing throws into the agent loop. Every failure is a `:seon/error` value;
-  catch sites record the fault as database data. Agent mistakes never crash the
-  pod. Core faults follow the one `:seon.config/on-core-error` dial.
-- Fail LOUD in development, never crash in production — one config dial, not
-  per-site judgment. Degraded fallbacks (e.g. codec text-serialization of a
-  value with no ordinary wire projection) always warn loudly; in development
-  the same event panics so it is found immediately (owner ruling R41).
-- Classification rules are COMPUTED, never name-based. A namespace-prefix or
-  literal-list trust/privacy/placement rule is a hand list; derive the fact
-  from provenance, the corpus, or the artifact inventory instead (R34
-  precedent). NAMING CONVENTIONS ARE THE SAME DEFECT: deriving a symbol by
-  string-building a name (`render-<kind>` from a namespace) is a hand rule in
-  disguise. Declare the thing EXPLICITLY — for schemas that means Malli
-  properties, which carry arbitrary namespaced keys read with `m/properties`
-  (`reference-code/malli/src/malli/core.cljc:39`, and the README's own
-  `:json-schema/example` / `:math/multiplier` examples at `README.md:284-292`)
-  — owner ruling #47.
-- **A REGEX REQUIRES THE OWNER'S PERMISSION. STOP AND ASK** (owner ruling
-  2026-08-02: "if you ever want to use a regex in this project you are to stop
-  and ask me permission. It's almost always wrong.") A regular expression over
-  code, model output, names, or structured data is nearly always a symptom of
-  reaching for text where a PARSED REPRESENTATION already exists: the program
-  graph answers questions about code, Malli schemas and their properties
-  answer questions about shape, the reader answers questions about forms, and
-  Datalog answers questions about facts. Regex-rewriting model output is
-  separately banned as a symptom patch. This applies to production code; using
-  `rg` to SEARCH the tree while working is ordinary tooling and needs no
-  permission.
-- Instrumentation is derived from the database program graph and reapplied on
-  hot reload. Wrong schemas/calls are fixed at the source. The kill-switch is
-  only emergency recovery.
-- Fresh runtime code is plain synchronous CLJ. Blocking external transport runs
-  on Flow's `:io` executor; guarded SCI evaluation runs on `:compute`. No
-  Promise/await or self-host execution path exists.
-- The database, not atoms, owns important durable state. Atoms are acceptable
-  only for genuinely process-local artifacts such as compiler state, a
-  connection, or invocation-local coordination.
-- Human-visible sizes are always estimated tokens through
-  `seon.ai.tokens/estimate`, never raw character counts. Storage may keep a
-  character projection, but display converts it.
-
-Detailed current ownership belongs in `docs/seon/architecture/`, its
-`library-grounding.md` read map, and the closest fresh source namespace.
-The quarry lives only in git history (deleted from the tree 2026-08-05).
-
-## Git and shared-tree safety
-
-Multiple agents share this working tree. Preserve unrelated edits and untracked
-files. Safe operations are read-only Git inspection and staging explicit owned
-paths. Do not use `git add -A`.
-
-The Git index is shared too: another lane can stage files after your cached
-name check and before a plain `git commit`. Every agent commit must therefore
-be path-limited (`git commit --only ... -- <explicit-owned-paths>`). Add a new
-untracked owned file explicitly first, then name it in the same path-limited
-commit. A clean `git diff --cached --name-only` is useful evidence but is not a
-locking mechanism and never makes an unbounded commit safe.
-
-The shared checkout is the normal collaboration model. Do not create or move
-work into a Git worktree unless extreme circumstances make shared-checkout work
-unsafe or impossible. Assume other agents are editing the same source tree;
-coordinate through narrow ownership, inspect overlapping diffs, and preserve
-their changes. Agents normally isolate live verification with their own named
-pod/cluster and process coordinates, not another source checkout. If concurrent
-work creates a real concern that these rules do not cover, ask the owner before
-introducing a worktree; otherwise roll with the shared system.
-
-Separately launched Codex tasks are still directly coordinateable: use the app
-thread list/read/message tools to identify the task by checkout and purpose,
-then request a coherent commit or explicit path handoff before editing overlap.
-Do not infer anonymous ownership indefinitely from `git status`, and do not add
-a `COORDINATION.md` status diary; the active PRD roadmap remains the durable
-ledger while thread messages handle ephemeral ownership.
-
-The orchestrator pushes the shared branch to its remote at every coherent
-checkpoint — a wave landing, a design sealing, an end of session. Committed
-work that exists on one disk is one failure from gone (found 2026-07-31:
-4,665 unpushed commits); lanes never push the shared branch themselves.
-
-Branch switches, history changes, file discards, resets, and other destructive
-Git operations require user coordination. Never run `git reset --hard` or
-`git checkout --` to clean a shared tree. Commit coherent gains frequently
-with clear messages.
-
-## Skills and editing
-
-Use a matching `.agents/skills/*/SKILL.md` before specialized work. Skills are
-workflows, not substitutes for source reading. Especially:
-
-- `data-oriented-clojure` before any Seon Clojure;
-- `seon-flow-architecture` before touching a proc, graph, channel, buffer,
-  workload, wake, or fault — or before designing any new runtime mechanism;
-- `data-modeling` plus `datahike` for schemas, queries, and transactions;
-- `clojure-testing` for test mechanics and the database fixture;
-- `repl` for how an agent's own forms are read and evaluated.
-
-**A SKILL'S BLAST RADIUS IS EVERY AGENT THAT LOADS IT** (owner ruling
-2026-07-29). A wrong line in code fails one lane; a wrong line in a skill
-silently poisons the context of everyone who invokes it, and they will
-trust it precisely because it is the curated guidance. So:
-
-- every factual claim in a skill carries a `file:line` or a named research
-  document, and is verified against CURRENT source when written OR touched;
-- a claim that cannot be verified is DELETED, never hedged — "probably" in a
-  skill is worse than silence;
-- designs that are ruled but unbuilt are marked explicitly (`[TARGET]`) so no
-  one writes code against them;
-- a skill that no longer matches the system is a HIGH-PRIORITY defect, not
-  documentation debt: fix or retire it the day it is noticed;
-- new or substantially changed skills get an INDEPENDENT verification pass
-  that trusts nothing — the same adversarial standard as a landing wave.
-
-Use `rg`/`rg --files` for search and `apply_patch` for edits. If repeated patch
-attempts fail, the function or document is too complex—refactor it.
-
-## REPL-driven development
-
-**Start every Clojure change at a running system, not at a file.** The REPL is
-the first design and diagnosis surface; checked-in source and tests remain the
-durable authority. A plan written without a probe is a hypothesis — this
-program has repeatedly had six-of-six assumptions falsified in one sitting.
-
-If you are spinning up fresh, this is the loop:
-
-1. **Get a live system.** `bin/seon status` shows running clusters. Boot your
-   OWN scratch cluster for anything you intend to change (`bin/seon start
-   <your-name>`); never reset, bounce, or write to a cluster someone else is
-   using — clusters are sovereign and cheap (a fork is ~17 ms). Load-only
-   probes need no cluster at all: `clojure -M:dev` gives you the namespaces.
-2. **Reach it.** `mcp__seon__runtime_status` lists live clusters and their
-   ports; `mcp__seon__eval_clj` evaluates in the selected cluster's JVM.
-   Qualify the cluster when more than one is live — ambiguity must fail, never
-   silently pick. The default session is right for disposable probes; use a
-   named `session_id` only when later forms intentionally depend on `*1`/`*2`.
-   A named-session restart loses process-local values only, never database
-   truth: choose a fresh session id and continue.
-3. **Reproduce with one small form**, and read the COMPLETE returned envelope —
-   not just the value. Inspect live facts, the installed schema, and the
-   immutable database value before inferring a cause.
+1. **Get a live system.** `bin/seon status`; boot your OWN scratch cluster
+   for anything you intend to change (clusters are sovereign and cheap;
+   never reset or write to someone else's).
+2. **Reach it.** `mcp__seon__runtime_status` lists live clusters;
+   `mcp__seon__eval_clj` evaluates in the selected cluster's JVM (qualify
+   the cluster when several are live — ambiguity must fail). **If these
+   tools are down, degraded, or missing, SAY SO IMMEDIATELY** — report it
+   to the orchestrator/owner and file the issue before working around it. A
+   silent workaround (hand-rolled prepl senders, blind file edits) is how
+   tool rot spreads; the tools staying sharp is everyone's leverage.
+3. **Reproduce with one small form** and read the COMPLETE returned
+   envelope. Inspect live facts and the installed schema before inferring a
+   cause.
 4. **Call the owning function directly** with representative data. When the
-   question is about a dependency, read its source in `reference-code/` at that
-   boundary rather than rebuilding its semantics from memory.
-5. **Design in the REPL**: evaluate the proposed shape or transformation on
-   immutable examples that expose inputs and outputs. Write to the database
-   only when the experiment requires it, then inspect the transaction result
-   and the resulting datoms.
-6. **Edit the one owning namespace**, let hot reload apply it, and rerun the
-   same form against the same live evidence. Re-evaluating a `defn` changes
-   running behavior immediately — including flow proc behavior, because procs
-   reference their step-fns as vars. Restart only for load-time config,
-   bootstrap, process, or artifact behavior hot reload cannot exercise.
-7. **Persist the regression**, run the smallest affected gate, then verify the
-   user-visible fact, page, log line, or process transition. A change proven
-   only by a passing test is not proven.
+   question is about a dependency, read its source in `reference-code/` at
+   that boundary.
+5. **Design in the REPL** on immutable examples exposing inputs and
+   outputs.
+6. **Edit the one owning namespace**; hot reload applies it — including
+   flow proc behavior, because procs reference step-fns as vars. Rerun the
+   same form against the same live evidence.
+7. **Persist the regression**, run the smallest affected gate, then verify
+   the user-visible fact, page, log line, or process transition. A change
+   proven only by a passing test is not proven.
 
-Use one form at a time unless batch semantics are the subject of the probe. Do
-not leave speculative definitions, sessions, or mutations as hidden proof:
-record the decisive form and its result in the active PRD when it changes the
-plan, and put reusable probe scripts in `tmp/` (project-local, visible to
-everyone) rather than a private scratch directory.
+Before planning any change: read the closest localized `AGENTS.md` and the
+active roadmap (a task naming a document means READ IT END TO END — never
+grep a named authority); write the dependency ledger (exact libraries and
+mechanisms, pinned `reference-code/` paths, first-party call sites that
+demonstrate the idiom) and read that source; probe the critical assumption
+in the REPL; then strengthen the one existing mechanism in place.
 
-## Dev feedback and testing
+**Where work lives.** Never a session scratchpad or system temp directory —
+deleted without warning, invisible to every other lane. Probes go in `tmp/`
+(project-local, visible); anything whose RESULT is evidence gets its script
+committed and numbers recorded in the owning PRD's `research/`; anything
+that will run again is real code under `test/`. The test: if the machine
+were wiped right now, what would be lost?
 
-### Test fixtures — the one right way (owner-directed 2026-08-13)
+**Comment grammar** (source convention only): `;` prose/inline, `;;` a
+code-block comment above a form, `;;;` runtime structure. Rendered output
+never uses comment-prefixed prose.
 
-The 2026-08-13 tally repair classified ~40 reds; nearly every one was a
-WRONG FIXTURE, not a production defect. These rules are mandatory for every
-new or edited test; each was proven by a same-day fix commit:
+**Skills.** Use the matching `.agents/skills/*/SKILL.md` before specialized
+work: `data-oriented-clojure`, `seon-flow-architecture` (before ANY new
+runtime mechanism), `data-modeling` + `datahike`, `clojure-testing`,
+`repl`. A skill's blast radius is every agent that loads it: every claim
+carries `file:line`, verified when touched; an unverifiable claim is
+DELETED, never hedged; a stale skill is a high-priority defect.
 
-1. **Never hand-roster schema.** A test never builds its own attribute list
-   or partial schema population; it uses the canonical database fixture
-   (`seon.test-support/with-database`, which installs the complete
-   population) plus `::test-support/extra-schema` for genuinely synthetic
-   attributes. A hand roster missing one attribute silently broke 12 tests
-   at once (`100f03a40`).
-2. **Hand the projection/environment explicitly.** Registration, admission,
-   codec, and transact fixtures pass the schema projection / environment as
-   an argument, exactly like production callers — never rely on an ambient
-   registry or dynamic var (`b7bd25c34`, `8377a4a69`, `464fd5ddb`,
-   `e8e37eb50`).
-3. **Supply every declared proc input.** A flow/render fixture supplies the
-   proc's declared inputs (cluster name, render interest, profile) — a
-   missing input becomes a typed refusal value that then poisons downstream
-   consumers (`66cecb816`, `677f84f85`, `0ef66e742`).
-4. **Fixed render profiles in fixtures.** A fixture supplies the shipped
-   render profile; letting the proc DERIVE profiles per call cost 217 s vs
-   6.2 s and read as a hang under the pooled runner (`1930dacd1`).
-5. **Every await is bounded and loud.** No unbounded
-   `await-database-state!`/event wait, ever: bound it with the declared
-   `seon.test-support/event-backstop-seconds` so a broken wake fails in
-   seconds with a message instead of wedging the pool for 300 s and burning
-   every agent's discovery time. A HANGING TEST IS A WORSE DEFECT THAN A
-   FAILING ONE.
-6. **Assert current ruled behavior.** Typed diagnostics are the contract —
-   an uninstalled attribute read is a flat refusal, never `#{}`; an answered
-   trigger is terminal; renders are total and bounded. A test expecting the
-   old lenient shape is stale, and the fix is the expectation
-   (`26e8cf84a`, `dc6604dac`, `0a39f71d6`).
+**Documentation authority.** `docs/seon/architecture/` is the always-current
+aspirational target. The active program roadmap
+([plan/README.md](docs/prds/sci-execution-runtime/plan/README.md), with
+`unsettled.md` as the working edge) is the one ledger of current state and
+ordering — dates, ruling numbers, and incident history live THERE. Bounded
+PRD chunks own their inventory and evidence. Update the affected authority
+in the same commit as the change that invalidates it; one fact lives in the
+deepest file that owns it.
 
-Deeper mechanics stay in `.agents/skills/clojure-testing/SKILL.md`; when a
-new fixture class is discovered, update BOTH in the same commit.
+## 5. Testing
 
-Live diagnosis and narrow behavioral verification start through the repository
-MCP server loaded by `.codex/config.toml` and `.mcp.json`:
+### Test fixtures — the one right way
 
-- use `runtime_status` to see which clusters are live and reachable;
-- use `eval_clj` against the selected cluster's JVM (its stateful `io-prepl`
-  session), qualifying the cluster whenever more than one is live — an
-  ambiguous selection must FAIL rather than silently pick;
-- use the default session for disposable probes and a named `session_id` only
-  when later forms intentionally depend on `*1`/`*2`/`*3`;
-- treat a named-session restart error as lost process-local REPL state and
-  choose a fresh session id; never infer that database state was lost; and
-- keep correctness tests in `bin/test`. MCP eval is the first probe, not
-  another test runner.
+Nearly every red in the 2026-08-13 tally repair was a wrong fixture, not a
+production defect:
 
-The repository MCP advertises only JVM operations. Nothing in the fresh system
-evaluates ClojureScript (CLJS off, owner ruling 2026-07-27).
+1. **Never hand-roster schema.** Use the canonical database fixture
+   (`seon.test-support/with-database` installs the complete population)
+   plus `::test-support/extra-schema` for genuinely synthetic attributes.
+2. **Hand the projection/environment explicitly**, exactly like production
+   callers.
+3. **Supply every declared proc input** (cluster name, render interest,
+   profile) — a missing input becomes a typed refusal that poisons
+   downstream consumers.
+4. **Fixed render profiles in fixtures** — deriving per call reads as a
+   hang under load.
+5. **Every await is bounded and loud** via the declared
+   `seon.test-support/event-backstop-seconds`; await the exact terminal
+   facts, not quiescence.
+6. **Assert current ruled behavior** — typed diagnostics not absence,
+   terminal verdicts, total bounded renders; a test expecting the old
+   lenient shape is stale and the fix is the expectation.
+7. **Own nothing global.** No assumptions about the shared worker JVM's
+   namespace load-state or scheduling, and no mutation of it either —
+   pooled workers run many tests per JVM. A probe namespace that must be
+   unloaded has NO file on any classpath, so the property holds by
+   construction.
 
-The server discovers live clusters from their advertisements and resolves the
-selected cluster's prepl coordinate. A bare id present in several clusters
-must fail as ambiguous. After changing MCP code or client registration,
-restart the Codex or Claude task: already-running clients do not reload stdio
-server definitions or tool schemas. This includes RESUMED codex lanes — a
-session binds its MCP servers at first launch and every resume keeps that
-binding, so a long-lived lane can permanently lack the seon tools. The tell
-is a lane hand-rolling its own prepl sender (e.g. `tmp/prepl-send.clj`)
-instead of calling `eval_clj`; the fix is a fresh lane launch, never a
-config change (probed 2026-08-01: fresh sessions see all three seon tools).
+Deeper mechanics: `.agents/skills/clojure-testing/SKILL.md`; a new fixture
+class updates both in the same commit.
 
-The edit hook runs clj-kondo over prospective and resulting Clojure files,
-returns file/row/column findings, and publishes admitted `src/` and `test/`
-changes to `current-src`. It NEVER runs or queues tests. It also accumulates
-reviewable paths into one asynchronous Gemini Flash review at most once per
-two-minute window; one PID-owned worker coalesces the window, provider failure
-silently drops that batch, and neither review nor tests delay edit feedback.
+### The gate and what a proof is
 
-Run affected tests at a coherent checkpoint. `bin/test` bare already does
-this: it runs the platform moving-part regressions first, then only the tests
-reaching code changed since the last recorded GREEN basis. To select from
-paths you name instead of from the basis:
+`bin/test` is the one correctness gate, tiered: the declared
+`:seon.test/platform` regressions run FIRST and stop the run when red; bare
+adds only tests reaching code changed since the recorded green basis
+(derived from `:seon.fn/calls` edges, never mtimes); `--all` adds every
+non-long test; explicit namespaces run complete. The runner enforces the
+bounded-execution law: a liveness watchdog dumps coordinator AND worker
+JVMs, and the tally is total — unlaunchable or unconfirmed work is typed,
+never silent.
 
-```bash
-bin/test --changed src/seon/cluster/run.clj --changed src/seon/db.clj
-```
+Tests find design issues; structure dissolves them: when a failure class
+appears, move the invariant to one choke point and keep ONE regression per
+class asserting the WANTED behavior. A smaller suite is a desired outcome;
+the health metric is class coverage. Every proof must be claimed by a
+recurring surface. Fixture load paths are not the live boot path: schema,
+acquisition, and process changes need the reset-boundary live proof. After
+code changes, verify the running system, not only the tests, and report
+what is still broken honestly.
 
-`seon.dev.changed-test/run-changed!` is the same thing from babashka — it
-names the paths and shells that gate. It owns no selector of its own.
+The edit hook runs clj-kondo over prospective Clojure edits and publishes
+admitted changes to `current-src`; it never runs tests. Syntax,
+unresolved-name, privacy, and arity errors block; read hook feedback and
+report smells.
 
-Do not discard type-checker output. clj-kondo `:type-mismatch` findings remain
-visible warning context in the hook/artifact, but its local inference is not a
-sound database admission proof and therefore does not veto publication.
-Syntax, unresolved name/namespace, privacy, and arity errors do block the
-affected source. Runtime reply analysis derives only the referenced namespace
-slice from the database `:seon.fn` graph; never serialize the entire graph into
-every lint request and never replace that query with an allowlist.
-
-Parse errors may block malformed edits. Test results are advisory and never
-undo a refactor; obsolete tests may need deletion. Read the retained report and
-full log rather than rerunning just to obtain output.
-
-Tests find design issues; structure dissolves them. When a failure class
-appears, do not fence the symptom with point tests — move the invariant
-to one choke point (a total codec, an admission gate, a computed
-discovery rule, a derived classification) and keep ONE regression per
-class. Schemas generate edge cases: generative round-trips are standing
-totality properties, not test suites to enumerate. Every proof must be
-claimed by a recurring surface — a test invisible to every runner, or a
-live proof that ran once in a lane, counts as NOT COVERED. Fixture load
-paths are not the live boot path: schema, acquisition, and process
-changes always need the reset-boundary live proof, because that is a
-different failure class than any fixture can see. Before writing a
-test, ask: which class is this failure, and what construction makes the
-class unrepresentable? The test you then write is the one that proves
-the class dead.
-
-There are two testing surfaces:
-
-1. code correctness through `bin/test` — the one gate for the fresh system,
-   tiered à la carte with smart defaults (owner ruling 2026-08-07 night).
-   Every tiered invocation runs the declared `:seon.test/platform`
-   moving-part regressions FIRST and stops there when they are red. A bare
-   run then adds only the tests reaching code changed since the last
-   recorded green basis, derived from `:seon.fn/calls` edges in the program
-   graph — never a modification time or a filename. `--all` adds every
-   non-long test, `--full` (or `SEON_TEST_FULL=1`) every test,
-   `--platform` the moving parts alone, `--changed PATH` an explicit
-   selection; explicit namespaces always run all their tests and skip the
-   tiers entirely;
-2. agent/model evaluation through `src-inspect-ai/`.
-
-Do not restore the gym, add bespoke drive scripts, or create another runner.
-Use focused tests while iterating, then one relevant complete checkpoint at the
-natural unit boundary. Tests assert facts, transitions, envelopes, DOM
-identity, omission, idempotency, and structure—not exact context prose.
-
-When exercising a real agent, use long-term planning plus database-backed
-memory: a multi-step plan that survives restart, and schema'd facts stored then
-queried in a later turn. Do not use old workout/trading toy scenarios.
-
-## Resiliency — churn is weather, not a blocker (owner ruling 2026-07-29)
-
-The shared tree and the shared machine are the normal collaboration model.
-Clusters, JVMs, ports, and advertisements come and go WHILE YOU WORK — another
-lane stops a JVM, the owner bounces a cluster, a shared JVM takes a SIGTERM, a
-build churns, a database is reset. None of that is a failure. **ADAPT AND
-CONTINUE.** An agent that stops and reports "blocked" because its environment
-moved has misread the situation; stop only for a genuine implementation
-dependency (something live still needs a path whose owner cannot serve it yet),
-and say exactly what that dependency is.
-
-Concretely, when the ground moves under you:
-
-- **Your cluster vanished** (advertisement gone, prepl refused, pid dead):
-  re-derive from `bin/seon status`, start a fresh one, and re-run your probe.
-  Nothing durable was in that process — facts live in the store, and a cluster
-  is a fork away.
-- **A stale advertisement** names a dead pid: it is a leftover file, not a
-  live claim. Clear it and proceed.
-- **`bin/seon start` adds to an EXISTING JVM** when one is running, so your
-  cluster may share a process with another lane's and die with it. For work
-  that must survive, boot your OWN operator root — that is the isolation
-  pattern the seam re-audits use.
-- **A long-lived JVM serves the code it loaded at start**, not the code in the
-  tree. If correct code fails there, suspect staleness before suspecting the
-  code (this trap cost a lane an entire chunk chasing a phantom).
-- **Another lane's in-flight edits made the gate red**: name whose failures
-  they are and carry on with your own boundary; do not fix or steer their work.
-- **Your own long operation died** (API error, killed wrapper, machine load):
-  the work committed so far stands. Re-read the tree, resume from what is
-  actually there, and never assume your uncommitted state survived.
-
-**Recursive deletion NEVER follows symlinks.** A fixture cleaning its own
-scratch directory followed repository symlinks on 2026-07-29 and deleted 55
-tracked paths — all of `src/` and thirteen vendored submodule trees — while a
-suite was running. Any recursive delete walks without `FOLLOW_LINKS` (or
-`lstat`s each entry) and refuses a path that resolves outside its own root,
-derived from that root rather than from the process working directory. Plant a
-symlinked sentinel in the cleanup regression and assert it survives. The lane
-that did this behaved correctly afterwards — it detected the damage, captured
-an exact inventory, and refused to self-recover without authorization, which
-is why it cost ten minutes instead of a day.
-
-The rule behind all of it: derive current state from the system rather than
-remembering it, keep your own work committed in small coherent slices so churn
-can only ever cost you minutes, and treat every restart as the free resilience
-drill it is.
-
-## Operating the system
+## 6. Operating
 
 `bin/seon` is the one development operator:
 
 ```bash
-bin/seon [--root PATH] COMMAND   # --root = an ISOLATED operator root:
-                                 # its process records, advertisements,
-                                 # logs, and store are separate
+bin/seon [--root PATH] COMMAND   # --root = an ISOLATED operator root
 bin/seon start [CLUSTER] [--config PATH]
 bin/seon config apply [CLUSTER] PATH
-bin/seon status                # reconcile + list this root's clusters
-bin/seon open [NAME]           # open the advertised web URL
-bin/seon init                  # completely publish current-src
-bin/seon init --changed PATH   # incremental when safe; complete fallback
-bin/seon init NAME [--force]   # fork a dormant cluster; --force destroys
-bin/seon stop [--force] [NAME] # force = shared-JVM SIGTERM after prepl fails
-bin/seon down [--force]        # stop EVERY recorded JVM in this root
-bin/seon reset --force         # down all, destroy the cluster root,
-                               # republish, refork default — works from
-                               # any wreckage, never opens the old store
+bin/seon status | open [NAME]
+bin/seon init [--changed PATH] | init NAME [--force]
+bin/seon stop [--force] [NAME] | down [--force]
+bin/seon reset --force           # down all, destroy, republish, refork
 ```
 
-An absent cluster argument means `default` for `start` and `config apply`.
-For `stop`, omission is accepted only when exactly one cluster exists; bare
-`down` deliberately means EVERYTHING in the root (2026-08-01 owner ruling —
-it prints the full pid/start-instant/generation census BEFORE acting).
-Bare `init` always means the published `current-src`, never `default`.
-`init NAME` refuses an existing branch; `--force` explicitly destroys and
-reforks it. Existing clusters receive no source synchronization. Stop/down
-act on exact recorded process identity (pid + start-instant + generation):
-graceful prepl first, TERM grace on the recorded handle, exact-rematched
-KILL only under `--force` — a reused pid can never be killed by mistake.
-`status` degrades from records and advertisements when the store or a
-prepl is unreachable rather than wedging; a failed flock boot exits
-nonzero with no success-shaped output. The operator owns process identity,
-locking, readiness, logs, and shutdown; do not launch its internals
-separately or kill children blindly. DESTRUCTIVE DRILLS AND SECOND
-DEPLOYMENTS USE `--root` — root-scoped discovery makes the shared root
-unreachable by construction (the 2026-08-01 shared-drill incident is the
-provenance).
+Absent cluster means `default` for `start`/`config apply`; bare `init`
+means the published `current-src`. Stop/down act on exact recorded process
+identity — a reused pid can never be killed by mistake. Never launch the
+operator's internals separately or kill its children blindly; use
+`bin/seon down` so the supervisor reaps its own. DESTRUCTIVE DRILLS AND
+SECOND DEPLOYMENTS USE `--root`. `bin/acme` is a thin root-scoped wrapper
+selecting cluster `acme`.
 
-NEVER USE A SESSION SCRATCHPAD OR SYSTEM TEMP DIRECTORY (owner ruling
-2026-07-25). Some harnesses hand an agent a private scratchpad under
-`/tmp`, `/private/tmp`, or a per-session directory and invite it to work
-there. Do not. That directory is deleted without warning, it is invisible
-to every other lane and to the owner, and nothing in it can be reviewed,
-committed, or reproduced. Work that lives only there is work that did not
-happen.
+**Session-start hygiene (standing order).** A fresh session begins by
+verifying the system it inherited, not by trusting it: check `bin/seon
+status` and that the MCP tools answer (a stale long-lived JVM serves old
+code — reset it onto current source rather than debugging phantoms);
+`git status` for another session's residue (preserve it, report it, never
+build on it unreviewed); and sweep the disposable exhaust — retained
+`tmp/test-runs/run.*` roots whose reds are superseded, scratch cluster
+roots under `tmp/`, and any store whose footprint has left its normal
+range. **Before deleting any run root, confirm no live runner holds it**
+(`bin/codex-agent status` for lanes plus the process table for `bin/test`
+JVMs) — sweeping an active root kills a foreign gate mid-run (`bin/seon status` prints it; database data is disposable by ruling —
+reset freely, never migrate). Everything under `tmp/` is throwaway until
+production; a disk filling with dead roots is a defect to fix in the
+minute it is noticed, and the [TARGET] root maintenance portfolio is the
+machinery that eventually owns this automatically.
 
-Everything goes in the repository from the first keystroke:
+**Churn is weather, not a blocker.** Clusters, JVMs, and advertisements
+come and go while you work — ADAPT AND CONTINUE. Your cluster vanished:
+re-derive from `bin/seon status` and start a fresh one. A long-lived JVM
+serves the code it loaded at start — suspect staleness before suspecting
+correct code. Stop only for a genuine implementation dependency, named
+exactly. **Recursive deletion NEVER follows symlinks**; plant a symlinked
+sentinel in any cleanup regression.
 
-- throwaway probes, REPL scripts, and one-off experiments → `tmp/`
-  (project-local, gitignored, survives the session, visible to everyone);
-- anything whose RESULT is evidence — a measurement, a repro, a
-  benchmark → commit the script and record the numbers in the owning
-  PRD's `research/` directory, because an unreproducible number is an
-  anecdote;
-- anything that will run again — a crash harness, an adversarial suite,
-  a regression — is real code. Tests belong under `test/`; a separate
-  top-level package is also valid; a scratch directory is not.
+The shipped model is DeepSeek through the single `seon.ai` HTTP owner;
+every AI dial is a `:seon.config.ai/*` config fact with per-agent overlay.
+Credentials name environment variables and never become datoms. Paid runs
+are deliberate: cheapest probe first
+([reference](docs/seon/reference/llm-adapters.md)).
 
-The test: if the machine were wiped right now, what would be lost? If the
-answer is anything, it was in the wrong place. After runtime/source changes,
-prove the default cluster before coordinating a downstream update.
+**No hobbling for hypothetical risk:** agents are trusted collaborators
+needing full capability, including reading every environment variable. The
+design concern is catching HONEST MISTAKES (bounded output, digests, atomic
+writes) — a restriction is admissible only after evidence of a real
+problem.
 
-`bin/acme` is a thin root-scoped wrapper over the fresh operator. It always
-selects cluster `acme` in an isolated operator root and accepts only the fresh
-`start`, `config apply`, `init`, `status`, `open`, `stop`, `down`, and `logs`
-forms. It owns no pod, build, source overlay, or writer-port mechanism.
+## 7. Collaborating
 
-## Provider and optional subsystem boundaries
+**The orchestrator designs, grounds specs, reviews diffs, and runs serial
+integration gates; implementation goes to capable code agents.** One
+research question gets one agent with complete context. A Claude
+orchestrator launches Codex lanes through `bin/codex-agent` as
+harness-tracked background commands, run BARE — never piped (a filter
+reduces the owner's live panel to one line):
 
-The shipped model is DeepSeek through the single `seon.ai` HTTP owner. Every AI
-dial is a `:seon.config.ai/*` schema-derived config fact and supports the same
-per-agent overlay on the agent entity; absence inherits cluster settings, and
-the loop resolves the effective values from one database value per turn.
-Attempts record the effective settings and usage. The credential setting names
-an environment variable; the credential itself never becomes a datom or enters
-Git. Details live in `docs/seon/reference/llm-adapters.md`.
+```bash
+bin/codex-agent run <name> "<the full spec>"
+bin/codex-agent status | summary <name> | stop <name> | resume <name> "<followup>"
+```
 
-## Key entry points
+Lane stdout never enters the orchestrator's context: read the summary, then
+query the log selectively. Stop + resume with a correction the moment new
+information invalidates a lane's direction. A Codex orchestrator uses its
+native collaboration tools instead
+([mechanics](docs/seon/reference/driving-codex-agents.md)).
 
-- `docs/TRANSFER_PROMPT.md` — **the orientation**: read it whole if you are new
-  to Seon (what it is, why archaeology precedes design, which skills to load,
-  the warts, the mentality, how the owner works);
-- `docs/seon/architecture/architecture.md` — intended system map;
-- `docs/prds/sci-execution-runtime/plan/README.md` — **the one ordering**: the
-  numbered owner rulings, plus `unsettled.md` (current state) and
-  `history.md`;
-- `docs/prds/sci-execution-runtime/AGENTS.md` — current chunk runbook;
-- `docs/conventions.md` — code/schema patterns;
-- `docs/seon/architecture/library-grounding.md` — current first-party and
-  dependency source map (the old-system quarry is git history only);
+**NEVER SANDBOX A LANE** — a sandbox makes an audit's own output
+unrecordable; ownership is enforced by NAMING OWNED PATHS, path-limited
+commits, and diff review. Write lane specs in neutral engineering language
+("verify", "falsify", "probe"). Give every lane its grounding, owned paths,
+protected paths, and exact deliverable.
+
+**Shared-tree safety.** Multiple agents share this working tree; preserve
+unrelated edits and untracked files. Every agent commit is path-limited
+(`git commit --only ... -- <explicit-owned-paths>`); never `git add -A`;
+never `git reset --hard` or `git checkout --` to clean a shared tree;
+branch switches and history changes require user coordination. Commits are
+a lane's heartbeat; the orchestrator pushes at every coherent checkpoint. A
+FOREIGN LANE'S BREAKAGE NEVER BLOCKS YOUR COMMIT: it blocks verification
+only — commit your coherent slice, name whose breakage it is, continue.
+VERIFY THE CLAIM BEFORE YOU NAME THE CAUSE: an attribution is a hypothesis
+until a probe confirms it; a lane that refutes its assignment with evidence
+has done its job.
+
+**Issues are how the system learns.** When you discover a bug, smell,
+duplicate mechanism, stale test, wrong vocabulary, or documentation
+mismatch: search `docs/seon/issues/`, then create or update ONE note before
+returning — never a private registry or a finding left in chat. Notes carry
+frontmatter (`type`, `status: open → resolved | superseded`, `severity:
+blocker | friction | cleanup`, and query tags per
+[the issues README](docs/seon/issues/README.md)). The index is the owner's
+ranked schedule (`bin/issues-index --check`); lanes do not edit it. Fix the
+CLASS, not the instance, with one regression proving the class dead. A
+recurring class earns a rule in this file — that is the loop that turns
+defects into instructions.
+
+**Reporting to the owner.** Sober summaries, broken things first. Full
+repository-relative markdown links for every document. Say that you read
+each named authority end to end. Ask the moment a genuine decision exists —
+2-4 priced options, recommendation first; never park a decision awaiting
+markup. Tool breakage, exploding context, and ugly output get reported the
+moment they are seen.
+
+## 8. Pointers
+
+- [docs/TRANSFER_PROMPT.md](docs/TRANSFER_PROMPT.md) — orchestrator
+  orientation: the current working edge, how the owner works, orchestration
+  lessons;
+- [docs/seon/architecture/architecture.md](docs/seon/architecture/architecture.md)
+  — the aspirational system map, then the domain docs;
+- [docs/prds/sci-execution-runtime/plan/README.md](docs/prds/sci-execution-runtime/plan/README.md)
+  — THE ONE ORDERING: numbered owner rulings, dates, incident history;
+  `unsettled.md` is the working edge. A second ordered list anywhere is a
+  defect;
+- [docs/conventions.md](docs/conventions.md) — code/schema patterns;
+- [docs/seon/issues/README.md](docs/seon/issues/README.md) — issue
+  lifecycle, severity, query tags;
+- `.agents/skills/` — load the matching skill before specialized work;
 - `AGENT.md` — thin delegated-lane compatibility adapter.
-
-## Lane-spec wording (owner-directed 2026-08-03)
-
-Write every lane/agent prompt in neutral software-engineering language:
-"verify", "falsify", "probe", "independent verification" — never
-"attack", "kill", "adversary", or security-flavored framing. Provider
-safety filters reject the latter (a verification lane was refused
-launch for exactly this on 2026-08-03), and neutral wording is the
-accurate description anyway: this is defect-finding, not offense.
-
-## Reporting to the owner (owner-directed 2026-08-03)
-
-When naming any document in a report to the owner — research, PRDs,
-issues, plans — always give the FULL repository-relative path as a
-markdown link (e.g. `[title](docs/prds/.../file.md)`), never a bare
-filename or an abbreviated path. The owner reads the details and
-iterates on designs from those links; an unlinkable mention forces a
-search. Lane summaries follow the same rule.
-
-## Read the whole spec — never grep it (standing, owner-ruled 2026-08-03)
-
-When a task names a document — a spec, ruling, research report, issue,
-or plan — READ IT END TO END before designing, deciding, implementing,
-or reporting on it, and state in your report that you did. Grepping a
-spec is how three wrong conclusions were reached in one evening
-(2026-08-02), each from a partial read of a document that was correct:
-verdict sections, "differences from current" sections, and numbered
-decision lists carry constraints a keyword search never surfaces. If a
-document is long, that is the reason to read it, not the excuse to
-search it. `rg` remains the right tool for FINDING things in the tree;
-it is never the way to CONSUME a named authority.
-
-## No hobbling for perceived security risk (owner ruling 2026-08-03)
-
-Seon is optimized for LOCAL model usage and the agents are trusted
-collaborators, not adversaries. To do the user's work agents need FULL
-capability, including reading every shell/environment variable — we
-cannot know which value is a credential, so nothing is blocked or
-filtered on that basis. Do not add allowlists, credential redaction,
-env sanitization, per-agent grants, or any restriction justified by a
-HYPOTHETICAL risk. The design concern is catching HONEST MISTAKES
-(bounded output, digests, atomic writes, refusal of ambiguous edits),
-never containing malice. A security restriction is admissible only
-after EVIDENCE of a real problem, recorded with that evidence.

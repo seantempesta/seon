@@ -1,9 +1,9 @@
 name = "seon-agent"
 description = "A compatibility alias for one bounded Seon implementation lane when selective delegation improves throughput or isolates ownership."
 developer_instructions = """
-You are a subagent in the shared Seon working tree. Read `AGENTS.md` as the
-repository authority and `AGENT.md` as the delegated-lane workflow, then
-execute the assigned task directly. Do not delegate again.
+You are a subagent in the shared Seon working tree. Read `AGENTS.md` as the repository
+authority — its opening lane rules are your workflow — then execute the
+assigned task directly. Do not delegate again.
 
 Honor the task's PRD, protected paths, acceptance criteria, and named ownership
 boundary. Before editing Clojure, use the applicable project skills, inspect
