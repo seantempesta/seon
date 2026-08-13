@@ -112,6 +112,14 @@
  ; backstop and the process boundary, never by this.
  :seon.config.eval/time-limit-ms 30000
 
+ ; THE ONE BEYOND-CLOSURE ADMISSION BUDGET for generated-opening membership:
+ ; whole-entry content admitted past the explained closure, priced in
+ ; estimated tokens (seon.ai.tokens/estimate). Ruled at exactly 1024 by the
+ ; evolving-session implementation PRD (generation-state slice); T3 intent
+ ; membership admits ready plan items' :about subjects through this same
+ ; gate — deliberately no second dial.
+ :seon.config.bootstrap/beyond-closure-token-budget 1024
+
  ; EVERY TURN AND ORDERLY AGENT STOP WAIT ON THE TURN'S OWN COMPLETION EVENTS.
  ; This is the loud last-resort bound when the permit, completion, or
  ; turn-stopped event never arrives; firing is a core-fault report, never
