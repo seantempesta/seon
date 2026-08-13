@@ -47,11 +47,12 @@ If you write "for each kind" or a `:kind` enum, stop and reframe.
 Namespace every attr `:seon.<ns>/<name>` where the namespace is a real code
 namespace that owns the data. In EDN, write the full qualified keyword.
 `seon.schema.edn/load!` reads the classpath directory `seon/schemas`, backed by
-`resources/seon/schemas/` (`src/seon/schema/edn.clj:1-15,49-51`);
+`resources/seon/schemas/` (`src/seon/schema/edn.clj:1-15,31-115,142-359`);
 `seon.schema.datahike/malli->datahike-attr` derives the
 Datahike facet. The design choice is which Malli shape expresses the intent:
 
 ```clojure
+;; Illustrative schema-resource content, not a JVM form to evaluate.
 ;; resources/seon/schemas/ — owning knowledge-base family
 {:my.kb.source/title :string
  :my.kb.source/rank :int
@@ -84,7 +85,7 @@ What the bridge installs for each (verify live with
 The bridge maps `:enum` (keyword members only), `:and` (bridges on its base),
 and same-type `:or`; a `[:maybe X]` on a stored attribute and any unmappable
 shape THROW — extend the bridge
-(`src/seon/schema/datahike.clj:25-47,112-228`), never hand-write a
+(`src/seon/schema/datahike.clj:25-40,116-264`), never hand-write a
 `:db.type/*`. The other
 properties it reads are `{:seon.db/unique true}` (`:db.unique/value`),
 `{:seon.db/index true}`, and `{:seon.db/no-history? true}`. Full table +
@@ -115,6 +116,7 @@ the schema population is `:seon.db/ref`, which every ref attribute references;
 the shape it names.
 
 ```clojure
+;; Illustrative schema-resource content, not a JVM form to evaluate.
 {:my.kb.source/external-id :string
  :my.kb.source/id
  [:and {:seon.db/identity true} :my.kb.source/external-id]}
@@ -133,7 +135,7 @@ same dial to hand-maintained composite maps or a separate roster.
 `config/default.edn` is the complete shipped decision document and
 `seon.config/compile-manifest` applies defaults, overlay, and explicit
 environment data once
-(`src/seon/schema/edn.clj:95-126`; `src/seon/config.clj:137-229`).
+(`src/seon/schema/edn.clj:31-115`; `src/seon/config.clj:279-400`).
 
 ## Provenance is NOT a domain attribute — the tx already records it
 
@@ -162,6 +164,7 @@ entity schema. Reference your attr schemas by keyword (don't re-inline their
 shapes); mark optional fields `{:optional true}`:
 
 ```clojure
+;; Illustrative schema-resource content, not a JVM form to evaluate.
 {:my.kb.source/entity
  [:map {:seon.db/entity true}
   [:my.kb.source/id :my.kb.source/id]
@@ -174,7 +177,7 @@ shapes); mark optional fields `{:optional true}`:
 The `{:seon.db/entity true}` marker is opt-in and load-bearing: the projection
 derives the identity attribute and emits a queryable `:seon.schema` row, so the
 renderer can enumerate instances by walking that id-attr's index (NO per-row
-`:kind` stamp) (`src/seon/schema.cljc:1149-1209`). Request/response/view maps
+`:kind` stamp) (`src/seon/schema.clj:3033-3115`). Request/response/view maps
 OMIT the marker — they're contracts, not catalogued kinds.
 
 ## Function specs — DEFAULT to map-in / map-out
@@ -195,6 +198,7 @@ ACCRETES safely — add an optional field to the request and old callers don't
 break.
 
 ```clojure
+;; Illustrative schema-resource content, not a JVM form to evaluate.
 ;; resources/seon/schemas/ — owning knowledge-base family
 {:my.kb.source/add-request
  [:map
@@ -209,6 +213,8 @@ break.
 ```
 
 ```clojure
+;; Illustrative contract shape; the request/response schemas and body are
+;; supplied by the owner.
 ;; The function contract references the named EDN schemas:
 (defn add
   {:malli/schema
@@ -231,6 +237,7 @@ invariant is completeness — a bare/unspecced arg is the only violation, never 
 specced positional one.
 
 ```clojure
+;; Illustrative positional contract; the named schemas and body are omitted.
 (defn rename
   {:malli/schema [:=> [:catn [::id ::id] [::new-title ::title]] ::add-response]}
   [id new-title] …)
@@ -253,14 +260,14 @@ Schema identity is global: one `:seon.schema/key` row, never namespace-owned.
 A function contract references schema keys; namespace context may reverse-find
 those keys, but that is a query, not ownership. Runtime
 `schema/unregister!` stages removal inside the current evaluation delta and
-refuses outside it (`src/seon/schema.cljc:1089-1108`). Removal refuses while a
+refuses outside it (`src/seon/schema.clj:1323-1341`). Removal refuses while a
 schema or function contract depends on the affected key. Replacement and
 removal also refuse atomically while any directly or transitively affected
 Datahike attribute—including entity-child attributes—carries current data.
 After current data and contract dependencies are retracted, the operation may
-commit (`src/seon/schema.cljc:1907-1935`;
-`src/seon/cluster/run.clj:562-730`;
-`test/seon/schema_usage_guard_test.clj:80-397`).
+commit (`src/seon/schema.clj:2440-2570`;
+`src/seon/cluster/run.clj:427-686`;
+`test/seon/schema_usage_guard_test.clj:80-476`).
 
 Ordinary history retains the old datoms and historical global schema row, so a
 simulation can rebuild the Malli projection from the same `as-of` database
@@ -278,7 +285,9 @@ Malli never proves an override's output satisfies the schema it decorates.
 The loop: design schema → prove it generates honestly → assert properties.
 
 ```clojure
-(require '[malli.generator :as mg])
+(require '[malli.core :as m]
+         '[malli.generator :as mg])
+;; Illustrative session; `::source-entity` is registered by the owner.
 (let [values (mg/sample ::source-entity {:seed 20260726 :size 50})]
   (assert (every? #(m/validate ::source-entity %) values)))
 ```
@@ -324,6 +333,7 @@ Model a knowledge base: a **source** (natural key, owns its **findings**, cites 
 shared **author**).
 
 ```clojure
+;; Illustrative schema-resource content, not a JVM form to evaluate.
 ;; resources/seon/schemas/ — owning knowledge-base family
 {:my.kb.source/id [:string {:seon.db/identity true}]
  :my.kb.source/title :string
@@ -339,6 +349,8 @@ shared **author**).
 ```
 
 ```clojure
+;; Illustrative end-to-end session; the schema population, aliases, and fresh
+;; connection are established before these forms run.
 ;; Inspect the derived Datahike declarations:
 (seon.schema.datahike/malli->datahike-schema
   [:my.kb.source/id :my.kb.source/topics :my.kb.source/author :my.kb.source/findings])
@@ -365,7 +377,7 @@ worked pair: identity attributes, refs, and transition contracts.
 |---|---|
 | `resources/seon/schemas/` | first-party attribute/entity/value schemas |
 | `src/seon/schema/edn.clj` | loading, config derivation, one admission gate |
-| `src/seon/schema.cljc` | registry, activation, entity-schema decomposition |
+| `src/seon/schema.clj` | registry, activation, entity-schema decomposition |
 | `src/seon/schema/datahike.clj` | `malli->datahike-attr` — the bridge (extend it here) |
 | `src/seon/schema/form.cljc` | shared form inspection the bridge and gates use |
 | `src/seon/fn.clj` | selective durable corpus admission |
