@@ -101,7 +101,13 @@ registered-keys-self-explain.
    staleness archival with source-verified evidence only.
 
 **PENDING THE OWNER (do not decide):** R3 `data/clusters/store` path
-rename options; instruction-facts PRD markup; T3 landing review.
+rename options; the drafted
+[instruction-facts PRD](instruction-facts-prd-2026-08-13.md)'s five
+numbered decisions (seed scope, EDN-as-canonical + byte-check, executable
+teaching via zero-arg `:seon.repl/entries` producers, self-fade criteria,
+curation-mined lessons deferred); T3 landing review; the
+[design-ideas ledger](design-ideas-ledger-2026-08-13.md)'s AWAITING
+section.
 
 **STANDING FOR THE RESUMED SESSION:** lanes get owned+protected paths and
 neutral wording; foreign breakage never blocks a commit; verify claims
