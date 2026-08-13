@@ -112,7 +112,9 @@
                   :seon.render.web/latest-packages latest-packages
                   :seon.render.web/interest interest
                   :seon.render.web/completion completion
-                  :seon.render.web/root-agent-id agent-id}
+                  :seon.render.web/root-agent-id agent-id
+                  ::web/profile
+                  (render/agent-render-profile (config/defaults))}
             graph (flow.core/create-flow
                    {:procs
                     {:seon.render.web/render
@@ -122,6 +124,7 @@
                                     :seon.env/environment @test-environment
                                     :seon.cluster.loop/cluster
                                     {:seon.db/connection connection
+                                     :seon.cluster/name "web-test"
                                      :seon.sci.admit/caps caps
                                      :seon.sci.eval/ctx ctx
                                      :seon.config.eval/time-limit-ms
@@ -562,7 +565,7 @@
             owner (cluster.agent/owner-of @connection 'seon.flow)
             basis-after-known (:max-tx @connection)]
         (is (= 200 (.statusCode known)))
-        (is (str/includes? (.body known) "<code>seon.flow</code>")
+        (is (str/includes? (.body known) "Agent seon.flow is running now.")
             "the canonical namespace page renders its owner's HTML walk")
         (is (= "seon.flow" owner))
         (is (= [process]

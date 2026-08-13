@@ -11,6 +11,7 @@
             [seon.render.web :as web]
             [seon.schema :as schema]
             [seon.sci.admit :as admit]
+            [seon.sci.kernel :as kernel]
             [seon.test-support :as support]))
 
 (def ^:private caps (config/result-caps (config/defaults)))
@@ -107,16 +108,22 @@
            (is (str/includes? (pr-str form) ":seon.ns/requires"))))))))
 
 (deftest form-output-validation-is-the-declared-open-shape
-  (let [valid? #'render/valid-projection?
-        entry {:seon.repl/comment "; think"
-               :seon.repl/form '(help)}]
-    (is (valid? :seon.render/form '(help)))
-    (is (valid? :seon.render/form entry))
-    (is (valid? :seon.render/form [entry {:seon.repl/form '(dir 'my.run)}]))
-    (is (not (valid? :seon.render/form {:seon.repl/comment "; no act"})))
-    (is (valid? :seon.render/form
-                {:seon.error/kind :seon.render/failure
-                 :seon.error/message "failed"}))))
+  (support/with-database
+   (fn [connection]
+     (let [valid? #'render/valid-projection?
+           projection (kernel/context-projection
+                       (support/fork-cluster-ctx connection))
+           entry {:seon.repl/comment "; think"
+                  :seon.repl/form '(help)}]
+       (is (valid? projection :seon.render/form '(help)))
+       (is (valid? projection :seon.render/form entry))
+       (is (valid? projection :seon.render/form
+                   [entry {:seon.repl/form '(dir 'my.run)}]))
+       (is (not (valid? projection :seon.render/form
+                        {:seon.repl/comment "; no act"})))
+       (is (valid? projection :seon.render/form
+                   {:seon.error/kind :seon.render/failure
+                    :seon.error/message "failed"}))))))
 
 (defn- settled-node
   [value]

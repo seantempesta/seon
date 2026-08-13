@@ -337,9 +337,10 @@
                  (:seon.render.call/captured-reads request))))))))
 
 (defn- valid-projection?
-  [output value]
+  [projection output value]
   (or (:seon.error/kind value)
-      (schema/valid-candidate-value? output value)))
+      (schema/valid-candidate-value?
+       (:seon.schema.projection/forms projection) output value)))
 
 (declare project-node*)
 
@@ -401,7 +402,7 @@
       (let [rendered (invoke-selected
                       (assoc request :seon.render/value value)
                       selected)]
-        (if (valid-projection? output rendered)
+        (if (valid-projection? projection output rendered)
           (if (:seon.error/kind rendered)
             node
             {:seon.print/face :seon.print/projected
@@ -454,16 +455,18 @@
   [request output rendered]
   (if (or (nil? rendered) (:seon.error/kind rendered))
     rendered
-    (let [profile (target-profile request)
-          node (print/fit
-                {:seon.print/face :seon.print/projected
-                 :seon.render/output output
-                 :seon.print/value rendered}
-                profile)
-          emitted (print/emit-both node (print/default-options))]
-      (if (= output :seon.render/html)
-        (:seon.print/hiccup emitted)
-        (:seon.print/text emitted)))))
+    (let [profile (target-profile request)]
+      (if (:seon.error/kind profile)
+        profile
+        (let [node (print/fit
+                    {:seon.print/face :seon.print/projected
+                     :seon.render/output output
+                     :seon.print/value rendered}
+                    profile)
+              emitted (print/emit-both node (print/default-options))]
+          (if (= output :seon.render/html)
+            (:seon.print/hiccup emitted)
+            (:seon.print/text emitted)))))))
 
 (defn render-ai
   "Render one value as text through the unique selected live SCI Var."
@@ -528,9 +531,11 @@
   {:malli/schema [:=> [:cat :seon.render/call-request]
                   [:or :seon.render/form :seon.error/value]]}
   [request]
-  (let [rendered (invoke-producer request :seon.render/form
+  (let [projection (sci.kernel/context-projection
+                    (:seon.sci.eval/ctx request))
+        rendered (invoke-producer request :seon.render/form
                                   :seon.render/form)]
-    (if (valid-projection? :seon.render/form rendered)
+    (if (valid-projection? projection :seon.render/form rendered)
       rendered
       {:seon.error/kind ::invalid-form-output
        :seon.error/message "The selected form renderer did not return a form."

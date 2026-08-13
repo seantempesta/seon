@@ -28,6 +28,13 @@ the gate-reds-pair lane's combined gate ("nested render calls encounter
 closed the direct re-arm throw; this is the render-selection instance of the
 same nesting question, surviving through the selected-render invocation path.
 
+The later six-test `seon.render.web-test` HTTP wedge was independently
+reattributed. Its render proc received an incomplete fixture configuration,
+treated the resulting typed missing-effective value as a render profile, and
+threw while fitting the terminal value; the HTTP request then waited for a
+package that could no longer arrive. That wedge adds no evidence to this
+armed-eval issue, whose direct SCI regression remains open.
+
 ## Owner
 
 `seon.render` selected-render invocation (the render call executed for a

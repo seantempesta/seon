@@ -70,6 +70,21 @@
            (is (not= :seon.render/missing-declaration
                      (:seon.error/kind (render-ai request))))))))))
 
+(deftest missing-render-profile-remains-a-flat-error
+  (support/with-database
+   (fn [connection]
+     (let [database @connection
+           ctx (support/fork-cluster-ctx connection)
+           missing-profile (config/effective database "missing-profile")
+           result (render-html
+                   (assoc (render-request database ctx fixture-b
+                                          {:fixture/value 1})
+                          :seon.render/html
+                          'seon.render-simplification.fixture-b/holes-html
+                          :seon.render/profile missing-profile))]
+       (is (= ::config/missing-effective (:seon.error/kind result)))
+       (is (= "missing-profile" (:seon.config/missing-effective result)))))))
+
 (deftest floor-selection-is-recorded-on-the-retained-call
   (support/with-database
    (fn [connection]
