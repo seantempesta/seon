@@ -136,7 +136,17 @@ rendering per the demo-vs-doc rule, basis-t rendered beside results;
 `seon.db/diff` EXCLUDED pending the live REPL exploration (opus agent
 running → `../research/generic-diff-exploration-2026-08-13.md`).
 `issue-class-kill` round 3 running on the operator status face. W3
-still HOLDS until wedge-kill + dump-kill return.
+still HOLDS until wedge-kill + dump-kill return. The diff exploration
+RETURNED (research + 5 probe scripts committed): no diff algorithm —
+`clojure.data/diff` over identity-keyed maps is the diff; simplified
+positional contract `(seon.db/diff basis-t #'f & args)` mirroring
+`as-of`; identity from output-refs row schema with alias chasing
+(id-attr covers only 37/2231 — measured); Datahike `since` is add-only
+(loses changed rows + retractions) so datoms cannot replace result
+diffing. Ledger entry 20 amended; `db-diff` lane LAUNCHED to implement.
+NOTE: the shared `default` cluster JVM is STALE (predates
+`seon.operator/connection`) — reset it at the next quiet boundary, no
+lane depends on it right now.
 
 **THE ORDERED QUEUE AFTER RETURNS:**
 1. R2 continuation, serial, red-tolerant: W2b (deferred producers in
