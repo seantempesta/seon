@@ -119,6 +119,7 @@
             [seon.db :as db]
             [seon.effect :as effect]
             [seon.env :as env]
+            [seon.error :as error]
             [seon.instrument :as instrument]
             [seon.print :as print]
             [seon.program :as program]
@@ -551,6 +552,15 @@
          (map :seon.ns/name)
          (:seon.ns/requires row))})
 
+(defn- program-row-identity
+  "The declared identity carried by one program row, or nil."
+  [row]
+  (some (fn [attribute]
+          (when-some [value (get row attribute)]
+            [attribute value]))
+        (conj program/identity-attributes
+              :seon.program/delete-identities)))
+
 (defn- namespace-context-row
   [namespace-name source before after changed?]
   (when (or changed?
@@ -585,16 +595,21 @@
     (env/advance-projection! state (db/basis-t db) projection))
   projection)
 
-(defn- instrumentation-config
-  "Read the contract dial and admission caps from this database value."
+(defn- database-effective-config
+  "The selected cluster's effective config in this database value, or nil."
   [db]
   (let [cluster-name
         (db/q '[:find ?cluster .
                :where
                [?config :seon.config/cluster ?cluster]
                [?config :seon.config/on-core-error _]]
-             db)
-        effective (when cluster-name (config/effective db cluster-name))]
+             db)]
+    (when cluster-name (config/effective db cluster-name))))
+
+(defn- instrumentation-config
+  "Read the contract dial and admission caps from this database value."
+  [db]
+  (let [effective (database-effective-config db)]
     {:seon.config/on-core-error
      (or (:seon.config/on-core-error effective) :record)
      :seon.sci.admit/caps (config/result-caps effective)}))
@@ -713,12 +728,7 @@
     row :seon.program/row}]
   (let [projection (or (context-projection ctx)
                        (schema/projection-from-database db))
-        [identity-attribute value]
-        (some (fn [attribute]
-                (when-some [value (get row attribute)]
-                  [attribute value]))
-              (conj program/identity-attributes
-                    :seon.program/delete-identities))
+        [identity-attribute value] (program-row-identity row)
         committed (when-not (= identity-attribute
                                :seon.program/delete-identities)
                     (db/pull db
@@ -1176,6 +1186,87 @@
     (sci/add-class! ctx class-name (Class/forName (str class-name))))
   ctx)
 
+(def ^:private acquisition-process "seon.sci.eval/acquire")
+
+(defn- acquisition-refusal
+  "A flat agent-mistake value naming one row that could not be installed."
+  [row failure]
+  (let [identity (program-row-identity row)
+        failure-data (error/refusal failure)
+        cause-kind (:seon.error/kind failure-data)
+        cause-message (or (:seon.error/message failure-data)
+                          (ex-message failure)
+                          (.getName (class failure)))]
+    (error/diagnostic
+     {:seon.error/kind ::acquisition-refused
+      :seon.error/message
+      (str "Program row " (pr-str identity)
+           " could not be installed during acquisition: " cause-message)
+      :seon.error/diagnostic-layer ::acquisition
+      :seon.error/diagnostic-operation 'seon.sci.eval/install-row!
+      :seon.error/diagnostic-member identity
+      :seon.error/diagnostic-expected ::installed
+      :seon.error/diagnostic-offending identity
+      :seon.error/diagnostic-cause
+      (or cause-kind (.getName (class failure)))
+      :seon.error/diagnostic-evidence failure-data
+      :seon.error/data
+      {::acquisition-row identity
+       ::acquisition-cause-kind cause-kind
+       ::acquisition-cause-message cause-message
+       ::acquisition-throwable-class (.getName (class failure))}})))
+
+(defn- acquisition-refusal-id
+  [refusal]
+  (str "acquire-"
+       (schema/sha-256
+        [(.getBytes
+          (pr-str [(get-in refusal [:seon.error/data ::acquisition-row])
+                   (:seon.error/kind refusal)
+                   (get-in refusal
+                           [:seon.error/data ::acquisition-cause-kind])
+                   (get-in refusal
+                           [:seon.error/data ::acquisition-cause-message])])
+          "UTF-8")])))
+
+(defn- record-acquisition-refusals!
+  "Record contained row refusals through the one durable error owner."
+  [ctx db state]
+  (let [refusals (::acquisition-refusals state)]
+    (if-not (seq refusals)
+      state
+      (if-let [connection (:seon.db/connection (::custody ctx))]
+        (let [effective (or (database-effective-config db)
+                            (config/defaults))
+              caps (config/result-caps effective)
+              recurrence-limit
+              (:seon.config.error/recurrence-limit effective)
+              escalate-to (:seon.config.error/escalate-to effective)
+              tx-data
+              (into
+               []
+               (mapcat
+                (fn [refusal]
+                  (error/commit-tx
+                   db
+                   (cond->
+                    {:seon.error/source refusal
+                     :seon.error/id (acquisition-refusal-id refusal)
+                     :seon.error/at (java.util.Date.)
+                     :seon.error/process acquisition-process
+                     :seon.error/basis-t (db/basis-t db)
+                     :seon.sci.admit/caps caps
+                     :seon.config.error/recurrence-limit recurrence-limit}
+                     escalate-to
+                     (assoc :seon.config.error/escalate-to escalate-to))))
+               refusals))
+              outcome (db/transact! connection tx-data)]
+          (cond-> (assoc state ::acquisition-refusals-recorded? true)
+            (:seon.error/kind outcome)
+            (assoc ::acquisition-refusals-recorded? false
+                   ::acquisition-recording-error outcome)))
+        (assoc state ::acquisition-refusals-recorded? false)))))
+
 (defn acquire!
   "Install declared renderer roots and agent code plus remaining compiled core.
 
@@ -1341,17 +1432,23 @@
                  (into ordered ready))))))
         install-row
         (fn [state row]
-          (let [installed
-                (install-row!
-                 {:seon.sci.eval/ctx
-                  (assoc ctx :seon.schema/projection
-                         (:seon.schema/projection state))
-                  :seon.db/db db
-                  :seon.program/row row})]
-            {:seon.schema/projection (:seon.schema/projection installed)
-             :seon.sci.eval/installed
-             (+ (:seon.sci.eval/installed state)
-                (:seon.sci.eval/installed installed))}))]
+          (try
+            (let [installed
+                  (install-row!
+                   {:seon.sci.eval/ctx
+                    (assoc ctx :seon.schema/projection
+                           (:seon.schema/projection state))
+                    :seon.db/db db
+                    :seon.program/row row})]
+              (assoc state
+                     :seon.schema/projection
+                     (:seon.schema/projection installed)
+                     :seon.sci.eval/installed
+                     (+ (:seon.sci.eval/installed state)
+                        (:seon.sci.eval/installed installed))))
+            (catch Throwable failure
+              (update state ::acquisition-refusals (fnil conj [])
+                      (acquisition-refusal row failure)))))]
     ;; Imports are explicit namespace facts. Install their named classes before
     ;; the namespace bindings resolve them; SCI is containment, not a security
     ;; boundary, and the program graph—not a hand list—declares the set.
@@ -1394,18 +1491,20 @@
            namespace-order)]
       ;; Tests resolve only after every namespace's functions and exact
       ;; bindings are present. This makes renamed `deftest` deterministic.
-      (reduce
-       (fn [state namespace-name]
-         (reduce
-          install-row
-          state
-          (map (fn [[sym source _ _]]
-                 {:seon.test/sym sym
-                  :seon.test/source source
-                  :seon.test/ns [:seon.ns/name namespace-name]})
-               (sort-by first (get test-rows-by-ns namespace-name)))))
-       functions-installed
-       namespace-order)))))))
+      (record-acquisition-refusals!
+       ctx db
+       (reduce
+        (fn [state namespace-name]
+          (reduce
+           install-row
+           state
+           (map (fn [[sym source _ _]]
+                  {:seon.test/sym sym
+                   :seon.test/source source
+                   :seon.test/ns [:seon.ns/name namespace-name]})
+                (sort-by first (get test-rows-by-ns namespace-name)))))
+        functions-installed
+        namespace-order))))))))
 
 (defn- def-restore-notice
   [intern-name reason]
