@@ -7,8 +7,9 @@
   (:require [rewrite-clj.zip :as z]))
 
 (defn- flat-error
-  [kind message data]
-  {:seon.error/kind kind
+  [kind marker subject message data]
+  {marker subject
+   :seon.error/kind kind
    :seon.error/message message
    :seon.error/data data})
 
@@ -112,7 +113,7 @@
   (try
     {:seon.edit/root (z/of-string* source {:track-position? true})}
     (catch Throwable error
-      (flat-error :my.edit/parse-refused
+      (flat-error :my.edit/parse-refused :my.edit/parse-refused true
                   "The complete source could not be parsed structurally."
                   {:seon.edit/cause (.getMessage error)}))))
 
@@ -144,7 +145,7 @@
           {:seon.edit/location location
            :seon.edit/node (z/node location)
            :seon.edit/sexpr (:seon.edit/sexpr semantic)}
-          (flat-error error-kind message
+          (flat-error error-kind :my.edit/parse-refused true message
                       {:seon.edit/form-count (count locations)}))))))
 
 (defn single-form?
@@ -250,11 +251,13 @@
       (if (or (:seon.error/kind reparsed)
               (not= rendered (z/root-string (:seon.edit/root reparsed))))
         (flat-error :my.edit/lossless-check-failed
+                    :my.edit/lossless-check-failed true
                     "The structural edit did not preserve the source boundary."
                     {})
         actual))
     (catch Throwable error
       (flat-error :my.edit/lossless-check-failed
+                  :my.edit/lossless-check-failed true
                   "The structural edit could not be verified losslessly."
                   {:seon.edit/cause (.getMessage error)}))))
 
@@ -316,7 +319,7 @@
                      (map #(candidate-evidence source starts %) semantics)
                      context-byte-limit)]
                 (flat-error
-                 :my.edit/no-match
+                 :my.edit/no-match :my.edit/no-match (:my.edit/path request)
                  "No top-level form matches the exact selector."
                  {:seon.edit/candidates (:seon.edit/values evidence)
                   :seon.edit/candidates-complete?
@@ -328,7 +331,8 @@
                      (map #(candidate-evidence source starts %) matches)
                      context-byte-limit)]
                 (flat-error
-                 :my.edit/ambiguous-match
+                 :my.edit/ambiguous-match :my.edit/ambiguous-match
+                 (:my.edit/path request)
                  "More than one top-level form matches the selector."
                  {:seon.edit/candidates (:seon.edit/values evidence)
                   :seon.edit/candidates-complete?
@@ -378,14 +382,15 @@
                   context-byte-limit)]
     (cond
       (empty? positions)
-      (flat-error :my.edit/no-match
+      (flat-error :my.edit/no-match :my.edit/no-match (:my.edit/path request)
                   "The exact prior string does not occur in the source."
                   {:my.edit/replacements 0
                    :seon.edit/lines (:seon.edit/values evidence)
                    :seon.edit/lines-complete? (:seon.edit/complete? evidence)})
 
       (and (not replace-all?) (< 1 (count positions)))
-      (flat-error :my.edit/ambiguous-match
+      (flat-error :my.edit/ambiguous-match :my.edit/ambiguous-match
+                  (:my.edit/path request)
                   "The exact prior string occurs more than once."
                   {:my.edit/replacements (count positions)
                    :seon.edit/lines (:seon.edit/values evidence)
@@ -418,7 +423,7 @@
         from-line (:my.edit/from-line request)
         to-line (:my.edit/to-line request)]
     (if (or (> from-line to-line) (> to-line (count starts)))
-      (flat-error :my.edit/no-match
+      (flat-error :my.edit/no-match :my.edit/no-match (:my.edit/path request)
                   "The guarded line range is outside the current source."
                   {:my.edit/from-line from-line
                    :my.edit/to-line to-line
@@ -430,7 +435,8 @@
         (if (not= expected actual)
           (let [bounded-end (prefix-end-within actual 0 (count actual)
                                                context-byte-limit)]
-            (flat-error :my.edit/no-match
+            (flat-error :my.edit/no-match :my.edit/no-match
+                        (:my.edit/path request)
                         "The guarded line window does not match current source."
                         {:my.edit/from-line from-line
                          :my.edit/to-line to-line

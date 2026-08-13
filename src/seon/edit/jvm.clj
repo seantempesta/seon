@@ -4,14 +4,15 @@
             [seon.fs.jvm :as fs.jvm]))
 
 (defn- flat-error
-  [kind message data]
-  {:seon.error/kind kind
+  [marker subject message data]
+  {marker subject
+   :seon.error/kind marker
    :seon.error/message message
    :seon.error/data data})
 
 (defn- stale-source
   [request actual-digest]
-  (flat-error :my.edit/stale-source
+  (flat-error :my.edit/stale-source (:my.edit/path request)
               "The source file no longer has the expected digest."
               {:my.edit/path (:my.edit/path request)
                :my.edit/expected-digest (:my.edit/expected-digest request)
@@ -24,7 +25,7 @@
                                      (get-in result
                                              [:seon.error/data :my.fs/digest]))
     :my.fs/invalid-utf8-window
-    (flat-error :my.edit/not-utf8
+    (flat-error :my.edit/not-utf8 (:my.edit/path request)
                 "Structural source editing requires strict UTF-8."
                 {:my.edit/path (:my.edit/path request)
                  :my.fs/digest actual-digest})
@@ -43,7 +44,7 @@
     (edit/lines source request context-byte-limit)
 
     :else
-    (flat-error :my.edit/parse-refused
+    (flat-error :my.edit/parse-refused true
                 "The edit request does not declare one operation shape."
                 {})))
 
