@@ -371,7 +371,7 @@ worked pair: identity attributes, refs, and transition contracts.
 | `src/seon/fn.clj` | selective durable corpus admission |
 | `src/seon/instrument.clj` | computed public-contracted-var instrumentation |
 | `src/seon/cluster/run.clj` | a live domain model end to end |
-| `docs/conventions.md` | Malli patterns, request/response, the `:any` boundary |
+| `.agents/skills/data-oriented-clojure/SKILL.md` | public contracts, namespaced data, and error values |
 | `reference-code/malli/src/malli/{core,generator}.cljc` | schema syntax + generator derivation |
 
 For querying / transacting / upsert / retract / refs-at-read-time → the

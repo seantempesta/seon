@@ -58,7 +58,7 @@ A single commit deserves special attention up front: [`b302ef8`](https://github.
 - 2026-02-14 → present (this repo): `:malli/schema` on every public function; runtime instrumentation throws on mismatch; `seon.schema/register!` is the single source of truth.
 
 **Current code**: `src/seon/schema.clj`, `src/seon/db/schema.clj`, `src/seon/dev/instrumentation.clj`
-**Current docs**: [`docs/seon/components/schema-system.md`](../components/schema-system.md), [`docs/conventions.md`](../../conventions.md)
+**Current docs**: [`docs/seon/components/schema-system.md`](../components/schema-system.md), [`AGENTS.md`](../../../AGENTS.md), and the `data-modeling` skill
 
 **Why it matters**: It is the typed boundary every other layer queries. Without schemas as data, function discovery, validated transacts, and per-namespace ctx are all impossible.
 

@@ -22,8 +22,8 @@
  ;; The standing review rubric is DATA: `:skills` names skill directories
  ;; under `.agents/skills/`, each of whose `SKILL.md` is read fresh on every
  ;; review (edit a skill and the next review sees it — nothing is baked in),
- ;; followed by `docs/conventions.md`. The selection is the subset with real
- ;; catch-power for a reviewer of the current JVM/Clojure tree; the pod-era
+ ;; review. The selection is the subset with real catch-power for a reviewer
+ ;; of the current JVM/Clojure tree; the pod-era
  ;; skills (clojurescript, datastar-web-ui, ui-canvas, seon-context-config)
  ;; and the agent-REPL skill are deliberately absent.
  :review

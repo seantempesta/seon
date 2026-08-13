@@ -689,7 +689,6 @@ moment they are seen.
   — THE ONE ORDERING: numbered owner rulings, dates, incident history;
   `unsettled.md` is the working edge. A second ordered list anywhere is a
   defect;
-- [docs/conventions.md](docs/conventions.md) — code/schema patterns;
 - [docs/seon/issues/README.md](docs/seon/issues/README.md) — issue
   lifecycle, severity, query tags;
 - `.agents/skills/` — load the matching skill before specialized work.

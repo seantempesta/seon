@@ -39,7 +39,6 @@
   (or (System/getenv "SEON_HOOK_CONFIG")
       (str (root-file ".claude/seon-hook.edn"))))
 
-(def conventions-path (root-file "docs/conventions.md"))
 (def skills-path (root-file ".agents/skills"))
 (def review-state-root
   (io/file (or (System/getenv "SEON_HOOK_STATE_DIR")
@@ -710,15 +709,13 @@
 (defn- build-review-prompt
   "Build one bounded batch prompt with the standing rubric included once.
 
-   The rubric is the configured skills followed by `docs/conventions.md`,
-   both re-read on every review."
+   The rubric is the configured skills, re-read on every review."
   [files {:keys [skills max-code-length max-batch-length max-rubric-length]
           :or {skills []
                max-code-length 40000
                max-batch-length 200000
                max-rubric-length 60000}}]
   (let [loaded-skills (load-skills skills max-rubric-length)
-        conventions (load-rubric (io/file conventions-path) max-rubric-length)
         files (vec files)
         {:keys [kept]}
         (reduce
@@ -737,8 +734,7 @@
     (when (pos? dropped)
       (log! "REVIEW_BATCH_TRUNCATED" (str "dropped-oldest=" dropped)))
     (log! "REVIEW_RUBRIC"
-          (str "skills=" (str/join "," (map :name loaded-skills)))
-          (str "conventions=" (boolean conventions)))
+          (str "skills=" (str/join "," (map :name loaded-skills))))
     (str
      "Do not call tools or inspect the filesystem. Review only the supplied "
      "rubric and file blocks.\n\n"
@@ -769,10 +765,6 @@
       (map (fn [{:keys [name content]}]
              (str "=== SEON SKILL: " name " (rubric) ===\n" content "\n\n"))
            loaded-skills))
-     (when conventions
-       (str "=== PROJECT CONVENTIONS (rubric) ===\n"
-            conventions
-            "\n\n"))
      (str/join
       "\n"
       (map #(render-file-block % max-code-length) ordered)))))

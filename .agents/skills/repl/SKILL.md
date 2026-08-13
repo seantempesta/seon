@@ -159,6 +159,11 @@ changes only the edited code. The planner repair used this sequence
 (`docs/seon/issues/archive/datahike-planner-and-caches-carry-three-smaller-defects.md`
 “Evidence”).
 
+When the edited host Var is a contracted Seon public function, re-evaluating
+its `defn` also replaces the Malli wrapper. Run `seon.instrument/apply!` after
+loading the definition and before repeating the probe; the operation is
+idempotent (`src/seon/instrument.clj:180-215`).
+
 For a running flow proc whose step function is stored as a Var, re-evaluating
 the `defn` updates the next step without rebuilding topology
 (`src/seon/flow.clj:83-115`;

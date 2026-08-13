@@ -104,10 +104,9 @@ keyword namespace is a real code namespace that owns that data's schema.
 The `:malli/schema` is the contract of record: tests check it, generators
 derive from it, review reads it, and `seon.instrument/apply!` instruments every
 loaded public var carrying one in development. The selection is computed —
-public + contracted — with no namespace allow list. Re-run `apply!` after
-re-evaluating a defn because hot reload replaces the wrapper
-(`src/seon/instrument.clj:180-215`). `:pre`/`:post`
-gets none of this — not
+public + contracted — with no namespace allow list. Reload and wrapper-restoration
+mechanics live in the **`repl`** skill (`src/seon/instrument.clj:180-215`).
+`:pre`/`:post` gets none of this — not
 discoverable, not generatively testable, not a database fact. Two sanctioned
 argument shapes: map-in/map-out
 (preferred for accreting API surfaces) or fully-spec'd positional via `:catn`;
@@ -127,6 +126,10 @@ a map and omit the key. Authored contracts refuse `:any`, `:some`, and `:nil`;
 declare a named predicate schema for genuine polymorphism
 (`src/seon/schema/internal.cljc:20,59-105`).
 
+Private helpers may use ordinary positional arguments and remain unspecced.
+That convenience never weakens a public function's complete input/output
+contract.
+
 ### Docstring line 1 is a complete ≤72-char sentence — it renders as the summary
 
 A public fn's docstring FIRST LINE is the summary shown wherever the fn renders
@@ -136,8 +139,9 @@ never a mid-sentence hard-wrap. State the action + data effect, not the mechanis
 (mechanism → the body, after a blank line). Imperative for side-effecting verbs
 (`Store…`, `Mint…`), noun-phrase for pure queries (`Agent ids whose…`); backtick
 identifiers. `seon.dev.docstring` (dev hook, warn-only) flags a line 1 that's
-missing, >78 chars, or lacks terminal punctuation. Full rule + example:
-`docs/conventions.md` "Function Docstrings".
+missing, >78 chars, or lacks terminal punctuation. Namespace docstrings stay
+concise and current-state; the long-form stewardship format lives only in
+`docs/seon/concepts/namespace-stewardship.md`.
 
 ### Agent-facing verbs return error envelopes — they never throw
 
@@ -272,6 +276,12 @@ shape once, reference everywhere": duplication guarantees drift.
 
 ### Schema EDN and function code have separate homes
 
+Keep one source file per namespace and mirror its path under `test/`. JVM-only
+owners use `.clj`; use `.cljc` only for a genuinely portable capability core or
+pure transformation. When plumbing obscures a public namespace's contract, it
+may move to a sibling `<ns>.internal`; never create that sibling to hide
+callable functions or to avoid strengthening the existing owner in place.
+
 Put shipped schema declarations under `resources/seon/schemas/`, then require
 only what function code actually calls:
 
@@ -318,5 +328,4 @@ Test fixtures, event backstops, and generative patterns live in the
 | Write tests, fixtures, generators | the **`clojure-testing`** skill |
 | Build a long-running owner, channel, or executor | `reference-code/core.async/.../flow/` + `src/seon/flow.clj` |
 | Confirm any library's actual behavior | the vendored source in `reference-code/<lib>/` — never guess |
-| Full conventions (Malli shapes, `.internal`, schema composition) | `docs/conventions.md` |
 | What is settled, unsettled, and next | `docs/prds/sci-execution-runtime/plan/README.md` |

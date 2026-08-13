@@ -435,7 +435,7 @@ block:
 These themes show up in vision + capabilities + PRDs + archives. They are the
 load-bearing ideas Sean has returned to across 18+ months.
 
-1. **Map-in / map-out / namespaced everywhere.** CLAUDE.md, conventions.md,
+1. **Map-in / map-out / namespaced everywhere.** `AGENTS.md`,
    every capability doc, every PRD. Non-negotiable.
 2. **Schemas are the discovery key, the validation gate, the documentation, the
    test generator — one Malli registration does all four.**
