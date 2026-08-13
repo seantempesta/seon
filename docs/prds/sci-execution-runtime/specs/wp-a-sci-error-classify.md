@@ -1,3 +1,9 @@
+---
+type: prd
+status: active
+tags: [prd, architecture, agent]
+---
+
 # WP-A — sci fork error patch + structural classification (`seon.error.sci`)
 
 Working dir /Users/sean/src/seon, branch codex/runtime-reliability-refactor.

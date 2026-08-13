@@ -1,3 +1,9 @@
+---
+type: prd
+status: active
+tags: [prd, architecture, agent]
+---
+
 # WP-K — package roots, ledger facts, config accessors (no host yet)
 
 Working dir /Users/sean/src/seon, branch codex/runtime-reliability-refactor.

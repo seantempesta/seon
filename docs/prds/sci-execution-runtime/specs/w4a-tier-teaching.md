@@ -1,3 +1,9 @@
+---
+type: prd
+status: active
+tags: [prd, architecture, agent]
+---
+
 # W4a — tier-aware system teaching + generate-code contract phrases
 
 Working dir /Users/sean/src/seon, branch codex/runtime-reliability-refactor.

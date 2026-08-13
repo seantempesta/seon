@@ -1,3 +1,9 @@
+---
+type: prd
+status: active
+tags: [prd, architecture]
+---
+
 # W8a — PRD archival sweep
 
 You are working in /Users/sean/src/seon on branch codex/runtime-reliability-refactor.

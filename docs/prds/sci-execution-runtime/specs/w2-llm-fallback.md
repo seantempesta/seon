@@ -1,3 +1,9 @@
+---
+type: prd
+status: active
+tags: [prd, architecture, agent]
+---
+
 # W2 — LLM provider fallback as config data
 
 Working dir /Users/sean/src/seon, branch codex/runtime-reliability-refactor.
