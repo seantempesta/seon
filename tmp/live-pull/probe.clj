@@ -251,7 +251,7 @@
      boundaries)))
 
 (defn- run-probe!
-  [root connection extra-agent-count]
+  [root connection extra-agent-count acquisition-only?]
   (support/seed-cluster! connection "live-pull-probe")
   (let [agent-id "live-pull-probe-agent"
         _ (cluster/ensure-entity!
@@ -266,7 +266,10 @@
                {:seon.cluster.agent/id extra-agent-id
                 :seon.cluster/name "live-pull-probe"
                 :seon.ns/name (symbol "my.agents" extra-agent-id)})))
-        ctx (sci.eval/cluster-ctx @connection connection)
+        ctx (if acquisition-only?
+              {:seon.schema/projection
+               (schema/projection-from-database @connection)}
+              (sci.eval/cluster-ctx @connection connection))
         generator-request (make-request connection ctx agent-id)
         observations (atom {})]
     (println (pr-str (conditions root @connection extra-agent-count)))
@@ -285,22 +288,23 @@
                  _ (measure observations :cold-root-acquisition
                             #(walk/root-acquisition request-with-plan))
                  _ (measure observations :warm-root-acquisition
-                            #(walk/root-acquisition request-with-plan))
-                 _ (measure observations :cold-pull-result
-                            #(bootstrap/pull-result generator-request))
-                 _ (measure observations :warm-pull-result
-                            #(bootstrap/pull-result generator-request))]
-             (settle-help! connection agent-id)
-             (let [settled-request (assoc generator-request
-                                          :seon.db/db @connection)]
-               (measure observations :next-entry-after-help
-                        #(bootstrap/next-entry settled-request
-                                               (bootstrap/run-id
-                                                agent-id)))))))))))
+                            #(walk/root-acquisition request-with-plan))]
+             (when-not acquisition-only?
+               (measure observations :cold-pull-result
+                        #(bootstrap/pull-result generator-request))
+               (measure observations :warm-pull-result
+                        #(bootstrap/pull-result generator-request))
+               (settle-help! connection agent-id)
+               (let [settled-request (assoc generator-request
+                                            :seon.db/db @connection)]
+                 (measure observations :next-entry-after-help
+                          #(bootstrap/next-entry settled-request
+                                                 (bootstrap/run-id
+                                                  agent-id))))))))))))
 
 (defn -main
   "Run the decomposition against one new repository-local root."
-  [& [root extra-agent-count]]
+  [& [root extra-agent-count mode]]
   (when-not root
     (throw (ex-info "Pass a new repository-local probe root."
                     {:live-pull.probe/usage
@@ -308,7 +312,8 @@
   (let [root-file (.getCanonicalFile (io/file root))
         extra-agent-count (if extra-agent-count
                             (parse-long extra-agent-count)
-                            0)]
+                            0)
+        acquisition-only? (= "acquisition-only" mode)]
     (when-not (nat-int? extra-agent-count)
       (throw (ex-info "The extra-agent count must be a natural integer."
                       {:live-pull.probe/extra-agent-count
@@ -323,5 +328,6 @@
     (support/with-published-file-database
       root-file :live-pull-probe
       (fn [connection]
-        (run-probe! root-file connection extra-agent-count))))
+        (run-probe! root-file connection extra-agent-count
+                    acquisition-only?))))
   (shutdown-agents))
