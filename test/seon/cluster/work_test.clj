@@ -407,49 +407,6 @@
               (is (seon.schema/valid-candidate-value?
                    :seon.cluster.work/next next-trigger)))))))))
 
-(deftest a-clean-correction-retires-the-previous-lint-refusal
-  (with-database
-    (fn [connection]
-      (configure-cap! connection 3)
-      (add-outside-trigger! connection message-id now)
-      (closed-run! connection "refused-run" message-id [lint-refusal] now)
-      (is (= message-id
-             (:seon.cluster.message/id
-              (work/next-agent-work @connection request))))
-      (closed-run! connection "clean-correction" message-id [1]
-                   (Date. 1700000000001))
-      (is (= 2 (work/episode-runs @connection agent-id)))
-      (is (nil? (work/next-agent-work @connection request))
-          "only the latest closed turn can derive continuation"))))
-
-(deftest lint-refusal-continuation-stops-at-the-existing-episode-cap
-  (with-database
-    (fn [connection]
-      (configure-cap! connection 3)
-      (add-outside-trigger! connection message-id now)
-      (doseq [ordinal (range 3)]
-        (closed-run! connection
-                     (str "refused-run-" ordinal)
-                     message-id
-                     [lint-refusal]
-                     (Date. (+ (.getTime now) ordinal)))
-        (is (= (inc ordinal) (work/episode-runs @connection agent-id))
-            "reusing an outside trigger does not reset its episode"))
-      (is (nil? (work/next-agent-work @connection request))
-          "a refusal at the cap does not continue")
-      (is (false? (work/more-agent-work? @connection request)))
-      (testing "a genuinely new outside trigger still resets the episode"
-        (add-outside-trigger! connection "message-2" (Date. 1700000000100))
-        (is (= {:seon.cluster.work/situation :open
-                :seon.cluster.agent/id agent-id
-                :seon.cluster.message/id "message-2"}
-               (work/next-agent-work @connection request)))
-        (closed-run! connection "outside-reset" "message-2" [1]
-                     (Date. 1700000000100))
-        (is (= 1 (work/episode-runs @connection agent-id)))
-        (is (nil? (work/next-agent-work @connection request))
-            "the older refusal cannot resurface after a clean latest turn")))))
-
 ;;; ---------------------------------------------------------------------------
 ;;; The two derivations that are NOT work
 ;;; ---------------------------------------------------------------------------
@@ -502,8 +459,7 @@
               (let [db (db/db connection)
                     derived (work/next-agent-work db request)
                     situation (:seon.cluster.work/situation derived)
-                    answered-closed? (and closed? triggered? trigger-first?)
-                    refused? (contains? (set receipts) lint-ordinal)]
+                    answered-closed? (and closed? triggered? trigger-first?)]
                 (and
                  ;; TOTAL: only the four situations, or idle
                  (contains? #{:resume :call :open :close nil} situation)
@@ -513,11 +469,10 @@
                  (or (nil? derived)
                      (seon.schema/valid-candidate-value?
                       :seon.cluster.work/next derived))
-                 ;; An answered closed turn is idle unless a committed
-                 ;; receipt contains a lint refusal; that presence derives
-                 ;; the existing corrective :open situation.
+                 ;; Every answered closed turn is idle. Receipt content cannot
+                 ;; manufacture a new trigger or corrective turn.
                  (or (not answered-closed?)
-                     (= (if refused? :open nil) situation))
+                     (nil? situation))
                  ;; :resume carries the FIRST ordinal with no terminal
                  ;; receipt — never one already settled, which is what
                  ;; "nothing re-executes" means in the derivation

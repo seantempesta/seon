@@ -9,8 +9,8 @@ tags: [issue, testing, flow, render]
 
 ## Problem
 
-The agent-flow property fixture and the loop settings fixture constructed
-`seon.render.web/render-step` without the declared
+The agent-flow property fixture, the loop settings fixture, and the turn
+streaming fixture constructed `seon.render.web/render-step` without the declared
 `:seon.render.web/interest` reference. Flow therefore refused during proc
 initialization before either fixture could exercise its subject.
 
@@ -30,11 +30,15 @@ initialization before either fixture could exercise its subject.
   `prompt-and-call-resolve-once-record-settings-and-see-next-turn-config` at
   `test/seon/cluster/loop_test.clj`; supplying the same `(atom :all)` fixture
   value closes that member of the class.
+- The 2026-08-13 complete-run attribution found the third member in
+  `test/seon/cluster/turn_test.clj`'s `render-proc-for`. Supplying the declared
+  reference lets `streaming-rides-channels-and-only-the-settled-value-is-a-fact`
+  reach and pass its stream assertions under direct invocation.
 
 ## Owner
 
-The hand-built render graph fixtures in `test/seon/cluster/agent_test.clj`
-and `test/seon/cluster/loop_test.clj`.
+The hand-built render graph fixtures in `test/seon/cluster/agent_test.clj`,
+`test/seon/cluster/loop_test.clj`, and `test/seon/cluster/turn_test.clj`.
 
 ## Acceptance
 
@@ -42,5 +46,7 @@ and `test/seon/cluster/loop_test.clj`.
   missing-port refusal.
 - The loop settings fixture reaches its config-acquisition assertions without
   a missing-port refusal.
+- The turn streaming fixture reaches its channel and settled-fact assertions
+  without a missing-port refusal.
 - The focused namespace passes after the protected projection source is
   coherent.

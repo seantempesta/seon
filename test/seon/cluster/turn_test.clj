@@ -356,7 +356,8 @@
                 (is (= '(1 2 3) (get results 1))
                     "form 1 SAW form 0's def — one ctx per run, not per
                      form — and its lazy sequence came back REALIZED")
-                (is (= (my.run/complete "counted 6")
+                (is (= (assoc (my.run/complete "counted 6")
+                              :my.run/delivered-to :outside)
                        (get results 2))
                     "and the disposition round-tripped through admission")))
             (testing "the real settlement retains queryable read evidence"
@@ -1125,7 +1126,9 @@
                               (keep #(:error-kind (val %)))
                               receipts))
                 "no form was refused")
-            (is (= (my.run/complete "refined") (get-in receipts [4 :result]))
+            (is (= (assoc (my.run/complete "refined")
+                          :my.run/delivered-to :outside)
+                   (get-in receipts [4 :result]))
                 "the run stayed open through the change and completed")))))))
 
 (deftest runtime-schema-unregister-removes-one-unused-global-schema
@@ -1873,8 +1876,8 @@
                 reports (drive! cluster 10)]
             (testing "the trigger was answered by exactly one run"
               (is (empty? (work/unanswered-triggers @connection "agent-a"))))
-            (testing "and the pass sequence is open -> call -> fold -> close"
-              (is (= [:open :call :resume :close]
+            (testing "and the terminal resume closes without another pass"
+              (is (= [:open :call :resume]
                      (mapv :seon.cluster.work/situation reports))))
             (testing "every form got exactly one terminal receipt"
               (is (= 2 (count (db/q '[:find ?e :where
@@ -2154,13 +2157,17 @@
                          [?schema :seon.schema/key
                           :my.agents.agent-a/combined-receipt ?tx]]
                        @connection)]
-              (is (= {:seon.cluster.eval/result-edn result-edn
-                      :seon.cluster.eval/result-blob result-blob
-                      :seon.cluster.eval/result-size (long (count result-edn))
+              (is (= (assoc result :my.run/delivered-to :outside)
+                     (semantic-result
+                      (:seon.cluster.eval/result-edn receipt)))
+                  "settlement accretes delivery onto the disposition")
+              (is (= {:seon.cluster.eval/result-blob result-blob
+                      :seon.cluster.eval/result-size
+                      (long (count (:seon.cluster.eval/result-edn receipt)))
                       :seon.cluster.eval/interrupted-at now
                       :seon.cluster.eval/error "combined error"
                       :seon.cluster.eval/output "combined output\n"}
-                     receipt))
+                     (dissoc receipt :seon.cluster.eval/result-edn)))
               (is (= 1 (count terminal-txs))
                   "receipt facts, program row, and completion close commit together")
               (is (= [row row]
@@ -2811,10 +2818,12 @@
                               "\"please count the widgets\")\n"
                               "(my.run/complete \"asked agent-b\")")}
                         {:seon.ai/text
-                         "(my.run/complete \"there are three widgets\")"}])]
+                         "(my.run/complete \"there are three widgets\")"}
+                        {:seon.ai/text
+                         "(my.run/complete \"accepted agent-b's answer\")"}])]
           (drive! cluster 10)
-          (is (= 2 (count @requests))
-              "the trigger and its answer each make one provider call")
+          (is (= 3 (count @requests))
+              "the outside, delegate, and reply triggers each make one call")
           (testing "the message is a durable fact addressed to the peer —
                     and the peer's completion answers back, derived from
                     the trigger rather than remembered by the delegate"
@@ -3481,6 +3490,7 @@
                           (async/chan (async/sliding-buffer 1))
                           :seon.render.web/registration (atom {})
                           :seon.render.web/latest-packages (atom {})
+                          :seon.render.web/interest (atom :all)
                           :seon.render.web/completion completion
                           :seon.render.web/root-agent-id "root"
                           :seon.cluster.loop/cluster cluster})}}
@@ -3638,17 +3648,16 @@
         ;; still return immediately, which is what sliding-1 buys
         (let [offer-results (atom [])
               completed-producers (atom #{})
+              request-index (atom -1)
               texts {"agent-a" "(my.run/complete \"alpha\")"
                      "agent-b" "(my.run/complete \"beta\")"}
               completer
               (fn [request]
                 (let [sink (:seon.ai/sink request)
-                      ;; which agent this call belongs to is derivable
-                      ;; from the prompt the turn captured
-                      agent-id (if (str/includes? (:seon.ai/prompt request)
-                                                  "sprockets")
-                                 "agent-b"
-                                 "agent-a")
+                      ;; The fixture drives agents in declared sorted order.
+                      ;; Agent identity is a database fact, not prompt format.
+                      agent-id (nth ["agent-a" "agent-b"]
+                                    (swap! request-index inc))
                       text (get texts agent-id)]
                   (doseq [n (range 1 (inc (count text)))]
                     (swap! offer-results conj

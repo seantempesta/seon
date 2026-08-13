@@ -18,14 +18,12 @@
   - `:generate` — a system-authored generated run whose current prefix has
     terminal receipts. Derive and append exactly its next dependency-ready
     form; no model call and no stored whole-episode plan;
-  - `:open` — an agent with no open run and either a lint-refused latest
-    closed turn below the episode cap or an unanswered trigger. A lint
-    refusal reuses that turn's trigger identity so its committed findings
-    appear in the corrective turn without a new message. Open and claim
-    FIRST, model second: the busy fence must exist before the expensive
-    part, so a second trigger during a model call cannot start a second
-    turn (the claim-early half of n3-plan §9.1, which the night ruling
-    kept);
+  - `:open` — an agent with no open run and an unanswered trigger under the
+    episode gate. Every closed run answers its trigger, including a refusal;
+    only a new trigger can open another run. Open and claim FIRST, model
+    second: the busy fence must exist before the expensive part, so a second
+    trigger during a model call cannot start a second turn (the claim-early
+    half of n3-plan §9.1, which the night ruling kept);
   - `:close` — an open run whose every evaluable form already has a terminal
     receipt. Comment-only input has no reader event and needs no receipt.
     The fold is done. This is its own situation rather than a
@@ -397,10 +395,10 @@
 
   Inclusive of that run, and derived purely from committed facts: every
   run records its trigger as `:seon.cluster.run/trigger` when it opens.
-  Refusal correction reuses that trigger, so the episode anchor is the
-  FIRST answering run for each outside trigger, then the
-  latest of those first answers; later corrective runs cannot reset their
-  own bound. A trigger is outside exactly when it carries neither `from`
+  The episode anchor is the FIRST answering run for each outside trigger,
+  then the latest of those first answers; any historical later run carrying
+  the same trigger cannot reset its own bound. A trigger is outside exactly
+  when it carries neither `from`
   nor `about` (R3 — the error recorder never resets the episode). Zero
   new facts, no stored counter — an outside trigger's first run IS the
   reset, so no reset code exists. An agent that has NEVER answered an

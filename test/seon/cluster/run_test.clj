@@ -35,11 +35,9 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [datahike.api :as d]
             [seon.db :as db]
             [seon.cluster.run :as run]
             [seon.schema]
-            [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as test-support]))
 
 (deftest receipt-ai-is-only-repl-output
@@ -72,72 +70,8 @@
 ;;; In-memory database fixture
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private model-attributes
-  [:seon.cluster.agent/id
-   :seon.cluster.agent/run
-   :seon.cluster.agent/namespace
-   :seon.ns/name
-   :seon.cluster.run/id
-   :seon.cluster.run/agent
-   :seon.cluster.run/opening-commit-id
-   :seon.cluster.run/opened-at
-   :seon.cluster.run/closed-at
-   :seon.cluster.run/interrupted-at
-   :seon.cluster.run/process
-   :seon.cluster.run/plan-digest
-   :seon.cluster.work/situation
-   :seon.cluster.run/starting-ns
-   :seon.cluster.run/forms
-   :seon.cluster.run.form/id
-   :seon.cluster.run.form/run
-   :seon.cluster.run.form/ordinal
-   :seon.cluster.run.form/author
-   :seon.cluster.run.form/source
-   :seon.cluster.run.form/ns
-   :seon.cluster.run.form/refreshes
-   :seon.cluster.eval/id
-   :seon.cluster.eval/run
-   :seon.cluster.eval/ordinal
-   :seon.cluster.eval/at
-   :seon.cluster.eval/interrupted-at
-   :seon.cluster.eval/result-edn
-   :seon.cluster.eval/result-blob
-   :seon.cluster.eval/result-size
-   :seon.cluster.eval/error
-   :seon.cluster.eval/triage-edn
-   :seon.cluster.eval/read-evidence
-   :seon.error/kind
-   :seon.schema.admission/source
-   :seon.def/key
-   :seon.def/id
-   :seon.def/agent
-   :seon.def/ns
-   :seon.def/name
-   :seon.def/value-edn
-   :seon.def/blob
-   :seon.def/size
-   :seon.def/unrestorable-reason
-   :seon.def/atom?
-   :seon.def/ordinal
-   :seon.fn/sym
-   :seon.fn/ns
-   :seon.fn/source
-   :seon.fn/arglists
-   :seon.fn/private?
-   :seon.fn/spec])
-
 (defn- with-model-database [body]
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :schema-flexibility :write}
-        _ (d/create-database configuration)
-        connection (d/connect configuration)]
-    (try
-      (db/transact! connection
-                  (schema.datahike/malli->datahike-schema model-attributes))
-      (body connection)
-      (finally
-        (d/release connection)
-        (d/delete-database configuration)))))
+  (test-support/with-database body))
 
 ;; Deterministic clock: every generated time is an offset from t0.
 (def ^:private t0-ms 1785000000000)
