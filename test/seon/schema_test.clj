@@ -53,17 +53,18 @@
      projection
      (fn []
        (is (schema/malli-form? definition))
-       ;; The probe namespace exists only for this test, but runner scans and
-       ;; analysis tooling may load every test-path namespace — construct the
-       ;; unloaded state instead of asserting the shared JVM never touched it.
-       (remove-ns 'seon.schema-test.probe-ns)
-       (is (nil? (find-ns 'seon.schema-test.probe-ns))
-           "the arbitrary predicate namespace starts unloaded by construction")
+       ;; The probe namespace deliberately has NO file on any classpath, so it
+       ;; is unloaded in every JVM by construction — no shared load-state
+       ;; assumption and no global mutation (both prior shapes broke pooled
+       ;; workers). If validation ever attempted to load it, the attempt would
+       ;; throw FileNotFound and surface here as an error.
+       (is (nil? (find-ns 'seon.schema-test.no-such-probe))
+           "the arbitrary predicate namespace is unloaded by construction")
        (is (false?
             (schema/malli-form?
-             [:fn 'seon.schema-test.probe-ns/probe-predicate?]))
+             [:fn 'seon.schema-test.no-such-probe/probe-predicate?]))
            "schema validation never loads an arbitrary predicate namespace")
-       (is (nil? (find-ns 'seon.schema-test.probe-ns))
+       (is (nil? (find-ns 'seon.schema-test.no-such-probe))
            "and asking the question did not load it either")))))
 
 (deftest two-projections-never-exchange-a-compiled-validator
