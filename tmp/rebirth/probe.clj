@@ -1,6 +1,7 @@
 (ns rebirth.probe
   "Probe-only capability proof for rebirth as fact-backed compaction."
   (:require [clojure.core.async :as async]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [datahike.api :as d]
@@ -18,6 +19,8 @@
             [seon.db :as db]
             [seon.env :as env]
             [seon.render :as render]
+            [seon.render.walk :as walk]
+            [seon.print :as print]
             [seon.render.transcript :as transcript]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
@@ -338,6 +341,25 @@
                           [?run :seon.cluster.run/agent ?agent]
                           [?run :seon.cluster.run/id ?run-id]]
                         @connection agent-id))
+                 generation-request
+                 {:seon.db/db @connection
+                  :seon.db/connection connection
+                  :seon.sci.eval/ctx ctx
+                  :seon.render.walk/lookup
+                  [:seon.cluster.agent/id agent-id]
+                  :seon.sci.admit/caps
+                  (:seon.sci.admit/caps cluster-handle)
+                  :seon.sci.eval/time-limit-ms
+                  (:seon.config.eval/time-limit-ms cluster-handle)
+                  :seon.config/on-core-error :record
+                  :seon.render/output :seon.render/form
+                  :seon.render/distance 3}
+                 initial-entry
+                 (first
+                  (walk/ordered-episode
+                   (assoc (bootstrap/pull-result generation-request)
+                          :seon.repl/settled [])))
+                 generation-boundary (atom nil)
                  opened
                  (db/transact!
                   connection
@@ -352,10 +374,7 @@
                       :seon.cluster.run/starting-ns
                       [:seon.ns/name namespace-name]
                       :seon.cluster.run.form/source
-                      (bootstrap/entry-source
-                       {:seon.repl/comment
-                        "; Reborn from current facts with empty history."
-                        :seon.repl/form '(help)})})
+                      (bootstrap/entry-source initial-entry)})
                     (map (fn [old-run-id]
                            [:db/add [:seon.cluster.run/id run-id]
                             :seon.cluster.run/supersedes
@@ -364,9 +383,12 @@
              (when (error-value? opened)
                (throw (ex-info "Rebirth run open was refused." opened)))
              (loop [passes 0]
-               (when (> passes 200)
+               (when (> passes 12)
                  (throw (ex-info "Rebirth exceeded the probe pass bound."
-                                 {:seon.cluster.run/id run-id})))
+                                 {:seon.cluster.run/id run-id
+                                  :rebirth.probe/history
+                                  (into [] (filter #(= run-id (first %)))
+                                        (raw-run-history @connection))})))
                (when-let [next-work
                           (work/next-agent-work
                            @connection
@@ -374,7 +396,13 @@
                             :seon.cluster.run/process process-id})]
                  (when (= run-id (:seon.cluster.run/id next-work))
                    (if (= :call (:seon.cluster.work/situation next-work))
-                     :generated
+                    (reset!
+                      generation-boundary
+                      {:rebirth.probe/situation :call
+                       :rebirth.probe/next-entry
+                       (bootstrap/next-entry
+                        (assoc generation-request :seon.db/db @connection)
+                        run-id)})
                      (do
                        (loop/turn
                         {:seon.cluster.loop/cluster cluster-handle
@@ -386,6 +414,7 @@
                 :rebirth.probe/history
                 (into [] (filter #(= run-id (first %)))
                       (raw-run-history database))
+                :rebirth.probe/generation-boundary @generation-boundary
                 :rebirth.probe/rendered-history
                 (transcript-entries*
                  connection cluster-handle
@@ -444,6 +473,67 @@
    (db/pull database
             [:seon.schema/key :seon.schema/form]
             [:seon.schema/key :seon.cluster.run/supersedes])})
+
+(defn- opening-generation-evidence
+  [instance database]
+  (let [connection (:seon.boot/cluster-connection instance)
+        cluster-handle (:seon.cluster.loop/cluster instance)
+        settings (config/effective database
+                                   (get-in instance
+                                           [:seon.boot/config
+                                            :seon.boot/cluster-name]))
+        request {:seon.db/db database
+                 :seon.db/connection connection
+                 :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster-handle)
+                 :seon.render.walk/lookup
+                 [:seon.cluster.agent/id agent-id]
+                 :seon.sci.admit/caps (config/result-caps settings)
+                 :seon.sci.eval/time-limit-ms
+                 (:seon.config.eval/time-limit-ms settings)
+                 :seon.config/on-core-error :record
+                 :seon.render/output :seon.render/form
+                 :seon.render/distance 3}
+        acquisition (walk/root-acquisition request)
+        namespace-lookup [:seon.ns/name namespace-name]
+        namespace-member (get-in acquisition
+                                 [:seon.render.walk/members namespace-lookup])
+        pull (bootstrap/pull-result request)
+        settled-result
+        (some-> (db/q '[:find ?result .
+                        :in $ ?run-id
+                        :where
+                        [?run :seon.cluster.run/id ?run-id]
+                        [?receipt :seon.cluster.eval/run ?run]
+                        [?receipt :seon.cluster.eval/ordinal 0]
+                        [?receipt :seon.cluster.eval/result-edn ?result]]
+                      database (bootstrap/run-id agent-id))
+                edn/read-string)
+        settled (when settled-result
+                  [{:seon.repl/key (:seon.repl/root-key pull)
+                    :seon.sci.admit/print-node settled-result}])]
+    {:rebirth.probe/order (:seon.render.walk/order acquisition)
+     :rebirth.probe/identity-attributes
+     (:seon.print/identity-attributes pull)
+     :rebirth.probe/settled-references
+     (when settled-result
+       (print/references (:seon.print/identity-attributes pull)
+                         settled-result))
+     :rebirth.probe/episode
+     (mapv :seon.repl/form
+           (walk/ordered-episode (assoc pull :seon.repl/settled settled)))
+     :rebirth.probe/namespace-member namespace-member
+     :rebirth.probe/namespace-form
+     (when namespace-member
+       (render/render-call
+        (assoc request
+               :seon.render/value (:seon.render/value namespace-member)
+               :seon.render.call/id
+               [:seon.render/form namespace-lookup]
+               :seon.render/namespace namespace-name)))
+     :rebirth.probe/candidates
+     (mapv #(select-keys % [:seon.repl/key :seon.repl/subject
+                            :seon.repl/entry])
+           (:seon.repl/candidates pull))}))
 
 (defn run-proof!
   "Run the isolated rebirth capability probe and return its evidence map."
@@ -549,6 +639,8 @@
                (= first-rendered-bytes second-rendered-bytes)
                :rebirth.probe/program-graph
                (program-graph-evidence database)
+               :rebirth.probe/opening-generation
+               (opening-generation-evidence instance database)
                :rebirth.probe/supersedes (supersedes-evidence database)
                :rebirth.probe/current-plan
                (db/pull database

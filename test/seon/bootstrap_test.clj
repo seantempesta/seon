@@ -29,6 +29,7 @@
    :seon.sci.admit/caps (config/result-caps (config/defaults))
    :seon.sci.eval/time-limit-ms 5000
    :seon.config/on-core-error :record
+   :seon.render/output :seon.render/form
    :seon.render/distance 3})
 
 (deftest creation-opens-one-generated-system-run-with-a-real-task
@@ -147,6 +148,69 @@
                     (generator-request connection)
                     (bootstrap/run-id agent-id)))
                 "same post-receipt state derives byte-identical data")))))))
+
+(deftest reborn-opening-retains-authored-namespace-membership
+  (support/with-database
+    (fn [connection]
+      (seed-cluster! connection "reborn-namespace-membership")
+      (cluster/ensure-entity!
+       connection cluster/boot-process-identity
+       {:seon.cluster.agent/id agent-id
+        :seon.cluster/name "reborn-namespace-membership"
+        :seon.ns/name namespace-name})
+      (db/transact!
+       connection
+       [{:seon.fn/sym (str namespace-name "/current-items")
+         :seon.fn/ns [:seon.ns/name namespace-name]
+         :seon.fn/source "(defn current-items [items] items)"
+         :seon.fn/arglists "([items])"
+         :seon.fn/private? false
+         :seon.fn/spec "[:=> [:cat [:vector :int]] [:vector :int]]"}
+        {:seon.test/sym (str namespace-name "/current-items-test")
+         :seon.test/ns [:seon.ns/name namespace-name]
+         :seon.test/source "(deftest current-items-test)"
+         :seon.test/usage true
+         :seon.test/pass-count 1
+         :seon.test/fail-count 0
+         :seon.test/error-count 0
+         :seon.test/run-basis-t (db/basis-t @connection)
+         :seon.test/run-at (java.util.Date. 1786500000000)}])
+      (let [request (generator-request connection)
+            pull (bootstrap/pull-result request)
+            namespace-key [[:seon.ns/name namespace-name] 0]
+            namespace-candidate
+            (some #(when (= namespace-key (:seon.repl/key %)) %)
+                  (:seon.repl/candidates pull))
+            help-node
+            (:seon.sci.admit/print-node
+             (admit/admit-value
+              {:seon.sci.admit/value
+               (bootstrap/situation @connection agent-id)
+               :seon.sci.admit/interrupt-fn (fn [])
+               :seon.sci.admit/caps
+               (config/result-caps (config/defaults))
+               :seon.config/on-core-error :record}))
+            episode
+            (walk/ordered-episode
+             (assoc pull :seon.repl/settled
+                    [{:seon.repl/key (:seon.repl/root-key pull)
+                      :seon.sci.admit/print-node help-node}]))
+            candidate-forms
+            (map (comp :seon.repl/form :seon.repl/entry)
+                 (:seon.repl/candidates pull))]
+        (is (contains? (:seon.print/identity-attributes pull)
+                       :seon.ns/name)
+            "the exact cluster projection preserves namespace identities")
+        (is (= namespace-name (:seon.repl/subject namespace-candidate)))
+        (is (= (list 'dir namespace-name)
+               (get-in namespace-candidate
+                       [:seon.repl/entry :seon.repl/form]))
+            "authored function and green-test facts retain the namespace dir read")
+        (is (= (list 'dir namespace-name)
+               (:seon.repl/form (second episode)))
+            "the content-bearing own namespace is the first gap after help")
+        (is (not-any? #(and (seq? %) (= 'defn (first %))) candidate-forms)
+            "a green authored usage result removes the worked defn lesson")))))
 
 (deftest authored-plan-machinery-is-deleted
   (is (nil? (io/resource "seon/bootstrap.edn")))

@@ -5,7 +5,8 @@
             [seon.db :as db]
             [seon.render :as render]
             [seon.render.walk :as walk]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.sci.kernel :as sci.kernel]))
 
 (defmacro help
   "Read the calling agent's live situation.
@@ -132,9 +133,77 @@
   (when (and (vector? lookup) (= :seon.ns/name (first lookup)))
     (second lookup)))
 
+(defn- green-usage-result?
+  [database namespace-name]
+  (boolean
+   (db/q '[:find ?test .
+           :in $ ?namespace-name
+           :where
+           [?namespace :seon.ns/name ?namespace-name]
+           [?test :seon.test/ns ?namespace]
+           [?test :seon.test/usage true]
+           [?test :seon.test/pass-count ?passes]
+           [(< 0 ?passes)]
+           [?test :seon.test/fail-count 0]
+           [?test :seon.test/error-count 0]]
+         database namespace-name)))
+
+(defn- authored-results?
+  [database namespace-name]
+  (boolean
+   (and namespace-name
+        (db/q '[:find ?function .
+                :in $ ?namespace-name
+                :where
+                [?namespace :seon.ns/name ?namespace-name]
+                [?function :seon.fn/ns ?namespace]
+                [?function :seon.fn/private? false]]
+              database namespace-name)
+        (green-usage-result? database namespace-name))))
+
+(defn- usage-demonstration-namespaces
+  [database]
+  (set
+   (db/q '[:find [?namespace-name ...]
+           :where
+           [?namespace :seon.ns/name ?namespace-name]
+           [?function :seon.fn/ns ?namespace]
+           [?test :seon.fn/calls ?function]
+           [?test :seon.test/usage true]]
+         database)))
+
+(defn- own-namespace-name
+  [acquisition]
+  (get-in acquisition
+          [:seon.render.walk/root
+           :seon.cluster.agent/namespace
+           :seon.ns/name]))
+
+(defn- opening-candidate-lookups
+  [database acquisition]
+  (let [order (:seon.render.walk/order acquisition)
+        root (first order)
+        own-namespace (own-namespace-name acquisition)
+        own-lookup [:seon.ns/name own-namespace]]
+    (if (and (authored-results? database own-namespace)
+             (some #{own-lookup} order))
+      (into [root own-lookup] (remove #{root own-lookup}) order)
+      order)))
+
+(defn- executable-namespace-entry
+  [lookup entry]
+  (if-let [namespace-name (namespace-subject lookup)]
+    (assoc entry :seon.repl/form (list 'dir namespace-name))
+    entry))
+
 (defn- direct-candidates
   [request acquisition]
-  (let [root (first (:seon.render.walk/order acquisition))]
+  (let [database (:seon.db/db request)
+        root (first (:seon.render.walk/order acquisition))
+        own-results? (authored-results? database
+                                        (own-namespace-name acquisition))
+        demonstration-namespaces
+        (when own-results? (usage-demonstration-namespaces database))]
     (into []
           (mapcat
            (fn [lookup]
@@ -149,7 +218,14 @@
                                    [:seon.render/form lookup])
                       (:seon.ns/name value)
                       (assoc :seon.render/namespace (:seon.ns/name value))))
-                   rendered-entries (entries rendered)
+                   rendered-entries
+                   (let [rendered-entries (entries rendered)]
+                     (if (and own-results?
+                              (namespace-subject lookup)
+                              (contains? demonstration-namespaces
+                                         (namespace-subject lookup)))
+                       (take 1 rendered-entries)
+                       rendered-entries))
                    subject (or (namespace-subject lookup) lookup)]
                (when (or (= lookup root)
                          (namespace-subject lookup)
@@ -161,9 +237,10 @@
                      :seon.repl/subject subject
                      :seon.repl/previous-key
                      (when (pos? index) [lookup (dec index)])
-                     :seon.repl/entry entry})
+                     :seon.repl/entry
+                     (executable-namespace-entry lookup entry)})
                   rendered-entries))))
-          (:seon.render.walk/order acquisition)))))
+          (opening-candidate-lookups database acquisition)))))
 
 (defn- listing-candidates
   [request acquisition]
@@ -210,7 +287,8 @@
       :else
       (let [identities
             (->> (vals (:seon.schema.projection/shape-rows
-                        (schema/current-projection)))
+                        (sci.kernel/context-projection
+                         (:seon.sci.eval/ctx request))))
                  (keep :seon.entity/id-attr)
                  set)]
         {:seon.repl/root-key [(first order) 0]
