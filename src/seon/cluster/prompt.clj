@@ -58,6 +58,7 @@
 
       (nil? cluster-name)
       {:seon.error/kind ::missing-cluster
+       :seon.cluster.prompt/missing-cluster agent-id
        :seon.error/message
        "The prompt's database has no effective cluster configuration."
        :seon.error/data {:seon.cluster.agent/id agent-id}}
@@ -121,7 +122,8 @@
   (throw (ex-info message
                   {:seon.error/kind ::refused
                    :seon.error/message message
-                   ::rule rule})))
+                   ::rule rule
+                   :seon.cluster.prompt/refused rule})))
 
 (defn- missing-required-keys
   [explanation]
@@ -189,6 +191,7 @@
         (if (pos? distance)
           (recur (dec distance))
           {:seon.error/kind ::budget-exceeded
+           :seon.cluster.prompt/budget-exceeded budget
            :seon.error/message
            (str "At render distance 0 the prompt still needs "
                 (tokens/report-sentence report) ". It was not sent.")

@@ -226,6 +226,7 @@
     (cond
       (empty? entities)
       {:seon.error/kind ::unknown-about
+       :seon.cluster.message/unknown-about identity
        :seon.error/message
        (str "There is no identified fact named \"" identity
             "\", so nothing was assigned about it.")
@@ -233,6 +234,7 @@
 
       (< 1 (count entities))
       {:seon.error/kind ::ambiguous-about
+       :seon.cluster.message/ambiguous-about identity
        :seon.error/message
        (str "More than one identified fact is named \"" identity
             "\", so the assignment target is ambiguous.")
@@ -280,15 +282,18 @@
      :seon.error/message
      (str "There is no agent named \"" id
           "\" in this cluster, so nothing was sent to it.")
-     :seon.error/data {:seon.cluster.agent/id id}}
+     :seon.error/data {:seon.cluster.agent/id id}
+     :seon.cluster.message/unknown-recipient id}
 
     (str/blank? inbound-content)
     {:seon.error/kind ::blank-content
      :seon.error/message "A message must contain some text."
-     :seon.error/data {:seon.cluster.agent/id id}}
+     :seon.error/data {:seon.cluster.agent/id id}
+     :seon.cluster.message/blank-content true}
 
     (> (count inbound-content) max-string)
     {:seon.error/kind ::content-too-large
+     :seon.cluster.message/content-too-large (count inbound-content)
      :seon.error/message
      (str "This message is " (count inbound-content)
           " characters; the configured limit is " max-string ".")
@@ -351,12 +356,14 @@
               ":seon.config.message/max-chain is absent, so nothing was "
               "delivered.")
          :seon.error/data {:seon.cluster.agent/id sender
-                           :seon.cluster.run/id run-id}}]}
+                           :seon.cluster.run/id run-id}
+         :seon.cluster.message/no-limit true}]}
 
       (> depth max-chain)
       {:seon.cluster.message/rows []
        :seon.error/values
        [{:seon.error/kind ::chain-limit
+         :seon.cluster.message/chain-limit max-chain
          :seon.error/message
          (str "This conversation has run " depth
               " agent-to-agent hops without a human, over the limit of "
@@ -382,7 +389,8 @@
                            "\" in this cluster, so nothing was sent to it.")
                       :seon.error/data {:my.message/to to
                                         :seon.cluster.agent/id sender
-                                        :seon.cluster.run/id run-id}})
+                                        :seon.cluster.run/id run-id}
+                      :seon.cluster.message/unknown-recipient to})
              (let [about-identity (:my.message/about candidate)
                    about (when about-identity
                            (resolve-about db about-identity))]

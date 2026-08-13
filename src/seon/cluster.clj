@@ -417,9 +417,11 @@
             (config/effective @connection cluster-name)))
           found))
       {:seon.error/kind :seon.dev.mcp/value-not-found
+       :seon.dev.mcp/value-not-found content-digest
        :seon.error/message "No stored MCP value has this digest."
        :seon.blob/digest content-digest})
     {:seon.error/kind :seon.dev.mcp/remainder-not-retrievable
+     :seon.dev.mcp/remainder-not-retrievable content-digest
      :seon.error/message
      "The cluster has no database connection; the remainder is not retrievable."
      :seon.blob/digest content-digest}))
@@ -456,6 +458,8 @@
   [message offense]
   (throw (ex-info message
                   {:seon.error/kind :seon.boot/refused
+                   :seon.boot/refused true
+                   :seon.error/message message
                    :seon.boot/offense offense})))
 
 ;; REQUIRES the population: `resolve-bootstrap` asks two questions and each
@@ -619,6 +623,8 @@
           (throw
            (ex-info message
                     {:seon.error/kind :seon.operator/low-disk-space
+                     :seon.operator/low-disk-space managed-root
+                     :seon.error/message message
                      :seon.operator/footprint footprint
                      :seon.config.maintenance/min-usable-bytes
                      (:seon.config.maintenance/min-usable-bytes effective)
@@ -1815,6 +1821,7 @@
            :seon.cluster/name cluster-name
            :seon.cluster.run/id bootstrap-run-id}
           {:seon.error/kind :seon.cluster.agent/creation-incomplete
+           :seon.cluster.agent/creation-incomplete agent-id
            :seon.error/message
            (str "Agent " (pr-str agent-id)
                 " committed without its namespace, cluster, or bootstrap run.")
@@ -2358,12 +2365,18 @@
           (throw
            (ex-info "The cluster armer input closed before quiescence."
                     {:seon.error/kind
-                     :seon.cluster.agent/armer-quiescence-undeliverable})))
+                     :seon.cluster.agent/armer-quiescence-undeliverable
+                     :seon.cluster.agent/armer-quiescence-undeliverable true
+                     :seon.error/message
+                     "The cluster armer input closed before quiescence."})))
         (when-not (= ::cluster.agent/quiesced (async/<!! quiesced))
           (throw
            (ex-info "The cluster armer did not publish quiescence."
                     {:seon.error/kind
-                     :seon.cluster.agent/armer-quiescence-undeliverable})))
+                     :seon.cluster.agent/armer-quiescence-undeliverable
+                     :seon.cluster.agent/armer-quiescence-undeliverable true
+                     :seon.error/message
+                     "The cluster armer did not publish quiescence."})))
         ;; Closure is the observable completion fact a later stop derives
         ;; from. Publish it only after the armer acknowledged quiescence.
         (async/close! armer-channel))))
@@ -2693,6 +2706,10 @@
                   (str "The cluster instance failed above the REPL: "
                        (ex-message failure))
                   {:seon.error/kind :seon.boot/refused
+                   :seon.boot/refused true
+                   :seon.error/message
+                   (str "The cluster instance failed above the REPL: "
+                        (ex-message failure))
                    :seon.boot/offense {:seon.boot/cluster-name cluster-name}
                    :seon.boot/instance @published}
                   failure)))))))

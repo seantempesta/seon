@@ -329,9 +329,11 @@
              (throw
               (ex-info
                "The agent turn could not publish its terminal completion."
-               {:seon.error/kind ::turn-completion-undeliverable
-                :seon.cluster.agent/id
-                (:seon.cluster.agent/id state)})))))
+                {:seon.error/kind ::turn-completion-undeliverable
+                 :seon.cluster.agent/id
+                 (:seon.cluster.agent/id state)
+                 :seon.cluster.agent/turn-completion-undeliverable
+                 (:seon.cluster.agent/id state)})))))
        [state nil]))))
 
 ;;; ---------------------------------------------------------------------------
@@ -487,7 +489,8 @@
             _ (when (nil? eid)
                 (throw (ex-info "arm! refused: no such agent in facts."
                                 {:seon.error/kind ::no-such-agent
-                                 :seon.cluster.agent/id agent-id})))
+                                 :seon.cluster.agent/id agent-id
+                                 :seon.cluster.agent/no-such-agent agent-id})))
             wake-channel (async/chan (async/sliding-buffer 1))
             schedule-channel (async/chan (async/sliding-buffer 1))
             completion (async/chan 1)
@@ -612,7 +615,8 @@
                        "Agent turn completion exceeded its provider-derived backstop."
                        {:seon.error/kind ::turn-completion-backstop
                         :seon.cluster.agent/id agent-id
-                        :seon.ai/timeout-ms timeout-ms})
+                        :seon.ai/timeout-ms timeout-ms
+                        :seon.cluster.agent/turn-completion-backstop agent-id})
                       fault
                       {::flow/pid ::turn
                        ::flow/status :stopping
@@ -773,6 +777,9 @@
                       (ex-info
                        "Root's first-agent supervision run did not commit."
                        {:seon.error/kind ::supervision-not-committed
+                        :seon.cluster.agent/supervision-not-committed true
+                        :seon.error/message
+                        "Root's first-agent supervision run did not commit."
                         :seon.error/data result}))))
                  (when-let [root (armed routing "root")]
                    (async/offer! (:seon.cluster.wake/channel root) ::wake)))))))

@@ -1,4 +1,6 @@
 #:seon.operator{:advertisements [:vector :seon.boot/advertisement],
+                 :low-disk-space :string,
+                 :low-disk-space-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the managed root with low disk space"} [:seon.operator/low-disk-space :seon.operator/low-disk-space] [:seon.error/message :seon.error/message]],
                  :repository-root :seon.boot/root,
                  :managed-root :seon.boot/root,
                  :ephemeral-owner :seon.cluster.process/identity,
