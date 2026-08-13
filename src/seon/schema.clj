@@ -91,6 +91,7 @@
              "shape, or a named predicate schema when the grammar belongs "
              "to its enforcing function.")
         {:seon.schema/error :seon.schema/cyclic-reference
+         :seon.schema/cyclic-reference identity
          :seon.schema/identity identity
          :seon.schema/definition (get forms identity)
          :seon.schema/cycle-path cycle-path
@@ -208,6 +209,7 @@
              (str "Predicate " (pr-str predicate)
                   " has no admitted callable in the corpus projection.")
              {:seon.schema/error :seon.schema/unresolved-predicate
+              :seon.schema/unresolved-predicate predicate
               :seon.schema/predicate predicate
               :seon.error/kind :user-input}))))
 
@@ -293,6 +295,7 @@
                (ex-info
                 "A durable Malli definition contains an unnamed callable."
                 {:seon.schema/error :seon.schema/noncanonical-definition
+                 :seon.schema/noncanonical-definition ::unnamed-callable
                  :seon.schema/value value
                  :seon.error/kind :core-bug}))))
         callable?
@@ -334,6 +337,8 @@
                                           "a callable outside :gen/gen.")
                                      {:seon.schema/error
                                       :seon.schema/noncanonical-definition
+                                      :seon.schema/noncanonical-definition
+                                      ::callable-property
                                       :seon.schema/property k
                                       :seon.schema/value v
                                       :seon.error/kind :core-bug})))
@@ -365,6 +370,7 @@
        (ex-info
         "A durable Malli definition contains non-EDN data."
         {:seon.schema/error :seon.schema/noncanonical-definition
+         :seon.schema/noncanonical-definition ::non-edn
          :seon.schema/value canonical
          :seon.error/kind :core-bug})))
     decoded))
@@ -918,6 +924,7 @@
        (ex-info
         (str "Predicate " predicate " does not name the supplied callable.")
         {:seon.schema/error :seon.schema/unresolved-predicate
+         :seon.schema/unresolved-predicate predicate
          :seon.schema/predicate predicate
          :seon.schema/resolved resolved
          :seon.error/kind :core-bug}))))
@@ -938,6 +945,7 @@
      (ex-info "Schema declarations require an isolated registration delta."
               {:seon.schema/error
                :seon.schema/registration-outside-delta
+               :seon.schema/registration-outside-delta true
                :seon.error/kind :user-input}))))
 
 (defn- candidate-registry
@@ -1119,6 +1127,7 @@
                      "execution planner admits that graph.")
                 {:seon.schema/error
                  :seon.schema/unproved-predicate-purity
+                 :seon.schema/unproved-predicate-purity predicate
                  :seon.schema/identity identity
                  :seon.schema/predicate predicate
                  :seon.error/kind :user-input}))))
@@ -2266,6 +2275,7 @@
                                          " " identity ".")
                                     {:seon.schema/error
                                      :seon.schema/duplicate-projection-row
+                                     :seon.schema/duplicate-projection-row identity
                                      :seon.schema/identity identity
                                      :seon.error/kind :core-bug})))
                   (assoc parsed identity
@@ -2332,6 +2342,7 @@
                                       identity ".")
                                  {:seon.schema/error
                                   :seon.schema/duplicate-projection-row
+                                  :seon.schema/duplicate-projection-row identity
                                   :seon.schema/identity identity
                                   :seon.error/kind :core-bug})))
                (assoc admissions identity
@@ -3061,6 +3072,7 @@
                            "without a qualified identity projection.")
                       {:seon.schema/key schema-key
                        :seon.schema/identity-projection projection-symbol
+                       :seon.schema/invalid-identity-projection true
                        :seon.error/kind :core-bug})))
                 projection-var (requiring-resolve projection-symbol)]
             (when-not (ifn? (var-get projection-var))
@@ -3070,6 +3082,7 @@
                      "a callable identity projection.")
                 {:seon.schema/key schema-key
                  :seon.schema/identity-projection projection-symbol
+                 :seon.schema/invalid-identity-projection true
                  :seon.error/kind :core-bug})))
             {:seon.schema/key schema-key
              :seon.schema.identity-only/validator

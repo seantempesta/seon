@@ -42,6 +42,8 @@
               :identity :qualified-keyword,
               :identity-only :boolean,
               :identity-projection :qualified-symbol,
+              :invalid-identity-projection [:= true]
+              :invalid-identity-projection-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an invalid identity-only projection function"} [:seon.schema/invalid-identity-projection :seon.schema/invalid-identity-projection] [:seon.error/message :seon.error/message]]
               :predicate :qualified-symbol,
               :schema
               [:map

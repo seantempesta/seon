@@ -26,6 +26,7 @@
     message
     (merge
      {:seon.schema/error error
+      error identity
       :seon.schema/identity identity
       :seon.schema/definition definition
       :seon.schema/path (vec path)
@@ -365,5 +366,6 @@
                     "its EXACT keyword instead of registering a new "
                     "one.")
                {:seon.schema/error :seon.schema/single-segment-namespace
+                :seon.schema/single-segment-namespace k
                 :seon.schema/key   k
                 :seon.error/kind   :user-input})))))
