@@ -753,11 +753,11 @@
               (str "arming published parked completion in " ready-count
                    "/100 controlled stop interleavings")))))))
 
-(deftest disarm-has-a-provider-derived-loud-backstop
+(deftest disarm-has-a-declared-loud-turn-completion-backstop
   (with-connection
     (fn [connection ctx]
       (let [routing (armory)
-            provider-timeout-ms 100
+            turn-completion-backstop-ms 100
             provider-entered (CountDownLatch. 1)
             release-provider (CountDownLatch. 1)
             server (ServerSocket. 0)
@@ -773,7 +773,9 @@
          [{:seon.cluster.agent/id agent-id}
           (config-row
            "provider-backstop"
-           {:seon.config.ai/timeout-ms provider-timeout-ms
+           {:seon.config.agent/turn-completion-backstop-ms
+            turn-completion-backstop-ms
+            :seon.config.ai/timeout-ms 30000
             :seon.config.ai.retry/maximum-retries 0
             :seon.config.ai.retry/maximum-total-delay-ms 0
             :seon.config.run/max-episode-runs 1})])
@@ -796,7 +798,17 @@
               (test-support/await-event!
                provider-entered
                ::never-answering-provider-entered)
-              (let [stopped
+              (let [run-id
+                    (db/q '[:find ?run-id .
+                            :in $ ?agent-id
+                            :where
+                            [?agent :seon.cluster.agent/id ?agent-id]
+                            [?agent :seon.cluster.agent/run ?run]
+                            [?run :seon.cluster.run/id ?run-id]
+                            [?run :seon.cluster.run/process _]]
+                          @connection agent-id)
+                    started-at (System/nanoTime)
+                    stopped
                     (future
                       (try
                         (agent/disarm!
@@ -808,17 +820,28 @@
                     failure
                     (test-support/await-event!
                      stopped
-                     ::provider-derived-stop-backstop)
+                     ::declared-turn-completion-backstop)
+                    elapsed-ms
+                    (/ (- (System/nanoTime) started-at) 1000000.0)
                     fault
                     (test-support/await-event!
                      fault-channel
                      ::provider-stop-core-fault)]
                 (is (= ::agent/turn-completion-backstop
                        (:seon.error/kind (ex-data failure))))
-                (is (= provider-timeout-ms
-                       (:seon.ai/timeout-ms (ex-data failure))))
+                (is (= turn-completion-backstop-ms
+                       (:seon.config.agent/turn-completion-backstop-ms
+                        (ex-data failure))))
+                (is (= agent-id
+                       (:seon.cluster.agent/id (ex-data failure))))
+                (is (= run-id
+                       (:seon.cluster.run/id (ex-data failure))))
+                (is (< elapsed-ms 1000.0)
+                    (str "the 100 ms declared bound returned in "
+                         elapsed-ms " ms"))
                 (is (= failure (::flow/ex fault)))
                 (is (= agent-id (:seon.cluster.agent/id fault)))
+                (is (= run-id (:seon.cluster.run/id fault)))
                 (is (some? (agent/armed routing agent-id))
                     "a fired backstop fails closed and leaves stop retryable"))
               (.countDown release-provider)

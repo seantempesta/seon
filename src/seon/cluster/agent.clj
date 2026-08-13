@@ -67,14 +67,13 @@
             [clojure.core.async.impl.protocols :as async.protocols]
             [clojure.core.async.flow :as flow]
             [clojure.string :as str]
-            [datahike.api :as d]
-            [seon.ai :as ai]
             [seon.bootstrap :as bootstrap]
             [seon.cluster.loop :as cluster.loop]
             [seon.cluster.work :as work]
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.error :as error]
             [seon.flow :as seon.flow]
             [seon.schedule :as schedule]
             [seon.schema.edn :as schema.edn])
@@ -533,116 +532,89 @@
         (async/offer! wake-channel ::wake)
         entry)))
 
-(defn- turn-completion-backstop-ms
-  [db cluster-name
-   agent-id]
-  (let [settings (ai/settings (config/effective db cluster-name)
-                              (ai/agent-overlay db agent-id))
-        targets (ai/targets settings)
-        primary-timeout (get-in targets [:seon.ai/primary
-                                         :seon.ai/timeout-ms])
-        backup-timeout (get-in targets [:seon.ai/backup
-                                        :seon.ai/timeout-ms])
-        maximum-retries
-        (:seon.ai.retry/maximum-retries (ai/retry-strategy settings))
-        provider-budget
-        (if backup-timeout
-          (+ primary-timeout backup-timeout)
-          (* primary-timeout (inc maximum-retries)))
-        retry-budget
-        (if backup-timeout
-          0
-          (:seon.ai.retry/maximum-total-delay-ms
-           (ai/retry-strategy settings)))]
-    (+ provider-budget retry-budget)))
-
-(defn- provider-call-capture-basis
-  [db agent-id]
-  (db/q '[:find ?basis-t .
-         :in $ ?agent-id
-         :where
-         [?agent :seon.cluster.agent/id ?agent-id]
-         [?agent :seon.cluster.agent/run ?run]
-         [?run :seon.cluster.run/process _]
-         [?capture :seon.context.capture/run ?run]
-         [?capture :seon.context.capture/basis-t ?basis-t]]
-       db agent-id))
-
 (defn- await-turn-completion!
   [routing entry]
   (let [completion (:seon.cluster.loop/completion entry)
         turn-stopped (:seon.cluster.agent/turn-stopped entry)
         {connection :seon.db/connection
-         cluster-name :seon.cluster/name}
-        (:seon.cluster.loop/cluster entry)
-        database-event (async/chan (async/sliding-buffer 1))
-        listener-key (random-uuid)]
+         cluster-name :seon.cluster/name
+         process :seon.cluster.run/process}
+        (:seon.cluster.loop/cluster entry)]
     (if-some [terminal (or (async/poll! completion)
                            (async/poll! turn-stopped))]
       terminal
-      (try
-        (d/listen connection listener-key
-                  (fn [_transaction-report]
-                    (async/offer! database-event ::committed)))
-        (let [agent-id (:seon.cluster.agent/id entry)
-              provider-db
-              (loop []
-                (let [db @connection]
-                  (if-let [basis-t
-                           (provider-call-capture-basis db agent-id)]
-                    (db/as-of db basis-t)
-                    (let [[value selected]
-                          (async/alts!! [completion turn-stopped database-event]
-                                        :priority true)]
-                      (if (or (= selected completion)
-                              (= selected turn-stopped))
-                        value
-                        (recur))))))]
-          (if-not (map? provider-db)
-            provider-db
-            (let [timeout-ms
-                  (turn-completion-backstop-ms
-                   provider-db cluster-name agent-id)
-                  backstop (async/timeout timeout-ms)
-                  [value selected]
-                  (async/alts!! [completion turn-stopped backstop]
-                                :priority true)]
-              (if (or (= selected completion)
-                      (= selected turn-stopped))
-                value
-                (let [failure
-                      (ex-info
-                       "Agent turn completion exceeded its provider-derived backstop."
-                       {:seon.error/kind ::turn-completion-backstop
-                        :seon.cluster.agent/id agent-id
-                        :seon.ai/timeout-ms timeout-ms
-                        :seon.cluster.agent/turn-completion-backstop agent-id})
-                      fault
-                      {::flow/pid ::turn
-                       ::flow/status :stopping
-                       ::flow/op ::turn-completion-backstop
-                       ::flow/ex failure
-                       :seon.cluster.agent/id agent-id}]
-                  (async/offer! (::fault-channel @routing) fault)
-                  (binding [*out* *err*]
-                    (println "SEON CORE FAULT (agent stop backstop):"
-                             (ex-message failure)
-                             (pr-str (ex-data failure)))
-                    (flush))
-                  (throw failure))))))
-        (finally
-          (d/unlisten connection listener-key)
-          (async/close! database-event))))))
+      (let [agent-id (:seon.cluster.agent/id entry)
+            database @connection
+            run-id (held-run-id database agent-id process)
+            timeout-ms
+            (:seon.config.agent/turn-completion-backstop-ms
+             (config/effective database cluster-name))
+            backstop (async/timeout timeout-ms)
+            [value selected]
+            (async/alts!! [completion turn-stopped backstop] :priority true)]
+        (if (or (= selected completion)
+                (= selected turn-stopped))
+          value
+          (let [evidence
+                (cond->
+                 {:seon.cluster.agent/id agent-id
+                  :seon.config.agent/turn-completion-backstop-ms timeout-ms
+                  :seon.cluster.agent/completion-events
+                  [:seon.cluster.loop/completion
+                   :seon.cluster.agent/turn-stopped]}
+                  run-id (assoc :seon.cluster.run/id run-id))
+                diagnostic
+                (error/diagnostic
+                 (cond->
+                  {:seon.error/kind ::turn-completion-backstop
+                   :seon.error/message
+                   (str "Agent " (pr-str agent-id)
+                        (if run-id
+                          (str " run " (pr-str run-id))
+                          " with no observable held run")
+                        " did not publish turn completion within "
+                        timeout-ms " ms.")
+                   :seon.cluster.agent/id agent-id
+                   :seon.cluster.agent/turn-completion-backstop agent-id
+                   :seon.config.agent/turn-completion-backstop-ms timeout-ms
+                   :seon.error/diagnostic-layer ::agent-graph
+                   :seon.error/diagnostic-operation ::disarm
+                   :seon.error/diagnostic-member
+                   :seon.cluster.loop/completion
+                   :seon.error/diagnostic-expected ::turn-completed
+                   :seon.error/diagnostic-offending evidence
+                   :seon.error/diagnostic-cause
+                   ::turn-completion-backstop
+                   :seon.error/diagnostic-evidence evidence}
+                   run-id (assoc :seon.cluster.run/id run-id)))
+                failure (ex-info (:seon.error/message diagnostic) diagnostic)
+                fault
+                (cond->
+                 {::flow/pid ::turn
+                  ::flow/status :stopping
+                  ::flow/op ::turn-completion-backstop
+                  ::flow/ex failure
+                  :seon.cluster.agent/id agent-id}
+                  run-id (assoc :seon.cluster.run/id run-id))]
+            (async/offer! (::fault-channel @routing) fault)
+            (binding [*out* *err*]
+              (println "SEON CORE FAULT (agent stop backstop):"
+                       (ex-message failure)
+                       (pr-str (ex-data failure)))
+              (flush))
+            (throw failure)))))))
 
 (defn disarm!
   "Orderly stop of one agent's graph, idempotent.
   Arm publishes one completion permit before scheduling the turn proc.
   An active transform holds it and republishes it from `finally`; an idle
-  graph leaves it ready. Request stop, consume that event, then drop the
-  routing entry before closing its channels. Thus disarm waits through a
-  seconds-long active model call, while an accepted-but-never-started proc
-  cannot strand teardown. If the loud backstop fires, the entry remains so
-  disarm can be retried after the turn settles. Stop drops conn contents —
+  graph leaves it ready. Request stop, consume that event under the declared
+  `:seon.config.agent/turn-completion-backstop-ms`, then drop the routing entry
+  before closing its channels. Thus disarm waits through a seconds-long active
+  model call, while an accepted-but-never-started proc cannot strand teardown.
+  If the loud backstop fires, its diagnostic names the agent and held run and
+  the entry remains so disarm can be retried after the turn settles. Stop drops
+  conn contents —
   safe by the transport law; triggers are rows and survive.
 
   THE ORDER OF THE LAST STEPS IS LOAD-BEARING, not stylistic: completion is

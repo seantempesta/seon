@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, cluster, agent, class/p3]
 ---
@@ -40,3 +40,18 @@ A stop against an agent whose turn completion never arrives returns a
 typed `:seon.error` diagnostic within the declared bound naming the
 agent; one regression proves it; the rebirth probe's stop path completes
 on a wedged turn instead of parking the JVM.
+
+## Resolution
+
+2026-08-13: `await-turn-completion!` now selects the completion and
+`turn-stopped` events together with a timeout derived from the live
+`:seon.config.agent/turn-completion-backstop-ms` fact. The timeout diagnostic
+names the agent and held run, carries the standard evidence-complete fields,
+publishes through the existing core-fault channel, and leaves the route intact
+for retry. The regression supplies a 100 ms overlay and proves the never-
+completing turn returns the typed diagnostic within one second.
+
+Focused verification ran the regression successfully twice. The second full
+namespace selection later hit the separately filed test-runner liveness wedge
+in `wake-routing-conservation-property`; retained evidence:
+`tmp/test-runs/run.FUEOh0`.

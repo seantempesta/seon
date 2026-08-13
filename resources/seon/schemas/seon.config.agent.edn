@@ -1,0 +1,1 @@
+#:seon.config.agent{:turn-completion-backstop-ms [:int {:min 1}]}
