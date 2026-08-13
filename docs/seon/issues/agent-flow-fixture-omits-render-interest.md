@@ -40,12 +40,24 @@ initialization before either fixture could exercise its subject.
   `wake/route!` request omitted `:seon.render.web/interest`, so the listener
   caught a nil dereference before routing Bob's message. The fixture now
   supplies `(atom :all)`, matching the production request contract.
+- All three `seon.gen.loop-test` reds were a fifth instance: the shared
+  `with-render-context-proc` constructed the now-total render terminal without
+  its required interest reference, so every test stopped at proc construction
+  before reaching its durable routing assertions. The shared fixture now
+  supplies the declared reference; the total terminal remains unchanged.
+- A direct combined rerun crossed that construction boundary. It then spent
+  more than five minutes in the first test while `prompt/acquire-within-budget`
+  waited for `render/acquire-context!`; the virtual-thread-aware dump at
+  `tmp/overnight-gen-loop-threads.json` showed the render proc actively in
+  `render.web/context-pass`, computing a Datahike schema projection rather than
+  a missing delivery. That later render-cost boundary is not evidence against
+  the fixture correction and remains to be isolated independently.
 
 ## Owner
 
 The hand-built render graph fixtures in `test/seon/cluster/agent_test.clj`,
 `test/seon/cluster/loop_test.clj`, `test/seon/cluster/turn_test.clj`, and
-`test/seon/cluster/message_test.clj`.
+`test/seon/cluster/message_test.clj`, plus `test/seon/gen/loop_test.clj`.
 
 ## Acceptance
 
@@ -57,3 +69,5 @@ The hand-built render graph fixtures in `test/seon/cluster/agent_test.clj`,
   without a missing-port refusal.
 - The focused namespace passes after the protected projection source is
   coherent.
+- The generative-loop tests cross proc construction and complete their durable
+  routing assertions within the focused runner's ordinary duration.

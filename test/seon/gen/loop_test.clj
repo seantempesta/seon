@@ -100,6 +100,7 @@
               :seon.render.web/pages-channel pages-channel
               :seon.render.web/registration (atom {})
               :seon.render.web/latest-packages (atom {})
+              :seon.render.web/interest (atom :all)
               :seon.render.web/completion completion
               :seon.render.web/root-agent-id "planner"
               :seon.cluster.loop/cluster cluster})}}
