@@ -361,7 +361,19 @@
                        (get results 2))
                     "and the disposition round-tripped through admission")))
             (testing "the real settlement retains queryable read evidence"
-              (let [evidence-eid
+              (let [[receipt-eid read-basis start-tx settlement-tx]
+                    (db/q '[:find [?receipt ?read-basis ?start-tx
+                                   ?settlement-tx]
+                            :where
+                            [?receipt :seon.cluster.eval/ordinal 1]
+                            [?receipt
+                             :seon.cluster.eval/read-basis-transaction
+                             ?read-basis ?settlement-tx]
+                            [?receipt :seon.cluster.eval/at _ ?start-tx]
+                            [?receipt :seon.cluster.eval/result-edn
+                             _ ?settlement-tx]]
+                          @connection)
+                    evidence-eid
                     (db/q '[:find ?evidence .
                             :where
                             [?receipt :seon.cluster.eval/ordinal 1]
@@ -374,9 +386,29 @@
                                :datahike.read/dependency-plan
                                :datahike.read/revision]
                              evidence-eid)]
+                (is (= start-tx read-basis)
+                    "the cursor is the database basis used by evaluation")
+                (is (not= settlement-tx read-basis)
+                    "the terminal transaction is not substituted as shown")
+                (is (= settlement-tx
+                       (db/q '[:find ?tx .
+                               :in $ ?receipt
+                               :where
+                               [?receipt :seon.cluster.eval/read-evidence
+                                _ ?tx]]
+                             @connection receipt-eid))
+                    "read evidence and the cursor share the terminal commit")
                 (is (int? (:seon.db/source-argument-position evidence)))
                 (is (contains? evidence :datahike.read/dependency-plan))
-                (is (map? (:datahike.read/revision evidence)))))
+                (is (map? (:datahike.read/revision evidence)))
+                (is (empty?
+                     (db/q '[:find ?receipt
+                             :where
+                             [?receipt :seon.cluster.eval/ordinal 0]
+                             [?receipt
+                              :seon.cluster.eval/read-basis-transaction _]]
+                           @connection))
+                    "a form that read no database value omits the member")))
             (testing "every receipt settled clean — no interrupt, no error"
               (is (= 3 (count (db/q '[:find ?e :where
                                      [?e :seon.cluster.eval/result-edn _]]

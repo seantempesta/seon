@@ -1488,6 +1488,7 @@
    :seon.cluster.eval/interrupted-at
    :seon.error/kind
    :seon.cluster.eval/output
+   :seon.cluster.eval/read-basis-transaction
    :seon.cluster.eval/ns
    :seon.sci.eval/ending-ns])
 
@@ -1548,6 +1549,8 @@
            :seon.cluster.eval/output]
           [:seon.cluster.eval/read-evidence {:optional true}
            :seon.cluster.eval/read-evidence]
+          [:seon.cluster.eval/read-basis-transaction {:optional true}
+           :seon.cluster.eval/read-basis-transaction]
           [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns]
           [:seon.sci.eval/ending-ns {:optional true}
            :seon.sci.eval/ending-ns]

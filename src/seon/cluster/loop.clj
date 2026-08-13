@@ -183,6 +183,9 @@
       (seq (:seon.cluster.eval/read-evidence evaluation))
       (assoc :seon.cluster.eval/read-evidence
              (:seon.cluster.eval/read-evidence evaluation))
+      (:seon.cluster.eval/read-basis-transaction evaluation)
+      (assoc :seon.cluster.eval/read-basis-transaction
+             (:seon.cluster.eval/read-basis-transaction evaluation))
       (:seon.cluster.eval/ns evaluation)
       (assoc :seon.cluster.eval/ns (:seon.cluster.eval/ns evaluation))
       (:seon.sci.eval/ending-ns evaluation)
@@ -1377,11 +1380,12 @@
           :else
           (let [evaluate
                 (fn [request]
-                  (let [read-evidence-sink (atom [])
+                  (let [database @connection
+                        read-evidence-sink (atom [])
                         evaluation
                         (binding [db/*read-evidence-sink* read-evidence-sink]
                           (render/call-with-walk-context
-                           {:seon.db/db @connection
+                           {:seon.db/db database
                             :seon.db/connection connection
                             :seon.cluster.agent/id agent-id
                             :seon.sci.admit/caps
@@ -1391,9 +1395,14 @@
                             (:seon.config.eval/time-limit-ms cluster)
                             :seon.config/on-core-error
                             (:seon.config/on-core-error cluster)}
-                           #(compiled-evaluate request)))]
-                    (assoc evaluation :seon.cluster.eval/read-evidence
-                           (db/read-evidence @read-evidence-sink))))]
+                           #(compiled-evaluate request)))
+                        read-evidence (db/read-evidence @read-evidence-sink)]
+                    (cond->
+                     (assoc evaluation
+                            :seon.cluster.eval/read-evidence read-evidence)
+                      (seq read-evidence)
+                      (assoc :seon.cluster.eval/read-basis-transaction
+                             (db/basis-t database)))))]
             (loop [ordinal (:seon.cluster.run.form/ordinal work)
                    ran 0
                    namespace-name

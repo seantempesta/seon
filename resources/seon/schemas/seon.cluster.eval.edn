@@ -8,6 +8,7 @@
                     [:string {:min 1, :seon.db/no-history? true}],
                     :read-evidence
                     [:vector {:seon.db/component true} :seon.db/ref],
+                    :read-basis-transaction :seon.db/basis-t,
                     :read-evidence-entity
                     [:map
                      {:seon.db/entity true}
@@ -71,7 +72,10 @@
                       :seon.cluster.eval/output]
                      [:seon.cluster.eval/read-evidence
                       {:optional true}
-                      :seon.cluster.eval/read-evidence]],
+                      :seon.cluster.eval/read-evidence]
+                     [:seon.cluster.eval/read-basis-transaction
+                      {:optional true}
+                      :seon.cluster.eval/read-basis-transaction]],
                     :result-blob :seon.blob/digest,
                     :result-edn [:string #:seon.db{:no-history? true}],
                     :result-size [:int {:min 0}],
@@ -108,6 +112,9 @@
                      [:seon.cluster.eval/read-evidence
                       {:optional true}
                       [:vector :seon.db/read-evidence]]
+                     [:seon.cluster.eval/read-basis-transaction
+                      {:optional true}
+                      :seon.cluster.eval/read-basis-transaction]
                      [:seon.cluster.eval/ns
                       {:optional true}
                       :seon.cluster.eval/ns]
