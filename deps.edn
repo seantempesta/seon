@@ -11,6 +11,7 @@
  ;; The system's dependency closure. Every coordinate is deliberate; the
  ;; maintained forks are vendored in reference-code/ and read, not guessed.
  :deps {org.clojure/clojure {:mvn/version "1.12.5"}
+        juji/editscript {:local/root "reference-code/editscript"}
         metosin/malli {:local/root "reference-code/malli"}
         clj-kondo/clj-kondo
         {:local/root "reference-code/clj-kondo"

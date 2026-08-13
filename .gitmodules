@@ -370,3 +370,6 @@
 	path = reference-code/cron-utils
 	url = https://github.com/jmrozanec/cron-utils.git
 	ignore = dirty
+[submodule "reference-code/editscript"]
+	path = reference-code/editscript
+	url = https://github.com/juji-io/editscript
