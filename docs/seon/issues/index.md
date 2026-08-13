@@ -61,7 +61,7 @@ See `README.md` for the convention.
 | [Bound agent-facing host crossings](agent-facing-host-crossings-can-wait-without-a-bound.md) | blocker | wedge class-kill continuation |
 | [Bound orderly-stop completion joins](orderly-stop-completion-joins-have-no-bound.md) | blocker | wedge class-kill continuation |
 
-## Friction (126)
+## Friction (123)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -70,7 +70,6 @@ See `README.md` for the convention.
 | [Refuse cluster names that collide with the store directory](cluster-named-store-collides-with-the-store-directory.md) | friction | R3 store-path decision |
 | [Carry the operator root explicitly instead of guessing from names](operator-root-inference-guesses-from-directory-names.md) | friction | R3 store-path decision |
 | [Bound the parallel-only confirmation protocol exchange](confirmation-parallel-failure-blocks-reading-worker-protocol.md) | friction | test-platform follow-up |
-| [Render one blob digest once per refusal envelope](contract-refusal-envelope-repeats-one-blob-digest-six-times.md) | friction | class-kill queue |
 | [Make generation dependency analysis see keywords](generation-dependency-analysis-ignores-keywords.md) | friction | evolving-session phases |
 | [Delete bloated stores at IO pace with progress](reset-deletes-a-bloated-store-one-lstat-at-a-time.md) | friction | operator velocity fixes |
 | [Stop the opening walkthrough replicating its usage test per agent](opening-walkthrough-replicates-a-usage-test.md) | friction | evolving-session implementation phases |
@@ -105,7 +104,6 @@ See `README.md` for the convention.
 | [Make the history-policy refusal test independent of machine load](history-policy-refusal-test-is-load-flaky.md) | friction | test fixture repair wave |
 | [Classify parallel-only test failures by their shared resource](parallel-test-stress-exposes-eleven-isolation-sensitive-tests.md) | friction | parallel stress triage wave |
 | [Give `malli-form?` its declarations from the environment](malli-form-predicate-resolves-the-declaration-population-itself.md) | friction | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
-| [Stop marker declarations from flooding the exact-reuse advisory](schema-exact-reuse-warnings-are-unreadable-at-volume.md) | friction | dev-tooling face hygiene |
 | [Name the stale clj-kondo cache entry that blocks correct code](stale-language-specific-kondo-cache-blocks-correct-code.md) | friction | dev-tooling face hygiene |
 | [Stop two identity attributes from naming one string](one-identity-string-names-two-entities.md) | friction | config/cluster identity design gate |
 | [Give `seon.db` the branch and commit reads root needs](seon-db-has-no-branch-or-commit-reads.md) | friction | `my.branch` verb wave (W-C, [PRD](../../prds/sci-execution-runtime/plan/agent-desk-and-checkout-prd-2026-08-05.md)) |
@@ -175,7 +173,6 @@ See `README.md` for the convention.
 | [Preserve Inst semantics when a value is also collection-like](admit-inst-overlap-prefers-collection-shape.md) | friction | adversarial-audit fix wave |
 | [Require the general printer bound for every contract headline](instrumentation-headline-unbounded-when-caps-absent.md) | friction | adversarial-audit fix wave |
 | [Keep interpreter-private markers out of the time-limit face](time-limit-face-exposes-interpreter-interrupt-marker.md) | friction | SCI failure-face repair wave |
-| [Keep contract-violation evidence as data](contract-violation-serializes-print-tree-inside-error-data.md) | friction | instrumentation error-data repair wave |
 | [Route exact context captures through the blob owner](context-capture-prompts-bypass-the-blob-splitter.md) | friction | eval-scale economics wave |
 | [Give the shared compute executor per-cluster fairness](root-compute-executor-has-no-per-cluster-fairness.md) | friction | shared-surface scheduling design gate |
 | [Extract Malli map entries by shape, not position](schema-map-extraction-still-depends-on-position-two.md) | friction | schema-form extraction repair |
