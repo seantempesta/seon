@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, ai, test, class/n2, wave/ai-provider-integrity]
 ---
@@ -29,3 +29,18 @@ The deterministic transport-leaf test fixture in `seon.ai-test`.
 The test deterministically produces the intended JDK failure classification,
 asserts that classification first, then asserts transmission and disposition
 evidence. No branch can complete with zero assertions.
+
+## Resolution
+
+Resolved by commit `270a66fd4`.
+
+The fixture now asks the OS for an ephemeral loopback port, closes its listener,
+and invokes the production HTTP boundary with explicit no-auth configuration.
+The test first asserts the resulting `:seon.ai/transport-failure` and validates
+the complete typed error value before inspecting transmission and disposition
+evidence. It also retains the counterexample: changing the evidence to
+`:transport-unknown` makes backup failover ineligible.
+
+Source verification confirmed that no assertion remains conditional on the
+expected error kind. The focused 2026-08-13 run executed
+`seon.ai-test/the-leaf-records-phase-from-the-jdks-own-taxonomy` successfully.

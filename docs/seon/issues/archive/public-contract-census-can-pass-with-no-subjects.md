@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, test, schema, class/n2, wave/contract-gate]
 ---
@@ -40,3 +40,20 @@ facts.
 - Missing source roots, unreadable files, and zero analyzed public functions
   are explicit failures with file-level evidence.
 - One regression removes the subject input and proves the gate fails.
+
+## Resolution
+
+Resolved by commit `dac16b297`.
+
+The contract census now consumes `seon.fn.analyzer/analyze`, the same canonical
+static-analysis owner used to construct program facts, and derives identified
+public `defn` subjects from its Var definitions. It refuses an empty census or
+an unidentified subject before contract completeness is checked, retaining
+the analyzed paths, files, and findings as evidence.
+
+`public-contract-census-refuses-an-absent-source-root` is the retained
+counterexample: an absent root must produce
+`::no-public-function-subjects` with empty analyzed-file evidence. Source
+verification confirmed the old private reader and alias parser are gone. The
+focused 2026-08-13 run executed both the production census and absent-root
+regression successfully.
