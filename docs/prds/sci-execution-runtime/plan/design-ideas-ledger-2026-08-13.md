@@ -45,12 +45,17 @@ one decision away from queued work. Ruled items cite their record.
     already records the read-basis transaction; rendering it makes
     incremental reasoning agent-operable (the agent anchors its own
     `since` forms on a shown value, never a guess). Lands with T3.
-18. **No optional `:since` keys on domain functions.** Open maps ignore
-    unknown keys, so an unimplemented `:since` would silently return the
-    full listing while claiming to be a delta. The one honest idiom is
-    the composed `seon.db/since` + pull form the generator demonstrates;
-    a domain function may accrete a DECLARED since parameter only on
-    evidence the composed form is too clumsy.
+18. **No UNDECLARED temporal keys on domain functions** (amended for
+    precision, same evening): the banned shape is a key a function never
+    declared and would silently swallow. A DECLARED, registered,
+    contract-validated option is the ruled form and already exists at
+    HEAD: `my.message/inbox` takes `:my.message/inbox-options`
+    (`[:map [:seon.db/since :seon.db/basis-t]]`) plus a declared
+    positional `:seon.db/database-value` argument, so
+    `(inbox {:seon.db/since 1200})` and `(inbox (seon.db/as-of 1200))`
+    both run verbatim for any agent. This pair — declared database-value
+    argument + fully namespaced registered options — is the uniform
+    convention for every read surface.
 
 19. **Nothing rendered that will not run verbatim for the agent** (owner,
     2026-08-13 evening): the generator only ever emits forms any agent
