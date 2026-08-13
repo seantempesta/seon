@@ -134,12 +134,14 @@
                            [:seon.cluster.agent/id "walker"]
                            :seon.render/distance 2
                            :seon.render/captured-calls (atom {})))
-           direct-text
-           (str/join "\n\n" (map :seon.render.history/bytes entries))
            contribution (first (:seon.context/contributions rendered))
-           contributions (:seon.context/contributions rendered)]
-       (is (= direct-text text)
-           "prompt assembly derives the same ordered history entries")
+           contributions (:seon.context/contributions rendered)
+           removed-block-read
+           (db/q '[:find ?block
+                   :where
+                   [?agent :seon.cluster.agent/id "walker"]
+                   [?agent :seon.cluster.agent/blocks ?block]]
+                 @connection)]
        (is (= text (:seon.context.contribution/text contribution)))
        (is (= 1 (count contributions)))
        (is (= :walk (:seon.render.block/name contribution)))
@@ -154,12 +156,12 @@
            "the deleted labeled-walk prompt is not reconstructed")
        (is (not (str/includes? text ";; REPL state"))
            "volatile database metadata is not a synthetic history entry")
-       (is (empty? (db/q '[:find ?block
-                          :where
-                          [?agent :seon.cluster.agent/id "walker"]
-                          [?agent :seon.cluster.agent/blocks ?block]]
-                        @connection))
-           "creation stores no presentation blocks")))))
+       (is (= :seon.db/invalid-read
+              (:seon.error/kind removed-block-read))
+           "the deleted presentation-block attribute is not installed")
+       (is (= :seon.db/attribute-not-installed
+              (get-in removed-block-read
+                      [:seon.error/data :seon.error/diagnostic-cause])))))))
 
 (deftest every-call-derives-the-current-basis
   (planted

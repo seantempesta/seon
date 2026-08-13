@@ -35,3 +35,11 @@ Commit `5084ee42c` calls `render-call` with explicit
 The same commit replaces the old labeled-walk and volatile-suffix assertions
 with append-only history assertions. `bin/test seon.cluster.prompt-test`
 passed 7 tests / 108 assertions with no failures or errors.
+
+The 2026-08-13 complete run found one surviving pre-terminal expectation in
+that regression. It joined raw `render.walk/history` bytes and required them
+to equal the prompt after the total render terminal had fitted the value. The
+terminal correctly rendered a long namespace value as a bounded printed
+string, so byte identity across that boundary is no longer the contract. The
+test retains the direct ordered-history assertions and verifies that prompt
+text is exactly the terminal contribution consumed by the model.

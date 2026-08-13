@@ -63,6 +63,14 @@ The eleven members were dispositioned as follows:
 | `a-never-run-agents-context-cannot-be-inspected` | Resolved from the compiled root acquisition and history query; empty is evidence, unavailable is typed unknown | `seon.render.web-test/a-never-run-agents-debug-context-is-labeled-prospective` |
 | `a-wrong-arity-call-reports-a-missing-namespace` | Converted from its program-graph arglist query | `seon.instrument-test/a-sci-only-arity-miss-names-its-program-graph-arglists` |
 | `database-read-admission-treats-invalid-identities-as-absence` | Resolved from installed schema evidence, including the `IHistory/-origin` chain for temporal database values | `seon.db-test/invalid-read-identities-are-diagnostics-never-absence` and `temporal-database-identities-use-the-origin-schema` |
+
+The 2026-08-13 complete run found one stale consumer of the old absence
+semantics. `seon.cluster.prompt-test/prompt-is-derived-append-only-repl-history`
+queried the deleted `:seon.cluster.agent/blocks` attribute and treated an empty
+result as proof that creation stored no presentation blocks. N5 correctly
+returns `:seon.db/invalid-read` with diagnostic cause
+`:seon.db/attribute-not-installed`; the regression now asserts that typed
+evidence instead of collapsing an unknown member into absence.
 | `database-request-shape-errors-bypass-public-contracts` | Resolved at the public database boundary; parsed request evidence names the invoked operation and bad member | `seon.db-test/malformed-public-database-requests-name-the-public-operation` |
 | `debug-pages-invent-wedged-runs` | Resolved from the service's observed process set; unavailable observation is typed unknown, never `#{}` | `seon.render.web-test/debug-pages-distinguish-held-live-and-dead-runs` |
 | `dev-mcp-envelopes-misdirect-errors-and-sprawl-status` | JVM exception construction converted; the independently reopened problems contract remains in that member outside N5 | `seon.cluster.mcp-test/jvm-exceptions-retain-the-root-location-and-flat-error` |
