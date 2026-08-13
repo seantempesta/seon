@@ -1,5 +1,6 @@
 (ns seon.render.ns-test
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
@@ -55,6 +56,12 @@
      (catch Throwable _
        false))))
 
+(defn- comment-framed?
+  [value]
+  (boolean
+   (some #(and (string? %) (str/starts-with? (str/triml %) ";"))
+         (tree-seq coll? seq value))))
+
 (defn- install-namespace!
   [connection namespace-name source schema-rows function-rows]
   (db/transact! connection
@@ -96,15 +103,17 @@
           (is (str/includes? ai1 "(defn- work-launcher-step")
               "the full d1 tier includes private member source too")
           (is (reader-valid? (the-ns 'seon.flow) ai1)))
-        (testing "distance two is the public compact card"
+        (testing "distance two is an ordinary public API value"
+          (let [rendered (edn/read-string ai2)]
+            (is (some #(= "seon.flow/start-work-launcher!"
+                          (:seon.fn/sym %))
+                      rendered))
+            (is (some :seon.schema/key rendered))
+            (is (not (comment-framed? rendered))))
           (is (str/includes? ai2 "[clojure.core.async :as async]"))
           (is (not (str/includes? ai2 "#:db"))
               "required namespace refs render their nested names")
-          (is (str/includes? ai2 "; schema :seon.flow/"))
-          (is (str/includes? ai2 "; fn seon.flow/start-work-launcher! — [:=>"))
-          (is (str/includes?
-               ai2
-               "; fn seon.flow/->CountedDroppingBuffer — <no contract>"))
+          (is (str/includes? ai2 "seon.flow/->CountedDroppingBuffer"))
           (is (not (str/includes? ai2 "fault-graph-definition")))
           (is (not (str/includes? ai2 "work-launcher-step")))
           (is (reader-valid? ai2)))
@@ -162,10 +171,10 @@
             ai (sut/render-ai unit)
             html-text (hiccup/->string (sut/render-html unit))]
         (is (str/includes? ai "(ns my.agents.fresh)"))
-        (is (str/includes? ai "no definitions yet"))
-        (is (str/includes? ai "owned by agent fresh"))
-        (is (str/includes? html-text "No definitions yet"))
-        (is (str/includes? html-text "owned by agent fresh"))))))
+        (is (str/includes? ai "No indexed members are recorded"))
+        (is (str/includes? ai ":seon.cluster.agent/id \"fresh\""))
+        (is (str/includes? html-text "No indexed members are recorded"))
+        (is (str/includes? html-text "owner agent fresh"))))))
 
 (deftest schema-closure-is-database-derived-cycle-safe-and-budgeted
   (support/with-database
@@ -180,8 +189,17 @@
             own-row {:seon.schema/key :fixture.closure/own
                      :seon.schema/form
                      (pr-str [:map [:value :fixture.external/a]])}
+            error-row
+            {:seon.schema/key :fixture.closure/not-found-error
+             :seon.schema/form
+             (pr-str
+              [:map {:seon.error/class true
+                     :seon.render/ai 'seon.error/render-ai
+                     :seon.render/html 'seon.error/render-html
+                     :error/message "must identify the absent fixture"}
+               [:seon.error/message :string]])}
             closure-schema-rows
-            [own-row
+            [own-row error-row
              {:seon.schema/key :fixture.external/a
               :seon.schema/form (pr-str [:or :string :fixture.external/b])}
              {:seon.schema/key :fixture.external/b
@@ -221,22 +239,29 @@
           (is (str/includes? ai1
                              "(register! :fixture.closure/own")))
         (testing "d2 renders own records, one closure, and raw contracts"
-          (is (str/includes?
-               ai2
-               "; schema :fixture.closure/own = [:map [:value :fixture.external/a]]"))
-          (is (str/includes? ai2 "; referenced schemas"))
-          (is (= 1 (count (re-seq #"; referenced schemas" ai2))))
-          (is (str/includes? ai2 "; fn fixture.closure/uses-own — [:=>"))
+          (let [rendered (edn/read-string ai2)]
+            (is (some #(= :fixture.closure/own (:seon.schema/key %))
+                      rendered))
+            (is (some #(= {:seon.schema/key
+                           :fixture.closure/not-found-error
+                           :seon.error/message
+                           "must identify the absent fixture"}
+                          %)
+                      rendered))
+            (is (not (str/includes? ai2 "seon.error/render-ai")))
+            (is (some #(= "fixture.closure/uses-own" (:seon.fn/sym %))
+                      rendered))
+            (is (not (comment-framed? rendered))))
           (is (not (str/includes? ai2
-                                  "; (register! :fixture.closure/own")))
+                                  "(register! :fixture.closure/own")))
           (is (not (str/includes? ai2
-                                  "; (register! :fixture.labels/input"))
+                                  "(register! :fixture.labels/input"))
               "a qualified catn label is not a schema ref")
           (is (not (str/includes? ai2
-                                  "; (register! :fixture.enum/not-a-schema"))
+                                  "(register! :fixture.enum/not-a-schema"))
               "a qualified enum value is not a schema ref")
           (is (not (str/includes? ai2
-                                  "; (register! :fixture.missing/key"))
+                                  "(register! :fixture.missing/key"))
               "a missing row never becomes a fake registration")
           (is (reader-valid? ai2)))
         (testing "the isolated placeholder registry ignores live registry state"
@@ -266,12 +291,10 @@
             db @connection
             ai (sut/render-ai (namespace-unit db cap-ns 2 100000))]
         (testing "the closure emits forty definitions and one honest cap line"
-          (is (= 40 (count (re-seq #"; \(register! :fixture.external/k" ai))))
-          (is (= 1 (count (re-seq #"40\+ referenced schemas capped" ai)))))
+          (is (= 40 (count (re-seq #"\(register! :fixture.external/k" ai))))
+          (is (= 1 (count (re-seq #"40\+ referenced schemas are reachable" ai)))))
         (testing "uncontracted public functions remain and docs clip explicitly"
-          (is (str/includes?
-               ai
-               "; fn fixture.cap/uncontracted — <no contract>"))
+          (is (str/includes? ai "fixture.cap/uncontracted"))
           (is (str/includes? ai " [clipped]"))
           (is (not (str/includes? ai "…"))))
 
@@ -291,10 +314,10 @@
               (sut/render-ai (namespace-unit @connection honest-ns 2 100000))]
           (testing "the cap line requires a forty-first resolvable definition"
             (is (= 40
-                   (count (re-seq #"; \(register! :fixture.external/k"
+                   (count (re-seq #"\(register! :fixture.external/k"
                                   honest-ai))))
             (is (not (str/includes? honest-ai
-                                    "40+ referenced schemas capped"))))))
+                                    "40+ referenced schemas are reachable"))))))
 
       (let [budget-ns 'fixture.budget
             large-form
@@ -325,18 +348,21 @@
             ai-candidate
             (some (fn [budget]
                     (let [text (sut/render-ai
-                                (namespace-unit db budget-ns 2 budget))]
-                      (when (and (str/includes? text "; fn fixture.budget/a")
-                                 (str/includes? text "; fn fixture.budget/b")
-                                 (not (str/includes? text "; schema "))
-                                 (not (str/includes? text "; (register! ")))
+                                (namespace-unit db budget-ns 2 budget))
+                          rendered (edn/read-string text)
+                          function-symbols
+                          (into #{} (keep :seon.fn/sym) rendered)]
+                      (when (and (contains? function-symbols "fixture.budget/a")
+                                 (contains? function-symbols "fixture.budget/b")
+                                 (not-any? :seon.schema/key rendered)
+                                 (not-any? :seon.schema/form rendered))
                         {:budget budget :text text})))
                   budgets)]
         (testing "compact budgets admit the callable API before schemas"
           (is (map? ai-candidate))
           (when ai-candidate
-            (is (str/includes? (:text ai-candidate)
-                               "omitted by the namespace render budget"))
+            (is (some #(= :seon.print/elided (:seon.print/face %))
+                      (edn/read-string (:text ai-candidate))))
             (is (<= (tokens/estimate (:text ai-candidate))
                     (:budget ai-candidate)))))))))
 

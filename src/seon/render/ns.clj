@@ -306,6 +306,9 @@
      ::requires (vec (require-specs row))
      ::functions functions
      ::own-schemas own-schemas
+     ::profile-id (get-in unit [:seon.render/profile
+                                :seon.render.profile/id]
+                          :seon.render.profile/unspecified)
      ::schema-row-cache
      (atom (into {} (map (juxt :seon.schema/key identity)) own-schemas))
      ::owner-agent-id (when (and db
@@ -329,10 +332,29 @@
   (or (nil? budget)
       (<= (tokens/estimate text) budget)))
 
-(defn- omission-comment
+(defn- omission-value
+  [namespace-name profile-id offset requires-count definitions-count]
+  (let [omitted (+ requires-count definitions-count)]
+    {:seon.print/face :seon.print/elided
+     :seon.print/omitted omitted
+     :seon.print/elision-unit :children
+     :seon.render.data/total (+ offset omitted)
+     :seon.render.data/path []
+     :seon.render.data/next-offset offset
+     :seon.render.profile/id profile-id
+     :seon.print/requery-id [:seon.ns/name namespace-name]}))
+
+(defn- empty-value
+  [owner-agent-id]
+  (cond->
+   {:seon.error/message
+    "No indexed members are recorded for this namespace."}
+    owner-agent-id
+    (assoc :seon.cluster.agent/id owner-agent-id)))
+
+(defn- omission-text
   [requires-count definitions-count]
-  (str ";; "
-       (when (pos? requires-count)
+  (str (when (pos? requires-count)
          (str requires-count " require declaration"
               (when (not= 1 requires-count) "s")
               (when (pos? definitions-count) " and ")))
@@ -341,20 +363,27 @@
               (when (not= 1 definitions-count) "s")))
        " omitted by the namespace render budget."))
 
-(defn- empty-comment
+(defn- empty-text
   [owner-agent-id]
-  (str ";; no definitions yet"
-       (when owner-agent-id (str "; owned by agent " owner-agent-id))
+  (str "No indexed members are recorded for this namespace"
+       (when owner-agent-id (str "; owner agent " owner-agent-id))
        "."))
 
 (defn- function-source
   [function]
   (or (:seon.fn/source function) (pr-str (signature-form function))))
 
+(defn- schema-error-message
+  [row]
+  (let [form (::schema-form (schema-definition row))]
+    (when (and (vector? form) (map? (second form)))
+      (:error/message (second form)))))
+
 (defn- compact-schema-line
   [row]
-  (str "schema " (pr-str (:seon.schema/key row)) " = "
-       (schema-definition-text (schema-definition row))))
+  (str "schema " (pr-str (:seon.schema/key row)) " — "
+       (or (schema-error-message row)
+           (schema-definition-text (schema-definition row)))))
 
 (defn- compact-function-line
   [{:seon.fn/keys [sym doc spec]}]
@@ -363,23 +392,37 @@
        (when-let [summary (first-doc-line doc)]
          (str " — " (pr-str (soft-clip summary 78))))))
 
+(defn- compact-schema-value
+  [row]
+  (if-let [message (schema-error-message row)]
+    {:seon.schema/key (:seon.schema/key row)
+     :seon.error/message message}
+    {:seon.schema/key (:seon.schema/key row)
+     :seon.schema/form
+     (schema-definition-text (schema-definition row))}))
+
+(defn- compact-function-value
+  [{:seon.fn/keys [sym doc spec]}]
+  (cond-> {:seon.fn/sym sym}
+    (not (str/blank? spec)) (assoc :seon.fn/spec spec)
+    (first-doc-line doc)
+    (assoc :seon.fn/doc (soft-clip (first-doc-line doc) 78))))
+
 (defn- referenced-schema-ai-section
-  [db schema-row-cache functions own-schemas compact?]
+  [db schema-row-cache functions own-schemas]
   (let [{::keys [schema-lines schemas-capped?]}
         (referenced-schema-lines db schema-row-cache functions own-schemas)]
     (when (or (seq schema-lines) schemas-capped?)
       (str/join
        "\n"
-       (cond-> [(if compact?
-                  "; referenced schemas"
-                  ";; referenced schemas")]
+       (cond-> []
          (seq schema-lines)
-         (into (if compact?
-                 (mapv #(str "; " %) schema-lines)
-                 schema-lines))
+         (into schema-lines)
          schemas-capped?
-         (conj (str "; " referenced-schema-cap
-                    "+ referenced schemas capped; more reachable via the db")))))))
+         (conj (pr-str
+                {:seon.error/message
+                 (str referenced-schema-cap
+                      "+ referenced schemas are reachable through the database.")})))))))
 
 (defn- full-ai-text
   [{::keys [db schema-row-cache namespace-name namespace-source requires
@@ -396,14 +439,14 @@
                      own-schemas))
         schema-section
         (referenced-schema-ai-section
-         db schema-row-cache functions own-schemas false)]
+         db schema-row-cache functions own-schemas)]
     (str/join
      "\n\n"
      (cond-> [source]
        (seq member-parts) (into member-parts)
        schema-section (conj schema-section)
        (and (empty? functions) (empty? own-schemas))
-       (conj (empty-comment owner-agent-id))))))
+       (conj (pr-str (empty-value owner-agent-id)))))))
 
 (defn- compact-ai-items
   [{::keys [db schema-row-cache functions own-schemas]}]
@@ -411,30 +454,28 @@
         (referenced-schema-lines db schema-row-cache functions own-schemas)]
     (vec
      (concat
-      (map #(str "; " (compact-function-line %)) functions)
-      (map #(str "; " (compact-schema-line %)) own-schemas)
-      (map-indexed
-       (fn [index line]
-         (str (when (zero? index) "; referenced schemas\n")
-              "; " line))
-       schema-lines)
+      (map compact-function-value functions)
+      (map compact-schema-value own-schemas)
+      (map (fn [line] {:seon.schema/form line}) schema-lines)
       (when schemas-capped?
-        [(str "; " referenced-schema-cap
-              "+ referenced schemas capped; more reachable via the db")])))))
+        [{:seon.error/message
+          (str referenced-schema-cap
+               "+ referenced schemas are reachable through the database.")}])))))
 
 (defn- compact-ai-text
-  [{::keys [namespace-name requires functions own-schemas owner-agent-id]}
+  [{::keys [namespace-name requires functions own-schemas owner-agent-id
+            profile-id]}
    items included-count]
   (let [included (subvec items 0 included-count)
         omitted (- (count items) included-count)]
-    (str/join
-     "\n\n"
-     (cond-> [(pr-str (ns-form namespace-name requires))]
-       (seq included)
-       (conj (str/join "\n" included))
+    (pr-str
+     (cond-> [(ns-form namespace-name requires)]
+       (seq included) (into included)
        (and (empty? functions) (empty? own-schemas))
-       (conj (empty-comment owner-agent-id))
-       (pos? omitted) (conj (omission-comment 0 omitted))))))
+       (conj (empty-value owner-agent-id))
+       (pos? omitted)
+       (conj (omission-value namespace-name profile-id included-count
+                             0 omitted))))))
 
 (defn- ai-text
   [data]
@@ -445,16 +486,16 @@
       (compact-ai-text data items (count items)))))
 
 (defn- minimal-ai-text
-  [{::keys [namespace-name requires functions own-schemas owner-agent-id]}]
-  (str/join
-   "\n\n"
-   (cond-> [(str namespace-name)]
+  [{::keys [namespace-name requires functions own-schemas owner-agent-id
+            profile-id]}]
+  (pr-str
+   (cond-> [namespace-name]
      (or (seq requires) (seq functions) (seq own-schemas))
-     (conj (omission-comment
-            (count requires)
-            (+ (count functions) (count own-schemas))))
+     (conj (omission-value namespace-name profile-id 0
+                           (count requires)
+                           (+ (count functions) (count own-schemas))))
      (and (empty? requires) (empty? functions) (empty? own-schemas))
-     (conj (empty-comment owner-agent-id)))))
+     (conj (empty-value owner-agent-id)))))
 
 (defn- budgeted-ai
   [data budget]
@@ -536,10 +577,7 @@
        schema-section (conj schema-section)
        (and (empty? functions) (empty? own-schemas))
        (conj [:p {:class "seon-namespace-empty"}
-              (str "No definitions yet"
-                   (when owner-agent-id
-                     (str "; owned by agent " owner-agent-id))
-                   ".")])))))
+              (empty-text owner-agent-id)])))))
 
 (defn- compact-html-view
   [{::keys [db schema-row-cache namespace-name requires functions own-schemas
@@ -565,13 +603,10 @@
                    (mapcat compact-function-html included)))
        (and (empty? functions) (empty? own-schemas))
        (conj [:p {:class "seon-namespace-empty"}
-              (str "No definitions yet"
-                   (when owner-agent-id
-                     (str "; owned by agent " owner-agent-id))
-                   ".")])
+              (empty-text owner-agent-id)])
        (pos? omitted)
        (conj [:p {:class "seon-namespace-elision"}
-              (omission-comment 0 omitted)])))))
+              (omission-text 0 omitted)])))))
 
 (defn- html-view
   [data included-count]
@@ -585,12 +620,12 @@
   [{::keys [namespace-name requires functions own-schemas owner-agent-id]}]
   [:section {:class "seon-family-entry seon-namespace-entry"}
    [:h2 [:code (str namespace-name)]]
-   [:p {:class "seon-namespace-elision"}
+    [:p {:class "seon-namespace-elision"}
     (if (or (seq requires) (seq functions) (seq own-schemas))
-      (omission-comment
+      (omission-text
        (count requires)
        (+ (count functions) (count own-schemas)))
-      (empty-comment owner-agent-id))]])
+      (empty-text owner-agent-id))]])
 
 (defn- html-within-budget?
   [view budget]
