@@ -148,6 +148,25 @@ NOTE: the shared `default` cluster JVM is STALE (predates
 `seon.operator/connection`) — reset it at the next quiet boundary, no
 lane depends on it right now.
 
+**2026-08-13 night rulings + queue additions:** (a) ruling 5 of the
+batch — `{:seon.db/entity true}` DELETED, consumers derive (README
+batch and ledger 21; implementation queued behind plan-t3's hold on
+walk/bootstrap). (b) Read-surface RESULT shapes must declare
+`:seon.render/ai`/`html` producers — the transcript already routes
+through `render-call`, but row shapes like `:my.message/inbox-entry`
+declare nothing and hit the pr-str floor; the owner wants ideal
+AI/HTML output from birth. ONE combined lane after plan-t3 returns:
+entity-flag deletion + inbox-entry/inbox declared renders as the
+exemplar + a census (program-graph query: agent-facing read output
+shapes lacking declared producers) with one class regression. (c)
+`wedge-kill` landed the disarm bound (`12cd3bf93`, issue resolved with
+regression) and continues on the await census; `dump-kill` and
+`db-diff` returned COMPLETE-UNCOMMITTED, both blocked only by the
+transient half-landed beyond-closure dial (plan-t3 adds the
+config/default.edn line last) — both resume to commit when config
+settles. The general-diff research agent was killed by host sleep and
+was resumed with the entity-flag ruling added to its brief.
+
 **THE ORDERED QUEUE AFTER RETURNS:**
 1. R2 continuation, serial, red-tolerant: W2b (deferred producers in
    bootstrap/walk/plan once those lanes land) → W3 consumers dispatch on

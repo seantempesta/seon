@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (38)
+## Blocker (40)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -58,12 +58,14 @@ See `README.md` for the convention.
 | [Supply the generated entry's required render output](generated-turn-omits-the-required-render-output.md) | blocker | generate-call-transition lane (held `loop.clj`) |
 | [Return from the generated opening's second live pull](generated-opening-live-pull-does-not-return-after-help.md) | blocker | prefix-drift bootstrap performance diagnosis (held `bootstrap.clj`) |
 | [Explain the 24-second live root pull of 189 members](live-root-pull-of-189-members-takes-24-seconds.md) | blocker | render acquisition performance wave |
+| [Bound agent-facing host crossings](agent-facing-host-crossings-can-wait-without-a-bound.md) | blocker | wedge class-kill continuation |
+| [Bound orderly-stop completion joins](orderly-stop-completion-joins-have-no-bound.md) | blocker | wedge class-kill continuation |
 
 ## Friction (131)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [Bound the disarm turn-completion await](cluster-disarm-awaits-turn-completion-without-a-bound.md) | friction | evolving-session implementation phases |
+| [Bound web delivery awaits](web-delivery-awaits-have-no-bound.md) | friction | wedge class-kill continuation |
 | [Refuse cluster names that collide with the store directory](cluster-named-store-collides-with-the-store-directory.md) | friction | R3 store-path decision |
 | [Carry the operator root explicitly instead of guessing from names](operator-root-inference-guesses-from-directory-names.md) | friction | R3 store-path decision |
 | [Bound the parallel-only confirmation protocol exchange](confirmation-parallel-failure-blocks-reading-worker-protocol.md) | friction | test-platform follow-up |
