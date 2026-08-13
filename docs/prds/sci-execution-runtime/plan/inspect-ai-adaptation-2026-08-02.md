@@ -134,7 +134,7 @@ Task `setup` starts one isolated operator root once
 reads that cluster's advertisement (`cluster.clj:222-225`) for the prepl
 coordinate and sends one EDN form per sample. Each sample gets its **own
 cluster** — a Datahike branch fork, the store fence's natural isolation unit
-(one process root, many clusters, per CLAUDE.md's boot tower §2). Cost:
+(one process root, many clusters, per `AGENTS.md`'s boot order). Cost:
 **~0.9 s per sample**, ~22 s once. Uses only transport that already exists and
 is already how MCP `eval_clj` reaches a cluster.
 

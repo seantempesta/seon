@@ -40,7 +40,7 @@ live JVM shows both boots COMPLETED:
  ["b" 63600 false "266bf231…"]]
 ```
 
-`:seon.boot/ready-ms` is present for both, so cluster b finished its tower at
+`:seon.boot/ready-ms` is present for both, so cluster b finished boot at
 63.6 s — 33 s after the operator declared failure. The wrapper's abandonment
 also costs the URL line the operator normally prints.
 
@@ -66,7 +66,7 @@ cluster.
 ## Owner
 
 - Slowness: the `config`/`program` boot phases in `src/seon/cluster.clj`
-  (`stack-tower!`), measured per phase before anything is changed. The
+  (`stand-boot-layers!`), measured per phase before anything is changed. The
   neighbouring finding that
   [`schema.edn/packaged-forms` re-reads and re-merges every schema resource
   per call](packaged-forms-rereads-every-schema-resource-per-call.md) is a plausible

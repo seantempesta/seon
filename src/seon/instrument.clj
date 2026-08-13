@@ -37,7 +37,7 @@
   - `:panic` (development) — INSTRUMENT, and the reporter THROWS. A
     contract violation is a bug in our own code and the first call is
     where it is cheapest to find. Fail loud is not fall down: the throw
-    halts that CALL, not the tower. And when the caller is a flow proc,
+    halts that CALL, not boot. And when the caller is a flow proc,
     the throw is a Throwable escaping our code onto `::flow/error`,
     which is exactly the path `seon.error` already owns — so an
     instrumentation violation inside the run loop becomes a durable

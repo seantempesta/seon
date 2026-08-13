@@ -275,7 +275,7 @@ and sends later requests to it. It never mutates a base under running tests.
 
 The proposed `seon.cluster/start-fork!` is the one function that turns a source
 base into a running cluster instance. It is extracted from the existing
-production sequence in `stack-tower!` and `stand-cluster-runtime!`; those
+production sequence in `stand-boot-layers!` and `stand-cluster-runtime!`; those
 functions do not acquire a second test-facing form.
 
 Its required work, in order, is:
@@ -321,7 +321,7 @@ executor, a prebuilt cluster handle, or a replacement production function.
    cluster. It also pushes every test toward scratch directories.
 2. **Recommended and owner-ruled: extract `seon.cluster/start-fork!`, used by
    both full boot and tests.** One source base is acquired once; the production
-   fork-to-runtime tower is shared. `seon.cluster/start!` remains the complete
+   fork-to-running boot sequence is shared. `seon.cluster/start!` remains the complete
    boot proof, and tests call the thinner production boundary.
 3. **Test tiers with independent constructors.** Pure, graph, and scratch-root
    tiers can be fast, but they create a policy layer in which a “graph fixture”
@@ -783,7 +783,7 @@ all tests in those namespaces.
 
 ### Cost estimate
 
-The estimate is based on the current census: one production tower extraction,
+The estimate is based on the current census: one production boot extraction,
 seven direct regressions, 12 raw graph sites, 187 shared-database call sites,
 50 cold-context sites, two artifact launchers, and one runner scheduler.
 

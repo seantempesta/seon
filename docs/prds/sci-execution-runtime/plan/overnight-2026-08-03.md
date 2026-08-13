@@ -181,7 +181,7 @@ finished. Its brief and the orchestrator's measurements:
 THE OWNER'S QUESTION, which is sharper than the orchestrator's and
 should drive the work: **why are we loading every cluster to run the
 tests at all?** Part of the answer is legitimate — `boot_test`'s
-subjects genuinely ARE the boot tower (process-root store identity,
+subjects genuinely ARE boot (process-root store identity,
 root executors and their thread kinds, REPL-first under the ten-second
 bound, two-instance isolation, stale advertisements, recycled-pid
 refusal, delayed stop versus replacement). Those need real boots. But 30

@@ -106,7 +106,7 @@
           (is (pos? (count (instrument/instrumented)))
               "the wrappers survive the second cluster's boot"))
 
-        (testing "both clusters completed the boot tower"
+        (testing "both clusters completed boot"
           (is (nat-int? (:seon.boot/ready-ms a)))
           (is (nat-int? (:seon.boot/ready-ms b)))
           (is (not= (get-in a [:seon.boot/advertisement :seon.boot/prepl-port])

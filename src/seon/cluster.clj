@@ -1213,7 +1213,7 @@
   nil)
 
 ;;; ---------------------------------------------------------------------------
-;;; The tower above the REPL
+;;; Ordered boot above the REPL
 ;;; ---------------------------------------------------------------------------
 
 ;;; The roots the published source digest is computed over. Today the
@@ -1845,7 +1845,7 @@
 
   The last layer, deliberately: everything it renders must already
   stand, and a failure here must not be able to cost the run loop. It
-  throws like any other tower layer, so the REPL survives and the
+  throws like any other boot layer, so the REPL survives and the
   degraded instance carries what stood — which is the honest behaviour
   for a port that is already taken, rather than a silent fallback to a
   no-UI-today state that nobody would notice until they opened a
@@ -2490,11 +2490,13 @@
                         :seon.render.web/served served
                         :seon.boot/advertisement advertisement))))))
 
-(defn- stack-tower!
-  "Stack store → source commit → fork → connection → config onto `instance`.
-  Each layer is assoc'd as it stands, and the whole value is republished
-  to the registry at every step, so the instance a failure carries is
-  exactly what stands: absence marks where boot stopped."
+(defn- stand-boot-layers!
+  "Stand the ordered boot layers above the REPL.
+
+  Store → source commit → fork → connection → config are assoc'd
+  as they stand, and the whole value is republished to the registry at every
+  step. The instance a failure carries is exactly what stands: absence marks
+  where boot stopped."
   [instance publish! compiled-config]
   (let [config (:seon.boot/config instance)
         cluster-name (:seon.boot/cluster-name config)
@@ -2574,7 +2576,7 @@
      projection-state (:seon.sci.eval/ctx source-base))))
 
 (defn start!
-  "Start one cluster instance in this JVM, REPL FIRST, then the tower.
+  "Start one cluster instance in this JVM, REPL FIRST, then boot.
   Order: resolve paths and create directories → open the io-prepl
   socket server and write the advertisement (real bound port, pid,
   start-instant — the REPL is live from here NO MATTER WHAT) → open the
@@ -2587,7 +2589,7 @@
   population → config/apply-compiled! with the shipped defaults → return the complete
   instance. A later-layer failure THROWS
   with the DEGRADED INSTANCE in the ex-data under :seon.boot/instance
-  (tower fields absent from the failure point) while the REPL and
+  (boot fields absent from the failure point) while the REPL and
   advertisement survive; the instance stays registered, and the caller
   stops it through that carried value like any other. Two instances in one JVM share the root store and executors,
   nothing else. Refuses a second start! for a cluster this JVM already
@@ -2680,7 +2682,7 @@
         ;; the elapsed measure belongs to boot, not to whoever prints
         ;; the banner: a caller timing `start!` from outside measures
         ;; its own require time too
-        (let [stood (stack-tower! instance publish! compiled-config)]
+        (let [stood (stand-boot-layers! instance publish! compiled-config)]
           (publish! (assoc stood :seon.boot/ready-ms
                            (quot (- (System/nanoTime) began) 1000000))))
         (catch Throwable failure
@@ -2798,7 +2800,7 @@
 
 (defn stop!
   "Stop exactly THIS instance, instance-addressed never name-addressed.
-  Unwinds the tower in reverse: releases ITS cluster branch connection,
+  Unwinds boot in reverse: releases ITS cluster branch connection,
   drops its hold on the process-root store — the LAST instance out
   releases the store and with it the lifetime flock, a sibling's hold
   keeps it open — then closes ITS prepl server socket and deletes ITS

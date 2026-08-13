@@ -1446,7 +1446,7 @@
                   "config" "program" "work-launcher" "agents" "web"
                   "ready"]
                  anchor-phases)
-              "the readiness socket reports every published tower boundary")
+              "the readiness socket reports every published boot boundary")
           (is add-completed? "the generated add form completed")
           (is (= 0 add-exit) add-output)
           (is scratch-ready?

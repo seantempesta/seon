@@ -308,7 +308,7 @@ whose recursive `size-of` stats every file under the managed root —
 and `operator-root` of `data/clusters` resolves to the WHOLE REPOSITORY
 CHECKOUT, including ~240 GiB of frozen `tmp/` evidence, `evals/runs/`,
 `.git`, and the vendored submodules. Measured: 11 s namespace load,
-**~94 s in the walk**, then the entire tower repl→ready in 2.6 s. The
+**~94 s in the walk**, then the entire boot repl→ready in 2.6 s. The
 wrapper's 30 s timeout fired a third of the way into the walk. The
 decisive detail: the low-space decision reads ONLY the statfs fields
 (`usable-bytes`/`usable-ratio`) — the walk's result was never consulted.

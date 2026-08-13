@@ -4,7 +4,7 @@
   "The armed layers of a booted cluster: root, the loop, the fault path.
 
   These are the falsifiers for the wiring whose ABSENCE was the highest
-  -value defect in the error grounding (D4): `start!` built the tower and
+  -value defect in the error grounding (D4): `start!` completed boot and
   then stopped, so the run loop existed only inside drive scripts and
   every core fault in a live cluster went into a
   `(sliding-buffer 100)` that nobody read

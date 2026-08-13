@@ -2628,7 +2628,7 @@ forks, THEN farm out the production deletion sweep as specced slices.
   objects. The render-model doc's open decision 2 is thereby RULED:
   durable symbol producers resolved to the live SCI Var, one
   representation, no fn-object declaration arm. Also ruled: the suite
-  floor is 2-3 minutes when the excess is GENUINE boot-tower subjects
+  floor is 2-3 minutes when the excess is GENUINE boot subjects
   (real flocks/processes) — everything else reaches seconds; and the
   orchestrator pushes the shared branch at every verified wave landing.
   AMENDED AGAIN same night (owner): RENDER IMPLEMENTATION IS AUTHORIZED

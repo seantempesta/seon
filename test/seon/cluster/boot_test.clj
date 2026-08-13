@@ -461,8 +461,8 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest ^{:seon.test/long
-           "47.230 s pool: published-base clone, real cluster boot tower, live prepl call, and stop."}
-  repl-is-live-after-the-boot-tower
+           "47.230 s pool: published-base clone, real ordered boot, live prepl call, and stop."}
+  repl-is-live-after-ordered-boot
   (let [root (published-root)]
     (try
       (let [instance (cluster/start! {:seon.boot/cluster-name "solo"
@@ -474,7 +474,7 @@
         (try
           (testing "the REPL answers with the evaluated value"
             (is (= "20260728" answer)))
-          (testing "the completed tower records its measured duration"
+          (testing "the completed boot records its measured duration"
             (is (nat-int? (:seon.boot/ready-ms instance))))
           (testing "the READY fork owns the complete published activation"
             (is (= (:seon.source/digest (cluster/source-snapshot))
@@ -758,7 +758,7 @@
         (delete-recursively! root)))))
 
 ;;; ---------------------------------------------------------------------------
-;;; The composed tower — store, source commit, fork, config, one start!
+;;; Ordered boot — store, source commit, fork, config, one start!
 ;;; ---------------------------------------------------------------------------
 
 (defn- start-refusal
@@ -1129,8 +1129,8 @@
         (delete-recursively! root)))))
 
 (deftest ^{:seon.test/long
-           "46.987 s pool: complete real boot tower plus sibling-cluster acquisition and independent config proof."}
-  the-tower-stands-in-one-start
+           "46.987 s pool: complete real boot plus sibling-cluster acquisition and independent config proof."}
+  boot-order-completes-in-one-start
   (let [root (published-root)]
     (try
       (let [started-at (System/nanoTime)
@@ -1139,21 +1139,21 @@
             instance
             (with-bindings
               {progress-var #(swap! phases conj %)}
-              (cluster/start! {:seon.boot/cluster-name "tower"
+              (cluster/start! {:seon.boot/cluster-name "boot-order"
                                :seon.boot/root root
                                :seon.config/manifest
                                {:seon.config.flow.compute/queue-depth 11}}))
             elapsed-ms (/ (- (System/nanoTime) started-at) 1e6)]
         (try
-          (testing "every tower field is present — nothing degraded"
+          (testing "every boot field is present — nothing degraded"
             (is (some? (:seon.store/store instance)))
             (is (store/connection?
                  (:seon.boot/cluster-connection instance)))
             (is (map? (:seon.boot/config-result instance))))
-          (testing "the whole tower reports its measured duration"
+          (testing "the whole boot reports its measured duration"
             (is (nat-int? (:seon.boot/ready-ms instance)))
             (is (<= (:seon.boot/ready-ms instance) elapsed-ms)))
-          (testing "each published tower boundary reports one phase"
+          (testing "each published boot boundary reports one phase"
             (is (= [:seon.boot.phase/repl
                     :seon.boot.phase/store
                     :seon.boot.phase/branch
@@ -1222,7 +1222,7 @@
                        (:seon.config.flow.compute/queue-depth
                         (config/effective
                          @(:seon.boot/cluster-connection instance)
-                         "tower"))))
+                         "boot-order"))))
                 (is (= 22
                        (:seon.config.flow.compute/queue-depth
                         (config/effective
@@ -1237,7 +1237,7 @@
         (delete-recursively! root)))))
 
 (deftest ^{:seon.test/long "Starts a real prepl over deliberately corrupted boot storage."}
-  a-failed-tower-never-takes-the-repl
+  a-failed-boot-never-takes-the-repl
   ;; owner ruling: the REPL is always useful for debugging — a corrupt
   ;; store fails the boot LOUDLY while the socket stays up
   (let [root (bare-root)]
@@ -1255,7 +1255,7 @@
         (is (map? degraded)
             "the throw carries the degraded instance")
         (is (nil? (:seon.store/store degraded))
-            "the tower fields are absent from the failure point")
+            "the boot fields are absent from the failure point")
         (let [advertisement (cluster/read-advertisement root "wreck")]
           (is (some? advertisement)
               "the advertisement survived the failure")

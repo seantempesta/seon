@@ -170,7 +170,7 @@ never stored and always re-derivable.
   from facts and arms one graph per agent, after `recover-runs!` has
   stamped dead custody's receipts `interrupted-at` and retracted
   custody (the takeover/recovery one-shape). Boot order inside the
-  tower is unchanged: recovery → config → root agent → arm (now: arm
+  boot order is unchanged: recovery → config → root agent → arm (now: arm
   ALL agent graphs + the armer) → serve.
 - **Disarm/stop** (orderly): `flow/stop` per graph, join each turn
   proc's completion (the existing promise-channel stop-transition
