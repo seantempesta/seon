@@ -11,19 +11,19 @@ Four surfaces share Clojure syntax but not an execution contract:
   source strings. This is what this skill is mostly about. Fresh Seon uses
   `seon.cluster.reply/sources` over `seon.sci.reader/read`; deleted reader
   implementations are Git-history quarry and are not on this path
-  (`src/seon/cluster/reply.clj:1-48,310-355`).
+  (`src/seon/cluster/reply.clj:1-48,310-389`).
 - **An agent turn in SCI** executes frozen sources through
   `seon.sci.eval/evaluate`. Each turn gets a fresh generation-aware fork of the
   cluster's program-only base, then rehydrates only the selected agent's defs.
   Every form in that turn shares the fork; the next turn forks the then-current
-  base again (`src/seon/sci/eval.clj:1418-1492`;
-  `src/seon/cluster/loop.clj:1245-1264`).
+  base again (`src/seon/sci/eval.clj:1509-1693`;
+  `src/seon/cluster/loop.clj:1-1706`).
 - **Cluster `io-prepl` / MCP `eval_clj`** sends a form to the live cluster
   JVM's `clojure.core.server/io-prepl`. It reads, evaluates, and returns a
   structured envelope; a bare value evaluates normally, and the agent-reply
-  prose classifier is absent (`src/seon/cluster.clj:926-986`;
+  prose classifier is absent (`src/seon/cluster.clj:176-390`;
   `reference-code/clojure/src/clj/clojure/core/server.clj:228-296`;
-  `script/seon/dev/mcp.clj:532-548`).
+  `script/seon/dev/mcp.clj:305-665`).
 - **A raw `clojure -M:dev` JVM REPL** is Clojure's ordinary
   read-eval-print loop. Bare values evaluate and print, and there is no Seon
   repair layer (`reference-code/clojure/src/clj/clojure/main.clj:368-467`).
@@ -34,11 +34,11 @@ contradiction; first name which surface you are on.
 ## Operating clusters from a REPL session
 
 `seon.operator` is the sanctioned control surface on the `io-prepl`/`eval_clj`
-jvm surface: eight thin-delegation verbs — `start!`, `stop!`, `restart!`,
-`status`, `banner`, `clusters`, `publish!`, `refork!` — each an ordinary
-function whose readiness output is derived per call, never stored
-(`src/seon/operator.clj`; verified live 2026-08-03: `(seon.operator/clusters)`
-returns the current advertisement census). `start!` REFUSES a running name
+jvm surface. Its ordinary functions include `start!`, `stop!`, `restart!`,
+`status`, `banner`, `clusters`, `publish!`, and `refork!`; readiness output is
+derived per call, never stored (`src/seon/operator.clj`; live verification:
+`(seon.operator/clusters)` returns the current advertisement and branch
+census). `start!` REFUSES a running name
 with a flat `:seon.boot/refused` error rather than implicitly halting, and a
 failed boot deliberately leaves the degraded instance up for diagnosis. There
 is no `reset` verb: var-level hot reload is automatic, and destructive refork
@@ -53,7 +53,7 @@ terminal receipt, contracted program publication, or the agent's defs. A
 direct `io-prepl` form proves only host-JVM evaluation; it never passes through
 the agent reply reader or the turn's terminal transaction
 (`reference-code/clojure/src/clj/clojure/core/server.clj:228-296`;
-`src/seon/cluster/loop.clj:1245-1419`).
+`src/seon/cluster/loop.clj:1-1706`).
 
 For the full split between program rows, base context, per-turn fork, and
 agent-scoped defs, read
@@ -62,15 +62,15 @@ agent-scoped defs, read
 An evaluation's namespace precedence is explicit form namespace → committed
 agent assignment → `user`. `agent-namespace` queries
 `:seon.cluster.agent/namespace`; it never reconstructs `my.agents.<id>`
-(`src/seon/sci/eval.clj:238-254,1588-1596`;
-`test/seon/sci/eval_test.clj:1040-1060`). A successful contracted `defn`
+(`src/seon/sci/eval.clj:271-295,1540-1693`;
+`test/seon/sci/eval_test.clj:1-1989`). A successful contracted `defn`
 returns SCI's Var value and admits as the same `:seon.print/var` face as `def`,
-rendered `#'namespace/name` (`src/seon/sci/eval.clj:1666-1685`;
-`test/seon/sci/eval_test.clj:452-466`). An untriaged failed receipt renders in
+rendered `#'namespace/name` (`src/seon/sci/eval.clj:1695-1857`;
+`test/seon/sci/eval_test.clj:1-1989`). An untriaged failed receipt renders in
 both transcript projections as a Clojure execution-error face; triage data,
 when present, remains the receipt's own error presentation
-(`src/seon/render/transcript.clj:512-531`;
-`test/seon/render/transcript_test.clj:249-286`).
+(`src/seon/render/transcript.clj:1-996`;
+`test/seon/render/transcript_test.clj:1-893`).
 
 ## The agent-reply surface
 
@@ -131,6 +131,8 @@ Var-quote bypasses public resolution and gives the Var itself; invoke it in
 function position:
 
 ```clojure
+;; Illustrative private-Var call; `db` and `clauses` are prepared by the
+;; planner probe.
 (#'datahike.query/create-plan-via-ir db clauses #{} nil nil)
 ```
 
@@ -147,6 +149,7 @@ After editing a namespace, load the edited definition into the JVM before
 claiming the probe still fails:
 
 ```clojure
+;; Illustrative continuation of the same prepared planner probe.
 (require 'datahike.query :reload)
 (#'datahike.query/create-plan-via-ir db clauses #{} nil nil)
 ```
@@ -162,11 +165,11 @@ changes only the edited code. The planner repair used this sequence
 When the edited host Var is a contracted Seon public function, re-evaluating
 its `defn` also replaces the Malli wrapper. Run `seon.instrument/apply!` after
 loading the definition and before repeating the probe; the operation is
-idempotent (`src/seon/instrument.clj:180-215`).
+idempotent (`src/seon/instrument.clj:571-624`).
 
 For a running flow proc whose step function is stored as a Var, re-evaluating
 the `defn` updates the next step without rebuilding topology
-(`src/seon/flow.clj:83-115`;
+(`src/seon/flow.clj:123-164`;
 `docs/prds/sci-execution-runtime/research/repl-workflows-2026-07-29.md`
 §4). Reloading is evidence only after the re-run; the edit on disk alone does
 not change an already-running JVM.
@@ -187,7 +190,7 @@ not program-graph indexing”).
 |---|---|
 | Reply became prose or the wrong plan forms | Agent reply: call `seon.cluster.reply/sources` with the actual run/form namespace or the result of `seon.sci.eval/agent-namespace`. |
 | `:seon.cluster.reply/unreadable` | Agent reply: fix malformed Clojure; no repair layer will close it. |
-| A def is live now but missing after restart | Agent turn: inspect its terminal receipt plus `:seon.def` row, then cold-acquire a fresh cluster context (`src/seon/cluster/loop.clj:380-465,1552-1644`; `src/seon/sci/eval.clj:1142-1228`). |
+| A def is live now but missing after restart | Agent turn: inspect its terminal receipt plus `:seon.def` row, then cold-acquire a fresh cluster context (`src/seon/cluster/loop.clj:1-1706`; `src/seon/sci/eval.clj:1270-1693`). |
 | Bare map/keyword evaluates and prints | Expected in `io-prepl` and raw JVM REPLs. |
 | A private function is unresolved | JVM probe: invoke `#'fully.qualified.ns/var`. |
 | The same old result appears after an edit | Reload/re-evaluate the owning namespace, then rerun the identical probe. |
