@@ -3,9 +3,9 @@
 
   SCI calls the stable interrupt function at interpreted function-body and
   loop entrances. One process guard keeps per-thread arm state; an invocation
-  either owns a new arm or inherits the identical context's active arm. Values
-  are admitted before disarm. Host calls remain SCI's documented interruption
-  ceiling and are never described as hard-stoppable.
+  either owns a new arm or inherits the same SCI interpreter context's active
+  arm. Values are admitted before disarm. Host calls remain SCI's documented
+  interruption ceiling and are never described as hard-stoppable.
 
   THE ARM IS A VALUE AND TRAVELS WITH THE WORK. The thread-local slot is the
   fast path for finding the arm governing the running thread, never the arm's
@@ -268,13 +268,16 @@
   "Arm `ctx` on this thread and return its stop, record, and observers.
 
   ONE re-entrancy rule for every entrance, because a second rule is how the
-  two boundaries diverged: work reached while the IDENTICAL context is
-  already armed on this thread INHERITS that arm — the outer deadline keeps
-  governing, the returned `::stop!` is inert, and no second timer exists, so
-  nested work can never restart the clock and outlive the limit that admitted
-  it. A DIFFERENT context on an armed thread is refused, because one thread
-  cannot honestly serve two limits. `::built-in-calls` reports the governing
-  arm's observations either way.
+  two boundaries diverged: work reached through the same SCI interpreter
+  context is identified by its `:env` reference and INHERITS that arm. Context
+  maps carrying a scoped environment may differ while still naming that same
+  interpreter. The outer deadline keeps governing, the returned `::stop!` is
+  inert, and no second timer exists, so nested work can never restart the clock
+  and outlive the limit that admitted it. A DIFFERENT SCI interpreter context
+  on an armed thread is refused, because one thread cannot honestly serve two
+  limits. A true `sci/fork` has a distinct `:env` reference and remains
+  different. `::built-in-calls` reports the governing arm's observations
+  either way.
 
   THE THREAD IS NOT THE ARM. Work that leaves this thread carries the arm as
   a value (`current-arm`) and the receiving thread installs it for the extent
@@ -292,7 +295,7 @@
                 {:seon.error/kind ::missing-interrupt-guard})))
     (if-let [armed (.get ^ThreadLocal (::thread-arm guard))]
       (do
-        (when-not (identical? ctx (::ctx armed))
+        (when-not (identical? (:env ctx) (:env (::ctx armed)))
           (throw
            (ex-info "A different SCI context is already armed on this thread."
                     {:seon.error/kind ::already-armed})))

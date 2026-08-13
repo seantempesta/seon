@@ -1770,6 +1770,67 @@
     (is (cut? evaluation)
         "the outer 50ms arm stopped work that asked for ten minutes")))
 
+(deftest a-selected-render-inherits-the-live-arm-or-owns-one-when-unarmed
+  ;; `evaluate` carries turn-scoped environment state on a new context map,
+  ;; while a render request may retain the cluster context map. Both maps name
+  ;; the same SCI interpreter through their shared `:env` reference. Selected
+  ;; render invocation must therefore inherit the live arm and its deadline;
+  ;; the same invocation on an unarmed thread owns an ordinary new arm.
+  (test-support/with-database
+   (fn [connection]
+     (let [database @connection
+           ctx (eval/cluster-ctx database connection)
+           wrapped-ctx
+           (env/carry-state ctx (env/environment-state (env/of ctx)))
+           _ (is (not (identical? ctx wrapped-ctx)))
+           _ (is (identical? (:env ctx) (:env wrapped-ctx)))
+           _ (is (ok? (run-in ctx
+                              (str "(defn probe-render [unit]"
+                                   " (str \"rendered:\""
+                                   "      (:seon.render/value unit)))")
+                              2000)))
+           _ (is (ok? (run-in ctx
+                              (str "(defn probe-render-spin [unit]"
+                                   " (loop [i 0] (recur (inc i))))")
+                              2000)))
+           _ (kernel/mark-installed! ctx 'user/probe-render)
+           _ (kernel/mark-installed! ctx 'user/probe-render-spin)
+           request
+           {:seon.db/db database
+            :seon.sci.eval/ctx ctx
+            :seon.render/value "value"
+            :seon.render/ai 'user/probe-render
+            :seon.sci.admit/caps caps
+            :seon.sci.eval/time-limit-ms 5000
+            :seon.config/on-core-error :record}
+           unarmed (render/render-ai request)
+           armed
+           (let [{stop! :seon.sci.kernel/stop!}
+                 (kernel/arm wrapped-ctx 5000)]
+             (try
+               (render/render-ai request)
+               (finally (stop!))))
+           deadline-task
+           (future
+             (let [{stop! :seon.sci.kernel/stop!}
+                   (kernel/arm wrapped-ctx 50)]
+               (try
+                 (render/render-ai
+                  (assoc request
+                         :seon.render/ai 'user/probe-render-spin
+                         :seon.sci.eval/time-limit-ms 600000))
+                 (finally (stop!)))))
+           deadline-result (deref deadline-task 15000 ::hung)]
+       (future-cancel deadline-task)
+       (is (= "rendered:value" unarmed)
+           "an unarmed selected render owns an ordinary arm")
+       (is (= "rendered:value" armed)
+           "the same selected render inherits the live interpreter arm")
+       (is (not= ::hung deadline-result))
+       (is (= :seon.sci.kernel/time-limit
+              (:seon.error/kind deadline-result))
+           "nested render work keeps the outer 50ms time limit")))))
+
 (deftest a-foreign-armed-context-is-refused-as-a-value
   (let [armed-ctx (eval/build-base-ctx)
         other-ctx (eval/build-base-ctx)
