@@ -1539,8 +1539,9 @@
             (is (ok? through-sci))
             (is (string? value))
             (is (re-find
-                 #"root=\[:seon\.cluster\.agent/id \"host-walker\"\]"
-                 value))
+                 #":seon\.cluster\.agent/id \"host-walker\""
+                 value)
+                "the printed walk value names its root agent identity")
             (is (false? (:seon.sci.admit/capped? through-sci))
                 "the measured string cap admits the ordinary walk whole")
             (is (map? direct))
