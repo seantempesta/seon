@@ -49,6 +49,19 @@ unavailable to ordinary tests.
 - Progress and no-progress publication issue identical writer transaction
   shapes.
 - One suite source digest produces exactly one base-build event; ordinary
-  test forks cannot invoke complete population.
+test forks cannot invoke complete population.
+
+## Re-observed in the 2026-08-13 boot gate
+
+`bin/test seon.cluster.boot-test` measured
+`incremental-source-refresh-publishes-without-touching-existing-clusters` at
+156.980 seconds before advancing normally to the next test. This is the same
+known complete-publication class, not the co-hosted-second-boot stall: the test
+is declared long because complete incremental publication dominates, and it
+then proves an existing cluster remains sovereign while a later cluster forks
+the published commit (`test/seon/cluster/boot_test.clj:932-985`). The 2026-08-11
+fat-tail measurement was 186.733 seconds for that same boundary, so the new
+sample is faster but still violates the fast-by-default law by more than an
+order of magnitude.
 - A named cause with numbers; complete publication is back near its historical
   cost or an owner-ruled accepted budget has the fix-loop default adjusted.
