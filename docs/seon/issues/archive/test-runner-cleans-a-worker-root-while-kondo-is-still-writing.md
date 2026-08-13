@@ -104,6 +104,70 @@ this lane; the disjoint wedge-properties lane owns that one full gate after its
 agent-test repair. Its result remains the integrated confirmation of the final
 acceptance bullet below, not evidence attributed to this focused run.
 
+## 2026-08-13 bounded-wait follow-up
+
+The retained evidence from the later `204372af7` gate refutes the hypothesis
+that this issue's `ProcessHandle.onExit` aggregation caused that gate's
+300-second silence. In
+`tmp/test-runs/run.BGxKo6/tmp/test-liveness/98503-1786591213826-threads.json`,
+the coordinator was waiting for active worker RPC futures in
+`run-task-pool!`; it was not in `stop-process-tree!`,
+`await-process-tree-exit`, or a child-exit `CompletableFuture.get`.
+
+The review did find two ways an exit failure remained incorrectly
+representable. Worker shutdown first made an unbounded `worker-rpc! :stop`
+round trip before it captured process-tree ownership, and the existing
+ten-second exit backstop continued silently when forced termination succeeded.
+Commit `0ef2750ef` captures every exact child completion before sending the
+stop command, sends the command without awaiting a protocol response, and
+awaits the captured `CompletableFuture.allOf`. If the ten-second backstop
+fires, it now names every still-live process, force-reaps the tree, and throws
+the typed `:seon.test.runner/process-tree-exit-backstop` refusal even when the
+forced exits arrive. Cleanup therefore remains keyed to child completion while
+the last-resort clock is always a failing bug report
+(`src/seon/test/runner.clj:1182-1251`).
+
+The same commit fixes the diagnostic blind spot. The suite liveness backstop
+captures the coordinator and every descendant first, runs bounded `jcmd
+Thread.dump_to_file -format=json` operations concurrently, and records every
+dump path before stopping the suite (`src/seon/test/runner.clj:261-395`). The
+regression starts a real worker JVM with a named virtual thread and proves both
+the coordinator and worker dumps retain their virtual threads
+(`test/seon/test_runner_test.clj:351-440`). A second regression makes a child
+ignore graceful termination and proves the backstop names it, force-reaps it,
+and fails (`test/seon/test_runner_test.clj:544-603`).
+
+The 123-second clj-kondo-cache test was not spending that time awaiting child
+exit. A virtual-thread-aware dump of focused worker PID 2833 retained at
+`tmp/test-liveness/focused-worker-2833-threads.json` showed the worker blocked
+reading a nested `bin/test` while that nested launcher copied ten complete
+worker checkouts. The two structural nested-runner fixtures now install a fake
+`getconf` reporting two logical processors, so each probe constructs the one
+worker root its assertion needs. Production pool sizing is unchanged.
+
+Follow-up verification:
+
+- `bin/test seon.test-runner-test` ran 14 tests containing 144 assertions with
+  0 failures and 0 errors. The cache regression completed in 39.5 seconds,
+  down from 123.3 seconds in the retained gate.
+- The one authorized `bin/test --all` at `0ef2750ef` did not produce a tally:
+  it exited 124 at its declared 300-second silence backstop and retained
+  `tmp/test-runs/run.rME4Ll`. This issue's cache regression completed in 44.4
+  seconds, later tests continued, and the worker-root cleanup regressions were
+  green before the distinct wedge.
+- The revised backstop retained eleven virtual-thread-aware dumps: coordinator
+  PID 7724 and all ten worker JVMs, plus diagnostic log
+  `tmp/test-runs/run.rME4Ll/tmp/test-liveness/7724-1786593605865.log`.
+  Six worker dumps identify the foreign boundary: six
+  `seon.render.web-test` tests were blocked in `HttpClient.send` through
+  `fetch` at `test/seon/render/web_test.clj:290` (`the-html-page-keeps-the-transcript-outside-the-agent-profile`,
+  `the-feed-opener-is-a-sibling-of-the-morph-targets`,
+  `an-agent-page-is-the-same-mechanism-as-root`,
+  `an-unknown-route-is-an-honest-404`,
+  `two-tabs-each-get-their-own-complete-paint`, and
+  `each-agent-has-an-isolated-debug-route`). That protected render owner is the
+  exact remaining integration boundary; this lane did not edit or rerun it.
+
 ## Acceptance
 
 - The interrupted launcher publishes completion only after every writer under
