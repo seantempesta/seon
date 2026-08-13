@@ -101,11 +101,11 @@ whose three instances were deepseek-v4-flash chat-template control markup
 (`docs/seon/issues/a-runs-last-form-can-close-without-a-receipt.md`).
 
 Those classifications and the exact-source return contract are current at
-`src/seon/cluster/reply.clj:20-60,155-268,330-390`. There is no delimiter
+`src/seon/cluster/reply.clj:20-60,155-268,330-389`. There is no delimiter
 auto-repair in this path. Unbalanced or malformed code returns
 `:seon.cluster.reply/unreadable`; a reply with no code — empty, or whole-text
 prose — returns `:seon.cluster.reply/no-forms` carrying that text
-(`src/seon/cluster/reply.clj:330-390`).
+(`src/seon/cluster/reply.clj:330-389`).
 
 Practical rule: write code as ordinary balanced Clojure. Agent-written source
 may use comments for thinking preserved beside a form. **[TARGET — owner
