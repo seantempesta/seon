@@ -152,3 +152,34 @@ arrived.
   buried in a parse error.
 - One regression proves the class at the concurrency that exposed it, not at
   one call.
+
+## Response-body custody resolution — 2026-08-13
+
+The triage's later `with-open` attribution was independently falsified before
+this repair. There is no Seon lifecycle that closes another turn's response
+body:
+
+- the process-wide `HttpClient` has no shutdown or close path;
+- `HttpClient.send` returns a distinct `InputStream` for each response;
+- `streamed-completion` closes only the body value passed by that attempt; and
+- pausing or stopping a Flow graph does not interrupt a transform already
+  executing the blocking provider call.
+
+The retained drive evidence also includes a `closed` occurrence with no
+concurrent provider call. The most specific honest attribution is therefore an
+upstream/JDK response-stream failure after HTTP 200, not cross-request
+closure. The historical row cannot distinguish a provider reset, connection
+failure, or interrupted reader because the old catch retained only
+`ex-message`; the cause-chain diagnostic landed by `8c6c2d90c` makes the next
+occurrence attributable without guessing.
+
+Commit `8be1b0e03` makes response-body custody explicit at construction:
+`send-request` obtains `.body` exactly once, binds it to the attempt, and hands
+that value to exactly one reader whose `with-open` owns its close. No cleanup
+path can recover a body from the shared client or from another response.
+
+The class regression uses two concurrent responses from one local stub server.
+One response sends provider finish evidence and closes promptly while its
+peer's body remains open between chunks; the peer then completes as
+`"peer survived"`. This proves that settling and closing one attempt cannot
+close a concurrent attempt's body. No paid provider call was made.

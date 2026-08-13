@@ -210,3 +210,27 @@ scratch-root message reached a stubbed AI request with a non-empty derived
 prompt and zero contract-violation facts under whole-image instrumentation (1
 test, 76 assertions). This closes the pre-provider spine blocker. It does not
 satisfy this issue's remaining paid one-call provider evidence.
+
+## Finish-signal settlement — 2026-08-13
+
+The remaining burn was in the stream fold, not the request builder. A provider
+finish reason was retained as evidence but did not terminate the fold; only
+natural EOF or a read failure did. A reasoning-only response could therefore
+announce that its choice was finished and then hold the HTTP body open until
+the configured time limit.
+
+Commit `8be1b0e03` treats the provider finish reason as terminal evidence when
+the accumulated choice contains reasoning and no assistant text. The fold
+reduces immediately, its attempt-owned reader closes its own body, and
+`parsed-completion` returns the flat typed
+`:seon.ai/reasoning-without-answer` value. The value records the finish reason,
+usage when supplied, retained reasoning, reasoning character count, and zero
+assistant-text count. There is no retry.
+
+The class regression uses a local stub that sends reasoning plus
+`finish_reason: "stop"` and deliberately keeps the response body open. The
+call settles with the typed value within two seconds while the server is still
+holding the body, proving that neither EOF nor the request time limit is the
+settlement mechanism. No paid provider call was made. The issue remains open
+only for its separately required paid one-call evidence after the live-drive
+owner chooses to spend it.
