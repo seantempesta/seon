@@ -13,8 +13,10 @@ tags: [architecture, agent]
 > one render-function call, never a stored data type.
 
 The prompt is an **append-only sequence of basis-labelled render entries rooted
-at one agent entity**. One Datahike pull acquires the agent's neighborhood from
-one immutable database value. Its selector is generated from installed schema
+at the agent's NAMESPACE** — agents ARE namespaces (owner rulings 39-40,
+2026-08-14): an agent's context is a pull of its namespace's data, with no
+manual membership specification anywhere. One Datahike pull acquires that
+namespace's neighborhood from one immutable database value. Its selector is generated from installed schema
 ref declarations: forward refs nest, every stored ref also receives its reverse
 spelling, requested distance determines selector depth, and pull `:limit`
 bounds breadth. The pull result is both the neighborhood and the membership

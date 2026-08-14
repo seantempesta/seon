@@ -137,7 +137,8 @@ therefore scale with changed content rather than web-surface size.
 
 ## Membership is the root pull — one derivation, no stored set
 
-**Blocks are derived, not installed.** One pull rooted at the agent
+**Blocks are derived, not installed.** One pull rooted at the agent's
+NAMESPACE (rulings 39-40: agents ARE namespaces; no manual membership)
 acquires the values reachable from it at one database value. Its selector is
 generated from installed schema ref declarations, including nested forward and
 reverse refs; the result is also the membership index for arrivals and
@@ -349,24 +350,26 @@ discipline.
 ## Web surfaces — root, namespace, agent, debug, and data
 
 Every web surface is a projection over one database value and the same root-pull/block
-machinery:
+machinery. Agents ARE namespaces (owner ruling 40): the namespace view IS
+the agent surface, and there is no separate agent page.
 
-- `/` renders root's namespace page plus one live-window card per attached
-  agent. Each card is that agent's newest-basis block in its HTML fit; the AI
-  fit of the same retained block is root's agent preview.
-- `/ns/{namespace}` resolves the namespace, its owner agent through
-  `:seon.cluster.agent/namespace`, and the owner's root pull.
-- `/ns/{namespace}/debug` shows the exact AI context and every acquired unit
-  side by side.
-- `/agent/{id}` resolves one `:seon.cluster.agent/id` and renders its agent web surface.
-- `/agent/{id}/debug` exposes the corresponding acquired tree and projections.
+- `/` renders root's namespace view — the system view. Root's
+  neighborhood reaches the other agents through its ordinary refs, so
+  each appears as a live card: that namespace's newest-basis block in
+  its HTML fit, whose AI fit is root's preview of the same agent.
+- `/ns/{namespace}` renders one namespace view: the pull rooted at
+  that namespace (ruling 39 — the namespace's data, nothing else),
+  every acquired value through the one chain, arranged by the layout
+  (newest-changed primary, side panels by last update, browser-local
+  pin — ruling 38). The honest `/ai` view and per-block drill are
+  in-page affordances of this view.
 - `/data` renders the structural database floor for inspection.
 
-Namespace pages are generic: adding one is adding the route-table line, not a
-new route-specific render function. Agent web surfaces query received and sent messages, runs,
-eval receipts, and routed errors using the refs named in [[data-model]]. Root is
-the ordinary agent whose identity is `"root"`; it has a specialized layout but
-no second route, parent, role, or render model.
+Namespace views are generic: adding an agent is creating a namespace,
+never adding a route. A view queries messages, runs, eval receipts,
+and routed errors through the refs named in [[data-model]]. Root is
+the ordinary agent whose namespace identity is root's; it has a
+specialized layout but no second route, parent, role, or render model.
 
 Browser-local selection, scroll, disclosure, and input state remain in the browser.
 No web-session, canvas pin, focus, route, or selected-agent entity is stored.
@@ -385,18 +388,18 @@ callback route or function descriptor crosses the browser boundary.
 ## Routing is one code table
 
 `seon.render.route/routes` is the one route authority, compiled by reitit at
-namespace load. The route entries are:
+namespace load. The navigable surface is three pages (owner ruling 41,
+2026-08-14): agents ARE namespaces, so there are no agent routes and
+no debug routes — the honest `/ai` view is an in-page affordance of
+the namespace view, never an address. The route entries are:
 
 | Route | Method | Handler role |
 |---|---|---|
-| `/` | GET | root namespace page |
-| `/ns/{namespace}` | GET | namespace page |
-| `/ns/{namespace}/debug` | GET | namespace debug surface |
-| `/agent/{id}` | GET | agent web surface |
-| `/agent/{id}/debug` | GET | agent debug surface |
-| `/agent/{id}/message` | POST | bounded inbound message |
-| `/feed/{id}` | GET | web-surface SSE feed |
-| `/data` | GET | database inspection |
+| `/` | GET | root's namespace view (the system view) |
+| `/ns/{namespace}` | GET | a namespace view — the agent surface |
+| `/data` | GET | the global database browser |
+| message POST (under the namespace view) | POST | bounded inbound message |
+| SSE feed (under the pages) | GET | web-surface feed — transport, not navigation |
 | `/css/{*path}` and `/js/{*path}` | GET | static assets |
 
 Named reverse routing uses the same compiled router. Reitit's conflict checks
