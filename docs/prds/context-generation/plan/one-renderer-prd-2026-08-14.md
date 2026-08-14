@@ -391,6 +391,7 @@ orchestrator's own-eyes verification):
 - [value-printer archaeology](../research/value-printer-archaeology-2026-08-14.md) — current `seon.print` vs the archive's 1927-line `seon.render.value`, and the synthesis shape
 - [print-path design 2026-08-01](../../sci-execution-runtime/plan/print-path-design-2026-08-01.md) — the sealed REPL-parity contract the current printer implements; the other half of the Q0 collision
 - [open-questions ledger](open-questions-2026-08-14.md) — the iteration ledger; rulings land there first
+- [one-pipeline design sketch](../research/one-pipeline-design-sketch-2026-08-14.md) — the candidate end-to-end shape (gated on Q0/Q1/Q4; shows where each defect class becomes unconstructable and what nets out deleted)
 - In flight: [deletion register](../research/deletion-register-2026-08-14.md) (net-LOC arithmetic), [seam-hole census](../research/seam-hole-census-2026-08-14.md) (every pipeline bypass + the choke points that close them), [parity-elision collision](../research/parity-elision-collision-2026-08-14.md) (Q0's evidence), [value-browser prior art](../research/value-browser-prior-art-2026-08-14.md) (reveal/orchard/malli survey)
 
 Day round:

@@ -9,7 +9,10 @@ tags: [plan, render, context, design]
 Owner + orchestrator working ledger, 2026-08-14 evening. Every major
 design question surfaced by the [renderer
 re-audit](../research/renderer-reaudit-2026-08-14.md), the four earlier
-censuses, and the owner's design dialogue. Nothing below is settled
+censuses, and the owner's design dialogue. The candidate answers are
+assembled into one coherent shape in the
+[one-pipeline design sketch](../research/one-pipeline-design-sketch-2026-08-14.md)
+— read it beside this ledger; it shows what each ruling buys. Nothing below is settled
 until marked RULED with the owner's answer; no wave starts before the
 structural questions (Q1-Q4) are ruled and the PRD is re-marked to
 match.
