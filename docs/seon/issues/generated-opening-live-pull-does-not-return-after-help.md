@@ -120,3 +120,25 @@ calls `neighborhood` twice (`src/seon/render/walk.clj:915,917`) and neither
 carries a profile; one uncarried `neighborhood` measured 91,252 ms, and the
 wedge's retained dump shows the identical `walk.clj:590,566,546` frames. Fix
 the class once.
+
+## Evidence — 2026-08-14 prefix reconciliation resolved
+
+Commits `0c3c289d7` and `dd7eb92b8` dissolved the independently seeded
+ordinal-0 source. A generated run now opens with zero forms in `:generate`,
+and the live generator derives and appends `(help)` through the same path as
+every successor. The follow-up keeps the initial situation and starting
+namespace in `open-call`'s one entity assertion; raw datoms after that
+transaction function could not address its newly created tempid and had left
+agent creation incomplete.
+
+`bin/test seon.bootstrap-test` passed after the correction. A fresh isolated
+root published from `dd7eb92b8` then created `prefix-proof-agent`; a bounded
+Datahike listener observed these ordered source facts:
+
+- ordinal 0: `; A new run just opened. Why am I awake — do I have messages?\n(help)`
+- ordinal 1: `(dir my.run)`
+
+Ordinal 0 had a settled result and no receipt error, the run remained in
+`:generate`, and the live query found no `seon.bootstrap/prefix-drift` fault.
+This resolves the prefix-reconciliation boundary. The issue remains open for
+its distinct single-acquisition/per-render projection cost acceptance.
