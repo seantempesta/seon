@@ -27,6 +27,15 @@ loaded from the working tree, the schema not yet in the published
 projection). The drive moved to an isolated `--root` JVM as the
 workaround.
 
+The independent observer watched the specified shared-root advertisement
+boundary from 05:27Z through 06:10Z. `bin/seon status` advertised only
+`default`, `mcp__seon__runtime_status` returned an empty cluster set for
+`drive-one`, and `data/clusters/drive-one` never existed. Only after the
+45-minute boundary did a filesystem search find the fallback at
+`tmp/drive-1-root`, where it was advertised as cluster `default`, not
+`drive-one`. The workaround therefore also made the live drive invisible to
+the independent observer under the agreed discovery contract.
+
 ## Owner
 
 The boot/instrumentation seam. Candidate shapes (design, not ruled):
@@ -42,3 +51,8 @@ A shared-root cluster boot with a half-edited foreign namespace either
 boots with a typed diagnostic naming the unregistered var or refuses
 with a message naming the churn source — never an opaque contract
 registration failure; one regression proves it.
+
+If an isolated-root fallback is the ruled substrate, the drive handoff names
+that root and actual cluster name through an observer-visible fact before the
+episode begins; an observer must not spend the complete watch window polling a
+name that cannot appear.

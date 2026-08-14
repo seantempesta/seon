@@ -183,6 +183,23 @@ reported the same process alive. No hand-rolled prepl fallback was used; this
 is current evidence that an advertised live process can still leave the MCP
 health face unavailable.
 
+## Drive 1 observer regression — 2026-08-14
+
+The independent Drive 1 observer reproduced two different unusable health
+faces against advertised live clusters while ordinary JVM evaluation still
+worked:
+
+- shared-root `default` returned a raw `java.lang.NullPointerException` at
+  `clojure.lang.RT/longCast`: `Cannot invoke \"java.lang.Number.doubleValue()\"
+  because \"x\" is null`;
+- isolated-root `tmp/drive-1-root`, cluster `default`, returned
+  `:seon.config/missing-projection` with `Effective config requires the
+  projection handed to this operation.`
+
+For the isolated root, a subsequent JVM `eval_clj` of `(+ 1 2)` returned `3`
+in 2 ms. The cluster and prepl were therefore alive; the health projection was
+the unavailable surface.
+
 ## Envelope economy and elision repair — 2026-08-10
 
 The 2026-08-08 independent verification found a separate response-economy
