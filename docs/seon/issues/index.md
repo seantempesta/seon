@@ -16,10 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (44)
+## Blocker (45)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Elide fenced projected forms atomically at the print owner](fit-splits-fenced-projected-forms-by-character.md) | blocker | clip-ripout lane |
 | [Attribute and bound the store's one-day 69 GB growth](store-grew-to-69-gigabytes-in-one-day-of-lanes.md) | blocker | exclusive sweep implementation wave |
 | [Carry the agent-scoped environment into generated turn forks](generated-turn-fork-omits-the-agent-scoped-environment.md) | blocker | evolving-session implementation phases |
 | [Give background-result wakes a queryable run trigger](background-result-wakes-have-no-run-trigger.md) | blocker | why-awake situation work (generator lane) |
