@@ -286,6 +286,17 @@ the orchestrator runs `bin/seon reset --force` on the shared root
 verifies status + the web UI answering, then runs the queued probe
 verification below. Do not wait for a further go-ahead.
 
+**THE PAID TURN FIRED (attempt 4, ~10:30 UTC):** full opening 12/12
+healthy derived forms (208.9 s — the one-pull case now has live
+evidence); real DeepSeek turn: 22,604 prompt tokens (49% cache), 310
+completion, 8.06 s, $0.0017. NEW DEFECTS: stale bootstrap task
+rendered TWICE and followed by the model (context-fidelity — the
+drive's first real catch); 4.7× estimate-vs-provider token gap;
+zero render-cost facts recorded (the agent-only restriction too
+strict). Observer on the LIVE specimen (`tmp/drive-1-root`, web
+:51063) attributing all three verbatim; the fidelity fix lane launches
+on its attribution. Report updated at `e6dd69642`.
+
 **NIGHT CLOSING STATE (2026-08-14 ~09:30 UTC) — read this first on
 resumption:** THE WEDGE EXTERMINATION IS COMPLETE: `seon.await/await!`
 owner + all crossings + census (`d452d0355`..`7e6b868cc`); lock/
