@@ -1,11 +1,24 @@
 ---
 type: prd
-status: active
+status: superseded
 tags: [prd, agent, flow, runtime, database]
 queue: [messaging-implementation-wave, green-bare-gate]
 ---
 
 # Agent-facing background work
+
+## Closing note — 2026-08-13
+
+**Superseded.** The one durable background-effect mechanism described here is
+implemented by `my.background` (`src/my/background.clj:40-140`), the effect
+receipt transitions and request owner (`src/seon/effect.clj:201-312,694-748`),
+and the bounded cluster work launcher (`src/seon/flow.clj:639-749`). The
+remaining wait-target and `result/eid-N` work did not land through this PRD:
+the active SCI program's messaging wave now owns it explicitly at
+`docs/prds/sci-execution-runtime/plan/messaging-wave-2026-08-06.md:18-46,48-93`.
+At archival time, `my.background/await` still carries the old note-based
+contract (`src/my/background.clj:122-140`), so this closure does not claim that
+future accretion is complete.
 
 ## Current decision
 
