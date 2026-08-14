@@ -697,9 +697,14 @@
                      :seon.render.call/output rendered})]
         (when (and call-id captured-calls)
           (swap! captured-calls assoc call-id entry))
+        ;; Render cost serves the agent-context consumer. A real prompt
+        ;; request structurally carries the held run id through `context-pass`;
+        ;; web page, root, and debug renders do not. They still retain call
+        ;; evidence, but a read-only page observation must never transact.
         (when (and (not reusable?)
                    call-id
                    captured-calls
+                   (:seon.cluster.run/id request)
                    (:seon.db/connection request))
           (db/transact! (:seon.db/connection request)
                         [(render-cost-fact request selected output rendered)]))
