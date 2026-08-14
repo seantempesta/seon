@@ -80,9 +80,23 @@ token; page lint clean; honesty falsifiers) are suite properties.
 
 ## 1. The target architecture (one page)
 
-**Values flow whole.** A producer — any function whose output reaches
-an agent or a page — returns its complete value. No producer bounds,
-truncates, summarizes, or narrates. (Ledger 32.)
+**Terminology (owner, same day): "producer" is retired** — it was
+already a legacy spelling in the vocabulary table. The things are
+FUNCTION OUTPUTS (what any function returns) and RENDER OUTPUTS (a
+declared `:seon.render/ai`/`/html` cleanup for a shape — INLINE data
+or a function symbol). Occurrences of "producer" below read as one of
+those two.
+
+**Function outputs flow whole.** Any function's output reaches the
+pipeline complete. Functions never bound, truncate, summarize, or
+narrate their outputs. (Ledger 32.)
+
+**Budgeting happens at the FLOOR, never at the function-output
+level.** The floor/fit boundary is the one place the profile budget
+applies, for both projections. Declared render outputs exist to CLEAN
+UP presentation — so a shape shows a designed face instead of garbage —
+and may be declared inline (literal template data in the schema props)
+or as a function symbol; either way they shape, they never shrink.
 
 **One render pipeline, three projections.** Every outward value crosses
 `seon.render` exactly once, where candidates select a declared producer
