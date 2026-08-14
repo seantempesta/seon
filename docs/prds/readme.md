@@ -13,11 +13,11 @@ The [issue index](/docs/seon/issues/index.md) is the ranked queue.
 
 - `sci-execution-runtime/` contains the active program and its current runbook.
 - `error-model/` is the active successor currently named by the working edge.
-- `accretion-testing/`, `background-work/`, `operational-events/`, and
-  `in-server-tests/` remain non-archived pending an explicit current dependency
-  edge, as recorded by the 2026-08-06 drift audit.
-- `archive/` contains archived historical quarry, including the retained
-  `_example-feature/` template.
+- `accretion-testing/` remains active: its 2026-08-13 current-state note names
+  the landed prerequisites and the still-unbuilt green-to-install gate.
+- `archive/` contains historical quarry, including the superseded
+  `background-work/`, `in-server-tests/`, and `operational-events/` briefs and
+  the retained `_example-feature/` template.
 
 ## Authority lifecycle
 
