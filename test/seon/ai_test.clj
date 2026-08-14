@@ -945,7 +945,7 @@
        "}}]}\n\n"))
 
 (defn- start-stub!
-  "A local server: /truncate ends a 200 early, /stream completes normally."
+  "A local server for complete, truncated, and rejected responses."
   []
   (let [server (com.sun.net.httpserver.HttpServer/create
                 (java.net.InetSocketAddress. "127.0.0.1" 0) 0)
@@ -973,6 +973,17 @@
                          "\"finish_reason\":\"stop\"}]}\n\n"
                          "data: [DONE]\n\n")]
            (write exchange (count body) body)))))
+    (.createContext
+     server "/payment-required"
+     (reify com.sun.net.httpserver.HttpHandler
+       (handle [_ exchange]
+         (let [body "{\"error\":{\"message\":\"Insufficient Balance\"}}"
+               bytes (.getBytes body "UTF-8")]
+           (.add (.getResponseHeaders exchange)
+                 "Content-Type" "application/json")
+           (.sendResponseHeaders exchange 402 (long (alength bytes)))
+           (with-open [out (.getResponseBody exchange)]
+             (.write out bytes))))))
     (.setExecutor
      server (java.util.concurrent.Executors/newVirtualThreadPerTaskExecutor))
     (.start server)
@@ -1086,6 +1097,44 @@
         (is (= 6 (count (filter #(= "(+ 1 2)" (:seon.ai/text %)) outcomes)))
             (str "every concurrent stream completed: "
                  (pr-str (mapv #(or (:seon.error/message %) :ok) outcomes)))))
+      (finally (.stop server 0)))))
+
+(deftest payment-required-primary-selects-the-configured-backup
+  (let [server (start-stub!)]
+    (try
+      (let [{:seon.ai/keys [primary backup]}
+            (ai/targets
+             (assoc @dials
+                    :seon.config.ai.backup/model "backup-probe"
+                    :seon.config.ai.backup/endpoint
+                    "https://backup.example.invalid/v1/chat/completions"))
+            failure
+            (with-redefs [ai/credential (constantly "test-key")]
+              (ai/complete
+               (assoc primary
+                      :seon.ai/endpoint
+                      (str "http://127.0.0.1:"
+                           (.getPort (.getAddress server))
+                           "/payment-required")
+                      :seon.ai/prompt "hello")))
+            action
+            (ai/disposition
+             {:seon.error/value failure :seon.ai/backup? true})
+            selected-target (when (= :failover-now action) backup)]
+        (is (= 402 (:seon.ai/provider-error failure)))
+        (is (= :authentication
+               (get-in failure
+                       [:seon.error/data :seon.ai/error-class]))
+            "payment exhaustion is a free 'not here' refusal")
+        (is (= :failover-now action))
+        (is (= "backup-probe" (:seon.ai/model selected-target)))
+        (is (= "https://backup.example.invalid/v1/chat/completions"
+               (:seon.ai/endpoint selected-target))
+            "the primary rejection selects the configured backup target")
+        (is (= :fail
+               (ai/disposition
+                {:seon.error/value failure :seon.ai/backup? false}))
+            "without a backup, repeating an empty-balance target cannot help"))
       (finally (.stop server 0)))))
 
 (deftest a-reasoning-finish-settles-before-the-response-body-ends

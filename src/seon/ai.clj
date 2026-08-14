@@ -988,7 +988,7 @@
   from 400 saying \"not this request\"."
   [status]
   (cond
-    (= 401 status) :authentication
+    (contains? #{401 402} status) :authentication
     (= 403 status) :authorization
     (= 404 status) :model
     (= 408 status) :rate-limit
