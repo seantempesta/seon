@@ -286,6 +286,17 @@ the orchestrator runs `bin/seon reset --force` on the shared root
 verifies status + the web UI answering, then runs the queued probe
 verification below. Do not wait for a further go-ahead.
 
+**DRIVE 1 LAUNCHED (2026-08-14, post-restart):** driver lane `drive-1`
+(scratch cluster `drive-one` forked from the clean reset publication —
+immune to working-tree lane churn; flash-only; the full spec session:
+opening → plan with the new `:about` token vector → durable function →
+mid-session message → rebirth → settle; report to
+`../research/drive-1-report-2026-08-14.md`) plus independent
+`drive-1-observer` (read-only, files issues on sight, own report). The
+live-pull probe verification is RE-QUEUED behind the await-owner and
+lock-bounds commits (two churn collisions with their in-flight edits;
+the drive does not depend on it — fork-from-published is churn-immune).
+
 **PENDING VERIFICATION (drive prep):** rerun
 `tmp/live-pull/after_help_probe.clj` WITHOUT the carried-profile
 argument against a pinned export of post-fix HEAD (recipe in the
