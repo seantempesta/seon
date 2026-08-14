@@ -105,15 +105,19 @@ the HTML window. Presentation WINDOWS (a `/data`
 page, an explicitly small view) are explicit request options that
 produce elision values — never ambient defaults.
 
-**The Q0 regime bit (assuming Q0-a):** the elision NODE always carries
-its full facts; which TEXT it emits is a face decision made by the
-render request's position — `:seon.print/parity` true exactly for
-REPL-result positions in the transcript (stock `...`/`#`, byte-faithful
-to a real REPL, `repl_parity_test` intact), rich text (`… +N more;
-requery …`) everywhere else; the hiccup face is always rich. One value,
-two spellings, zero information loss — the collision dissolves into a
-one-boolean face choice at a named seam instead of two half-merged
-regimes.
+**Q0 RULED (ledger ruling 33) — simpler than any drafted option: no
+regime bit at all.** Parity means framing fidelity (no comment
+scaffolding, no narration; the transcript reads as a real REPL), never
+stock elision bytes. There is ONE elision face everywhere — compact,
+shape-bearing (`type, count, what remains, requery identity` at the cut
+point; never a trailing annotation line) — and it fires only at
+extremes. Defaults are sized so ordinary generated content (`help`
+output, larger inter-agent messages, opening episodes) prints WHOLE:
+this is the system's default printer and must be trustworthy without
+options. The `::length 32`/`::level 8` defaults and bare `...`/`#`
+faces die; the already-`known-divergence` parity elision rows are
+rewritten to the one face. P-TEE stands untouched — one face means one
+token stream.
 
 ## Stage 4 — the two seams, typed shut
 

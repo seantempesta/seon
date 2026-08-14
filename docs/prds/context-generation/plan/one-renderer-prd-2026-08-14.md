@@ -373,9 +373,14 @@ the view IS the namespace render (`/ns/<ns>`, root's `/` — no layout
 machinery), and the two seams are 2D/3D projections of ONE walk vector.
 The structural questions that gate the wave plan:
 
-- **Q0** — the REPL-parity vs elision-value regime reconciliation:
-  where does the regime bit live? (Gates rip-outs #13-#14 and the
-  printer synthesis.)
+- **Q0 — RULED** (ledger ruling 33): no regime bit. Parity = framing
+  fidelity, never stock elision bytes; ONE compact shape-bearing
+  elision face everywhere, firing only at extremes; generous defaults
+  so ordinary generated content (`help`, agent messages, openings)
+  prints whole — a trustworthy DEFAULT printer. Bare `...`/`#` and the
+  `::length`/`::level` defaults die; #26/D5 superseded, #25 narrowed
+  to "no trailing annotation." Unblocks rip-outs #13-#14 and the
+  printer synthesis.
 - **Q1** — does the composing walk become THE renderer (selection
   re-entered at every node; specialists are frames, not terminals)?
   (Gates #16-#17.)

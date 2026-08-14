@@ -305,6 +305,29 @@ one decision away from queued work. Ruled items cite their record.
     print system, never beside it — declared producers stay the
     exception for genuinely special surfaces.
 
+33. **REPL parity is framing fidelity; elision is for extremes; the
+    printer is a trustworthy default** (owner, 2026-08-14 evening,
+    resolving open-questions Q0): parity's purpose was killing the
+    comment scaffolding and narration that made output NOT read like a
+    real REPL — it was never a commitment to stock `...`/`#` elision
+    bytes. Elision markers exist for EXTREME data only, and when they
+    fire they SHOW THE SHAPE (type, count, what remains, requery
+    identity). Ordinary generated content — `help` output, the larger
+    inter-agent messages, generated-opening episodes — prints WHOLE
+    under defaults: defaults are sized so nothing ordinary elides,
+    because this is the system's default printer and must be
+    trustworthy without options. Consequences: the emitter's
+    `::length 32` / `::level 8` bare-cut defaults die (they would elide
+    help-sized output); the bare `...`/`#` faces die with them; the
+    `repl_parity_test` elision rows (already `:known-divergence`) are
+    rewritten to the shape-bearing face; ruling #26's D5 bare-face seal
+    is SUPERSEDED by the shape-bearing elision face; ruling #25's
+    no-annotation rule survives narrowed — no TRAILING annotation line
+    after a value; the shape lives inside the marker at the cut point.
+    No per-position regime bit is needed: one compact, shape-bearing
+    elision face everywhere, styled identically in result lines and
+    pages.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced

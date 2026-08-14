@@ -32,7 +32,18 @@ match.
 
 ## Structural questions (answer these first — they shape everything)
 
-### Q0. The regime collision: REPL parity vs elision values — where does the regime bit live?
+### Q0. RULED (owner, 2026-08-14 evening — ledger ruling 33). The regime collision: REPL parity vs elision values
+
+**Ruling: no regime bit.** Parity = framing fidelity (no comment
+scaffolding, no narration — the transcript reads as a real REPL), never
+stock elision bytes. ONE compact shape-bearing elision face everywhere,
+firing only at extremes; ordinary generated content (`help`, larger
+inter-agent messages, opening episodes) prints WHOLE under generous
+defaults — this is the system's default printer and must be trustworthy
+without options. The bare-cut defaults and `...`/`#` faces die; #26/D5
+superseded; #25 narrowed to "no trailing annotation." Full text:
+[design-ideas-ledger ruling 33](design-ideas-ledger-2026-08-13.md).
+Original options and evidence retained below for the record.
 
 The single biggest new fact from the archaeology
 ([print-path-design-2026-08-01](../../sci-execution-runtime/plan/print-path-design-2026-08-01.md),
