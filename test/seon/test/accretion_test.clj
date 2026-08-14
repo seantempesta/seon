@@ -1,7 +1,10 @@
 (ns seon.test.accretion-test
   (:require [clojure.test :refer [deftest is testing]]
+            [sci.core :as sci]
+            [seon.config :as config]
             [seon.db :as db]
             [seon.fn :as seon.fn]
+            [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support]
             [seon.test.accretion :as accretion]))
 
@@ -72,3 +75,91 @@
              (seon.fn/gate-set @connection "fixture.gate/future")))
       (is (= (seon.fn/gate-set @connection "fixture.gate/target")
              (seon.fn/tests-reaching @connection "fixture.gate/target"))))))
+
+(deftest candidate-tests-run-on-a-copy-on-write-turn-fork
+  (test-support/with-database
+    (fn [connection]
+      (db/transact!
+       connection
+       [{:seon.cluster.agent/id "candidate-author"
+         :seon.cluster.agent/namespace
+         {:seon.ns/name 'fixture.candidate
+          :seon.ns/source
+          (str "(ns fixture.candidate "
+               "(:require [clojure.test :refer [deftest is]]))")}}
+        {:seon.fn/sym "fixture.candidate/target"
+         :seon.fn/ns [:seon.ns/name 'fixture.candidate]
+         :seon.fn/source
+         (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+              "target [x] x)")
+         :seon.fn/arglists "([x])"
+         :seon.fn/private? false
+         :seon.fn/spec "[:=> [:cat :int] :int]"}
+        {:seon.test/sym "fixture.candidate/green-test"
+         :seon.test/ns [:seon.ns/name 'fixture.candidate]
+         :seon.test/source
+         (str "(clojure.test/deftest green-test "
+              "(clojure.test/is (= 2 (target 1))))")}
+        {:seon.test/sym "fixture.candidate/red-test"
+         :seon.test/ns [:seon.ns/name 'fixture.candidate]
+         :seon.test/source
+         (str "(clojure.test/deftest red-test "
+              "(clojure.test/is (= 3 (target 1))))")}])
+      (let [parent (test-support/fork-cluster-ctx connection)
+            _ (when-not (sci/find-ns parent 'fixture.candidate)
+                (sci/add-namespace! parent 'fixture.candidate {}))
+            _ (sci/binding [sci/ns (sci/create-ns 'fixture.candidate)]
+                (sci/eval-string*
+                 parent
+                 (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+                      "target [x] x)")))
+            parent-var (sci/resolve parent 'fixture.candidate/target)
+            parent-root-bytes
+            (.getBytes
+             (binding [*print-meta* true]
+               (pr-str
+                (first
+                 (sci/var-root-data
+                  parent ['fixture.candidate/target]))))
+             java.nio.charset.StandardCharsets/UTF_8)
+            result
+            (sci.eval/evaluate-candidate
+             {:seon.sci.eval/ctx parent
+              :seon.db/db @connection
+              :seon.db/connection connection
+              :seon.cluster.agent/id "candidate-author"
+              :seon.cluster.run.form/source
+              (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+                   "target [x] (inc x))")
+              :seon.test.accretion/gate-set
+              ["fixture.candidate/green-test"
+               "fixture.candidate/red-test"]
+              :seon.sci.eval/time-limit-ms 2000
+              :seon.sci.admit/caps
+              (config/result-caps (config/defaults))
+              :seon.config/on-core-error :panic})
+            candidate (:seon.test.accretion/candidate-ctx result)
+            results (:seon.test.accretion/results result)
+            parent-root-after
+            (.getBytes
+             (binding [*print-meta* true]
+               (pr-str
+                (first
+                 (sci/var-root-data
+                  parent ['fixture.candidate/target]))))
+             java.nio.charset.StandardCharsets/UTF_8)]
+        (testing "the candidate function and every gate test run"
+          (is (= ["fixture.candidate/green-test"
+                  "fixture.candidate/red-test"]
+                 (mapv :seon.test/sym results)))
+          (is (= [0 1] (mapv :seon.test/fail-count results)))
+          (is (= 2
+                 (sci/eval-string*
+                  candidate "(fixture.candidate/target 1)"))))
+        (testing "the parent retains byte-identical Var state"
+          (is (identical? parent-var
+                          (sci/resolve parent 'fixture.candidate/target)))
+          (is (java.util.Arrays/equals parent-root-bytes parent-root-after))
+          (is (= 1
+                 (sci/eval-string*
+                  parent "(fixture.candidate/target 1)"))))))))

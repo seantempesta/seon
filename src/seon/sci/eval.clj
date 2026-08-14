@@ -128,7 +128,8 @@
             [seon.sci.admit :as admit]
             [seon.sci.kernel :as kernel]
             [seon.sci.reader :as reader]
-            [seon.test.accretion :as accretion]))
+            [seon.test.accretion :as accretion]
+            [seon.test.runner :as test.runner]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -2229,3 +2230,104 @@
                     (java.util.Date.))))))
         (finally
           (stop!))))))))
+
+(defn fork-candidate-ctx
+  "Fork one candidate through the generation-aware turn path.
+
+  This deliberately delegates to `fork-for-turn`; candidate code never calls
+  plain `sci/fork`, and therefore inherits the same copy-on-write Var roots and
+  agent-def restoration as an ordinary turn."
+  {:malli/schema [:=> [:cat :seon.test.accretion/candidate-context-request]
+                  :seon.sci.eval/ctx]}
+  [request]
+  (:seon.sci.eval/ctx (fork-for-turn request)))
+
+(defn- install-candidate-function!
+  [ctx database row]
+  (let [function-symbol (symbol (:seon.fn/sym row))
+        definition (edn/read-string (:seon.fn/spec row))
+        projection (context-projection ctx)
+        next-projection
+        (schema/projection-with-function-contract
+         projection function-symbol definition
+         {:seon.schema.admission/source :agent})]
+    (kernel/cache-function!
+     ctx function-symbol
+     {::function-source (:seon.fn/source row)
+      ::function-namespace (second (:seon.fn/ns row))
+      ::function-private? (:seon.fn/private? row)
+      ::agent-authored? true})
+    (kernel/mark-installed! ctx function-symbol)
+    (install-function-contract! ctx row next-projection database)
+    (advance-context-projection! ctx database next-projection)
+    ctx))
+
+(defn- candidate-test-result
+  [test-symbol evaluation]
+  {:seon.test/sym test-symbol
+   :seon.test/pass-count 0
+   :seon.test/fail-count 0
+   :seon.test/error-count 1
+   :seon.test/failure-message
+   (or (:seon.cluster.eval/error evaluation)
+       (str "Candidate test " test-symbol " could not be evaluated."))})
+
+(defn- run-candidate-test!
+  [ctx database request test-symbol]
+  (let [row (db/pull database
+                     '[:seon.test/source {:seon.test/ns [:seon.ns/name]}]
+                     [:seon.test/sym test-symbol])
+        evaluation
+        (evaluate
+         (assoc request
+                :seon.sci.eval/ctx ctx
+                :seon.cluster.run.form/source (:seon.test/source row)
+                :seon.cluster.run.form/ns
+                [:seon.ns/name (get-in row [:seon.test/ns :seon.ns/name])]))]
+    (if (:seon.cluster.eval/error evaluation)
+      (candidate-test-result test-symbol evaluation)
+      (let [test-var (sci/resolve ctx (symbol test-symbol))
+            armed (kernel/arm ctx (:seon.sci.eval/time-limit-ms request))]
+        (try
+          (binding [clojure.test/report (constantly nil)]
+            (test.runner/run-var! test-var))
+          (finally
+            ((::kernel/stop! armed))))))))
+
+(defn evaluate-candidate
+  "Evaluate one durable function and every gate test in an isolated candidate.
+
+  The returned test values are exactly `seon.test.runner/run-var!` reports.
+  All tests run even after a red result; the candidate is evidence only and is
+  never promoted to the cluster context."
+  {:malli/schema [:=> [:cat :seon.test.accretion/candidate-request]
+                  :seon.test.accretion/candidate-result]}
+  [{base-ctx :seon.sci.eval/ctx
+    database :seon.db/db
+    connection :seon.db/connection
+    agent-id :seon.cluster.agent/id
+    source :seon.cluster.run.form/source
+    test-symbols :seon.test.accretion/gate-set
+    :as request}]
+  (let [ctx (fork-candidate-ctx
+             {:seon.sci.eval/ctx base-ctx
+              :seon.db/db database
+              :seon.db/connection connection
+              :seon.cluster.agent/id agent-id})
+        evaluation
+        (evaluate (assoc request
+                         :seon.sci.eval/ctx ctx
+                         :seon.cluster.run.form/source source))
+        row (:seon.program/row evaluation)]
+    (if (or (:seon.cluster.eval/error evaluation)
+            (nil? (:seon.fn/sym row)))
+      {:seon.test.accretion/candidate-ctx ctx
+       :seon.test.accretion/evaluation evaluation
+       :seon.test.accretion/results []}
+      (do
+        (install-candidate-function! ctx database row)
+        {:seon.test.accretion/candidate-ctx ctx
+         :seon.test.accretion/evaluation evaluation
+         :seon.test.accretion/results
+         (mapv (partial run-candidate-test! ctx database request)
+               test-symbols)}))))

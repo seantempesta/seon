@@ -1,0 +1,33 @@
+#:seon.test.accretion{:gate-set [:vector :seon.test/sym],
+                        :candidate-context-request
+                        [:map
+                         [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+                         [:seon.db/db :seon.db/database-value]
+                         [:seon.db/connection :seon.db/connection]
+                         [:seon.cluster.agent/id :seon.cluster.agent/id]],
+                        :candidate-request
+                        [:map
+                         [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+                         [:seon.db/db :seon.db/database-value]
+                         [:seon.db/connection :seon.db/connection]
+                         [:seon.cluster.agent/id :seon.cluster.agent/id]
+                         [:seon.cluster.run.form/source
+                          :seon.cluster.run.form/source]
+                         [:seon.test.accretion/gate-set
+                          :seon.test.accretion/gate-set]
+                         [:seon.sci.eval/time-limit-ms
+                          :seon.sci.eval/time-limit-ms]
+                         [:seon.sci.admit/caps :seon.sci.admit/caps]
+                         [:seon.config/on-core-error
+                          :seon.config/on-core-error]],
+                        :candidate-ctx :seon.sci.eval/ctx,
+                        :evaluation :seon.sci.eval/evaluation,
+                        :results :seon.test.runner/captured-results,
+                        :candidate-result
+                        [:map
+                         [:seon.test.accretion/candidate-ctx
+                          :seon.test.accretion/candidate-ctx]
+                         [:seon.test.accretion/evaluation
+                          :seon.test.accretion/evaluation]
+                         [:seon.test.accretion/results
+                          :seon.test.accretion/results]]}
