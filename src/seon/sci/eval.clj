@@ -2331,3 +2331,12 @@
          :seon.test.accretion/results
          (mapv (partial run-candidate-test! ctx database request)
                test-symbols)}))))
+
+(defn auto-check-candidate
+  "Run the seeded contract check against an already evaluated candidate."
+  {:malli/schema
+   [:=> [:cat :seon.test.accretion/candidate-auto-check-request]
+    :seon.test.accretion/auto-check-result]}
+  [{ctx :seon.sci.eval/ctx :as request}]
+  (accretion/auto-check
+   (assoc request :seon.schema/projection (context-projection ctx))))

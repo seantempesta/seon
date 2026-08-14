@@ -53,6 +53,7 @@
    :seon.config.render.agent/max-children :live
    :seon.config.render.agent/composition :live
    :seon.config.eval/time-limit-ms :arm-time
+   :seon.config.test/auto-check-cases :live
    :seon.config.agent/turn-completion-backstop-ms :live
    :seon.config.error/recurrence-limit :mixed
    :seon.config.error/escalate-to :mixed
@@ -124,6 +125,7 @@
    :seon.config.eval.result/max-string 17
    :seon.config.eval.result/max-nodes 21
    :seon.config.eval/time-limit-ms 1234
+   :seon.config.test/auto-check-cases 7
    :seon.config.agent/turn-completion-backstop-ms 600000
    :seon.config.error/recurrence-limit 2
    :seon.config.error/escalate-to "root"

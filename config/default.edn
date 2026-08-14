@@ -112,6 +112,11 @@
  ; backstop and the process boundary, never by this.
  :seon.config.eval/time-limit-ms 30000
 
+ ; Pure durable functions with generatable inputs run this many seeded
+ ; contract cases in their candidate context before installation. The seed
+ ; rides the terminal receipt, so every failure is exactly reproducible.
+ :seon.config.test/auto-check-cases 25
+
  ; THE ONE BEYOND-CLOSURE ADMISSION BUDGET for generated-opening membership:
  ; whole-entry content admitted past the explained closure, priced in
  ; estimated tokens (seon.ai.tokens/estimate). Ruled at exactly 1024 by the

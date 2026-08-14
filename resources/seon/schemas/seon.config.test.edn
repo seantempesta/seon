@@ -1,0 +1,1 @@
+#:seon.config.test{:auto-check-cases [:int {:min 0}]}

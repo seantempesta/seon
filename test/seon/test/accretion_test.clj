@@ -163,3 +163,95 @@
           (is (= 1
                  (sci/eval-string*
                   parent "(fixture.candidate/target 1)"))))))))
+
+(deftest auto-check-is-seeded-shrunk-and-derived-pure
+  (test-support/with-database
+    (fn [connection]
+      (db/transact!
+       connection
+       [{:seon.cluster.agent/id "auto-check-author"
+         :seon.cluster.agent/namespace
+         {:seon.ns/name 'fixture.auto-check
+          :seon.ns/source "(ns fixture.auto-check)"}}
+        {:seon.fn/sym "fixture.auto-check/capability"
+         :seon.effect/capability 'fixture.auto-check/handler}])
+      (let [parent (test-support/fork-cluster-ctx connection)
+            candidate-request
+            (fn [source]
+              (sci.eval/evaluate-candidate
+               {:seon.sci.eval/ctx parent
+                :seon.db/db @connection
+                :seon.db/connection connection
+                :seon.cluster.agent/id "auto-check-author"
+                :seon.cluster.run.form/source source
+                :seon.test.accretion/gate-set []
+                :seon.sci.eval/time-limit-ms 2000
+                :seon.sci.admit/caps
+                (config/result-caps (config/defaults))
+                :seon.config/on-core-error :panic}))
+            check-request
+            (fn [candidate row]
+              {:seon.sci.eval/ctx candidate
+               :seon.db/db @connection
+               :seon.program/row row
+               :seon.config.test/auto-check-cases 25
+               :seon.test.accretion/seed 424242
+               :seon.sci.eval/time-limit-ms 2000
+               :seon.sci.admit/caps
+               (config/result-caps (config/defaults))
+               :seon.config/on-core-error :panic})
+            bad
+            (candidate-request
+             (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
+                  "bad [x] \"wrong\")"))
+            bad-row
+            (get-in bad [:seon.test.accretion/evaluation :seon.program/row])
+            bad-request
+            (check-request (:seon.test.accretion/candidate-ctx bad) bad-row)
+            first-failure (sci.eval/auto-check-candidate bad-request)
+            reproduced (sci.eval/auto-check-candidate bad-request)
+            shape-only
+            (candidate-request
+             (str "(defn ^{:malli/schema "
+                  "[:=> [:cat :int :int] :int]} add [a b] 1)"))
+            shape-only-row
+            (get-in shape-only
+                    [:seon.test.accretion/evaluation :seon.program/row])
+            shape-only-check
+            (sci.eval/auto-check-candidate
+             (check-request
+              (:seon.test.accretion/candidate-ctx shape-only)
+              shape-only-row))
+            effectful-check
+            (sci.eval/auto-check-candidate
+             (check-request
+              (:seon.test.accretion/candidate-ctx bad)
+              (assoc bad-row
+                     :seon.fn/calls
+                     [[:seon.fn/sym
+                       "fixture.auto-check/capability"]])))]
+        (testing "the same seed reproduces the shrunk failure"
+          (is (= :failed (:seon.test.accretion/status first-failure))
+              (pr-str first-failure))
+          (is (= 424242 (:seon.test.accretion/seed first-failure)))
+          (is (= (:seon.test.accretion/failure first-failure)
+                 (:seon.test.accretion/failure reproduced)))
+          (is (seq (get-in first-failure
+                           [:seon.test.accretion/failure
+                            :seon.test.accretion/arguments])))
+          (is (string?
+               (get-in first-failure
+                       [:seon.test.accretion/failure
+                        :seon.test.accretion/explanation]))))
+        (testing "contract shape does not invent semantic properties"
+          (is (= :passed (:seon.test.accretion/status shape-only-check))
+              (pr-str shape-only-check))
+          (is (= 25
+                 (:seon.test.accretion/executed-count shape-only-check))))
+        (testing "capability reachability skips auto-check honestly"
+          (is (= :skipped-effectful
+                 (:seon.test.accretion/status effectful-check)))
+          (is (= 0
+                 (:seon.test.accretion/executed-count effectful-check)))
+          (is (= #{"fixture.auto-check/capability"}
+                 (:seon.test.accretion/capabilities effectful-check))))))))

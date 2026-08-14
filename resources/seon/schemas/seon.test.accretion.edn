@@ -1,4 +1,80 @@
 #:seon.test.accretion{:gate-set [:vector :seon.test/sym],
+                        :seed :int,
+                        :status
+                        [:enum
+                         :passed
+                         :failed
+                         :skipped-effectful
+                         :skipped-non-generatable],
+                        :executed-count [:int {:min 0}],
+                        :case-count [:int {:min 0}],
+                        :capabilities [:set :seon.fn/sym],
+                        :actual :seon.schema/value,
+                        :expected :string,
+                        :explanation :string,
+                        :skip-reason :string,
+                        :pass? :boolean,
+                        :failure
+                        [:map
+                         [:seon.test.accretion/arguments
+                          :seon.schema/arguments]
+                         [:seon.test.accretion/actual
+                          :seon.test.accretion/actual]
+                         [:seon.test.accretion/expected
+                          :seon.test.accretion/expected]
+                         [:seon.test.accretion/explanation
+                          {:optional true}
+                          :seon.test.accretion/explanation]
+                         [:seon.test.accretion/pass?
+                          :seon.test.accretion/pass?]],
+                        :auto-check-result
+                        [:map
+                         [:seon.test.accretion/seed
+                          :seon.test.accretion/seed]
+                         [:seon.test.accretion/case-count
+                          :seon.test.accretion/case-count]
+                         [:seon.test.accretion/executed-count
+                          :seon.test.accretion/executed-count]
+                         [:seon.test.accretion/capabilities
+                          :seon.test.accretion/capabilities]
+                         [:seon.test.accretion/status
+                          :seon.test.accretion/status]
+                         [:seon.test.accretion/skip-reason
+                          {:optional true}
+                          :seon.test.accretion/skip-reason]
+                         [:seon.test.accretion/failure
+                          {:optional true}
+                          :seon.test.accretion/failure]],
+                        :auto-check-request
+                        [:map
+                         [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+                         [:seon.db/db :seon.db/database-value]
+                         [:seon.program/row :seon.program/row]
+                         [:seon.schema/projection
+                          :seon.schema/projection]
+                         [:seon.config.test/auto-check-cases
+                          :seon.config.test/auto-check-cases]
+                         [:seon.test.accretion/seed
+                          :seon.test.accretion/seed]
+                         [:seon.sci.eval/time-limit-ms
+                          :seon.sci.eval/time-limit-ms]
+                         [:seon.sci.admit/caps :seon.sci.admit/caps]
+                         [:seon.config/on-core-error
+                          :seon.config/on-core-error]],
+                        :candidate-auto-check-request
+                        [:map
+                         [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+                         [:seon.db/db :seon.db/database-value]
+                         [:seon.program/row :seon.program/row]
+                         [:seon.config.test/auto-check-cases
+                          :seon.config.test/auto-check-cases]
+                         [:seon.test.accretion/seed
+                          :seon.test.accretion/seed]
+                         [:seon.sci.eval/time-limit-ms
+                          :seon.sci.eval/time-limit-ms]
+                         [:seon.sci.admit/caps :seon.sci.admit/caps]
+                         [:seon.config/on-core-error
+                          :seon.config/on-core-error]],
                         :candidate-context-request
                         [:map
                          [:seon.sci.eval/ctx :seon.sci.eval/ctx]
