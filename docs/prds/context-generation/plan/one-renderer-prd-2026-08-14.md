@@ -109,6 +109,68 @@ message/run-form/receipt facts, never stored as a transcript — feeds:
 Same block identities across every face, so live morphs serve all of
 them.
 
+## 1.5 The HTML faces — the same pipeline, worn by humans
+
+**Authority:** [docs/seon/architecture/ui.md](../../../seon/architecture/ui.md)
+is the standing design (blocks, morphs, routes, layouts, the `/` cards,
+the resolution chain). This section is a DELTA against it — the owner's
+ruled corrections plus what this cycle's evidence demands. Read ui.md
+END TO END before touching any of this; failing to was fuckup #5.
+
+**The views** (all projections of the same blocks; ledger 30-32):
+
+- **`/` — the system view.** The ruled ui.md layout stands: root's
+  page plus one live-window card per attached agent (the tile view).
+  Corrected framing: this is where you FIND YOUR WAY BACK, not the
+  assumed destination; chatting with root is available here but a chat
+  session with root is not presumed to be the goal.
+- **`/agent/{id}` — the conversation, the default view.** The CHAT
+  face: the transcript's `/html` projection, newest at the bottom,
+  message bar FIXED AT THE BOTTOM with an auto-expanding textarea
+  (enter sends, shift-enter newline) — a polished chat tool, not a
+  form bolted to a page top. Entries without a real html face render
+  as chips that expand inline to pretty-printed highlighted data.
+  **The right column: agent-declared html render functions appear
+  AUTOMATICALLY as panels** (they are ordinary blocks discovered by
+  the pull/walk resolution chain — "ask for a visualization, define a
+  function, it's there"), sorted by newest-basis. **Click a panel to
+  PIN it**: the panel takes the primary position and the transcript
+  moves to the side column. Pin state is browser-local (a Datastar
+  signal), never a database fact — ui.md's rule stands.
+- **`/agent/{id}/debug` — the honest face.** Always the `/ai` content,
+  formatted: pretty spacing, syntax highlighting, turn chrome from
+  receipt facts; character-faithful modulo whitespace and color; raw
+  bytes one toggle away. Made right and beautiful — it is the
+  load-bearing trust surface.
+- **New sessions — a non-programmer's flow.** "New chat" creates a new
+  agent in its default `my.agents.<id>` namespace; the user NEVER
+  chooses a namespace. Once root understands the agent's purpose it
+  migrates it to a real namespace (the transition-when-understood
+  flow). OPEN QUESTION (§8.4): the mechanism — "new chat" as sugar for
+  a message to root (keeps ui.md's one-mutation rule; root does the
+  creation) vs one new creation route (faster first paint, a small
+  accretion).
+
+**What we already know is broken on these surfaces** — do not
+rediscover it: the six filed defects from the
+[UI verification walk](../research/ui-verification-2026-08-14.md)
+(session invisible on the agent page — a run renders as ONE SENTENCE;
+hiccup painted as escaped EDN text; the run-name substitution; the
+no-wrap debug pane), the
+[owner's screenshot review](../../sci-execution-runtime/plan/unsettled.md)
+(EDN-soup fire ids, dead left column, top message bar), the retained-
+package staleness, and the placeholder residue. Every one is filed
+under `docs/seon/issues/` with evidence; the fixes ride the wave plan
+(§7), mostly waves 4-5.
+
+**The polish bar** (owner: think the most beautiful apps): content is
+the interface (the transcript owns the pixels; chrome earns its
+place); speed is the aesthetic (morphs, optimistic input, streaming —
+machinery ui.md already specifies); motion only communicates state;
+one accent color, color reserved for meaning; keyboard-first;
+honest empty states (never an anonymous spinner — that is
+absence-as-health in a costume).
+
 ## 2. The failure policy — three faces, one fact, zero new machinery
 
 **Development panics hard.** Any render-path contract violation — a
@@ -279,6 +341,10 @@ gated revivals, not fresh builds.
 3. **Chat default timing**: does the agent page default to the chat
    face immediately at wave 4, or stay on debug until the chat face
    has survived one live drive?
+4. **New-chat mechanism** (§1.5): "new chat" as sugar for a message to
+   root — keeps ui.md's one-mutation rule, root performs the creation,
+   costs one round-trip — or one new creation route (faster first
+   paint, a small accretion to the route table)?
 
 ## 9. Sources
 
