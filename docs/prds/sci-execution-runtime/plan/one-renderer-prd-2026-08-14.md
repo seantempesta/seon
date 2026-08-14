@@ -54,8 +54,14 @@ one is promised — PANICS at the stage boundary with the producer,
 value, and contract named. There is no degraded output in dev: no
 `renderer unavailable` placeholder (that div is a swallow wearing a
 label — BANNED as a dev output), no partial page, no silently smaller
-result. In production the same violation renders as ONE loud typed
-error block naming the defect — never garbage, never absence.
+result. In production the system NEVER crashes (R41's other half): the same
+violation renders as ONE polite, concise, HUMAN-DESIGNED error face —
+a small declared card (the `seon.error` card family is the seat):
+one plain sentence of what failed, the identity to requery or report,
+consistent styling, deduplicated when repeated — never a stack trace,
+never an EDN dump, never garbage, never absence. The pair is the whole
+policy: dev panics so defects cannot slip by; prod stays up and tells
+the human the truth in one designed breath.
 "Thousands of lines of garbage" becomes impossible because every
 stage's output is checked and bounded before the next stage sees it,
 and the end-to-end invariants (whole-prompt accounting exact to the
