@@ -1,11 +1,19 @@
 #:seon.context{:capture-request
-               [:map
-                [:seon.cluster.run/id :seon.cluster.run/id]
-                [:seon.cluster.prompt/rendered-context
-                 :seon.cluster.prompt/rendered-context]
-                [:seon.cluster.run/live-processes
-                 {:optional true}
-                 :seon.cluster.run/live-processes]],
+               [:or
+                [:map
+                 [:seon.cluster.run/id :seon.cluster.run/id]
+                 [:seon.cluster.prompt/rendered-context
+                  :seon.cluster.prompt/rendered-context]
+                 [:seon.cluster.run/live-processes
+                  {:optional true}
+                  :seon.cluster.run/live-processes]]
+                [:map
+                 [:seon.cluster.run/id :seon.cluster.run/id]
+                 [:seon.db/db :seon.db/database-value]
+                 [:seon.error/value :seon.error/value]
+                 [:seon.cluster.run/live-processes
+                  {:optional true}
+                  :seon.cluster.run/live-processes]]],
                :contribution
                [:map
                 [:seon.render.block/name :seon.render.block/name]

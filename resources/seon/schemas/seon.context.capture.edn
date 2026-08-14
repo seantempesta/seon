@@ -11,6 +11,7 @@
                         [:seon.context.capture/basis-t
                          :seon.context.capture/basis-t]
                         [:seon.context.capture/prompt
+                         {:optional true}
                          :seon.context.capture/prompt]
                         ;; the prompt's exact character count, recorded
                         ;; beside the prompt in the same transaction so
@@ -21,7 +22,14 @@
                          {:optional true}
                          :seon.ai.tokens/characters]
                         [:seon.context.capture/contributions
+                         {:optional true}
                          :seon.context.capture/contributions]
+                        [:seon.error/kind
+                         {:optional true}
+                         :seon.error/kind]
+                        [:seon.error/message
+                         {:optional true}
+                         :seon.error/message]
                         [:seon.cluster.run/live-processes
                          {:optional true}
                          :seon.cluster.run/live-processes]],

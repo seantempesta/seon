@@ -117,17 +117,21 @@
   nil)
 
 (defn capture-html
-  "Expose a recorded prompt in one compact debug disclosure."
+  "Expose recorded prompt or refusal evidence in one debug disclosure."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
-  (let [prompt (:seon.context.capture/prompt unit)]
+  (let [prompt (:seon.context.capture/prompt unit)
+        basis-t (:seon.context.capture/basis-t unit)]
     [:details {:class "seon-family-entry seon-context-capture-entry"}
      [:summary
-      (str "Context capture at database basis "
-           (:seon.context.capture/basis-t unit)
-           " — approximately " (tokens/estimate prompt)
-           " tokens on the uncalibrated chars/4 basis")]
-     [:pre {:class "seon-context-capture-prompt"} prompt]]))
+      (if prompt
+        (str "Context capture at database basis " basis-t
+             " — approximately " (tokens/estimate prompt)
+             " tokens on the uncalibrated chars/4 basis")
+        (str "Context derivation refused at database basis " basis-t
+             " (" (:seon.error/kind unit) ")"))]
+     [:pre {:class "seon-context-capture-prompt"}
+      (or prompt (:seon.error/message unit))]]))
 
 (defn- contribution-row
   "One durable contribution row: evidence, not content. No stored output tag
@@ -149,20 +153,28 @@
 
 (defn capture-tx
   "Transaction data for one context capture. PURE — the loop commits.
-  Derives the capture id from (run-id, basis-t of the rendered db
-  value), one component contribution row per in-memory record carrying
-  position/name/hash/tokens/band/projection (+ error kind and bounded
-  message when failed), the exact prompt text, and the live-process
-  snapshot when the request carried one. Idempotent by derived
-  identity: re-deriving the same prompt at the same basis upserts,
-  never double-writes."
+
+  A successful arm records the exact prompt and ordered contribution evidence.
+  A refusal arm records the immutable database basis plus typed error, with no
+  invented prompt. Both use the same `(run-id, basis-t)` identity."
   {:malli/schema [:=> [:cat :seon.context/capture-request]
                   :seon.store/transaction-data]}
   [request]
   (let [{run-id :seon.cluster.run/id
          rendered :seon.cluster.prompt/rendered-context
+         database :seon.db/db
+         failure :seon.error/value
          live :seon.cluster.run/live-processes} request
-        db (:seon.db/db rendered)
+        rendered-arm (find request :seon.cluster.prompt/rendered-context)
+        refusal-arm (find request :seon.error/value)
+        _ (when (= (some? rendered-arm) (some? refusal-arm))
+            (throw
+             (ex-info
+              "Context capture requires exactly one rendered or refusal arm."
+              {:seon.context/capture-request request
+               :seon.context/rendered-arm? (some? rendered-arm)
+               :seon.context/refusal-arm? (some? refusal-arm)})))
+        db (or (:seon.db/db rendered) database)
         ; the database interface, not a map key: an as-of/history value
         ; carries no top-level :max-tx entry. `basis-t` is the reader for
         ; every value shape; `database-value-identity` is not — its output
@@ -171,20 +183,20 @@
         capture-id (str run-id "-context-" basis-t)]
     [(cond-> {:seon.context.capture/id capture-id
               :seon.context.capture/run [:seon.cluster.run/id run-id]
-              :seon.context.capture/basis-t basis-t
-              :seon.context.capture/prompt (:seon.cluster.prompt/text rendered)
+              :seon.context.capture/basis-t basis-t}
+       rendered
+       (assoc :seon.context.capture/prompt
+              (:seon.cluster.prompt/text rendered)
               ;; THE CALIBRATION JOIN'S OTHER HALF: the provider's own
-              ;; `prompt_tokens` lands on the attempt for this same run,
-              ;; and these characters are what produced it. Recorded as
-              ;; a scalar beside the string it counts so
-              ;; `seon.cluster.prompt/model-calibration` can fit a
-              ;; characters-per-token ratio without dragging every
-              ;; recorded prompt through a query.
+              ;; `prompt_tokens` lands on the attempt for this same run.
               :seon.ai.tokens/characters
               (count (:seon.cluster.prompt/text rendered))
               :seon.context.capture/contributions
               (mapv (fn [record] (contribution-row capture-id record))
-                    (:seon.context/contributions rendered))}
+                    (:seon.context/contributions rendered)))
+       failure
+       (assoc :seon.error/kind (:seon.error/kind failure)
+              :seon.error/message (:seon.error/message failure))
        live (assoc :seon.cluster.run/live-processes live))]))
 
 ;;; ---------------------------------------------------------------------------

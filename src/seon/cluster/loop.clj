@@ -1315,9 +1315,11 @@
           ;; and this one call site turns that refusal into the flat
           ;; error value the loop already records — the same shape a
           ;; refused transaction takes through `db/transact!`.
+          observed-db @connection
+          prompt-db (run/opening-db observed-db run-id)
           rendered
           (phase
-           #(prompt/prompt (run/opening-db @connection run-id)
+           #(prompt/prompt prompt-db
                            {:seon.cluster.run/id run-id
                             :seon.cluster.agent/id agent-id
                             :seon.sci.admit/caps
@@ -1340,26 +1342,38 @@
           ;; REUSE this one capture — the same prompt bytes go out,
           ;; and the backup's system segment is re-derivable from the
           ;; committed primary error fact, never re-captured.
-          captured (if (:seon.error/kind rendered)
-                     ;; a refused prompt derivation IS the turn's
-                     ;; outcome — there is nothing to capture and no
-                     ;; provider call to make
-                     rendered
-                     (db/transact!
-                      connection
-                      (context/capture-tx
-                       {:seon.cluster.run/id run-id
-                        :seon.cluster.prompt/rendered-context rendered})))
+          captured
+          (db/transact!
+           connection
+           (context/capture-tx
+            (if (:seon.error/kind rendered)
+              {:seon.cluster.run/id run-id
+               ;; The immutable opening value the refused derivation used,
+               ;; never a fresh connection deref after the fact.
+               :seon.db/db (if (:seon.error/kind prompt-db)
+                             observed-db
+                             prompt-db)
+               :seon.error/value rendered}
+              {:seon.cluster.run/id run-id
+               :seon.cluster.prompt/rendered-context rendered})))
           ;; THE EXACT-TEXT HANDOFF: the loop extracts the rendered
           ;; text and alone places that string in `:seon.ai/prompt` —
           ;; the bytes the capture recorded are the bytes sent.
           text (:seon.cluster.prompt/text rendered)]
-      (if (:seon.error/kind captured)
+      (cond
+        (:seon.error/kind captured)
         ;; A refused prompt/capture closes this run and records the refusal.
         ;; The next pass derives correction from those facts below the ONE
         ;; episode cap; at the cap it derives no work. No provider call occurs
         ;; without durable prompt evidence.
         (fail! captured)
+
+        (:seon.error/kind rendered)
+        ;; The refusal capture is now durable. Close without crossing the
+        ;; provider boundary; a diagnosis never depends on absent signal.
+        (fail! rendered)
+
+        :else
         (loop [target primary
                ordinal (attempts @connection run-id)
                ;; ABSENT on the primary and on every backoff retry;

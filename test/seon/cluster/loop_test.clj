@@ -28,6 +28,7 @@
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.loop :as cluster.loop]
             [seon.cluster.message :as message]
+            [seon.cluster.prompt :as prompt]
             [seon.cluster.run :as run]
             [seon.cluster.wake :as wake]
             [seon.cluster.work :as work]
@@ -571,6 +572,97 @@
                      ::attempt-ordinal ordinal)))
        (sort-by (juxt ::attempt-run-id ::attempt-ordinal))
        vec))
+
+(deftest refused-generated-opening-captures-evidence-before-close
+  (test-support/with-database
+   (fn [connection]
+     (let [cluster-name "refused-generated-opening"
+           agent-id "generated-agent"
+           run-id "bootstrap:generated-agent"
+           message-id "generated-trigger"
+           provider-calls (atom 0)
+           refusal {:seon.error/kind :seon.cluster.prompt/budget-exceeded
+                    :seon.error/message "The generated opening did not fit."}
+           cluster {:seon.db/connection connection
+                    :seon.cluster/name cluster-name
+                    :seon.cluster.run/process process
+                    :seon.sci.eval/ctx
+                    (test-support/fork-cluster-ctx connection)
+                    :seon.config.eval/time-limit-ms 2000
+                    :seon.config/on-core-error :record
+                    :seon.sci.admit/caps
+                    (config/result-caps (config/defaults))
+                    :seon.config.error/recurrence-limit 3
+                    :seon.config.message/max-chain 8}]
+       (config/apply! {:seon.db/connection connection
+                       :seon.boot/cluster-name cluster-name})
+       (test-support/seed-cluster! connection cluster-name)
+       (db/transact!
+        connection
+        (cluster.agent/creation-tx
+         {:seon.cluster.agent/id agent-id
+          :seon.ns/name 'my.agents.generated-agent
+          :seon.cluster/name cluster-name}))
+       (db/transact!
+        connection
+        [{:seon.cluster.message/id message-id
+          :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+          :seon.cluster.message/content "start"
+          :seon.cluster.message/at now}])
+       (db/transact!
+        connection
+        (run/generated-run-tx
+         @connection
+         {:seon.cluster.agent/id agent-id
+          :seon.cluster.run/id run-id
+          :seon.cluster.run/process process
+          :seon.cluster.run/opened-at now
+          :seon.cluster.run/starting-ns 'my.agents.generated-agent
+          :seon.cluster.run.form/source "(help)"
+          :seon.cluster.run/trigger
+          [:seon.cluster.message/id message-id]}))
+       (db/transact!
+        connection
+        (into (run/receipt-start-tx
+               {:seon.cluster.run/id run-id
+                :seon.cluster.eval/ordinal 0
+                :seon.cluster.eval/at now})
+              (run/receipt-settle-tx
+               {:seon.cluster.run/id run-id
+                :seon.cluster.eval/ordinal 0
+                :seon.cluster.eval/result-edn "nil"})))
+       (db/transact!
+        connection
+        (run/generation-complete-tx
+         {:seon.cluster.run/id run-id
+          :seon.cluster.run/process process}))
+       (with-redefs [prompt/prompt (fn [_database _request] refusal)
+                     ai/complete (fn [_request]
+                                   (swap! provider-calls inc)
+                                   {:seon.ai/text "(identity :unexpected)"})]
+         (let [report
+               (cluster.loop/turn
+                {:seon.cluster.loop/cluster cluster
+                 :seon.cluster.work/next (call-work agent-id run-id)}
+                now)
+               capture
+               (db/q '[:find (pull ?capture [*]) .
+                       :in $ ?run-id
+                       :where
+                       [?run :seon.cluster.run/id ?run-id]
+                       [?capture :seon.context.capture/run ?run]]
+                     @connection run-id)]
+           (is (= :error (:seon.cluster.loop/outcome report)))
+           (is (inst? (:seon.cluster.run/closed-at
+                       (db/pull @connection
+                                [:seon.cluster.run/closed-at]
+                                [:seon.cluster.run/id run-id]))))
+           (is (= 0 @provider-calls))
+           (is (= (:seon.error/kind refusal) (:seon.error/kind capture)))
+           (is (= (:seon.error/message refusal)
+                  (:seon.error/message capture)))
+           (is (int? (:seon.context.capture/basis-t capture)))
+           (is (not (find capture :seon.context.capture/prompt)))))))))
 
 (defn- with-render-context-proc
   [cluster body]
