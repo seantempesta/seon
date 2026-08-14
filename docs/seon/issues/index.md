@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (44)
+## Blocker (43)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -58,7 +58,6 @@ See `README.md` for the convention.
 | [Supply the generated entry's required render output](generated-turn-omits-the-required-render-output.md) | blocker | generate-call-transition lane (held `loop.clj`) |
 | [Return from the generated opening's second live pull](generated-opening-live-pull-does-not-return-after-help.md) | blocker | prefix-drift bootstrap performance diagnosis (held `bootstrap.clj`) |
 | [Explain the 24-second live root pull of 189 members](live-root-pull-of-189-members-takes-24-seconds.md) | blocker | render acquisition performance wave |
-| [Install generated-at before generated runs transact it](generated-run-transacts-uninstalled-generated-at.md) | blocker | drive-1 defect wave |
 | [Capture context before the generated opening can refuse](generated-opening-refuses-before-context-capture.md) | blocker | drive-1 defect wave |
 | [Stop read-only GETs writing render-cost facts](web-get-records-render-cost-facts.md) | blocker | drive-1 defect wave |
 | [Bound agent-facing host crossings](agent-facing-host-crossings-can-wait-without-a-bound.md) | blocker | wedge class-kill continuation |
