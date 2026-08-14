@@ -176,6 +176,59 @@ and Datastar morphs; the capture facts as the honesty baseline.
    regression over the standard pages with subject-present enforcement.
 5. Debug face character-equality; chat chip completeness.
 
+## 5.5 The property suite (owner requirement, same day)
+
+The design defines its tests, and the tests are LOUD DRIFT ALARMS —
+property tests over the well-defined pipeline, never fragile unit
+assertions. Banned outright: exact-string expectations ("these words in
+the help text"), pinned counts, golden HTML files. The properties are
+generative wherever a value is the input, because registered schemas
+make generators free (`mg/generate` per shape; the green-to-install
+auto-check machinery is the precedent), and test.check SHRINKS every
+failure to the minimal reproducing input.
+
+Per-stage properties (each a seeded generative property, adversarial
+budgets/profiles included):
+
+1. **Totality**: any generated registered value (and adversarial
+   unregistered ones) renders through the whole pipeline without a
+   throw — the output is a face or ONE error fact, never an exception,
+   never absence.
+2. **Honesty/round-trip**: a data face's text reads back through the
+   reader equal to the value modulo declared elisions; every elision is
+   a real elision value carrying count + requery identity; re-querying
+   the identity reaches the elided content.
+3. **Boundedness**: for any generated value and any budget, output ≤
+   budget (estimated tokens) AND no fence/form is ever split — whole-
+   form elision only.
+4. **No producer bounds**: the graph-query census (producers contain no
+   bounding calls; the two seams are the only bounded-text callers) —
+   subject-present by construction.
+5. **Results are data**: every generated result position's rendering
+   reads back through the reader; prose appears only under declared
+   instruction entities.
+6. **Accounting exactness**: assembled prompt estimate == sum of
+   per-contribution costs == what the wire sends (the 3-token proof
+   becomes a property).
+7. **Page lint**: for generated agent histories, the rendered pages
+   pass `seon.render.lint/check` (no placeholders, no splits, no
+   duplicated subtrees, no soup) — the UI's generative test: generate
+   arbitrary histories from schemas, render the full page, lint it,
+   SHRINK failures to the minimal history that reproduces.
+8. **Face equivalences**: chat entries ∪ chips == debug entries ==
+   capture content (completeness); debug pretty face character-equal to
+   `/ai` content modulo whitespace; block identities stable across
+   faces.
+9. **Failure faces**: for generated defective producers (wrong shape,
+   throwing, over-budget), dev mode panics naming the stage; prod mode
+   yields exactly one error fact whose three faces all render.
+
+The gap census (§7b) includes the TEST AUDIT: which existing tests
+these properties SUBSUME (delete them — a smaller suite is a desired
+outcome), which assert the old lenient/fragile shapes (rewrite to
+wanted-behavior properties), and which stand. One property per defect
+class, claimed by a recurring surface, per the standing suite law.
+
 ## 6. Open questions for the owner
 
 1. The narrated producers (rip-out #3) currently carry SOME curation
@@ -188,7 +241,48 @@ and Datastar morphs; the capture facts as the honesty baseline.
 3. Chat default for the drive demos: chat view or debug view as the
    agent page default while the chat face matures?
 
-## 7. Archaeology mandate (running; report links land here)
+## 7. Archaeology verdict (landed — [full report](../research/render-archaeology-2026-08-14.md))
+
+The owner's suspicion was CORRECT: the first implementation had the
+coherent pipeline this PRD re-derives, and the fresh tree's piecemeal
+growth lost it. Quarry root: `git show 9e44815f5:src-old/<path>`.
+
+**Revive verbatim:** `seon/ui/clojure.cljc` — the 192-line server-side
+Clojure tokenizer (total by contract, morph-safe, dependency-free);
+the fresh tree has NO highlighter. Only change: `hljs-*` →
+`seon-print-*` classes, and its degrade-to-plain fallback routes
+through the strict dial.
+
+**Revive adapted:** the two-phase **sample → emit** bounding
+architecture (bound the structure, THEN print — nothing oversized is
+ever cut), the Oppen-style `fits?`/`emit` printer, the capped Writer,
+`dominant-string-entry` (shape-general 70%-payload rule); the
+per-block **output-byte chain hashes** (producer change → text change →
+hash change → invalidation from that block forward — rip-out #10's
+structural fix); the drill protocol (closed request map, four-axis
+bounds, clients may only narrow, indexed non-drillable keys);
+`strict-fail!`'s catch-site order (error FACT classified agent-vs-core
+→ dev panic → prod face, siblings untouched) and `missing-render`
+(name the unresolved symbol so defining it self-heals — the correct
+treatment of the banned placeholder). `render/chat.cljc` bubbles.
+
+**Revived RULINGS (constraints, code stays dead):** the `/ai` context
+is a FLAT interleaved event log — no turn containers in the model's
+face (turn sections are HTML-face chrome only); reserved runtime
+glyphs as single-source defs (`⟹` results deliberately NOT
+comment-shaped — agents were observed fabricating results as `; ⟹`
+comments); error-run coalescing with a teaching line; byte-stability
+above the cache breakpoint.
+
+**Honest negatives (the revival must invert):** form-aware fit never
+existed (the old `clip-string` was the same bare `subs`); the strict
+dial DEFAULTED OFF (absence-as-health inside the guard itself —
+revive with panic-on by default in dev); eleven catch sites bypassed
+the dial (so no-silent-swallowing must be a GRAPH QUERY over catch
+sites, property 9's census, never a convention); the seven old render
+dials are correctly deleted — today's single profile wins.
+
+## 7b. Gap-census mandate (running; report links land here)
 
 Two research lanes: (a) the OLD implementation's render/print/transcript
 system mined from git history — inventory of what existed, quality
