@@ -729,22 +729,28 @@
          (transform-error (ex-info "walk evidence" {}))
          {:seon.cluster.agent/id "agent-3"})))
       (let [db @connection
+            ctx (test-support/fork-cluster-ctx connection)
+            request {:seon.db/db db
+                     :seon.sci.eval/ctx ctx
+                     :seon.render.walk/lookup
+                     [:seon.cluster.agent/id "agent-3"]
+                     :seon.render/distance 1
+                     :seon.sci.admit/caps caps
+                     :seon.sci.eval/time-limit-ms 2000
+                     :seon.config/on-core-error :panic}
             units (walk/neighborhood
-                  {:seon.db/db db
-                   :seon.sci.eval/ctx
-                   (test-support/fork-cluster-ctx connection)
-                   :seon.render.walk/lookup
-                   [:seon.cluster.agent/id "agent-3"]
-                   :seon.render/output :seon.render/ai
-                   :seon.render/distance 1
-                   :seon.sci.admit/caps caps
-                   :seon.sci.eval/time-limit-ms 2000
-                   :seon.config/on-core-error :panic})
+                   (assoc request :seon.render/output :seon.render/ai))
+            html-units (walk/neighborhood
+                        (assoc request :seon.render/output :seon.render/html))
             text (walk/prose db units)]
         (is (str/includes? text "The loop :step failed"))
         (is (str/includes? text "Inspect error"))
         (is (not (str/includes? text "projection threw")))
-        (is (not (str/includes? text "violated its contract")))))))
+        (is (not (str/includes? text "violated its contract")))
+        (is (pos? (count html-units))
+            "the HTML assertion inspects a real walked neighborhood")
+        (is (every? (complement :seon.error/value) html-units)
+            "pulled error entities render cards instead of renderer failures")))))
 
 (deftest a-missing-recurrence-limit-records-and-stays-silent
   ;; the recursion fence extended to OUR bugs: requiredness is a

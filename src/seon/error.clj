@@ -506,10 +506,14 @@
         data (if (:seon.error/data-edn fact)
                (flat-data fact)
                (:seon.error/data fact))
-        operation (:seon.error/diagnostic-operation data)
-        member (:seon.error/diagnostic-member data)
-        expected (:seon.error/diagnostic-expected data)
-        received (:seon.error/diagnostic-offending data)]
+        operation (or (:seon.error/diagnostic-operation data)
+                      (:seon.instrument/fn fact))
+        member (or (:seon.error/diagnostic-member data)
+                   (:seon.instrument/arm fact))
+        expected (or (:seon.error/diagnostic-expected data)
+                     (:seon.instrument/expected fact))
+        received (or (:seon.error/diagnostic-offending data)
+                     (:seon.instrument/args fact))]
     (if operation
       (str "Contract violation in " operation " " (name member)
            ": expected " (pr-str expected)
@@ -991,7 +995,7 @@
            (disj (:seon.schema/required-attrs class-row)
                  :seon.error/message)]
        (first
-        (sort-by (comp str key)
+        (sort-by (comp str first)
                  (select-keys value marker-attributes)))))
    (when-let [kind (:seon.error/kind value)]
      [:seon.error/kind kind])))
@@ -1001,10 +1005,10 @@
   (->> value
        (remove (fn [[attribute _]]
                  (or (= :seon.error/message attribute)
-                     (= (some-> marker key) attribute)
+                     (= (some-> marker first) attribute)
                      (= :seon.error/id attribute)
                      (contains? render-context-attributes attribute))))
-       (sort-by (comp str key))))
+       (sort-by (comp str first))))
 
 (defn- evidence-text
   [evidence]
@@ -1026,7 +1030,7 @@
       nil?
       [(:seon.error/message value)
        (when marker
-         (str "Failed: " (key marker) "=" (pr-str (val marker)) "."))
+         (str "Failed: " (first marker) "=" (pr-str (second marker)) "."))
        (evidence-text evidence)
        "Re-read the current facts before retrying or changing state."]))))
 
@@ -1075,8 +1079,8 @@
       (when marker
         [[:dl {:class "seon-error-marker"}
           [:div {:class "seon-error-marker-row"}
-           [:dt (str (key marker))]
-           [:dd (pr-str (val marker))]]]])
+           [:dt (str (first marker))]
+           [:dd (pr-str (second marker))]]]])
       (when (seq evidence)
         [(into [:dl {:class "seon-error-evidence"}]
                (map (fn [[attribute evidence-value]]
@@ -1115,7 +1119,8 @@
      (remove nil?
              [(:seon.error/message value)
               (when marker
-                (str "Selection: " (key marker) "=" (pr-str (val marker)) "."))
+                (str "Selection: " (first marker) "="
+                     (pr-str (second marker)) "."))
               (evidence-text evidence)
               "Re-read the exact source and narrow the edit selection before applying it again."]))))
 
@@ -1178,7 +1183,8 @@
      (remove nil?
              [(:seon.error/message value)
               (when marker
-                (str "Lookup: " (key marker) "=" (pr-str (val marker)) "."))
+                (str "Lookup: " (first marker) "="
+                     (pr-str (second marker)) "."))
               (evidence-text evidence)
               "Re-read the current cluster status or value identity before requesting the data again."]))))
 
@@ -1194,7 +1200,7 @@
      (remove nil?
              [(:seon.error/message value)
               (when marker
-                (str "Indexing stopped at " (key marker) "="
-                     (pr-str (val marker)) "."))
+                (str "Indexing stopped at " (first marker) "="
+                     (pr-str (second marker)) "."))
               (evidence-text evidence)
               "Repair the named source or declaration evidence, then rerun initialization."]))))
