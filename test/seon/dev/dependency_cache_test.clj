@@ -5,6 +5,7 @@
             [clojure.test :refer [deftest is testing]]
             [dev-cache :as dev-cache]
             [seon.dev.state :as state]
+            [seon.operator.state :as operator.state]
             [seon.test-support :as test-support])
   (:import [java.util.concurrent TimeUnit]))
 
@@ -69,18 +70,17 @@
             ~@(map (fn [row]
                      `(compile '~(:seon.dev-cache/namespace row)))
                    rows)))
-        process
-        (.start
-         (doto
-          (ProcessBuilder.
-           ^java.util.List
-           ["clojure" "-Sdeps"
-            (pr-str {:paths [(.getCanonicalPath (io/file source-root))]})
-            "-M" "-e" form])
-          (.directory project-root)
-          (.redirectErrorStream true)))
-        output (slurp (.getInputStream process))
-        exit (.waitFor process)]
+        result
+        (operator.state/run-process!
+         {:seon.operator.subprocess/argv
+          ["clojure" "-Sdeps"
+           (pr-str {:paths [(.getCanonicalPath (io/file source-root))]})
+           "-M" "-e" form]
+          :seon.operator.subprocess/directory (.getPath project-root)
+          :seon.operator.subprocess/deadline-ms 120000
+          :seon.operator.subprocess/merge-error? true})
+        output (:seon.operator.subprocess/output result)
+        exit (:seon.operator.subprocess/exit result)]
     (when-not (zero? exit)
       (throw (ex-info "The cache probe namespaces did not compile."
                       {:seon.dev-cache/exit exit

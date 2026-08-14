@@ -3,6 +3,8 @@
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [datahike.api :as d]
+            [datahike.tools :as datahike.tools]
             [malli.instrument :as mi]
             [seon.cluster :as cluster]
             [seon.cluster.registry :as registry]
@@ -34,6 +36,122 @@
   {:seon.cluster.loop/cluster
    {:seon.env/environment
     (test-support/environment cluster-name connection)}})
+
+(deftest lifecycle-lock-refuses-undeclared-bounds-before-acquisition
+  (let [root (owned-root)
+        invoked? (atom false)]
+    (try
+      (let [failure
+            (caught
+             #(operator.state/with-lifecycle-lock!
+               {:seon.operator.lock/path
+                (operator.state/root-lifecycle-lock-path root)
+                :seon.operator.lock/command "missing lock declarations"}
+               (fn [] (reset! invoked? true))))]
+        (is (= :seon.operator/lock-bound-undeclared
+               (:seon.error/kind (ex-data failure))))
+        (is (= :seon.operator.lock/acquisition-timeout-ms
+               (:seon.operator.lock/bound (ex-data failure))))
+        (is (false? @invoked?)))
+      (finally
+        (test-support/delete-recursively! root)))))
+
+(deftest lifecycle-lock-acquisition-timeout-names-holder-and-waiter
+  (let [root (owned-root)
+        lock-path (operator.state/root-lifecycle-lock-path root)
+        holder-entered (CountDownLatch. 1)
+        release-holder (CountDownLatch. 1)]
+    (try
+      (let [holder
+            (future
+              (operator.state/with-lifecycle-lock!
+               {:seon.operator.lock/path lock-path
+                :seon.operator.lock/command "held transition"
+                :seon.operator.lock/acquisition-timeout-ms 1000
+                :seon.operator.lock/hold-timeout-ms 1000}
+               (fn []
+                 (.countDown holder-entered)
+                 (test-support/await-event! release-holder :release-holder))))]
+        (try
+          (test-support/await-event! holder-entered :holder-entered)
+          (let [failure
+                (caught
+                 #(operator.state/with-lifecycle-lock!
+                   {:seon.operator.lock/path lock-path
+                    :seon.operator.lock/command "waiting transition"
+                    :seon.operator.lock/acquisition-timeout-ms 50
+                    :seon.operator.lock/hold-timeout-ms 1000}
+                   (fn [] :must-not-run)))
+                data (ex-data failure)]
+            (is (= :seon.operator/lock-acquisition-timeout
+                   (:seon.error/kind data)))
+            (is (= "held transition"
+                   (get-in data
+                           [:seon.operator.lock/holder
+                            :seon.operator.lock/command])))
+            (is (= "waiting transition"
+                   (get-in data
+                           [:seon.operator.lock/waiter
+                            :seon.operator.lock/command]))))
+          (finally
+            (.countDown release-holder)))
+        (test-support/await-event! holder :holder-released))
+      (finally
+        (.countDown release-holder)
+        (test-support/delete-recursively! root)))))
+
+(deftest lifecycle-lock-hold-timeout-is-loud-and-fail-closed
+  (let [root (owned-root)
+        lock-path (operator.state/root-lifecycle-lock-path root)
+        holder-entered (CountDownLatch. 1)
+        release-holder (CountDownLatch. 1)]
+    (try
+      (let [timed-holder
+            (future
+              (caught
+               #(operator.state/with-lifecycle-lock!
+                 {:seon.operator.lock/path lock-path
+                  :seon.operator.lock/command "overdue transition"
+                  :seon.operator.lock/acquisition-timeout-ms 1000
+                  :seon.operator.lock/hold-timeout-ms 50}
+                 (fn []
+                   (.countDown holder-entered)
+                   (test-support/await-event! release-holder
+                                              :release-overdue-holder)))))]
+        (test-support/await-event! holder-entered :overdue-holder-entered)
+        (let [failure (test-support/await-event! timed-holder
+                                                 :hold-timeout-returned)
+              data (ex-data failure)]
+          (is (= :seon.operator/lock-hold-timeout
+                 (:seon.error/kind data)))
+          (is (= "overdue transition"
+                 (get-in data [:seon.operator.lock/holder
+                               :seon.operator.lock/command])))
+          (is (= "overdue transition"
+                 (get-in data [:seon.operator.lock/waiter
+                               :seon.operator.lock/command]))))
+        (let [failure
+              (caught
+               #(operator.state/with-lifecycle-lock!
+                 {:seon.operator.lock/path lock-path
+                  :seon.operator.lock/command "must remain queued"
+                  :seon.operator.lock/acquisition-timeout-ms 50
+                  :seon.operator.lock/hold-timeout-ms 1000}
+                 (constantly :must-not-run)))]
+          (is (= :seon.operator/lock-acquisition-timeout
+                 (:seon.error/kind (ex-data failure)))
+              "an expired hold remains kernel-owned until terminal"))
+        (.countDown release-holder)
+        (is (= :acquired-after-terminal
+               (operator.state/with-lifecycle-lock!
+                {:seon.operator.lock/path lock-path
+                 :seon.operator.lock/command "after terminal"
+                 :seon.operator.lock/acquisition-timeout-ms 1000
+                 :seon.operator.lock/hold-timeout-ms 1000}
+                (constantly :acquired-after-terminal)))))
+      (finally
+        (.countDown release-holder)
+        (test-support/delete-recursively! root)))))
 
 (deftest cluster-address-admission-is-derived-from-schema-and-filesystem
   (let [root (owned-root)
@@ -712,7 +830,8 @@
                    {:seon.operator.lock/path
                     (operator.state/control-lock-path repository-root)
                     :seon.operator.lock/command "test root claim"
-                    :seon.operator.lock/timeout-ms 1000}
+                    :seon.operator.lock/acquisition-timeout-ms 1000
+                    :seon.operator.lock/hold-timeout-ms 1000}
                    #(operator.state/claim-root-under-lock!
                      repository-root managed-root nil "during-collection"))]
               (is (= #{"during-collection"}
@@ -726,6 +845,54 @@
             (is (true? (:seon.operator.collect/complete? result))))))
       (finally
         (.countDown release-collection)
+        (test-support/delete-recursively! repository-root)))))
+
+(deftest parked-datahike-collection-yields-lock-and-retains-store-custody
+  (let [repository-root (owned-root)
+        managed-root (.getCanonicalPath
+                      (io/file repository-root "managed"))
+        gc-entered (CountDownLatch. 1)
+        blocked-completion (datahike.tools/throwable-promise)]
+    (try
+      (with-redefs
+       [d/gc-storage
+        (fn [& _]
+          (.countDown gc-entered)
+          blocked-completion)]
+        (let [collection
+              (future
+                (operator/collect!
+                 {:seon.operator/repository-root repository-root
+                  :seon.operator/managed-root managed-root
+                  :seon.config.operator/event-silence-backstop-ms 100}))]
+          (test-support/await-event! gc-entered :datahike-gc-wait-entered)
+          (is (thrown? Exception
+                       (store/open-store!
+                        {:seon.store/dir
+                         (str (io/file managed-root "data" "store"))}))
+              "the parked writer completion retains operation-store custody")
+          (is (= :lifecycle-acquired
+                 (operator.state/with-lifecycle-lock!
+                  {:seon.operator.lock/path
+                   (operator.state/root-lifecycle-lock-path managed-root)
+                   :seon.operator.lock/command "waiting lifecycle transition"
+                   :seon.operator.lock/acquisition-timeout-ms 1000
+                   :seon.operator.lock/hold-timeout-ms 1000}
+                  (constantly :lifecycle-acquired)))
+              "the parked GC does not retain root lifecycle custody")
+          (blocked-completion [])
+          (let [result
+                (test-support/await-event! collection
+                                           :settled-collection-result)]
+            (is (true? (:seon.operator.collect/complete? result)))
+            (let [reopened
+                  (store/open-store!
+                   {:seon.store/dir
+                    (str (io/file managed-root "data" "store"))})]
+              (is (some? (:seon.store/lock reopened))
+                  "terminal collection releases owned operation-store custody")
+              (store/release-store! reopened)))))
+      (finally
         (test-support/delete-recursively! repository-root)))))
 
 (deftest collection-dry-run-returns-the-bounded-physical-inventory

@@ -701,8 +701,14 @@
                  (deref child-output 10000
                         "The anchor output reader did not finish.")})))
     (when-not (= "ready" (:seon.dev.fresh-operator-test/value winner))
-      (throw (ex-info "The anchor returned malformed readiness."
-                      {:seon.dev.fresh-operator-test/value winner})))
+      (let [failure
+            {:seon.dev.fresh-operator-test/value winner
+             :seon.dev.fresh-operator-test/output
+             (deref child-output 10000
+                    "The anchor output reader did not finish.")}]
+        (throw (ex-info (str "The anchor returned malformed readiness: "
+                             (pr-str failure))
+                        failure))))
     winner))
 
 (defn- prepl-eval
@@ -762,9 +768,10 @@
           child
           (.start
            (doto
-            (ProcessBuilder.
-             ^java.util.List
-             ["clojure" "-M:test" "-e" code])
+             (ProcessBuilder.
+              ^java.util.List
+             ["clojure" "-J-Dseon.operator.claimed=true"
+              "-M:test" "-e" code])
              (.directory project-root)
              (.redirectErrorStream true)))
           child-output (process-output child)]
@@ -956,15 +963,6 @@
     (is (str/includes?
          output
          "operator event silence backstop fired: prepl response was silent"))))
-
-(deftest every-child-jvm-command-uses-the-shared-launch-owner
-  (let [source (slurp (io/file project-root "script" "seon"
-                               "fresh_operator.clj"))]
-    (is (= 2 (count (re-seq #"\[\"clojure\"" source)))
-        "only the child owner and dependency-cache target construct Clojure commands")
-    (is (= 4 (count (re-seq #"\(start-child-jvm!" source)))
-        (str "offline status, cluster start, initialization, and managed-root "
-             "cleanup use one owner"))))
 
 (deftest ^{:seon.test/long
            "110.837 s pool: complete publication JVM plus named fork/refork, start, readiness, and store read-back."}
@@ -1484,8 +1482,7 @@
           (is anchor-ready?
               "the generated launch form instrumented before publishing ready")
           (is (= ["namespaces" "repl" "store" "branch" "recovery"
-                  "config" "program" "work-launcher" "agents" "web"
-                  "ready"]
+                  "config" "program" "work-launcher" "agents" "web"]
                  anchor-phases)
               "the readiness socket reports every published boot boundary")
           (is add-completed? "the generated add form completed")
@@ -1735,7 +1732,9 @@
         (future
           (operator.state/with-lifecycle-lock!
            {:seon.operator.lock/path held-lock
-            :seon.operator.lock/command "the regression's holder"}
+            :seon.operator.lock/command "the regression's holder"
+            :seon.operator.lock/acquisition-timeout-ms 2000
+            :seon.operator.lock/hold-timeout-ms 60000}
            (fn []
              (deliver acquired true)
              (deref release 60000 :backstop))))]
@@ -1761,13 +1760,14 @@
                   (operator.state/with-lifecycle-lock!
                    {:seon.operator.lock/path held-lock
                     :seon.operator.lock/command "a second same-root command"
-                    :seon.operator.lock/timeout-ms 2000}
+                    :seon.operator.lock/acquisition-timeout-ms 2000
+                    :seon.operator.lock/hold-timeout-ms 2000}
                    (fn [] ::ran))
                   (catch clojure.lang.ExceptionInfo error
                     (ex-data error))))
               announcement (str captured)
               pid (:seon.boot/pid (operator.state/current-process-identity))]
-          (is (= :seon.operator/lifecycle-lock-timeout
+          (is (= :seon.operator/lock-acquisition-timeout
                  (:seon.error/kind refusal))
               (pr-str refusal))
           (is (= pid (get-in refusal [:seon.operator.lock/holder

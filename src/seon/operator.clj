@@ -316,12 +316,15 @@
   [{repository-root :seon.operator/repository-root
     managed-root :seon.operator/managed-root
     :as request}]
+  ;; Deliberate keep-serial exception: the launcher already holds the root
+  ;; lifecycle lock while its child calls cleanup-root-under-lock!, so moving
+  ;; this public JVM path there requires explicit lock-custody transfer.
   (attempt
    #(let [bound-ms (lifecycle-lock-bound-ms request)]
       (state/with-control-lock!
        repository-root
        {:seon.operator.lock/command "cleanup managed root"
-        :seon.operator.lock/wait-timeout-ms bound-ms
+        :seon.operator.lock/acquisition-timeout-ms bound-ms
         :seon.operator.lock/hold-timeout-ms bound-ms}
        (fn [] (cleanup-root-under-lock! repository-root managed-root))))))
 
@@ -354,7 +357,7 @@
        (state/with-control-lock!
         repository-root
         {:seon.operator.lock/command "reap dead managed roots"
-         :seon.operator.lock/wait-timeout-ms bound-ms
+         :seon.operator.lock/acquisition-timeout-ms bound-ms
          :seon.operator.lock/hold-timeout-ms bound-ms}
         (fn []
        (let [silence-ms (state/event-silence-backstop-ms
@@ -538,7 +541,7 @@
       (valid-store? held) [held false]
       :else [(store/open-store! {:seon.store/dir path}) true])))
 
-(declare collect-under-lock!)
+(declare collect-store!)
 
 (defn- quiesce-cluster-under-lock!
   [{repository-root :seon.operator/repository-root
@@ -578,37 +581,49 @@
 (defn- cleanup-cluster-under-lock!
   [{supplied-store :seon.store/store
     :as request}]
-  (let [{cluster-dir ::cluster-dir
-         branch :seon.store/branch
+  (let [{branch :seon.store/branch
          :as quiesced} (quiesce-cluster-under-lock! request)
         managed-root (:seon.operator.cluster-cleanup/managed-root quiesced)
-          [operation-store release?]
-          (acquire-operation-store! managed-root supplied-store)]
+        [operation-store release?]
+        (acquire-operation-store! managed-root supplied-store)]
     (try
-      (let [_ (registry/retire-branch!
-               {:seon.store/store operation-store
-                :seon.store/branch branch})
-              collection (collect-under-lock! managed-root operation-store)
-              remaining (cond-> []
-                          (.exists (io/file cluster-dir))
-                          (conj cluster-dir)
-                          (contains? (registry/roster operation-store)
-                                     branch)
-                          (conj (str branch)))
-              complete? (empty? remaining)
-              result (-> quiesced
-                         (dissoc ::cluster-dir)
-                         (assoc
-                          :seon.operator.cluster-cleanup/branch-retired? true
-                          :seon.operator.cluster-cleanup/collection collection
-                          :seon.operator.cluster-cleanup/remaining remaining
-                          :seon.operator.cluster-cleanup/complete? complete?))]
-          (when-not complete?
-            (throw
-             (ex-info "Cluster cleanup left claimed state."
-                      {:seon.error/kind
-                       :seon.operator/cluster-cleanup-incomplete
-                       :seon.operator.cluster-cleanup/result result :seon.operator/cluster-cleanup-incomplete true})))
+      (registry/retire-branch!
+       {:seon.store/store operation-store
+        :seon.store/branch branch})
+      quiesced
+      (finally
+        (when release? (store/release-store! operation-store))))))
+
+(defn- finish-cluster-cleanup!
+  [{supplied-store :seon.store/store}
+   quiesced]
+  (let [{cluster-dir ::cluster-dir
+         branch :seon.store/branch} quiesced
+        managed-root (:seon.operator.cluster-cleanup/managed-root quiesced)
+        [operation-store release?]
+        (acquire-operation-store! managed-root supplied-store)]
+    (try
+      (let [collection (collect-store! managed-root operation-store)
+            remaining (cond-> []
+                        (.exists (io/file cluster-dir))
+                        (conj cluster-dir)
+                        (contains? (registry/roster operation-store) branch)
+                        (conj (str branch)))
+            complete? (empty? remaining)
+            result (-> quiesced
+                       (dissoc ::cluster-dir)
+                       (assoc
+                        :seon.operator.cluster-cleanup/branch-retired? true
+                        :seon.operator.cluster-cleanup/collection collection
+                        :seon.operator.cluster-cleanup/remaining remaining
+                        :seon.operator.cluster-cleanup/complete? complete?))]
+        (when-not complete?
+          (throw
+           (ex-info "Cluster cleanup left claimed state."
+                    {:seon.error/kind
+                     :seon.operator/cluster-cleanup-incomplete
+                     :seon.operator.cluster-cleanup/result result
+                     :seon.operator/cluster-cleanup-incomplete true})))
         result)
       (finally
         (when release? (store/release-store! operation-store))))))
@@ -619,14 +634,17 @@
    [:=> [:cat :seon.operator.cluster-cleanup/request]
     [:or :seon.operator.cluster-cleanup/result :seon.error/value]]}
   [{repository-root :seon.operator/repository-root :as request}]
+  ;; Deliberate keep-serial exception, matching cleanup-root!. Only quiesce and
+  ;; branch retirement stay under control custody; writer GC runs afterward.
   (attempt
    #(let [bound-ms (lifecycle-lock-bound-ms request)]
-      (state/with-control-lock!
-       repository-root
-       {:seon.operator.lock/command "cleanup claimed cluster"
-        :seon.operator.lock/wait-timeout-ms bound-ms
-        :seon.operator.lock/hold-timeout-ms bound-ms}
-       (fn [] (cleanup-cluster-under-lock! request))))))
+      (let [quiesced (state/with-control-lock!
+                      repository-root
+                      {:seon.operator.lock/command "quiesce claimed cluster"
+                       :seon.operator.lock/acquisition-timeout-ms bound-ms
+                       :seon.operator.lock/hold-timeout-ms bound-ms}
+                      (fn [] (cleanup-cluster-under-lock! request)))]
+        (finish-cluster-cleanup! request quiesced)))))
 
 (defn- operation-konserve
   [operation-store]
@@ -744,7 +762,7 @@
   ;; FileStore sync per candidate at an illustrative five milliseconds.
   5)
 
-(defn- dry-run-under-lock!
+(defn- dry-run-store!
   [managed-root operation-store]
   (let [inventory
         (registry/collect!
@@ -779,7 +797,7 @@
      :seon.operator.collect/projected-duration-ms
      (+ mark-duration (* projected-delete-ms-per-file candidates))}))
 
-(defn- collect-under-lock!
+(defn- collect-store!
   [managed-root operation-store]
   (let [store-id
         (get-in @(:seon.store/connection-object operation-store)
@@ -852,10 +870,9 @@
 (defn collect!
   "Collect or dry-run one managed store.
 
-  Collection is one root's maintenance, so it holds that root's lifecycle
-  lock rather than the installation-wide control lock. A slow writer-side
-  collection therefore cannot prevent another lifecycle operation from
-  publishing its root claim."
+  The root lifecycle lock protects operation-store acquisition only. The
+  store's flock then preserves operation ownership while writer-side GC waits
+  outside lifecycle custody, so a parked collection yields to lifecycle work."
   {:malli/schema
    [:=> [:cat :seon.operator.collect/request]
     [:or :seon.operator.collect/result :seon.error/value]]}
@@ -864,23 +881,22 @@
     :as request}]
   (attempt
    #(let [managed-root (state/canonical-path managed-root)
-          bound-ms (lifecycle-lock-bound-ms request)]
-      (state/with-lifecycle-lock!
-       {:seon.operator.lock/path
-        (state/root-lifecycle-lock-path managed-root)
-        :seon.operator.lock/command "collect managed store"
-        :seon.operator.lock/wait-timeout-ms bound-ms
-        :seon.operator.lock/hold-timeout-ms bound-ms}
-       (fn []
-         (let [[operation-store release?]
-               (acquire-operation-store! managed-root nil)]
-           (try
-             (if (true? dry-run?)
-               (dry-run-under-lock! managed-root operation-store)
-               (collect-under-lock! managed-root operation-store))
-             (finally
-               (when release?
-                 (store/release-store! operation-store))))))))))
+          bound-ms (lifecycle-lock-bound-ms request)
+          [operation-store release?]
+          (state/with-lifecycle-lock!
+           {:seon.operator.lock/path
+            (state/root-lifecycle-lock-path managed-root)
+            :seon.operator.lock/command "acquire collection store"
+            :seon.operator.lock/acquisition-timeout-ms bound-ms
+            :seon.operator.lock/hold-timeout-ms bound-ms}
+           (fn [] (acquire-operation-store! managed-root nil)))]
+      (try
+        (if (true? dry-run?)
+          (dry-run-store! managed-root operation-store)
+          (collect-store! managed-root operation-store))
+        (finally
+          (when release?
+            (store/release-store! operation-store)))))))
 
 (defn- refork-under-lock!
   [{managed-root :seon.operator/managed-root
@@ -914,7 +930,6 @@
              {:seon.store/store operation-store
               :seon.boot/cluster-name (:seon.boot/cluster-name request)
               :seon.source/commit-id source-commit})]
-        (collect-under-lock! managed-root operation-store)
         result)
       (finally
         (when release? (store/release-store! operation-store))))))
@@ -925,11 +940,13 @@
    [:=> [:cat :seon.operator/refork-request]
     [:or :seon.cluster.registry/branch-result :seon.error/value]]}
   [{repository-root :seon.operator/repository-root :as request}]
+  ;; Deliberate keep-serial exception: fresh_operator's child invokes
+  ;; refork-under-lock! while its parent owns the root lifecycle lock.
   (attempt
    #(let [bound-ms (lifecycle-lock-bound-ms request)]
       (state/with-control-lock!
        repository-root
        {:seon.operator.lock/command "refork claimed cluster"
-        :seon.operator.lock/wait-timeout-ms bound-ms
+        :seon.operator.lock/acquisition-timeout-ms bound-ms
         :seon.operator.lock/hold-timeout-ms bound-ms}
        (fn [] (refork-under-lock! request))))))

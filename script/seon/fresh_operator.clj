@@ -232,7 +232,7 @@
    (operator.state/with-lifecycle-lock!
     {:seon.operator.lock/path (operator.state/root-lifecycle-lock-path root)
      :seon.operator.lock/command command
-     :seon.operator.lock/wait-timeout-ms
+     :seon.operator.lock/acquisition-timeout-ms
      operator.state/lifecycle-lock-timeout-ms
      :seon.operator.lock/hold-timeout-ms
      operator.state/lifecycle-lock-timeout-ms}
@@ -271,7 +271,7 @@
   ;; The invoking environment wins. The file is data, never shell code.
   (merge (dotenv root) (into {} (System/getenv))))
 
-(defn- start-child-jvm!
+(defn- child-jvm-command
   [{:seon.fresh-operator/keys
     [root jvm-options arguments detach dependency-cache-path]}]
   (let [root (.getCanonicalPath (io/file root))
@@ -300,51 +300,52 @@
                  (str (:seon.fresh-operator/adoption-port detach))
                  (str (:seon.fresh-operator/silence-backstop-ms detach))]
                 child-command)
-          child-command)
-        builder (doto (ProcessBuilder. ^java.util.List command)
-                  (.directory (repository-root))
-                  (.redirectErrorStream true))
-        _ (.putAll (.environment builder) (child-environment root))]
-    (.start builder)))
+          child-command)]
+    command))
+
+(defn- run-child-jvm!
+  [{root :seon.fresh-operator/root :as request}]
+  (operator.state/run-process!
+   {:seon.operator.subprocess/argv (child-jvm-command request)
+    :seon.operator.subprocess/deadline-ms
+    operator.state/lifecycle-lock-timeout-ms
+    :seon.operator.subprocess/directory (str (repository-root))
+    :seon.operator.subprocess/extra-env (child-environment root)
+    :seon.operator.subprocess/merge-error? true}))
 
 (defn- ensure-dependency-cache!
   []
   (println "● boot dependency cache: checking inputs")
   (flush)
-  (let [process
-        (.start
-         (doto
-          (ProcessBuilder.
-           ^java.util.List
-           ["clojure" "-T:dev-cache" "ensure-cache"])
-          (.directory (repository-root))
-          (.redirectErrorStream true)))]
-    (let [lines
-          (with-open [reader (io/reader (.getInputStream process))]
-            (reduce
-             (fn [seen line]
-               (println line)
-               (flush)
-               (conj seen line))
-             []
-             (line-seq reader)))
-          exit (.waitFor process)]
-      (when-not (zero? exit)
-        (fail! "The dependency class cache could not be prepared."
-               {:seon.fresh-operator/exit exit}))
-      (let [result (try
-                     (edn/read-string (last lines))
-                     (catch Throwable error
-                       (fail! "The dependency cache returned no selection."
-                              {:seon.fresh-operator/cause
-                               (ex-message error)})))
-            path (:seon.dev-cache/path result)]
-        (when-not (and (string? path)
-                       (fs/absolute? path)
-                       (fs/directory? path))
-          (fail! "The dependency cache selected an invalid directory."
-                 {:seon.dev-cache/path path}))
-        result))))
+  (let [{exit :seon.operator.subprocess/exit
+         output :seon.operator.subprocess/output}
+        (operator.state/run-process!
+         {:seon.operator.subprocess/argv
+          ["clojure" "-T:dev-cache" "ensure-cache"]
+          :seon.operator.subprocess/deadline-ms
+          operator.state/lifecycle-lock-timeout-ms
+          :seon.operator.subprocess/directory (str (repository-root))
+          :seon.operator.subprocess/merge-error? true})
+        lines (str/split-lines output)]
+    (doseq [line lines]
+      (println line)
+      (flush))
+    (when-not (zero? exit)
+      (fail! "The dependency class cache could not be prepared."
+             {:seon.fresh-operator/exit exit}))
+    (let [result (try
+                   (edn/read-string (last lines))
+                   (catch Throwable error
+                     (fail! "The dependency cache returned no selection."
+                            {:seon.fresh-operator/cause
+                             (ex-message error)})))
+          path (:seon.dev-cache/path result)]
+      (when-not (and (string? path)
+                     (fs/absolute? path)
+                     (fs/directory? path))
+        (fail! "The dependency cache selected an invalid directory."
+               {:seon.dev-cache/path path}))
+      result)))
 
 (defn- valid-name!
   [name]
@@ -635,13 +636,12 @@
   [root]
   (if-not (fs/directory? (store-directory root))
     #{}
-    (let [process
-          (start-child-jvm!
+    (let [{output :seon.operator.subprocess/output
+           exit :seon.operator.subprocess/exit}
+          (run-child-jvm!
            {:seon.fresh-operator/root root
             :seon.fresh-operator/arguments
-            ["-e" (offline-roster-form root)]})
-          output (slurp (.getInputStream process))
-          exit (.waitFor process)]
+            ["-e" (offline-roster-form root)]})]
       (when-not (zero? exit)
         (fail! "The persisted cluster roster could not be read."
                {:seon.fresh-operator/exit exit
@@ -1497,8 +1497,8 @@
            (repository-root) root (ephemeral-owner root) name)
         log (create-log! root name)
         generation (random-uuid)
-        process
-        (start-child-jvm!
+        handoff
+        (run-child-jvm!
          {:seon.fresh-operator/root root
           :seon.fresh-operator/dependency-cache-path dependency-cache-path
           :seon.fresh-operator/jvm-options
@@ -1510,8 +1510,8 @@
           {:seon.fresh-operator/log (str log)
            :seon.fresh-operator/adoption-port adoption-port
            :seon.fresh-operator/silence-backstop-ms silence-ms}})
-        output (str/trim (slurp (.getInputStream process)))
-        exit (.waitFor process)]
+        output (str/trim (:seon.operator.subprocess/output handoff))
+        exit (:seon.operator.subprocess/exit handoff)]
     (when-not (zero? exit)
       (fail! "The detached cluster launcher failed."
              {:seon.fresh-operator/exit exit
@@ -2149,27 +2149,24 @@
 
 (defn- source-process-value!
   [root form]
-  (let [process
-        (start-child-jvm!
+  (let [{captured :seon.operator.subprocess/output
+         exit :seon.operator.subprocess/exit}
+        (run-child-jvm!
          {:seon.fresh-operator/root root
           :seon.fresh-operator/arguments ["-e" form]})
-        exited (.onExit process)
         output (StringBuilder.)
         result (volatile! nil)]
-    (with-open [reader (io/reader (.getInputStream process))]
-      (doseq [line (line-seq reader)]
-        (.append output line)
-        (.append output \newline)
-        (if (str/starts-with? line init-result-prefix)
-          (vreset!
-           result
-           (edn/read-string (subs line (count init-result-prefix))))
-          (do
-            (println line)
-            (flush)))))
-    (.get exited)
-    (let [exit (.exitValue process)
-          output (str output)]
+    (doseq [line (str/split-lines captured)]
+      (.append output line)
+      (.append output \newline)
+      (if (str/starts-with? line init-result-prefix)
+        (vreset!
+         result
+         (edn/read-string (subs line (count init-result-prefix))))
+        (do
+          (println line)
+          (flush))))
+    (let [output (str output)]
       (when-not (zero? exit)
         (fail! "The initialization JVM exited unsuccessfully."
                {:seon.fresh-operator/exit exit
@@ -2417,9 +2414,12 @@
                      (:seon.fresh-operator/registered-advertisement row)))
                 (fail! "The live cluster has not advertised a web URL."
                        {:seon.fresh-operator/name name}))
-        process (doto (ProcessBuilder. ^java.util.List ["/usr/bin/open" url])
-                  (.inheritIO))]
-    (when-not (zero? (.waitFor (.start process)))
+        result (operator.state/run-process!
+                {:seon.operator.subprocess/argv ["/usr/bin/open" url]
+                 :seon.operator.subprocess/deadline-ms
+                 (operator-silence-backstop-ms {})
+                 :seon.operator.subprocess/merge-error? true})]
+    (when-not (zero? (:seon.operator.subprocess/exit result))
       (fail! "The browser opener failed."
              {:seon.fresh-operator/url url}))
     (println (str "● opened " name " → " url))))
@@ -2721,12 +2721,11 @@
 
 (defn- cleanup-managed-root!
   [root]
-  (let [process
-        (start-child-jvm!
+  (let [{output :seon.operator.subprocess/output
+         exit :seon.operator.subprocess/exit}
+        (run-child-jvm!
          {:seon.fresh-operator/root root
           :seon.fresh-operator/arguments ["-e" (cleanup-form root)]})
-        output (slurp (.getInputStream process))
-        exit (.waitFor process)
         result
         (some
          (fn [line]
@@ -2779,11 +2778,16 @@
       (fail! "The cluster has no log."
              {:seon.fresh-operator/name name
               :seon.fresh-operator/path (str path)}))
-    (let [builder (doto
-                   (ProcessBuilder.
-                    ^java.util.List ["tail" "-n" "200" (str path)])
-                    (.inheritIO))
-          exit (.waitFor (.start builder))]
+    (let [{exit :seon.operator.subprocess/exit
+           output :seon.operator.subprocess/output
+           error-output :seon.operator.subprocess/error-output}
+          (operator.state/run-process!
+           {:seon.operator.subprocess/argv ["tail" "-n" "200" (str path)]
+            :seon.operator.subprocess/deadline-ms
+            (operator-silence-backstop-ms {})})]
+      (print output)
+      (binding [*out* *err*] (print error-output))
+      (flush)
       (when-not (zero? exit)
         (fail! "`tail` exited unsuccessfully."
                {:seon.fresh-operator/exit exit})))))

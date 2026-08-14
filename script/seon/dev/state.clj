@@ -32,6 +32,6 @@
      {:seon.operator.lock/path
       (fs/path process-dir "locks" (str (name lock-name) ".lock"))
       :seon.operator.lock/command (str (name lock-name) " transition")
-      :seon.operator.lock/wait-timeout-ms timeout-ms
+      :seon.operator.lock/acquisition-timeout-ms timeout-ms
       :seon.operator.lock/hold-timeout-ms timeout-ms}
      transition)))

@@ -3,23 +3,24 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]))
+            [clojure.test :refer [deftest is testing]]
+            [seon.operator.state :as operator.state]))
 
 (def ^:private repo-root
   (.getCanonicalFile (io/file (System/getProperty "user.dir"))))
 
 (defn- run-process
   [{::keys [command directory environment input]}]
-  (let [builder (doto (ProcessBuilder. ^java.util.List command)
-                  (.directory (io/file directory)))
-        _ (.putAll (.environment builder) (or environment {}))
-        process (.start builder)]
-    (with-open [writer (io/writer (.getOutputStream process))]
-      (.write writer (or input "")))
-    (let [stdout (future (slurp (.getInputStream process)))
-          stderr (future (slurp (.getErrorStream process)))
-          exit (.waitFor process)]
-      {::exit exit ::stdout @stdout ::stderr @stderr})))
+  (let [result
+        (operator.state/run-process!
+         {:seon.operator.subprocess/argv command
+          :seon.operator.subprocess/directory directory
+          :seon.operator.subprocess/extra-env (or environment {})
+          :seon.operator.subprocess/input (or input "")
+          :seon.operator.subprocess/deadline-ms 30000})]
+    {::exit (:seon.operator.subprocess/exit result)
+     ::stdout (:seon.operator.subprocess/output result)
+     ::stderr (:seon.operator.subprocess/error-output result)}))
 
 (defn- fixture-directory []
   (doto (io/file repo-root "tmp" (str "edit-feedback-" (random-uuid)))
