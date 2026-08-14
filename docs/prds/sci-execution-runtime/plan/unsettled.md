@@ -303,6 +303,14 @@ deletion → `:seon.db/database-value`→`:seon.db/db` → run `sources-*`
 rename → **ONE closing `bin/test --all`** (fix-forward; the tally is
 the morning headline).
 
+*Wedge extermination (owner-directed, launched immediately):*
+`await-owner` (the ONE bounded-await owner + the three filed await
+classes + the program-graph census regression that fails on new
+members) and `lock-bounds` (bounded lock holds + subprocess deadlines +
+their census, seeded by tonight's wedge-3 lock evidence). Same kill
+template as the disarm bound and the projection-fallback deletion:
+unconstructable at one seam, never patched per instance.
+
 *Parallel beside the spine (file-disjoint):* R3 tail (computed-guard
 live refusal + collision archival); six-word-error MCP face
 (cluster.clj now free); wedge-continuation classes (web delivery
