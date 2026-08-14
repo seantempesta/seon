@@ -1286,28 +1286,46 @@
   [events]
   (:val (peek events)))
 
-(defn- instrument-form
+(defn- effective-form
   [instance-symbol name]
   `(let [projection-state#
          (:seon.sci.eval/projection-state
           (:seon.sci.eval/ctx ~instance-symbol))
          dials#
-         ((ns-resolve 'seon.config (symbol "effective"))
-          @(get ~instance-symbol :seon.boot/cluster-connection)
-          ~name)]
+         ((ns-resolve 'seon.schema (symbol "call-with-projection-state"))
+          projection-state#
+          (fn []
+            ((ns-resolve 'seon.config (symbol "effective"))
+             @(get ~instance-symbol :seon.boot/cluster-connection)
+             ~name)))]
+     (if (:seon.error/kind dials#)
+       (throw (ex-info (:seon.error/message dials#) dials#))
+       dials#)))
+
+(defn- instrument-form
+  [instance-symbol name]
+  `(let [projection-state#
+         (:seon.sci.eval/projection-state
+          (:seon.sci.eval/ctx ~instance-symbol))]
      ((ns-resolve 'seon.schema (symbol "call-with-projection-state"))
       projection-state#
       (fn []
-        ((ns-resolve 'seon.instrument (symbol "apply!"))
-         {:seon.config/on-core-error
-          (:seon.config/on-core-error dials#)
-          :seon.sci.admit/caps
-          (select-keys
-           dials#
-           [:seon.config.eval.result/max-depth
-            :seon.config.eval.result/max-collection
-            :seon.config.eval.result/max-string
-            :seon.config.eval.result/max-nodes])})))))
+        (let [dials#
+              ((ns-resolve 'seon.config (symbol "effective"))
+               @(get ~instance-symbol :seon.boot/cluster-connection)
+               ~name)]
+          (if (:seon.error/kind dials#)
+            (throw (ex-info (:seon.error/message dials#) dials#))
+            ((ns-resolve 'seon.instrument (symbol "apply!"))
+             {:seon.config/on-core-error
+              (:seon.config/on-core-error dials#)
+              :seon.sci.admit/caps
+              (select-keys
+               dials#
+               [:seon.config.eval.result/max-depth
+                :seon.config.eval.result/max-collection
+                :seon.config.eval.result/max-string
+                :seon.config.eval.result/max-nodes])})))))))
 
 (defn- refresh-instrument-form
   []
@@ -1389,9 +1407,7 @@
                                       ~instance)))
                     _# (require 'seon.operator)
                     dials#
-                    ((ns-resolve 'seon.config (symbol "effective"))
-                     @(get ~instance :seon.boot/cluster-connection)
-                     ~name)
+                    ~(effective-form instance name)
                     rotation#
                     ((ns-resolve 'seon.operator (symbol "rotate-logs!"))
                      {:seon.boot/log-dir

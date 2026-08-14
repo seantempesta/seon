@@ -57,6 +57,29 @@
 
 (use-fixtures :each preserving-instrumentation-state)
 
+(deftest an-invalid-core-error-mode-is-an-evidence-complete-value
+  (let [result (instrument/apply! {:seon.config/on-core-error nil})]
+    (is (= :seon.instrument/invalid-mode (:seon.error/kind result)))
+    (is (= {:seon.error/diagnostic-layer :instrumentation
+            :seon.error/diagnostic-operation 'seon.instrument/apply!
+            :seon.error/diagnostic-member :seon.config/on-core-error
+            :seon.error/diagnostic-expected [:enum :panic :record]
+            :seon.error/diagnostic-offending :seon.instrument/nil
+            :seon.error/diagnostic-cause :seon.instrument/invalid-mode
+            :seon.error/diagnostic-evidence-availability :seon.error/known
+            :seon.error/diagnostic-evidence
+            {:seon.instrument/accepted-modes [:panic :record]}}
+           (select-keys
+            (:seon.error/data result)
+            [:seon.error/diagnostic-layer
+             :seon.error/diagnostic-operation
+             :seon.error/diagnostic-member
+             :seon.error/diagnostic-expected
+             :seon.error/diagnostic-offending
+             :seon.error/diagnostic-cause
+             :seon.error/diagnostic-evidence-availability
+             :seon.error/diagnostic-evidence])))))
+
 (defn- instrumented!
   "Run `body` with instrumentation on, and always take it back off."
   [body]

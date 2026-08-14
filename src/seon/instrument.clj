@@ -552,26 +552,43 @@
   strips the wrapper and no watch fires. Malli collection compiles against
   the caller's cluster-bound schema projection; instrumentation never loads,
   publishes, or replaces schema declarations."
-  {:malli/schema [:=> [:cat :seon.instrument/request] :seon.instrument/applied]}
+  {:malli/schema
+   [:=> [:cat :seon.instrument/request]
+    [:or :seon.instrument/applied :seon.error/value]]}
   [{mode :seon.config/on-core-error caps :seon.sci.admit/caps}]
-  (let [registered (count (collect-contracts! caps))]
-    (case mode
-      :panic
-      (do (mi/instrument! {:scope #{:input :output}
-                           :report (throwing-report caps)})
-          (let [count-now (count (instrumented))]
-            (when (zero? count-now)
-              (binding [*out* *err*]
-                (println "seon.instrument: :panic instrumented ZERO vars —"
-                         "that is a bug, not a quiet success")
-                (flush)))
-            {:seon.instrument/registered registered
-             :seon.instrument/instrumented count-now}))
+  (if-not (#{:panic :record} mode)
+    (let [bounded-caps (evidence-caps (or caps contract-evidence-caps))]
+      (error/diagnostic
+       {:seon.error/kind ::invalid-mode
+        :seon.error/message
+        "Instrumentation requires :panic or :record core-error mode."
+        :seon.error/diagnostic-layer :instrumentation
+        :seon.error/diagnostic-operation 'seon.instrument/apply!
+        :seon.error/diagnostic-member :seon.config/on-core-error
+        :seon.error/diagnostic-expected [:enum :panic :record]
+        :seon.error/diagnostic-offending
+        (if (nil? mode) ::nil (admitted-value bounded-caps mode))
+        :seon.error/diagnostic-cause ::invalid-mode
+        :seon.error/diagnostic-evidence
+        {:seon.instrument/accepted-modes [:panic :record]}}))
+    (let [registered (count (collect-contracts! caps))]
+      (case mode
+        :panic
+        (do (mi/instrument! {:scope #{:input :output}
+                             :report (throwing-report caps)})
+            (let [count-now (count (instrumented))]
+              (when (zero? count-now)
+                (binding [*out* *err*]
+                  (println "seon.instrument: :panic instrumented ZERO vars —"
+                           "that is a bug, not a quiet success")
+                  (flush)))
+              {:seon.instrument/registered registered
+               :seon.instrument/instrumented count-now}))
 
-      :record
-      (do (mi/unstrument!)
-          {:seon.instrument/registered registered
-           :seon.instrument/instrumented (count (instrumented))}))))
+        :record
+        (do (mi/unstrument!)
+            {:seon.instrument/registered registered
+             :seon.instrument/instrumented (count (instrumented))})))))
 
 (defn remove!
   "Strip every instrumentation wrapper. EMERGENCY RECOVERY ONLY.

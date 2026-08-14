@@ -231,10 +231,30 @@
 
 (defn- mcp-effective
   [cluster-name bootstrap-effective]
-  (if-let [connection (:seon.boot/cluster-connection
-                       (mcp-instance cluster-name))]
-    (config/effective @connection cluster-name)
-    bootstrap-effective))
+  (let [instance (mcp-instance cluster-name)
+        connection (:seon.boot/cluster-connection instance)
+        projection-state
+        (get-in instance
+                [:seon.sci.eval/ctx :seon.sci.eval/projection-state])]
+    (if connection
+      (if projection-state
+        (schema/call-with-projection-state
+         projection-state
+         #(config/effective @connection cluster-name))
+        (error/diagnostic
+         {:seon.error/kind ::mcp-missing-projection
+          :seon.error/message
+          "The MCP config read has no cluster projection state."
+          :seon.error/diagnostic-layer :development-mcp
+          :seon.error/diagnostic-operation 'seon.config/effective
+          :seon.error/diagnostic-member :seon.schema/projection
+          :seon.error/diagnostic-expected
+          :seon.sci.eval/projection-state
+          :seon.error/diagnostic-offending :seon.error/unknown
+          :seon.error/diagnostic-cause ::mcp-missing-projection
+          :seon.error/diagnostic-evidence
+          {:seon.boot/cluster-name cluster-name}}))
+      bootstrap-effective)))
 
 (defn- evaluation-node
   ; A door evaluation is recognized by its result-edn parsing to a print
@@ -321,9 +341,11 @@
   (let [instance (mcp-instance cluster-name)
         connection (:seon.boot/cluster-connection instance)
         effective (mcp-effective cluster-name bootstrap-effective)
-        caps (config/result-caps effective)]
-    (if (:seon.error/kind caps)
-      {:seon.dev.mcp/value caps
+        caps (when-not (:seon.error/kind effective)
+               (config/result-caps effective))]
+    (if-let [refusal (or (when (:seon.error/kind effective) effective)
+                         (when (:seon.error/kind caps) caps))]
+      {:seon.dev.mcp/value refusal
        :seon.sci.admit/capped? false
        :seon.dev.mcp/windowed? false}
       (let [evaluation-print-node (evaluation-node value)
@@ -446,13 +468,15 @@
             found (render.data/at
                    (render.value/artifact-value stored)
                    {:seon.render.data/path path
-                    :seon.render.data/offset offset})]
-        (if (contains? found :seon.render.data/value)
-          (render.value/window
-           (:seon.render.data/value found) offset
-           (:seon.render.value/max-collection
-            (config/effective @connection cluster-name)))
-          found))
+                    :seon.render.data/offset offset})
+            effective (mcp-effective cluster-name nil)]
+        (if (:seon.error/kind effective)
+          effective
+          (if (contains? found :seon.render.data/value)
+            (render.value/window
+             (:seon.render.data/value found) offset
+             (:seon.render.value/max-collection effective))
+            found)))
       {:seon.error/kind :seon.dev.mcp/value-not-found
        :seon.dev.mcp/value-not-found content-digest
        :seon.error/message "No stored MCP value has this digest."

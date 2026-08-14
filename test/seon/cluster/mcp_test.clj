@@ -7,8 +7,10 @@
             [seon.cluster :as cluster]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.operator.runtime :refer [running-instances]]
             [seon.render.value :as render.value]
+            [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.sci.admit :as admit]
             [seon.test-support :as support]))
@@ -22,6 +24,18 @@
   [value]
   (alength (.getBytes ^String (pr-str value) "UTF-8")))
 
+(defn- running-instance
+  [connection cluster-name]
+  (let [projection (schema/projection-from-database @connection)
+        environment
+        (env/environment
+         {:seon.boot/cluster-name cluster-name
+          :seon.db/basis-t (db/basis-t @connection)
+          :seon.schema/projection projection})]
+    {:seon.boot/cluster-connection connection
+     :seon.sci.eval/ctx
+     (env/carry-state {} (env/environment-state environment))}))
+
 (defn- door-evaluation
   [effective value]
   (let [admitted
@@ -33,6 +47,34 @@
     (assoc admitted
            :seon.cluster.eval/ns [:seon.ns/name 'user]
            :seon.sci.eval/ending-ns 'user)))
+
+(deftest mcp-config-reads-receive-the-running-cluster-projection
+  (let [cluster-name "mcp-projection-test"
+        connection (atom ::database)
+        projection (schema/build-projection (schema/snapshot))
+        projection-state
+        (env/environment-state
+         (env/environment
+          {:seon.boot/cluster-name cluster-name
+           :seon.db/basis-t 0
+           :seon.schema/projection projection}))
+        observed (atom nil)]
+    (swap! running-instances assoc cluster-name
+           {:seon.boot/cluster-connection connection
+            :seon.sci.eval/ctx
+            (env/carry-state {} projection-state)})
+    (try
+      (with-redefs [config/effective
+                    (fn [_ _]
+                      (reset! observed (some? (schema/handed-projection)))
+                      (config/defaults))]
+        (is (= 42 (get-in (projected cluster-name (config/defaults) 42)
+                          [:seon.dev.mcp/value]))
+            "the MCP projection remains an ordinary successful value")
+        (is (true? @observed)
+            "the config read receives the projection already carried by ctx"))
+      (finally
+        (swap! running-instances dissoc cluster-name)))))
 
 (deftest nested-bulk-is-bounded-by-the-shared-value-window
   (let [cluster-name "mcp-nested-window-test"
@@ -145,7 +187,7 @@
                       [{:seon.ns/name 'seon.cluster.mcp-test
                         :seon.ns/source "(ns seon.cluster.mcp-test)"}])
         (swap! running-instances assoc cluster-name
-               {:seon.boot/cluster-connection connection})
+               (running-instance connection cluster-name))
         (try
           (let [result (projected cluster-name effective envelope)
                 face (:seon.dev.mcp/value result)
@@ -263,7 +305,7 @@
                         :seon.boot/cluster-name cluster-name})
         (support/seed-cluster! connection cluster-name)
         (swap! running-instances assoc cluster-name
-               {:seon.boot/cluster-connection connection})
+               (running-instance connection cluster-name))
         (try
           (let [stored (projected cluster-name effective value)
                 content-digest (:seon.blob/digest stored)
@@ -292,7 +334,7 @@
                         :seon.boot/cluster-name cluster-name})
         (support/seed-cluster! connection cluster-name)
         (swap! running-instances assoc cluster-name
-               {:seon.boot/cluster-connection connection})
+               (running-instance connection cluster-name))
         (try
           (let [stored (projected cluster-name effective value)
                 content-digest (:seon.blob/digest stored)
@@ -346,7 +388,7 @@
                         :seon.boot/cluster-name cluster-name})
         (support/seed-cluster! connection cluster-name)
         (swap! running-instances assoc cluster-name
-               {:seon.boot/cluster-connection connection})
+               (running-instance connection cluster-name))
         (try
           (let [stored (projected cluster-name effective door-result)
                 content-digest (:seon.blob/digest stored)

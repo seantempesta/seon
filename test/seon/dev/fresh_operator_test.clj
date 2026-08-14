@@ -9,9 +9,11 @@
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.config :as config]
+            [seon.env :as env]
             [seon.fresh-operator]
             [seon.instrument :as instrument]
             [seon.operator.state :as operator.state]
+            [seon.schema :as schema]
             [seon.test-support :as test-support])
   (:import [java.net ServerSocket]
            [java.util Date]
@@ -1386,6 +1388,16 @@
                [:seon.config/manifest :map]]]
          :map]
         start-calls (atom [])
+        effective-projections (atom [])
+        projection (schema/build-projection (schema/snapshot))
+        projection-state
+        (env/environment-state
+         (env/environment
+          {:seon.boot/cluster-name "live"
+           :seon.db/basis-t 0
+           :seon.schema/projection projection}))
+        instance-context
+        {:seon.sci.eval/projection-state projection-state}
         start-filter (mi/-filter-var #{start-var})
         apply-current!
         (fn [_]
@@ -1398,9 +1410,12 @@
        [cluster/start!
         (fn [request]
           (swap! start-calls conj request)
-          {:seon.boot/cluster-connection connection})
+          {:seon.boot/cluster-connection connection
+           :seon.sci.eval/ctx instance-context})
         config/effective
         (fn [_ _]
+          (swap! effective-projections conj
+                 (some? (schema/handed-projection)))
           {:seon.config/on-core-error :panic})
         instrument/apply! apply-current!]
         (alter-meta! start-var assoc :malli/schema stale-schema)
@@ -1413,11 +1428,14 @@
          (var-get instances-var)
          {"live"
           {:seon.boot/cluster-connection connection
+           :seon.sci.eval/ctx instance-context
            :seon.boot/advertisement
            {:seon.boot/cluster-name "live"}}})
         (is (= "scratch" (eval (read-string form))))
         (is (= [current-request] @start-calls)
-            "the pre-start apply! replaced the stale wrapper before start"))
+            "the pre-start apply! replaced the stale wrapper before start")
+        (is (= [true true] @effective-projections)
+            "both operator config reads run inside the cluster projection"))
       (finally
         (mi/unstrument! {:filters [start-filter]})
         (alter-meta! start-var (constantly start-meta))
