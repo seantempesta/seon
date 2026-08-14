@@ -411,9 +411,9 @@ not create render-cost facts; the global count remained zero.
 
 New issues:
 
-- `docs/seon/issues/agent-context-history-appends-complete-snapshots.md`
-- `docs/seon/issues/opening-cost-proxy-hides-agent-prompt-bulk.md`
-- `docs/seon/issues/agent-context-render-cost-requires-unprovided-connection.md`
+- `docs/seon/issues/archive/agent-context-history-appends-complete-snapshots.md`
+- `docs/seon/issues/archive/opening-cost-proxy-hides-agent-prompt-bulk.md`
+- `docs/seon/issues/archive/agent-context-render-cost-requires-unprovided-connection.md`
 
 Existing issues with new live evidence:
 
@@ -421,3 +421,18 @@ Existing issues with new live evidence:
 - `docs/seon/issues/dev-mcp-envelopes-misdirect-errors-and-sprawl-status.md`
 
 Per the observer assignment, `docs/seon/issues/index.md` was not edited.
+
+### Resolution proof, 2026-08-14
+
+Commits `98421f82f`, `aed781a3b`, `470ecf029`, and `b57076d08`
+resolved and archived the three Attempt 4 fidelity defects. Fresh isolated
+root `tmp/context-fidelity-proof.Jq1MLw` produced opening capture
+`bootstrap:root-context-536870964` and second capture
+`context-fidelity-current-run-context-536871000`.
+
+The 60,005-character second prompt contains `(dir (quote my.web))` once,
+contains the superseded bootstrap task zero times, contains
+`CURRENT-TASK-LAST-MARKER` once, and ends with that marker. Its 47 durable
+contribution positions sum to 18,751 tokens, exactly the whole-prompt budget
+estimate. The opening capture's 16 positions sum to 10,374 tokens. The same
+live acquisitions recorded 130 agent-context render-cost facts.
