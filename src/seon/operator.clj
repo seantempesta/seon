@@ -57,6 +57,11 @@
        (keyword? (:seon.error/kind value))
        (string? (:seon.error/message value))))
 
+(defn- lifecycle-lock-bound-ms
+  [request]
+  (or (:seon.config.operator/event-silence-backstop-ms request)
+      state/lifecycle-lock-timeout-ms))
+
 (defn start!
   "Start one named cluster in this JVM."
   {:malli/schema
@@ -309,11 +314,16 @@
    [:=> [:cat :seon.operator/cleanup-request]
     [:or :seon.operator/cleanup-result :seon.error/value]]}
   [{repository-root :seon.operator/repository-root
-    managed-root :seon.operator/managed-root}]
+    managed-root :seon.operator/managed-root
+    :as request}]
   (attempt
-   #(state/with-control-lock!
-     repository-root
-     (fn [] (cleanup-root-under-lock! repository-root managed-root)))))
+   #(let [bound-ms (lifecycle-lock-bound-ms request)]
+      (state/with-control-lock!
+       repository-root
+       {:seon.operator.lock/command "cleanup managed root"
+        :seon.operator.lock/wait-timeout-ms bound-ms
+        :seon.operator.lock/hold-timeout-ms bound-ms}
+       (fn [] (cleanup-root-under-lock! repository-root managed-root))))))
 
 (defn- public-stopped-process
   [stopped]
@@ -340,9 +350,13 @@
     :as request}]
   (attempt
    (fn []
-     (state/with-control-lock!
-      repository-root
-      (fn []
+     (let [bound-ms (lifecycle-lock-bound-ms request)]
+       (state/with-control-lock!
+        repository-root
+        {:seon.operator.lock/command "reap dead managed roots"
+         :seon.operator.lock/wait-timeout-ms bound-ms
+         :seon.operator.lock/hold-timeout-ms bound-ms}
+        (fn []
        (let [silence-ms (state/event-silence-backstop-ms
                          repository-root request)
              observed (state/census-observations request)
@@ -449,7 +463,7 @@
             (ex-info "One or more ephemeral roots were refused."
                      {:seon.error/kind :seon.operator/reap-incomplete
                       :seon.operator.reap/result result :seon.operator/reap-incomplete true})))
-         result))))))
+         result)))))))
 
 (defn- archive-path
   [log-path index]
@@ -606,9 +620,13 @@
     [:or :seon.operator.cluster-cleanup/result :seon.error/value]]}
   [{repository-root :seon.operator/repository-root :as request}]
   (attempt
-   #(state/with-control-lock!
-     repository-root
-     (fn [] (cleanup-cluster-under-lock! request)))))
+   #(let [bound-ms (lifecycle-lock-bound-ms request)]
+      (state/with-control-lock!
+       repository-root
+       {:seon.operator.lock/command "cleanup claimed cluster"
+        :seon.operator.lock/wait-timeout-ms bound-ms
+        :seon.operator.lock/hold-timeout-ms bound-ms}
+       (fn [] (cleanup-cluster-under-lock! request))))))
 
 (defn- operation-konserve
   [operation-store]
@@ -842,13 +860,17 @@
    [:=> [:cat :seon.operator.collect/request]
     [:or :seon.operator.collect/result :seon.error/value]]}
   [{managed-root :seon.operator/managed-root
-    dry-run? :seon.operator.collect/dry-run?}]
+    dry-run? :seon.operator.collect/dry-run?
+    :as request}]
   (attempt
-   #(let [managed-root (state/canonical-path managed-root)]
+   #(let [managed-root (state/canonical-path managed-root)
+          bound-ms (lifecycle-lock-bound-ms request)]
       (state/with-lifecycle-lock!
        {:seon.operator.lock/path
         (state/root-lifecycle-lock-path managed-root)
-        :seon.operator.lock/command "collect managed store"}
+        :seon.operator.lock/command "collect managed store"
+        :seon.operator.lock/wait-timeout-ms bound-ms
+        :seon.operator.lock/hold-timeout-ms bound-ms}
        (fn []
          (let [[operation-store release?]
                (acquire-operation-store! managed-root nil)]
@@ -904,6 +926,10 @@
     [:or :seon.cluster.registry/branch-result :seon.error/value]]}
   [{repository-root :seon.operator/repository-root :as request}]
   (attempt
-   #(state/with-control-lock!
-     repository-root
-     (fn [] (refork-under-lock! request)))))
+   #(let [bound-ms (lifecycle-lock-bound-ms request)]
+      (state/with-control-lock!
+       repository-root
+       {:seon.operator.lock/command "refork claimed cluster"
+        :seon.operator.lock/wait-timeout-ms bound-ms
+        :seon.operator.lock/hold-timeout-ms bound-ms}
+       (fn [] (refork-under-lock! request))))))

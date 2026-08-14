@@ -68,6 +68,7 @@
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.fs :as fs]
+            [seon.operator.state :as operator.state]
             [seon.schema.edn :as schema.edn])
   (:import [java.nio.file CopyOption Files StandardCopyOption]))
 
@@ -76,6 +77,8 @@
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})
+
+(def ^:private clone-deadline-ms 600000)
 
 (defn- refuse!
   "Refuse loudly with the one export error shape."
@@ -116,10 +119,13 @@
   command's own output when it has one and it fails."
   [source ^java.io.File target]
   (if-let [command (clone-command source (.getPath target))]
-    (let [process (.start (doto (ProcessBuilder. ^java.util.List command)
-                            (.redirectErrorStream true)))
-          output (slurp (.getInputStream process))
-          exit (.waitFor process)]
+    (let [result
+          (operator.state/run-process!
+           {:seon.operator.subprocess/argv command
+            :seon.operator.subprocess/deadline-ms clone-deadline-ms
+            :seon.operator.subprocess/merge-error? true})
+          output (:seon.operator.subprocess/output result)
+          exit (:seon.operator.subprocess/exit result)]
       (when-not (zero? exit)
         (throw (ex-info (str "the clone command failed: " command)
                         {::command command ::exit exit ::output output})))
@@ -192,7 +198,10 @@
                                 (System/getProperty "os.name"))
                            {::os (System/getProperty "os.name")}))
                 (catch Throwable failure
-                  failure))]
+                  (if (= :seon.operator.subprocess/deadline-exceeded
+                         (:seon.error/kind (ex-data failure)))
+                    (throw failure)
+                    failure)))]
     (when cause
       (warn! "export is falling back to create + re-transact; this is
               slower by a factor of tens and is not copy-on-write"

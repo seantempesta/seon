@@ -1,8 +1,8 @@
 (ns seon.dev.clj-kondo
   "Native clj-kondo dependency-cache ownership for development tools."
   (:require [babashka.fs :as fs]
-            [babashka.process :as process]
             [clojure.string :as str]
+            [seon.operator.state :as operator.state]
             [seon.dev.state :as state])
   (:import [java.security MessageDigest]))
 
@@ -44,6 +44,8 @@
   [root]
   (fs/path root "tmp/test-changed/dependency-cache.edn"))
 
+(def ^:private subprocess-deadline-ms 300000)
+
 (defn ensure-dependency-cache!
   "Refresh native clj-kondo dependency context when its real inputs change."
   [root]
@@ -58,28 +60,35 @@
          "clojure and clj-kondo are required to warm dependency analysis"}
         (try
           (let [classpath-result
-                (process/sh {:cmd ["clojure" "-Spath"]
-                             :dir root
-                             :out :string
-                             :err :string
-                             :continue true})
-                classpath (str/trim (:out classpath-result))]
-            (if (or (not (zero? (:exit classpath-result)))
+                (operator.state/run-process!
+                 {:seon.operator.subprocess/argv ["clojure" "-Spath"]
+                  :seon.operator.subprocess/directory root
+                  :seon.operator.subprocess/deadline-ms
+                  subprocess-deadline-ms})
+                classpath
+                (str/trim (:seon.operator.subprocess/output classpath-result))]
+            (if (or (not (zero? (:seon.operator.subprocess/exit
+                                 classpath-result)))
                     (str/blank? classpath))
               {:seon.dev.clj-kondo/status :unavailable
                :seon.dev.clj-kondo/reason
                (str "could not derive the project classpath"
-                    (when-not (str/blank? (:err classpath-result))
-                      (str ": " (str/trim (:err classpath-result)))))}
+                    (when-not
+                     (str/blank?
+                      (:seon.operator.subprocess/error-output classpath-result))
+                      (str ": "
+                           (str/trim
+                            (:seon.operator.subprocess/error-output
+                             classpath-result)))))}
               (let [result
-                    (process/sh
-                     {:cmd ["clj-kondo" "--lint" classpath
-                            "--dependencies" "--parallel" "--copy-configs"]
-                      :dir root
-                      :out :string
-                      :err :string
-                      :continue true})]
-                (if (zero? (:exit result))
+                    (operator.state/run-process!
+                     {:seon.operator.subprocess/argv
+                      ["clj-kondo" "--lint" classpath
+                       "--dependencies" "--parallel" "--copy-configs"]
+                      :seon.operator.subprocess/directory root
+                      :seon.operator.subprocess/deadline-ms
+                      subprocess-deadline-ms})]
+                (if (zero? (:seon.operator.subprocess/exit result))
                   (do
                     (state/write-edn! (state-path root)
                                       {:seon.dev.clj-kondo/input-digest
@@ -88,8 +97,17 @@
                   {:seon.dev.clj-kondo/status :unavailable
                    :seon.dev.clj-kondo/reason
                    (str "clj-kondo dependency analysis failed"
-                        (when-not (str/blank? (:err result))
-                          (str ": " (str/trim (:err result)))))}))))
+                        (when-not
+                         (str/blank?
+                          (:seon.operator.subprocess/error-output result))
+                          (str ": "
+                               (str/trim
+                                (:seon.operator.subprocess/error-output
+                                 result)))))}))))
           (catch Exception error
-            {:seon.dev.clj-kondo/status :unavailable
-             :seon.dev.clj-kondo/reason (.getMessage error)}))))))
+            (cond->
+             {:seon.dev.clj-kondo/status :unavailable
+              :seon.dev.clj-kondo/reason (.getMessage error)}
+              (:seon.error/kind (ex-data error))
+              (assoc :seon.error/kind (:seon.error/kind (ex-data error))
+                     :seon.error/data (ex-data error)))))))))

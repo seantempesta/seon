@@ -231,7 +231,11 @@
   ([root command transition]
    (operator.state/with-lifecycle-lock!
     {:seon.operator.lock/path (operator.state/root-lifecycle-lock-path root)
-     :seon.operator.lock/command command}
+     :seon.operator.lock/command command
+     :seon.operator.lock/wait-timeout-ms
+     operator.state/lifecycle-lock-timeout-ms
+     :seon.operator.lock/hold-timeout-ms
+     operator.state/lifecycle-lock-timeout-ms}
     transition)))
 
 (defn- unquote-value

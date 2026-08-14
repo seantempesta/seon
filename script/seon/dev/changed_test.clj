@@ -8,17 +8,16 @@
   advisory result together with the clj-kondo findings from the same
   analysis pass."
   (:require [babashka.fs :as fs]
-            [babashka.process :as process]
             [clojure.edn :as edn]
             [clojure.string :as str]
             [seon.dev.clj-kondo :as dev.kondo]
             [seon.dev.state :as state]
-            [seon.dev.test-roots :as test-roots])
-  (:import [java.io File]
-           [java.util.concurrent TimeUnit TimeoutException]))
+            [seon.dev.test-roots :as test-roots]
+            [seon.operator.state :as operator.state])
+  (:import [java.io File]))
 
 (def test-timeout-ms 300000)
-(def termination-wait-ms 12000)
+(def host-analysis-deadline-ms 60000)
 (declare normalize-paths)
 
 (defn configuration
@@ -136,15 +135,16 @@
      :seon.dev.changed-test/reason "clj-kondo is unavailable"}
     (try
       (let [files (host-corpus root)
-            result (process/sh {:cmd (into ["clj-kondo" "--lint"]
-                                           (concat files
-                                                   ["--config"
-                                                    host-analysis-config]))
-                                :dir root
-                                :out :string
-                                :err :string
-                                :continue true})
-            parsed (edn/read-string (:out result))]
+            result
+            (operator.state/run-process!
+             {:seon.operator.subprocess/argv
+              (into ["clj-kondo" "--lint"]
+                    (concat files ["--config" host-analysis-config]))
+              :seon.operator.subprocess/directory root
+              :seon.operator.subprocess/deadline-ms
+              host-analysis-deadline-ms})
+            parsed
+            (edn/read-string (:seon.operator.subprocess/output result))]
         (if (map? (:analysis parsed))
           {:seon.dev.changed-test/host-status :available
            :seon.dev.changed-test/host-graph
@@ -154,11 +154,18 @@
           {:seon.dev.changed-test/host-status :unavailable
            :seon.dev.changed-test/reason
            (str "clj-kondo returned no namespace analysis"
-                (when-not (str/blank? (:err result))
-                  (str ": " (str/trim (:err result)))))}))
+                (when-not
+                 (str/blank? (:seon.operator.subprocess/error-output result))
+                  (str ": "
+                       (str/trim
+                        (:seon.operator.subprocess/error-output result)))))}))
       (catch Exception error
-        {:seon.dev.changed-test/host-status :unavailable
-         :seon.dev.changed-test/reason (.getMessage error)}))))
+        (cond->
+         {:seon.dev.changed-test/host-status :unavailable
+          :seon.dev.changed-test/reason (.getMessage error)}
+          (:seon.error/kind (ex-data error))
+          (assoc :seon.error/kind (:seon.error/kind (ex-data error))
+                 :seon.error/data (ex-data error)))))))
 
 (defn- prune-logs! [directory]
   (doseq [path (->> (fs/list-dir directory "changed-*.log")
@@ -166,30 +173,6 @@
                     reverse
                     (drop 20))]
     (fs/delete-if-exists path)))
-
-(defn- await-process-exit
-  [^Process process timeout-ms]
-  (try
-    (.get (.onExit (.toHandle process))
-          (long timeout-ms)
-          TimeUnit/MILLISECONDS)
-    true
-    (catch TimeoutException _
-      false)))
-
-(defn- terminate!
-  "Signal one process owner and await its exact exit publication.
-
-   The launched `bin/test` process owns and awaits its runner JVM before it
-   exits, so changed-test never samples an incomplete descendant tree. The
-   time limit is only the loud backstop around that foreign process."
-  [^Process process]
-  (let [handle (.toHandle process)]
-    (.destroy handle)
-    (or (await-process-exit process termination-wait-ms)
-        (do
-          (.destroyForcibly handle)
-          (await-process-exit process termination-wait-ms)))))
 
 (defn failure-excerpts
   "Return bounded clojure.test failure blocks with expected and actual values."
@@ -214,34 +197,30 @@
                           (System/currentTimeMillis) "-"
                           (random-uuid) ".log"))
         _ (fs/create-dirs log-dir)
-        builder (doto (ProcessBuilder. ^java.util.List argv)
-                  (.directory (.toFile (fs/path root)))
-                  (.redirectErrorStream true)
-                  (.redirectOutput (.toFile log)))
-        _ (.putAll (.environment builder) environment)
-        process (.start builder)
-        shutdown-hook
-        (Thread. #(terminate! process)
-                 (str "seon-changed-test-cleanup-" (.pid process)))
-        runtime (Runtime/getRuntime)
-        _ (.addShutdownHook runtime shutdown-hook)
-        [completed? terminated?]
+        execution
         (try
-          (let [completed? (.waitFor process test-timeout-ms
-                                     TimeUnit/MILLISECONDS)]
-            [completed? (if completed? true (terminate! process))])
-          (catch InterruptedException error
-            (terminate! process)
-            (.interrupt (Thread/currentThread))
-            (throw error))
-          (catch Throwable error
-            (terminate! process)
-            (throw error))
-          (finally
-            (try
-              (.removeShutdownHook runtime shutdown-hook)
-              (catch IllegalStateException _))))
-        exit (if completed? (.exitValue process) 124)
+          {:seon.dev.changed-test/process
+           (operator.state/run-process!
+            {:seon.operator.subprocess/argv argv
+             :seon.operator.subprocess/directory root
+             :seon.operator.subprocess/extra-env environment
+             :seon.operator.subprocess/deadline-ms test-timeout-ms
+             :seon.operator.subprocess/merge-error? true
+             :seon.operator.subprocess/output-file (str log)})}
+          (catch clojure.lang.ExceptionInfo failure
+            (if (= :seon.operator.subprocess/deadline-exceeded
+                   (:seon.error/kind (ex-data failure)))
+              {:seon.dev.changed-test/deadline-error (ex-data failure)}
+              (throw failure))))
+        process-result (:seon.dev.changed-test/process execution)
+        deadline-error (:seon.dev.changed-test/deadline-error execution)
+        completed? (some? process-result)
+        terminated? (or completed?
+                        (true? (:seon.operator.subprocess/reaped?
+                                deadline-error)))
+        exit (if completed?
+               (:seon.operator.subprocess/exit process-result)
+               124)
         output (slurp (str log))
         summary (some->> (str/split-lines output)
                          (filter #(re-find #"^Ran [0-9]+ tests containing" %))
@@ -267,7 +246,9 @@
          :seon.dev.changed-test/failures failures
          :seon.dev.changed-test/log (str log)}]
     (prune-logs! log-dir)
-    result))
+    (cond-> result
+      deadline-error
+      (assoc :seon.dev.changed-test/deadline-error deadline-error))))
 
 (defn- run-gate!
   "Run the one gate over the named changed paths.

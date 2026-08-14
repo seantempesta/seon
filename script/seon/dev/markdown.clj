@@ -15,7 +15,8 @@
      (format-violations {::violations [...] ::max-length 800})
      (fix {::content \"...\"})"
   (:require [clojure.java.io :as io]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [seon.operator.state :as operator.state])
   (:import [java.io File]))
 
 ;;; ---------------------------------------------------------------------------
@@ -941,13 +942,13 @@
 
 (defn- run-git [repository-root arguments]
   (let [command (into ["git" "-C" repository-root] arguments)
-        process (.start (ProcessBuilder. ^java.util.List command))
-        output (future (slurp (.getInputStream process)))
-        error-output (future (slurp (.getErrorStream process)))
-        exit (.waitFor process)]
-    {::exit exit
-     ::output @output
-     ::error-output @error-output
+        result
+        (operator.state/run-process!
+         {:seon.operator.subprocess/argv command
+          :seon.operator.subprocess/deadline-ms 30000})]
+    {::exit (:seon.operator.subprocess/exit result)
+     ::output (:seon.operator.subprocess/output result)
+     ::error-output (:seon.operator.subprocess/error-output result)
      ::command command}))
 
 (defn- successful-git-output [repository-root arguments]

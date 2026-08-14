@@ -6,6 +6,7 @@
   the Babashka launcher and the JVM operator; it is the one atomic-record
   mechanism for roots, processes, stores, and clusters."
   (:require [babashka.fs :as fs]
+            [babashka.process :as process]
             [clojure.edn :as edn]
             [clojure.string :as str])
   (:import [java.io PushbackReader RandomAccessFile]
@@ -15,6 +16,113 @@
            [java.time Instant]
            [java.util Date UUID]
            [java.util.concurrent ExecutionException TimeUnit TimeoutException]))
+
+(def ^:private subprocess-cleanup-ms 10000)
+
+(declare process-start-instant matching-process-handle)
+
+(defn- subprocess-remaining-ms
+  [deadline-ns]
+  (max 0 (long (/ (- deadline-ns (System/nanoTime)) 1000000))))
+
+(defn- await-subprocess-value
+  [value deadline-ns timeout-value]
+  (if (future? value)
+    (deref value (subprocess-remaining-ms deadline-ns) timeout-value)
+    value))
+
+(defn- subprocess-identity
+  [^java.lang.ProcessHandle handle]
+  {:seon.boot/pid (.pid handle)
+   :seon.boot/start-instant (process-start-instant (.pid handle))})
+
+(defn- same-subprocess-handle
+  [{:seon.boot/keys [pid] :as process-identity}]
+  (let [candidate (matching-process-handle process-identity)]
+    (when (and candidate (= pid (.pid ^java.lang.ProcessHandle candidate)))
+      candidate)))
+
+(defn- terminate-subprocess!
+  [process-record identities]
+  (process/destroy-tree process-record)
+  (doseq [process-identity (reverse identities)]
+    (when-let [handle (same-subprocess-handle process-identity)]
+      (.destroyForcibly ^java.lang.ProcessHandle handle)))
+  (let [^Process child (:proc process-record)]
+    (try
+      (.get (.onExit child) subprocess-cleanup-ms TimeUnit/MILLISECONDS)
+      (catch TimeoutException _ nil)
+      (catch ExecutionException error (throw (.getCause error))))
+    (not (.isAlive child))))
+
+(defn run-process!
+  "Run one foreign argv process under one declared monotonic deadline."
+  [{argv :seon.operator.subprocess/argv
+    deadline-ms :seon.operator.subprocess/deadline-ms
+    directory :seon.operator.subprocess/directory
+    extra-env :seon.operator.subprocess/extra-env
+    input :seon.operator.subprocess/input
+    merge-error? :seon.operator.subprocess/merge-error?
+    output-file :seon.operator.subprocess/output-file
+    :as request}]
+  (when-not (and (vector? argv) (seq argv) (every? string? argv)
+                 (integer? deadline-ms) (pos? deadline-ms))
+    (throw
+     (ex-info "A foreign process requires argv and a positive deadline."
+              {:seon.error/kind
+               :seon.operator.subprocess/deadline-undeclared
+               :seon.operator.subprocess/request request})))
+  (let [deadline-ns (+ (System/nanoTime) (* 1000000 (long deadline-ms)))
+        options (cond-> {:out (if output-file :write :string)
+                         :err (if merge-error? :out :string)
+                         :shutdown process/destroy-tree}
+                  directory (assoc :dir directory)
+                  extra-env (assoc :extra-env extra-env)
+                  (some? input) (assoc :in input)
+                  output-file (assoc :out-file output-file))
+        process-record (process/process argv options)
+        ^Process child (:proc process-record)
+        root (.toHandle child)
+        identities
+        (with-open [descendant-stream (.descendants root)]
+          (into [(subprocess-identity root)]
+                (map subprocess-identity)
+                (iterator-seq (.iterator descendant-stream))))
+        timeout-value (Object.)
+        completed? (.waitFor child (subprocess-remaining-ms deadline-ns)
+                             TimeUnit/MILLISECONDS)
+        output (when completed?
+                 (if output-file
+                   ""
+                   (await-subprocess-value (:out process-record)
+                                           deadline-ns timeout-value)))
+        error-output (when completed?
+                       (if merge-error?
+                         ""
+                         (await-subprocess-value (:err process-record)
+                                                 deadline-ns timeout-value)))
+        phase (cond
+                (not completed?) :process-exit
+                (identical? timeout-value output) :stdout
+                (identical? timeout-value error-output) :stderr
+                :else nil)]
+    (if phase
+      (let [reaped? (terminate-subprocess! process-record identities)]
+        (throw
+         (ex-info
+          "A foreign process exceeded its declared deadline."
+          {:seon.error/kind :seon.operator.subprocess/deadline-exceeded
+           :seon.operator.subprocess/argv argv
+           :seon.operator.subprocess/deadline-ms deadline-ms
+           :seon.operator.subprocess/phase phase
+           :seon.operator.subprocess/pid (.pid child)
+           :seon.operator.subprocess/start-instant
+           (:seon.boot/start-instant (first identities))
+           :seon.operator.subprocess/reaped? reaped?})))
+      {:seon.operator.subprocess/argv argv
+       :seon.operator.subprocess/exit (.exitValue child)
+       :seon.operator.subprocess/output output
+       :seon.operator.subprocess/error-output error-output})))
 
 (defn- instant-ms
   [instant]
@@ -216,10 +324,10 @@
   5000)
 
 (def lifecycle-lock-timeout-ms
-  "The backstop deadline for a lifecycle lock wait.
+  "The legacy operator bound explicitly selected by internal callers.
 
-  Firing is a bug report — a lifecycle transition that holds one root's lock
-  this long is the defect, not the waiter."
+  Both acquisition and hold deadlines must still be named at every lock
+  acquisition. This value is only the shared decision those call sites name."
   900000)
 
 (defn root-lifecycle-lock-path
@@ -322,22 +430,70 @@
                 " the kernel already released its lock")))
     "a process that left no holder record beside the lock"))
 
+(defn- declared-lock-bound
+  [request bound-key]
+  (let [value (get request bound-key ::undeclared)]
+    (when-not (and (integer? value) (pos? value))
+      (throw
+       (ex-info
+        (str "The operator lifecycle lock requires a positive declared `"
+             bound-key "` before acquisition.")
+        {:seon.error/kind :seon.operator/lock-bound-undeclared
+         :seon.operator.lock/bound bound-key
+         :seon.operator.lock/value value
+         :seon.operator.lock/request request :seon.operator/lock-bound-undeclared true})))
+    value))
+
+(defn- hold-timeout-error
+  [holder expired-at failure]
+  (ex-info
+   (str "Timed out holding the operator lifecycle lock "
+        (:seon.operator.lock/path holder) " for `"
+        (:seon.operator.lock/command holder) "`.")
+   {:seon.error/kind :seon.operator/lock-hold-timeout
+    :seon.operator.lock/holder holder
+    :seon.operator.lock/expired-at expired-at
+    :seon.operator/lock-hold-timeout true}
+   failure))
+
+(defn- hold-deadline-thread
+  [holder-thread hold-timeout-ms expired-at]
+  (doto
+   (Thread.
+    (fn []
+      (try
+        (Thread/sleep (long hold-timeout-ms))
+        (reset! expired-at (Date.))
+        (.interrupt ^Thread holder-thread)
+        (catch InterruptedException _))))
+   (.setName (str "seon-lifecycle-lock-deadline-" (.threadId holder-thread)))
+   (.setDaemon true)
+   (.start)))
+
 (defn with-lifecycle-lock!
   "Run one lifecycle transition under a named kernel-owned file lock.
 
-  Waiting is bounded and loud: after `lifecycle-lock-announce-ms` the wait
-  prints the lock path, the recorded holder's process identity and command,
-  and how long it has waited; the deadline refusal names the same facts. The
-  deadline is a backstop whose firing is a bug report."
+  Acquisition and hold bounds are both required before the first lock attempt.
+  Waiting remains event-driven and loud. The hold deadline interrupts the
+  lock-owning thread, but custody stays fail-closed: the file lock is released
+  only after the transition is terminal, never while mutating work continues."
   [{path :seon.operator.lock/path
     command :seon.operator.lock/command
-    timeout-ms :seon.operator.lock/timeout-ms
-    :or {timeout-ms lifecycle-lock-timeout-ms}}
+    :as request}
    transition]
-  (fs/create-dirs (fs/parent path))
-  (let [started (System/currentTimeMillis)
-        deadline (+ started timeout-ms)
-        lock-key (str path)]
+  (let [wait-timeout-ms
+        (declared-lock-bound request :seon.operator.lock/wait-timeout-ms)
+        hold-timeout-ms
+        (declared-lock-bound request :seon.operator.lock/hold-timeout-ms)
+        started (System/currentTimeMillis)
+        deadline (+ started wait-timeout-ms)
+        lock-key (str path)
+        waiter (assoc (current-process-identity)
+                      :seon.operator.lock/path lock-key
+                      :seon.operator.lock/command (str command)
+                      :seon.operator.lock/waiting-since (Date. started)
+                      :seon.operator.lock/wait-timeout-ms wait-timeout-ms)]
+    (fs/create-dirs (fs/parent path))
     (loop [announced-at nil]
       (let [outcome
             (when (acquire-lock-slot! lock-key)
@@ -347,21 +503,44 @@
                              (release-lock-slot! lock-key)
                              (throw error)))]
                 (if held
-                  (try
-                    (write-edn! (lock-holder-path path)
-                                (assoc (current-process-identity)
-                                       :seon.operator.lock/path lock-key
-                                       :seon.operator.lock/command (str command)
-                                       :seon.operator.lock/acquired-at (Date.)))
-                    [::ran (transition)]
-                    (finally
-                      (delete-edn! (lock-holder-path path))
-                      ;; Closing the channel releases its FileLock. Babashka
-                      ;; permits FileChannel/close but intentionally does not
-                      ;; expose FileLock/release through SCI.
-                      (.close ^java.nio.channels.FileChannel (second held))
-                      (.close ^RandomAccessFile (first held))
-                      (release-lock-slot! lock-key)))
+                  (let [acquired-at (Date.)
+                        holder (assoc (current-process-identity)
+                                      :seon.operator.lock/path lock-key
+                                      :seon.operator.lock/command (str command)
+                                      :seon.operator.lock/acquired-at acquired-at
+                                      :seon.operator.lock/hold-timeout-ms
+                                      hold-timeout-ms
+                                      :seon.operator.lock/hold-deadline
+                                      (Date. (+ (.getTime acquired-at)
+                                                hold-timeout-ms)))
+                        expired-at (atom nil)
+                        holder-thread (Thread/currentThread)
+                        deadline-thread
+                        (hold-deadline-thread holder-thread
+                                              hold-timeout-ms expired-at)]
+                    (try
+                      (write-edn! (lock-holder-path path) holder)
+                      (let [result (transition)]
+                        (if-let [expired @expired-at]
+                          (do
+                            (Thread/interrupted)
+                            (throw (hold-timeout-error holder expired nil)))
+                          [::ran result]))
+                      (catch Throwable failure
+                        (if-let [expired @expired-at]
+                          (do
+                            (Thread/interrupted)
+                            (throw (hold-timeout-error holder expired failure)))
+                          (throw failure)))
+                      (finally
+                        (.interrupt ^Thread deadline-thread)
+                        (delete-edn! (lock-holder-path path))
+                        ;; Closing the channel releases its FileLock. Babashka
+                        ;; permits FileChannel/close but intentionally does not
+                        ;; expose FileLock/release through SCI.
+                        (.close ^java.nio.channels.FileChannel (second held))
+                        (.close ^RandomAccessFile (first held))
+                        (release-lock-slot! lock-key))))
                   (do
                     (release-lock-slot! lock-key)
                     nil))))]
@@ -375,11 +554,11 @@
                 (str "Timed out after " waited
                      " ms waiting for the operator lifecycle lock "
                      lock-key " held by " (holder-sentence path) ".")
-                {:seon.error/kind :seon.operator/lifecycle-lock-timeout
+                {:seon.error/kind :seon.operator/lock-acquisition-timeout
                  :seon.operator.lock/path lock-key
-                 :seon.operator.lock/command (str command)
                  :seon.operator.lock/waited-ms waited
-                 :seon.operator.lock/holder (lock-holder path)})))
+                 :seon.operator.lock/holder (lock-holder path)
+                 :seon.operator.lock/waiter waiter :seon.operator/lock-acquisition-timeout true})))
             (let [announce?
                   (if announced-at
                     (<= lifecycle-lock-repeat-ms (- now announced-at))
@@ -393,10 +572,12 @@
               (recur (if announce? now announced-at)))))))))
 
 (defn- with-control-lock*
-  [repository-root transition]
+  [repository-root command transition]
   (with-lifecycle-lock!
    {:seon.operator.lock/path (control-lock-path repository-root)
-    :seon.operator.lock/command "installation control transition"}
+    :seon.operator.lock/command command
+    :seon.operator.lock/wait-timeout-ms lifecycle-lock-timeout-ms
+    :seon.operator.lock/hold-timeout-ms lifecycle-lock-timeout-ms}
    transition))
 
 (defn with-control-lock!
@@ -406,8 +587,11 @@
   it, so only work that genuinely spans roots — reaping dead roots, writing a
   claim in the shared control directory — belongs here. One root's own
   lifecycle transitions take that root's `root-lifecycle-lock-path` instead."
-  [repository-root transition]
-  (with-control-lock* repository-root transition))
+  [repository-root lock-request transition]
+  (with-lifecycle-lock!
+   (assoc lock-request
+          :seon.operator.lock/path (control-lock-path repository-root))
+   transition))
 
 (defn claim-root-under-lock!
   "Publish a root claim while the caller holds the control lifecycle lock."
@@ -496,6 +680,7 @@
   [repository-root managed-root ephemeral-owner cluster-name]
   (with-control-lock*
     repository-root
+    "publish managed root claim"
     #(claim-root-under-lock! repository-root managed-root
                              ephemeral-owner cluster-name)))
 
@@ -512,6 +697,7 @@
   [repository-root managed-root]
   (with-control-lock*
     repository-root
+    "mark managed root created"
     #(mark-root-created-under-lock! repository-root managed-root)))
 
 (defn write-process-claim!
@@ -986,6 +1172,7 @@
   [repository-root managed-root]
   (with-control-lock*
     repository-root
+    "record managed root footprint"
     #(record-footprint-under-lock! repository-root managed-root)))
 
 (defn mark-root-destroyed-under-lock!
@@ -1003,4 +1190,5 @@
   [repository-root managed-root result]
   (with-control-lock*
     repository-root
+    "mark managed root destroyed"
     #(mark-root-destroyed-under-lock! repository-root managed-root result)))
