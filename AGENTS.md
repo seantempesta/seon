@@ -313,8 +313,11 @@ Clojure — at design time, not only before the edit. The compact invariants:
 **An entity IS its attributes, values, and refs — never a stamped kind.**
 Do not add `:type`/`:kind` discriminator attributes: query attribute
 presence to find entities, use a unique identity attribute to identify one,
-follow refs to relate one (`:seon.entity/id-attr` enumerates identity
-attributes; it is not a kind stamp). We accrete functionality with fully
+follow refs to relate one. Renderer discovery catalogues identity attributes
+present in actual datoms; identity derives from installed
+`:db.unique/identity` with registry-alias chasing; and a schema bridge asking
+entity-versus-envelope uses `storable-attribute-in?`. No map-level entity
+property or projected identity mirror exists. We accrete functionality with fully
 Malli-spec'ed, code-validatable understanding of every shape — a kind stamp
 freezes taxonomy where attributes would have kept growing. The narrow
 exception: a genuinely bounded, closed set of states (a disposition, a

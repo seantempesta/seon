@@ -959,7 +959,7 @@
         "a propertyless Malli map keeps its first entry")
     (is (= expected
            (committed-test-attributes
-            (into [:map {:seon.db/entity true}] entries)))
+            (into [:map {:seon.render/ai 'seon.test/render-ai}] entries)))
         "an optional properties map does not change the extracted entries")))
 
 (deftest a-disposition-is-read-only-when-it-really-is-one
