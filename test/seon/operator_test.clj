@@ -12,7 +12,8 @@
             [seon.operator :as operator]
             [seon.operator.runtime :as runtime]
             [seon.operator.state :as operator.state]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support])
+  (:import [java.util.concurrent CountDownLatch]))
 
 (defn- caught
   [f]
@@ -33,6 +34,41 @@
   {:seon.cluster.loop/cluster
    {:seon.env/environment
     (test-support/environment cluster-name connection)}})
+
+(deftest cluster-address-admission-is-derived-from-schema-and-filesystem
+  (let [root (owned-root)
+        cluster-root (str (io/file root "data" "clusters"))]
+    (try
+      (doseq [cluster-name ["." ".." "nested/name" "nested\\name"]]
+        (let [result (operator/start!
+                      {:seon.boot/cluster-name cluster-name
+                       :seon.boot/root cluster-root})]
+          (is (= :seon.boot/refused (:seon.error/kind result)))
+          (is (= cluster-name
+                 (get-in result
+                         [:seon.boot/offense
+                          :seon.boot/value
+                          :seon.boot/cluster-name])))))
+      (is (= "store"
+             (:seon.boot/cluster-name
+              (cluster/resolve-bootstrap
+               {:seon.boot/cluster-name "store"
+                :seon.boot/root cluster-root}))))
+      (.mkdirs (io/file cluster-root))
+      (let [collision (io/file cluster-root "occupied")]
+        (spit collision "not a cluster")
+        (let [result (operator/start!
+                      {:seon.boot/cluster-name "occupied"
+                       :seon.boot/root cluster-root})]
+          (is (= :seon.boot/refused (:seon.error/kind result)))
+          (is (= :seon.cluster/non-cluster-target
+                 (get-in result [:seon.boot/offense :seon.boot/rule])))
+          (is (= (.toString (.toPath collision))
+                 (get-in result
+                         [:seon.boot/offense :seon.boot/cluster-dir])))
+          (is (= "not a cluster" (slurp collision)))))
+      (finally
+        (test-support/delete-recursively! root)))))
 
 (deftest development-connection-selects-the-sole-or-named-cluster
   (test-support/with-database
@@ -277,14 +313,20 @@
   (let [repository-root (owned-root)
         managed-root (str (io/file repository-root "managed"))
         cluster-root (io/file managed-root "data" "clusters")
+        store-dir (io/file managed-root "data" "store")
+        store-lock (io/file managed-root "data" "store.lock")
+        blob-staging (io/file managed-root "data" "blob-staging")
         sentinel-root (io/file repository-root "sentinel")
         sentinel (io/file sentinel-root "survives.txt")
         link (io/file cluster-root "scratch-link")]
     (try
       (.mkdirs (io/file cluster-root "default" "logs"))
-      (.mkdirs (io/file cluster-root "store"))
+      (.mkdirs store-dir)
+      (.mkdirs blob-staging)
       (spit (io/file cluster-root "default" "logs" "seon.log") "evidence")
-      (spit (io/file cluster-root "store" "object.ksv") "stored")
+      (spit (io/file store-dir "object.ksv") "stored")
+      (spit store-lock "locked")
+      (spit (io/file blob-staging "pending") "staged")
       (.mkdirs sentinel-root)
       (spit sentinel "alive")
       (java.nio.file.Files/createSymbolicLink
@@ -310,6 +352,9 @@
         (is (true? (:seon.operator.cleanup/complete? result)))
         (is (empty? (:seon.operator.cleanup/remaining result)))
         (is (false? (.exists cluster-root)))
+        (is (false? (.exists store-dir)))
+        (is (false? (.exists store-lock)))
+        (is (false? (.exists blob-staging)))
         (is (= "alive" (slurp sentinel))))
       (finally
         (test-support/delete-recursively! repository-root)))))
@@ -342,7 +387,7 @@
         :seon.boot/cluster-name cluster-name})
       (let [operation-store
             (store/open-store!
-             {:seon.store/dir (str (io/file cluster-root "store"))})
+             {:seon.store/dir (str (io/file managed-root "data" "store"))})
             instance {:seon.boot/config
                       {:seon.boot/cluster-name cluster-name}}
             sweeps (atom [3 0])]
@@ -634,6 +679,53 @@
              (:seon.operator.collect/verification-pass-swept result)))
         (is (true? (:seon.operator.collect/complete? result))))
       (finally
+        (test-support/delete-recursively! repository-root)))))
+
+(deftest scheduled-collection-yields-the-installation-control-lock
+  (let [repository-root (owned-root)
+        managed-root (.getCanonicalPath
+                      (io/file repository-root "managed"))
+        collection-entered (CountDownLatch. 1)
+        release-collection (CountDownLatch. 1)
+        collect-calls (atom 0)]
+    (try
+      (with-redefs
+       [registry/collect!
+        (fn [_ _]
+          (when (= 1 (swap! collect-calls inc))
+            (.countDown collection-entered)
+            (test-support/await-event!
+             release-collection
+             :release-held-collection))
+          0)]
+        (let [collection
+              (future
+                (operator/collect!
+                 {:seon.operator/repository-root repository-root
+                  :seon.operator/managed-root managed-root}))]
+          (try
+            (test-support/await-event!
+             collection-entered
+             :collection-holds-its-root-lock)
+            (let [claim
+                  (operator.state/with-lifecycle-lock!
+                   {:seon.operator.lock/path
+                    (operator.state/control-lock-path repository-root)
+                    :seon.operator.lock/command "test root claim"
+                    :seon.operator.lock/timeout-ms 1000}
+                   #(operator.state/claim-root-under-lock!
+                     repository-root managed-root nil "during-collection"))]
+              (is (= #{"during-collection"}
+                     (:seon.operator.claim/clusters claim))))
+            (finally
+              (.countDown release-collection)))
+          (let [result
+                (test-support/await-event!
+                 collection
+                 :collection-completes-after-release)]
+            (is (true? (:seon.operator.collect/complete? result))))))
+      (finally
+        (.countDown release-collection)
         (test-support/delete-recursively! repository-root)))))
 
 (deftest collection-dry-run-returns-the-bounded-physical-inventory

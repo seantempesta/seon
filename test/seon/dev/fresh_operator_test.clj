@@ -968,7 +968,7 @@
            "110.837 s pool: complete publication JVM plus named fork/refork, start, readiness, and store read-back."}
   init-owns-current-source-and-dormant-cluster-lifecycle
   (let [root (fresh-root)
-        store-dir (str (io/file root "data" "clusters" "store"))
+        store-dir (str (io/file root "data" "store"))
         name "init-command"
         published-commit (atom nil)
         current-digest
@@ -1142,7 +1142,7 @@
            "94.568 s pool: destructive reset performs complete republication and default refork in a real JVM."}
   source-less-root-reset-republishes-and-reforks-default
   (let [root (fresh-root)
-        store-dir (str (io/file root "data" "clusters" "store"))]
+        store-dir (str (io/file root "data" "store"))]
     (try
       (let [reset (run-operator root "reset" "--force")]
         (is (= 0 (::exit reset)) (::output reset))
@@ -1161,7 +1161,7 @@
 
 (deftest reset-discards-only-enumerated-unreadable-claims-after-the-flock
   (let [root (fresh-root)
-        store-dir (str (io/file root "data" "clusters" "store"))
+        store-dir (str (io/file root "data" "store"))
         exact (io/file root "claims" "unreadable.edn")
         survivor (io/file root "claims" "survivor.edn")
         errors [{:seon.fresh-operator/path (.getCanonicalPath exact)

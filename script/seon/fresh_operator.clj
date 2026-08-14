@@ -115,9 +115,13 @@
   [root name]
   (fs/path (cluster-root root) name))
 
+(defn- store-directory
+  [root]
+  (fs/path root "data" "store"))
+
 (defn- store-lock-path
   [root]
-  (operator.state/store-lock-path (fs/path (cluster-root root) "store")))
+  (operator.state/store-lock-path (store-directory root)))
 
 (defn- advertisement-path
   [root name]
@@ -616,7 +620,7 @@
       (require 'seon.cluster.registry 'seon.cluster.store)
       (let [store#
             (seon.cluster.store/open-store!
-             {:seon.store/dir ~(str (fs/path (cluster-root root) "store"))})]
+             {:seon.store/dir ~(str (store-directory root))})]
         (try
           (println ~roster-result-prefix
                    (pr-str (seon.cluster.registry/roster store#)))
@@ -625,7 +629,7 @@
 
 (defn- offline-roster
   [root]
-  (if-not (fs/directory? (fs/path (cluster-root root) "store"))
+  (if-not (fs/directory? (store-directory root))
     #{}
     (let [process
           (start-child-jvm!
@@ -2007,7 +2011,7 @@
                     `(seon.cluster/refresh-source! ~cluster-root))
                  ~cold-store
                  (seon.cluster.store/open-store!
-                  {:seon.store/dir ~(str (fs/path cluster-root "store"))})]
+                  {:seon.store/dir ~(str (store-directory root))})]
              (try
                (~(named-init-form root name force?)
                 ~cold-store

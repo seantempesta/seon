@@ -64,12 +64,26 @@
     @output
     (.getPath target)))
 
+(declare delete-recursively!)
+
+(defn- replace-directory!
+  [authority source target]
+  (when (.exists (io/file target))
+    (fs/delete-recursively! (str authority) (str target)))
+  (clone-directory! source target))
+
 (defn populate-published-root!
   "Populate `root` from the runner's immutable base, or publish standalone."
   [root]
   (if-let [base (System/getProperty "seon.test.published-base")]
-    (let [root (clone-directory! base root)]
-      (cluster.export/reidentify! (io/file root "store"))
+    (let [root (clone-directory! base root)
+          source-store (io/file base "data" "store")
+          store (:seon.boot/store-dir
+                 (cluster/resolve-bootstrap {:seon.boot/root root}))
+          authority (or (System/getProperty "seon.operator.root") root)]
+      (replace-directory! authority source-store store)
+      (cluster.export/reidentify!
+       store)
       root)
     (do
       (cluster/refresh-source! (str root))
@@ -79,8 +93,9 @@
   "Populate an operator root from the runner's immutable current-src base."
   [root]
   (if-let [base (System/getProperty "seon.test.published-base")]
-    (let [store (io/file root "data" "clusters" "store")]
-      (clone-directory! (io/file base "store") store)
+    (let [source-store (io/file base "data" "store")
+          store (io/file root "data" "store")]
+      (replace-directory! root source-store store)
       (cluster.export/reidentify! store)
       (str root))
     (do
@@ -92,7 +107,10 @@
   [root branch body]
   (let [root (str root)]
     (populate-published-root! root)
-    (let [opened (store/open-store! {:seon.store/dir (str (io/file root "store"))})]
+    (let [store-dir
+          (:seon.boot/store-dir
+           (cluster/resolve-bootstrap {:seon.boot/root root}))
+          opened (store/open-store! {:seon.store/dir store-dir})]
     (try
       (registry/branch! {:seon.store/store opened
                          :seon.cluster.registry/from source/current-branch

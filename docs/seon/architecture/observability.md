@@ -221,7 +221,8 @@ They do not store a display selection or route entity.
 The operator separately reports process identities, branches, ports, readiness,
 logs, and per-root disk footprint. Before creating a managed root, store, log,
 or cluster, it publishes one atomic EDN claim under the installation control
-root outside `data/clusters`. That catalog records the canonical root, store,
+root outside the managed `data/clusters`, `data/store`, `data/store.lock`, and
+`data/blob-staging` siblings. That catalog records the canonical root, store,
 clusters, durable/ephemeral disposition, creator, and exact process generations;
 status derives liveness from `(pid, start-instant)` without opening Datahike.
 The claim survives the process and managed tree it describes. These facts govern

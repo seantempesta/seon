@@ -54,7 +54,8 @@
   "Install packaged `current-src` rows when an operator root is empty."
   {:malli/schema [:=> [:cat :seon.boot/root] :seon.source/current]}
   [root]
-  (let [store-dir (str (io/file root "store"))
+  (let [store-dir (:seon.boot/store-dir
+                   (cluster/resolve-bootstrap {:seon.boot/root root}))
         held-store (store/open-store! {:seon.store/dir store-dir})]
     (try
       (or

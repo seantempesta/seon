@@ -259,8 +259,10 @@ Root owns the maintenance portfolio—database and blob reclamation, footprint
 inspection, dead-root cleanup, log retention, process census, and related
 repair—as ordinary root tasks. Scheduled work and explicit operator work invoke
 the same owners. Explicit reset is authorization to remove the complete managed
-`data/clusters` tree and succeeds only when its returned cleanup result reports
-no residual paths.
+layout—`data/clusters`, `data/store`, `data/store.lock`, and
+`data/blob-staging`—while preserving the installation control authority at
+`data/operator`; it succeeds only when its returned cleanup result reports no
+residual managed paths.
 
 ## Crash recovery
 

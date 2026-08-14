@@ -396,7 +396,8 @@
         request
         invocation-id (subs (uuid-text) 0 8)
         cluster-name (str "bootstrap-drive-" invocation-id)
-        process-root (str "tmp/bootstrap-drives/" invocation-id "/clusters")
+        process-root (str "tmp/bootstrap-drives/" invocation-id
+                          "/data/clusters")
         timeout-ms (or remote-timeout-ms (* run-cap 240000))]
     (when-not (and (pos-int? runs) (pos-int? run-cap))
       (throw (ex-info "Drive runs and run cap must be positive integers."

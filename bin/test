@@ -436,7 +436,7 @@ fi
 
 echo "bin/test: preparing one shared published test base"
 launch_runner clojure \
-  "-J-Dseon.operator.root=$run_root" \
+  "-J-Dseon.operator.root=$shared_published_base" \
   "-J-Dseon.test.root=$run_root" \
   "-J-Dseon.test.source-root=$source_root" \
   -M:test -m seon.test.runner --prepare-base "$shared_published_base"

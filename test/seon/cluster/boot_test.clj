@@ -31,6 +31,7 @@
             [seon.db :as db]
             [seon.fn :as seon.fn]
             [seon.flow :as seon.flow]
+            [seon.fs :as fs]
             [seon.operator :as operator]
             [seon.program :as program]
             [seon.render.transcript :as transcript]
@@ -56,6 +57,11 @@
     (.mkdirs (io/file root))
     root))
 
+(defn- derived-store-dir
+  [root]
+  (:seon.boot/store-dir
+   (cluster/resolve-bootstrap {:seon.boot/root (str root)})))
+
 (def ^:dynamic *published-root* nil)
 
 (defn- published-root
@@ -74,7 +80,7 @@
   (let [root (bare-root)
         opened
         (store/open-store!
-         {:seon.store/dir (str (io/file root "store"))
+         {:seon.store/dir (derived-store-dir root)
           :seon.config.db/keep-history? keep-history?})]
     (store/release-store! opened)
     (cluster/refresh-source! root)
@@ -86,14 +92,30 @@
     (when-not (= shared-root target)
       (test-support/delete-recursively! path))))
 
+(defn- delete-process-store!
+  [root]
+  (let [store-dir (io/file (derived-store-dir root))
+        authority (or (System/getProperty "seon.operator.root")
+                      (.getCanonicalPath (io/file root)))]
+    (doseq [path [store-dir
+                  (io/file (store/lock-file (.getPath store-dir)))
+                  (io/file (.getParentFile store-dir) "blob-staging")]]
+      (when (.exists path)
+        (fs/delete-recursively! authority (.getPath path))))))
+
 (defn- with-published-root
   [body]
-  (binding [*published-root* (atom nil)]
-    (try
-      (body)
-      (finally
-        (when-let [root @*published-root*]
-          (test-support/delete-recursively! root))))))
+  (let [process-root (bare-root)]
+    (binding [*published-root* (atom nil)]
+      (try
+        (delete-process-store! process-root)
+        (body)
+        (finally
+          (when-let [root @*published-root*]
+            (delete-process-store! root)
+            (test-support/delete-recursively! root))
+          (when (.exists (io/file process-root))
+            (test-support/delete-recursively! process-root)))))))
 
 (use-fixtures :each with-published-root)
 
@@ -193,7 +215,7 @@
 (defn- seed-incompatible-sovereign!
   [root cluster-name]
   (let [opened (store/open-store!
-                {:seon.store/dir (str (io/file root "store"))})
+                {:seon.store/dir (derived-store-dir root)})
         branch (registry/cluster-branch cluster-name)]
     (try
       (registry/branch! {:seon.store/store opened
@@ -378,6 +400,8 @@
     (let [config (cluster/resolve-bootstrap {})]
       (is (= "default" (:seon.boot/cluster-name config)))
       (is (= "data/clusters" (:seon.boot/root config)))
+      (is (= (.getCanonicalPath (io/file "data" "store"))
+             (:seon.boot/store-dir config)))
       (is (= "127.0.0.1" (:seon.boot/prepl-host config)))
       (is (= 0 (:seon.boot/prepl-port config))))))
 
@@ -619,7 +643,7 @@
   (let [root (published-root)
         cluster-name "retry-stop"
         original-release-store! store/release-store!
-        root-store-key (.getCanonicalPath (io/file root "store"))
+        root-store-key (derived-store-dir root)
         retry-release-calls (atom 0)]
     (try
       (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
@@ -1105,7 +1129,7 @@
                          "(ns sample.b)\n(defn value [] 20)\n")
           (cluster/refresh-source! root [b-path])
           (let [opened (store/open-store!
-                        {:seon.store/dir (str (io/file root "store"))})]
+                        {:seon.store/dir (derived-store-dir root)})]
             (try
               (let [db (d/branch-as-db (:seon.store/connection-object opened)
                                        source/current-branch)]
@@ -1243,7 +1267,8 @@
   (let [root (bare-root)]
     (try
       ;; a FILE where the store directory belongs corrupts layer 1
-      (spit (io/file root "store") "not a store")
+      (.mkdirs (.getParentFile (io/file (derived-store-dir root))))
+      (spit (derived-store-dir root) "not a store")
       (let [degraded
             (try
               (cluster/start! {:seon.boot/cluster-name "wreck"
@@ -1370,7 +1395,7 @@
           :seon.operator/managed-root managed-root
           :seon.boot/cluster-name cluster-name})
         (let [opened (store/open-store!
-                      {:seon.store/dir (str (io/file cluster-root "store"))})]
+                      {:seon.store/dir (derived-store-dir cluster-root)})]
           (try
             (registry/ensure-cluster!
              {:seon.store/store opened

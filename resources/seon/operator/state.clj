@@ -2,8 +2,8 @@
   "Protected, non-database lifecycle records for managed operator roots.
 
   Claims live in the installation control root, outside every managed
-  `data/clusters` tree.  This namespace is deliberately available to both the
-  Babashka launcher and the JVM operator; it is the one atomic-record
+  cluster/store/blob tree.  This namespace is deliberately available to both
+  the Babashka launcher and the JVM operator; it is the one atomic-record
   mechanism for roots, processes, stores, and clusters."
   (:require [babashka.fs :as fs]
             [clojure.edn :as edn]
@@ -184,7 +184,7 @@
     (boolean deleted?)))
 
 (defn control-root
-  "The one installation-owned authority outside `data/clusters`."
+  "The one installation-owned authority outside managed cluster/store data."
   [repository-root]
   (fs/path (canonical-path repository-root) "data" "operator"))
 
@@ -467,7 +467,7 @@
                  :seon.operator.claim/ephemeral?
                  (boolean (:seon.operator.claim/ephemeral? previous))
                  :seon.operator.claim/superseded-at claimed-at}))
-        store-path (str (fs/path root "data" "clusters" "store"))
+        store-path (str (fs/path root "data" "store"))
         clusters (cond-> (set (:seon.operator.claim/clusters previous))
                    cluster-name (conj cluster-name))
         claim (merge previous
@@ -974,9 +974,9 @@
                   (throw (ex-info "The managed root has no external claim."
                                   {:seon.operator.claim/root
                                    (canonical-path managed-root)})))
-        cluster-data (fs/path managed-root "data" "clusters")
-        observation (footprint (if (fs/exists? cluster-data)
-                                 cluster-data
+        managed-data (fs/path managed-root "data")
+        observation (footprint (if (fs/exists? managed-data)
+                                 managed-data
                                  managed-root))]
     (write-edn! path
                 (assoc claim :seon.operator.claim/footprint observation))

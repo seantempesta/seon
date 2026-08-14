@@ -62,7 +62,8 @@
             [seon.schema.form :as schema.form]
             [seon.search :as search])
   (:import [java.nio.charset StandardCharsets]
-           [java.nio.file CopyOption Files StandardCopyOption]
+           [java.nio.file CopyOption Files InvalidPathException LinkOption Paths
+            StandardCopyOption]
            [java.util.concurrent Executor]))
 
 ;;; ---------------------------------------------------------------------------
@@ -102,6 +103,38 @@
 
 (schema/register-core-predicate! 'seon.cluster/socket-server?
                                  socket-server?)
+
+(defn cluster-name?
+  "True when `value` is one valid relative path segment.
+
+  This is the ruled 2026-08-13 input narrowing: cluster names contain no path
+  separator and are neither `.` nor `..`, so cluster-path derivation cannot
+  escape or alias the cluster root."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (and (string? value)
+       (not (empty? value))
+       (not (#{"." ".."} value))
+       (not (str/includes? value "/"))
+       (not (str/includes? value "\\"))
+       (try
+         (let [path (Paths/get value (make-array String 0))]
+           (and (not (.isAbsolute path))
+                (= 1 (.getNameCount path))))
+         (catch InvalidPathException _
+           false))))
+
+(def cluster-name-generator
+  (gen/one-of
+   [(gen/fmap (fn [characters] (apply str characters))
+              (gen/vector
+               (gen/elements
+                (seq "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"))
+               1 48))
+    (gen/elements ["default" "alpha.beta"])]))
+
+(schema/register-core-predicate! 'seon.cluster/cluster-name?
+                                 cluster-name?)
 
 ;;; Each generation makes a FRESH UNBOUND server socket. One shared
 ;;; delayed socket bound a real process port that no cluster owned and
@@ -482,7 +515,7 @@
                 :seon.boot/explanation
                 (schema/explain-candidate-value forms schema-key value)}))))
 
-(declare cluster-paths)
+(declare cluster-paths operator-root)
 
 (defn resolve-bootstrap
   "Resolve overrides into one complete bootstrap configuration.
@@ -490,8 +523,8 @@
   \"default\" (just a name, nothing special), root \"data/clusters\",
   prepl-host \"127.0.0.1\", prepl-port 0 (ephemeral — the advertisement
   carries the real port), log-dir derived as <root>/<name>/logs,
-  store-dir derived as <root>/store — the PROCESS-root store every
-  cluster branches from.
+  store-dir derived as <operator-root>/data/store — the process-root
+  store every cluster branches from.
   Refuses (throws ex-info {:seon.error/kind :seon.boot/refused ...}) when a
   declared key has an invalid value. Extra keys remain available for
   accretion."
@@ -511,7 +544,8 @@
                     :seon.boot/prepl-port 0}
           base (merge defaults overrides)
           derived-store-dir
-          (str (io/file (:seon.boot/root base) "store"))
+          (str (io/file (operator-root (:seon.boot/root base))
+                        "data" "store"))
           derived-log-dir
           (:seon.boot/log-dir
            (cluster-paths (:seon.boot/root base)
@@ -590,6 +624,18 @@
   (doseq [path [(:seon.boot/cluster-dir paths)
                 (:seon.boot/log-dir config)]]
     (.mkdirs (io/file path))))
+
+(defn- require-cluster-target!
+  [paths]
+  (let [target (.toPath (io/file (:seon.boot/cluster-dir paths)))
+        no-follow (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])]
+    (when (and (Files/exists target no-follow)
+               (not (Files/isDirectory target no-follow)))
+      (refused!
+       "The cluster path exists and is not a cluster directory."
+       {:seon.boot/rule ::non-cluster-target
+        :seon.boot/cluster-dir (str target)})))
+  paths)
 
 (defn- operator-root
   [cluster-root]
@@ -2629,6 +2675,7 @@
                             (System/getProperty "user.dir"))
         managed-root (operator-root (:seon.boot/root config))
         claim-here? (not= "true" (System/getProperty "seon.operator.claimed"))
+        _ (require-cluster-target! paths)
         _ (when claim-here?
             (operator.state/claim-root! repository-root managed-root nil
                                         cluster-name))

@@ -268,27 +268,32 @@
              :seon.operator/low-space?
              (boolean (low-space? observation request))))))
 
-(defn- existing-children
-  [path]
-  (let [file (io/file path)]
-    (if (.isDirectory file)
-      (mapv #(.getCanonicalPath ^java.io.File %) (or (.listFiles file) []))
-      [])))
+(defn- managed-data-paths
+  [managed-root]
+  (let [data-root (io/file managed-root "data")]
+    (mapv #(.getCanonicalPath (io/file data-root %))
+          ["clusters" "store" "store.lock" "blob-staging"])))
 
 (defn- cleanup-root-under-lock!
   [repository-root managed-root]
   (let [managed-root (.getCanonicalPath (io/file managed-root))
-          target (.getCanonicalPath (io/file managed-root "data" "clusters"))
-          before (state/footprint target)
-          present? (.exists (io/file target))
-          _ (when present? (fs/delete-recursively! managed-root target))
-          remaining (existing-children target)
-          complete? (and (empty? remaining) (not (.exists (io/file target))))
+          target (.getCanonicalPath (io/file managed-root "data"))
+          paths (managed-data-paths managed-root)
+          present (filterv #(.exists (io/file %)) paths)
+          removed-file-bytes
+          (reduce + 0
+                  (map #(get (state/footprint %)
+                             :seon.operator.footprint/file-bytes)
+                       present))
+          _ (doseq [path present]
+              (fs/delete-recursively! managed-root path))
+          remaining (filterv #(.exists (io/file %)) paths)
+          complete? (empty? remaining)
           result {:seon.operator.cleanup/root managed-root
                   :seon.operator.cleanup/target target
-                  :seon.operator.cleanup/removed (if present? [target] [])
+                  :seon.operator.cleanup/removed present
                   :seon.operator.cleanup/removed-file-bytes
-                  (:seon.operator.footprint/file-bytes before)
+                  removed-file-bytes
                   :seon.operator.cleanup/remaining remaining
                   :seon.operator.cleanup/complete? complete?}]
       (state/mark-root-destroyed-under-lock!
@@ -501,7 +506,7 @@
 (defn- store-dir
   [managed-root]
   (.getCanonicalPath
-   (io/file managed-root "data" "clusters" "store")))
+   (io/file managed-root "data" "store")))
 
 (defn- valid-store?
   [value]
@@ -827,26 +832,33 @@
           (incomplete-collection! base-result failure))))))
 
 (defn collect!
-  "Collect or dry-run one managed store."
+  "Collect or dry-run one managed store.
+
+  Collection is one root's maintenance, so it holds that root's lifecycle
+  lock rather than the installation-wide control lock. A slow writer-side
+  collection therefore cannot prevent another lifecycle operation from
+  publishing its root claim."
   {:malli/schema
    [:=> [:cat :seon.operator.collect/request]
     [:or :seon.operator.collect/result :seon.error/value]]}
-  [{repository-root :seon.operator/repository-root
-    managed-root :seon.operator/managed-root
+  [{managed-root :seon.operator/managed-root
     dry-run? :seon.operator.collect/dry-run?}]
   (attempt
-   #(state/with-control-lock!
-     repository-root
-     (fn []
-       (let [managed-root (state/canonical-path managed-root)
-             [operation-store release?]
-             (acquire-operation-store! managed-root nil)]
-         (try
-           (if (true? dry-run?)
-             (dry-run-under-lock! managed-root operation-store)
-             (collect-under-lock! managed-root operation-store))
-           (finally
-             (when release? (store/release-store! operation-store)))))))))
+   #(let [managed-root (state/canonical-path managed-root)]
+      (state/with-lifecycle-lock!
+       {:seon.operator.lock/path
+        (state/root-lifecycle-lock-path managed-root)
+        :seon.operator.lock/command "collect managed store"}
+       (fn []
+         (let [[operation-store release?]
+               (acquire-operation-store! managed-root nil)]
+           (try
+             (if (true? dry-run?)
+               (dry-run-under-lock! managed-root operation-store)
+               (collect-under-lock! managed-root operation-store))
+             (finally
+               (when release?
+                 (store/release-store! operation-store))))))))))
 
 (defn- refork-under-lock!
   [{managed-root :seon.operator/managed-root

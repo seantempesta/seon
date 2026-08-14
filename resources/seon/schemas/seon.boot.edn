@@ -11,7 +11,16 @@
              [:seon.render.web/port
               {:optional true}
               :seon.render.web/port]],
-            :cluster-name [:string {:min 1}],
+            :cluster-name
+            [:and
+             {:description
+              "Ruled input narrowing (2026-08-13): a cluster name is one valid relative path segment, with no separator and no dot traversal."}
+             [:string {:min 1}]
+             [:fn
+              {:error/message
+               "must be one valid relative path segment with no separator or dot traversal"
+               :gen/gen seon.cluster/cluster-name-generator}
+              seon.cluster/cluster-name?]],
             :config
             [:map
              [:seon.boot/cluster-name :seon.boot/cluster-name]
