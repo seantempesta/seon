@@ -2,6 +2,7 @@
   "Protected JVM implementation of foreground shell execution."
   (:require [babashka.fs :as fs]
             [babashka.process :as process]
+            [seon.await :as await]
             [seon.blob :as blob]
             [seon.effect :as effect]
             [seon.fs.jvm]
@@ -109,12 +110,31 @@
      :seon.shell.jvm/result result}))
 
 (defn- task-result
-  [{thread :seon.shell.jvm/thread result :seon.shell.jvm/result}]
-  (.join ^Thread thread)
-  (let [terminal @result]
-    (if-let [error (:seon.shell.jvm/error terminal)]
-      (throw error)
-      (:seon.shell.jvm/value terminal))))
+  [{thread :seon.shell.jvm/thread result :seon.shell.jvm/result}
+   effective member]
+  (let [terminal
+        (await/await!
+         {:seon.await/bound
+          {:seon.await/config-attribute :seon.config.eval/time-limit-ms
+           :seon.await/config-value
+           (:seon.config.eval/time-limit-ms effective)}
+          :seon.await/diagnostic
+          {:seon.error/diagnostic-layer :shell
+           :seon.error/diagnostic-operation ::capture-completion
+           :seon.error/diagnostic-member member
+           :seon.error/diagnostic-expected ::task-result
+           :seon.error/diagnostic-offending ::pending
+           :seon.error/diagnostic-evidence
+           {:seon.shell.jvm/thread-name (.getName ^Thread thread)
+            :seon.shell.jvm/thread-id (.threadId ^Thread thread)}}
+          :seon.await/blocking-deref result})]
+    (if (:seon.error/kind terminal)
+      (do
+        (.interrupt ^Thread thread)
+        terminal)
+      (if-let [error (:seon.shell.jvm/error terminal)]
+        (throw error)
+        (:seon.shell.jvm/value terminal)))))
 
 (defn- capture-task
   [connection name ^InputStream input]
@@ -298,11 +318,15 @@
 
 (defn- finish-evidence
   [connection stdout-task stderr-task effective]
-  (let [stdout (task-result stdout-task)
-        stderr (task-result stderr-task)]
-    {:my.shell/stdout (output-descriptor connection stdout effective)
-     :my.shell/stderr (output-descriptor connection stderr effective)
-     :seon.blob/staged-writes [stdout stderr]}))
+  (let [stdout (task-result stdout-task effective ::stdout)]
+    (if (:seon.error/kind stdout)
+      stdout
+      (let [stderr (task-result stderr-task effective ::stderr)]
+        (if (:seon.error/kind stderr)
+          stderr
+          {:my.shell/stdout (output-descriptor connection stdout effective)
+           :my.shell/stderr (output-descriptor connection stderr effective)
+           :seon.blob/staged-writes [stdout stderr]})))))
 
 (defn- execute
   [request effective cwd]
@@ -328,12 +352,16 @@
                                      effective))]
         (if (= :exited disposition)
           (let [evidence (finish-evidence connection stdout-task stderr-task
-                                          effective)]
-            (task-result input-task)
-            (merge {:my.shell/argv argv
-                    :my.shell/cwd (:my.shell/cwd request)
-                    :my.shell/exit (.exitValue child)}
-                   evidence))
+                                          effective)
+                input (task-result input-task effective ::stdin)]
+            (cond
+              (:seon.error/kind evidence) evidence
+              (:seon.error/kind input) input
+              :else
+              (merge {:my.shell/argv argv
+                      :my.shell/cwd (:my.shell/cwd request)
+                      :my.shell/exit (.exitValue child)}
+                     evidence)))
           ;; Both limits reap the tree before this frame goes away — the
           ;; handler owns its resource, so no arm of this function can return
           ;; while its child is still alive. The `:interrupted` disposition is
@@ -344,21 +372,26 @@
                              (:seon.config.shell/termination-grace-ms
                               effective))
             (let [evidence (finish-evidence connection stdout-task stderr-task
-                                            effective)]
-              (try
-                (task-result input-task)
-                (catch Throwable _))
-              (assoc
-               (flat-error
-                :my.shell/time-limit
-                (if (= :evaluation-limit disposition)
-                  (str "The foreign process was terminated when its "
-                       "evaluation reached its time limit.")
-                  "The foreign process exceeded its configured time limit.")
-                (merge {:my.shell/argv argv
-                        :my.shell/cwd (:my.shell/cwd request)}
-                       evidence))
-               :seon.effect/disposition :interrupted)))))
+                                            effective)
+                  input
+                  (try
+                    (task-result input-task effective ::stdin)
+                    (catch Throwable _ nil))]
+              (cond
+                (:seon.error/kind evidence) evidence
+                (:seon.error/kind input) input
+                :else
+                (assoc
+                 (flat-error
+                  :my.shell/time-limit
+                  (if (= :evaluation-limit disposition)
+                    (str "The foreign process was terminated when its "
+                         "evaluation reached its time limit.")
+                    "The foreign process exceeded its configured time limit.")
+                  (merge {:my.shell/argv argv
+                          :my.shell/cwd (:my.shell/cwd request)}
+                         evidence))
+                 :seon.effect/disposition :interrupted))))))
       (catch InterruptedException interrupted
         (terminate-tree! process-record
                          (:seon.config.shell/termination-grace-ms effective))

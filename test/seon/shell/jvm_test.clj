@@ -22,6 +22,10 @@
   []
   (deref (ns-resolve 'seon.shell.jvm 'run)))
 
+(defn- shell-private
+  [function-name]
+  (deref (ns-resolve 'seon.shell.jvm function-name)))
+
 (defn- temp-tree
   []
   (let [base (io/file "tmp/my-shell-test" (str (random-uuid)))]
@@ -118,6 +122,31 @@
   [field]
   (let [separator (.indexOf ^String field "=")]
     [(subs field 0 separator) (subs field (inc separator))]))
+
+(deftest capture-task-completion-is-bounded-and-interrupts-only-that-task
+  (let [started (promise)
+        interrupted (promise)
+        task
+        ((shell-private 'virtual-task)
+         "seon-shell-never-completes-"
+         (fn []
+           (deliver started true)
+           (try
+             @(promise)
+             (catch InterruptedException failure
+               (deliver interrupted true)
+               (throw failure)))))
+        _ (is (= true (deref started 1000 ::not-started)))
+        result
+        ((shell-private 'task-result)
+         task
+         {:seon.config.eval/time-limit-ms 20}
+         ::stdout-capture)]
+    (is (= :seon.await/backstop-fired (:seon.error/kind result)))
+    (is (= ::stdout-capture
+           (get-in result [:seon.error/data
+                           :seon.error/diagnostic-member])))
+    (is (= true (deref interrupted 1000 ::not-interrupted)))))
 
 (deftest binary-output-is-byte-exact-on-both-sides-of-the-inline-ceiling
   (with-temp-tree
