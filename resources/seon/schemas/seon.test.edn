@@ -1,6 +1,7 @@
 #:seon.test{:ns :seon.db/ref,
             :source :string,
             :subject :seon.db/ref,
+            :pending-subject :string,
             :usage :boolean,
             :pass-count [:int {:min 0}],
             :fail-count [:int {:min 0}],
@@ -57,6 +58,8 @@
              [:seon.fn/keywords {:optional true} :seon.fn/keywords]
              [:seon.test/usage {:optional true} :seon.test/usage]
              [:seon.test/subject {:optional true} :seon.test/subject]
+             [:seon.test/pending-subject {:optional true}
+              :seon.test/pending-subject]
              [:seon.test/pass-count
               {:optional true}
               :seon.test/pass-count]

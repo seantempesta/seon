@@ -1077,7 +1077,13 @@
            database
            (:seon.cluster.run.form/source form)
            (:seon.cluster.run.form/ns form)
-           (:seon.program/row request))]
+           (:seon.program/row request))
+          subject (:seon.test/subject program-row)
+          subject-present?
+          (or (nil? subject)
+              (:db/id (db/pull database [:db/id] subject)))
+          form-facts (cond-> form-facts
+                       (not subject-present?) (dissoc :seon.test/subject))]
       (cond-> (assoc request ::form-facts
                      (assoc form-facts :db/id (:db/id form)))
         program-row (assoc :seon.program/row program-row)))
@@ -1274,7 +1280,8 @@
     false))
 
 (def ^:private program-relation-attributes
-  [:seon.fn/calls :seon.fn/keywords :seon.test/subject])
+  [:seon.fn/calls :seon.fn/keywords
+   :seon.test/subject :seon.test/pending-subject])
 
 (defn- relation-assertions
   [entity row]
@@ -1285,7 +1292,24 @@
          (map (fn [used] [:db/add entity :seon.fn/keywords used])
               (:seon.fn/keywords row))
          (when-let [subject (:seon.test/subject row)]
-           [[:db/add entity :seon.test/subject subject]]))))
+           [[:db/add entity :seon.test/subject subject]])
+         (when-let [pending-subject (:seon.test/pending-subject row)]
+           [[:db/add entity :seon.test/pending-subject pending-subject]]))))
+
+(defn- pending-subject-resolution-tx
+  [db identity identity-value existing]
+  (when (= :seon.fn/sym identity)
+    (let [target (or (:db/id existing) (str "sym:" identity-value))]
+      (into []
+            (mapcat (fn [test-eid]
+                      [[:db/retract test-eid :seon.test/pending-subject
+                        identity-value]
+                       [:db/add test-eid :seon.test/subject target]]))
+            (db/q '[:find [?test ...]
+                    :in $ ?subject
+                    :where
+                    [?test :seon.test/pending-subject ?subject]]
+                  db identity-value)))))
 
 (defn- row-tx
   "Validate and exact-upsert one reader-produced durable declaration."
@@ -1329,7 +1353,22 @@
           [identity identity-value] (program/row-identity row)
           namespace-ref (or (:seon.fn/ns row)
                             (:seon.test/ns row))
-          existing (when identity (db/pull db '[*] [identity identity-value]))]
+          existing (when identity (db/pull db '[*] [identity identity-value]))
+          subject-symbol
+          (or (second (:seon.test/subject row))
+              (:seon.test/pending-subject row))
+          row
+          (if (and (= :seon.test/sym identity) subject-symbol)
+            (if (:db/id (db/pull db [:db/id]
+                                 [:seon.fn/sym subject-symbol]))
+              (-> row
+                  (dissoc :seon.test/pending-subject)
+                  (assoc :seon.test/subject
+                         [:seon.fn/sym subject-symbol]))
+              (-> row
+                  (dissoc :seon.test/subject)
+                  (assoc :seon.test/pending-subject subject-symbol)))
+            row)]
       (when (and namespace-ref
                  (not (:db/id (db/pull db [:db/id] namespace-ref))))
         (refuse! `receipt-settle-call ::program-namespace-missing request))
@@ -1410,7 +1449,9 @@
                  :else
                  (program/exact-replacement-tx existing base-row))
                (relation-assertions [identity identity-value]
-                                    relation-row)))))))
+                                    relation-row)
+               (pending-subject-resolution-tx
+                db identity identity-value existing)))))))
 
 (defn- def-owned-attributes
   "Attributes declared on one agent def, derived from its entity schema."

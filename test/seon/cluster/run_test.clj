@@ -37,6 +37,7 @@
             [clojure.test.check.properties :as prop]
             [seon.db :as db]
             [seon.cluster.run :as run]
+            [seon.fn :as seon.fn]
             [seon.schema]
             [seon.test-support :as test-support]))
 
@@ -72,6 +73,68 @@
 
 (defn- with-model-database [body]
   (test-support/with-database body))
+
+(deftest test-first-subjects-resolve-when-the-function-arrives
+  (with-model-database
+    (fn [connection]
+      (let [namespace-name 'fixture.pending
+            test-symbol "fixture.pending/target-test"
+            function-symbol "fixture.pending/target"
+            now (java.util.Date. 1785000000000)
+            settle-row!
+            (fn [run-id agent-id row]
+              (db/transact!
+               connection
+               [{:seon.cluster.agent/id agent-id}
+                {:seon.cluster.run/id run-id
+                 :seon.cluster.run/agent
+                 [:seon.cluster.agent/id agent-id]
+                 :seon.cluster.run/opened-at now}])
+              (db/transact!
+               connection
+               (run/receipt-start-tx
+                {::run/id run-id
+                 :seon.cluster.eval/ordinal 0
+                 :seon.cluster.eval/at now}))
+              (db/transact!
+               connection
+               (run/receipt-settle-tx
+                {::run/id run-id
+                 :seon.cluster.eval/ordinal 0
+                 :seon.cluster.eval/result-edn "nil"
+                 :seon.program/row row})))]
+        (db/transact! connection [{:seon.ns/name namespace-name}])
+        (settle-row!
+         "pending-test-run" "pending-test-agent"
+         {:seon.test/sym test-symbol
+          :seon.test/ns [:seon.ns/name namespace-name]
+          :seon.test/source "(clojure.test/deftest target-test)"
+          :seon.schema.admission/source :agent
+          :seon.test/subject [:seon.fn/sym function-symbol]})
+        (let [pending (db/pull @connection '[*]
+                               [:seon.test/sym test-symbol])]
+          (is (= function-symbol (:seon.test/pending-subject pending)))
+          (is (nil? (:seon.test/subject pending)))
+          (is (= [test-symbol]
+                 (seon.fn/gate-set @connection function-symbol))))
+        (settle-row!
+         "pending-function-run" "pending-function-agent"
+         {:seon.fn/sym function-symbol
+          :seon.fn/ns [:seon.ns/name namespace-name]
+          :seon.fn/source
+          "(defn ^{:malli/schema [:=> [:cat] :int]} target [] 1)"
+          :seon.fn/arglists "([])"
+          :seon.fn/private? false
+          :seon.fn/spec "[:=> [:cat] :int]"})
+        (let [resolved (db/pull @connection
+                                '[:seon.test/pending-subject
+                                  {:seon.test/subject [:seon.fn/sym]}]
+                                [:seon.test/sym test-symbol])]
+          (is (nil? (:seon.test/pending-subject resolved)))
+          (is (= function-symbol
+                 (get-in resolved [:seon.test/subject :seon.fn/sym])))
+          (is (= [test-symbol]
+                 (seon.fn/gate-set @connection function-symbol))))))))
 
 ;; Deterministic clock: every generated time is an offset from t0.
 (def ^:private t0-ms 1785000000000)
