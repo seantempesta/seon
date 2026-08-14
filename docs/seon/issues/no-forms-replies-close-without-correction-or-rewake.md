@@ -59,6 +59,26 @@ But `src/seon/cluster/loop.clj:1337-1338` sends every reply-reader error to
 `fail!`. The agent had only its generated opening run and this failed task run;
 there was no subsequent correction run, message, or re-wake.
 
+## Context ablation — 2026-08-14
+
+The paid flash-only ablation in
+`docs/prds/sci-execution-runtime/research/context-ablation-2026-08-14.md`
+isolated the preventative prompt factors with the exact captured bytes:
+
+- The `/ai` capture already contained the complete balanced fenced `greet`
+  `defn`; only HTML had cut it mid-form. An identical-byte complete-demo
+  control still returned no forms. Broken teaching was not the cause.
+- Appending exactly 123 characters at the tail — `Your reply is read as forms
+  and evaluated in your namespace. Prose alone runs nothing; include at least
+  one Clojure form.` — produced one reader-accepted form in both calls (2/2).
+- Retaining 31.48% of the toolkit span with no tail reminder also produced
+  forms twice (2/2), but one reply ran away into repetitive exploration and
+  the retained repeat emitted 16 forms without completing the task.
+
+Weak recency is therefore the cleanest demonstrated cause and prevention.
+Toolkit volume contributes, but trimming it does not teach the terminal
+prose-only edge and produced much less disciplined replies.
+
 ## Open design boundary — no ruling in this note
 
 The evidence establishes that terminal closure is insufficient, but does not
@@ -95,3 +115,6 @@ derived obligations and bounded provider-turn contract.
   and diagnostic retained.
 - A genuinely prose-complete conversational task remains representable without
   manufacturing a Clojure form.
+- The final task-adjacent medium instruction states the prose-only edge
+  explicitly; a recurring flash ablation proves it elicits a reader-accepted
+  form without relying on the remote opening demonstration.

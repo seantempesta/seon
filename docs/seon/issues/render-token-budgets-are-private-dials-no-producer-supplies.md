@@ -156,3 +156,21 @@ requery identity, and first rewrites any real `…` to `...`, destroying the
 elision vocabulary on the way through. Fixing the budget dial without deleting
 `soft-clip` leaves the namespace page still clipping agent context outside the
 owner.
+
+## Behavioral ablation — 2026-08-14
+
+The exact Attempt 5 prompt carried a 32,159-character toolkit span. The paid
+ablation retained the complete medium demonstration, task-turn suffix, and the
+task-relevant `my.message`, `my.plan`, agent-namespace, and `seon.db` blocks:
+10,125 toolkit characters, or 31.48%. The whole prompt fell from 34,955 to
+12,921 characters and from 11,476 billed input tokens to 4,188 on the retained
+repeat.
+
+With no tail medium reminder, both trimmed calls emitted reader-accepted
+Clojure forms where the full prompt and identical-byte demo control emitted
+none. This is behavioral evidence that namespace bulk affects medium execution,
+not only spend. It is not evidence that trimming alone is sufficient: the
+first trimmed reply was a runaway survey, and the repeat emitted 16 exploratory
+forms without completing the task. The ranked fix remains to enforce the
+existing namespace budget and API-first fit here, while the reply-medium owner
+states the prose-only edge at the task tail.
