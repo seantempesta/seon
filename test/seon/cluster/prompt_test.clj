@@ -7,6 +7,7 @@
             [seon.ai.tokens :as tokens]
             [seon.cluster :as cluster]
             [seon.config :as config]
+            [seon.context :as context]
             [seon.db :as db]
             [seon.cluster.agent :as agent]
             [seon.cluster.prompt :as prompt]
@@ -143,8 +144,25 @@
                    [?agent :seon.cluster.agent/id "walker"]
                    [?agent :seon.cluster.agent/blocks ?block]]
                  @connection)]
-       (is (= text (:seon.context.contribution/text contribution)))
-       (is (= 1 (count contributions)))
+       (is (= text
+              (apply str
+                     (map :seon.context.contribution/text contributions))))
+       (is (= (count entries) (count contributions)))
+       (is (= (range (count contributions))
+              (map :seon.context.contribution/position contributions)))
+       (is (= (get-in rendered
+                      [:seon.ai.tokens/budget-report
+                       :seon.ai.tokens/estimated])
+              (reduce +
+                      (map :seon.context.contribution/tokens
+                           contributions)))
+           "per-entry costs reconcile exactly to the checked whole prompt")
+       (is (every?
+            (fn [entry]
+              (= (context/contribution-hash
+                  (:seon.context.contribution/text entry))
+                 (:seon.context.contribution/hash entry)))
+            contributions))
        (is (= :walk (:seon.render.block/name contribution)))
        (is (seq entries))
        (is (every? (comp seq :seon.render.history/bytes) entries))
@@ -339,6 +357,10 @@
                        (swap! distances conj distance)
                        {:seon.cluster.prompt/text
                         (if (= 1 distance) "fits nine" (apply str (repeat 40 "x")))
+                        :seon.render.history/segments
+                        [(if (= 1 distance)
+                           "fits nine"
+                           (apply str (repeat 40 "x")))]
                         :seon.db/db (:seon.db/db render-request)}))]
        (with-redefs [render/acquire-context! acquire]
          (let [compacted (prompt/prompt @connection
@@ -353,6 +375,8 @@
                      (fn [_ render-request]
                        (swap! distances conj (:seon.render/distance render-request))
                        {:seon.cluster.prompt/text (apply str (repeat 40 "x"))
+                        :seon.render.history/segments
+                        [(apply str (repeat 40 "x"))]
                         :seon.db/db (:seon.db/db render-request)})]
          (let [refusal (prompt/prompt @connection
                                       (request connection context-channel))]

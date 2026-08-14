@@ -148,13 +148,36 @@
          (str "Prompt request is missing required input " (pr-str missing) ".")
          "Prompt request violates :seon.cluster.prompt/request.")))))
 
-(defn- walk-contribution
-  [text report]
-  {:seon.render.block/name :walk
-   :seon.context.contribution/position 0
-   :seon.context.contribution/text text
-   :seon.context.contribution/hash (context/contribution-hash text)
-   :seon.context.contribution/tokens (:seon.ai.tokens/estimated report)})
+(defn- history-contributions
+  "Price the exact retained entry segments whose concatenation is the prompt.
+
+   Token estimates are differences between cumulative character estimates.
+   That gives every separator to exactly one entry and guarantees the ordered
+   decomposition sums to the same calibrated whole-prompt estimate."
+  [segments calibration]
+  (loop [remaining segments
+         position 0
+         characters 0
+         estimated 0
+         contributions []]
+    (if-let [segment (first remaining)]
+      (let [next-characters (+ characters (count segment))
+            next-estimated
+            (tokens/estimate-of-characters next-characters calibration)]
+        (recur
+         (next remaining)
+         (inc position)
+         next-characters
+         next-estimated
+         (conj contributions
+               {:seon.render.block/name :walk
+                :seon.context.contribution/position position
+                :seon.context.contribution/text segment
+                :seon.context.contribution/hash
+                (context/contribution-hash segment)
+                :seon.context.contribution/tokens
+                (- next-estimated estimated)})))
+      contributions)))
 
 (defn- acquire-within-budget
   [database request budget calibration agent-id]
@@ -167,7 +190,9 @@
       (if (:seon.error/kind acquired)
         acquired
         (let [text (:seon.cluster.prompt/text acquired)
-              report (tokens/budget-report text budget calibration)]
+              segments (:seon.render.history/segments acquired)
+              report (tokens/budget-report text budget calibration)
+              contributions (history-contributions segments calibration)]
           (case (:seon.ai.tokens/verdict report)
         ;; ADMITTED, BUT NOT SILENTLY: the point estimate fits and the
         ;; calibration's own worst observed miss does not. Saying
@@ -181,13 +206,13 @@
                   "calibration's own accuracy: "
                   (tokens/report-sentence report)))
             {:seon.cluster.prompt/text text
-             :seon.context/contributions [(walk-contribution text report)]
+             :seon.context/contributions contributions
              :seon.ai.tokens/budget-report report
              :seon.db/db (:seon.db/db acquired)})
 
         :seon.ai.tokens/within
         {:seon.cluster.prompt/text text
-         :seon.context/contributions [(walk-contribution text report)]
+         :seon.context/contributions contributions
          :seon.ai.tokens/budget-report report
          :seon.db/db (:seon.db/db acquired)}
 

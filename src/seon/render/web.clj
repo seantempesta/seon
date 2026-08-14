@@ -1095,9 +1095,17 @@
      entries
      observations)))
 
+(defn- history-segments
+  [entries]
+  (mapv (fn [position entry]
+          (str (when (pos? position) "\n\n")
+               (:seon.render.history/bytes entry)))
+        (range)
+        entries))
+
 (defn- history-text
   [entries]
-  (str/join "\n\n" (map :seon.render.history/bytes entries)))
+  (apply str (history-segments entries)))
 
 (defn- context-pass
   [state message]
@@ -1110,6 +1118,7 @@
         call-id (root-call-id :seon.render/ai agent-id)]
     (if (and (seq entries) (empty? candidates))
       [state {:seon.cluster.prompt/text (history-text entries)
+              :seon.render.history/segments (history-segments entries)
               :seon.db/db database}]
       (let [captured-calls (atom {})
             render-request
@@ -1141,6 +1150,7 @@
                       (assoc-in [::ai-calls agent-id] retained-calls)
                       (assoc-in [::ai-entries agent-id] entries))]
         [state {:seon.cluster.prompt/text (history-text entries)
+                :seon.render.history/segments (history-segments entries)
                 :seon.db/db database}]))))
 
 (defn render-step

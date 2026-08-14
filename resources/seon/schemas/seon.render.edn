@@ -1,6 +1,8 @@
 #:seon.render{:acquired-context
               [:map
                [:seon.cluster.prompt/text :seon.cluster.prompt/text]
+               [:seon.render.history/segments
+                [:vector {:min 1} :seon.cluster.prompt/text]]
                [:seon.db/db :seon.db/database-value]],
               :ai [:or :qualified-symbol :string],
               :call-request
