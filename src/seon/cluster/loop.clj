@@ -684,8 +684,10 @@
   Evaluation settlement commits its receipt, disposition, deliveries, the
   agent's defs, and close together. An agent evaluation error stays in that receipt;
   it never enters the durable core-fault family. A phase failure before
-  evaluation has no ordinal and therefore commits zero receipts. A refused
-  terminal transaction takes one bounded refusal branch; success is the
+  evaluation has no ordinal and therefore commits zero receipts. A gate failure
+  after evaluation carries the started receipt's ordinal and settles that
+  receipt through the failure arm; it is never presented as an evaluation. A
+  refused terminal transaction takes one bounded refusal branch; success is the
   returned transaction report, never a value constructed before commit."
   {:malli/schema
    [:=>
@@ -737,6 +739,47 @@
         (assoc refusal
                ::outcome refused
                ::refused-outcome outcome)))))
+
+(defn- settle-gate-outcome!
+  "Settle the typed union returned by the post-evaluation install gate."
+  [{cluster ::cluster
+    now ::now
+    agent-id :seon.cluster.agent/id
+    run-id :seon.cluster.run/id
+    ordinal :seon.cluster.run.form/ordinal
+    gate-outcome ::gate-outcome
+    trigger :seon.cluster.message/trigger}]
+  (if (:seon.error/kind gate-outcome)
+    (settle! {::cluster cluster
+              ::now now
+              :seon.cluster.agent/id agent-id
+              :seon.cluster.run/id run-id
+              :seon.cluster.run.form/ordinal ordinal
+              :seon.error/value gate-outcome})
+    (let [problem
+          (phase
+           #(problems/form-problem
+             @(:seon.db/connection cluster)
+             {:seon.cluster.run/id run-id
+              :seon.cluster.run.form/ordinal ordinal
+              :seon.sci.eval/evaluation gate-outcome}))]
+      (if (= ::phase-failed (:seon.error/kind problem))
+        (settle! {::cluster cluster
+                  ::now now
+                  :seon.cluster.agent/id agent-id
+                  :seon.cluster.run/id run-id
+                  :seon.cluster.run.form/ordinal ordinal
+                  :seon.error/value problem})
+        (settle!
+         (cond->
+          {::cluster cluster
+           ::now now
+           :seon.cluster.agent/id agent-id
+           :seon.cluster.run/id run-id
+           :seon.cluster.run.form/ordinal ordinal
+           :seon.sci.eval/evaluation gate-outcome}
+           problem (assoc :seon.problems/form-problem problem)
+           trigger (assoc :seon.cluster.message/trigger trigger)))))))
 
 (defn- attempt-id
   "One model attempt's identity: derived, so nothing allocates a uuid.
@@ -1607,49 +1650,30 @@
                                       :seon.cluster.run.form/ordinal ordinal
                                       :seon.error/value evaluation})
                             (report :error (inc ran)))
-                          (let [evaluation
+                          (let [gate-outcome
                                 (phase
                                  #(gate-function-install
                                    cluster base-ctx agent-id receipt-id
                                    form evaluation))
-                                problem
-                                (phase
-                                 #(problems/form-problem
-                                   @connection
-                                   {:seon.cluster.run/id run-id
-                                    :seon.cluster.run.form/ordinal ordinal
-                                    :seon.sci.eval/evaluation evaluation}))
                                 terminal
-                                (if (= ::phase-failed
-                                       (:seon.error/kind problem))
-                                  (settle! {::cluster cluster
-                                            ::now now
-                                            :seon.cluster.agent/id agent-id
-                                            :seon.cluster.run/id run-id
-                                            :seon.cluster.run.form/ordinal ordinal
-                                            :seon.error/value problem})
-                                  (settle!
-                                   (cond->
-                                    {::cluster cluster
-                                     ::now now
-                                     :seon.cluster.agent/id agent-id
-                                     :seon.cluster.run/id run-id
-                                     :seon.cluster.run.form/ordinal ordinal
-                                     :seon.sci.eval/evaluation evaluation}
-                                     problem
-                                     (assoc :seon.problems/form-problem problem)
-                                     trigger
-                                     (assoc :seon.cluster.message/trigger
-                                            trigger))))
+                                (settle-gate-outcome!
+                                 {::cluster cluster
+                                  ::now now
+                                  :seon.cluster.agent/id agent-id
+                                  :seon.cluster.run/id run-id
+                                  :seon.cluster.run.form/ordinal ordinal
+                                  ::gate-outcome gate-outcome
+                                  :seon.cluster.message/trigger trigger})
                                 outcome (::outcome terminal)
                                 refused? (some? (::refused-outcome terminal))
-                                failure (::failure terminal)
+                                failure (or (::failure terminal)
+                                            (:seon.error/value terminal))
                                 settled (::settled terminal)
                                 undisposed? (::undisposed? terminal)
                                 _
-                                (when (and (:seon.program/row evaluation)
+                                (when (and (:seon.program/row gate-outcome)
                                            (not refused?))
-                                  (let [row (:seon.program/row evaluation)
+                                  (let [row (:seon.program/row gate-outcome)
                                         db-after (:db-after outcome)]
                                     (sci.eval/install-row!
                                      {:seon.sci.eval/ctx base-ctx
@@ -1675,7 +1699,7 @@
                               undisposed? (report :closed ran)
                               next-ordinal
                               (recur next-ordinal ran
-                                     (or (:seon.sci.eval/ending-ns evaluation)
+                                     (or (:seon.sci.eval/ending-ns gate-outcome)
                                          evaluation-namespace))
                               :else (report :released ran))))))))))))))))
 

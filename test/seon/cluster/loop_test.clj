@@ -1358,6 +1358,63 @@
                      (assoc :seon.cluster.eval/interrupted-at now)))
                  receipts)))}))
 
+(deftest install-gate-failure-settles-the-started-receipt-as-a-failure
+  (with-database
+    (fn [connection]
+      (commit-run! connection
+                   {:held? true
+                    :planned? true})
+      (db/transact!
+       connection
+       (run/receipt-start-tx
+        {:seon.cluster.run/id "run-1"
+         :seon.cluster.eval/ordinal 0
+         :seon.cluster.eval/at now}))
+      (let [cluster {:seon.db/connection connection
+                     :seon.cluster.run/process process
+                     :seon.sci.admit/caps
+                     (config/result-caps (config/defaults))
+                     :seon.config.error/recurrence-limit 3}
+            gate-refusal
+            ((private-loop-fn 'phase)
+             #(throw
+               (ex-info "install gate broke after evaluation"
+                        {:seon.test/install-gate-broke true})))
+            terminal
+            (with-redefs [problems/form-problem
+                          (fn [& _]
+                            (throw
+                             (ex-info
+                              "a gate refusal must not re-enter evaluation"
+                              {:seon.test/fake-evaluation true})))]
+              ((private-loop-fn 'settle-gate-outcome!)
+               {:seon.cluster.loop/cluster cluster
+                :seon.cluster.loop/now now
+                :seon.cluster.agent/id "agent-a"
+                :seon.cluster.run/id "run-1"
+                :seon.cluster.run.form/ordinal 0
+                :seon.cluster.loop/gate-outcome gate-refusal}))
+            receipt
+            (db/q '[:find (pull ?receipt [*]) .
+                    :in $ ?run-id ?ordinal
+                    :where
+                    [?run :seon.cluster.run/id ?run-id]
+                    [?receipt :seon.cluster.eval/run ?run]
+                    [?receipt :seon.cluster.eval/ordinal ?ordinal]]
+                  @connection "run-1" 0)
+            stored-value (edn/read-string
+                          (:seon.cluster.eval/result-edn receipt))]
+        (is (= :seon.cluster.loop/phase-failed
+               (:seon.error/kind gate-refusal)
+               (get-in terminal [:seon.error/value :seon.error/kind])
+               (:seon.error/kind stored-value)))
+        (is (= "install gate broke after evaluation"
+               (:seon.cluster.eval/error receipt)))
+        (is (inst? (:seon.cluster.run/closed-at
+                    (db/pull @connection
+                             [:seon.cluster.run/closed-at]
+                             [:seon.cluster.run/id "run-1"]))))))))
+
 ;;; The F2 sealed suite — kill-positions-per-agent-test, seed 2026072827.
 ;;; ORACLE: the crash-walk rows 1-10, re-grounded — `next-agent-work`
 ;;; derives the same expected situation per row under the AGENT-SCOPED
