@@ -1,10 +1,30 @@
 ---
 type: prd
 status: active
+current-state: "2026-08-13: genuinely open future work; prerequisites landed, green-to-install remains unbuilt"
 tags: [prd, testing, agent, runtime]
 ---
 
 # Accretion testing: green-to-install
+
+## Current state — 2026-08-13
+
+This remains genuinely open future work. The enabling test graph has landed:
+`src/seon/fn.clj:670-711` derives direct, transitive, and explicit-subject
+reachability, and `src/seon/test/selection.clj:123-175` uses the same edges for
+the current changed-test gate. Candidate isolation has also landed at the
+publication seam (`src/seon/sci/eval.clj:723-835`).
+
+The green-to-install decision itself has not landed. The running turn settles
+the durable program row and then immediately installs it from `db-after`
+(`src/seon/cluster/loop.clj:1493-1524`); neither that path nor the transaction
+owner at `src/seon/cluster/run.clj:1526-1594` runs the dependent tests first.
+The terminal receipt contract records evaluation result/error/read evidence
+but no gate set, generated-case seed, case count, or gate outcomes
+(`src/seon/cluster/run.clj:1533-1560`). The current program authority still
+rules the dependent-tests quality gate at
+`docs/prds/sci-execution-runtime/plan/README.md:606-616`, so this PRD remains
+the open mechanism detail rather than an absorbed or superseded authority.
 
 ## Decision
 
