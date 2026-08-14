@@ -140,3 +140,19 @@ budget mechanism is needed. \`src/seon/render.clj\` was owned by the concurrent
 \`ns-page-perf\` lane, so this lane did not edit it. The live root before/after
 and prospective \`seon.db\` walk measurements remain acceptance evidence for
 that integration.
+
+## Census cross-reference — 2026-08-14
+
+The outward-bounding census
+([context-clipping-census-2026-08-14](../../prds/sci-execution-runtime/research/context-clipping-census-2026-08-14.md))
+records this note as the missing-FACT half of the §2.4 law, beside a
+missing-HONESTY half. `seon.render.ns`'s budgeted assembly is a MODEL member of
+the compliant pattern in shape — `:337-341,470-478,587-609` emit a real
+`:seon.print/elided` node with `:seon.print/omitted` and
+`:seon.render.data/total`, and honest prose at `:364` — yet twelve lines away
+the same file's private `soft-clip` (`:234-240`, called at `:393`/`:409` with a
+hard `78`) cuts docstrings with an invented `[clipped]` token, no count, no
+requery identity, and first rewrites any real `…` to `...`, destroying the
+elision vocabulary on the way through. Fixing the budget dial without deleting
+`soft-clip` leaves the namespace page still clipping agent context outside the
+owner.

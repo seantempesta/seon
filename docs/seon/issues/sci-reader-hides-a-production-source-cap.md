@@ -44,3 +44,15 @@ fallback number decides production admission.
   prose recovery without the bound.
 - No schema resource or shipped config fact declares
   `:seon.sci.reader/max-chars`.
+
+## Census cross-reference — 2026-08-14
+
+Member #12 of the outward-bounding census
+([context-clipping-census-2026-08-14](../../prds/sci-execution-runtime/research/context-clipping-census-2026-08-14.md)).
+This is not an isolated dial: the census found the same private-constant shape
+at `src/seon/flow.clj:1093-1096` (bare `160`), `src/seon/ai.clj:706-708,1386-1387`
+(bare `500`, twice), `src/my/note.clj:22,266` (bare `50`), `src/my/message.clj:22`
+(bare `160`), and `src/seon/render/ns.clj:234-240,393,409` (bare `78`). The
+proposed class regression derives the member list from the program graph rather
+than maintaining it by hand, so this issue's fix should land as part of that
+class rather than as a one-site repair.

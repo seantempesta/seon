@@ -72,3 +72,34 @@ emits an elision value carrying the omitted count, path, and requery
 identity. A recurring proof asserts that a unit's rendered content is either
 fully visible or accompanied by an elision value — never silently cut by
 `overflow: hidden`.
+
+## Census cross-reference — 2026-08-14
+
+This note is member #13 of the outward-bounding census
+([context-clipping-census-2026-08-14](../../prds/sci-execution-runtime/research/context-clipping-census-2026-08-14.md)).
+Three siblings in the SAME stylesheet hide content the same way and want the
+same fix in one pass, so a repair that touches only `.seon-rank-rail` /
+`.seon-rank-deep` leaves the class alive:
+
+- `resources/public/css/input.css:473-477` — `.seon-card-compact`,
+  `max-height: 10rem; overflow: hidden;` (the comment states outright that it
+  clips). Any agent-authored card face past 10rem is unreachable in the
+  compact/grid presentation.
+- `resources/public/css/input.css:549-558` — `.seon-card-reply`,
+  `-webkit-line-clamp: 3; overflow: hidden;` — the agent's last reply on the
+  default root canvas, silently past 3 lines.
+- `resources/public/css/input.css:536-542` — `.plan-title` /`.plan-goal`,
+  `-webkit-line-clamp: 2 / 1; overflow: hidden;`.
+
+The compliant contrast is one word away and already present in the same file:
+`.seon-rank-layout` / `.seon-rank-primary` / `.plan-tree`
+(`:1131-1152`, `:544-546`) use `overflow: auto`, so nothing is lost. And
+`.agent-activity > summary` (`:512-515`) plus
+`.seon-attempt-reasoning > summary` (`:1017-1021`) clip a summary line whose
+`<details>` body carries the complete text — compliant by disclosure, and NOT
+part of this defect.
+
+The census also proposes the recurring proof this note's acceptance asks for:
+for every rendered block, assert `scrollHeight <= clientHeight` OR computed
+`overflow-y` is `auto`/`scroll` OR a declared elision marker is present — with
+zero blocks found counting as a FAILURE, so the check cannot pass by absence.
