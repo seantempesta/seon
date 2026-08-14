@@ -173,6 +173,16 @@ isolated boot whose selected runtime health satisfies the
 `seon.problems/problems` output contract when an error-signature entry contains
 an absent side of a comparison.
 
+## Live regression — 2026-08-13
+
+The session-start probe selected the advertised `default` cluster at PID
+66478, but `mcp__seon__runtime_status` returned
+`{:seon.dev.mcp/health "unknown", :seon.dev.mcp/flow "unknown",
+:seon.dev.mcp/error "Connection reset"}`. `bin/seon status` independently
+reported the same process alive. No hand-rolled prepl fallback was used; this
+is current evidence that an advertised live process can still leave the MCP
+health face unavailable.
+
 ## Envelope economy and elision repair — 2026-08-10
 
 The 2026-08-08 independent verification found a separate response-economy
