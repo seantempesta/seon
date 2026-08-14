@@ -172,7 +172,7 @@ bounding: `src/seon/config.clj:50` and `src/seon/render/value.clj:67` and
 
 The class regression should make clipping-outside-the-owner **unconstructable**,
 not merely detected, and it should follow the template of the await/lock census
-regressions (`docs/prds/sci-execution-runtime/research/unbounded-await-census-2026-08-13.md`)
+regressions (`prds/context-generation/research/unbounded-await-census-2026-08-13.md`)
 — a query over facts we already have, failing loudly on a NEW member, and
 reporting a typed refusal rather than silence when its subject is absent.
 

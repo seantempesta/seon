@@ -9,7 +9,7 @@ tags: [research, agent, context, runtime, live-drive]
 
 ## Scope and independence
 
-I read `docs/prds/sci-execution-runtime/plan/live-drive-spec-2026-08-13.md`
+I read `prds/context-generation/plan/live-drive-spec-2026-08-13.md`
 end to end and observed without contacting, messaging, or waiting on the
 driver lane. I did not mutate the drive through an agent message, transaction,
 operator lifecycle command, or SCI door evaluation. I did not use the

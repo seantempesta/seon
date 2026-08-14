@@ -38,7 +38,7 @@ I read each named authority end to end before interpreting the result:
 - the acceptance framing in
   [`docs/prds/sci-execution-runtime/research/rebirth-systems-sweep-2026-08-12.md`](rebirth-systems-sweep-2026-08-12.md); and
 - the cleared blocker evidence in
-  [`docs/prds/sci-execution-runtime/research/live-pull-attribution-2026-08-13.md`](live-pull-attribution-2026-08-13.md).
+  [`prds/context-generation/research/live-pull-attribution-2026-08-13.md`](live-pull-attribution-2026-08-13.md).
 
 I also read the complete named source call shapes used by the probe:
 `seon.cluster/start!` and `ensure-entity!`; `seon.cluster.run` open, claim,
