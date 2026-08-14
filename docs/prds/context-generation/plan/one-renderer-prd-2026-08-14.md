@@ -29,7 +29,14 @@ is a stock-Clojure face, byte-locked by `repl_parity_test`) and the
 later elision-value law both live half-merged in `seon.print`, with no
 seam deciding which regime a render request is under — that unowned
 boundary is where most garbage fell through (open-questions Q0). This is
-therefore a RE-PLUMBING program, net-deleting, not an invention program. The scope of this PRD is the
+therefore a RE-PLUMBING program, net-deleting, not an invention program:
+the [deletion register](../research/deletion-register-2026-08-14.md)'s
+verified arithmetic is 1671 lines removed vs 1347 revived+new (−324,
+stated conservatively — attribute-face conversions leave `src/` for
+`resources/` EDN and test deletions are uncounted). The deeper win is
+mechanism count: SEVEN independent English elision phrasings → one
+face; six bounding owners → one seam; two resolution chains → one; two
+private `fit` re-implementations → zero. The scope of this PRD is the
 ENTIRE content rendering system for AI and HTML outputs, start to
 finish: one coherent pipeline where nothing can go sideways, no data is
 ever silently swallowed, development panics hard, and production
@@ -242,6 +249,8 @@ the bytes by the orchestrator, not relayed from a lane.
 | 19 | HTML markup bytes evict entries from the MODEL's prompt (`output-tokens` maxes AI and serialized-HTML estimates) | `transcript.clj:792-799`; reaudit §2.10 | Seam A measures AI text only |
 | 20 | `web.clj` parallel content path: `session-timeline` private pulls + `pop`/`conj` splice into foreign hiccup, a second Clojure lexer, `generic-entity`'s private EAV dump; 75/171 CSS classes style UI nothing emits | `web.clj:316-398, 451-510, 707-754`; reaudit §2.12-2.13 | DELETE; blocks all the way down (R-a) |
 | 21 | Fit calibration split (shipped vs cluster-observed tokens) and the `:?_current-ns_?/face` alias botch in the totality branch ✓ | `print.cljc:931, 572`; reaudit §2.14-2.15 | One calibration; fix the botch on sight |
+| 22 | The DOCUMENTED AI assembly is dead code: `walk/prose` has no production caller; the live prompt is assembled by `web.clj/history-text` — and `seon.effect/context-suffix` (background-work guidance, written and tested) has therefore NEVER reached a live prompt | `walk.clj:606-709`, `web.clj:1340-1350`, `effect.clj:724-812`; [hole census](../research/seam-hole-census-2026-08-14.md) | DELETE dead prose; seam A becomes the one assembly; deliver or delete context-suffix |
+| 23 | Agent print output is UNBOUNDED: `evaluation-output` concatenates the raw StringWriter with no cap while the namespace docstring claims a `max-string` bound that does not exist | `sci/eval.clj:299-306` vs `:69` | Route through admission (seam B) like every stored string |
 
 ## 4. Revivals — the archive already built the hard parts
 

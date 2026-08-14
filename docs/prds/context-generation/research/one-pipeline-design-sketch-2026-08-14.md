@@ -133,6 +133,20 @@ windowing; no budget, no re-query, no re-walk. `session-timeline`, the
 second lexer, `hiccup/raw` splices of AI text, and the `pop`/`conj`
 surgery all die because the seam refuses raw hiccup and raw strings.
 
+The [seam-hole census](seam-hole-census-2026-08-14.md) grounds this
+stage in the live tree: 26 AI-side and 22 HTML-side holes, reduced to
+SEVEN choke points (four of which are deletions) — one assembly type
+at seam A; one agent-facing print exit; delete `::length`/`::level`;
+admission owns every stored string; faces return data; HTML stays
+hiccup until one linted delivery point (today it collapses to a string
+at `web.clj:275`, which is why five sites re-splice with
+`hiccup/raw`); no budget on the HTML path. Its two live-defect finds
+reshape the work: the documented assembly (`walk/prose`) is DEAD CODE
+— the real prompt is assembled in `web.clj/history-text`, and
+`effect/context-suffix` has never reached a live prompt; and agent
+print output is stored UNBOUNDED against a docstring that claims
+otherwise.
+
 **Unconstructability, concretely — three enforcement layers:**
 
 1. **Types at the seams.** Prompt assembly and the web writer accept
@@ -142,7 +156,12 @@ surgery all die because the seam refuses raw hiccup and raw strings.
    `seon.fn/text-boundary-report`): callers of `emit-*`/`pr-str`
    feeding a seam outside the printer's owners; hiccup-with-content in
    non-face functions; budget-shaped calls outside seam A. Each census
-   is one regression, subject-present by construction.
+   is one regression, subject-present by construction. Prerequisite
+   named by the hole census: the analyzer must index CORE-call edges
+   (`pr-str`, `str/join`, `subs` currently create no `:seon.fn/calls`
+   edges), or a "no pr-str at a boundary" census is vacuous — the
+   precise reason `text-boundary-report` and `seon.render.lint` are
+   blind today.
 3. **Grammar.** The bare elision, the un-identified block, and the
    budgetless-profile NPE are unrepresentable in the schemas, so the
    floor of every check is "it could not have been constructed."
