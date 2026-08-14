@@ -63,6 +63,17 @@ the drive measures fidelity first, cost second.
    anchor on rendered basis-t values.
 6. Cost: total provider spend for the session (flash pricing;
    peak-hour rule respected).
+7. **Basis-`t` display comprehension** (owner, 2026-08-14): does the
+   agent anchor its own temporal forms on the rendered `t=<basis>`
+   values, and does the tag-before-value line read unambiguously to a
+   live model — evidence for keeping or reshaping the display.
+8. **The #11 case measurement** (owner, 2026-08-14): how often does the
+   live planner name a resolvable subject in item TEXT while omitting
+   the structured `:about` ref? That frequency decides auto-derived
+   suggestions — ruled D-for-now (explicit-only, demonstration
+   teaches); adoption would be B (suggest-and-confirm in the `plan!`
+   result) or C (read-side weaker membership signal, budget-ordered
+   after explicit refs), never silent auto-attach.
 
 ## Acceptance / stop
 
