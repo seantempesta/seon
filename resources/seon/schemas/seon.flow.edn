@@ -116,7 +116,9 @@
              [:seon.config.flow.io/queue-depth
               :seon.config.flow.io/queue-depth]
              [:seon.config.flow.io/concurrency
-              :seon.config.flow.io/concurrency]],
+              :seon.config.flow.io/concurrency]
+             [:seon.config.agent/turn-completion-backstop-ms
+              :seon.config.agent/turn-completion-backstop-ms]],
             :panic!
             [:=>
              [:cat :seon.flow/core-fault]

@@ -12,6 +12,7 @@
             [clojure.core.async.impl.protocols :as async.impl]
             [clojure.datafy :as datafy]
             [clojure.test.check.generators :as gen]
+            [seon.await :as await]
             [seon.env :as env]
             [seon.schema :as schema]
             [seon.sci.kernel :as kernel]
@@ -577,7 +578,8 @@
   [:seon.config.flow.compute/queue-depth
    :seon.config.flow.compute/concurrency
    :seon.config.flow.io/queue-depth
-   :seon.config.flow.io/concurrency])
+   :seon.config.flow.io/concurrency
+   :seon.config.agent/turn-completion-backstop-ms])
 
 (defn- required-launcher-configuration
   [configuration]
@@ -695,8 +697,11 @@
 
 (defn stop-work-launcher!
   "Close IO admission, settle accepted work, then stop the Flow graph."
-  {:malli/schema [:=> [:cat :seon.flow/work-launcher] :nil]}
-  [{::keys [graph accepting? io-submissions drained proc-stopped active-work]}]
+  {:malli/schema
+   [:=> [:cat :seon.flow/work-launcher]
+    [:or :nil :seon.error/value]]}
+  [{::keys [graph accepting? io-submissions drained proc-stopped active-work
+            configuration]}]
   (when graph
     (reset! accepting? false)
     (doseq [[_ {::keys [task] :as work}] @io-submissions]
@@ -715,10 +720,36 @@
          :seon.error/data {::submission-id (::submission-id work)}}}))
     (when (empty? @io-submissions)
       (deliver drained ::drained))
-    @drained
-    (flow/stop graph)
-    @proc-stopped)
-  nil)
+    (let [bound
+          {:seon.await/config-attribute
+           :seon.config.agent/turn-completion-backstop-ms
+           :seon.await/config-value
+           (:seon.config.agent/turn-completion-backstop-ms configuration)}
+          observation
+          (fn [member]
+            {:seon.error/diagnostic-layer :flow
+             :seon.error/diagnostic-operation ::stop-work-launcher
+             :seon.error/diagnostic-member member
+             :seon.error/diagnostic-expected ::completion
+             :seon.error/diagnostic-offending ::pending
+             :seon.error/diagnostic-evidence
+             {:seon.flow/active-work-count (count @active-work)
+              :seon.flow/io-submission-count (count @io-submissions)}})
+          drained-result
+          (await/await!
+           {:seon.await/bound bound
+            :seon.await/diagnostic (observation ::launcher-drained)
+            :seon.await/blocking-deref drained})
+          _ (flow/stop graph)
+          stopped-result
+          (await/await!
+           {:seon.await/bound bound
+            :seon.await/diagnostic (observation ::work-launcher-proc-stopped)
+            :seon.await/blocking-deref proc-stopped})]
+      (cond
+        (:seon.error/kind drained-result) drained-result
+        (:seon.error/kind stopped-result) stopped-result
+        :else nil))))
 
 (defn submit!
   "Submit bounded IO work without waiting for its terminal callback.

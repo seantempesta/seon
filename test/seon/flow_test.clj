@@ -37,7 +37,8 @@
 
 (def ^:private test-io-configuration
   {:seon.config.flow.io/queue-depth 2
-   :seon.config.flow.io/concurrency 2})
+   :seon.config.flow.io/concurrency 2
+   :seon.config.agent/turn-completion-backstop-ms 60000})
 
 (defn- earliest-resume-fault-step
   ([]
@@ -388,7 +389,8 @@
         {:seon.config.flow.compute/queue-depth 1
          :seon.config.flow.compute/concurrency 1
          :seon.config.flow.io/queue-depth 1
-         :seon.config.flow.io/concurrency 1}
+         :seon.config.flow.io/concurrency 1
+         :seon.config.agent/turn-completion-backstop-ms 60000}
         launcher
         (sut/start-work-launcher! {:seon.env/environment @test-environment
                                    ::sut/configuration configuration})
@@ -426,6 +428,28 @@
         (.countDown release)
         (when-not (every? realized? (take 2 terminals))
           (sut/stop-work-launcher! launcher))))))
+
+(deftest stopping-a-work-launcher-is-bounded-by-its-carried-config-fact
+  (let [launcher
+        (sut/start-work-launcher!
+         {:seon.env/environment @test-environment
+          ::sut/configuration
+          (merge test-io-configuration
+                 {:seon.config.flow.compute/queue-depth 1
+                  :seon.config.flow.compute/concurrency 1
+                  :seon.config.agent/turn-completion-backstop-ms 20})})
+        result
+        (sut/stop-work-launcher!
+         (assoc launcher ::sut/proc-stopped (promise)))]
+    (is (= :seon.await/backstop-fired (:seon.error/kind result)))
+    (is (= ::sut/work-launcher-proc-stopped
+           (get-in result
+                   [:seon.error/data :seon.error/diagnostic-member])))
+    (is (= :seon.config.agent/turn-completion-backstop-ms
+           (get-in result
+                   [:seon.error/data
+                    :seon.error/diagnostic-evidence
+                    :seon.await/config-attribute])))))
 
 (deftest submission-time-limit-covers-the-pre-start-wait
   (testing "paused before start"
