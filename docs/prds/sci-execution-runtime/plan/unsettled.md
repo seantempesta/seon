@@ -286,6 +286,22 @@ the orchestrator runs `bin/seon reset --force` on the shared root
 verifies status + the web UI answering, then runs the queued probe
 verification below. Do not wait for a further go-ahead.
 
+**THE GOLDEN DEFECT (2026-08-14 ~06:30):** green-to-install's live
+graduation got a REAL DeepSeek turn through — the agent authored its
+contracted function — and then settlement was silently LOST: receipt
+ordinal 0 started, never settled; flow `:call` returned `:released`;
+no following turn; no durable fault 10+ minutes past the backstop; the
+orchestrator's full virtual-thread dump shows ZERO seon frames —
+nothing blocked, the event EVAPORATED (the transport-law violation
+class, live). Specimen preserved running
+(`tmp/accretion-graduation-c528efb0a`, PID 59115, prepl 55938);
+`lost-settlement` diagnosis lane on it (read-only, then releases it).
+The advisory root-cause landed (`c528efb0a`). `drive-defects` resumed
+on the quiet tree to finish blockers 2-3 (its own drafts, incl. the
+loop.clj mid-edit). Drive 1 attempt 2 waits on those plus the
+lost-settlement verdict — a drive into a known lost-settlement wedge
+would just reproduce it expensively.
+
 **DRIVE 1 ATTEMPT 1 — FAILED USEFULLY (2026-08-14 small hours, $0
 spent):** the opening died pre-model on the accretion advisory contract
 (fixed at cause by green-to-install, `c528ec0a8`-era commit: advisory
