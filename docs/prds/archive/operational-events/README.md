@@ -1,22 +1,48 @@
 ---
 type: prd
-status: active
+status: superseded
 tags: [prd, runtime, observability, operator]
 ---
 
 # Operational events: significant facts, noHistory gauges, referenced logs
 
-## Status and refresh basis
+## Closing note — 2026-08-13
 
-Active, but implementation is queued. The operator and maintenance dependencies
-have landed; this folder now waits for the current cleanup wave's green bare
-gate, the error-model W1 contract it sits beside, and the messaging redesign
-before any event-to-agent attention path is implemented. The landed exclusive
-sweep and operations/maintenance slices are dependencies, not remaining waits.
+**Superseded.** The proposed generic `:seon.event` fact family and
+EID-plus-commit log reference did not land. Current architecture instead makes
+each owning fact family its own forensic authority: run and receipt transition
+facts own lifecycle and recovery evidence; maintenance receipts plus typed
+results own scheduled operational evidence; error facts own retained faults;
+and transaction metadata owns provenance. Process logs remain a separate
+operational stream, not a second durable history model
+(`docs/seon/architecture/data-model.md:75-89,118-140`;
+`docs/seon/architecture/agent-runtime.md:252-285`;
+`docs/seon/architecture/observability.md:12-15,140-165,213-235`).
+
+At HEAD, those decisions are concrete in the atomic maintenance claim and
+settlement transitions (`src/seon/schedule.clj:283-361,382-421`), the durable
+maintenance receipt and result declarations
+(`resources/seon/schemas/seon.maintenance.receipt.edn:1-46`;
+`resources/seon/schemas/seon.maintenance.result.edn:1-44`), and recovery's
+owner-specific run/receipt stamps (`src/seon/cluster/run.clj:1619-1707`). The
+separate last-observation decision was absorbed by the general schema bridge
+and existing model gauges (`src/seon/schema/datahike.clj:248-260`;
+`resources/seon/schemas/seon.ai.model.edn:18-23`). Future owner-specific
+evidence accretes those current families rather than reviving this cross-owner
+event wrapper.
+
+## Historical status and refresh basis — 2026-08-06
+
+At that refresh this PRD was active, but implementation was queued. The operator
+and maintenance dependencies had landed; the folder then waited for the cleanup
+wave's green bare gate, the error-model W1 contract it sat beside, and the
+messaging redesign before any event-to-agent attention path was implemented.
+The landed exclusive sweep and operations/maintenance slices were dependencies,
+not remaining waits.
 
 For this 2026-08-06 refresh I read the repository `AGENTS.md`, this folder,
 `src/seon/operator.clj`, and the sealed
-[operations and maintenance specification](../sci-execution-runtime/plan/operations-and-maintenance-spec-2026-08-05.md)
+[operations and maintenance specification](../../sci-execution-runtime/plan/operations-and-maintenance-spec-2026-08-05.md)
 end to end. I also checked the current error, Flow, wake, message, schedule,
 schema, gauge, logging, operator-test, and Flow-test owners, plus the ruled
 2026-08-05/06 batches and current working edge.
