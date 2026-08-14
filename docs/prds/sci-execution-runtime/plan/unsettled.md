@@ -272,6 +272,15 @@ declarations; exposed the printed-EDN message-id smell, filed).
 `staleness-sweep` folded (2 archived, 5 updated). A `prd-archive` lane
 is verifying the four single-README PRD dirs for honest archival.
 
+**PENDING VERIFICATION (drive prep):** rerun
+`tmp/live-pull/after_help_probe.clj` WITHOUT the carried-profile
+argument against a pinned export of post-fix HEAD (recipe in the
+[diagnosis](../research/live-pull-after-help-diagnosis-2026-08-13.md));
+acceptance = the faithful arm drops from ~276 s to single-digit
+seconds inside the derivation extent, and a naked render call outside
+any extent returns the typed refusal. Run it at the quiet tree right
+before the shared-root reset.
+
 **THE ORDERED QUEUE AFTER RETURNS:**
 1. R2 continuation, serial, red-tolerant: W2b (deferred producers in
    bootstrap/walk/plan once those lanes land) → W3 consumers dispatch on
