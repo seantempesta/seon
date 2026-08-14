@@ -19,7 +19,17 @@ Every rendering defect found this cycle — silent truncation, narrated
 results, placeholder swallows, split code fences, prompt bloat, stale
 cached blocks, thousand-line garbage pages — is one disease: **there is
 no single well-thought-out pipeline, so every blow-up was papered over
-locally instead of fixed at the system.** The scope of this PRD is the
+locally instead of fixed at the system.** The evening re-audit sharpened
+the diagnosis ([renderer-reaudit](../research/renderer-reaudit-2026-08-14.md)):
+the ingredients all exist — a tee'd two-sink printer, a composing nested
+walk, the elision value, a four-step selection chain — and the code
+defeats each one AT ITS MOUNT POINT. And the deepest hole is a **regime
+collision**: the sealed 2026-08-01 REPL-parity print design (bare `...`
+is a stock-Clojure face, byte-locked by `repl_parity_test`) and the
+later elision-value law both live half-merged in `seon.print`, with no
+seam deciding which regime a render request is under — that unowned
+boundary is where most garbage fell through (open-questions Q0). This is
+therefore a RE-PLUMBING program, net-deleting, not an invention program. The scope of this PRD is the
 ENTIRE content rendering system for AI and HTML outputs, start to
 finish: one coherent pipeline where nothing can go sideways, no data is
 ever silently swallowed, development panics hard, and production
@@ -213,7 +223,7 @@ the bytes by the orchestrator, not relayed from a lane.
 |---|---|---|---|
 | 1 | `project-node*` substituting `/ai` faces in result position (audit: 30.5% of result positions data, 66.7% prose; an entity pull reached the agent as a 79-char sentence — 98.8% of queried data destroyed) | `src/seon/render.clj:445-495` | DELETE — values render as data |
 | 2 | `seon.print` sink emitting raw `/ai` fragments below root | `src/seon/print.cljc:107-112` | DELETE |
-| 3 | Narrating faces — census: 42 declared `/ai` faces, 20 narrate; the audit's named seams: run `src/seon/cluster/run.clj:1913-1966` (pull → sentence), stale-var `src/seon/problems.clj:434-438` (pull → reboot instruction), message `src/seon/cluster/message.clj:460-471`, error `src/seon/error.clj:604-627`, cluster + config twin `src/seon/cluster.clj:155-168`; the remaining 12+ are enumerated in the census register | audit + census docs, §9 | REPLACE with attribute faces or inline render outputs |
+| 3 | Narrating faces — census: 42 declared `/ai` faces, 20 narrate; the audit's named seams: run `src/seon/cluster/run.clj:1913-1966` (pull → sentence), stale-var `src/seon/problems.clj:434-438` (pull → reboot instruction), message `src/seon/cluster/message.clj:460-471`, error `src/seon/error.clj:604-627`, cluster + config twin `src/seon/cluster.clj:155-168`; the remaining 12+ are enumerated in the census register. **Re-audit correction:** the face census graded ~37 of ~51 faces genuinely curated (the error/run/message/agent prose families are evidence-derived); the concentrated rot is the two private fit engines in `render/ns.clj` + `render/transcript.clj`. Narration-in-result-position dies everywhere; the graded-good faces are candidates for curated DATA faces (Q2), not wholesale deletion | audit + census docs, §9; [reaudit](../research/renderer-reaudit-2026-08-14.md) | REPLACE with attribute faces or inline render outputs, per Q2 |
 | 4 | The floor's second map face (`:seon.schedule.fire/nominal-at` reaches the agent as unqueryable `nominal-at:`) | `src/seon/render/value.clj:365-372, 393-398` | DELETE — one readable EDN face, namespaces intact |
 | 5 | Two elision representations + `render-elision-ai` English narration | `src/seon/print.cljc:283-301`, `src/seon/db.clj:1666` | UNIFY on the elision value |
 | 6 | Function-side bounding, census tier 1-2 (12 sites) — worst: notes past #50 vanish uncounted (`src/my/note.clj:266` with private `notes-limit 50`; the compliant contrast is `src/my/plan.clj:810-818` in the same directory); agent print output cut unmarked (`src/seon/sci/eval.clj:299-308`); `[clipped]` token inventor that also rewrites real `…` to `...` (`src/seon/render/ns.clj:234-240`) | census doc, §9, per-site table | DELETE the bounds; values flow whole to seam A/B (in flight, corrected to boundary-only shape) |
@@ -223,6 +233,15 @@ the bytes by the orchestrator, not relayed from a lane.
 | 10 | Retained packages serving replaced render functions (13 stale placeholder blocks after a hot fix) | filed: `docs/seon/issues/retained-render-packages-survive-producer-replacement.md` | Chain-hash invalidation (revival, §4) |
 | 11 | NO contract check at any of the eight stage boundaries; on a render output failing `valid-projection?` the code RETURNS THE UNPROJECTED NODE silently — no error, no fact | `src/seon/render.clj:468-474` ✓ (`(if (valid-projection? …) … node)`) | BUILD the stage-contract layer (§2) |
 | 12 | Block identity derived three ways: `block/surface-id`, `value/node-id` (`seon-value-<sha24>` per walk unit), and the debug pane's own ids | census register row, §9 | UNIFY on one derivation |
+| 13 | The emitter's bare-cut default: `::length 32`/`::level 8` from `seon.print.edn` emit literal `"..."`/`"#"` at eight sites; ONE caller nils them out; direct `emit-*` callers all get bare truncation ✓ | `src/seon/print.cljc:383-557`; [reaudit §2.1](../research/renderer-reaudit-2026-08-14.md) | Resolve under Q0 (parity regime), then make the bare form unconstructable outside it |
+| 14 | Bare admission markers render as FABRICATED elision sentences ("1 more subtree at path []"); `enrich-elisions` has one caller | `print.cljc:283-304`, `admit.clj:107-140`; reaudit §2.2 | Elision value becomes the only legal form; grammar requires the facts |
+| 15 | Double fit: structural fit in `prepare`, then `fit-terminal` character-chops the flattened output (pr-str of hiccup) ✓ | `render.clj:524`, `print.cljc:829-839`; reaudit §2.5 | DELETE the second pass (budget moves to seam A) |
+| 16 | Two resolution chains; the documented chain's owning-namespace step is dead for all but 4 call sites ✓; floor identified by hardcoded symbol set | `render.clj:301-320` vs `:457-459`, `:172-176`; reaudit §2.3 | UNIFY per Q1/Q3 |
+| 17 | Nested composition mounted UNDER the floor (one caller ✓); a selected specialist swallows its whole subtree; error evidence flattened by raw `pr-str` | `render.clj:501-502`, `value.clj:494`, `error.clj:1019`; reaudit §2.4 | INVERT per Q1 — the walk composes at every node |
+| 18 | The transcript's `:summary` tier is a provable no-op (all four text producers ignore `detail`), and it RAISES the budget it was handed | `transcript.clj:584-667, 804, 832`; reaudit §2.7-2.8 | DELETE with the transcript rebuild (Q6) |
+| 19 | HTML markup bytes evict entries from the MODEL's prompt (`output-tokens` maxes AI and serialized-HTML estimates) | `transcript.clj:792-799`; reaudit §2.10 | Seam A measures AI text only |
+| 20 | `web.clj` parallel content path: `session-timeline` private pulls + `pop`/`conj` splice into foreign hiccup, a second Clojure lexer, `generic-entity`'s private EAV dump; 75/171 CSS classes style UI nothing emits | `web.clj:316-398, 451-510, 707-754`; reaudit §2.12-2.13 | DELETE; blocks all the way down (R-a) |
+| 21 | Fit calibration split (shipped vs cluster-observed tokens) and the `:?_current-ns_?/face` alias botch in the totality branch ✓ | `print.cljc:931, 572`; reaudit §2.14-2.15 | One calibration; fix the botch on sight |
 
 ## 4. Revivals — the archive already built the hard parts
 
@@ -247,7 +266,13 @@ implementation's last content commit before the `099cdfa99` deletion
   request map, four-axis bounds including bytes, clients may only
   narrow, indexed non-drillable keys); `strict-fail!`'s catch-site
   order (error fact classified agent-vs-core → dev panic → prod face,
-  siblings untouched); `render/chat.cljc` bubbles.
+  siblings untouched); `render/chat.cljc` bubbles. The orchestrator's
+  own-eyes comparison of the 1927-line archive printer against current
+  `seon.print` — including what each side has that the other lacks
+  (keep the sinks/tee, table face, elision-as-node; revive lazy
+  guards, drill hints, opaque/shape tokens, payload-first degradation,
+  the verbatim probe) — is
+  [value-printer-archaeology](../research/value-printer-archaeology-2026-08-14.md).
 - **Revived rulings (code stays dead):** flat `/ai` event log;
   reserved glyphs as single-source defs; error-run coalescing with a
   teaching line; byte-stability above the cache breakpoint.
@@ -331,25 +356,47 @@ gated revivals, not fresh builds.
 
 ## 8. Open questions for the owner
 
-1. **Attribute-face curation**: when the narrating faces die, do those
-   shapes keep tiny declared faces that ORDER attributes (likely as
-   inline render outputs) but never prose — or is the floor's
-   identity-first ordering enough everywhere?
-2. **The `/form` projection**: does the third face join wave 2 (each
-   entry carrying its regenerating form) or wait for the drive series
-   to demand it?
-3. **Chat default timing**: does the agent page default to the chat
-   face immediately at wave 4, or stay on debug until the chat face
-   has survived one live drive?
-4. **New-chat mechanism** (§1.5): "new chat" as sugar for a message to
-   root — keeps ui.md's one-mutation rule, root performs the creation,
-   costs one round-trip — or one new creation route (faster first
-   paint, a small accretion to the route table)?
+The complete iteration ledger is
+[open-questions-2026-08-14.md](open-questions-2026-08-14.md) — every
+question stated neutrally with its evidence; the owner rules there. Two
+rulings from the 2026-08-14 evening dialogue are already recorded in it:
+the view IS the namespace render (`/ns/<ns>`, root's `/` — no layout
+machinery), and the two seams are 2D/3D projections of ONE walk vector.
+The structural questions that gate the wave plan:
+
+- **Q0** — the REPL-parity vs elision-value regime reconciliation:
+  where does the regime bit live? (Gates rip-outs #13-#14 and the
+  printer synthesis.)
+- **Q1** — does the composing walk become THE renderer (selection
+  re-entered at every node; specialists are frames, not terminals)?
+  (Gates #16-#17.)
+- **Q2** — the curation stance: curated DATA faces expected per
+  important family, vs floor-first with declarations only where earned.
+- **Q3** — one chain: does the owning-namespace discovery step survive
+  and become real, or die by dissolution?
+- **Q4** — the exact bounding map: what replaces the prompt
+  distance-decrement loop; do display windows survive as explicit
+  options; seam-A measurement rules.
+
+Longer-horizon questions preserved from the first draft (now ledger
+Q9): the `/form` projection's wave, chat-default timing, and the
+new-chat mechanism (message-to-root sugar vs a creation route).
 
 ## 9. Sources
 
+Evening re-audit round (2026-08-14, four independent lanes + the
+orchestrator's own-eyes verification):
+
+- [renderer re-audit](../research/renderer-reaudit-2026-08-14.md) — the consolidated four-lane findings behind rip-outs #13-#21
+- [value-printer archaeology](../research/value-printer-archaeology-2026-08-14.md) — current `seon.print` vs the archive's 1927-line `seon.render.value`, and the synthesis shape
+- [print-path design 2026-08-01](../../sci-execution-runtime/plan/print-path-design-2026-08-01.md) — the sealed REPL-parity contract the current printer implements; the other half of the Q0 collision
+- [open-questions ledger](open-questions-2026-08-14.md) — the iteration ledger; rulings land there first
+- In flight: [deletion register](../research/deletion-register-2026-08-14.md) (net-LOC arithmetic), [seam-hole census](../research/seam-hole-census-2026-08-14.md) (every pipeline bypass + the choke points that close them), [parity-elision collision](../research/parity-elision-collision-2026-08-14.md) (Q0's evidence), [value-browser prior art](../research/value-browser-prior-art-2026-08-14.md) (reveal/orchard/malli survey)
+
+Day round:
+
 - [results-as-data audit](../research/results-as-data-audit-2026-08-14.md) — the 30.5%/66.7% measurement and nine-seam list
-- [context-clipping census](../research/context-clipping-census-2026-08-14.md) — 16 violations, the two-seams evidence
+- [context-clipping census](../research/context-clipping-census-2026-08-14.md) — 16 violations, the two-seams evidence (mostly landed; residue in reaudit §3)
 - [render archaeology](../research/render-archaeology-2026-08-14.md) — the first implementation's pipeline, verdicts per item
 - [one-renderer gap census](../research/one-renderer-gap-census-2026-08-14.md) — the 47-row register and wave plan
 - [transcript view design](../research/transcript-view-design-2026-08-14.md) — the honest-faces mechanics and class vocabulary
