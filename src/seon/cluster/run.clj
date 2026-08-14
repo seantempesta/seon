@@ -398,18 +398,24 @@
   current-run pointer is present (an agent holds at most one open run).
   Returns the run entity assertion plus the agent pointer assertion —
   BOTH derived from the one `::agent` ref in the request; there is no
-  separate agent-id field to disagree with it."
+  separate agent-id field to disagree with it. The ordinary initial
+  situation is `:call`; generated runs explicitly open in `:generate`."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map
                         [::id ::id]
                         [::agent ::agent]
                         [::trigger {:optional true} ::trigger]
+                        [::starting-ns {:optional true} ::starting-ns]
+                        [:seon.cluster.work/situation
+                         {:optional true}
+                         :seon.cluster.work/situation]
                         [::opening-commit-id {:optional true}
                          ::opening-commit-id]
                         [::opened-at ::opened-at]]]
                   [:vector :some]]}
   [db request]
-  (let [{::keys [id agent trigger opening-commit-id opened-at]} request
+  (let [{::keys [id agent trigger opening-commit-id opened-at starting-ns]
+         situation :seon.cluster.work/situation} request
         agent-eid (:db/id (db/pull db [:db/id] agent))
         run-tempid (str "seon.cluster.run/" id)
         background-results (unanswered-background-results db agent-eid)]
@@ -426,11 +432,12 @@
       :else [(cond-> {:db/id run-tempid
                       ::id id
                       ::agent agent-eid
-                      :seon.cluster.work/situation :call
+                      :seon.cluster.work/situation (or situation :call)
                       ::opening-commit-id
                       (or opening-commit-id (db/commit-id db))
                       ::opened-at opened-at}
                trigger (assoc ::trigger trigger)
+               starting-ns (assoc ::starting-ns starting-ns)
                (seq background-results)
                (assoc ::background-results background-results))
              {:db/id agent-eid :seon.cluster.agent/run run-tempid}])))
@@ -714,6 +721,10 @@
                              [::id ::id]
                              [::agent ::agent]
                              [::trigger {:optional true} ::trigger]
+                             [::starting-ns {:optional true} ::starting-ns]
+                             [:seon.cluster.work/situation
+                              {:optional true}
+                              :seon.cluster.work/situation]
                              [::opening-commit-id {:optional true}
                               ::opening-commit-id]
                              [::opened-at ::opened-at]]]
@@ -885,23 +896,21 @@
         namespace-name (if (vector? starting-ns)
                          (second starting-ns)
                          starting-ns)
-        run-tempid (str "seon.cluster.run/" run-id)
         namespace-tempid (str "namespace:" namespace-name)]
     (into [] cat
           [[{:db/id namespace-tempid :seon.ns/name namespace-name}]
            (open-tx
             (cond-> {::id run-id
                      ::agent [:seon.cluster.agent/id agent-id]
+                     ::starting-ns [:seon.ns/name namespace-name]
+                     :seon.cluster.work/situation :generate
                      ::opening-commit-id (db/commit-id database)
                      ::opened-at opened-at}
               trigger (assoc ::trigger trigger)))
            (claim-tx {::id run-id
                       ::process process
                       ::live-processes #{process}
-                      ::now opened-at})
-           [[:db/retract run-tempid :seon.cluster.work/situation :call]
-            [:db/add run-tempid :seon.cluster.work/situation :generate]
-            [:db/add run-tempid ::starting-ns namespace-tempid]]])))
+                      ::now opened-at})])))
 
 (defn refresh-tx
   "Transaction data refreshing one prior system-authored form."
