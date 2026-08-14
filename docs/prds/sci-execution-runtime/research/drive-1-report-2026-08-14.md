@@ -6,6 +6,206 @@ date: 2026-08-14
 
 # Drive 1 — live DeepSeek evolving session
 
+## Attempt 5 verdict
+
+**Web UI: [http://127.0.0.1:55156](http://127.0.0.1:55156)**
+
+**Stopped at a durable `:seon.cluster.reply/no-forms` boundary on the real
+task turn.** The fidelity wave is live: the first task prompt contains no
+`largest` text, ends with the current message read, records 39 shape-cost
+facts, and its 19 contribution costs sum exactly to its calibrated
+whole-prompt estimate. DeepSeek nevertheless returned 97 tokens of prose and
+no Clojure form. The runtime recorded the exact prose and typed refusal, then
+closed the run. No corrective run or open work followed, so the mid-session
+message and rebirth were not attempted.
+
+### Attempt 5 live endpoint and retained root
+
+- Fresh isolated operator root: `tmp/drive-1-root`
+- Cluster: `default`
+- Git HEAD: `899e0b243`
+- Published `:current-src` commit:
+  `6a7efadd-34a1-5a21-bb26-9290201d2ecd`
+- Publication inventory: 232 source inputs, 2,318 schemas, 823 functions,
+  7,173 contract rows, 535 namespaces
+- Agent: `drive-one-agent-attempt-5`
+- Namespace: `my.agents.drive-one-agent-attempt-5`
+- Generated opening run: `bootstrap:drive-one-agent-attempt-5`
+- Task message: `inbound-536871131-0`
+- Task run: `a887d305-c8ae-4b6e-842f-43287f7f7496`
+- Opening capture:
+  `bootstrap:drive-one-agent-attempt-5-context-536871009`
+- Task capture:
+  `a887d305-c8ae-4b6e-842f-43287f7f7496-context-536871133`
+- Terminal error fact: `4b93a1bf-e56e-4a33-befe-1882cfda474f`
+- Terminal error basis: `t=536871186`
+- Preservation: the root was neither stopped nor reset. The cluster, exact
+  prompts, render costs, attempts, receipts, and error fact remain live.
+
+The runtime-status tool remained degraded with the typed
+`:seon.config/missing-projection` result; scoped JVM evaluation remained
+functional. The report-only path restriction prevented a separate issue note.
+
+### Attempt 5 headline measurements
+
+| Measurement | Fact-derived result |
+|---|---:|
+| Agent creation to opening close | **214.330 s** |
+| Opening forms / receipts | **13 / 13** |
+| Opening system / model-authored forms | **11 / 2** |
+| Opening whole-prompt estimate | **10,635 tokens** |
+| Opening provider prompt tokens | **11,182 tokens** |
+| Opening shape-cost facts / sum | **36 / 10,582 tokens** |
+| Beyond-closure intent contribution | **0 tokens** |
+| Task whole-prompt estimate | **11,479 tokens** |
+| Task provider prompt tokens | **11,476 tokens** |
+| Task shape-cost facts / sum | **39 / 10,887 tokens** |
+| Total provider prompt / completion tokens | **22,658 / 396** |
+| Provider cache hits | **0** |
+| Total spend | **$0.003283** |
+| Authored plan items / `:about` refs | **0 / 0** |
+| Durable functions / tests | **0 / 0** |
+| Mid-session delta messages / rebirths | **0 / 0** |
+
+Agent creation committed at `2026-08-14T11:25:09.534Z`; the generated
+opening closed at `11:28:43.864Z`. The task was submitted at `11:28:56Z` and
+its terminal error was committed in that same second.
+
+### Family 1 — real opening composition and costs
+
+There were no `my.plan` items before opening, so beyond-closure intent
+membership contributed **zero**; all opening membership was ordinary closure.
+The opening capture is 34,033 exact characters split into 17 ordered `walk`
+contributions. Their recorded costs sum to **10,635**, exactly the calibrated
+whole-prompt estimate. DeepSeek counted 11,182 prompt tokens on this first
+fresh-cluster sample.
+
+The 36 real `:seon.render.cost` facts committed between the capture's
+single-snapshot basis and its capture transaction are:
+
+| Shape | Calls | Per-call estimated tokens | Sum |
+|---|---:|---|---:|
+| `:seon.cluster/cluster` | 1 | 26 | 26 |
+| `:seon.cluster.instruction/instruction` | 1 | 198 | 198 |
+| `:seon.cluster.message/message` | 2 | 18, 95 | 113 |
+| `:seon.cluster.run/run` | 1 | 41 | 41 |
+| `:seon.config/entity` | 1 | 56 | 56 |
+| `:seon.ns/ns` | 22 | 6, 6, 8, 6, 5, 7, 6, 6, 15, 8, 6, 1,018, 1,002, 576, 1,012, 1,005, 997, 1,002, 1,002, 69, 1,018, 1,008 | 9,788 |
+| `:seon.schema/value` | 8 | 24, 17, 17, 22, 17, 26, 158, 79 | 360 |
+
+The 17 exact ordered contribution costs were:
+
+```clojure
+[56 87 234 1038 1022 598 1032 1024 1017 1022 1022 110 97 1040 1028 81 127]
+```
+
+The 53-token difference between the shape-cost sum (10,582) and whole-prompt
+sum (10,635) is prompt assembly/separator material assigned by the cumulative
+contribution decomposition, not an unrecorded block.
+
+### Family 2 — live pull
+
+The opening took **214.330 seconds** under the fresh isolated root and settled
+11 generated system forms before its model call produced two more forms. The
+generated prefix therefore implies 12 `next-entry` decisions—11 concrete
+entries plus the terminal call-boundary decision. This is a mechanical count
+from the settled prefix because no separate function-call counter is stored.
+The opening prompt then recorded 36 concrete render calls as cost facts.
+
+### Current-task fidelity and exact accounting
+
+The task capture contains **zero** lines containing `largest`. Its last
+interaction is the current message read:
+
+```clojure
+my.agents.drive-one-agent-attempt-5=> (my.message/read "inbound-536871131-0")
+```
+
+That value is the exact current task:
+
+```text
+Author and follow one my.plan for this task. Every authored item must use the NEW :my.plan.item/about plain-vector token shape, mixing quoted qualified function symbols and namespaced keywords and targeting the actual functions and schema attributes that item will use. Define a durable contracted function sum-of-squares in your namespace that accepts a sequential collection of integers and returns the sum of their squares, with a complete Malli contract. Define a discoverable clojure.test usage test covering a non-empty input and the empty input, run it through seon.test/run, complete every plan item, and close with my.run/complete reporting the exact test result. Do not edit repository files.
+```
+
+The task capture is 34,955 characters and 19 ordered contributions whose
+recorded costs sum to **11,479**. DeepSeek reported **11,476** prompt tokens:
+a three-token difference after the opening sample calibrated the model. Its 39
+shape-cost facts sum to 10,887:
+
+| Shape | Calls | Sum |
+|---|---:|---:|
+| `:seon.cluster/cluster` | 1 | 26 |
+| `:seon.cluster.instruction/instruction` | 1 | 198 |
+| `:seon.cluster.message/message` | 4 | 361 |
+| `:seon.cluster.run/run` | 2 | 73 |
+| `:seon.config/entity` | 1 | 56 |
+| `:seon.ns/ns` | 22 | 9,788 |
+| `:seon.schema/value` | 9 | 385 |
+
+### Verbatim terminal evidence
+
+DeepSeek's whole 97-token completion was prose:
+
+```text
+I'll start by understanding my plan and checking the current state. Let me look at what I need to do:
+
+1. Author a plan with items using the NEW `:my.plan.item/about` plain-vector token shape
+2. Define `sum-of-squares` function with Malli contract
+3. Define and run tests through `seon.test/run`
+4. Complete all plan items and report results
+
+Let me first check my current state and any messages:
+```
+
+The durable error is:
+
+```clojure
+{:seon.error/id "4b93a1bf-e56e-4a33-befe-1882cfda474f"
+ :seon.error/kind :seon.cluster.reply/no-forms
+ :seon.error/message
+ "The reply carried no Clojure forms — its whole text read as prose. Prose runs nothing and settles nothing; write the Clojure you want evaluated."
+ :seon.error/basis-t 536871186}
+```
+
+The task run has zero frozen forms and zero receipts, and closed with that
+message. A complete agent/run query after settlement found no open work and no
+correction run. There are zero plan items, `:about` refs, durable function
+rows, or test rows for the agent.
+
+### Eight measurement families
+
+1. **Opening composition:** fully measured above: 10,635 whole-prompt tokens,
+   36 real per-shape cost facts totaling 10,582, 17 ordered contribution
+   costs, all closure and zero beyond-closure.
+2. **Live pull:** 214.330 s, 11 generated entries, an inferred 12
+   `next-entry` decisions, then 36 recorded opening-prompt render calls.
+3. **Delta economics:** unavailable. The required unrelated message was not
+   sent after the terminal no-forms boundary. There are two full captures
+   (opening and task) but no mid-session delta package to compare honestly.
+4. **Rebirth in vivo:** unavailable. No rebirth was triggered after the task
+   failed before authoring any durable session state.
+5. **Context behavior:** the opening model used `dir`; the task model correctly
+   named all four newest obligations in prose, showing that stale-task removal
+   worked, but emitted no executable form. It used neither `doc` nor `dir` on
+   the task turn, did not operate `my.plan`, and installed nothing.
+6. **Cost:** two direct `deepseek-v4-flash` attempts, no failover and no cache
+   hits. Usage totals are 22,658 uncached prompt tokens and 396 completion
+   tokens. At $0.14/M input and $0.28/M output, spend is **$0.003283**. Both
+   attempts occurred in the declared 10:00–24:00 UTC off-peak window at its
+   regular 1.0 factor.
+7. **Basis-`t` comprehension:** the exact task prompt contains zero `t=` lines,
+   so anchoring behavior remains unobservable rather than wrong.
+8. **Planner omission case:** the denominator is zero authored items. No item
+   text omitted `:about`, but no adoption frequency can be calculated.
+
+### Stop ruling
+
+The provider was healthy and the prompt fidelity repair worked; the new
+boundary is model output shape. A prose-only reply creates no executable
+continuation, and the settled database exposes no correction work. Sending a
+second driver message would be a retry beyond the specified task turn and
+would erase the clean falsifier. The cluster and every fact are retained.
+
 ## Attempt 4 verdict
 
 **Web UI: [http://127.0.0.1:51063](http://127.0.0.1:51063)**
