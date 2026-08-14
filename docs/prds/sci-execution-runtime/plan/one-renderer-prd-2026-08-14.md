@@ -19,6 +19,48 @@ rebuilt. It builds on the landed floor-first ruling (ledger 27), the
 two-seams bounding ruling (ledger 32), the chat/debug projections
 (ledger 30/31), and the results-as-data audit's nine-seam rip-out list.
 
+## 0. Scope correction (owner, same day): the ENTIRE pipeline
+
+The owner's clarification, governing everything below: this PRD covers
+the **complete content rendering system for AI and HTML outputs, start
+to finish — one coherent pipeline where nothing can go sideways.** The
+diagnosis, in the owner's words: all the hacks are the same problem —
+there was no well-thought-out system, it kept blowing up and returning
+thousands of lines of garbage, and the holes got papered over instead
+of fixed. So the unit of design is the WHOLE PIPELINE, not the seams:
+
+```text
+value produced (whole)
+  → storage admission (declared caps, honest elisions)      [seam 2]
+  → derivation (history unit / walk membership, from facts)
+  → projection selection (:seon.render/ai | /html | /form)
+  → producer or floor (declared face, or derived data face)
+  → fit (the ONE bounding: profile budget, form-aware,
+         elision values)                                     [seam 1]
+  → face assembly (prompt bytes | page hiccup)
+  → delivery (provider wire | SSE morphs)
+```
+
+Every stage: total (never throws into the pipeline), honest (typed
+loud error values, never silence), bounded (declared budgets), and
+contract-checked at its boundary. A value that skips a stage is
+unconstructable, not discouraged.
+
+**The failure policy (R41 applied to rendering): PANIC HARD IN
+DEVELOPMENT.** In dev, ANY render-path contract violation — a producer
+returning the wrong shape, a stage handed a value it cannot face, a
+budget applied outside fit, an unregistered value where a registered
+one is promised — PANICS at the stage boundary with the producer,
+value, and contract named. There is no degraded output in dev: no
+`renderer unavailable` placeholder (that div is a swallow wearing a
+label — BANNED as a dev output), no partial page, no silently smaller
+result. In production the same violation renders as ONE loud typed
+error block naming the defect — never garbage, never absence.
+"Thousands of lines of garbage" becomes impossible because every
+stage's output is checked and bounded before the next stage sees it,
+and the end-to-end invariants (whole-prompt accounting exact to the
+token; page lint clean; honesty falsifiers) are suite properties.
+
 ## 1. The target architecture (one page)
 
 **Values flow whole.** A producer — any function whose output reaches
