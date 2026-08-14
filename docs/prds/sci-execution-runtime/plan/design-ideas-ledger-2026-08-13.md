@@ -291,6 +291,20 @@ one decision away from queued work. Ruled items cite their record.
     [transcript-view-design-2026-08-14](../research/transcript-view-design-2026-08-14.md);
     folds into ui-overhaul with the chat-projection package.
 
+32. **Producers hand back whole values — bounding lives at exactly two
+    seams** (owner, 2026-08-14 afternoon, correcting the clip rip-out
+    mid-flight): content gets smaller ONLY at (1) the render boundary —
+    `seon.print`/the value floor applying the profile budget for both
+    `/ai` and `/html`, emitting elision values — and (2) declared
+    storage-admission caps (the `seon.sci.admit` config-fact family).
+    `bounded-text` is internal machinery of those two seams, never a
+    public convenience; a producer containing ANY bounding call is the
+    defect. The census regression asserts producers bound nothing and
+    the two seams are bounded-text's only callers (graph query). THE
+    ONE RENDERER IS THE WORKHORSE: investment goes INTO the universal
+    print system, never beside it — declared producers stay the
+    exception for genuinely special surfaces.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
