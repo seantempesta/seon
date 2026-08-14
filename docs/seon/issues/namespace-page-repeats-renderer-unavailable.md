@@ -29,6 +29,16 @@ blocks at paths including
 `src/seon/render/web.clj` explicitly substitutes this string when a walked
 unit carries a failure without output.
 
+The live Attempt 4 page at `/agent/drive-one-agent-attempt-4` reproduced the
+same defect after the paid run settled. Its 36,963-byte HTML contained the
+same complete visible placeholder 15 times, including immediately after the
+configuration, getting-started instruction, toolkit namespaces, historical
+message/run, and current message/run blocks:
+
+```html
+<div class="seon-render-unavailable">renderer unavailable</div>
+```
+
 ## Owner
 
 `seon.render.web/unit-html` and the render failure value supplied by the walk.

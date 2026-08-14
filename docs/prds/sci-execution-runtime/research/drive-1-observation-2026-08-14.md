@@ -254,3 +254,170 @@ New issues filed:
 - `docs/seon/issues/root-maintenance-context-exceeds-provider-budget.md`
 
 Per the observer assignment, `docs/seon/issues/index.md` was not edited.
+
+## Attempt 4 independent observation — 2026-08-14
+
+### Boundary and method
+
+I read the Attempt 4 section of
+`docs/prds/sci-execution-runtime/research/drive-1-report-2026-08-14.md` first,
+as instructed, then verified its claims against the preserved specimen rather
+than treating the report as evidence. I used only JVM-mode MCP reads and HTTP
+GETs against isolated root `tmp/drive-1-root`, cluster `default`, PID 53761,
+prepl 51058, and web UI `http://127.0.0.1:51063`. I sent no message, evaluated
+nothing through the SCI door, transacted no fact, and issued no lifecycle
+command. The specimen remained running.
+
+`mcp__seon__runtime_status` was degraded with the already-filed exact error:
+
+```clojure
+{:seon.config/missing-projection true
+ :seon.error/message "Effective config requires the projection handed to this operation."}
+```
+
+JVM `eval_clj` remained usable (`(+ 1 2)` returned `3`), so all database
+queries below used the advertised cluster connection explicitly.
+
+### The actual provider request
+
+The durable attempt body is 72,814 characters of JSON. Parsed directly, it has
+one message only:
+
+```clojure
+{:messages [{:role "user", :chars 68905}]}
+```
+
+There is no provider system segment and no hidden history array. The sole user
+message is byte-for-byte capture
+`6c5dad44-e55a-4184-b4bb-0cf07a6b8764-context-536871046`. Its contribution
+record estimated 22,620 tokens; DeepSeek reported 22,604, split into 11,136
+cache-hit and 11,468 cache-miss tokens.
+
+The capture consists of 40 blank-line-separated history entries:
+
+| Region | Characters | Local token estimate |
+|---|---:|---:|
+| entries 0–18, first opening snapshot | 34,033 | 10,635 |
+| entries 19–35, repeated opening snapshot | 33,285 | 10,401 |
+| entries 36–39, paid-run tail | 1,583 | 494 |
+
+This answers the 4.7× discrepancy. The 4,776-token opening proxy priced stored
+source/result strings, not the agent-consumed fitted transcript. Even one real
+opening snapshot was about 10,635 locally estimated tokens. Then retained
+history appended essentially the entire snapshot again. No system message
+filled the difference.
+
+The first snapshot begins:
+
+```text
+my.agents.drive-one-agent-attempt-4=> (db/pull db (quote [*]) [:seon.cluster/name "default"])
+Cluster default.
+Configuration default; 1 shared instruction and 9 toolkit namespaces.
+```
+
+It contains large toolkit faces, including a 3,318-character `(dir my.web)`,
+3,268-character `(dir my.edit)`, 3,301-character `(dir my.shell)`, and similar
+entries for `my.fs`, `my.message`, `my.note`, and `my.plan`. The first
+snapshot's rendered values alone occupy 32,574 characters and approximately
+10,179 locally estimated tokens. This is the unfitted/unreconciled content
+the stored 4,437-token result-face proxy did not represent.
+
+### Superseded task survival and duplication seam
+
+The stale bootstrap task is entry 18 and appears again at entry 38:
+
+```text
+From outside this cluster to drive-one-agent-attempt-4: Define a durable contracted function named largest that returns the row with the greatest :example/amount, or {} for empty input. Call it once, query its stored :seon.fn/spec, then complete with a short reply naming what you built and its contract.
+```
+
+The current trigger appears once, at entry 37:
+
+```text
+From outside this cluster to drive-one-agent-attempt-4: Author and follow one my.plan for this task. Every authored item must use the NEW :my.plan.item/about shape: a plain vector mixing quoted qualified function symbols and namespaced keywords, targeting the actual functions and schema attributes you will use. Define a durable contracted function sum-of-squares in your namespace with a complete Malli contract, define a discoverable clojure.test usage test, run it through seon.test/run, complete every plan item, and close with my.run/complete reporting the exact test result. Do not edit repository files.
+```
+
+The survival is in retained context assembly, not the provider. At
+`src/seon/render/web.clj:1050-1061`, `append-history` treats a logical call at a
+new basis as a new observation. `context-pass` builds a complete refreshed
+history and appends it to `::ai-entries` at lines 1093–1107. The observed basis
+comes from `src/seon/render/walk.clj:819-868`, with current database basis as a
+fallback. The new paid-run facts therefore caused a second snapshot to be
+appended rather than replacing the old logical entries.
+
+### What DeepSeek did with that context
+
+The model visibly followed the twice-rendered stale objective rather than the
+single current objective. Its exact first source began:
+
+```clojure
+; Looking at this task, I need to:
+; 1. Define a durable contracted function named `largest` that returns the row with the greatest `:example/amount`, or `{}` for empty input
+; 2. Call it once
+; 3. Query its stored `:seon.fn/spec`
+; 4. Complete with a short reply
+
+(defn largest
+  "Return the row with the greatest :example/amount, or {} for empty input."
+  {:malli/schema [:=> [:cat [:sequential [:map [:example/amount :int]]]] [:or :map {}]]}
+  [rows]
+  (if (empty? rows) {} (apply max-key :example/amount rows)))
+```
+
+The remaining reply attempted `(largest ...)`, then
+`(db/pull db '[*] [:seon.fn/sym "largest"])`, then
+`(dir 'my.agents.drive-one-agent-attempt-4)` with trailing prose. The four
+receipts settled respectively as:
+
+```text
+seon.schema/projection-with-function-contract violated its contract (invalid-input): must be a parseable, EDN-readable Malli form
+Unable to resolve symbol: largest
+Unable to resolve symbol: db/pull
+No namespace: my.agents.drive-one-agent-attempt-4 found
+```
+
+No durable function, test, plan item, or completion resulted. The context was
+well-served only in narrow mechanics: it accurately showed the cluster,
+configuration, REPL grammar, toolkit directory forms, both message facts, and
+the current run. It failed at priority and economy: it duplicated almost the
+entire history, repeated a superseded task twice, buried the current task near
+the end, and supplied enough low-signal directory output to make one opening
+snapshot more than twice its reported proxy.
+
+### Render-cost condition and web faces
+
+There were zero `:seon.render.cost` entities after a real capture and provider
+attempt. The exact failed predicate introduced by `0e7c38cfc` is
+`(:seon.db/connection request)` at `src/seon/render.clj:708`. The run ID is
+present, but the production request constructed at
+`src/seon/cluster/loop.clj:1366-1378` never carries the connection. Prompt
+assembly adds the database value and distance only. The agent-only recording
+path is therefore too strict for its actual caller.
+
+Both pages returned `200`: debug was 78,161 bytes and correctly labelled its
+AI pane `captured`; the ordinary agent page was 36,963 bytes. The debug HTML
+showed the stale task on lines 66–67 and again on lines 136–137, with the new
+task only on lines 133–134. The ordinary page repeated this ugly, complete
+placeholder 15 times:
+
+```html
+<div class="seon-render-unavailable">renderer unavailable</div>
+```
+
+That existing defect was added to
+`docs/seon/issues/namespace-page-repeats-renderer-unavailable.md`. The GETs did
+not create render-cost facts; the global count remained zero.
+
+### Attempt 4 defect list
+
+New issues:
+
+- `docs/seon/issues/agent-context-history-appends-complete-snapshots.md`
+- `docs/seon/issues/opening-cost-proxy-hides-agent-prompt-bulk.md`
+- `docs/seon/issues/agent-context-render-cost-requires-unprovided-connection.md`
+
+Existing issues with new live evidence:
+
+- `docs/seon/issues/namespace-page-repeats-renderer-unavailable.md`
+- `docs/seon/issues/dev-mcp-envelopes-misdirect-errors-and-sprawl-status.md`
+
+Per the observer assignment, `docs/seon/issues/index.md` was not edited.
