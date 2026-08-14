@@ -286,6 +286,16 @@ the orchestrator runs `bin/seon reset --force` on the shared root
 verifies status + the web UI answering, then runs the queued probe
 verification below. Do not wait for a further go-ahead.
 
+**DEBUG-VIEW PRETTY-DATA (owner, midday): because results ARE data,
+the debug view pretty-prints and syntax-highlights every data entry** —
+parse the captured entry, pprint with namespaces intact, highlight
+tokens — under the honesty contract: the pretty face derives from the
+SAME captured bytes, the raw toggle shows them naked, and the
+byte-equality falsifier covers the raw face while the pretty face must
+read back through the reader EQUAL to the raw parse (pretty lies are
+unconstructable too). Folds into ui-overhaul at its return (+ the
+transcript design doc when the design agent lands).
+
 **THE RESULTS-AS-DATA VERDICT (2026-08-14 midday) — owner-directed
 audit, measured on the real captures: 30.5% of result positions are
 honest data; 66.7% narrated prose.** Root mechanism:
