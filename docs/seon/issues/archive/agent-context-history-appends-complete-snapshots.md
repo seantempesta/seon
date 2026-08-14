@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, agent, wave/render-context-cache]
 ---
@@ -64,3 +64,25 @@ identity shared with `seon.render.walk/history`.
 - A changed observation replaces its prior logical entry while genuinely new
   transcript entries retain causal order.
 - A live paid-context capture proves the invariant from durable bytes.
+
+## Resolution
+
+Commit `98421f82f` makes one retained slot belong to one logical render call.
+An unchanged shown basis retains its exact bytes; a changed basis replaces the
+old observation and appends the replacement after retained history. The
+run-trigger relation marks the one current-task slot, the full re-walk cannot
+reintroduce its superseded task, and that slot is ordered last.
+
+The recurring proof is split across
+`seon.render.history-test/a-new-current-task-supersedes-the-old-task-and-is-last`
+and
+`seon.cluster.prompt-test/a-second-run-replaces-the-opening-task-and-puts-current-task-last`.
+The focused gate passed 17 tests and 144 assertions.
+
+Fresh reset-boundary proof used isolated operator root
+`tmp/context-fidelity-proof.Jq1MLw`, published from commit `470ecf029`. Its
+durable second capture
+`context-fidelity-current-run-context-536871000` contains 60,005 characters.
+The toolkit opening form `(dir (quote my.web))` occurs once, the superseded
+bootstrap task occurs zero times, `CURRENT-TASK-LAST-MARKER` occurs once, and
+that marker is the final prompt bytes.
