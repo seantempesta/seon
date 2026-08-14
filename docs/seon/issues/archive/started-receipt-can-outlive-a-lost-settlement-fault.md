@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, flow, agent, class/n10, wave/settlement]
 ---
@@ -91,3 +91,12 @@ fault committer assembled by `src/seon/cluster.clj` and
 - [Supply the handed schema projection throughout fault encoding](archive/fault-encoding-lost-the-handed-schema-projection.md)
   repaired transaction encoding below `commit-fault!`; this specimen fails in
   the config-mode callback before `commit-fault!` is invoked.
+
+## Resolution — 2026-08-14
+
+Fixed by the settlement wave `bea9c068d`/`5f1601d2f`/`6a99a7a13`/`2500a7f0a`:
+install-gate failures settle as typed terminals; the fault committer is
+total (handed projection, joined error channel, bounded stderr
+fallback); every active turn transform arms the completion backstop.
+Live isolated-root proof: the exact reproduction settles the receipt
+(`:seon.cluster.loop/phase-failed`) and commits the durable error fact.
