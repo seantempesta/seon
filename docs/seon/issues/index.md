@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (46)
+## Blocker (44)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -61,9 +61,7 @@ See `README.md` for the convention.
 | [Return attributes from an entity pull, never a sentence](an-entity-pull-returns-a-sentence-instead-of-its-attributes.md) | blocker | results-as-data rip-out |
 | [Render walk-unit hiccup as markup, never escaped EDN text](walk-units-render-their-hiccup-as-escaped-edn-text.md) | blocker | ui verification wave |
 | [Name the run a history entry actually pulled](a-run-history-entry-can-name-a-different-run-than-its-form-pulled.md) | blocker | ui verification wave |
-| [Elide walk-unit overflow, never hide it](walk-units-hide-their-overflow-instead-of-eliding-it.md) | blocker | ui verification wave |
 | [Show a run entry with its forms, not one sentence](the-agent-page-shows-a-run-as-one-sentence-and-never-its-forms.md) | blocker | session-view lane |
-| [Hand the data route its projection](the-data-route-refuses-because-it-never-hands-the-projection.md) | blocker | session-view lane |
 | [Answer no-forms replies with correction or re-wake](no-forms-replies-close-without-correction-or-rewake.md) | blocker | OWNER DESIGN GATE (correction vs re-wake) |
 | [Bound orderly-stop completion joins](orderly-stop-completion-joins-have-no-bound.md) | blocker | wedge class-kill continuation |
 
