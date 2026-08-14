@@ -37,6 +37,15 @@ guidance render as ordinary computed data or printed values without comment
 prefixes. Absence still omits the projection, and no new stored notice path is
 introduced.
 
+## Live capture attempt — 2026-08-14
+
+No `;;`-prefixed effect notice appears in the Drive 1 stored capture facts
+(`tmp/drive-1-root`, 210 result positions). The drive's turns never reached a
+background or long foreground effect, so the context suffix never fired. The
+note stands unchanged on its own source evidence; this records only that the
+drive could not corroborate it. Recorded during the
+[results-as-data audit](../../prds/sci-execution-runtime/research/results-as-data-audit-2026-08-14.md).
+
 ## N1 disposition — 2026-08-12
 
 Still open outside this lane. Replace the comment-prefixed branches in

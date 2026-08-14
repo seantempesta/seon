@@ -48,6 +48,20 @@ annotations, or comment-only pseudo-entries. A real failed form on an isolated
 scratch cluster provides the final before/after proof once the foreign boot
 and capture-context boundary is green.
 
+## Live capture attempt — 2026-08-14
+
+The Drive 1 stored capture facts (`tmp/drive-1-root`, six captures carrying a
+prompt, 210 result positions) contain NO comment-encoded entries. The only
+`;;` lines in the entire corpus are the two inside the `getting-started`
+instruction's own code fence. The drive's model replies never settled — the
+turns failed at `:seon.instrument/contract-violated` — so no agent prose ever
+reached the transcript.
+
+This neither confirms nor refutes the comment-encoding subclass; it records
+that the required live failed-form proof is still outstanding and that this
+drive could not supply it. Recorded during the
+[results-as-data audit](../../prds/sci-execution-runtime/research/results-as-data-audit-2026-08-14.md).
+
 ## N1 disposition — 2026-08-12
 
 The comment-form subclass remains fixed by `c6a81988c`: the focused
