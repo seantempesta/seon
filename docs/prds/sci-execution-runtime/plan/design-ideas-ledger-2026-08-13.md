@@ -269,7 +269,11 @@ one decision away from queued work. Ruled items cite their record.
     unit (never the namespace), each entry rendered per-block via its
     declared `:seon.render/html` producer or the derived floor; entries
     with no real html face elide to a compact chip (honest elision
-    value: count + anchor into debug), never dropped. Chat = curated
+    value: value kind, size, basis) that EXPANDS INLINE (owner
+    amendment, same day): expanded, the chip pretty-prints the full
+    data with syntax highlighting in place — the same pretty-data
+    renderer as debug, the same bytes, summoned on demand — never a
+    bounce to another page, never dropped. Chat = curated
     face, debug = complete pretty-data face; same block identities so
     morphs serve both. No agent-side injection — rendering is
     system-side projection selection; the declare-renders-at-birth rule
