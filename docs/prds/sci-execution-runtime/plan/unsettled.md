@@ -286,6 +286,24 @@ the orchestrator runs `bin/seon reset --force` on the shared root
 verifies status + the web UI answering, then runs the queued probe
 verification below. Do not wait for a further go-ahead.
 
+**NIGHT CLOSING STATE (2026-08-14 ~09:30 UTC) — read this first on
+resumption:** THE WEDGE EXTERMINATION IS COMPLETE: `seon.await/await!`
+owner + all crossings + census (`d452d0355`..`7e6b868cc`); lock/
+subprocess bounds + census (`732573ddb`, `5345be971`); the settlement
+chain total (`bea9c068d`..`2500a7f0a`, live-proven); five-plus wedge
+classes archived. THE DRIVE LOOP: three $0 attempts, each killing the
+next defect — advisory (fixed), lost settlement (fixed, golden), codec
+canonicalization (`8ec96cbf1`, killed the wildcard-pull blocker too),
+prefix drift (dissolution landed `0c3c289d7`, `prefix-drift` lane
+FINISHING its own red regressions — bootstrap_test 323-324/63-64,
+retained root run.cKvil2). NEXT IN ORDER: prefix-drift green + live
+successor proof → DRIVE 1 ATTEMPT 4 (fresh isolated root; the paid
+turn is the next unexplored territory) → observer → reports → then the
+deferred spine (graduation transcript rerun, R2 W3-W5 + renames +
+closing --all, Drive 2). Index 180 open / 1119 archived. One noted
+non-blocker: a parallel-only canonical-definition rejection for a
+my.background schema (isolation-sensitive class, existing note).
+
 **THE GOLDEN DEFECT (2026-08-14 ~06:30):** green-to-install's live
 graduation got a REAL DeepSeek turn through — the agent authored its
 contracted function — and then settlement was silently LOST: receipt
