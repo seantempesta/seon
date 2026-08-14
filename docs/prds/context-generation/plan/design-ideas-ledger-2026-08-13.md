@@ -439,6 +439,19 @@ one decision away from queued work. Ruled items cite their record.
     data-model decision, brought to the owner with options before any
     schema edit.
 
+41. **Two routes: `/` and `/ns/<full.ns.symbol>`** (owner, 2026-08-14
+    night): the only routes right now are root at `/` and every
+    reachable namespace at `/ns/<full.ns.symbol>`. Consequences:
+    `/agent/{id}` and `/agent/{id}/debug` are dead (agents ARE
+    namespaces, ruling 40); the `/ns/{ns}/debug` and `/data` PAGES are
+    dead as routes — the honest `/ai` view (ledger 31) and the data
+    drill become in-page affordances of the namespace view
+    (browser-local toggles/panels under ruling 38), not addresses.
+    Non-navigable plumbing (the SSE feed, the message POST, static
+    assets) remains transport under those two pages, not part of the
+    navigable surface; ui.md's route table is amended to match in the
+    same wave that re-scopes §1.5.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
