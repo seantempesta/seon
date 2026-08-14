@@ -14,6 +14,7 @@
   (:require [clojure.core.async :as async]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.error :as error]
             [seon.print :as print]
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as render.value]
@@ -61,25 +62,42 @@
 (def ^:private default-agent-profile
   (agent-render-profile (config/defaults)))
 
-(defn- request-profile
+(defn request-profile
+  "Return the profile carried by one request, deriving it once when absent."
+  {:malli/schema [:=> [:cat :map]
+                  [:or :seon.render.profile/profile :seon.error/value]]}
   [request]
   (or (:seon.render/profile request)
-      (let [database (:seon.db/db request)
-            agent-id (:seon.cluster.agent/id request)
-            cluster-name
-            (when (and database agent-id)
-              (db/q '[:find ?cluster-name .
-                      :in $ ?agent-id
-                      :where
-                      [?agent :seon.cluster.agent/id ?agent-id]
-                      [?agent :seon.cluster.agent/cluster ?cluster]
-                      [?cluster :seon.cluster/name ?cluster-name]]
-                    database agent-id))
-            effective (when cluster-name
-                        (config/effective database cluster-name))]
-        (when effective
-          (agent-render-profile effective)))
-      default-agent-profile))
+      (if (schema/handed-projection)
+        (let [database (:seon.db/db request)
+              agent-id (:seon.cluster.agent/id request)
+              cluster-name
+              (when (and database agent-id)
+                (db/q '[:find ?cluster-name .
+                        :in $ ?agent-id
+                        :where
+                        [?agent :seon.cluster.agent/id ?agent-id]
+                        [?agent :seon.cluster.agent/cluster ?cluster]
+                        [?cluster :seon.cluster/name ?cluster-name]]
+                      database agent-id))
+              effective (when cluster-name
+                          (config/effective database cluster-name))]
+          (if (:seon.error/kind effective)
+            effective
+            (or (when effective (agent-render-profile effective))
+                default-agent-profile)))
+        (error/diagnostic
+         {:seon.error/kind ::missing-projection
+          :seon.error/message
+          "Rendering requires a carried profile or handed projection."
+          :seon.error/diagnostic-layer :render
+          :seon.error/diagnostic-operation 'seon.render/request-profile
+          :seon.error/diagnostic-member :seon.schema/projection
+          :seon.error/diagnostic-expected
+          [:or :seon.render/profile :seon.schema/handed-projection]
+          :seon.error/diagnostic-offending :seon.error/unknown
+          :seon.error/diagnostic-cause ::missing-projection
+          :seon.error/diagnostic-evidence nil}))))
 
 (defn- target-profile
   [request]
@@ -229,6 +247,16 @@
                          (assoc by-key (:seon.schema/key row) row))
                        (sorted-map))
                vals)
+          matches
+          (if (:db/id value)
+            (let [specificity (apply max 0
+                                     (map (comp count
+                                                :seon.schema/required-attrs)
+                                          matches))]
+              (filter #(= specificity
+                          (count (:seon.schema/required-attrs %)))
+                      matches))
+            matches)
           producers
           (->> matches
                (keep #(get % output))
@@ -478,33 +506,41 @@
   {:malli/schema [:=> [:cat :seon.render/call-request]
                   [:or :nil :string :seon.error/value]]
    :seon.fn/external-sink :ai-visible-text
-   :seon.fn/projection-boundary :seon.render/ai}
+  :seon.fn/projection-boundary :seon.render/ai}
   [request]
-  (let [rendered (invoke-producer request :seon.render/ai :seon.render/ai)]
-    (if (or (nil? rendered) (string? rendered) (:seon.error/kind rendered))
-      (fit-terminal request :seon.render/ai rendered)
-      {:seon.error/kind ::invalid-ai-output
-       :seon.render/invalid-output :ai
-       :seon.error/message "The selected AI renderer did not return text."
-       :seon.error/data {:seon.render/output rendered}})))
+  (let [profile (request-profile request)]
+    (if (:seon.error/kind profile)
+      profile
+      (let [request (assoc request :seon.render/profile profile)
+            rendered (invoke-producer request :seon.render/ai :seon.render/ai)]
+        (if (or (nil? rendered) (string? rendered) (:seon.error/kind rendered))
+          (fit-terminal request :seon.render/ai rendered)
+          {:seon.error/kind ::invalid-ai-output
+           :seon.render/invalid-output :ai
+           :seon.error/message "The selected AI renderer did not return text."
+           :seon.error/data {:seon.render/output rendered}})))))
 
 (defn render-html
   "Render one value as Hiccup through the unique selected live SCI Var."
   {:malli/schema [:=> [:cat :seon.render/call-request]
                   [:or :nil :seon.render/hiccup :seon.error/value]]
    :seon.fn/external-sink :html-response
-   :seon.fn/projection-boundary :seon.render/html}
+  :seon.fn/projection-boundary :seon.render/html}
   [request]
-  (let [rendered (invoke-producer request :seon.render/html
-                                  :seon.render/html)]
-    (if (or (nil? rendered)
-            (:seon.error/kind rendered)
-            (hiccup/hiccup? rendered))
-      (fit-terminal request :seon.render/html rendered)
-      {:seon.error/kind ::invalid-html-output
-       :seon.render/invalid-output :html
-       :seon.error/message "The selected HTML renderer did not return Hiccup."
-       :seon.error/data {:seon.render/output rendered}})))
+  (let [profile (request-profile request)]
+    (if (:seon.error/kind profile)
+      profile
+      (let [request (assoc request :seon.render/profile profile)
+            rendered (invoke-producer request :seon.render/html
+                                      :seon.render/html)]
+        (if (or (nil? rendered)
+                (:seon.error/kind rendered)
+                (hiccup/hiccup? rendered))
+          (fit-terminal request :seon.render/html rendered)
+          {:seon.error/kind ::invalid-html-output
+           :seon.render/invalid-output :html
+           :seon.error/message "The selected HTML renderer did not return Hiccup."
+           :seon.error/data {:seon.render/output rendered}})))))
 
 (defn- entity-lookup
   [database entity]
@@ -537,16 +573,21 @@
   {:malli/schema [:=> [:cat :seon.render/call-request]
                   [:or :seon.render/form :seon.error/value]]}
   [request]
-  (let [projection (sci.kernel/context-projection
-                    (:seon.sci.eval/ctx request))
-        rendered (invoke-producer request :seon.render/form
-                                  :seon.render/form)]
-    (if (valid-projection? projection :seon.render/form rendered)
-      rendered
-      {:seon.error/kind ::invalid-form-output
-       :seon.render/invalid-output :form
-       :seon.error/message "The selected form renderer did not return a form."
-       :seon.error/data {:seon.render/output rendered}})))
+  (let [profile (request-profile request)]
+    (if (:seon.error/kind profile)
+      profile
+      (let [request (assoc request :seon.render/profile profile)
+            projection (sci.kernel/context-projection
+                        (:seon.sci.eval/ctx request))
+            rendered (invoke-producer request :seon.render/form
+                                      :seon.render/form)]
+        (if (valid-projection? projection :seon.render/form rendered)
+          rendered
+          {:seon.error/kind ::invalid-form-output
+           :seon.render/invalid-output :form
+           :seon.error/message
+           "The selected form renderer did not return a form."
+           :seon.error/data {:seon.render/output rendered}})))))
 
 (defn render-call
   "Reuse one retained projection while its input, code, and reads are current."
@@ -560,7 +601,11 @@
     captured-calls :seon.render/captured-calls
     candidate-call-ids :seon.render/candidate-call-ids
     :as request}]
-  (let [output-schema (case output
+  (let [profile (request-profile request)]
+    (if (:seon.error/kind profile)
+      profile
+      (let [request (assoc request :seon.render/profile profile)
+            output-schema (case output
                         :seon.render/ai :seon.render/ai
                         :seon.render/html :seon.render/html
                         :seon.render/form :seon.render/form)
@@ -622,7 +667,7 @@
                      :seon.render.call/output rendered})]
         (when (and call-id captured-calls)
           (swap! captured-calls assoc call-id entry))
-        rendered))))
+        rendered))))))
 
 (defn acquire-context!
   "Acquire an agent's exact retained AI bytes and database value.

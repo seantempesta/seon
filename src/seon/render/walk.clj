@@ -880,6 +880,7 @@
   [{captured :seon.render/captured-calls
     :as request}]
   (let [captured (or captured (atom {}))
+        profile (render/request-profile request)
         acquisition (or (:seon.render.walk/root-acquisition request)
                         (root-acquisition request))
         direct-acquisition
@@ -893,6 +894,7 @@
                         members)))
         request (assoc request
                        :seon.render/captured-calls captured
+                       :seon.render/profile profile
                        :seon.render.walk/root-acquisition direct-acquisition)
         form-units (neighborhood (assoc request :seon.render/output
                                         :seon.render/form))

@@ -15,6 +15,7 @@
             [clojure.java.io :as io]
             [clojure.set :as set]
             [seon.db :as db]
+            [seon.error :as error]
             [seon.reconcile :as reconcile]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -527,11 +528,19 @@
    ;; one it already resolved for its extent — measured live 2026-08-07:
    ;; 84,664 resource reads before the read seam was repaired, 1,216 after it,
    ;; and 152 (one population, 12.6 ms) once supplied.
-   (let [projection (schema/projection-from-database
-                     (db/schema-database db))]
-     (schema/call-with-projection
-      projection
-      #(effective-in db (or cluster-name "default"))))))
+   (if (schema/handed-projection)
+     (effective-in db (or cluster-name "default"))
+     (error/diagnostic
+      {:seon.error/kind ::missing-projection
+       :seon.error/message
+       "Effective config requires the projection handed to this operation."
+       :seon.error/diagnostic-layer :configuration
+       :seon.error/diagnostic-operation 'seon.config/effective
+       :seon.error/diagnostic-member :seon.schema/projection
+       :seon.error/diagnostic-expected :seon.schema/handed-projection
+       :seon.error/diagnostic-offending :seon.error/unknown
+       :seon.error/diagnostic-cause ::missing-projection
+       :seon.error/diagnostic-evidence nil}))))
 
 (defn- effective-in
   [db cluster-name]

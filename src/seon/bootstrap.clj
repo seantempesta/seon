@@ -7,7 +7,8 @@
             [seon.db :as db]
             [seon.render :as render]
             [seon.render.walk :as walk]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.sci.kernel :as sci.kernel]))
 
 (defmacro help
   "Read the calling agent's live situation.
@@ -532,10 +533,7 @@
      :seon.repl/subject (:seon.render.walk/lookup request)
      :seon.repl/entry (first (entries rendered))}))
 
-(defn next-entry
-  "Derive the next generated entry from receipts already stored on the run."
-  {:malli/schema [:=> [:cat :seon.render.walk/request :seon.cluster.run/id]
-                  [:or :nil :seon.repl/entry :seon.error/value]]}
+(defn- next-entry-in
   [request run-id]
   (let [rows
         (db/q {:query
@@ -606,6 +604,18 @@
                        :seon.bootstrap/expected expected-sources
                        :seon.bootstrap/actual prior-sources}))))
         (nth episode index nil)))))
+
+(defn next-entry
+  "Derive the next generated entry from receipts already stored on the run."
+  {:malli/schema [:=> [:cat :seon.render.walk/request :seon.cluster.run/id]
+                  [:or :nil :seon.repl/entry :seon.error/value]]}
+  [request run-id]
+  (let [projection
+        (or (schema/handed-projection)
+            (sci.kernel/context-projection (:seon.sci.eval/ctx request)))]
+    (schema/call-with-projection
+     projection
+     #(next-entry-in request run-id))))
 
 (defn- digest-value
   [value]

@@ -13,6 +13,7 @@
             [seon.render.hiccup :as hiccup]
             [seon.render.transcript :as transcript]
             [seon.render.walk :as walk]
+            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.schema.form :as schema.form]
             [seon.test-support :as support])
@@ -103,6 +104,26 @@
 (defn- pulled
   [database lookup]
   (db/pull database '[*] lookup))
+
+(deftest render-without-a-carried-profile-or-projection-refuses
+  (let [world (atom nil)]
+    (support/with-database
+     (fn [connection]
+       (seed-entities! connection)
+       (let [database @connection]
+         (reset! world
+                 {:database database
+                  :ctx (support/fork-cluster-ctx connection)
+                  :value (pulled database
+                                 [:seon.config/cluster cluster-name])}))))
+    (let [{:keys [database ctx value]} @world
+          result (with-redefs [schema/handed-projection (constantly nil)]
+                   (render/render-ai (render-request database ctx value)))]
+      (is (= ::render/missing-projection (:seon.error/kind result)))
+      (is (= 'seon.render/request-profile
+             (get-in result
+                     [:seon.error/data
+                      :seon.error/diagnostic-operation]))))))
 
 (defn- walk-output-by-attribute
   [units attribute]
