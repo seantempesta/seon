@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, runtime, render, wave/ui-watchability]
 ---
@@ -31,3 +31,17 @@ backstop that closes the exact response with a loud diagnostic. Initial paint
 retains its registration/package event and gains a declared render backstop
 naming the registration and basis. Regressions prove a never-draining socket
 and missing package cannot retain their virtual threads indefinitely.
+
+## Resolution
+
+Resolved by `99a5f322a`. Both one-shot joins now use
+`seon.await/await!` with the declared eval time-limit config fact. Socket
+expiry names the pending byte count and closes the exact SSE generator;
+initial-package expiry names the registration and database basis transaction.
+The page boundary returns the typed refusal as HTTP 503 and the feed boundary
+commits it through the existing fault path.
+
+The two new never-arriving-event regressions passed. The complete
+`seon.render.web-test` namespace remains blocked by failures in untouched
+render/data paths after `0e7c38cfc`; the bounded-delivery assertions themselves
+were green before this note was archived.
