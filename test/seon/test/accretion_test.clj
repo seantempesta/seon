@@ -1,10 +1,12 @@
 (ns seon.test.accretion-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.edn :as edn]
+            [clojure.test :refer [deftest is testing]]
             [sci.core :as sci]
             [seon.config :as config]
             [seon.db :as db]
             [seon.fn :as seon.fn]
             [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support]
             [seon.test.accretion :as accretion]))
@@ -64,6 +66,32 @@
   (is (= [:=> [:cat :seon.test.accretion/install-refused-error]
           :seon.render/hiccup]
          (:malli/schema (meta #'accretion/render-html)))))
+
+(deftest source-harvest-keeps-refusal-render-contracts-coherent
+  (let [rows (seon.fn/rows {:seon.fn/roots seon.fn/source-roots})
+        contracts
+        (into {}
+              (keep (fn [{function-symbol :seon.fn/sym
+                          contract :seon.fn/spec}]
+                      (when contract
+                        [(symbol function-symbol)
+                         (edn/read-string contract)])))
+              rows)
+        projection
+        (schema/build-projection
+         (schema.edn/packaged-forms)
+         contracts
+         {:seon.schema/validate-render-contracts? true})]
+    (is (= [:=> [:cat :seon.test.accretion/install-refused-error]
+            :seon.render/ai]
+           (get-in projection
+                   [:seon.schema.projection/function-contracts
+                    'seon.test.accretion/render-ai])))
+    (is (= 'seon.test.accretion/render-ai
+           (get-in projection
+                   [:seon.schema.projection/shape-rows
+                    :seon.test.accretion/install-refused-error
+                    :seon.render/ai])))))
 
 (deftest generatability-is-derived-by-malli-generator-construction
   (testing "test.chuck enables Malli regex generation on the runtime classpath"
