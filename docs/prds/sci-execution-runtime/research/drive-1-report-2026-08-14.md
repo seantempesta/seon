@@ -6,7 +6,217 @@ date: 2026-08-14
 
 # Drive 1 — live DeepSeek evolving session
 
-## Verdict
+## Attempt 2 verdict
+
+**Stopped while the generated opening advanced beyond its first healthy
+receipt.** The fresh cluster and Drive 1 agent both booted, and the generated
+`(help)` form evaluated successfully. Generation then closed the run with a
+typed `:seon.db/invalid-read`: one captured call-preparation query's
+`:seon.db/read-request` was not canonical EDN when the next opening pull read
+the receipt.
+
+Per the live-drive spec's terminal-defect rule, no paid task message,
+mid-session message, or rebirth was attempted. This is Attempt 2's clean stop
+boundary, distinct from Attempt 1's now-fixed advisory contract failure.
+
+### Live endpoint and retained root
+
+**Web UI: [http://127.0.0.1:62886](http://127.0.0.1:62886)**
+
+- Fresh isolated operator root: `tmp/drive-1-root`
+- Cluster: `default`
+- Git HEAD: `fe73d8922eb7065786a7a20e519aedaa6f289c53`
+- Published `:current-src` commit:
+  `6a7ed1ce-9551-514e-94ca-74d2586341e9`
+- Publication inventory: 232 source inputs, 2,318 schemas, 823 functions,
+  7,169 contract rows, 535 namespaces
+- Agent: `drive-one-agent-attempt-2`
+- Namespace: `my.agents.drive-one-agent-attempt-2`
+- Generated run: `bootstrap:drive-one-agent-attempt-2`
+- Opening commit ID:
+  `6a7ed1ce-9551-514e-94ca-74d2586341e9`
+- Opening settlement basis: `t=536870969`
+- Fault observation basis: `t=536870968`
+- Preservation: the root was neither stopped nor reset after the attempt.
+  Its cluster, episode facts, receipt, read-evidence components, error fact,
+  blobs, and logs remain live.
+
+The previous Attempt 1 root was stopped through the operator and removed before
+this fresh publication, exactly as directed. Attempt 1's evidence remains in
+the prior report commit.
+
+### Attempt 2 headline measurements
+
+| Measurement | Fact-derived result |
+|---|---:|
+| Creation through generated-opening observation | **9.740 s** |
+| Generated forms / durable receipts | **1 / 1** |
+| Healthy generated receipts | **1** |
+| Receipt read-evidence components | **20** |
+| Provider attempts | **0** |
+| Context captures | **0** |
+| Recorded `:seon.render.cost` rows | **0** |
+| Provider spend | **$0.00** |
+| Driver task messages | **0** |
+| Authored plan items | **0** |
+| Rebirths | **0** |
+
+Agent creation began at `2026-08-14T08:30:38Z`; the healthy receipt was
+recorded at `08:30:39Z`; the generated run closed at `08:30:42Z`; the
+bounded observer returned at `08:30:48Z`. The complete driver-observed wall
+interval was **9.740 seconds**.
+
+### Verbatim generated entry and value
+
+The sole stored generated source was:
+
+```clojure
+; A new run just opened. Why am I awake — do I have messages?
+(help)
+```
+
+Its receipt had no `:seon.cluster.eval/error` and no `:seon.error/kind`.
+The admitted result, rendered from the stored print face, was:
+
+```clojure
+{:seon.cluster.agent/id "drive-one-agent-attempt-2"
+ :seon.cluster.agent/namespace-ref
+ [:seon.ns/name my.agents.drive-one-agent-attempt-2]
+ :seon.cluster.agent/unread-message-count 0
+ :seon.cluster.run/turns-remaining 99
+ :seon.cluster.agent/protocol-namespaces
+ [my.message my.run seon.bootstrap seon.db]
+ :seon.cluster.agent/open-run-ref
+ [:seon.cluster.run/id "bootstrap:drive-one-agent-attempt-2"]
+ :seon.cluster.run/trigger
+ [:seon.cluster.message/id "bootstrap-task:drive-one-agent-attempt-2"]}
+```
+
+The receipt read at `t=536870967` and owns 20 read-evidence component rows.
+It has no recorded `:seon.eval/fn-entries` or
+`:seon.eval/allocated-bytes` fact.
+
+### Typed stop evidence
+
+The generated run closed with:
+
+```clojure
+{:seon.cluster.run/id "bootstrap:drive-one-agent-attempt-2"
+ :seon.cluster.run/opened-at #inst "2026-08-14T08:30:38.000-00:00"
+ :seon.cluster.run/closed-at #inst "2026-08-14T08:30:42.000-00:00"
+ :seon.cluster.run/error
+ "The EDN-backed attribute :seon.db/read-request has an invalid logical value."}
+```
+
+The total fault committer recorded error fact
+`9f54bedb-7424-4857-b862-7fc4a8ab36c2`:
+
+```clojure
+{:seon.error/kind :seon.db/invalid-read
+ :seon.error/message
+ "The EDN-backed attribute :seon.db/read-request has an invalid logical value."
+ :seon.error/basis-t 536870968
+ :seon.db/operation :datahike.pull/result
+ :seon.schema.datahike/rule :seon.schema.datahike/noncanonical-edn
+ :seon.schema.datahike/attr :seon.db/read-request}
+```
+
+The offending stored logical value, verbatim from
+`:seon.error/data-edn`, was:
+
+```clojure
+#:seon.db{:read-operation :q,
+          :query-request
+          {:query
+           {:find [?key ?schema-key ?fingerprint ?supplier],
+            :in [$],
+            :where
+            [[?row :seon.call-preparation/key ?key]
+             [?row :seon.call-preparation/schema ?schema]
+             [?schema :seon.schema/key ?schema-key]
+             [?schema :seon.schema/shape ?shape]
+             [?shape :seon.schema.shape/fingerprint ?fingerprint]
+             [?row :seon.call-preparation/supplier ?function]
+             [?function :seon.fn/sym ?supplier]]},
+           :args [:seon.db/database]}}
+```
+
+`bootstrap:root` independently exhibited the same shape before agent
+creation: one healthy receipt followed by the same run error. The Drive 1
+agent reproduction establishes that the defect is not root-specific.
+
+### Attempt 2 measurement families
+
+#### 1. Opening composition
+
+The complete opening was not generated. One source/value entry settled, but
+there are zero context captures and zero `:seon.render.cost` facts in the
+fresh database. Total opening tokens, explained-closure tokens,
+beyond-closure tokens, and per-entry shape/cost are therefore **unavailable**,
+not zero. The one entry reached `help`; generation failed while deriving its
+successor.
+
+#### 2. Live pull
+
+Named conditions: fresh isolated root at the published commit above, shipped
+`deepseek-v4-flash` with thinking disabled, one new agent, opening
+`(help)`, 30,000 ms eval limit, receipt read basis `t=536870967`.
+Creation-to-observer wall time was **9.740 s**. The pull terminated rather than
+wedging. Its receipt contains 20 read-evidence components, but no
+`:seon.eval/fn-entries` fact, so a call-count comparison with the attribution
+baseline is unavailable.
+
+#### 3. Delta economics
+
+**Not reached.** No task or mid-session message was sent, so no delta or
+counterfactual full rerender exists.
+
+#### 4. Rebirth in vivo
+
+**Not reached.** A rebirth after a terminally incomplete generated opening
+would be a different experiment. Lived/reborn tokens, determinism, and
+post-rebirth behavior are unavailable.
+
+#### 5. Agent behavior against context
+
+No model turn occurred. The system-generated `(help)` form executed, but the
+agent did not replay shown forms, use `doc`/`dir`, follow a first-use
+demonstration, operate `my.plan`, or anchor a temporal form. These are
+unobserved opportunities, not negative model decisions.
+
+#### 6. Provider cost
+
+There are zero `:seon.ai.attempt/run` facts and zero context captures for
+the run. Total provider spend is therefore **$0.00**. Neither the primary
+DeepSeek route nor the configured failover was called.
+
+#### 7. Basis-`t` comprehension
+
+**Not reached.** The receipt records `t=536870967`, but no model prompt was
+captured and no agent could interpret or reuse the basis display.
+
+#### 8. Planner text without structured `:about`
+
+**Not reached.** There are zero authored `my.plan.item` entities. The
+frequency has denominator zero and is unavailable rather than 0%.
+
+### Attempt 2 stop boundary
+
+```text
+fresh init and start
+→ system root opening: healthy (help), then invalid read
+→ Drive 1 agent creation
+→ generated opening form 0: healthy (help) receipt
+→ next-entry pull decodes noncanonical :seon.db/read-request
+→ durable :seon.db/invalid-read error fact
+→ generated run closes with error
+→ STOP before any paid message
+```
+
+Continuing would have bypassed the generated-opening contract and invalidated
+the requested evolve→rebirth→continue measurement.
+
+## Attempt 1 verdict
 
 **Stopped at the generated-opening gate.** The isolated cluster booted and
 the Drive 1 agent was created, but its first generated form, `(help)`,
