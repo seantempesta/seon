@@ -138,6 +138,12 @@
                            :seon.render/captured-calls (atom {})))
            contribution (first (:seon.context/contributions rendered))
            contributions (:seon.context/contributions rendered)
+           web-directory-contributions
+           (filterv
+            #(str/includes?
+              (:seon.context.contribution/text %)
+              "(dir (quote my.web))")
+            contributions)
            removed-block-read
            (db/q '[:find ?block
                    :where
@@ -164,6 +170,15 @@
                  (:seon.context.contribution/hash entry)))
             contributions))
        (is (= :walk (:seon.render.block/name contribution)))
+       (is (= 1 (count web-directory-contributions))
+           "the full toolkit directory is priced from its consumer-fit bytes")
+       (is (< 0
+              (:seon.context.contribution/tokens
+               (first web-directory-contributions))
+              (get-in rendered
+                      [:seon.ai.tokens/budget-report
+                       :seon.ai.tokens/estimated]))
+           "one directory contribution is bounded inside the whole prompt")
        (is (seq entries))
        (is (every? (comp seq :seon.render.history/bytes) entries))
        (is (str/includes? text "inspect this walk")
