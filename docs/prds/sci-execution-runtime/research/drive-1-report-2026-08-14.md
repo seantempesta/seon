@@ -6,6 +6,220 @@ date: 2026-08-14
 
 # Drive 1 — live DeepSeek evolving session
 
+## Attempt 4 verdict
+
+**Web UI: [http://127.0.0.1:51063](http://127.0.0.1:51063)**
+
+**Stopped after the first paid turn followed the generated opening's stale
+task instead of the driver's task.** The opening itself completed cleanly for
+the first time: 12 generated forms and 12 healthy receipts settled in
+208.899 seconds. The subsequent prompt contained both the real task and the
+opening's `largest` task, with the latter present twice. DeepSeek replayed
+`largest`, made no plan, did not define `sum-of-squares`, and exhausted its
+reply without `my.run/complete`. Per the drive stop rule, no unrelated message
+or rebirth was attempted after that terminal boundary.
+
+### Attempt 4 live endpoint and retained root
+
+- Fresh isolated operator root: `tmp/drive-1-root`
+- Cluster: `default`
+- Git HEAD: `a2da91591`
+- Published `:current-src` commit:
+  `6a7ee69e-0be7-5bf0-8b29-3d67ac768bbd`
+- Publication inventory: 232 source inputs, 2,318 schemas, 823 functions,
+  7,170 contract rows, 535 namespaces
+- Agent: `drive-one-agent-attempt-4`
+- Namespace: `my.agents.drive-one-agent-attempt-4`
+- Generated run: `bootstrap:drive-one-agent-attempt-4`
+- Paid run: `6c5dad44-e55a-4184-b4bb-0cf07a6b8764`
+- Prompt capture: `6c5dad44-e55a-4184-b4bb-0cf07a6b8764-context-536871046`
+- Final observed basis: `t=536871058`
+- Preservation: the operator was neither stopped nor reset. Its cluster,
+  opening receipts, exact prompt, paid attempt, reply forms, and errors remain
+  live.
+
+The isolated cluster health probe was degraded throughout: it returned the
+typed `:seon.config/missing-projection` error instead of runtime health. JVM
+evaluation remained functional. The report-only path restriction prevented a
+separate issue note.
+
+### Attempt 4 headline measurements
+
+| Measurement | Fact-derived result |
+|---|---:|
+| Agent creation to opening close | **208.899 s** |
+| Generated forms / durable receipts | **12 / 12** |
+| Opening source / result-face estimate | **339 / 4,437 tokens** |
+| Opening episode estimate proxy | **4,776 tokens** |
+| Beyond-closure intent membership | **0 tokens** |
+| Stored `:seon.render.cost` rows | **0** |
+| Paid prompt estimate / provider tokens | **22,620 / 22,604** |
+| Prompt cache hit / miss tokens | **11,136 / 11,468** |
+| Completion tokens | **310** |
+| Paid-turn terminal latency | **8.063 s** |
+| Provider attempts | **1** (`deepseek-v4-flash`) |
+| Provider spend | **$0.0017235008** |
+| Authored plan items | **0** |
+| Requested durable functions / tests installed | **0 / 0** |
+| Mid-session delta messages / rebirths | **0 / 0** |
+
+Creation was committed at `2026-08-14T09:58:54.642Z`; the generated run
+closed at `10:02:23.541Z`. Its receipt read bases advanced from
+`t=536870953` at ordinal 0 to `t=536871026` at ordinal 11. The task message
+was committed as `inbound-536871044-0` at `10:02:58Z`; its run closed at
+`10:03:13Z`.
+
+### Opening composition and pull economics
+
+There were no ready `my.plan` subjects before the opening, so the
+beyond-closure admission path contributed zero. All 12 entries came from the
+ordinary generated-opening closure. The required `:seon.render.cost` family
+was installed but had **no entities at all**, globally or for this agent, so
+the promised authoritative per-entry cost measurement is unavailable. The
+following is the explicitly weaker proxy derived from the stored source and
+result strings with the shipped `seon.ai.tokens/estimate` function:
+
+| Ordinal | Entry shape | Source | Result |
+|---:|---|---:|---:|
+| 0 | `(help)` | 21 | 527 |
+| 1 | `(dir my.run)` | 3 | 117 |
+| 2 | explained `(dir my.run)` | 25 | 117 |
+| 3 | explained `(dir my.run)` | 30 | 117 |
+| 4 | explained `(dir my.run)` | 22 | 117 |
+| 5 | explained `(dir my.run)` | 42 | 117 |
+| 6 | explained `(dir my.run)` | 23 | 117 |
+| 7 | `(dir seon.db)` | 4 | 666 |
+| 8 | `(dir my.message)` | 5 | 95 |
+| 9 | agent-namespace `dir` | 12 | 1,100 |
+| 10 | `(dir seon.bootstrap)` | 6 | 247 |
+| 11 | stale `largest` task + schema `dir` | 146 | 1,100 |
+
+The fact-derived 12-entry prefix implies 13 live pull decisions—one for each
+settled entry and one terminal no-next-entry decision—from the documented
+`next-entry` mechanism. There is no durable call-count fact, so 13 is a
+mechanical inference rather than a recorded counter. Wall time is the exact
+fact timestamp difference above.
+
+### Verbatim stale opening context
+
+Opening ordinal 11 was:
+
+```clojure
+; I can see there's a task waiting for me. Let me understand what's needed:
+
+; 1. Define a durable contracted function named `largest` that returns the row with the greatest `:example/amount`, or `{}` for empty input
+; 2. Call it once
+; 3. Query its stored `:seon.fn/spec`
+; 4. Complete with a short reply naming what I built and its contract
+
+; Let me first check the schemas available for the examples and understand the data structures.
+
+(dir (quote seon.schema.edn))
+```
+
+The paid prompt contained this line **twice**:
+
+```text
+From outside this cluster to drive-one-agent-attempt-4: Define a durable contracted function named largest that returns the row with the greatest :example/amount, or {} for empty input. Call it once, query its stored :seon.fn/spec, then complete with a short reply naming what you built and its contract.
+```
+
+It also contained the actual newest message once:
+
+```text
+From outside this cluster to drive-one-agent-attempt-4: Author and follow one my.plan for this task. Every authored item must use the NEW :my.plan.item/about shape: a plain vector mixing quoted qualified function symbols and namespaced keywords, targeting the actual functions and schema attributes you will use. Define a durable contracted function sum-of-squares in your namespace with a complete Malli contract, define a discoverable clojure.test usage test, run it through seon.test/run, complete every plan item, and close with my.run/complete reporting the exact test result. Do not edit repository files.
+```
+
+The exact captured prompt was 68,905 characters. Its one durable `walk`
+contribution estimated 22,620 tokens; DeepSeek reported 22,604 prompt tokens.
+
+### Verbatim paid reply and terminal evidence
+
+DeepSeek's first form replayed the old objective:
+
+```clojure
+; Looking at this task, I need to:
+; 1. Define a durable contracted function named `largest` that returns the row with the greatest `:example/amount`, or `{}` for empty input
+; 2. Call it once
+; 3. Query its stored `:seon.fn/spec`
+; 4. Complete with a short reply
+
+; Let me start by defining the function with the proper Malli schema:
+
+(defn largest
+  "Return the row with the greatest :example/amount, or {} for empty input."
+  {:malli/schema [:=> [:cat [:sequential [:map [:example/amount :int]]]] [:or :map {}]]}
+  [rows]
+  (if (empty? rows)
+    {}
+    (apply max-key :example/amount rows)))
+```
+
+The remaining reply forms were:
+
+```clojure
+; Now let me call it once to verify it works:
+(largest [{:example/amount 10} {:example/amount 20} {:example/amount 15}])
+
+; Now let me query its stored `:seon.fn/spec`:
+(db/pull db '[*] [:seon.fn/sym "largest"])
+
+; Let me look up how to query the function spec. I should check what the directory shows for my namespace first:
+(dir (quote my.agents.drive-one-agent-attempt-4))
+; Let me check the seon.db functions to understand how to query the spec properly:
+```
+
+The first result was unreadable through the shipped fact reader and no
+`:seon.fn` row was installed. The next three receipt values were typed errors:
+
+```clojure
+[:seon.sci.eval/evaluation-failed "Unable to resolve symbol: largest"]
+[:seon.sci.eval/evaluation-failed "Unable to resolve symbol: db/pull"]
+[:seon.sci.eval/evaluation-failed "No namespace: my.agents.drive-one-agent-attempt-4 found"]
+```
+
+The run itself has no run-level error; it simply closed after the reply was
+exhausted. `seon.eval.drive/terminal-state` therefore derived `:stopped`, not
+`:completed`. There are zero function rows, zero test rows, and zero
+`my.plan.item` rows for this agent.
+
+### Eight measurement families
+
+1. **Opening composition:** 12/12 healthy generated entries, 208.899 s;
+   4,776-token stored-string proxy, all closure and zero beyond-closure.
+   Authoritative per-entry cost facts were absent, which is itself the
+   measured result.
+2. **Live pull:** 208.899 s and an inferred 13 pull decisions. No durable call
+   counter exists, so a measured function-call attribution comparison cannot
+   be made.
+3. **Delta economics:** unavailable. The stop occurred on the first paid turn,
+   before the required unrelated mid-session message. There is one full
+   capture only, so no honest delta/full comparison exists.
+4. **Rebirth in vivo:** unavailable. No rebirth was triggered after the
+   terminal wrong-objective boundary; lived/reborn tokens and survival cannot
+   be measured.
+5. **Context behavior:** the agent replayed the demonstrated stale `largest`
+   objective and its shown forms. It used `dir` in the opening and reply, never
+   used `doc`, never operated `my.plan`, and did not follow the newest task.
+6. **Cost:** one direct DeepSeek Flash attempt, no failover. Usage was 11,136
+   cached input, 11,468 uncached input, and 310 output tokens. At the shipped
+   $0.0028/$0.14/$0.28 per million cached-input/uncached-input/output prices,
+   the total is **$0.0017235008**. The attempt began at 10:02:58Z, inside the
+   declared 10:00–24:00 UTC off-peak window whose regular factor is 1.0.
+7. **Basis-`t` comprehension:** the capture contained **zero `t=` display
+   lines**. The agent therefore could not anchor on a shown basis value; this
+   family is unobservable rather than a comprehension failure.
+8. **Planner omission case:** zero authored items makes the denominator zero.
+   There are no text-named subjects with omitted `:about`, but the omission
+   frequency is **not measurable** from this attempt.
+
+### Stop ruling
+
+Continuing with the unrelated message or manufacturing a rebirth would have
+measured a session already following the wrong durable objective. The defect
+boundary is exact: the first real prompt preserved an obsolete bootstrap task
+twice, and the live model selected it over the newest driver message. The
+root and every receipt are retained for diagnosis.
+
 ## Attempt 3 verdict
 
 **Stopped at generated-opening prefix drift after one healthy receipt.**
