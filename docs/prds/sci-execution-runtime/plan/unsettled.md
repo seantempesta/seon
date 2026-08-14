@@ -286,6 +286,22 @@ the orchestrator runs `bin/seon reset --force` on the shared root
 verifies status + the web UI answering, then runs the queued probe
 verification below. Do not wait for a further go-ahead.
 
+**THE RESULTS-AS-DATA VERDICT (2026-08-14 midday) — owner-directed
+audit, measured on the real captures: 30.5% of result positions are
+honest data; 66.7% narrated prose.** Root mechanism:
+`seon.render/project-node*` substitutes `/ai` producers for VALUES in
+result position (an entity pull reached the agent as a sentence —
+98.8% of queried data destroyed; the teaching paragraph spliced
+unquoted into map slots 30+ times per context — also a prompt-bloat
+and budget-wedge driver). Complete nine-seam rip-out list in
+[results-as-data-audit-2026-08-14](../research/results-as-data-audit-2026-08-14.md);
+four new issues scheduled. **THE RESULTS RIP-OUT IS THE NEXT WAVE**,
+launching the moment block-coverage and clip-ripout land (the nine
+seams span their held files). Principle: `/ai` renders context blocks,
+never computed values; pulls return attributes; prose-as-data quotes
+itself; after seams 1-4 die, prose-on-purpose = declared instruction
+entity, a one-line predicate.
+
 **MORNING HANDOFF (2026-08-14 ~11:30 UTC) — the owner's wake-up
 package.** Five drive attempts, total spend ~$0.005, each converting
 the next latent defect into a landed fix. Attempt 5 validated the
