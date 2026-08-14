@@ -71,6 +71,7 @@ See `README.md` for the convention.
 | [Add the required instrumentation request to the repl skill](repl-skill-omits-required-instrumentation-request.md) | friction | skill accuracy sweep |
 | [Give maintenance messages plain identities, not printed EDN](maintenance-message-ids-embed-printed-edn.md) | friction | message identity cleanup |
 | [Boot past half-edited foreign vars with a typed diagnostic](cluster-boot-instruments-in-flight-working-tree-vars.md) | friction | boot instrumentation scope design |
+| [Commit the babashka-process AOT patch to a fork](vendored-babashka-process-carries-a-local-aot-patch.md) | cleanup | vendoring hygiene |
 | [Refuse cluster names that collide with the store directory](cluster-named-store-collides-with-the-store-directory.md) | friction | R3 store-path decision |
 | [Carry the operator root explicitly instead of guessing from names](operator-root-inference-guesses-from-directory-names.md) | friction | R3 store-path decision |
 | [Bound the parallel-only confirmation protocol exchange](confirmation-parallel-failure-blocks-reading-worker-protocol.md) | friction | test-platform follow-up |
