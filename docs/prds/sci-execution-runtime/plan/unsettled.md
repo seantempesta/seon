@@ -286,7 +286,23 @@ the orchestrator runs `bin/seon reset --force` on the shared root
 verifies status + the web UI answering, then runs the queued probe
 verification below. Do not wait for a further go-ahead.
 
-**DRIVE 1 LAUNCHED (2026-08-14, post-restart):** driver lane `drive-1`
+**DRIVE 1 ATTEMPT 1 — FAILED USEFULLY (2026-08-14 small hours, $0
+spent):** the opening died pre-model on the accretion advisory contract
+(fixed at cause by green-to-install, `c528ec0a8`-era commit: advisory
+skipped for ordinary evaluations). En route the drive flushed out AND
+got fixed/filed: the operator rename break (atomic repair
+`fd9777027`), shared-JVM boot instrumentation churn (filed → drives
+run on isolated roots), the babashka-process AOT cycle (vendored patch
+with its tracking issue), the mid-walk vanish race (filed). The OBSERVER
+delivered
+[drive-1-observation-2026-08-14](../research/drive-1-observation-2026-08-14.md):
+8 new issues + 2 updated; the 3 BLOCKERS (uninstalled `generated-at`,
+refuse-before-capture, GETs writing render-cost facts) are the
+`drive-defects` lane, launched. The bounded-await owner
+`seon.await/await!` LANDED (`d452d0355`, with crossings `922c90e48`
+and `6d374c247`). Drive 1 attempt 2 relaunches behind drive-defects +
+green-to-install. Original launch record follows: **DRIVE 1 LAUNCHED
+(2026-08-14, post-restart):** driver lane `drive-1`
 (scratch cluster `drive-one` forked from the clean reset publication —
 immune to working-tree lane churn; flash-only; the full spec session:
 opening → plan with the new `:about` token vector → durable function →
