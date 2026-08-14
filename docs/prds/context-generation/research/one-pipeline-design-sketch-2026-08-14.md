@@ -49,32 +49,34 @@ fabricated-sentence defect (reaudit §2.2) are deleted rather than
 fixed. Everything downstream is finite, pure, closed-grammar data —
 no safety reasoning survives past this line.
 
-## Stage 2 — one walk, one selection, re-entered per node (Q1-i)
+## Stage 2 — one selection per unit; faces terminal; the floor composes the unclaimed (RULED 35/36)
 
-The inversion that makes it turtles all the way down: **selection is
-not a step before the printer; it is a rung inside it.** The emit walk,
-at every node, asks the ONE chain — explicit projection key on the
-value; unique contract-fitting public function in the owning namespace
-when the pull edge carries one (Q3); the schema-attached face; the
-structural face (the floor's grammar emit). A specialist face is a
-FRAME, not a terminal: it renders its own value and its output enters
-the sinks as an identified fragment, while nested schema'd values
-inside it resolve through the same chain (the current `project-node*`
-mechanism, promoted from under the floor to being the walk itself; the
-existing `:seon.render/rendering` re-entrance guard carries over). A
-face that genuinely owns its whole subtree (source text) declares
-that — opting OUT of child composition is data, not the default.
+**Corrected against the owner's ruling (35) — the earlier frames
+recommendation is dead.** Selection runs once per unit through the ONE
+chain — explicit projection key; the owning-namespace face discovered
+through ordinary program facts (ruling 36: a defined function IS pull
+data; no registration, no second discovery mechanism); the
+schema-attached face; the floor. **A declared face is TERMINAL: it
+owns its value's output.** Composition lives where it lives today — in
+the floor — but promoted to first quality: for a value nothing
+claimed, the floor walk detects nested registered shapes and composes
+their declared faces (the `project-node*` mechanism, kept at its mount,
+made excellent). Nested quality INSIDE a declared face is a curation
+duty under ruling 34: a face that `pr-str`s its nested values (today's
+`seon.error` evidence) is a defect fixed AT that face — typically by
+the face calling the floor for that sub-value as an ordinary function
+call — never by machinery inserted underneath it.
 
-Consequences that fall out for free:
+What still falls out:
 
-- there is no separate "floor engine" — the floor is the face of last
-  resort in the same recursion, so "one renderer" is literally one
-  function;
-- `seon.error/render-ai`'s raw `pr-str` of evidence dissolves: evidence
-  is a nested value, so it composes through the chain like everything
-  else;
-- the two argument conventions and the hardcoded floor-symbol set die —
-  a face is a face.
+- one chain, one calling convention; the hardcoded floor-symbol set
+  dies (the floor is the declared last rung, not a special-cased pair
+  of symbols);
+- functions render through a default face whose output is the FORM
+  that generates their data (ruling 36) — the agent's REPL, the
+  panels, and `doc`/`dir` are all this one mechanism;
+- ruling 34's census tracks which families still ride the floor in
+  either projection — the floor being GOOD never makes it the goal.
 
 ## Stage 3 — the printer: sample→emit, two sinks, one elision value
 
@@ -123,12 +125,15 @@ token stream.
 
 **Seam A (model call):** consumes only pipeline-produced history
 entries — records carrying block identity, basis, form, and the AI
-bytes. Budgeting is member-level against the prompt token budget with
-the cluster-observed calibration: whole entries enter, or elide as
-whole chips carrying requery identity. It measures AI text ONLY
-(rip-out #19). The reply-medium reminder and every other prompt tail
-becomes an ordinary instruction block — `prompt/text` is a `join`, and
-nothing else.
+bytes — and is, for now, a `join` in order and NOTHING else: ruling 37
+defers all budget machinery until the pipeline works. The interim
+depth knob is acquisition config; wrong content at a depth is fixed by
+moving data around, not clipping. When budgets return, the ruled
+design is member-level whole-or-chip (shape marker + requery identity)
+measuring AI text only with the observed calibration. The four
+existing budget loops die now regardless — their owners are deleted
+with or without a successor budget. The reply-medium reminder and
+every other prompt tail becomes an ordinary instruction block.
 
 **Seam B' (namespace view):** consumes only serialized block packages
 (the existing revisioned keyframe/delta machinery). The namespace view

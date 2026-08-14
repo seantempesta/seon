@@ -328,6 +328,54 @@ one decision away from queued work. Ruled items cite their record.
     elision face everywhere, styled identically in result lines and
     pages.
 
+34. **Declared faces for everything are the goal; the floor is the
+    net, never the norm** (owner, 2026-08-14 late evening, resolving
+    open-questions Q2 and confirming the big picture): one mechanism
+    generates the agent's context and the human's page — the ordered
+    block vector from the one agent-rooted pull, faces per unit,
+    append-only diff/history updates, two seams. Within it, every
+    load-bearing family owes a thought-through declared face for BOTH
+    `/ai` and `/html` — selection and transformation designed for the
+    consumer, data that reads back through the reader, never dumped
+    output. The floor value printer exists for honesty and totality; a
+    family riding the floor in either output is an open census gap.
+    Composition of face fragments covers nested values whose own face
+    is missing. Neither output tolerates shit.
+
+35. **Faces are terminal; the floor composes only what nothing
+    claimed** (owner, 2026-08-14 late evening, resolving Q1): when a
+    value — or a function's returned value — has a declared renderer,
+    that renderer owns the output, full stop. Per-node composition is
+    the FLOOR's mechanism: the last resort for values nothing claimed,
+    where the floor walk detects nested registered shapes and composes
+    their faces. The general posture stays ruling 34: register or
+    explicitly specify renderers; do not lean on the floor. (The
+    corollary: a declared face that renders its nested values badly is
+    a curation defect to fix at that face, never a reason to add
+    machinery under it.)
+
+36. **Agent-authored render functions are ordinary program facts — the
+    same mechanism renders them** (owner, 2026-08-14 late evening,
+    resolving Q3): defining a function in an agent's namespace writes
+    program-graph facts reachable from the agent's entity, so the pull
+    acquires it and it renders automatically, like every other value.
+    Functions get a DEFAULT renderer whose output is the FORM — the
+    REPL form that generates the data — so evaluating it produces the
+    value whose own renderer then shows it correctly on every surface.
+    No registration step, no special discovery machinery: it's all the
+    one pull + faces mechanism.
+
+37. **No budget machinery until the pipeline works** (owner,
+    2026-08-14 late evening, resolving Q4): defer seam-A budget work
+    entirely — focus on getting the content RIGHT, not on clipping it.
+    The interim knob is acquisition depth config (go less deep if
+    needed), and if the right context is not appearing at the right
+    depths the answer is moving data around (schema refs, membership),
+    not clipping. HTML has no clipping, ever. The four existing budget
+    loops still die with their owners; member-level selection with
+    shape-chips remains the ruled DESIGN for when budgets return, but
+    it is not built now.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced

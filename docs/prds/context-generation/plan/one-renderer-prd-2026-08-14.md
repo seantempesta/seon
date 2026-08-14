@@ -63,6 +63,67 @@ unconstructable, not discouraged.
 
 ## 1. The architecture
 
+### 1.0 The big picture — context generation IS the renderer
+
+**One mechanism generates the agent's context and the human's page.**
+There is no context builder beside a UI renderer; there are five stages
+over one substrate (ruled with the owner, 2026-08-14 late evening):
+
+1. **Collect** — one Datahike pull rooted at the agent entity, its
+   selector GENERATED from installed schema ref declarations; the pull
+   result is both the data and the membership index. Nothing configures
+   what blocks exist; reachability from the agent at one immutable
+   database value decides. Authority:
+   [context.md "Membership is the root pull"](../../../seon/architecture/context.md).
+2. **Order** — the walk emits one deterministic ordered vector of
+   blocks: pull-tree order, define-before-use, alphabetical ties, live
+   material by arrival. This vector is the ONE shared substrate — the
+   owner's "2D": the AI side is this vector reduced to text in order;
+   the HTML side is the same vector arranged in space. Authority:
+   [context.md "Order preserves the prefix"](../../../seon/architecture/context.md).
+3. **Face** — each unit resolves `/form`, `/ai`, `/html` through the
+   one selection chain. **Ruled (ledger 34): declared faces for every
+   load-bearing family are THE GOAL** — the floor value printer is the
+   safety net (honesty, totality), never the mechanism that decides
+   what the agent or the human sees; a family riding the floor in
+   either output is an open census gap, and neither output tolerates
+   dumped shit. Faces are TERMINAL (ruling 35): a declared renderer
+   owns its value's output; composition is the FLOOR's mechanism —
+   for values nothing claimed, the floor walk detects nested
+   registered shapes and composes their declared faces. Agent-authored
+   render functions need no registration: a defined function is a
+   program fact the pull acquires, with a default face that outputs
+   its generating FORM (ruling 36).
+4. **Update** — the diff/history model: the render proc retains each
+   logical call's read evidence; a transaction wake replays it against
+   the latest database value; only semantically stale calls re-derive,
+   exactly once, APPENDING basis-labelled entries. History never
+   edits: prompt N+1 is prompt N plus a suffix — so the agent sees
+   change AS change, newest-basis material sits nearest the model
+   turn, and the byte-stable prefix is the provider cache. Authority:
+   [context.md "Read reuse…" / "Work wakes and render refresh are
+   separate"](../../../seon/architecture/context.md).
+5. **Deliver** — seam A joins the entries in order; ALL budget
+   machinery is DEFERRED (ruling 37: nothing clips until the pipeline
+   works — the interim knob is acquisition depth config, and wrong
+   context at a depth is fixed by moving data around; when budgets
+   return, the ruled design is member-level whole-or-chip). Seam B′
+   arranges the same retained blocks on the namespace view
+   (`/ns/<ns>`; `/` is root's) — newest-basis primary, disclosure and
+   morphs, never a budget. The agent and the
+   human hold the same retained artifacts at different fits, so "my
+   human is seeing this" is structurally true. Authority:
+   [ui.md "The render engine" / "The in-process render
+   flow"](../../../seon/architecture/ui.md).
+
+The recursive printer that dominates the rip-out register is stage 3's
+FLOOR RUNG — load-bearing for honesty, deliberately boring: the vision
+is that stages 1-2 and 4-5 carry the system and stage 3 is mostly
+designed faces. End-to-end candidate mechanics:
+[one-pipeline design sketch](../research/one-pipeline-design-sketch-2026-08-14.md).
+
+### 1.1 The stage laws
+
 **Function outputs flow whole.** No function bounds, truncates,
 summarizes, or narrates what it returns.
 
@@ -381,16 +442,26 @@ The structural questions that gate the wave plan:
   `::length`/`::level` defaults die; #26/D5 superseded, #25 narrowed
   to "no trailing annotation." Unblocks rip-outs #13-#14 and the
   printer synthesis.
-- **Q1** — does the composing walk become THE renderer (selection
-  re-entered at every node; specialists are frames, not terminals)?
-  (Gates #16-#17.)
-- **Q2** — the curation stance: curated DATA faces expected per
-  important family, vs floor-first with declarations only where earned.
-- **Q3** — one chain: does the owning-namespace discovery step survive
-  and become real, or die by dissolution?
-- **Q4** — the exact bounding map: what replaces the prompt
-  distance-decrement loop; do display windows survive as explicit
-  options; seam-A measurement rules.
+- **Q1 — RULED** (ruling 35): faces are terminal; composition is the
+  floor's last-resort mechanism for unclaimed values, kept at its
+  mount and made excellent. Nested quality inside a declared face is a
+  curation duty, not machinery.
+- **Q2 — RULED** (ruling 34): declared, thought-through faces for
+  every load-bearing family in BOTH projections are the goal; the
+  floor is the honesty net; a family riding the floor is a census gap.
+- **Q3 — RULED** (ruling 36): agent-authored render functions are
+  ordinary program facts the pull acquires — automatic, no
+  registration; functions get a default face outputting their
+  generating form.
+- **Q4 — RULED** (ruling 37): budgets deferred entirely until the
+  pipeline works; depth config is the interim knob; the four budget
+  loops die now; member-level whole-or-chip is the design for when
+  budgets return.
+
+**All five structural gates are now ruled.** The wave plan (§7)
+re-scopes accordingly: wave 3's fit work becomes the printer synthesis
+WITHOUT budget machinery, and no wave builds seam-A selection until
+the owner reopens budgets.
 
 Longer-horizon questions preserved from the first draft (now ledger
 Q9): the `/form` projection's wave, chat-default timing, and the

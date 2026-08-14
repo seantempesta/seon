@@ -93,7 +93,16 @@ regimes); the unrecorded `::address` parity trade (`3f6958fc2`); and
 the parity harness reporting health about a path half the system
 bypasses.
 
-### Q1. Does the composing walk become THE renderer?
+### Q1. RULED (owner, 2026-08-14 late evening — ledger ruling 35)
+
+**Faces are terminal.** A declared renderer owns its value's output.
+Composition belongs to the FLOOR: last resort for unclaimed values,
+where the floor walk detects nested registered shapes and composes
+their faces. Nested quality inside declared faces is a curation duty
+(ruling 34), not machinery. The orchestrator's frames recommendation
+was overruled. Original options below for the record.
+
+### Q1 (original). Does the composing walk become THE renderer?
 
 The nested composition the owner wants — the walk detects recognizable
 schema'd values at every depth and composes their declared faces —
@@ -117,7 +126,15 @@ identity for a face nested inside a face (interacts with rip-out #12);
 whether a specialist can opt out of child composition (a face that
 genuinely owns its whole subtree, e.g. source code).
 
-### Q2. The curation stance — what is an `/ai` face FOR?
+### Q2. RULED (owner, 2026-08-14 late evening — ledger ruling 34). The curation stance
+
+**Ruling: declared, thought-through faces for every load-bearing
+family, in BOTH projections, are the goal.** The floor is the honesty
+net, never the mechanism deciding what anyone sees; a family riding
+the floor in either output is an open census gap. Composition fills
+nested gaps. Original options retained below for the record.
+
+### Q2 (original). The curation stance — what is an `/ai` face FOR?
 
 Owner (this dialogue): the point of `:seon.render/ai` is thought-through
 per-shape key selection and transformation for agent comprehension —
@@ -139,7 +156,17 @@ message/agent families are evidence-derived and real. Options:
 Interacts with PRD open question 1 (attribute-ordering inline faces)
 and with "results are data" (prose only under instruction entities).
 
-### Q3. One chain — and does the owning-namespace step survive?
+### Q3. RULED (owner, 2026-08-14 late evening — ledger ruling 36)
+
+**Yes — via the program graph, as the same mechanism.** A function
+defined in an agent's namespace is a program fact reachable from the
+agent entity; the pull acquires it; it renders automatically like any
+other value. Functions get a default renderer that outputs the FORM
+(the REPL form that generates the data), whose evaluated value then
+renders through its own face everywhere. No registration step, no
+second discovery mechanism. Original options below for the record.
+
+### Q3 (original). One chain — and does the owning-namespace step survive?
 
 Two chains exist today (`producer` four-step vs `project-node*`
 two-step, re-audit §2.3), and the four-step chain's step 2 (unique
@@ -160,7 +187,20 @@ Also under this question: floor identity by declared property instead of
 the hardcoded symbol set (`floor-producer?`, `render.clj:172`); one
 calling convention instead of two argument shapes.
 
-### Q4. Where exactly does bounding run — and what dies?
+### Q4. RULED (owner, 2026-08-14 late evening — ledger ruling 37)
+
+**Budgets are deferred entirely.** No seam-A budget machinery until
+the pipeline works; the interim knob is acquisition depth config, and
+wrong-context-at-depth is fixed by moving data around, not clipping.
+HTML never clips. The four budget loops still die with their owners;
+member-level whole-or-chip stays the ruled design for when budgets
+return. Sub-questions (a)-(d) below inherit this: (a) display windows
+remain explicit request options; (b) answered — depth config, no
+decrement loop; (c) storage windows are seam-B admission, legitimate;
+(d) moot until budgets return, then AI-text-only with observed
+calibration. Original text below for the record.
+
+### Q4 (original). Where exactly does bounding run — and what dies?
 
 The PRD's seam ruling (budget ONLY at context assembly for a model
 call; the printer owns quality-not-budget; admission caps at storage)
