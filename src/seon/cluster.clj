@@ -1992,36 +1992,6 @@
          [?run :seon.cluster.run/id ?id]]
        db agent-id process))
 
-(defn- bounded-fault-string
-  [value limit]
-  (if (and (string? value) (pos-int? limit) (< limit (count value)))
-    (str (subs value 0 (dec limit)) "…")
-    value))
-
-(defn- over-fault-inline-ceiling?
-  [value limit]
-  (and (string? value) (pos-int? limit) (< limit (count value))))
-
-(defn- bounded-fault-transaction
-  [transaction-data inline-ceiling]
-  (mapv
-   (fn [operation]
-     (let [message-capped?
-           (over-fault-inline-ceiling?
-            (:seon.error/message operation) inline-ceiling)]
-       (cond-> operation
-         message-capped?
-         (update :seon.error/message bounded-fault-string inline-ceiling)
-
-         message-capped?
-         (assoc :seon.error/capped? true)
-
-         (over-fault-inline-ceiling?
-          (:seon.cluster.message/content operation) inline-ceiling)
-         (update :seon.cluster.message/content
-                 bounded-fault-string inline-ceiling))))
-   transaction-data))
-
 (defn- previously-reported-fault-signature?
   [database signature]
   (some?
@@ -2059,28 +2029,27 @@
           run-id (when agent-id (tagged-run db agent-id process))
           dropped-count (::flow/dropped-fault-count source-fault)
           transaction-data
-          (-> (error/commit-tx
-               db
-               (cond-> {:seon.error/source source-fault
-                        :seon.error/id (str (random-uuid))
-                        :seon.error/at (java.util.Date.)
-                        :seon.error/process process
-                        :seon.sci.admit/caps caps
-                        :seon.error/basis-t (db/basis-t db)
-                        :seon.config.error/recurrence-limit
-                        (:seon.config.error/recurrence-limit dials)}
-                 (:seon.config.error/escalate-to dials)
-                 (assoc :seon.config.error/escalate-to
-                        (:seon.config.error/escalate-to dials))
-                 run-id (assoc :seon.cluster.run/id run-id)
-                 agent-id (assoc :seon.cluster.agent/id agent-id)))
-              (cond-> (pos-int? dropped-count)
-                (update 0 assoc
-                        :seon.error/dropped-fault-count dropped-count
-                        :seon.error/dropped-fault-digest
-                        (::flow/dropped-fault-digest source-fault)))
-              (bounded-fault-transaction
-               (:seon.config.eval.result/blob-threshold dials)))
+          (cond->
+           (error/commit-tx
+            db
+            (cond-> {:seon.error/source source-fault
+                     :seon.error/id (str (random-uuid))
+                     :seon.error/at (java.util.Date.)
+                     :seon.error/process process
+                     :seon.sci.admit/caps caps
+                     :seon.error/basis-t (db/basis-t db)
+                     :seon.config.error/recurrence-limit
+                     (:seon.config.error/recurrence-limit dials)}
+              (:seon.config.error/escalate-to dials)
+              (assoc :seon.config.error/escalate-to
+                     (:seon.config.error/escalate-to dials))
+              run-id (assoc :seon.cluster.run/id run-id)
+              agent-id (assoc :seon.cluster.agent/id agent-id)))
+            (pos-int? dropped-count)
+            (update 0 assoc
+                    :seon.error/dropped-fault-count dropped-count
+                    :seon.error/dropped-fault-digest
+                    (::flow/dropped-fault-digest source-fault)))
           fact (first transaction-data)
           signature (:seon.error/signature fact)
           previously-reported?
@@ -2106,23 +2075,17 @@
       (str/replace "\n" " ")))
 
 (defn- emit-core-fault!
-  [configuration reported]
+  [_configuration reported]
   (let [fact (::flow/fault-fact reported)
         outcome (::flow/commit-outcome reported)
         mode (::flow/core-error-mode reported)
-        inline-ceiling
-        (:seon.config.eval.result/blob-threshold configuration)
-        message (bounded-fault-string
-                 (or (:seon.error/message fact)
-                     "A core fault could not be normalized.")
-                 inline-ceiling)
+        message (or (:seon.error/message fact)
+                    "A core fault could not be normalized.")
         failure-message
         (when-not (= ::flow/committed outcome)
-          (bounded-fault-string
-           (or (when (map? outcome) (:seon.error/message outcome))
-               (when (instance? Throwable outcome) (ex-message outcome))
-               (str outcome))
-           inline-ceiling))]
+          (or (when (map? outcome) (:seon.error/message outcome))
+              (when (instance? Throwable outcome) (ex-message outcome))
+              (str outcome)))]
     (binding [*out* *err*]
       (println
        (str "SEON CORE FAULT"

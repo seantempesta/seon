@@ -45,26 +45,13 @@
   [event]
   (var-symbol (or (:var event) (first test/*testing-vars*))))
 
-(defn- bounded-text
-  [options text]
-  (let [text (str text)
-        max-chars (:seon.config.eval.result/blob-threshold options)
-        suffix "\n... additional failure output elided by bin/test"]
-    (if (<= (count text) max-chars)
-      text
-      (if (<= max-chars (count suffix))
-        (subs suffix 0 max-chars)
-        (str (subs text 0 (- max-chars (count suffix))) suffix)))))
-
 (defn- printable
   [options value]
-  (bounded-text
-   options
-   (if (instance? Throwable value)
-     (str (.getName (class value)) ": " (or (ex-message value) ""))
-     (binding [*print-length* (:seon.print/length options)
-               *print-level* (:seon.print/level options)]
-       (pr-str value)))))
+  (if (instance? Throwable value)
+    (str (.getName (class value)) ": " (or (ex-message value) ""))
+    (binding [*print-length* (:seon.print/length options)
+              *print-level* (:seon.print/level options)]
+      (pr-str value))))
 
 (defn- throwable-signature
   [^Throwable failure]
@@ -100,8 +87,7 @@
         (when (contains? event :actual)
           (str "actual: " (printable options (:actual event))))]
        (remove str/blank?)
-       (str/join "\n")
-       (bounded-text options)))
+       (str/join "\n")))
 
 (defn- failure-identity
   "Content identity for one normalized failing assertion report.
@@ -176,17 +162,15 @@
   (test/with-test-out
     (test/inc-report-counter :error)
     (print
-     (bounded-text
-      options
-      (with-out-str
-        (println "\nERROR in" (test/testing-vars-str event))
-        (when (seq test/*testing-contexts*)
-          (println (test/testing-contexts-str)))
-        (when-let [message (:message event)]
-          (println message))
-        (println "expected:" (printable options (:expected event)))
-        (print "  actual: ")
-        (println (throwable-face options (:actual event) signature)))))))
+     (with-out-str
+       (println "\nERROR in" (test/testing-vars-str event))
+       (when (seq test/*testing-contexts*)
+         (println (test/testing-contexts-str)))
+       (when-let [message (:message event)]
+         (println message))
+       (println "expected:" (printable options (:expected event)))
+       (print "  actual: ")
+       (println (throwable-face options (:actual event) signature))))))
 
 (defn- report-event!
   [options default-report reported-signatures event]
@@ -768,14 +752,13 @@
                (quot (- (System/nanoTime) started-nanos) 1000000)
                ::task-summary (task-summary raw-summary)
                ::task-results (captured-results @capture)
-               ::task-output (bounded-text options (str output))))
+               ::task-output (str output)))
       (catch Throwable failure
         (let [test-symbol (first (::task-symbols task))
               message
-              (bounded-text options
-                            (str "Worker task failed outside a test Var: "
-                                 (.getName (class failure)) ": "
-                                 (or (ex-message failure) "")))
+              (str "Worker task failed outside a test Var: "
+                   (.getName (class failure)) ": "
+                   (or (ex-message failure) ""))
               failure-id
               (schema/sha-256
                [(.getBytes (pr-str [test-symbol :worker-task message])
@@ -795,11 +778,9 @@
                               :failing-assertions [failure-id]
                               :failure-message message}]
                  ::task-output
-                 (bounded-text
-                  options
-                  (str output "\n" (throwable-face
-                                     options failure
-                                     (throwable-signature failure))))))))))
+                 (str output "\n" (throwable-face
+                                    options failure
+                                    (throwable-signature failure)))))))))
 
 (def ^:private protocol-prefix
   "SEON_TEST_WORKER_EDN ")

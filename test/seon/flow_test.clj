@@ -830,6 +830,7 @@
         caps {:seon.config.eval.result/max-depth 8
               :seon.config.eval.result/max-collection 8
               :seon.config.eval.result/max-string 256
+              :seon.config.eval.result/max-source 1048576
               :seon.config.eval.result/max-nodes 64}
         contract-fault
         {::flow/pid :render
@@ -936,6 +937,7 @@
         caps {:seon.config.eval.result/max-depth 8
               :seon.config.eval.result/max-collection 8
               :seon.config.eval.result/max-string 64
+              :seon.config.eval.result/max-source 1048576
               :seon.config.eval.result/max-nodes 64}
         repeated-message
         (str "one repeated cause: " (apply str (repeat 10000 "x")))
@@ -951,7 +953,7 @@
         (fn [_database _cluster-name]
           {:seon.config.error/recurrence-limit 3
            :seon.config.eval.result/blob-threshold inline-ceiling})]
-    (testing "132 equal faults produce 132 facts and one bounded stderr face"
+    (testing "132 equal faults produce 132 facts and one whole stderr face"
       (test-support/with-database
         (fn [connection]
           (with-redefs [config/effective effective]
@@ -1000,15 +1002,15 @@
               (is (= 132 (::sut/committed final-state)))
               (is (= 1 (::sut/panicked final-state)))
               (is (= 1 (count (::sut/seen-signatures final-state))))
-              (is (= inline-ceiling (count message)))
-              (is (str/ends-with? message "…"))
+              (is (= repeated-message message))
               (is (true? capped?))
               (is (< (count data-edn) 10000)
                   "the normalizer caps the retained stack and ex-data")
               (is (= 1 (count lines))
                   "all 132 equal envelopes own one emitted face")
-              (is (<= (count (first lines)) (+ (* 2 inline-ceiling) 192))
-                  "the emitted face remains bounded"))))))
+              (is (str/includes? (first lines)
+                                 (apply str (repeat 10000 "x")))
+                  "the stderr sink receives the whole normalized message"))))))
 
     (testing "a rebuilt proc does not print a signature already durable"
       (test-support/with-database
@@ -1062,9 +1064,7 @@
               (is (= 1 (::sut/panicked final-state)))
               (is (= 1 (count lines))
                   "one genuinely new signature remains visible")
-              (is (str/includes? (first lines) "a distinct cause"))
-              (is (<= (count (first lines)) (+ (* 2 inline-ceiling) 192))
-                  "the new signature's face remains bounded"))))))
+              (is (str/includes? (first lines) "a distinct cause"))))))
 
     (testing "a dead writer still emits each signature only once"
       (test-support/with-database
@@ -1106,18 +1106,17 @@
                 "the repeated signature and the distinct signature print once")
             (is (= 2 (count (::sut/seen-signatures @final-state))))
             (is (= 3 @transaction-attempts)
-                "every occurrence reaches the writer even while output is bounded")
+                "every occurrence reaches the writer")
             (is (zero? (::sut/committed @final-state)))
             (is (= 2 (::sut/panicked @final-state)))
             (is (every? #(str/includes? % "durable record refused") lines))
             (is (every? #(str/includes? % "signature ") lines))
-            (is (every? #(<= (count %) (+ (* 2 inline-ceiling) 192)) lines)
-                "the configured string ceiling bounds each single-line face")
-            (is (not (str/includes? stderr (apply str (repeat 100 "x")))))
+            (is (str/includes? stderr (apply str (repeat 10000 "x")))
+                "the last-resort sink receives the whole fault message")
             (is (empty?
                  (db/q '[:find ?error
                          :where [?error :seon.error/signature _]]
-                       @connection)))))))))
+                       @connection))))))))))
 
 (deftest stopping-the-fanout-awaits-an-active-fault-commit
   (let [{::keys [graph started] :as testbed} (source-testbed)
@@ -1302,6 +1301,7 @@
               caps {:seon.config.eval.result/max-depth 8
                     :seon.config.eval.result/max-collection 8
                     :seon.config.eval.result/max-string 64
+                    :seon.config.eval.result/max-source 1048576
                     :seon.config.eval.result/max-nodes 64}
               effective
               (fn [_database _cluster-name]

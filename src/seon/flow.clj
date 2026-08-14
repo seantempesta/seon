@@ -1092,11 +1092,10 @@
 
 (defn- fault-loss-name
   [value]
-  (let [text (str value)]
-    (subs text 0 (min 160 (count text)))))
+  (str value))
 
 (defn- report-committer-loss!
-  "The bounded last resort when the mechanism recording faults itself fails."
+  "Report whole identities when the fault committer itself fails."
   [escaped]
   (try
     (let [failure (::flow/ex escaped)

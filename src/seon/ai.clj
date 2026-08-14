@@ -704,7 +704,7 @@
    :seon.error/message
    (str "The provider stream carried unreadable data: " reason ".")
    :seon.error/data
-   {::body (subs payload 0 (min 500 (count payload)))}
+   {::body payload}
    :seon.ai/unparseable-body true})
 
 (defn- stream-chunk-error
@@ -1383,8 +1383,7 @@
                                  ;; even though we cannot read it
                                  ::output-observed? true}
                :seon.ai/unparseable-body true}))
-          (let [text (str (read-body))
-                body (subs text 0 (min 500 (count text)))]
+          (let [body (str (read-body))]
             {:seon.error/kind ::provider-error
              :seon.error/message (str "The provider answered " status ".")
              :seon.error/data {::status status

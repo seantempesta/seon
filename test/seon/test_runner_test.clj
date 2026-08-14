@@ -260,7 +260,7 @@
          (:seon.test/failure-message assertionless)
          "Test seon.test-runner-failure-fixture/assertionless-example completed without assertion evidence."))))
 
-(deftest repeated-identical-errors-have-one-bounded-face
+(deftest repeated-identical-errors-have-one-whole-face
   (let [{::keys [result output]} (captured-run-with-output)
         by-symbol (into {}
                         (map (juxt :seon.test/sym identity))
@@ -284,10 +284,10 @@
       (is (= 2 (occurrences output "  signature:")))
       (is (str/includes? output "one repeated refusal"))
       (is (str/includes? output distinct-signature)))
-    (testing "one face and the captured fact are bounded and deduplicated"
-      (is (<= (count repeated-face)
-              (:seon.config.eval.result/blob-threshold
-               (config/defaults))))
+    (testing "one face and the captured fact are whole and deduplicated"
+      (is (not (str/includes?
+                repeated-face
+                "additional failure output elided by bin/test")))
       (is (= 1 (occurrences repeated-message
                             "the same refusal reached the reporter again"))))))
 

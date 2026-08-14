@@ -433,16 +433,13 @@
             actual (subs source start end)
             expected (:my.edit/old-window request)]
         (if (not= expected actual)
-          (let [bounded-end (prefix-end-within actual 0 (count actual)
-                                               context-byte-limit)]
-            (flat-error :my.edit/no-match :my.edit/no-match
-                        (:my.edit/path request)
-                        "The guarded line window does not match current source."
-                        {:my.edit/from-line from-line
-                         :my.edit/to-line to-line
-                         :my.edit/actual-window (subs actual 0 bounded-end)
-                         :my.edit/source-window-complete?
-                         (= bounded-end (count actual))}))
+          (flat-error :my.edit/no-match :my.edit/no-match
+                      (:my.edit/path request)
+                      "The guarded line window does not match current source."
+                      {:my.edit/from-line from-line
+                       :my.edit/to-line to-line
+                       :my.edit/actual-window actual
+                       :my.edit/source-window-complete? true})
           (let [new-window (:my.edit/new-window request)
                 candidate-source (splice source start end new-window)
                 changed-end (+ start (count new-window))]
