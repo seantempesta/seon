@@ -1,11 +1,24 @@
 ---
 type: prd
-status: active
-note: "Queued for owner rulings; implementation waits for the quiet-tree green bare gate, the deletion sweep, and the messaging wave."
+status: superseded
+note: "Superseded 2026-08-13 by the active one-test-infrastructure specification and its isolated shared-base/worker gate."
 tags: [prd, testing, runtime, operator]
 ---
 
 # In-server test execution: one runner, three callers
+
+## Closing note (2026-08-13)
+
+This proposal is superseded by the active
+[one-test-infrastructure specification](../../sci-execution-runtime/plan/test-infrastructure-spec-2026-08-07.md),
+which absorbs its four open questions and rules that ordinary tests run in an
+isolated suite rather than against a user's live cluster. At HEAD, `bin/test`
+owns one isolated operator root and prepares one shared published base
+(`bin/test:21-24,437-464`); `seon.cluster/source-base!` acquires that immutable
+program value (`src/seon/cluster.clj:1294-1333`); and the one runner coordinates
+bounded worker JVMs and the platform-first tier (`src/seon/test/runner.clj:1498-1516,1518-1679`).
+The historical one-runner principle survives there, but this PRD's live-cluster
+dispatcher, reload contract, and independent queue no longer own current work.
 
 ## Decision
 
@@ -16,7 +29,7 @@ same function; and root calling it as ordinary program-graph work. The spawned
 JVM remains the owner for `--full`, tests declared
 `:seon.test/long`, process-unclean tests, and the no-live-system fallback.
 Grounding and measurements remain in
-[in-server-tests-2026-08-03.md](../sci-execution-runtime/research/in-server-tests-2026-08-03.md),
+[in-server-tests-2026-08-03.md](../../sci-execution-runtime/research/in-server-tests-2026-08-03.md),
 but its operator-integration and missing-test-call-edge claims are historical,
 not current dependencies.
 
@@ -88,7 +101,7 @@ current owner on both sides:
   (`README.md:59-64`, pre-refresh). The 2026-08-06 ruling instead requires
   one-value send/complete, wait on the send's returned value, explicit
   addressing, and a terminal `result/<eid>` receipt handle
-  (`../sci-execution-runtime/plan/README.md:778-807`). The current string-only
+  (`../../sci-execution-runtime/plan/README.md:778-807`). The current string-only
   `my.message/send` and note-based `my.run/wait` show that wave has not landed
   yet (`src/my/message.clj:17-59`; `src/my/run.clj:16-47`). Root invocation and
   report handoff therefore wait on that messaging implementation rather than
@@ -114,14 +127,14 @@ current owner on both sides:
   in-server/spawned dispatcher; it must not retain a second analysis or runner.
 - The landed 2026-08-05 quality-gate ruling says shared definitions, schemas,
   and tests merge only after their dependent tests pass
-  (`../sci-execution-runtime/plan/README.md:520-531`). The host JVM runner stays
+  (`../../sci-execution-runtime/plan/README.md:520-531`). The host JVM runner stays
   distinct from SCI candidate-context accretion testing; only indexed
   dependencies and the result shape are shared.
 
 ### Genuine waits in the active queue
 
 1. **Deletion sweep landing.** The active working edge records the code sweep
-   in flight (`../sci-execution-runtime/plan/unsettled.md:19-41`). This PRD
+   in flight (`../../sci-execution-runtime/plan/unsettled.md:19-41`). This PRD
    touches the same operator launcher and test feedback owners, so
    implementation starts from the landed sweep rather than racing a removed
    seam.
@@ -133,7 +146,7 @@ current owner on both sides:
 3. **Messaging implementation wave.** Root-agent invocation waits for the
    ruled one-value `send`/`complete`, wait-on-send custody, and `result/<eid>`
    resolution. The active edge places that wave after the result-id archaeology
-   and SCI probe return (`../sci-execution-runtime/plan/unsettled.md:28-41`).
+   and SCI probe return (`../../sci-execution-runtime/plan/unsettled.md:28-41`).
    Launcher, runner, operator, and human-prepl slices may be designed now, but
    root's end-to-end proof cannot graduate against the current string protocol.
 

@@ -197,7 +197,7 @@ I read the following end to end before writing this specification:
   `19601a5de`;
 - `test/seon/test_support.clj`;
 - `bin/test`;
-- `docs/prds/in-server-tests/README.md`, including its four owner questions;
+- `docs/prds/archive/in-server-tests/README.md`, including its four owner questions;
 - `docs/prds/sci-execution-runtime/plan/README.md`, including the evening and
   night rulings on the minimal turn, activation closure, per-cluster
   projections, and the new 2026-08-07 morning ruling;
@@ -805,7 +805,7 @@ one review-sized implementation commit.
 
 ## In-server test questions absorbed by this design
 
-The four questions in `docs/prds/in-server-tests/README.md` no longer need four
+The four questions in `docs/prds/archive/in-server-tests/README.md` no longer need four
 independent mechanisms:
 
 1. **Process-unclean declaration:** recommend derivation through the program
