@@ -2170,8 +2170,9 @@
             :seon.sci.eval/output-prefix
             (str/join "\n"
                       (remove str/blank?
-                              [output-prefix
-                               (accretion/non-generatable-advisory row)]))
+                               [output-prefix
+                                (when row
+                                  (accretion/non-generatable-advisory row))]))
             :seon.sci.eval/namespace-name namespace-name
             :seon.sci.eval/ending-namespace @ending-namespace
             :seon.print/options @print-options

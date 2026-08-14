@@ -143,6 +143,45 @@
              :seon.sci.eval/time-limit-ms 1000}))
       "no dial, no evaluation"))
 
+(deftest instrumented-generated-form-does-not-advise-an-absent-program-row
+  (test-support/with-database
+    (fn [connection]
+      (let [ctx (eval/build-base-ctx)
+            _ (eval/acquire! {:seon.sci.eval/ctx ctx
+                              :seon.db/db @connection})
+            projection (schema/projection-from-database @connection)
+            entering-roots
+            (into {}
+                  (map (fn [instrumented-var]
+                         [instrumented-var @instrumented-var]))
+                  (instrument/instrumented))]
+        (try
+          (schema/call-with-projection
+           projection
+           #(instrument/apply! {:seon.config/on-core-error :panic
+                                :seon.sci.admit/caps caps}))
+          (let [evaluation
+                (eval/evaluate
+                 {:seon.sci.eval/ctx ctx
+                  :seon.db/db @connection
+                  :seon.db/connection connection
+                  :seon.cluster.agent/id "root"
+                  :seon.cluster.run.form/source
+                  "; generated opening non-declaration\n:opening-probe"
+                  :seon.sci.admit/caps caps
+                  :seon.sci.eval/time-limit-ms 2000
+                  :seon.config/on-core-error :panic})]
+            (is (nil? (:seon.program/row evaluation))
+                "ordinary generated forms have no declaration row")
+            (is (ok? evaluation) (pr-str evaluation))
+            (is (not= :seon.instrument/contract-violated
+                      (get-in evaluation
+                              [:seon.sci.admit/value :seon.error/kind]))))
+          (finally
+            (instrument/remove!)
+            (doseq [[instrumented-var root] entering-roots]
+              (alter-var-root instrumented-var (constantly root)))))))))
+
 (deftest the-diagnostics-are-recorded-and-are-not-limits
   (let [evaluation (run "(reduce + (map inc (range 500)))")
         record (:seon.sci.admit/record evaluation)]
@@ -866,7 +905,8 @@
     (is (= 1 @calls))
     (is (= {:seon.schema/key :user/direct-schema
             :seon.schema/form "[:int {:min 0}]"
-            :seon.schema.admission/source :agent}
+            :seon.schema.admission/source :agent
+            :seon.schema/generatable? true}
            (:seon.sci.eval/base-declared-row result)))
     (is (= :user/direct-schema (:seon.sci.eval/schema-value result)))
     (is (false? (:seon.sci.eval/live-declaration? result)))
