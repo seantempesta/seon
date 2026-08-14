@@ -209,18 +209,14 @@
   (str "(register! " (pr-str schema-key) " "
        (schema-definition-text definition) ")"))
 
-(defn- referenced-schema-lines
+(defn- referenced-schema-summary
   [db cache functions own-rows]
   (let [closure
         (referenced-schema-closure
          db cache
          (into [] (keep :seon.fn/spec) functions)
-         own-rows)
-        definitions (::schema-definitions closure)]
-    {::schema-lines
-     (mapv (fn [schema-key]
-             (schema-registration-line schema-key (get definitions schema-key)))
-           (::schema-keys closure))
+         own-rows)]
+    {::schema-keys (::schema-keys closure)
      ::schemas-capped? (::schemas-capped? closure)}))
 
 ;;; ---------------------------------------------------------------------------
@@ -230,14 +226,6 @@
 (defn- first-doc-line
   [doc]
   (some-> doc str/split-lines first str/trim not-empty))
-
-(defn- soft-clip
-  [text limit]
-  (let [marker " [clipped]"
-        text (str/replace text "…" "...")]
-    (if (> (count text) limit)
-      (str (subs text 0 (max 0 (- limit (count marker)))) marker)
-      text)))
 
 (defn- stored-arglists
   [serialized]
@@ -390,7 +378,7 @@
   (str "fn " sym " — "
        (if (str/blank? spec) "<no contract>" spec)
        (when-let [summary (first-doc-line doc)]
-         (str " — " (pr-str (soft-clip summary 78))))))
+         (str " — " (pr-str summary)))))
 
 (defn- compact-schema-value
   [row]
@@ -406,18 +394,20 @@
   (cond-> {:seon.fn/sym sym}
     (not (str/blank? spec)) (assoc :seon.fn/spec spec)
     (first-doc-line doc)
-    (assoc :seon.fn/doc (soft-clip (first-doc-line doc) 78))))
+    (assoc :seon.fn/doc (first-doc-line doc))))
 
 (defn- referenced-schema-ai-section
   [db schema-row-cache functions own-schemas]
-  (let [{::keys [schema-lines schemas-capped?]}
-        (referenced-schema-lines db schema-row-cache functions own-schemas)]
-    (when (or (seq schema-lines) schemas-capped?)
+  (let [{::keys [schema-keys schemas-capped?]}
+        (referenced-schema-summary db schema-row-cache functions own-schemas)]
+    (when (or (seq schema-keys) schemas-capped?)
       (str/join
        "\n"
        (cond-> []
-         (seq schema-lines)
-         (into schema-lines)
+         (seq schema-keys)
+         (into (map (fn [schema-key]
+                      (pr-str {:seon.schema/key schema-key})))
+               schema-keys)
          schemas-capped?
          (conj (pr-str
                 {:seon.error/message
@@ -450,13 +440,13 @@
 
 (defn- compact-ai-items
   [{::keys [db schema-row-cache functions own-schemas]}]
-  (let [{::keys [schema-lines schemas-capped?]}
-        (referenced-schema-lines db schema-row-cache functions own-schemas)]
+  (let [{::keys [schema-keys schemas-capped?]}
+        (referenced-schema-summary db schema-row-cache functions own-schemas)]
     (vec
      (concat
       (map compact-function-value functions)
       (map compact-schema-value own-schemas)
-      (map (fn [line] {:seon.schema/form line}) schema-lines)
+      (map (fn [schema-key] {:seon.schema/key schema-key}) schema-keys)
       (when schemas-capped?
         [{:seon.error/message
           (str referenced-schema-cap
@@ -541,19 +531,19 @@
 
 (defn- referenced-schema-html
   [db schema-row-cache functions own-schemas]
-  (let [{::keys [schema-lines schemas-capped?]}
-        (referenced-schema-lines db schema-row-cache functions own-schemas)]
-    (when (or (seq schema-lines) schemas-capped?)
+  (let [{::keys [schema-keys schemas-capped?]}
+        (referenced-schema-summary db schema-row-cache functions own-schemas)
+        items
+        (cond-> (mapv (fn [schema-key]
+                        [:li [:code (pr-str schema-key)]])
+                      schema-keys)
+          schemas-capped?
+          (conj [:li (str referenced-schema-cap
+                          "+ referenced schemas capped; more reachable via the db")]))]
+    (when (or (seq schema-keys) schemas-capped?)
       [:section {:class "seon-namespace-referenced-schemas"}
        [:h3 "Referenced schemas"]
-       [:pre
-        [:code
-         (str/join
-          "\n"
-          (cond-> (vec schema-lines)
-            schemas-capped?
-            (conj (str referenced-schema-cap
-                       "+ referenced schemas capped; more reachable via the db"))))]]])))
+       (into [:ul] items)])))
 
 (defn- full-html-view
   [{::keys [db schema-row-cache namespace-name namespace-source requires

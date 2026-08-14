@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, schema, class/n1, wave/agent-context]
 ---
@@ -86,3 +86,32 @@ must be hoisted and deduplicated in protected `src/seon/render/walk.clj`, and a
 recurring whole-context share measurement must be added there. Exact Phase-1
 edit: accumulate referenced schema identities across selected units, emit one
 walk-level section, and exclude declarations the agent cannot author.
+
+## Resolution — 2026-08-14
+
+The owner selected the by-reference branch of the acceptance contract instead
+of a new walk-level aggregation mechanism. `seon.render.ns` still derives the
+transitive closure from database schema definitions, but emits only ordinary
+`{:seon.schema/key ...}` values in AI and a `<ul>` of schema-key references in
+HTML. Referenced Malli source is no longer repeated or presented as executable
+`register!` boilerplate. Own namespace declarations retain their existing
+compact error-message face.
+
+Before, the live root package contained this exact block three times:
+
+```html
+(register! :seon.error/value [:map [:seon.error/kind :seon.error/kind] [:seon.error/message :seon.error/message] [:seon.error/data {:optional true} :seon.error/data]])
+```
+
+After hot-loading the producer, a fresh live root neighborhood contained 14
+namespace units, zero copies of that registration, and ordinary references
+including:
+
+```html
+<section class="seon-namespace-referenced-schemas"><h3>Referenced schemas</h3><ul><li><code>:my.run/note</code></li>
+```
+
+`seon.render.ns-test` passed 5 tests and 138 assertions. Its closure regression
+has a positive subject count of forty references, refuses registration source
+for referenced schemas in both projections, and proves the forty-first
+resolvable definition alone produces the cap value.

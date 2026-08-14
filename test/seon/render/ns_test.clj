@@ -225,6 +225,7 @@
             d2 (namespace-unit db closure-ns 2 100000)
             ai1 (sut/render-ai d1)
             ai2 (sut/render-ai d2)
+            html2 (sut/render-html d2)
             isolated-ai2
             (binding [mr/*registry* {:fixture.external/a :boolean
                                      :fixture.external/b :int}]
@@ -233,9 +234,9 @@
           (is (str/starts-with? ai1 closure-source))
           (is (str/includes? ai1 "(defn uses-own"))
           (is (str/includes? ai1
-                             "(register! :fixture.external/a [:or :string :fixture.external/b])"))
+                             "#:seon.schema{:key :fixture.external/a}"))
           (is (str/includes? ai1
-                             "(register! :fixture.external/b [:maybe :fixture.external/a])"))
+                             "#:seon.schema{:key :fixture.external/b}"))
           (is (str/includes? ai1
                              "(register! :fixture.closure/own")))
         (testing "d2 renders own records, one closure, and raw contracts"
@@ -263,6 +264,10 @@
           (is (not (str/includes? ai2
                                   "(register! :fixture.missing/key"))
               "a missing row never becomes a fake registration")
+          (is (not (str/includes? (pr-str html2) "(register!"))
+              "HTML names referenced schemas without repeating their source")
+          (is (str/includes? (pr-str html2) ":fixture.external/a"))
+          (is (str/includes? (pr-str html2) ":fixture.external/b"))
           (is (reader-valid? ai2)))
         (testing "the isolated placeholder registry ignores live registry state"
           (is (= ai2 isolated-ai2))))
@@ -290,13 +295,17 @@
                                   cap-schemas cap-functions)
             db @connection
             ai (sut/render-ai (namespace-unit db cap-ns 2 100000))]
-        (testing "the closure emits forty definitions and one honest cap line"
-          (is (= 40 (count (re-seq #"\(register! :fixture.external/k" ai))))
+        (testing "the closure emits forty references and one honest cap line"
+          (is (= 40
+                 (count
+                  (filter #(= "fixture.external" (namespace %))
+                          (keep :seon.schema/key (edn/read-string ai))))))
+          (is (not (str/includes? ai "(register! :fixture.external/")))
           (is (= 1 (count (re-seq #"40\+ referenced schemas are reachable" ai)))))
-        (testing "uncontracted public functions remain and docs clip explicitly"
+        (testing "uncontracted public functions and their docs remain whole"
           (is (str/includes? ai "fixture.cap/uncontracted"))
-          (is (str/includes? ai " [clipped]"))
-          (is (not (str/includes? ai "…"))))
+          (is (str/includes? ai long-doc))
+          (is (not (str/includes? ai " [clipped]"))))
 
         (let [honest-ns 'fixture.cap-honesty
               honest-spec
@@ -314,8 +323,10 @@
               (sut/render-ai (namespace-unit @connection honest-ns 2 100000))]
           (testing "the cap line requires a forty-first resolvable definition"
             (is (= 40
-                   (count (re-seq #"\(register! :fixture.external/k"
-                                  honest-ai))))
+                   (count
+                    (filter #(= "fixture.external" (namespace %))
+                            (keep :seon.schema/key
+                                  (edn/read-string honest-ai))))))
             (is (not (str/includes? honest-ai
                                     "40+ referenced schemas are reachable"))))))
 
