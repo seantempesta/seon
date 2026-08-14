@@ -246,6 +246,38 @@
          (is (= [1] @appended)
              "one new message crosses append with exactly one entry"))))))
 
+(deftest a-second-run-replaces-the-opening-task-and-puts-current-task-last
+  (planted
+   (fn [connection context-channel]
+     (let [opening (:seon.cluster.prompt/text
+                    (prompt/prompt @connection
+                                   (request connection context-channel)))]
+       (db/transact!
+        connection
+        [{:seon.cluster.message/id "current-task"
+          :seon.cluster.message/to [:seon.cluster.agent/id "walker"]
+          :seon.cluster.message/content "CURRENT-TASK-UNIQUE"
+          :seon.cluster.message/at (Date. 1700000005000)}
+         {:seon.cluster.run/id "current-run"
+          :seon.cluster.run/agent [:seon.cluster.agent/id "walker"]
+          :seon.cluster.run/trigger
+          [:seon.cluster.message/id "current-task"]
+          :seon.cluster.run/opened-at (Date. 1700000006000)}
+         {:seon.cluster.agent/id "walker"
+          :seon.cluster.agent/run [:seon.cluster.run/id "current-run"]}])
+       (let [current-request
+             (assoc (request connection context-channel)
+                    :seon.cluster.run/id "current-run")
+             current (:seon.cluster.prompt/text
+                      (prompt/prompt @connection current-request))]
+         (is (str/includes? opening "inspect this walk"))
+         (is (not (str/includes? current "inspect this walk"))
+             "the opening task is not emitted again from the full re-walk")
+         (is (= 1 (count (re-seq #"CURRENT-TASK-UNIQUE" current)))
+             "the current task appears exactly once")
+         (is (str/ends-with? current "CURRENT-TASK-UNIQUE")
+             "the current task is the final prompt bytes"))))))
+
 (deftest basis-only-transactions-do-not-append-history
   (planted
    (fn [connection context-channel]

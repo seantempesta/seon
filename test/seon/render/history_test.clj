@@ -243,12 +243,14 @@
     (is (= [:root :run-namespace] (mapv :seon.repl/key result)))
     (is (= '(dir (quote my.run)) (:seon.repl/form (peek result))))))
 
-(deftest advancing-bases-only-append-to-the-prompt-prefix
+(deftest advancing-bases-replace-the-logical-slot
   (let [first-entry
         {:seon.render.history/call-id [:entity :alpha]
          :seon.render.history/basis-transaction 10
          :seon.render.history/bytes "user=> (alpha)\n:alpha"}
-        repeated (assoc first-entry :seon.render.history/bytes "rewritten")
+        repeated (assoc first-entry
+                        :seon.render.history/basis-transaction 11
+                        :seon.render.history/bytes "rewritten")
         second-entry
         {:seon.render.history/call-id [:entity :beta]
          :seon.render.history/basis-transaction 11
@@ -256,8 +258,37 @@
         prompt-n (web/append-history [] [first-entry])
         prompt-n+1 (web/append-history prompt-n [repeated second-entry])
         prompt-bytes #(str/join "\n\n" (map :seon.render.history/bytes %))]
-    (is (= [first-entry second-entry] prompt-n+1)
-        "the old observation is never reserialized or rewritten")
-    (is (str/starts-with? (prompt-bytes prompt-n+1)
-                          (prompt-bytes prompt-n))
-        "prompt N is a byte prefix of prompt N+1")))
+    (is (= [repeated second-entry] prompt-n+1)
+        "a logical call has one retained observation at its shown basis")
+    (is (= 1 (count (re-seq #"rewritten" (prompt-bytes prompt-n+1)))))))
+
+(deftest a-new-current-task-supersedes-the-old-task-and-is-last
+  (let [old-task
+        {:seon.render.history/call-id [:seon.render.walk/current-task "worker"]
+         :seon.render.history/basis-transaction 10
+         :seon.render.history/current-task? true
+         :seon.render.history/form '(my.message/read "old-task")
+         :seon.render.history/bytes "worker=> old task"}
+        old-task-from-full-snapshot
+        (assoc old-task
+               :seon.render.history/call-id [:message "old-task"]
+               :seon.render.history/basis-transaction 11
+               :seon.render.history/current-task? false)
+        history
+        {:seon.render.history/call-id [:receipt "history"]
+         :seon.render.history/basis-transaction 11
+         :seon.render.history/bytes "worker=> history"}
+        current-task
+        {:seon.render.history/call-id [:seon.render.walk/current-task "worker"]
+         :seon.render.history/basis-transaction 11
+         :seon.render.history/current-task? true
+         :seon.render.history/form '(my.message/read "current-task")
+         :seon.render.history/bytes "worker=> current task"}
+        result (web/append-history [old-task]
+                                   [old-task-from-full-snapshot
+                                    current-task
+                                    history])]
+    (is (= [history current-task] result)
+        "the complete second snapshot contributes only new history")
+    (is (= current-task (peek result))
+        "the current instruction is the last retained entry")))

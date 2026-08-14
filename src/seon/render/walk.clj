@@ -37,6 +37,7 @@
   Crash walk: pure over a database value. Nothing here opens, commits or
   holds anything."
   (:require [clojure.string :as str]
+            [seon.context :as context]
             [seon.db :as db]
             [seon.ai.tokens :as tokens]
             [seon.effect :as effect]
@@ -855,17 +856,37 @@
                               (:seon.render.walk/lookup form-unit) distance]
                    value-call [:seon.render/ai
                                (:seon.render.walk/lookup form-unit) distance]
+                   message-eid
+                   (when (= :seon.cluster.message/id
+                            (first (:seon.render.walk/lookup form-unit)))
+                     (:db/id
+                      (db/entity database
+                                 (:seon.render.walk/lookup form-unit))))
+                   current-task?
+                   (and message-eid
+                        (= :seon.context/current-trigger
+                           (context/message-custody
+                            database
+                            (:seon.cluster.run/id request)
+                            (:seon.cluster.agent/id request)
+                            message-eid)))
                    observed-basis
                    (max (observation-basis captured form-call basis)
                         (observation-basis captured value-call basis))]
                (when (and (seq? form) (string? printed-value))
-                 {:seon.render.history/call-id entry-key
-                  :seon.render.history/basis-transaction observed-basis
-                  :seon.render.history/form form
-                  :seon.render.history/printed-value printed-value
-                  :seon.render.history/bytes
-                  (str (or namespace-name 'user) "=> " (pr-str form)
-                       "\n" printed-value)}))))
+                 (cond->
+                  {:seon.render.history/call-id
+                   (if current-task?
+                     [::current-task (:seon.cluster.agent/id request)]
+                     entry-key)
+                   :seon.render.history/basis-transaction observed-basis
+                   :seon.render.history/form form
+                   :seon.render.history/printed-value printed-value
+                   :seon.render.history/bytes
+                   (str (or namespace-name 'user) "=> " (pr-str form)
+                        "\n" printed-value)}
+                   current-task?
+                   (assoc :seon.render.history/current-task? true))))))
           form-units)))
 
 (defn history
@@ -900,4 +921,5 @@
                      (remove #(= root-lookup
                                  (first (:seon.render.history/call-id %))))
                      vec)]
-    generic))
+    (into (filterv (complement :seon.render.history/current-task?) generic)
+          (filter :seon.render.history/current-task? generic))))

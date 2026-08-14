@@ -1042,23 +1042,58 @@
      (when changed? packages)])))
 
 (defn append-history
-  "Append observations that have not appeared in this prompt generation.
+  "Merge newly observed history into the retained prompt generation.
 
-   The logical call and the basis at which it was invoked identify an
-   observation. Existing entries are returned byte-for-byte and in place."
+   A logical call occupies one slot. An unchanged shown basis retains its
+   exact bytes in place; a changed basis replaces the old observation and is
+   appended after retained history. The current task is the final slot, and a
+   full re-walk cannot reintroduce the task that slot superseded."
   {:malli/schema [:=> [:cat [:vector :map] [:vector :map]] [:vector :map]]}
   [entries observations]
-  (let [seen (into #{}
-                   (map (juxt :seon.render.history/call-id
-                              :seon.render.history/basis-transaction))
-                   entries)]
-    (into entries
-          (remove (fn [entry]
-                    (contains?
-                     seen
-                     [(:seon.render.history/call-id entry)
-                      (:seon.render.history/basis-transaction entry)])))
-          observations)))
+  (let [current-task? :seon.render.history/current-task?
+        current-observation (last (filter current-task? observations))
+        superseded-forms
+        (if current-observation
+          (into #{}
+                (comp (filter current-task?)
+                      (map :seon.render.history/form)
+                      (remove #{(:seon.render.history/form
+                                 current-observation)}))
+                entries)
+          #{})
+        observations
+        (->> observations
+             (remove (fn [entry]
+                       (and (not (current-task? entry))
+                            (contains? superseded-forms
+                                       (:seon.render.history/form entry)))))
+             ((fn [observed]
+                (concat (remove current-task? observed)
+                        (filter current-task? observed)))))]
+    (reduce
+     (fn [retained observation]
+       (let [call-id (:seon.render.history/call-id observation)
+             basis (:seon.render.history/basis-transaction observation)
+             prior (some #(when (= call-id
+                                  (:seon.render.history/call-id %))
+                            %)
+                         retained)]
+         (cond
+           (and prior
+                (= basis (:seon.render.history/basis-transaction prior)))
+           retained
+
+           prior
+           (conj (into []
+                       (remove #(= call-id
+                                   (:seon.render.history/call-id %)))
+                       retained)
+                 observation)
+
+           :else
+           (conj retained observation))))
+     entries
+     observations)))
 
 (defn- history-text
   [entries]
