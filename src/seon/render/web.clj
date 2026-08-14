@@ -66,6 +66,7 @@
             [seon.render.walk :as render.walk]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
+            [seon.sci.kernel :as sci.kernel]
             [starfederation.datastar.clojure.adapter.common :as datastar.common]
             [starfederation.datastar.clojure.adapter.http-kit :as datastar.http-kit]
             [starfederation.datastar.clojure.api :as datastar]
@@ -1906,7 +1907,11 @@
 
           :else
           (schema/canonical-database-attributes))
-        effective (config/effective db (current-cluster-name db))
+        projection (sci.kernel/context-projection
+                    (:seon.sci.eval/ctx service))
+        effective (schema/call-with-projection
+                   projection
+                   #(config/effective db (current-cluster-name db)))
         options
         (select-keys
          effective

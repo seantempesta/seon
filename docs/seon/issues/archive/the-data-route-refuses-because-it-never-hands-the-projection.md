@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, web, config, class/p1, wave/visual-qa]
 ---
@@ -61,3 +61,32 @@ route hands `seon.config/effective` the projection it resolved for its own
 extent, exactly like production callers, and a recurring proof exercises the
 route through the live boot path rather than a fixture that pre-installs a
 projection.
+
+## Resolution
+
+Resolved 2026-08-14. `seon.render.web/data-response` now derives the immutable
+schema projection from the cluster's supplied SCI context and hands it across
+the existing `schema/call-with-projection` extent before calling
+`seon.config/effective`. No config fallback or second projection owner was
+introduced.
+
+Before, both live targets returned the typed refusal:
+
+```text
+Effective config requires the projection handed to this operation.
+[status:500 bytes:66]
+```
+
+After hot-reloading the same Var into both sovereign clusters, the actual
+route returned complete page HTML:
+
+```text
+port:55156 status:200 bytes:3068
+port:7994 status:200 bytes:3068
+<!doctype html><html data-theme="phosphor" lang="en"><head>…
+<div class="seon-data-panel" …>
+```
+
+The existing four `/data` socket regressions remain the recurring proof; they
+exercise schema, entity, stored-value, and five-megabyte elision roots through
+the real route.
