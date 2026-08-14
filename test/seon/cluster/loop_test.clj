@@ -1380,8 +1380,18 @@
              #(throw
                (ex-info "install gate broke after evaluation"
                         {:seon.test/install-gate-broke true})))
+            receipt-settle-tx @#'run/receipt-settle-tx
             terminal
-            (with-redefs [problems/form-problem
+            (with-redefs [run/receipt-settle-tx
+                          (fn
+                            ([_request]
+                             (throw
+                              (ex-info
+                               "failure settlement omitted its database"
+                               {:seon.test/missing-database true})))
+                            ([database request]
+                             (receipt-settle-tx database request)))
+                          problems/form-problem
                           (fn [& _]
                             (throw
                              (ex-info

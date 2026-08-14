@@ -655,6 +655,7 @@
         receipt-tx
         (when ordinal
           (run/receipt-settle-tx
+           database
            (cond->
             {:seon.cluster.run/id run-id
              :seon.cluster.eval/ordinal ordinal
