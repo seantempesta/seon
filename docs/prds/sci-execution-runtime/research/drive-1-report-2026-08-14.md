@@ -39,6 +39,9 @@ message and rebirth were not attempted.
   `a887d305-c8ae-4b6e-842f-43287f7f7496-context-536871133`
 - Terminal error fact: `4b93a1bf-e56e-4a33-befe-1882cfda474f`
 - Terminal error basis: `t=536871186`
+- Retained-root footprint at final status: **10.90 GiB** (725.05 GiB
+  filesystem usable). This is surprising growth from the fresh root and was
+  preserved, not swept, under the drive evidence rule.
 - Preservation: the root was neither stopped nor reset. The cluster, exact
   prompts, render costs, attempts, receipts, and error fact remain live.
 
