@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, database, wave/live-drive-context]
 ---
@@ -48,3 +48,23 @@ The values-carry-their-world request from `seon.cluster.loop` through
 - The prompt caller and request schema explicitly carry the connection needed
   by the recording effect; no owner fetches it globally.
 - One regression proves both halves using the same production request path.
+
+## Resolution
+
+Commit `aed781a3b` adds `:seon.db/connection` to the prompt request contract
+and hands the held cluster connection from `seon.cluster.loop` through
+`seon.cluster.prompt` into every agent-context render call. No render owner
+fetches custody.
+
+`seon.cluster.prompt-test/prompt-is-derived-append-only-repl-history` now
+drives the production context channel and asserts that new render-cost facts
+exist. `seon.render-coverage-test/only-agent-context-render-receipts-record-cost`
+retains the other half: a web-like HTML render records no cost. Those focused
+suites passed, including 15 tests and 199 assertions in the combined prompt
+and render-coverage run before the stable-basis expectation was corrected,
+then 10 prompt tests and 116 assertions after correction.
+
+On fresh isolated root `tmp/context-fidelity-proof.Jq1MLw`, two live prompt
+acquisitions recorded 130 render-cost facts. The ordinary HTML-read fence is
+unchanged: the write still requires a held run ID and captured-call sink as
+well as the newly carried connection.
