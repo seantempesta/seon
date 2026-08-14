@@ -238,6 +238,21 @@ one decision away from queued work. Ruled items cite their record.
     shape) — the exemplar becomes: make the floor render
     `:my.message/inbox` well WITHOUT a declaration.
 
+28. **Delete the world-fetching defaults — the p1 class kill** (owner,
+    2026-08-14 small hours): no production internal may re-derive
+    expensive state (a projection, an environment) because the caller
+    forgot to hand it — the fallback is DELETED, not preferred-away; a
+    missing world is a flat typed refusal naming the site. The
+    legitimate other kind is preserved and named: cheap authoritative
+    handles at DECLARED seams (seon.db's elided current-database
+    arities, call preparation's declared supplied defaults — visible,
+    caller-wins, deref-cheap). First execution: the projection fallback
+    in `seon.config/effective`/`render/request-profile`
+    (entity-flag-deletion lane, in flight); the refusal's message is
+    the caller to-do list, and the class regression asserts the typed
+    refusal itself. Remaining class/p1 members sweep against the same
+    rule after.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
