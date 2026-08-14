@@ -49,7 +49,8 @@
              [:seon.flow/monitor-report-channel :seon.flow/channel]
              [:seon.flow/monitor-error-channel :seon.flow/channel]
              [:seon.flow/fault-channel :seon.flow/channel]
-             [:seon.flow/completion :seon.flow/channel]],
+             [:seon.flow/completion :seon.flow/channel]
+             [:seon.flow/committer-error-completion :seon.flow/channel]],
             :error-fanout-request
             [:map
              [:seon.flow/graph :seon.flow/graph]
@@ -61,6 +62,9 @@
               :seon.flow/buffer-capacity]
              [:seon.flow/monitor-buffer-capacity
               :seon.flow/buffer-capacity]
+             [:seon.flow/projection
+              {:optional true}
+              :seon.schema/projection]
              [:seon.flow/read-core-error-mode
               :seon.flow/read-core-error-mode]
              [:seon.flow/commit-fault! :seon.flow/commit-fault!]
@@ -76,6 +80,7 @@
             [:map
              [:seon.flow/fault-channel :seon.flow/channel]
              [:seon.flow/completion :seon.flow/channel]
+             [:seon.flow/projection :seon.schema/projection]
              [:seon.flow/read-core-error-mode
               :seon.flow/read-core-error-mode]
              [:seon.flow/commit-fault! :seon.flow/commit-fault!]

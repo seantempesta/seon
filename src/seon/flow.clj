@@ -968,15 +968,18 @@
   [capacity]
   (CountedDroppingBuffer. (LinkedList.) (long capacity) nil))
 
+(declare report-committer-loss!)
+
 (defn- fault-committer-step
   ([]
    {:workload :io
-    :ping-map-fn #(select-keys % [::committed ::panicked])})
+    :ping-map-fn #(select-keys % [::committed ::panicked ::lost])})
   ([{::keys [fault-channel] :as args}]
    (assoc args
           ::flow/in-ports {::core-fault fault-channel}
           ::committed 0
           ::panicked 0
+          ::lost 0
           ::seen-signatures #{}))
   ([{::keys [completion] :as state} transition]
    (when (= ::flow/stop transition)
@@ -993,41 +996,50 @@
    ;; Flow removes that input. It is lifecycle, not a core fault.
    (if (nil? fault)
      [state nil]
-    (let [mode (read-core-error-mode)
-          [fact outcome previously-reported?]
-          ((if (::dropped-fault-count fault) commit-drop! commit-fault!) fault)
-          signature (:seon.error/signature fact)
-          repeated? (and signature (contains? seen-signatures signature))
-          already-reported?
-          (or repeated? previously-reported?)
-          next-state (cond-> state
-                       signature (update ::seen-signatures conj signature)
-                       (= ::committed outcome) (update ::committed inc))
-          reported (assoc fault
-                          ::fault-fact fact
-                          ::commit-outcome outcome
-                          ::core-error-mode mode)
-          commit-refused?
-          (not= ::committed outcome)]
-      (cond
-        already-reported?
-        [next-state nil]
+     (try
+       (let [mode (read-core-error-mode)
+             [fact outcome previously-reported?]
+             ((if (::dropped-fault-count fault) commit-drop! commit-fault!)
+              fault)
+             signature (:seon.error/signature fact)
+             repeated? (and signature (contains? seen-signatures signature))
+             already-reported?
+             (or repeated? previously-reported?)
+             next-state (cond-> state
+                          signature (update ::seen-signatures conj signature)
+                          (= ::committed outcome) (update ::committed inc))
+             reported (assoc fault
+                             ::fault-fact fact
+                             ::commit-outcome outcome
+                             ::core-error-mode mode)
+             commit-refused?
+             (not= ::committed outcome)]
+         (cond
+           already-reported?
+           [next-state nil]
 
-        (= :record mode)
-        (do
-          (when commit-refused? (panic! reported))
-          [next-state nil])
+           (= :record mode)
+           (do
+             (when commit-refused? (panic! reported))
+             [next-state nil])
 
-        (= :panic mode)
-        (do
-          (panic! reported)
-          [(update next-state ::panicked inc) nil])
+           (= :panic mode)
+           (do
+             (panic! reported)
+             [(update next-state ::panicked inc) nil])
 
-        :else
-        (throw
-         (ex-info
-          "Unknown fake :seon.config/on-core-error value."
-          {::core-error-mode mode})))))))
+           :else
+           (throw
+            (ex-info
+             "Unknown :seon.config/on-core-error value."
+             {::core-error-mode mode}))))
+       (catch Throwable failure
+         (report-committer-loss!
+          {::flow/pid ::fault-committer
+           ::flow/op :step
+           ::flow/ex failure
+           ::lost-fault fault})
+         [(update state ::lost inc) nil])))))
 
 (defn fault-committer-proc
   "Create the Flow proc that turns core faults into durable facts.
@@ -1064,12 +1076,74 @@
     (inject [_ coordinate messages]
       (flow.graph/inject graph coordinate messages))))
 
+(defn- projection-executor
+  [projection]
+  (let [^Executor delegate
+        (:io ((requiring-resolve 'seon.operator.runtime/root-executors)))]
+    (reify Executor
+      (execute [_ command]
+        (.execute
+         delegate
+         ^Runnable
+         (fn []
+           (schema/call-with-projection
+            projection
+            #(.run ^Runnable command))))))))
+
+(defn- fault-loss-name
+  [value]
+  (let [text (str value)]
+    (subs text 0 (min 160 (count text)))))
+
+(defn- report-committer-loss!
+  "The bounded last resort when the mechanism recording faults itself fails."
+  [escaped]
+  (try
+    (let [failure (::flow/ex escaped)
+          lost (::lost-fault escaped)]
+      (binding [*out* *err*]
+        (println
+         (str "SEON FAULT COMMITTER LOSS: pid="
+              (fault-loss-name (or (::flow/pid lost) (::flow/pid escaped)))
+              " op="
+              (fault-loss-name (or (::flow/op lost) (::flow/op escaped)))
+              " failure="
+              (fault-loss-name
+               (if (instance? Throwable failure)
+                 (.getName (class failure))
+                 (type failure)))))
+        (flush)))
+    (catch Throwable _
+      ;; The output device itself is the last external boundary. There is no
+      ;; second process-local path whose failure could be reported honestly.
+      nil))
+  nil)
+
+(defn- join-fault-committer-errors!
+  [error-channel]
+  (let [completion (async/promise-chan)
+        ^Executor io-executor
+        (:io ((requiring-resolve 'seon.operator.runtime/root-executors)))]
+    (.execute
+     io-executor
+     ^Runnable
+     (fn []
+       (try
+         (loop []
+           (when-some [escaped (async/<!! error-channel)]
+             (report-committer-loss! escaped)
+             (recur)))
+         (finally
+           (async/put! completion ::fault-committer-error-channel-closed)))))
+    completion))
+
 (defn- fault-graph-definition
-  [request]
+  [request projection]
   {:procs
    {::fault-committer
     {:proc (fault-committer-proc request)}}
-   :conns []})
+   :conns []
+   :io-exec (projection-executor projection)})
 
 (defn start-error-fanout!
   "Own report/error fan-out for one already-started Flow graph.
@@ -1083,10 +1157,17 @@
   {:malli/schema
    [:=> [:catn [::request ::error-fanout-request]] ::error-fanout]}
   [{::keys [graph started fault-buffer-capacity monitor-buffer-capacity
-            read-core-error-mode commit-fault! commit-drop! panic!]
+            read-core-error-mode commit-fault! commit-drop! panic! projection]
     :as request}]
   (let [environment (env/refuse-absent-environment!
                      request ::start-error-fanout!)
+        projection
+        (or projection
+            (:seon.schema/projection environment)
+            (throw
+             (ex-info
+              "The fault committer requires its schema projection at construction."
+              {::missing-fault-projection true})))
         report-mult (async/mult (:report-chan started))
         error-mult (async/mult (:error-chan started))
         application-report-channel
@@ -1099,18 +1180,27 @@
         (async/chan
          (counted-dropping-buffer fault-buffer-capacity))
         completion (async/promise-chan)
-        {fault-graph ::graph}
+        {fault-graph ::graph
+         fault-joins ::joins}
         (start-graph!
          {::graph-definition
           (fault-graph-definition
            (env/carry
             {::fault-channel fault-channel
              ::completion completion
+             ::projection projection
              ::read-core-error-mode read-core-error-mode
              ::commit-fault! commit-fault!
              ::commit-drop! commit-drop!
              ::panic! panic!}
-            environment))})
+            environment)
+           projection)
+          ::joins
+          {::fault-committer-error-join
+           (fn [{::keys [started]}]
+             (join-fault-committer-errors! (:error-chan started)))}})
+        committer-error-completion
+        (::fault-committer-error-join fault-joins)
         monitor-view
         (monitor-graph
          graph monitor-report-channel monitor-error-channel)]
@@ -1127,7 +1217,8 @@
      ::monitor-report-channel monitor-report-channel
      ::monitor-error-channel monitor-error-channel
      ::fault-channel fault-channel
-     ::completion completion}))
+     ::completion completion
+     ::committer-error-completion committer-error-completion}))
 
 (defn join-error-fanout!
   "Feed one more started graph's errors into an existing fan-out.
@@ -1162,12 +1253,17 @@
   {:malli/schema
    [:=> [:catn [::fanout ::error-fanout]] :boolean]}
   [{::keys [fault-graph report-mult error-mult completion
+            committer-error-completion
             application-report-channel monitor-report-channel
             monitor-error-channel fault-channel]}]
   (let [stopped? (boolean (flow/stop fault-graph))]
     ;; Join the proc's lifecycle event before its caller can release the
     ;; database connection used by an active fault commit.
     (async/<!! completion)
+    ;; The committer graph's own error channel is a source too. Its join ends
+    ;; only after Flow closes that channel, so no escaped last-resort report is
+    ;; abandoned during teardown.
+    (async/<!! committer-error-completion)
     (async/untap report-mult application-report-channel)
     (async/untap report-mult monitor-report-channel)
     (async/untap error-mult monitor-error-channel)

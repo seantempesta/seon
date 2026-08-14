@@ -746,6 +746,7 @@
   [connection graph started fault-buffer-capacity monitor-buffer-capacity]
   (sut/start-error-fanout!
    {:seon.env/environment @test-environment
+    ::sut/projection (schema/current-projection)
     ::sut/graph graph
     ::sut/started started
     ::sut/fault-buffer-capacity fault-buffer-capacity
@@ -821,7 +822,7 @@
               (sut/stop-error-fanout! fanout)
               (stop-source-testbed! testbed))))))))
 
-(deftest an-instrumentation-fault-commits-without-an-ambient-projection
+(deftest fault-committer-runs-with-the-projection-handed-at-construction
   (let [commit-core-fault!
         (var-get (ns-resolve 'seon.cluster 'commit-fault!))
         resolve-var #'schema.datahike/resolve-datahike-form-in
@@ -845,31 +846,84 @@
             :seon.instrument/args "[{:seon.render.walk/lookup :root}]"}})}]
     (test-support/with-database
       (fn [connection]
-        (try
-          ;; Reproduce the live fault-committer boundary: this public bridge
-          ;; is instrumented, while its Flow thread has no ambient projection.
-          (mi/clj-collect! {:ns ['seon.schema.datahike]})
-          (mi/instrument! {:filters [resolve-filter]})
-          (with-redefs [config/effective
-                        (fn [_database _cluster-name]
-                          {:seon.config.error/recurrence-limit 3
-                           :seon.config.eval.result/blob-threshold 4096})]
-            (let [[fact outcome]
-                  (commit-core-fault! connection "fault-test"
-                                      "process-instrumentation" caps
-                                      contract-fault)
+        (let [cluster-name "fault-test"
+              _ (config/apply! {:seon.db/connection connection
+                                :seon.boot/cluster-name cluster-name})
+              environment (test-support/environment cluster-name connection)
+              {::keys [graph started] :as testbed} (source-testbed)
+              transactions (database-events connection)
+              fanout
+              (sut/start-error-fanout!
+               {:seon.env/environment environment
+                ::sut/graph graph
+                ::sut/started started
+                ::sut/fault-buffer-capacity 4
+                ::sut/monitor-buffer-capacity 4
+                ::sut/read-core-error-mode
+                (fn []
+                  (:seon.config/on-core-error
+                   (config/effective @connection cluster-name)))
+                ::sut/commit-fault!
+                #(commit-core-fault! connection cluster-name
+                                     "process-instrumentation" caps %)
+                ::sut/commit-drop!
+                #(commit-core-fault! connection cluster-name
+                                     "process-instrumentation" caps %)
+                ::sut/panic! (fn [_])})]
+          (try
+            ;; Reproduce the live boundary: both config/effective and this
+            ;; public bridge require the projection on the committer thread.
+            (mi/clj-collect! {:ns ['seon.schema.datahike]})
+            (mi/instrument! {:filters [resolve-filter]})
+            (async/>!! (:error-chan started) contract-fault)
+            (let [transaction
+                  (test-support/await-event!
+                   (::channel transactions)
+                   ::projected-fault-committed
+                   #(seq (committed-faults (:db-after %))))
                   stored
-                  (db/pull @connection
-                           '[*]
-                           [:seon.error/id (:seon.error/id fact)])]
-              (is (= ::sut/committed outcome))
+                  (db/q '[:find (pull ?error [*]) .
+                          :where
+                          [?error :seon.instrument/fn
+                           "seon.render.walk/root-acquisition"]]
+                        (:db-after transaction))]
               (is (= "seon.render.walk/root-acquisition"
                      (:seon.instrument/fn stored)))
               (is (= ":seon.render.walk/acquisition-request"
                      (:seon.instrument/expected stored)))
-              (is (boolean? (:seon.error/capped? stored)))))
-          (finally
-            (mi/unstrument! {:filters [resolve-filter]})))))))
+              (is (boolean? (:seon.error/capped? stored))))
+            (finally
+              (mi/unstrument! {:filters [resolve-filter]})
+              (stop-database-events! connection transactions)
+              (sut/stop-error-fanout! fanout)
+              (stop-source-testbed! testbed))))))))
+
+(deftest fault-committer-own-error-channel-reaches-the-last-resort
+  (let [{::keys [graph started] :as testbed} (source-testbed)
+        losses (async/chan 1)
+        step-var (ns-resolve 'seon.flow 'fault-committer-step)
+        reporter-var (ns-resolve 'seon.flow 'report-committer-loss!)
+        fanout (start-test-fanout! nil graph started 2 2)]
+    (try
+      (with-redefs-fn
+        {step-var
+         (fn [& _]
+           (throw (ex-info "committer wrapper failed"
+                           {:seon.test/committer-wrapper-failed true})))
+         reporter-var #(async/offer! losses %)}
+        (fn []
+          (async/>!! (:error-chan started) (synthetic-core-fault 0))
+          (let [escaped
+                (test-support/await-event!
+                 losses ::committer-last-resort
+                 #(= "committer wrapper failed"
+                     (ex-message (::flow/ex %))))]
+            (is (= ::sut/fault-committer (::flow/pid escaped)))
+            (is (= :step (::flow/op escaped))))))
+      (finally
+        (sut/stop-error-fanout! fanout)
+        (stop-source-testbed! testbed)
+        (async/close! losses)))))
 
 (deftest core-fault-signatures-bound-durable-and-stderr-output
   (let [commit-core-fault!
@@ -1072,6 +1126,7 @@
         fanout
         (sut/start-error-fanout!
          {:seon.env/environment @test-environment
+          ::sut/projection (schema/current-projection)
           ::sut/graph graph
           ::sut/started started
           ::sut/fault-buffer-capacity 1
@@ -1256,6 +1311,7 @@
               fanout
               (sut/start-error-fanout!
                {:seon.env/environment @test-environment
+                ::sut/projection (schema/current-projection)
                 ::sut/graph graph
                 ::sut/started started
                 ::sut/fault-buffer-capacity fault-buffer-capacity
@@ -1456,6 +1512,7 @@
         fanout
         (sut/start-error-fanout!
          {:seon.env/environment @test-environment
+          ::sut/projection (schema/current-projection)
           ::sut/graph graph
           ::sut/started started
           ::sut/fault-buffer-capacity 8
