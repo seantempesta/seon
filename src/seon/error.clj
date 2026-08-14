@@ -367,6 +367,10 @@
     run-id :seon.cluster.run/id
     agent-id :seon.cluster.agent/id}]
   (let [failure (throwable source)
+        failure-data (when failure (refusal failure))
+        instrument-data (when (= :seon.instrument/contract-violated
+                                 (:seon.error/kind failure-data))
+                          (:seon.error/data failure-data))
         class-name (when failure (.getName (class failure)))
         error-kind (kind source failure)
         ;; :record UNCONDITIONALLY. The dial governs the failing site;
@@ -393,6 +397,14 @@
       (and flow? (::flow/pid source)) (assoc :seon.error/proc (::flow/pid source))
       (and flow? (::flow/op source)) (assoc :seon.error/op (::flow/op source))
       (and flow? (::flow/cid source)) (assoc :seon.error/cid (::flow/cid source))
+      (:seon.instrument/fn instrument-data)
+      (assoc :seon.instrument/fn (:seon.instrument/fn instrument-data))
+      (:seon.instrument/arm instrument-data)
+      (assoc :seon.instrument/arm (:seon.instrument/arm instrument-data))
+      (:seon.instrument/schema instrument-data)
+      (assoc :seon.instrument/expected (:seon.instrument/schema instrument-data))
+      (:seon.instrument/args instrument-data)
+      (assoc :seon.instrument/args (:seon.instrument/args instrument-data))
       basis-t (assoc :seon.error/basis-t basis-t)
       run-id (assoc :seon.error/run [:seon.cluster.run/id run-id])
       agent-id (assoc :seon.error/agent [:seon.cluster.agent/id agent-id]))))

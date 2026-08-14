@@ -255,7 +255,15 @@
                       (catch Exception thrown (ex-data thrown)))]
         (is (= ["not a fact"]
                (:seon.error/diagnostic-offending (:seon.error/data data)))
-            "arguments remain bounded ordinary data, never a printed value"))
+            "arguments remain bounded ordinary data, never a printed value")
+        (is (= {::instrument/fn "seon.error/value"
+                ::instrument/arm :input
+                ::instrument/schema ":seon.error/fact"
+                ::instrument/args "[\"not a fact\"]"}
+               (select-keys (:seon.error/data data)
+                            [::instrument/fn ::instrument/arm
+                             ::instrument/schema ::instrument/args]))
+            "the bounded fault evidence is complete before normalization"))
       (finally (instrument/remove!))))
   (instrumented!
    (fn [_]

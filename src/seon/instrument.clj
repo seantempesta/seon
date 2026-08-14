@@ -346,18 +346,20 @@
           expected-value (when bounded-caps
                            (admitted-value bounded-caps expected))
           offending (when (and bounded-caps first-problem)
-                      (offending-value bounded-caps kind first-problem))]
+                      (offending-value bounded-caps kind first-problem))
+          function-symbol (:fn-name data)
+          arm (if (= :malli.core/invalid-output kind) :output :input)]
       (error/diagnostic
        {:seon.error/kind ::contract-violated
-        :seon.instrument/contract-violated (str (:fn-name data))
+        :seon.instrument/contract-violated (str function-symbol)
         ;; Store semantic evidence once. The terminal render path owns the
         ;; only presentation fit; embedding printed schemas, problem trees,
         ;; and arguments here made it print a print and repeat one payload.
         :seon.error/message
-        (str (:fn-name data) " violated its contract ("
+        (str function-symbol " violated its contract ("
              (name kind) "): " problem-message)
         :seon.error/diagnostic-layer :instrumentation
-        :seon.error/diagnostic-operation (:fn-name data)
+        :seon.error/diagnostic-operation function-symbol
         :seon.error/diagnostic-member
         (if (= :malli.core/invalid-output kind) :return :arguments)
         :seon.error/diagnostic-expected expected-value
@@ -368,9 +370,14 @@
           {:seon.instrument/problem-count problem-count
            :seon.instrument/problems [representative-problem]})
         :seon.error/data
-        {::malli kind
-         ::arm (if (= :malli.core/invalid-output kind) :output :input)
-         ::problem-count problem-count}}))))
+        (cond-> {::malli kind
+                 ::arm arm
+                 ::problem-count problem-count}
+          function-symbol (assoc ::fn (str function-symbol))
+          expected-value
+          (assoc ::schema (admit/canonical-edn expected-value))
+          offending
+          (assoc ::args (admit/canonical-edn offending)))}))))
       (catch Throwable _
         fallback))))
 
