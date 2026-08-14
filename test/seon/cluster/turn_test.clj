@@ -3159,8 +3159,15 @@
            :seon.cluster.run/process process
            :seon.cluster.run/opened-at now
            :seon.cluster.run/starting-ns
-           [:seon.ns/name 'my.agents.agent-a]
-           :seon.cluster.run.form/source "(help)"}))
+           [:seon.ns/name 'my.agents.agent-a]}))
+        (db/transact!
+         connection
+         (run/append-generated-tx
+          {:seon.cluster.run/id run-id
+           :seon.cluster.run/process process
+           :seon.cluster.run.form/ordinal 0
+           :seon.cluster.run.form/source "(help)"
+           :seon.ns/name 'my.agents.agent-a}))
         (db/transact!
          connection
          (run/receipt-start-tx
@@ -3215,8 +3222,15 @@
            :seon.cluster.run/process process
            :seon.cluster.run/opened-at now
            :seon.cluster.run/starting-ns
-           [:seon.ns/name 'my.agents.agent-a]
-           :seon.cluster.run.form/source "(help)"}))
+           [:seon.ns/name 'my.agents.agent-a]}))
+        (db/transact!
+         connection
+         (run/append-generated-tx
+          {:seon.cluster.run/id run-id
+           :seon.cluster.run/process process
+           :seon.cluster.run.form/ordinal 0
+           :seon.cluster.run.form/source "(help)"
+           :seon.ns/name 'my.agents.agent-a}))
         (db/transact!
          connection
          (run/receipt-start-tx

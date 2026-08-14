@@ -520,12 +520,12 @@
 
 (defn- root-candidate
   [request root-key]
-  (let [rendered
+  (let [agent-id (second (:seon.render.walk/lookup request))
+        rendered
         (render/render-call
          (assoc request
                 :seon.render/value
-                (db/pull (:seon.db/db request) '[*]
-                         (:seon.render.walk/lookup request))
+                (situation (:seon.db/db request) agent-id)
                 :seon.render/output :seon.render/form
                 :seon.render.call/id
                 [:seon.render/form (:seon.render.walk/lookup request)]))]
@@ -790,9 +790,5 @@
             :seon.cluster.run/opened-at opened-at
             :seon.cluster.run/trigger
             [:seon.cluster.message/id message-id]
-            :seon.cluster.run/starting-ns [:seon.ns/name namespace-name]
-            :seon.cluster.run.form/source
-            (entry-source
-             {:seon.repl/comment
-              "; A new run just opened. Why am I awake — do I have messages?"
-              :seon.repl/form '(help)})}))))
+            :seon.cluster.run/starting-ns
+            [:seon.ns/name namespace-name]}))))

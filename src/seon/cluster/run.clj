@@ -760,8 +760,9 @@
 
   The requested ordinal must equal the number of forms already present. For
   every noninitial append, the preceding ordinal must already have a terminal
-  receipt. Those two facts make prefix growth atomic and prevent both gaps and
-  generation ahead of execution. A digest-backed run cannot enter this path."
+  receipt. Initial and successor forms use the same `:generate` transition;
+  those facts make prefix growth atomic and prevent both gaps and generation
+  ahead of execution. A digest-backed run cannot enter this path."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.run/generated-form-request]
                   [:vector :some]]}
@@ -796,8 +797,7 @@
                   db run-eid (dec ordinal))))]
     (when (some? (::plan-digest held))
       (refuse! `append-generated-call ::plan-frozen request))
-    (when-not (= (if (zero? ordinal) :call :generate)
-                 (:seon.cluster.work/situation held))
+    (when-not (= :generate (:seon.cluster.work/situation held))
       (refuse! `append-generated-call ::not-generate-situation request))
     (when-not (= expected ordinal)
       (refuse! `append-generated-call ::generated-ordinal request))
@@ -805,19 +805,15 @@
       (refuse! `append-generated-call ::generated-prefix-unsettled request))
     (let [form-id (form-identity id ordinal)
           namespace-id (str "namespace:" namespace-name)]
-      (cond-> [{:db/id namespace-id :seon.ns/name namespace-name}
-               {:db/id form-id
-                :seon.cluster.run.form/id form-id
-                :seon.cluster.run.form/run run-eid
-                :seon.cluster.run.form/ordinal ordinal
-                :seon.cluster.run.form/author :system
-                :seon.cluster.run.form/source source
-                :seon.cluster.run.form/ns namespace-id}
-               [:db/add run-eid ::forms form-id]]
-        (zero? ordinal)
-        (into [[:db/retract run-eid :seon.cluster.work/situation :call]
-               [:db/add run-eid :seon.cluster.work/situation :generate]
-               [:db/add run-eid ::starting-ns namespace-id]])))))
+      [{:db/id namespace-id :seon.ns/name namespace-name}
+       {:db/id form-id
+        :seon.cluster.run.form/id form-id
+        :seon.cluster.run.form/run run-eid
+        :seon.cluster.run.form/ordinal ordinal
+        :seon.cluster.run.form/author :system
+        :seon.cluster.run.form/source source
+        :seon.cluster.run.form/ns namespace-id}
+       [:db/add run-eid ::forms form-id]])))
 
 (defn append-generated-tx
   "Transaction data appending one dependency-ready generated form."
@@ -875,7 +871,7 @@
   [[:db.fn/call #'generation-complete-call request]])
 
 (defn generated-run-tx
-  "Open, claim, and append the first form of a generated system run."
+  "Open and claim one zero-form generated system run."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.run/generated-run-request]
                   :seon.store/transaction-data]}
@@ -885,13 +881,15 @@
          process ::process
          opened-at ::opened-at
          starting-ns ::starting-ns
-         source :seon.cluster.run.form/source
          trigger ::trigger} request
         namespace-name (if (vector? starting-ns)
                          (second starting-ns)
-                         starting-ns)]
+                         starting-ns)
+        run-tempid (str "seon.cluster.run/" run-id)
+        namespace-tempid (str "namespace:" namespace-name)]
     (into [] cat
-          [(open-tx
+          [[{:db/id namespace-tempid :seon.ns/name namespace-name}]
+           (open-tx
             (cond-> {::id run-id
                      ::agent [:seon.cluster.agent/id agent-id]
                      ::opening-commit-id (db/commit-id database)
@@ -901,12 +899,9 @@
                       ::process process
                       ::live-processes #{process}
                       ::now opened-at})
-           (append-generated-tx
-            {::id run-id
-             ::process process
-             :seon.cluster.run.form/ordinal 0
-             :seon.cluster.run.form/source source
-             :seon.ns/name namespace-name})])))
+           [[:db/retract run-tempid :seon.cluster.work/situation :call]
+            [:db/add run-tempid :seon.cluster.work/situation :generate]
+            [:db/add run-tempid ::starting-ns namespace-tempid]]])))
 
 (defn refresh-tx
   "Transaction data refreshing one prior system-authored form."

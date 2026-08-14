@@ -304,8 +304,28 @@
                 ::run/id "generated-run"
                 ::run/process "generated-process"
                 ::run/opened-at t0
-                ::run/starting-ns [:seon.ns/name 'my.agents.generated]
-                :seon.cluster.run.form/source "(help)"}))))
+                ::run/starting-ns [:seon.ns/name 'my.agents.generated]}))))
+      (is (= {:seon.cluster.work/situation :generate
+              ::run/starting-ns {:seon.ns/name 'my.agents.generated}}
+             (db/pull @connection
+                      '[:seon.cluster.work/situation
+                        {:seon.cluster.run/starting-ns [:seon.ns/name]}]
+                      [::run/id "generated-run"])))
+      (is (empty?
+           (db/q '[:find ?form
+                   :where
+                   [?run :seon.cluster.run/id "generated-run"]
+                   [?form :seon.cluster.run.form/run ?run]]
+                 @connection)))
+      (is (= ::committed
+             (transact-or-refusal
+              connection
+              (run/append-generated-tx
+               {::run/id "generated-run"
+                ::run/process "generated-process"
+                :seon.cluster.run.form/ordinal 0
+                :seon.cluster.run.form/source "(help)"
+                :seon.ns/name 'my.agents.generated}))))
       (is (= ::run/generated-prefix-unsettled
              (::run/rule
               (transact-or-refusal
@@ -369,8 +389,15 @@
          ::run/id "appended-run"
          ::run/process "appended-process"
          ::run/opened-at t0
-         ::run/starting-ns [:seon.ns/name 'my.agents.appended]
-         :seon.cluster.run.form/source "(help)"}))
+         ::run/starting-ns [:seon.ns/name 'my.agents.appended]}))
+      (db/transact!
+       connection
+       (run/append-generated-tx
+        {::run/id "appended-run"
+         ::run/process "appended-process"
+         :seon.cluster.run.form/ordinal 0
+         :seon.cluster.run.form/source "(help)"
+         :seon.ns/name 'my.agents.appended}))
       (db/transact!
        connection
        (run/receipt-start-tx

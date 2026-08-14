@@ -7,6 +7,7 @@
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as cluster.agent]
+            [seon.cluster.run :as run]
             [seon.cluster.work :as work]
             [seon.config :as config]
             [seon.db :as db]
@@ -37,7 +38,7 @@
    :seon.render/output :seon.render/form
    :seon.render/distance 3})
 
-(deftest creation-opens-one-generated-system-run-with-a-real-task
+(deftest creation-opens-one-zero-form-generated-run-with-a-real-task
   (support/with-database
     (fn [connection]
       (seed-cluster! connection "generated-bootstrap")
@@ -49,6 +50,7 @@
             run-id (bootstrap/run-id agent-id)
             run (db/pull @connection
                          '[:seon.cluster.run/id :seon.cluster.run/process
+                           :seon.cluster.work/situation
                            :seon.cluster.run/plan-digest
                            {:seon.cluster.run/forms
                             [:seon.cluster.run.form/ordinal
@@ -62,22 +64,18 @@
         (is (= process (:seon.cluster.run/process run)))
         (is (nil? (:seon.cluster.run/plan-digest run))
             "a generated run has no frozen authored plan")
-        (is (= [{:seon.cluster.run.form/ordinal 0
-                 :seon.cluster.run.form/author :system
-                 :seon.cluster.run.form/source
-                 (str "; A new run just opened. Why am I awake — do I have messages?\n"
-                      "(help)")}]
-               (mapv #(dissoc % :db/id) (:seon.cluster.run/forms run))))
+        (is (= :generate (:seon.cluster.work/situation run)))
+        (is (empty? (:seon.cluster.run/forms run))
+            "creation admits no form outside the generator")
         (is (= (bootstrap/task-message-id agent-id)
                (get-in run [:seon.cluster.run/trigger
                             :seon.cluster.message/id])))
         (is (= (bootstrap/task-message)
                (get-in run [:seon.cluster.run/trigger
                             :seon.cluster.message/content])))
-        (is (= {:seon.cluster.work/situation :resume
+        (is (= {:seon.cluster.work/situation :generate
                 :seon.cluster.run/id run-id
-                :seon.cluster.agent/id agent-id
-                :seon.cluster.run.form/ordinal 0}
+                :seon.cluster.agent/id agent-id}
                (work/next-agent-work
                 @connection {:seon.cluster.agent/id agent-id
                              :seon.cluster.run/process process})))))))
@@ -91,20 +89,21 @@
        {:seon.cluster.agent/id agent-id
         :seon.cluster/name "generated-proof"
         :seon.ns/name namespace-name})
-      (let [pull (bootstrap/pull-result (generator-request connection))
-            first-pass (walk/ordered-episode
-                        (assoc pull :seon.repl/settled []))
-            second-pass (walk/ordered-episode
-                         (assoc pull :seon.repl/settled []))]
-        (is (= first-pass second-pass)
+      (let [request (generator-request connection)
+            pull (bootstrap/pull-result request)
+            first-entry
+            (bootstrap/next-entry request (bootstrap/run-id agent-id))
+            second-entry
+            (bootstrap/next-entry
+             (generator-request connection) (bootstrap/run-id agent-id))]
+        (is (= first-entry second-entry)
             "same agent state derives byte-identical episode data")
-        (is (= '(help) (:seon.repl/form (first first-pass))))
-        (is (= 1 (count first-pass))
-            "without the first real receipt no later form can be emitted")
+        (is (= '(help) (:seon.repl/form first-entry))
+            "the zero-form run derives help from its live situation")
         (is (not-any? #(= 'outside.pull (:seon.repl/subject %))
                       (:seon.repl/candidates pull))
             "membership comes only from the bounded pull")
-        (let [opening-source (bootstrap/entry-source (first first-pass))
+        (let [opening-source (bootstrap/entry-source first-entry)
               situation (bootstrap/situation @connection agent-id)
               node (:seon.sci.admit/print-node
                     (admit/admit-value
@@ -113,6 +112,14 @@
                       :seon.sci.admit/caps
                       (config/result-caps (config/defaults))
                       :seon.config/on-core-error :record}))]
+          (db/transact!
+           connection
+           (run/append-generated-tx
+            {:seon.cluster.run/id (bootstrap/run-id agent-id)
+             :seon.cluster.run/process cluster/boot-process-identity
+             :seon.cluster.run.form/ordinal 0
+             :seon.cluster.run.form/source opening-source
+             :seon.ns/name namespace-name}))
           (db/transact!
            connection
            [{:seon.cluster.eval/id
@@ -146,7 +153,7 @@
                         listing-candidates)
                 "listing subjects are their pulled stable identities")
             (is (map? next-entry)
-                "the live post-receipt pull appends one next entry")
+                "the live post-receipt pull derives one successor entry")
             (is (not= opening-source (bootstrap/entry-source next-entry)))
             (is (= next-entry
                    (bootstrap/next-entry

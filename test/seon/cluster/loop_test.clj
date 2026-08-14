@@ -618,9 +618,16 @@
           :seon.cluster.run/process process
           :seon.cluster.run/opened-at now
           :seon.cluster.run/starting-ns 'my.agents.generated-agent
-          :seon.cluster.run.form/source "(help)"
           :seon.cluster.run/trigger
           [:seon.cluster.message/id message-id]}))
+       (db/transact!
+        connection
+        (run/append-generated-tx
+         {:seon.cluster.run/id run-id
+          :seon.cluster.run/process process
+          :seon.cluster.run.form/ordinal 0
+          :seon.cluster.run.form/source "(help)"
+          :seon.ns/name 'my.agents.generated-agent}))
        (db/transact!
         connection
         (into (run/receipt-start-tx

@@ -50,8 +50,6 @@
                     [:seon.cluster.run/process :seon.cluster.run/process]
                     [:seon.cluster.run/opened-at :seon.cluster.run/opened-at]
                     [:seon.cluster.run/starting-ns :seon.cluster.run/starting-ns]
-                    [:seon.cluster.run.form/source
-                     :seon.cluster.run.form/source]
                     [:seon.cluster.run/trigger {:optional true}
                      :seon.cluster.run/trigger]],
                    :run
