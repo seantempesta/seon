@@ -128,6 +128,7 @@
 (defn- comment-only-source?
   [source]
   (let [events (reader/read {:seon.sci.reader/text source
+                             :seon.config.eval.result/max-source (count source)
                              :seon.sci.reader/defer-auto-resolve? true})]
     (and (vector? events) (empty? events))))
 

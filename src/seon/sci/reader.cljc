@@ -4,11 +4,6 @@
   (:require [clojure.string :as str]
             [sci.core :as sci]))
 
-(def ^:private default-max-chars
-  ;; D5 in parse-primitives-plan-2026-07-29.md. A later config owner
-  ;; supplies this value; S1 has no production callers or config seam.
-  1048576)
-
 (def ^:private eof ::eof)
 
 (defn- error-value
@@ -585,7 +580,7 @@
     features ::features
     tags ::tags
     defer-auto-resolve? ::defer-auto-resolve?
-    max-chars ::max-chars}]
+    max-source :seon.config.eval.result/max-source}]
   (let [reading-context
         {::ns (or namespace-name 'user)
          ::aliases (or aliases {})
@@ -594,7 +589,7 @@
          ::features (or features #{:clj})
          ::tags (or tags {})
          ::defer-auto-resolve? (boolean defer-auto-resolve?)
-         ::max-chars (or max-chars default-max-chars)}]
+         ::max-source max-source}]
     (cond
       (not (string? text))
       (error-value
@@ -603,21 +598,21 @@
        {::text text
         ::phase "parse"})
 
-      (or (not (integer? (::max-chars reading-context)))
-          (neg? (::max-chars reading-context)))
+      (or (not (integer? (::max-source reading-context)))
+          (neg? (::max-source reading-context)))
       (error-value
        ::unreadable
-       "Reader max-chars must be a non-negative integer."
+       "Reader max-source must be a non-negative integer."
        {::text text
-        ::max-chars (::max-chars reading-context)
+        :seon.config.eval.result/max-source (::max-source reading-context)
         ::phase "parse"})
 
-      (> (count text) (::max-chars reading-context))
+      (> (count text) (::max-source reading-context))
       (error-value
        ::oversize
        "Clojure source exceeds the declared character bound."
        {::length (count text)
-        ::max-chars (::max-chars reading-context)})
+        :seon.config.eval.result/max-source (::max-source reading-context)})
 
       :else
       (try

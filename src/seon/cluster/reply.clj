@@ -133,10 +133,11 @@
   (`:seon.sci.reader/ns`, REPL semantics, absent rather than inherited
   after a malformed declaration) arrives with the span instead of being
   re-derived here by a second rule."
-  ([source] (parsed-events source nil))
-  ([source namespace-name]
+  ([source] (parsed-events source nil (count source)))
+  ([source namespace-name max-source]
    (let [events (reader/read
                  (cond-> {:seon.sci.reader/text source
+                          :seon.config.eval.result/max-source max-source
                           ;; This pass freezes exact source spans. Reader
                           ;; aliases created by earlier forms are resolved by
                           ;; the evaluator's later sequential read, not here.
@@ -308,8 +309,9 @@
   which keys a reader exception happens to carry."
   [lines line-number]
   (vector?
-   (reader/read {:seon.sci.reader/text
-                 (str/join "\n" (subvec lines 0 (dec line-number)))})))
+   (let [prefix (str/join "\n" (subvec lines 0 (dec line-number)))]
+     (reader/read {:seon.sci.reader/text prefix
+                   :seon.config.eval.result/max-source (count prefix)}))))
 
 (defn- comment-prose-failure
   "Comment one reader-failing prose line, preserving a valid code suffix."
@@ -362,28 +364,40 @@
     [:=> [:cat :seon.cluster.reply/text]
      [:or :seon.cluster.reply/sources :seon.error/value]]
     [:=> [:cat :seon.cluster.reply/text :seon.ns/name]
+     [:or :seon.cluster.reply/sources :seon.error/value]]
+    [:=> [:cat :seon.cluster.reply/text :seon.ns/name
+          :seon.config.eval.result/max-source]
      [:or :seon.cluster.reply/sources :seon.error/value]]]}
-  ([text] (sources text nil))
+  ([text] (sources text nil (count text)))
   ([text namespace-name]
-   (loop [source (unfenced text)
-          recovered-lines #{}]
-     (let [events (parsed-events source namespace-name)]
-       ; the reader refuses #= and unknown tags by itself — there is no
-       ; blocklist here, and there must never be one
-       (if (map? events)
-         (let [message (:seon.error/message events)
-               tag (:seon.sci.reader/tag (:seon.error/data events))]
-           (if (= :seon.sci.reader/refused-tag (:seon.error/kind events))
-             (refused ::refused-tag
-                      (cond-> {} tag (assoc ::refused-tag tag))
-                      message {::text text})
-             (if-let [{recovered-source :source line :line}
-                      (comment-prose-failure source events recovered-lines)]
-               (recur recovered-source (conj recovered-lines line))
-               (refused ::unreadable {::unreadable text} message
-                        {::text text}))))
-         (let [forms (plan-sources source events)]
-           (if (seq forms)
-             (vec forms)
-             (refused ::no-forms {::no-forms true}
-                      (no-forms-message source) {::text text}))))))))
+   (sources text namespace-name (count text)))
+  ([text namespace-name max-source]
+   (let [admission-events (parsed-events text namespace-name max-source)]
+     (if (= :seon.sci.reader/oversize
+            (:seon.error/kind admission-events))
+       (refused ::unreadable {::unreadable text}
+                (:seon.error/message admission-events)
+                (merge {::text text}
+                       (:seon.error/data admission-events)))
+       (loop [source (unfenced text)
+              recovered-lines #{}]
+         (let [events (parsed-events source namespace-name (count source))]
+           ; the reader refuses #= and unknown tags by itself — there is no
+           ; blocklist here, and there must never be one
+           (if (map? events)
+             (let [message (:seon.error/message events)
+                   tag (:seon.sci.reader/tag (:seon.error/data events))]
+               (if (= :seon.sci.reader/refused-tag (:seon.error/kind events))
+                 (refused ::refused-tag
+                          (cond-> {} tag (assoc ::refused-tag tag))
+                          message {::text text})
+                 (if-let [{recovered-source :source line :line}
+                          (comment-prose-failure source events recovered-lines)]
+                   (recur recovered-source (conj recovered-lines line))
+                   (refused ::unreadable {::unreadable text} message
+                            {::text text}))))
+             (let [forms (plan-sources source events)]
+               (if (seq forms)
+                 (vec forms)
+                 (refused ::no-forms {::no-forms true}
+                          (no-forms-message source) {::text text}))))))))))

@@ -17,6 +17,8 @@
                    :seon.config.eval.result/max-collection]
                   [:seon.config.eval.result/max-string
                    :seon.config.eval.result/max-string]
+                  [:seon.config.eval.result/max-source
+                   :seon.config.eval.result/max-source]
                   [:seon.config.eval.result/max-nodes
                    :seon.config.eval.result/max-nodes]],
                  :interrupt-fn

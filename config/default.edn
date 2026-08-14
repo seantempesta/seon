@@ -57,6 +57,9 @@
  :seon.config.eval.result/max-collection 8192
  ; Unit: characters retained per string.
  :seon.config.eval.result/max-string 262144
+ ; Unit: source characters admitted to the SCI reader. Oversize source is a
+ ; typed refusal carrying observed and allowed lengths; it is never clipped.
+ :seon.config.eval.result/max-source 1048576
  ; Unit: total nodes visited across the whole projection.
  :seon.config.eval.result/max-nodes 65536
 

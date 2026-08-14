@@ -306,6 +306,7 @@
         (doseq [{source :seon.cluster.run.form/source} forms]
           (is (seq (reader/read
                     {:seon.sci.reader/text source
+                     :seon.config.eval.result/max-source (count source)
                      :seon.sci.reader/defer-auto-resolve? true}))
               (str "a plan source with no reader event settles no receipt: "
                    (pr-str source))))))))

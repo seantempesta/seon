@@ -837,6 +837,7 @@
                     {:seon.config.eval.result/max-depth 6
                      :seon.config.eval.result/max-collection 8
                      :seon.config.eval.result/max-string 4096
+                     :seon.config.eval.result/max-source 1048576
                      :seon.config.eval.result/max-nodes 256}
                     :seon.config.error/recurrence-limit 3
                     :seon.config.message/max-chain 8}
@@ -1157,6 +1158,7 @@
                 {:seon.config.eval.result/max-depth 12
                  :seon.config.eval.result/max-collection 64
                  :seon.config.eval.result/max-string 4096
+                 :seon.config.eval.result/max-source 1048576
                  :seon.config.eval.result/max-nodes 4096}
                 :seon.cluster.agent/id agent-id
                 :seon.render.transcript/token-budget 100000})]

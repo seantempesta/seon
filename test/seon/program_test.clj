@@ -16,7 +16,9 @@
 (defn- one-event
   [source]
   (let [events (reader/read {:seon.sci.reader/text source
-                             :seon.sci.reader/ns 'sample})]
+                             :seon.sci.reader/ns 'sample
+                             :seon.config.eval.result/max-source
+                             (count source)})]
     (is (vector? events) (str "reader refused " source))
     (is (= 1 (count events)) (str "reader split " source))
     (first events)))
@@ -773,7 +775,9 @@
                     "[foo :as foo]))\n"
                     "(foo/deftest impostor)\n"
                     "(deftest real-test)")
-        events (reader/read {:seon.sci.reader/text source})]
+        events (reader/read
+                {:seon.sci.reader/text source
+                 :seon.config.eval.result/max-source (count source)})]
     (is (vector? events))
     (is (= #{"sample/real-test"}
            (into #{} (keep :seon.test/sym) events)))))

@@ -46,6 +46,7 @@
    :seon.config.eval.result/max-depth :arm-time
    :seon.config.eval.result/max-collection :arm-time
    :seon.config.eval.result/max-string :arm-time
+   :seon.config.eval.result/max-source :arm-time
    :seon.config.eval.result/max-nodes :arm-time
    :seon.config.eval.result/blob-threshold :live
    :seon.config.render.agent/token-budget :live
@@ -124,6 +125,7 @@
    :seon.config.eval.result/max-depth 2
    :seon.config.eval.result/max-collection 3
    :seon.config.eval.result/max-string 17
+   :seon.config.eval.result/max-source 31
    :seon.config.eval.result/max-nodes 21
    :seon.config.eval/time-limit-ms 1234
    :seon.config.test/auto-check-cases 7

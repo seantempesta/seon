@@ -30,7 +30,7 @@
             :seon.sci.reader/refers {}
             :seon.sci.reader/features #{:clj}
             :seon.sci.reader/tags {}
-            :seon.sci.reader/max-chars 1048576}
+            :seon.config.eval.result/max-source 1048576}
            context))))
 
 (defn- error?
@@ -106,7 +106,7 @@
            (:seon.sci.reader/source (first read-events))))
     (is (= (count text)
            (:seon.sci.reader/end (peek read-events)))))
-  (testing "offsets and max-chars use JVM UTF-16 character units"
+  (testing "offsets and max-source use JVM UTF-16 character units"
     (let [text "😀 42"
           read-events (events text)]
       (is (= 5 (count text)))
@@ -116,7 +116,7 @@
                    read-events)))
       (is (= 2
              (get-in
-              (events "😀" {:seon.sci.reader/max-chars 1})
+              (events "😀" {:seon.config.eval.result/max-source 1})
               [:seon.error/data :seon.sci.reader/length]))))))
 
 (deftest original-source-spans-preserve-crlf-and-utf16
@@ -227,6 +227,15 @@
    "#=(+ 1 2)"
    "#unaccepted/tag 1"])
 
+(deftest the-reader-never-invents-an-absent-source-bound
+  (let [result (reader/read {:seon.sci.reader/text "(+ 1 2)"})]
+    (is (= :seon.sci.reader/unreadable (:seon.error/kind result)))
+    (is (contains? (:seon.error/data result)
+                   :seon.config.eval.result/max-source))
+    (is (nil? (get-in result
+                      [:seon.error/data
+                       :seon.config.eval.result/max-source])))))
+
 (deftest every-refusal-is-a-flat-value-and-never-a-throw
   (let [mutation
         (gen/one-of
@@ -251,7 +260,7 @@
   (testing "oversize is the third and only other kind"
     (let [result
           (events "(+ 1 2)"
-                  {:seon.sci.reader/max-chars 3})]
+                  {:seon.config.eval.result/max-source 3})]
       (is (= :seon.sci.reader/oversize
              (:seon.error/kind result)))
       (is (= 7
@@ -259,7 +268,8 @@
                      [:seon.error/data :seon.sci.reader/length])))
       (is (= 3
              (get-in result
-                     [:seon.error/data :seon.sci.reader/max-chars])))))
+                     [:seon.error/data
+                      :seon.config.eval.result/max-source])))))
   (testing "unreadable source carries the parser position"
     (let [result (events "(defn f\n  [x]")]
       (is (= :seon.sci.reader/unreadable
@@ -419,15 +429,17 @@
 (deftest renamed-and-refer-all-bindings-resolve-to-exact-targets
   (let [read-events
         (reader/read
-         {:seon.sci.reader/text
-          (str "(ns exact.bindings "
-               "(:require [clojure.test :refer [deftest] "
-               ":rename {deftest dt}] "
-               "[clojure.set :refer :all]))\n"
-               "(dt renamed-test :ok)\n"
-               "(defn united [a b] (union a b))")
-          :seon.sci.reader/publics
-          {'clojure.set #{'union 'intersection 'difference}}})]
+         (let [source
+               (str "(ns exact.bindings "
+                    "(:require [clojure.test :refer [deftest] "
+                    ":rename {deftest dt}] "
+                    "[clojure.set :refer :all]))\n"
+                    "(dt renamed-test :ok)\n"
+                    "(defn united [a b] (union a b))")]
+           {:seon.sci.reader/text source
+            :seon.config.eval.result/max-source (count source)
+            :seon.sci.reader/publics
+            {'clojure.set #{'union 'intersection 'difference}}}))]
     (is (= "exact.bindings/renamed-test"
            (:seon.test/sym (second read-events))))
     (is (= #{{:seon.ns.refer/local 'dt

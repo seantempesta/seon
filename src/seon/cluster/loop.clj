@@ -1288,7 +1288,10 @@
             (let [namespace-name (sci.eval/agent-namespace @connection agent-id)
                   sources
                   (reply/sources (:seon.ai/text completion)
-                                 namespace-name)]
+                                 namespace-name
+                                 (get-in cluster
+                                         [:seon.sci.admit/caps
+                                          :seon.config.eval.result/max-source]))]
               (cond
                 ;; THE CLASS: an unreadable reply used to take `fail!`, whose
                 ;; absent ordinal can only close the run with `run/error`.

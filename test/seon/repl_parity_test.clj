@@ -793,7 +793,7 @@
     :seon.sci.reader/refers {}
     :seon.sci.reader/features #{:clj}
     :seon.sci.reader/tags {}
-    :seon.sci.reader/max-chars 1048576}))
+    :seon.config.eval.result/max-source 1048576}))
 
 (defparity "G1" :passing
   (let [results
