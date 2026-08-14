@@ -272,7 +272,15 @@ declarations; exposed the printed-EDN message-id smell, filed).
 `staleness-sweep` folded (2 archived, 5 updated). A `prd-archive` lane
 is verifying the four single-README PRD dirs for honest archival.
 
-**FULL RESTART AUTHORIZED (owner, 2026-08-14):** the moment R3 commits,
+**RESTART EXECUTED (2026-08-14 05:14 UTC):** boot fix landed
+(`a0282de37`), reset destroyed the 8.35 GiB store (fresh footprint
+0.26 GiB), republished (7,084 contract rows, 526 namespaces), reforked
+and booted `default` to READY (784 vars instrumented) on the new
+`data/store` layout; UI answering HTTP 200 at `http://127.0.0.1:7994`
+(first paint 7.1 s — the known render-cost class, filed). Next per the
+overnight spine: the live-pull probe verification (running), then
+DRIVE 1. **[superseded original block:] FULL RESTART AUTHORIZED
+(owner, 2026-08-14):** the moment R3 commits,
 the orchestrator runs `bin/seon reset --force` on the shared root
 (destroys the 8.35 GiB store, republishes, fresh JVM on today's code),
 verifies status + the web UI answering, then runs the queued probe
