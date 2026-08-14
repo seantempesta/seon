@@ -6,6 +6,200 @@ date: 2026-08-14
 
 # Drive 1 — live DeepSeek evolving session
 
+## Attempt 3 verdict
+
+**Stopped at generated-opening prefix drift after one healthy receipt.**
+Attempt 2's codec failure is gone: the stored receipt and its 20 read-evidence
+components read successfully. The next generated-opening derivation instead
+refused because the already-settled `(help)` source was outside the new pull.
+
+The same failure occurred for `bootstrap:root` and the actual Drive 1 agent.
+Per the live-drive spec, no paid task message, mid-session message, or rebirth
+was attempted after this terminal boundary.
+
+### Attempt 3 live endpoint and retained root
+
+**Web UI: [http://127.0.0.1:64767](http://127.0.0.1:64767)**
+
+- Fresh isolated operator root: `tmp/drive-1-root`
+- Cluster: `default`
+- Git HEAD: `eead437ed44c4754bd91deea9388953661058398`
+- Published `:current-src` commit:
+  `6a7eda81-fac7-5f08-a592-ec20ebe758db`
+- Publication inventory: 232 source inputs, 2,318 schemas, 823 functions,
+  7,170 contract rows, 535 namespaces
+- Agent: `drive-one-agent-attempt-3`
+- Namespace: `my.agents.drive-one-agent-attempt-3`
+- Generated run: `bootstrap:drive-one-agent-attempt-3`
+- Opening commit ID:
+  `6a7eda81-fac7-5f08-a592-ec20ebe758db`
+- Opening settlement basis: `t=536870972`
+- Fault basis: `t=536870971`
+- Preservation: the root was neither stopped nor reset after the attempt.
+  Its cluster, run, receipt, read evidence, error fact, blobs, and logs remain
+  live.
+
+The previous Attempt 2 root was already stopped, then removed before this
+fresh publication as directed. Its report remains in Git history.
+
+### Attempt 3 headline measurements
+
+| Measurement | Fact-derived result |
+|---|---:|
+| Creation through generated-opening observation | **13.838 s** |
+| Generated forms / durable receipts | **1 / 1** |
+| Healthy generated receipts | **1** |
+| Receipt read-evidence components | **20** |
+| Provider attempts | **0** |
+| Context captures | **0** |
+| Recorded `:seon.render.cost` rows | **0** |
+| Provider spend | **$0.00** |
+| Driver task messages | **0** |
+| Authored plan items | **0** |
+| Rebirths | **0** |
+
+Agent creation began at `2026-08-14T09:07:23Z`; the healthy receipt was
+recorded during that second; the generated run closed at `09:07:26Z`; the
+bounded observer returned at `09:07:36Z`. The full driver-observed interval
+was **13.838 seconds**.
+
+### Verbatim generated entry and value
+
+The only stored generated source was:
+
+```clojure
+; A new run just opened. Why am I awake — do I have messages?
+(help)
+```
+
+Its receipt has no `:seon.cluster.eval/error` and no `:seon.error/kind`.
+The admitted value was:
+
+```clojure
+{:seon.cluster.agent/id "drive-one-agent-attempt-3"
+ :seon.cluster.agent/namespace-ref
+ [:seon.ns/name my.agents.drive-one-agent-attempt-3]
+ :seon.cluster.agent/unread-message-count 0
+ :seon.cluster.run/turns-remaining 99
+ :seon.cluster.agent/protocol-namespaces
+ [my.message my.run seon.bootstrap seon.db]
+ :seon.cluster.agent/open-run-ref
+ [:seon.cluster.run/id "bootstrap:drive-one-agent-attempt-3"]
+ :seon.cluster.run/trigger
+ [:seon.cluster.message/id "bootstrap-task:drive-one-agent-attempt-3"]}
+```
+
+The receipt read at `t=536870970` and owns 20 readable read-evidence
+component rows. It has no recorded `:seon.eval/fn-entries` or
+`:seon.eval/allocated-bytes` fact.
+
+### Attempt 3 typed stop evidence
+
+The generated run closed with:
+
+```clojure
+{:seon.cluster.run/id "bootstrap:drive-one-agent-attempt-3"
+ :seon.cluster.run/opened-at #inst "2026-08-14T09:07:23.000-00:00"
+ :seon.cluster.run/closed-at #inst "2026-08-14T09:07:26.000-00:00"
+ :seon.cluster.run/error "A stored generated form is outside the pull."}
+```
+
+The total fault committer recorded error fact
+`901d4b0d-c5cf-4573-b1c2-1e87d993df9b`:
+
+```clojure
+{:seon.error/kind :seon.bootstrap/prefix-drift
+ :seon.error/message "A stored generated form is outside the pull."
+ :seon.error/basis-t 536870971
+ :seon.cluster.loop/phase-failed true
+ :seon.bootstrap/prefix-drift true
+ :seon.cluster.run/id "bootstrap:drive-one-agent-attempt-3"
+ :seon.cluster.run.form/source
+ "; A new run just opened. Why am I awake — do I have messages?\n(help)"}
+```
+
+`bootstrap:root` independently recorded one healthy form/receipt and then
+closed with the same message. Its run opened at `09:06:25Z` and closed at
+`09:06:32Z`. The Drive 1 agent reproduction makes the boundary independent
+of root's special identity.
+
+### Attempt 3 measurement families
+
+#### 1. Opening composition
+
+The full opening did not generate. One source/value entry settled, but the
+fresh database contains zero context captures and zero
+`:seon.render.cost` facts. Total opening tokens, explained-closure tokens,
+beyond-closure tokens, and per-entry shape/cost are **unavailable**, not zero.
+The codec now preserves the receipt; prefix validation refuses its successor
+pull.
+
+#### 2. Live pull
+
+Named conditions: fresh isolated root at the publication above, shipped
+`deepseek-v4-flash` with thinking disabled, one new agent, generated
+`(help)`, 30,000 ms eval limit, receipt read basis `t=536870970`.
+Creation-to-observer wall time was **13.838 s**. The pull terminated rather
+than wedging. It read 20 evidence components successfully, proving the Attempt
+2 codec boundary dead. No `:seon.eval/fn-entries` fact exists, so comparison
+with the attribution baseline remains unavailable.
+
+#### 3. Delta economics
+
+**Not reached.** No task or unrelated mid-session message was sent, so no
+delta or full-rerender comparison exists.
+
+#### 4. Rebirth in vivo
+
+**Not reached.** Rebirth after an incomplete generated opening would measure a
+different session. Lived/reborn tokens, determinism, and behavior survival are
+unavailable.
+
+#### 5. Agent behavior against context
+
+No model turn occurred. The system executed `(help)`; the agent had no
+opportunity to replay forms, use `doc`/`dir`, follow a demonstration,
+operate `my.plan`, or anchor a temporal form.
+
+#### 6. Provider cost
+
+There are zero `:seon.ai.attempt/run` facts and zero context captures.
+Provider spend is **$0.00**. Neither DeepSeek nor failover was called.
+
+#### 7. Basis-`t` comprehension
+
+**Not reached.** The receipt records `t=536870970`, but no model prompt was
+captured and no agent interpreted a rendered basis tag.
+
+#### 8. Planner text without structured `:about`
+
+**Not reached.** There are zero authored `my.plan.item` entities. Frequency
+has denominator zero and is unavailable rather than 0%.
+
+### Attempt 3 probe hygiene
+
+One pre-agent root-health query used the wrong nested scalar binding and
+returned a typed `:seon.db/invalid-read` without transacting. Three simple
+scalar queries then measured the root run correctly. This diagnostic occurred
+after root had already closed and cannot account for either generated-opening
+failure.
+
+### Attempt 3 stop boundary
+
+```text
+fresh init and start
+→ root: healthy (help) receipt, then prefix drift
+→ Drive 1 agent creation
+→ generated opening form 0: healthy (help) receipt
+→ next pull excludes the stored generated source
+→ durable :seon.bootstrap/prefix-drift error fact
+→ generated run closes with error
+→ STOP before any paid message
+```
+
+Continuing would have bypassed the generated-opening prefix contract and
+invalidated the requested evolve→rebirth→continue drive.
+
 ## Attempt 2 verdict
 
 **Stopped while the generated opening advanced beyond its first healthy
