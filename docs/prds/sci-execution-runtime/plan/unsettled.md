@@ -286,6 +286,24 @@ the orchestrator runs `bin/seon reset --force` on the shared root
 verifies status + the web UI answering, then runs the queued probe
 verification below. Do not wait for a further go-ahead.
 
+**MORNING HANDOFF (2026-08-14 ~11:30 UTC) — the owner's wake-up
+package.** Five drive attempts, total spend ~$0.005, each converting
+the next latent defect into a landed fix. Attempt 5 validated the
+fidelity wave live (prompt accounting honest to 3 tokens; zero stale
+content; 36-39 cost facts per prompt) and reached the first
+BEHAVIORAL boundary: DeepSeek restated its obligations in prose and
+stopped without emitting a form. Observer verdict (verbatim evidence
+in the observation doc): a MEDIUM-EXECUTION LAPSE UNDER WEAK RECENCY —
+the replies-are-forms teaching sits at char 970, the task at 34,253.
+**THE MORNING DECISION (owner design gate, scheduled as a blocker):**
+[no-forms-replies-close-without-correction-or-rewake](../../seon/issues/no-forms-replies-close-without-correction-or-rewake.md)
+— correction turn vs obligation-driven re-wake, plus the cheap recency
+option (render the medium demonstration near the prompt tail). Also
+measured live: 10.9 GiB retained per drive session (evidence added to
+the store-bloat blocker). Specimen live at web :55156. DEFERRED SPINE
+unchanged behind the drive: graduation rerun, R2 W3-W5 + renames +
+ONE closing --all, Drive 2, dogfood lane revival, the probe rerun.
+
 **THE PAID TURN FIRED (attempt 4, ~10:30 UTC):** full opening 12/12
 healthy derived forms (208.9 s — the one-pull case now has live
 evidence); real DeepSeek turn: 22,604 prompt tokens (49% cache), 310
