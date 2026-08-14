@@ -3,13 +3,12 @@
  :my.message/from :seon.cluster.agent/id,
  :my.message/at :inst,
  :my.message/id :seon.cluster.message/id,
- :my.message/preview [:string {:max 160}],
  :my.message/inbox-entry
              [:map
               [:my.message/id :my.message/id]
               [:my.message/from {:optional true} :my.message/from]
               [:my.message/at :my.message/at]
-              [:my.message/preview :my.message/preview]],
+              [:my.message/content :my.message/content]],
  :my.message/inbox [:vector :my.message/inbox-entry],
  :my.message/inbox-options
              [:map

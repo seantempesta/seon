@@ -296,26 +296,14 @@
 ;;; The one operation
 ;;; ---------------------------------------------------------------------------
 
-(defn- bounded-output
-  "What the form printed, capped by the projection's own string cap.
-  One cap, not a second dial: output and projected strings are the same
-  kind of agent-visible text and are bounded the same way."
-  [writer caps]
-  (let [text (str writer)
-        limit (:seon.config.eval.result/max-string caps)]
-    (if (<= (count text) limit)
-      text
-      (subs text 0 limit))))
-
 (defn- evaluation-output
-  [prefix printed caps]
+  "Return the complete printed value for storage and later rendering."
+  [prefix printed]
   (let [printed (str printed)]
     (when (or (seq prefix) (seq printed))
-      (bounded-output
-       (str prefix
-            (when (and (seq prefix) (seq printed)) "\n")
-            printed)
-       caps))))
+      (str prefix
+           (when (and (seq prefix) (seq printed)) "\n")
+           printed))))
 
 (declare deleted-schema-key)
 
@@ -484,10 +472,11 @@
      ::requires requires}))
 
 (defn- one-event
-  [source namespace-name ctx]
+  [source namespace-name ctx max-source]
   (let [events (reader/read
                 (assoc (reader-context ctx namespace-name)
-                       :seon.sci.reader/text source))]
+                       :seon.sci.reader/text source
+                       :seon.config.eval.result/max-source max-source))]
     (cond
       (map? events)
       (throw (ex-info (:seon.error/message events) events))
@@ -794,7 +783,8 @@
       (let [namespace-name (second (:seon.test/ns row))
             event (when-not (::evaluated? row)
                     (one-event (:seon.test/source committed)
-                               namespace-name ctx))]
+                               namespace-name ctx
+                               (count (:seon.test/source committed))))]
         (when event
           (sci/binding [sci/ns (sci/create-ns namespace-name)]
             (sci/eval-form ctx (:seon.sci.reader/form event))))
@@ -816,7 +806,8 @@
         (when (and (not schema-deletion?)
                    (nil? (::namespace-state row)))
           (let [event (one-event (:seon.program/source row)
-                                 namespace-name ctx)]
+                                 namespace-name ctx
+                                 (count (:seon.program/source row)))]
             (sci/binding [sci/ns (sci/create-ns namespace-name)]
               (sci/eval-form ctx (:seon.sci.reader/form event)))))
         {:seon.schema/projection
@@ -1830,7 +1821,7 @@
     (seq definitions) (assoc :seon.sci.eval/defs definitions)
     (or (seq output-prefix) (seq (str printed)))
     (assoc :seon.cluster.eval/output
-           (evaluation-output output-prefix printed caps))))
+           (evaluation-output output-prefix printed))))
 
 (defn- failed-evaluation
   [{admitted :seon.sci.eval/admitted
@@ -1861,7 +1852,7 @@
     (assoc :seon.cluster.eval/interrupted-at interrupted-at)
     (or (seq output-prefix) (seq (str printed)))
     (assoc :seon.cluster.eval/output
-           (evaluation-output output-prefix printed caps))))
+           (evaluation-output output-prefix printed))))
 
 (defn- arity-exception
   [throwable]
@@ -2054,7 +2045,9 @@
         (let [_ (vreset! arm-state (kernel/arm evaluation-ctx time-limit-ms))
             before-reader-context
             (reader-context evaluation-ctx namespace-name)
-            event (one-event source namespace-name evaluation-ctx)
+            event (one-event
+                   source namespace-name evaluation-ctx
+                   (:seon.config.eval.result/max-source caps))
             form (:seon.sci.reader/form event)
             namespace-unmap? (:seon.sci.reader/ns-unmap? event)
             execution-ctx (if namespace-unmap?

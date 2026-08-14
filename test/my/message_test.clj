@@ -41,15 +41,14 @@
 (deftest ^{:seon.test/usage true} inbox-lists-this-agents-messages-newest-last
   (with-messages
     (fn [connection before]
-      (let [long-preview (str (apply str (repeat 159 "x")) "…")]
-        (is (= [{:my.message/id "m-1"
-                 :my.message/from "alice"
-                 :my.message/at #inst "2026-08-12T10:00:00.000-00:00"
-                 :my.message/preview "First message"}
-                {:my.message/id "m-2"
-                 :my.message/at #inst "2026-08-12T11:00:00.000-00:00"
-                 :my.message/preview long-preview}]
-               (message/inbox @connection "bob"))))
+      (is (= [{:my.message/id "m-1"
+               :my.message/from "alice"
+               :my.message/at #inst "2026-08-12T10:00:00.000-00:00"
+               :my.message/content "First message"}
+              {:my.message/id "m-2"
+               :my.message/at #inst "2026-08-12T11:00:00.000-00:00"
+               :my.message/content (apply str (repeat 200 "x"))}]
+             (message/inbox @connection "bob")))
       (is (= ["m-1" "m-2"]
              (mapv :my.message/id
                    (message/inbox {:seon.db/since before}

@@ -304,10 +304,11 @@
             (flow/start-work-launcher!
              {:seon.env/environment @test-environment
               ::flow/configuration
-              {:seon.config.flow.compute/queue-depth 1
-               :seon.config.flow.compute/concurrency 1
-               :seon.config.flow.io/queue-depth 1
-               :seon.config.flow.io/concurrency 1}})
+               {:seon.config.flow.compute/queue-depth 1
+                :seon.config.flow.compute/concurrency 1
+                :seon.config.flow.io/queue-depth 1
+                :seon.config.flow.io/concurrency 1
+                :seon.config.agent/turn-completion-backstop-ms 60000}})
             effect-id (pr-str ["effect-run" 3 0])
             gate (promise)
             arm (kernel/arm @probe-ctx 150)
@@ -396,7 +397,8 @@
                 {:seon.config.flow.compute/queue-depth 1
                  :seon.config.flow.compute/concurrency 1
                  :seon.config.flow.io/queue-depth 1
-                 :seon.config.flow.io/concurrency 1}})
+                 :seon.config.flow.io/concurrency 1
+                 :seon.config.agent/turn-completion-backstop-ms 60000}})
               effect-id (pr-str ["effect-run" 3 0])
               gate (promise)]
           (reset! handler-gate gate)

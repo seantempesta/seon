@@ -156,22 +156,6 @@
    (long (Math/floor (* token-budget
                         (:seon.ai.tokens/chars-per-token calibration))))))
 
-(defn clip-str
-  "Clip `text` to a token budget and mark a cut with `…`."
-  {:malli/schema
-   [:function
-    [:=> [:cat [:or :nil :string] [:int {:min 0}]] :string]
-    [:=> [:cat [:or :nil :string] [:int {:min 0}]
-          :seon.ai.tokens/calibration]
-     :string]]}
-  ([text token-budget] (clip-str text token-budget shipped-calibration))
-  ([text token-budget calibration]
-   (let [text (str text)
-         character-limit (estimate-chars token-budget calibration)]
-     (if (> (count text) character-limit)
-       (str (subs text 0 character-limit) "…")
-       text))))
-
 (defn budget-report
   "Judge `text` against a token `budget` under one calibration.
 

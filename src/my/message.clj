@@ -19,8 +19,6 @@
 ;;; Reads
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private preview-limit 160)
-
 (def ^:private message-selector
   '[:seon.cluster.message/id
     :seon.cluster.message/content
@@ -63,17 +61,11 @@
       (:seon.cluster.message/about message)
       (update :seon.cluster.message/about :db/id))))
 
-(defn- preview
-  [content]
-  (if (<= (count content) preview-limit)
-    content
-    (str (subs content 0 (dec preview-limit)) "…")))
-
 (defn- listing-entry
   [message]
   (cond-> {:my.message/id (:seon.cluster.message/id message)
            :my.message/at (:seon.cluster.message/at message)
-           :my.message/preview (preview (:seon.cluster.message/content message))}
+           :my.message/content (:seon.cluster.message/content message)}
     (endpoint-id message :seon.cluster.message/from)
     (assoc :my.message/from
            (endpoint-id message :seon.cluster.message/from))))

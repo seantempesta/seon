@@ -15,7 +15,6 @@
             [seon.db :as db]
             [seon.env :as env]
             [seon.flow :as flow]
-            [seon.print :as print]
             [seon.sci.admit :as admit]
             [seon.sci.kernel :as kernel]
             [seon.schema :as schema]
@@ -44,16 +43,9 @@
     (contains? unit :seon.effect/result-edn) :returned
     :else :pending))
 
-(defn- payload-preview
-  [payload]
-  (let [width (:seon.print/width (print/default-options))
-        preview-tokens (max 1 (tokens/estimate-of-characters width))]
-    (tokens/clip-str payload preview-tokens)))
-
 (defn- payload-face
   [label payload]
-  (str label " (~" (tokens/estimate payload) " tokens): "
-       (payload-preview payload)))
+  (str label " (~" (tokens/estimate payload) " tokens): " payload))
 
 (defn- receipt-identities
   [unit]
@@ -123,12 +115,12 @@
           [[:details {:class "seon-effect-request"}
             [:summary (str "Request · approximately "
                            (tokens/estimate request) " tokens")]
-            [:code (payload-preview request)]]])
+            [:code request]]])
         (when result
           [[:details {:class "seon-effect-result"}
             [:summary (str "Result · approximately "
                            (tokens/estimate result) " tokens")]
-            [:code (payload-preview result)]]])
+            [:code result]]])
         (when-let [digest (:seon.effect/result-blob unit)]
           [[:p {:class "seon-effect-blob"}
             "Blob digest " [:code digest]]]))))))

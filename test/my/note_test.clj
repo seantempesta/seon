@@ -69,7 +69,7 @@
         (is (seon.schema/valid-candidate-value?
              :seon.error/value missing))))))
 
-(deftest notes-is-agent-scoped-current-and-bounded
+(deftest notes-is-agent-scoped-current-and-whole
   (with-notes
     (fn [connection]
       (doseq [index (range 55)]
@@ -78,13 +78,13 @@
                    connection "alice"))
       (note/add! "bob-only" "Bob's note." connection "bob")
       (let [current (note/notes @connection "alice")]
-        (is (= 50 (count current)))
+        (is (= 55 (count current)))
         (is (= "note-00" (:my.note/id (first current))))
-        (is (= "note-49" (:my.note/id (last current))))
+        (is (= "note-54" (:my.note/id (last current))))
         (is (not-any? #(= "bob-only" (:my.note/id %)) current))
         (is (seon.schema/valid-candidate-value? :my.note/notes current))))))
 
-(deftest rebirth-renders-only-the-bounded-current-facts
+(deftest rebirth-renders-only-the-current-facts
   (with-notes
     (fn [connection]
       (note/add! "kept" "Old content." connection "alice")

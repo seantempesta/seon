@@ -27,10 +27,6 @@
 
 (deftest token-budget-derivations-share-one-character-ratio
   (is (= 9 (tokens/estimate-chars 3)))
-  (is (= "abcdefghi…"
-         (tokens/clip-str "abcdefghijklmnop" 3)))
-  (is (= "short" (tokens/clip-str "short" 3)))
-  (is (= "" (tokens/clip-str nil 0)))
   (testing "a character count sizes through the same owner as a string"
     (is (= (tokens/estimate (text-of 4096))
            (tokens/estimate-of-characters 4096)))))

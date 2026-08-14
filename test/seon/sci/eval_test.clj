@@ -797,7 +797,7 @@
             :seon.sci.admit/record record
             :seon.program/row row
             :seon.sci.eval/defs defs
-            :seon.cluster.eval/output "res"}
+            :seon.cluster.eval/output "restored\nabcdef"}
            evaluation))))
 
 (deftest failed-evaluation-assembles-failure-presence-facts
@@ -833,7 +833,7 @@
             :seon.sci.admit/record record
             :seon.sci.eval/defs defs
             :seon.cluster.eval/interrupted-at interrupted-at
-            :seon.cluster.eval/output "lost\nb"}
+            :seon.cluster.eval/output "lost\nbefore failure"}
            evaluation))))
 
 (deftest evaluation-projection-prefers-the-live-context
@@ -853,7 +853,7 @@
            (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
                 "discarded [x] x)"))
         source "(ns-unmap 'user 'discarded)"
-        event (#'eval/one-event source 'user ctx)
+        event (#'eval/one-event source 'user ctx (count source))
         execution-ctx (sci/fork ctx)
         before-interns (sci/namespace-interns execution-ctx)
         before-namespace-state (sci/namespace-state execution-ctx)
@@ -889,7 +889,7 @@
 (deftest declared-row-evaluates-a-schema-once-inside-its-delta
   (let [ctx (eval/build-base-ctx)
         source "(seon.schema/register! :user/direct-schema [:int {:min 0}])"
-        event (#'eval/one-event source 'user ctx)
+        event (#'eval/one-event source 'user ctx (count source))
         projection
         (#'eval/evaluation-projection {:seon.sci.eval/ctx ctx})
         calls (atom 0)

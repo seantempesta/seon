@@ -19,8 +19,6 @@
 ;;; Current values and rendering
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private notes-limit 50)
-
 (def ^:private note-selector
   '[:my.note/id
     :my.note/content
@@ -263,6 +261,5 @@
       rows
       (->> rows
            (sort-by first)
-           (take notes-limit)
            (mapv (fn [[_ note]]
                    (note-row (db/pull database note-selector note))))))))

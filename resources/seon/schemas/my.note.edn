@@ -14,8 +14,7 @@
            [:my.note/about {:optional true} :my.note/about]],
           :notes
           [:vector
-           {:max 50,
-            :seon.render/ai my.note/render-notes-ai,
+           {:seon.render/ai my.note/render-notes-ai,
             :seon.render/html my.note/render-notes-html,
             :seon.render/form my.note/render-notes-form}
            :my.note/note],

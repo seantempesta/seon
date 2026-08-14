@@ -7,8 +7,7 @@
   until bootstrap forms replace the status section in slice 2.
 
   Crash walk: pure renders over a database value. A kill loses a prompt
-  that re-derives."
-  (:require [clojure.string :as str]))
+  that re-derives.")
 
 ;;; ---------------------------------------------------------------------------
 ;;; The renders
@@ -40,4 +39,4 @@
   [unit]
   (when-let [text (agent-ai unit)]
     [:article {:class "seon-family-entry seon-agent-entry"}
-     [:p (first (str/split-lines text))]]))
+     [:p text]]))
