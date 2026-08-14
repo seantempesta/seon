@@ -43,8 +43,7 @@
            [:my.plan/diff :my.plan/diff]
            [:my.plan/ids :my.plan/ids]],
           :agent-state
-          [:map
-           {:seon.db/entity true}
+          [:map {:seon.db/attributes true}
            [:seon.cluster.agent/id :seon.cluster.agent/id]
            [:my.plan/anchor {:optional true} :my.plan/anchor]],
           :obligation-source [:enum :message :run :test],

@@ -2,8 +2,7 @@
                 :expression [:string {:min 1}],
                 :zone-id [:string {:min 1}],
                 :schedule
-                [:map
-                 {:seon.db/entity true}
+                [:map {:seon.db/attributes true}
                  [:seon.schedule/id :seon.schedule/id]
                  [:seon.schedule/expression :seon.schedule/expression]
                  [:seon.schedule/zone-id :seon.schedule/zone-id]],

@@ -6,7 +6,7 @@
             [:seon.def/agent :seon.def/agent]],
            :def
            [:map
-            #:seon.db{:entity true}
+            #:seon.db{:attributes true}
             [:seon.def/key :seon.def/key]
             [:seon.def/id :seon.def/id]
             [:seon.def/agent :seon.def/agent]

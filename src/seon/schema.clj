@@ -1274,15 +1274,14 @@
 
    Returns the registered keyword `k`.
 
-   Entity-map render metadata stays in the authored form. The activated
-   projection derives its id attribute and renderer catalog without persisting
-   a second decomposition. Maps without `{:seon.db/entity true}` are ordinary
-   request/response or view schemas and do not enter that catalog.
+   Map render metadata stays in the authored form. Database storability and
+   stable identity derive from installed attribute declarations; no map-level
+   entity-kind marker is required.
 
    Example:
      (register! ::api-key [:string {:min 1}])
      (register! ::timeout [:int {:min 1000 :max 600000}])
-     (register! :seon.eval [:map {:seon.db/entity true
+     (register! :seon.eval [:map {:seon.db/attributes true
                                   :seon.render/ai 'foo}
                             [:seon.eval/id ...] ...])"
   {:malli/schema [:=> [:catn [::registry-key ::registry-key]
@@ -1379,9 +1378,7 @@
          (fn [schema-key]
            (let [definition (get forms schema-key)
                  properties
-                 (some->> definition
-                          (internal/with-entity-id-attr forms)
-                          form/attr-form-properties)]
+                 (some->> definition form/attr-form-properties)]
              (keep (fn [property]
                      (let [renderer (get properties property)]
                        (when (qualified-symbol? renderer)
@@ -1576,24 +1573,21 @@
 
 (defn- shape-row-in
   [forms schema-key definition]
-  (let [form (internal/with-entity-id-attr forms definition)
-        props (or (form/attr-form-properties form) {})
-        required-attrs (some-> (internal/map-required-attrs forms form) set)
-        id-attr (:seon.entity/id-attr props)]
+  (let [props (or (form/attr-form-properties definition) {})
+        required-attrs
+        (some-> (internal/map-required-attrs forms definition) set)]
     (when (seq required-attrs)
-      (cond->
-       (merge
+      (merge
         {:seon.schema/key schema-key
          :seon.schema/required-attrs required-attrs
-         :seon.schema/entity? (boolean (:seon.db/entity props))}
+         :seon.schema/entity? (boolean (:seon.db/attributes props))}
         (into {}
               (filter
                (fn [[property declaration]]
                  (and (qualified-keyword? property)
                       (= "seon.render" (namespace property))
                       (qualified-symbol? declaration))))
-              props))
-        id-attr (assoc :seon.entity/id-attr id-attr)))))
+              props)))))
 
 (defn build-projection
   "Build and validate one immutable runtime projection.
@@ -1802,22 +1796,7 @@
         catalog  (->> shape-rows
                       (sort-by (comp str key))
                       (map second)
-                      (keep
-                        (fn [{:seon.schema/keys [key required-attrs]
-                              :seon.entity/keys [id-attr]
-                              :seon.render/keys [ai html]
-                              :as row}]
-                          (when (and (:seon.schema/entity? row) id-attr)
-                            (cond->
-                              {:seon.schema.catalog/key key
-                               :seon.schema.catalog/id-attr id-attr
-                               :seon.schema.catalog/required-attrs
-                               required-attrs}
-                              ai
-                              (assoc :seon.schema.catalog/render-ai ai)
-
-                              html
-                              (assoc :seon.schema.catalog/render-html html)))))
+                      (filter :seon.schema/entity?)
                       vec)
         fingerprint
         (projection-fingerprint
@@ -1922,18 +1901,7 @@
         (->> shape-rows
              (sort-by (comp str key))
              (map second)
-             (keep
-              (fn [{:seon.schema/keys [key required-attrs]
-                    :seon.entity/keys [id-attr]
-                    :seon.render/keys [ai html]
-                    :as row}]
-                (when (and (:seon.schema/entity? row) id-attr)
-                  (cond->
-                   {:seon.schema.catalog/key key
-                    :seon.schema.catalog/id-attr id-attr
-                    :seon.schema.catalog/required-attrs required-attrs}
-                    ai (assoc :seon.schema.catalog/render-ai ai)
-                    html (assoc :seon.schema.catalog/render-html html)))))
+             (filter :seon.schema/entity?)
              vec)]
     {:seon.schema.projection/required-by-key required-by-key
      :seon.schema.projection/shape-index shape-index
@@ -2700,7 +2668,7 @@
       (when *packaged-forms* (declaration-projection *packaged-forms*))))
 
 (defn entity-catalog
-  "Derived renderable entity catalog for packaged schema facts."
+  "Derived database-storable shape catalog for packaged schema facts."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
   (:seon.schema.projection/catalog (build-projection (candidate-forms))))

@@ -5,8 +5,7 @@
                      [:and #:seon.db{:index true} :inst],
                      :observed-at :inst,
                      :fire
-                     [:map
-                      {:seon.db/entity true}
+                     [:map {:seon.db/attributes true}
                       [:seon.schedule.fire/id :seon.schedule.fire/id]
                       [:seon.schedule.fire/task :seon.schedule.fire/task]
                       [:seon.schedule.fire/nominal-at

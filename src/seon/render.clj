@@ -18,6 +18,7 @@
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
+            [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
             [seon.schema.form :as schema.form]
             [seon.sci.admit :as admit]
@@ -212,14 +213,18 @@
           (schema/matching-shapes-in projection (render.value/transacted value))
           ;; A pull has two honest shapes. Refs and cardinality-many values
           ;; validate in transaction form, while tuple/vector value attributes
-          ;; validate exactly as pulled. `:seon.schema/entity?` is the declared
-          ;; discriminator: an entity must never accidentally acquire a
-          ;; one-key value renderer merely because maps are open.
+          ;; validate exactly as pulled. A pulled entity admits only shapes
+          ;; whose required attributes are database-storable; open request
+          ;; envelopes must not acquire a one-key value renderer.
           pulled-matches (schema/matching-shapes-in projection value)
           matches
           (->> (concat transacted-matches pulled-matches)
-               (filter #(or (not (:db/id value))
-                            (:seon.schema/entity? %)))
+               (filter
+                #(or (not (:db/id value))
+                     (every?
+                      (partial schema.datahike/storable-attribute-in?
+                               projection)
+                      (:seon.schema/required-attrs %))))
                (reduce (fn [by-key row]
                          (assoc by-key (:seon.schema/key row) row))
                        (sorted-map))
@@ -502,14 +507,10 @@
        :seon.error/data {:seon.render/output rendered}})))
 
 (defn- entity-lookup
-  [projection entity]
+  [database entity]
   (let [identity-attribute
-        (->> (:seon.schema.projection/shape-rows projection)
-             vals
-             (keep :seon.entity/id-attr)
-             distinct
+        (->> (db/identity-attributes database)
              (filter #(contains? entity %))
-             (sort-by str)
              first)]
     (if identity-attribute
       [identity-attribute (get entity identity-attribute)]
@@ -528,8 +529,7 @@
     (list 'db/pull
           'db
           (list 'quote '[*])
-          (entity-lookup (sci.kernel/context-projection
-                          (:seon.sci.eval/ctx unit))
+          (entity-lookup (:seon.db/db unit)
                          (:seon.render/value unit)))))
 
 (defn render-form-value

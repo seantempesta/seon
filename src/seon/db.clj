@@ -23,8 +23,7 @@
             [seon.error.refusal :as error.refusal]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
-            [seon.schema.form :as schema.form]
-            [seon.schema.internal :as schema.internal])
+            [seon.schema.form :as schema.form])
   (:import [datahike.db AsOfDB]
            [datalog.parser.type BindScalar Constant FindColl FindRel FindScalar
             FindTuple Pattern Variable]))
@@ -471,6 +470,29 @@
           candidate
           (recur origin)))
       candidate)))
+
+(defn identity-attributes
+  "Installed `:db.unique/identity` attributes for one database value."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value] [:vector :qualified-keyword]]}
+  [database]
+  (->> (:schema (schema-database database))
+       (keep (fn [[attribute properties]]
+               (when (and (qualified-keyword? attribute)
+                          (= :db.unique/identity (:db/unique properties)))
+                 attribute)))
+       (sort-by str)
+       vec))
+
+(defn populated-identity-attributes
+  "Installed identity attributes that occur in actual datoms."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value] [:vector :qualified-keyword]]}
+  [database]
+  (into []
+        (filter (fn [attribute]
+                  (seq (d/datoms database :avet attribute))))
+        (identity-attributes database)))
 
 (defn- read-declarations
   [database]
@@ -1556,17 +1578,12 @@
            first))))
 
 (defn- result-identity-attribute
-  [projection output-refs]
+  [database projection output-refs]
   (let [forms (:seon.schema.projection/forms projection)
-        identity-attributes
-        (into #{}
-              (keep (fn [[_ definition]]
-                      (schema.internal/derive-entity-id-attr
-                       forms definition)))
-              forms)]
+        identities (set (identity-attributes database))]
     (->> output-refs
          (mapcat #(collection-entry-schemas forms %))
-         (keep #(row-identity-attribute forms % identity-attributes))
+         (keep #(row-identity-attribute forms % identities))
          distinct
          (sort-by str)
          first)))
@@ -1656,7 +1673,7 @@
                             (:seon.fn.arity/order plan))
         identity-attribute
         (when-not (error-value? output-refs)
-          (result-identity-attribute projection output-refs))]
+          (result-identity-attribute database projection output-refs))]
     (cond
       (error-value? output-refs) output-refs
 
@@ -1664,7 +1681,7 @@
       (diff-refusal
        "The declared result collection has no derivable row identity."
        :seon.fn.arity/output-refs
-       :seon.entity/id-attr output-refs
+       :db.unique/identity output-refs
        ::row-identity-absent
        {:seon.fn/sym function-symbol
         :seon.fn.arity/order (:seon.fn.arity/order plan)

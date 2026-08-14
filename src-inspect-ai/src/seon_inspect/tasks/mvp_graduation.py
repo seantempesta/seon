@@ -238,7 +238,7 @@ def _seed_form(*, cluster_name: str, agent_id: str, peer_agent_id: str,
         (fixture_owner, f"my.fixtures.{nonce}",
          _schema_source(
              attributes["entity"],
-             "[:map {:seon.db/entity true} "
+             "[:map {:seon.db/attributes true} "
              f"[{attributes['id']} {attributes['id']}] "
              f"[{attributes['amount_cents']} {attributes['amount_cents']}] "
              f"[{attributes['vendor']} {attributes['vendor']}] "

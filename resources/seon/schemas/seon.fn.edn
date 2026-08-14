@@ -13,7 +13,7 @@
            :qualified-keyword],
           :fn
           [:map
-           {:seon.db/entity true,
+           {:seon.db/attributes true,
             :seon.render/form seon.render.ns/function-form}
            [:seon.fn/sym :seon.fn/sym]
            [:seon.test/subject {:optional true} :seon.test/subject]

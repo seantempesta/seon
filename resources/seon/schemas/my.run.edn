@@ -17,7 +17,7 @@
           [:seon.ns/doc {:optional true} :seon.ns/doc]],
          :usage-unit
          [:map
-          {:seon.db/entity true,
+          {:seon.db/attributes true,
            :seon.render/form my.run/usage-form}
           [:seon.test/sym :seon.test/sym]
           [:seon.test/usage [:= true]]],

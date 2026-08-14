@@ -22,8 +22,7 @@
                   :lookup-refs
                   [:vector {:seon.db/component true} :seon.db/ref],
                   :closure
-                  [:map
-                   {:seon.db/entity true}
+                  [:map {:seon.db/attributes true}
                    [:seon.activation/source-digest
                     :seon.activation/source-digest]
                    [:seon.activation/schema-keys

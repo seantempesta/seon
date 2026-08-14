@@ -11,7 +11,7 @@
                     [:vector {:seon.db/component true} :seon.db/ref],
                     :row
                     [:map
-                     #:seon.db{:entity true}
+                     #:seon.db{:attributes true}
                      [:seon.schema.shape/fingerprint
                       :seon.schema.shape/fingerprint]
                      [:seon.schema.shape/normalization-revision

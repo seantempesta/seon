@@ -112,26 +112,25 @@
               :seon.eval.drive/terminal-state
               (assoc terminal :seon.eval.drive/outcome :unknown))))))
 
-(deftest catalog-render-declarations-resolve
+(deftest database-shape-render-declarations-resolve
   (let [catalog (schema/entity-catalog)
         program-keys #{:seon.fn/fn :seon.ns/ns :seon.schema/schema}]
     (testing "the namespace family declares both render projections"
-      (doseq [row (filter (comp #{:seon.ns/ns} :seon.schema.catalog/key)
+      (doseq [row (filter (comp #{:seon.ns/ns} :seon.schema/key)
                           catalog)]
-        (is (contains? row :seon.schema.catalog/render-ai))
-        (is (contains? row :seon.schema.catalog/render-html))))
+        (is (contains? row :seon.render/ai))
+        (is (contains? row :seon.render/html))))
     (testing "families with no built specialist stay bare"
       (doseq [row (filter (comp (disj program-keys :seon.ns/ns)
-                                :seon.schema.catalog/key)
+                                :seon.schema/key)
                           catalog)]
-        (is (not (contains? row :seon.schema.catalog/render-ai)))
-        (is (not (contains? row :seon.schema.catalog/render-html)))))
+        (is (not (contains? row :seon.render/ai)))
+        (is (not (contains? row :seon.render/html)))))
     (testing "every projection the catalog still advertises is loadable"
       (doseq [row catalog
-              projection-key [:seon.schema.catalog/render-ai
-                              :seon.schema.catalog/render-html]
+              projection-key [:seon.render/ai :seon.render/html]
               :let [projection (get row projection-key)]
               :when projection]
         (is (var? (requiring-resolve projection))
-            (str (:seon.schema.catalog/key row)
+            (str (:seon.schema/key row)
                  " advertises missing " projection-key " " projection))))))

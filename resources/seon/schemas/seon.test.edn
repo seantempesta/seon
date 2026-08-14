@@ -47,7 +47,7 @@
             :results [:vector :seon.test/result],
             :test
             [:map
-             #:seon.db{:entity true}
+             #:seon.db{:attributes true}
              [:seon.test/sym :seon.test/sym]
              [:seon.schema.admission/source
               :seon.schema.admission/source]

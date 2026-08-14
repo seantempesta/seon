@@ -93,7 +93,7 @@
              (into [:map] agent-overlay-entries)
              :seon.config/entity
              (into
-              [:map {:seon.db/entity true
+              [:map {:seon.db/attributes true
                      :seon.render/ai 'seon.config/render-ai
                      :seon.render/html 'seon.config/render-html}
                [:seon.config/cluster :seon.config/cluster]

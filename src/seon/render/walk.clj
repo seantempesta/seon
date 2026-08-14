@@ -145,24 +145,6 @@
                             ref-attributes)))))]
       (selector-at (long distance)))))
 
-(defn- installed-identity-attributes
-  [database]
-  (let [installed (installed-attributes database)
-        declared (->> (vals (:seon.schema.projection/shape-rows
-                             (schema/current-projection)))
-                      (keep :seon.entity/id-attr)
-                      distinct (filter #(contains? installed %))
-                      (sort-by str) vec)
-        declared-set (set declared)
-        database-identities
-        (->> installed
-             (keep (fn [[attribute properties]]
-                     (when (= :db.unique/identity (:db/unique properties))
-                       attribute)))
-             (remove declared-set)
-             (sort-by str))]
-    (into declared database-identities)))
-
 (defn- stable-lookup
   [id-attributes entity]
   (or (some (fn [attribute]
@@ -180,7 +162,7 @@
   (let [pulled (db/pull database '[*] entity)]
     (if (:seon.error/kind pulled)
       pulled
-      (stable-lookup (installed-identity-attributes database) pulled))))
+      (stable-lookup (db/populated-identity-attributes database) pulled))))
 
 (defn- pulled-values
   [value]
@@ -219,7 +201,7 @@
                                       (not= :my.plan.item/about attribute))
                              attribute)))
                    installed)
-        identities (installed-identity-attributes database)
+        identities (db/populated-identity-attributes database)
         width (long (:seon.config.eval.result/max-collection caps))]
     (letfn [(connection-values [entity attribute reverse?]
               (let [display (if reverse?

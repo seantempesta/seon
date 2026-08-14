@@ -263,7 +263,7 @@
          :seon.schema/form
          (pr-str
           [:map
-           (merge {:seon.db/entity true} renderers)
+           (merge {:seon.db/attributes true} renderers)
            [attribute attribute]])})
        (db/transact! connection [{attribute "plan-1"}])
        (let [raw-row

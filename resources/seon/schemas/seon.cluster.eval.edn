@@ -10,8 +10,7 @@
                     [:vector {:seon.db/component true} :seon.db/ref],
                     :read-basis-transaction :seon.db/basis-t,
                     :read-evidence-entity
-                    [:map
-                     {:seon.db/entity true}
+                    [:map {:seon.db/attributes true}
                      [:seon.db/source-argument-position
                       :seon.db/source-argument-position]
                      [:datahike.read/dependency-plan
@@ -27,8 +26,8 @@
                     :triage-edn [:string {:min 1}],
                     :receipt
                     [:map
-                     {:seon.db/entity true,
-                      :seon.render/ai
+                    {:seon.db/attributes true,
+                     :seon.render/ai
                       seon.cluster.run/render-receipt-ai,
                       :seon.render/html
                       seon.cluster.run/render-receipt-html}

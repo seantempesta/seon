@@ -9,7 +9,7 @@
                :expected-result [:string {:min 1}],
                :item
                [:map
-                {:seon.db/entity true,
+                {:seon.db/attributes true,
                  :seon.render/ai my.plan/render-item-ai,
                  :seon.render/html my.plan/render-item-html}
                 [:my.plan.item/id :my.plan.item/id]

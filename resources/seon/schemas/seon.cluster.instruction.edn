@@ -1,7 +1,7 @@
 #:seon.cluster.instruction{:id [:keyword #:seon.db{:identity true}],
                            :instruction
                            [:map
-                            {:seon.db/entity true,
+                            {:seon.db/attributes true,
                              :seon.render/ai
                              seon.cluster.instruction/instruction-ai,
                              :seon.render/html

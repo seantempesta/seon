@@ -34,7 +34,7 @@
 
  :row
  [:map
-  #:seon.db{:entity true}
+  #:seon.db{:attributes true}
   [:seon.call-preparation/key :seon.call-preparation/key]
   [:seon.call-preparation/schema :seon.call-preparation/schema]
   [:seon.call-preparation/supplier :seon.call-preparation/supplier]],

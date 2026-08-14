@@ -56,7 +56,7 @@
                      :seon.cluster.run/trigger]],
                    :run
                    [:map
-                    {:seon.db/entity true,
+                    {:seon.db/attributes true,
                      :seon.render/ai seon.cluster.run/render-ai,
                      :seon.render/html seon.cluster.run/render-html}
                     [:seon.cluster.run/id :seon.cluster.run/id]

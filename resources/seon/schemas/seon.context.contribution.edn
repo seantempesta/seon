@@ -1,6 +1,6 @@
 #:seon.context.contribution{:contribution
                             [:map
-                             #:seon.db{:entity true}
+                             #:seon.db{:attributes true}
                              [:seon.context.contribution/id
                               :seon.context.contribution/id]
                              [:seon.context.contribution/position

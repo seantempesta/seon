@@ -227,7 +227,7 @@ output is one of the three render shapes is a **render function**:
 All three use the one selection chain. The `/form` structural floor is total:
 a unit reached through an attribute uses the listing query for that attribute,
 and an entity uses an identity lookup-ref pull whose identity attribute is
-derived from `:seon.entity/id-attr`. `doc` and `dir` are ordinary `/form`
+derived from installed `:db.unique/identity` attributes. `doc` and `dir` are ordinary `/form`
 declarations for program-graph values, not special context-engine arms.
 
 ### [TARGET] Generalized canvas focus

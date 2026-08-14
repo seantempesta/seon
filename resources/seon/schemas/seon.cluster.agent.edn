@@ -1,6 +1,6 @@
 #:seon.cluster.agent{:agent
                      [:map
-                      {:seon.db/entity true,
+                      {:seon.db/attributes true,
                        :seon.render/ai
                        seon.cluster.agent/render-situation-ai,
                        :seon.render/html
@@ -39,7 +39,7 @@
                      :cluster :seon.db/ref,
                      :context-links
                      [:map
-                      #:seon.db{:entity true}
+                      #:seon.db{:attributes true}
                       [:seon.cluster.agent/id :seon.cluster.agent/id]
                       [:seon.cluster.agent/cluster
                        :seon.cluster.agent/cluster]

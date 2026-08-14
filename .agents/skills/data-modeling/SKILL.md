@@ -166,7 +166,7 @@ shapes); mark optional fields `{:optional true}`:
 ```clojure
 ;; Illustrative schema-resource content, not a JVM form to evaluate.
 {:my.kb.source/entity
- [:map {:seon.db/entity true}
+ [:map {:seon.db/attributes true}
   [:my.kb.source/id :my.kb.source/id]
   [:my.kb.source/title :my.kb.source/title]
   [:my.kb.source/rating {:optional true} :my.kb.source/rating]
@@ -174,11 +174,11 @@ shapes); mark optional fields `{:optional true}`:
   [:my.kb.source/author {:optional true} :my.kb.source/author]]}
 ```
 
-The `{:seon.db/entity true}` marker is opt-in and load-bearing: the projection
-derives the identity attribute and emits a queryable `:seon.schema` row, so the
-renderer can enumerate instances by walking that id-attr's index (NO per-row
-`:kind` stamp) (`src/seon/schema.clj:3033-3115`). Request/response/view maps
-OMIT the marker — they're contracts, not catalogued kinds.
+The `{:seon.db/attributes true}` property says that this composite contributes
+its entry keys to database schema derivation. Stable identity derives from the
+installed attribute's `:db.unique/identity` property, and renderer discovery
+catalogues only identity attributes that occur in actual datoms. There is no
+entity-kind marker or per-row kind stamp.
 
 ## Function specs — DEFAULT to map-in / map-out
 

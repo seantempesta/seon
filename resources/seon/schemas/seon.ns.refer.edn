@@ -1,6 +1,6 @@
 #:seon.ns.refer{:binding
                 [:map
-                 #:seon.db{:entity true}
+                 #:seon.db{:attributes true}
                  [:seon.ns.refer/local :seon.ns.refer/local]
                  [:seon.ns.refer/target-ns :seon.ns.refer/target-ns]
                  [:seon.ns.refer/target-name

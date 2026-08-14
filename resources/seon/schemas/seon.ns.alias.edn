@@ -1,6 +1,6 @@
 #:seon.ns.alias{:binding
                 [:map
-                 #:seon.db{:entity true}
+                 #:seon.db{:attributes true}
                  [:seon.ns.alias/local :seon.ns.alias/local]
                  [:seon.ns.alias/target-ns :seon.ns.alias/target-ns]],
                 :local :symbol,

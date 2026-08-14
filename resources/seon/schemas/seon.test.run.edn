@@ -3,7 +3,7 @@
                 :id [:string {:min 1, :seon.db/identity true}],
                 :run
                 [:map
-                 #:seon.db{:entity true}
+                 #:seon.db{:attributes true}
                  [:seon.test.run/id :seon.test.run/id]
                  [:seon.test.run/at :seon.test.run/at]
                  [:seon.test.run/git-sha :seon.test.run/git-sha]]}

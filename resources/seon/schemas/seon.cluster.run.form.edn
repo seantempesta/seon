@@ -1,6 +1,6 @@
 #:seon.cluster.run.form{:form
                         [:map
-                         {:seon.db/entity true,
+                         {:seon.db/attributes true,
                           :seon.render/ai
                           seon.cluster.run/render-form-ai,
                           :seon.render/html

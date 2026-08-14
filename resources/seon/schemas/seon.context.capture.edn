@@ -1,7 +1,7 @@
 #:seon.context.capture{:basis-t [:int {:min 0}],
                        :capture
                        [:map
-                        {:seon.db/entity true,
+                        {:seon.db/attributes true,
                          :seon.render/ai seon.context/capture-ai,
                          :seon.render/html seon.context/capture-html}
                         [:seon.context.capture/id

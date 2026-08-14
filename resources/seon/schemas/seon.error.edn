@@ -32,7 +32,7 @@
              :evidence [:tuple [:enum :seon.error/id] :seon.error/id],
              :fact
              [:map
-              {:seon.db/entity true,
+              {:seon.db/attributes true,
                :seon.render/ai seon.error/render-ai,
                :seon.render/html seon.error/render-html}
               [:seon.error/id :seon.error/id]

@@ -6,7 +6,7 @@
            {:seon.db/identity true, :seon.search/index :symbol}],
           :ns
           [:map
-           {:seon.db/entity true,
+           {:seon.db/attributes true,
             :seon.render/ai seon.render.ns/render-ai,
             :seon.render/html seon.render.ns/render-html,
             :seon.render/form seon.render.ns/namespace-form}

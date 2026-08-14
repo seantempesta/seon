@@ -50,15 +50,6 @@
      :seon.cluster.eval/ns [:seon.ns/name agent-namespace]
      :seon.cluster.eval/result-edn "42"}]))
 
-(defn- declared-identity-attributes
-  [projection]
-  (->> (:seon.schema.projection/shape-rows projection)
-       vals
-       (keep :seon.entity/id-attr)
-       distinct
-       (sort-by str)
-       vec))
-
 (deftest every-identifiable-neighbour-uses-its-declared-lookup-ref
   (support/with-database
    (fn [connection]
@@ -68,8 +59,7 @@
       [{:db/id "identityless-run"
         :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]}])
      (let [database @connection
-           projection (schema/projection-from-database database)
-           identity-attributes (declared-identity-attributes projection)
+           identity-attributes (db/populated-identity-attributes database)
            units (walk/neighborhood
                   (request database (support/fork-cluster-ctx connection) 1))
            numeric-lookups (->> units

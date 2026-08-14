@@ -4,7 +4,7 @@
           :about :seon.db/ref,
           :note
           [:map
-           {:seon.db/entity true,
+           {:seon.db/attributes true,
             :seon.render/ai my.note/render-note-ai,
             :seon.render/html my.note/render-note-html,
             :seon.render/form my.note/render-note-form}

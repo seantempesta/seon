@@ -399,21 +399,17 @@
          (is (zero? @reads)
              "history shares the acquisition without a second discovery"))))))
 
-(deftest declared-identity-precedes-a-lexically-earlier-database-unique
+(deftest installed-identity-selects-a-stable-lookup-ref
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}
    (fn [connection]
      (db/transact! connection
                    [{::root-id "root" ::forward "both"}
                     {:db/id "both" ::root-id "lexical" ::node-id "declared"}])
-     (with-redefs [sci.kernel/context-projection
-                   (constantly
-                    {:seon.schema.projection/shape-rows
-                     {::declared {:seon.entity/id-attr ::node-id}}})]
-       (let [acquisition (acquire connection)]
-         (is (contains? (:seon.render.walk/members acquisition)
-                        [::node-id "declared"])
-             "production acquisition chooses the declared identity"))))))
+     (let [acquisition (acquire connection)]
+       (is (contains? (:seon.render.walk/members acquisition)
+                      [::node-id "declared"])
+           "production acquisition chooses an installed identity")))))
 
 (deftest as-of-revision-comparison-uses-the-database-read-owner
   (support/with-database

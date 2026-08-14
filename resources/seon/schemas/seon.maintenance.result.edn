@@ -218,8 +218,7 @@
                            [:seon.operator.collect/complete?
                             :seon.operator.collect/complete?]],
                           :entity
-                          [:map
-                           {:seon.db/entity true}
+                          [:map {:seon.db/attributes true}
                            [:seon.maintenance.result/id
                             :seon.maintenance.result/id]],
                           :value :map}

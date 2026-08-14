@@ -160,9 +160,11 @@
   (boolean
    (some-> (get schemas attr-key) form/attr-form-properties :seon.db/identity)))
 
-(defn- map-identity-entry-key
+(defn map-identity-entry-key
   "The first entry key of `:map` schema `v` that is itself an identity
    attr in `schemas` (`{:seon.db/identity true}`), or nil."
+  {:malli/schema
+   [:=> [:cat :map :seon.schema/value] [:maybe :keyword]]}
   [schemas v]
   (when (form/map-shape? v)
     (some (fn [entry]
@@ -170,19 +172,6 @@
               (when (identity-attr? schemas k) k)))
           (form/map-entries v))))
 
-(defn derive-entity-id-attr
-  "Identity-attr entry key of `v` when `v` is a `:map` DECLARED a stored
-   entity kind (`{:seon.db/entity true}` in its own props); else nil.
-
-   Entity-kind-ness is DECLARED, never inferred: a request/response
-   envelope that merely carries an id entry must NOT become a catalogued
-   kind. The derived id-attr makes a declared schema self-describing for
-   the renderer's discovery walk — no per-row `:seon.entity/kind` stamp."
-  {:malli/schema
-   [:=> [:cat :map :seon.schema/value] [:maybe :keyword]]}
-  [schemas v]
-  (when (:seon.db/entity (form/schema-properties v))
-    (map-identity-entry-key schemas v)))
 
 (defn map-required-attrs
   "Required map-entry keys reached through refs and `:and` composition.
@@ -224,22 +213,6 @@
 
                :else #{}))]
      (not-empty (vec (sort-by str (required v #{})))))))
-
-(defn with-entity-id-attr
-  "Attach `{:seon.entity/id-attr <k>}` to `v`'s props when `v` is a
-   DECLARED entity kind with an identity-attr entry; preserves existing
-   props (`:seon.render/ai`, etc). Pass-through otherwise."
-  {:malli/schema
-   [:=> [:cat :map :seon.schema/value] :seon.schema/value]}
-  [schemas v]
-  (if-let [id-attr (derive-entity-id-attr schemas v)]
-    (let [head     (first v)
-          body     (rest v)
-          [props body] (if (and (seq body) (map? (first body)))
-                         [(first body) (rest body)]
-                         [{} body])]
-      (into [head (assoc props :seon.entity/id-attr id-attr)] body))
-    v))
 
 (defn- missing-schema-reference
   [error]

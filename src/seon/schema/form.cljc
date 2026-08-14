@@ -72,11 +72,10 @@
        (reduce-kv
         (fn [attributes schema-key definition]
           (let [properties (attr-form-properties definition)
-                entity-attributes
+                declared-attributes
                 (when (and (map-shape? definition)
-                           (let [properties (schema-properties definition)]
-                             (or (true? (:seon.db/entity properties))
-                                 (true? (:seon.db/attributes properties)))))
+                           (true? (:seon.db/attributes
+                                   (schema-properties definition))))
                   (into #{}
                         (keep (fn [entry]
                                 (let [attribute
@@ -84,7 +83,7 @@
                                   (when (qualified-keyword? attribute)
                                     attribute))))
                         (map-entries definition)))]
-            (cond-> (into attributes entity-attributes)
+            (cond-> (into attributes declared-attributes)
               (and (qualified-keyword? schema-key)
                    (some #(contains? properties %)
                          database-attribute-properties))

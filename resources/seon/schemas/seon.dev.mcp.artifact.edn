@@ -2,7 +2,7 @@
 {:id [:and {:seon.db/identity true} :seon.blob/digest]
  :digest [:and {:seon.db/no-history? true} :seon.blob/digest]
  :entity
- [:map {:seon.db/entity true}
+ [:map {:seon.db/attributes true}
   [:seon.dev.mcp.artifact/id :seon.dev.mcp.artifact/id]
   [:seon.dev.mcp.artifact/digest :seon.dev.mcp.artifact/digest]],
  :root-not-committed :seon.blob/digest,

@@ -7,8 +7,7 @@
             [seon.db :as db]
             [seon.render :as render]
             [seon.render.walk :as walk]
-            [seon.schema :as schema]
-            [seon.sci.kernel :as sci.kernel]))
+            [seon.schema :as schema]))
 
 (defmacro help
   "Read the calling agent's live situation.
@@ -509,11 +508,8 @@
                 (walk/join-membership
                  acquisition (:my.plan/acquisitions admitted))
                 identities
-                (->> (vals (:seon.schema.projection/shape-rows
-                            (sci.kernel/context-projection
-                             (:seon.sci.eval/ctx request))))
-                     (keep :seon.entity/id-attr)
-                     set)]
+                (set (db/populated-identity-attributes
+                      (:seon.db/db request)))]
             {:seon.repl/root-key [(first order) 0]
              :seon.repl/candidates (into base-candidates intent-candidates)
              :seon.print/identity-attributes identities

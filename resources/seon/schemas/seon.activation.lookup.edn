@@ -3,8 +3,7 @@
                          :attribute :qualified-keyword,
                          :value :seon.db/lookup-ref-value,
                          :lookup
-                         [:map
-                          {:seon.db/entity true}
+                         [:map {:seon.db/attributes true}
                           [:seon.activation.lookup/id
                            :seon.activation.lookup/id]
                           [:seon.activation.lookup/attribute

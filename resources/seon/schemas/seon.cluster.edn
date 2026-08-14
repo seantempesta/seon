@@ -1,6 +1,6 @@
 #:seon.cluster{:cluster
                [:map
-                {:seon.db/entity true
+                {:seon.db/attributes true
                  :seon.render/ai seon.cluster/render-ai
                  :seon.render/html seon.cluster/render-html}
                 [:seon.cluster/name :seon.cluster/name]

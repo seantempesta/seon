@@ -15,8 +15,7 @@
                            :nominal-at :seon.schedule.fire/nominal-at,
                            :observed-at :seon.schedule.fire/observed-at,
                            :entity
-                           [:map
-                            {:seon.db/entity true}
+                           [:map {:seon.db/attributes true}
                             [:seon.maintenance.request/id
                              :seon.maintenance.request/id]
                             [:seon.maintenance.request/task

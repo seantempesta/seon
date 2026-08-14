@@ -3,8 +3,7 @@
                      :function [:and #:seon.db{:index true} :seon.db/ref],
                      :schedule [:and #:seon.db{:index true} :seon.db/ref],
                      :task
-                     [:map
-                      {:seon.db/entity true}
+                     [:map {:seon.db/attributes true}
                       [:seon.schedule.task/id :seon.schedule.task/id]
                       [:seon.schedule.task/owner :seon.schedule.task/owner]
                       [:seon.schedule.task/function

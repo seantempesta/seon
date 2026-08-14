@@ -47,7 +47,7 @@
                          :seon.config.eval.result/max-string]],
                        :message
                        [:map
-                        {:seon.db/entity true,
+                        {:seon.db/attributes true,
                          :seon.render/ai
                          seon.cluster.message/render-ai,
                          :seon.render/html

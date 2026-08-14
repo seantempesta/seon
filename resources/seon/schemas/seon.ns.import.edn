@@ -1,6 +1,6 @@
 #:seon.ns.import{:binding
                  [:map
-                  #:seon.db{:entity true}
+                  #:seon.db{:attributes true}
                   [:seon.ns.import/local :seon.ns.import/local]
                   [:seon.ns.import/target-class
                    {:optional true}
