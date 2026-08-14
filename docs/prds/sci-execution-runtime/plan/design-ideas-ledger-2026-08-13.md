@@ -263,6 +263,19 @@ one decision away from queued work. Ruled items cite their record.
     is never stored. Amends the hours-old T3 shape in place before
     first real use (plan-t3 lane, in flight).
 
+30. **The chat page IS the transcript's `/html` projection** (owner,
+    2026-08-14 midday): the agent view renders the SAME history blocks
+    the `/ai` projection feeds the model — input is the agent's history
+    unit (never the namespace), each entry rendered per-block via its
+    declared `:seon.render/html` producer or the derived floor; entries
+    with no real html face elide to a compact chip (honest elision
+    value: count + anchor into debug), never dropped. Chat = curated
+    face, debug = complete pretty-data face; same block identities so
+    morphs serve both. No agent-side injection — rendering is
+    system-side projection selection; the declare-renders-at-birth rule
+    is the quality incentive. Seam: `seon.render.transcript` history
+    derivation + the web agent page. Folds into ui-overhaul.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
