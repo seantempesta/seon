@@ -68,6 +68,23 @@ rather than rerunning this seconds-long acquisition after every settled form.
 The issue remains open pending that structural change and an interactive
 single-acquisition result.
 
+## Evidence — 2026-08-14 codec clearance exposes prefix drift
+
+After commit `8ec96cbf1` repaired the EDN-backed receipt codec, a freshly
+published isolated root decoded the complete ordinal-0 `bootstrap:root`
+receipt under the deliberately opposing `*print-namespace-maps*` binding: 23
+read-evidence components, including 22 call-preparation read requests and 23
+dependency plans, with no read error. Generation therefore crossed the prior
+codec stop boundary.
+
+The run then closed at the next boundary with `"A stored generated form is
+outside the pull."` from `seon.bootstrap/next-entry`
+(`src/seon/bootstrap.clj:568-580` at that commit). The assertion means a
+settled receipt source was absent from the newly derived candidate pull. It is
+the same post-`help` generated-opening owner and acceptance boundary tracked by
+this issue, now observed as a prompt, typed prefix-drift failure rather than an
+unbounded non-return. The database-codec repair did not alter this owner.
+
 ## Evidence — 2026-08-13 root cause: the per-render projection rebuild
 
 [The dated after-help diagnosis](../../prds/sci-execution-runtime/research/live-pull-after-help-diagnosis-2026-08-13.md)

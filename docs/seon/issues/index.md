@@ -23,7 +23,6 @@ See `README.md` for the convention.
 | [Attribute and bound the store's one-day 69 GB growth](store-grew-to-69-gigabytes-in-one-day-of-lanes.md) | blocker | exclusive sweep implementation wave |
 | [Carry the agent-scoped environment into generated turn forks](generated-turn-fork-omits-the-agent-scoped-environment.md) | blocker | evolving-session implementation phases |
 | [Give background-result wakes a queryable run trigger](background-result-wakes-have-no-run-trigger.md) | blocker | why-awake situation work (generator lane) |
-| [Make wildcard receipt pulls accept stored read dependency plans](wildcard-receipt-pull-refuses-a-stored-dependency-plan.md) | blocker | database codec repair wave |
 | [Store the model's raw reply as a durable fact even when it parses to no forms](prose-only-model-replies-are-not-durable-facts.md) | blocker | reply-durability fix (overnight queue) |
 | [Make outward values unable to bypass one total render contract](class-outward-values-bypass-total-render-contract.md) | blocker | class-kill queue |
 | [Give every loaded artifact enforced source identity](class-loaded-artifacts-lack-source-identity.md) | blocker | class-kill queue |

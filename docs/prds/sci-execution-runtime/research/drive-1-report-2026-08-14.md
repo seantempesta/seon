@@ -216,6 +216,42 @@ fresh init and start
 Continuing would have bypassed the generated-opening contract and invalidated
 the requested evolve→rebirth→continue measurement.
 
+### Attempt 2 codec resolution — 2026-08-14
+
+This is the **same database-codec class** as
+[`wildcard-receipt-pull-refuses-a-stored-dependency-plan.md`](../../../seon/issues/archive/wildcard-receipt-pull-refuses-a-stored-dependency-plan.md),
+not a separate `:seon.db/read-request` defect. Both that attribute and
+`:datahike.read/dependency-plan` select the heterogeneous-union EDN fallback in
+`seon.schema.datahike`. Its write seam used ambient `pr-str`, so
+`*print-namespace-maps*` and map/set iteration order could change durable bytes;
+the strict reader then correctly refused a stored string unequal to its
+canonical re-encoding. That was a two-sided contract break created by the
+writer, not a reason to weaken the reader.
+
+Commit `8ec96cbf1` fixes the one canonicalization seam: recursively ordered map
+and set data is printed under one complete readable binding policy. The strict
+noncanonical refusal remains unchanged. The production-database regression
+round-trips the exact captured call-preparation query plus a dependency plan
+through `seon.db/transact!` and wildcard `seon.db/pull`, under opposite
+namespace-map bindings and opposite construction/iteration orders. The test
+failed six assertions before the fix; afterward the focused gate passed **9
+tests / 101 assertions / 0 failures / 0 errors**. Commit `17787d4a6` archives
+the single issue note with that evidence.
+
+A fresh isolated root at `tmp/codec-live-root`, published as current-source
+commit `6a7ed89d-557a-531a-b9a2-bfab87b3b2a2`, supplied the live boundary proof.
+With `*print-namespace-maps*` forced false, wildcard-pulling the real ordinal-0
+`bootstrap:root` receipt returned an ordinary value: receipt entity `29971`,
+23 read-evidence components, 22 decoded `:seon.db/read-request` values, 23
+decoded `:datahike.read/dependency-plan` values, and no `:seon.error/kind`.
+
+The fixed opening then advanced past the codec boundary and exposed the
+distinct existing prefix-drift failure, `"A stored generated form is outside
+the pull."`, in `seon.bootstrap/next-entry`. That evidence belongs to the
+already-open
+[`generated-opening-live-pull-does-not-return-after-help.md`](../../../seon/issues/generated-opening-live-pull-does-not-return-after-help.md);
+it is not part of the database-codec class and was not patched here.
+
 ## Attempt 1 verdict
 
 **Stopped at the generated-opening gate.** The isolated cluster booted and
