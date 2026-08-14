@@ -252,6 +252,26 @@ half-landed. The
 `my.plan` vocabulary row carries its landed links; the memory anchor is
 current.
 
+**2026-08-14 small hours — branch + diagnosis landmark:** main is
+FAST-FORWARDED to HEAD (6,139 commits; no tree change, lanes
+uninterrupted) and work continues on the fresh branch
+`context-generation-drive`. The live-pull diagnosis RETURNED
+([live-pull-after-help-diagnosis](../research/live-pull-after-help-diagnosis-2026-08-13.md)):
+SLOW not hung — `seon.config/effective` rebuilds the schema projection
+from the database on every render call (851 ms × 246; carrying the
+profile = 39.7×, 276 s → 7 s), overturning the Datahike attribution
+(pull frames are the ~5 s residual); walk/history's two uncarried
+`neighborhood` calls are boot-test wedge 2 (same class, stack-matched).
+The `entity-flag-deletion` lane was redirected onto the measured fix
+(handed-projection preference in config/effective + one
+call-with-projection extent at next-entry + profile carriage in
+walk/history + class regression) BEFORE its original scope; it is drive
+precondition 4 and the critical path. `floor-render` LANDED
+(`0f1374d5c`: derived one-line-per-row floor, inbox exemplar with zero
+declarations; exposed the printed-EDN message-id smell, filed).
+`staleness-sweep` folded (2 archived, 5 updated). A `prd-archive` lane
+is verifying the four single-README PRD dirs for honest archival.
+
 **THE ORDERED QUEUE AFTER RETURNS:**
 1. R2 continuation, serial, red-tolerant: W2b (deferred producers in
    bootstrap/walk/plan once those lanes land) → W3 consumers dispatch on
