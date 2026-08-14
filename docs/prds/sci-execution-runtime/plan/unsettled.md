@@ -272,6 +272,12 @@ declarations; exposed the printed-EDN message-id smell, filed).
 `staleness-sweep` folded (2 archived, 5 updated). A `prd-archive` lane
 is verifying the four single-README PRD dirs for honest archival.
 
+**FULL RESTART AUTHORIZED (owner, 2026-08-14):** the moment R3 commits,
+the orchestrator runs `bin/seon reset --force` on the shared root
+(destroys the 8.35 GiB store, republishes, fresh JVM on today's code),
+verifies status + the web UI answering, then runs the queued probe
+verification below. Do not wait for a further go-ahead.
+
 **PENDING VERIFICATION (drive prep):** rerun
 `tmp/live-pull/after_help_probe.clj` WITHOUT the carried-profile
 argument against a pinned export of post-fix HEAD (recipe in the
