@@ -13,6 +13,7 @@
                       [:map
                        [:seon.cluster.run/id :seon.cluster.run/id]
                        [:seon.cluster.agent/id :seon.cluster.agent/id]
+                       [:seon.db/connection :seon.db/connection]
                        [:seon.sci.admit/caps :seon.sci.admit/caps]
                        [:seon.sci.eval/ctx :seon.sci.eval/ctx]
                        [:seon.sci.eval/time-limit-ms

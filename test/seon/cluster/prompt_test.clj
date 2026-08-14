@@ -107,6 +107,7 @@
   [connection context-channel]
   {:seon.cluster.run/id "walk-run"
    :seon.cluster.agent/id "walker"
+   :seon.db/connection connection
    :seon.sci.admit/caps caps
    :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
    :seon.sci.eval/time-limit-ms 2000
@@ -161,7 +162,14 @@
            "the deleted presentation-block attribute is not installed")
        (is (= :seon.db/attribute-not-installed
               (get-in removed-block-read
-                      [:seon.error/data :seon.error/diagnostic-cause])))))))
+                      [:seon.error/data :seon.error/diagnostic-cause])))
+       (is (pos?
+            (count
+             (db/q '[:find ?cost
+                     :where
+                     [?cost :seon.render.cost/estimated-tokens]]
+                   @connection)))
+           "the production prompt request records every newly rendered cost")))))
 
 (deftest every-call-derives-the-current-basis
   (planted
@@ -206,6 +214,10 @@
 (deftest unchanged-acquisition-performs-zero-database-door-reads
   (planted
    (fn [connection context-channel]
+     (acquire-context connection context-channel)
+     ;; The first real context render records its costs and therefore advances
+     ;; the connection once. Let retained dependency evidence observe that
+     ;; unrelated transaction before measuring a genuinely unchanged basis.
      (acquire-context connection context-channel)
      (let [reads (atom 0)
            counted (fn [f]

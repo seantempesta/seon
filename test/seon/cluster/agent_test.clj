@@ -372,6 +372,7 @@
                @connection
                {:seon.cluster.run/id "missing-context-run"
                 :seon.cluster.agent/id "missing-context"
+                :seon.db/connection connection
                 :seon.sci.admit/caps
                 {:seon.config.eval.result/max-depth 6
                  :seon.config.eval.result/max-collection 8

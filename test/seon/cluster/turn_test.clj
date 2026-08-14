@@ -1784,6 +1784,7 @@
                         (prompt/prompt @connection
                                        {:seon.cluster.run/id "run-next"
                                         :seon.cluster.agent/id "agent-a"
+                                        :seon.db/connection connection
                                         :seon.sci.admit/caps
                                         (:seon.sci.admit/caps cluster)
                                         :seon.sci.eval/ctx
@@ -2105,6 +2106,7 @@
                   @connection
                   {:seon.cluster.run/id "run-after-unreadable"
                    :seon.cluster.agent/id "agent-a"
+                   :seon.db/connection connection
                    :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
                    :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
                    :seon.sci.eval/time-limit-ms 2000

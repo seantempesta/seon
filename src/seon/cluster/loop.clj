@@ -1366,6 +1366,7 @@
            #(prompt/prompt prompt-db
                            {:seon.cluster.run/id run-id
                             :seon.cluster.agent/id agent-id
+                            :seon.db/connection connection
                             :seon.sci.admit/caps
                             (:seon.sci.admit/caps cluster)
                             :seon.sci.eval/ctx
