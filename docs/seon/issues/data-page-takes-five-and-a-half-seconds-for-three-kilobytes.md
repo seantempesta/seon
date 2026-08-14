@@ -225,3 +225,24 @@ path. The stall is gone from an independent lane's measurement as well.
 The note's other acceptance edges (retained bytes on an unchanged basis, only
 8 of 525 schema keys shown, root's page identity) were not exercised here, so
 this is corroboration of the latency fix only.
+
+## The route now 500s — 2026-08-14
+
+The latency question is moot at HEAD: `/data` no longer renders at all. It
+returns HTTP 500 in ~0.35 s with a single unstyled line of body text, on both
+a freshly booted shared default and the Drive 1 attempt-5 cluster:
+
+```text
+$ curl -s -w " [status:%{http_code} time:%{time_total}s]\n" http://127.0.0.1:7994/data
+Effective config requires the projection handed to this operation. [status:500 time:0.344890s]
+
+$ curl -s -w " [status:%{http_code} time:%{time_total}s]\n" http://127.0.0.1:55156/data
+Effective config requires the projection handed to this operation. [status:500 time:0.360224s]
+```
+
+That is a distinct defect with a distinct owner — the route reads
+`seon.config/effective` without handing it a projection — and is filed as
+[the-data-route-refuses-because-it-never-hands-the-projection](the-data-route-refuses-because-it-never-hands-the-projection.md).
+This note's remaining acceptance edges cannot be re-measured until that
+refusal is fixed. Full walk:
+[ui-verification-2026-08-14](../../prds/sci-execution-runtime/research/ui-verification-2026-08-14.md).

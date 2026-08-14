@@ -36,3 +36,23 @@ Still open outside this lane's owned paths. The exact edit belongs in
 table/code/value containers their own horizontal scrolling at 375 px, then
 verify the body has no horizontal scrollbar. The N1 terminal fit does not
 replace viewport layout.
+
+## Fresh evidence — 2026-08-14
+
+Walked at DESKTOP width (1280x720) rather than 375 px, which turns up two
+adjacent layout facts for the same owner:
+
+- The body no longer scrolls sideways at 1280 px (`scrollWidth` 1280 equals
+  `innerWidth`), but the page grid uses only 787 px of it — columns measured
+  525 px and 262 px — leaving the right ~38% of the window empty while content
+  is squeezed and clipped. Run and message blocks sit in the 262 px column.
+- Content is instead lost VERTICALLY: every `.seon-walk-unit` is
+  `max-height: 160px; overflow: hidden`, silently discarding 55 of 138 units
+  on the default root page and 11 of 38 on the drive agent page. Filed
+  separately as
+  [walk-units-hide-their-overflow-instead-of-eliding-it](walk-units-hide-their-overflow-instead-of-eliding-it.md),
+  since it is a different axis with a different fix, but both live in
+  `resources/public/css/input.css` and should be settled in one pass.
+
+Full walk:
+[ui-verification-2026-08-14](../../prds/sci-execution-runtime/research/ui-verification-2026-08-14.md).

@@ -39,6 +39,25 @@ message/run, and current message/run blocks:
 <div class="seon-render-unavailable">renderer unavailable</div>
 ```
 
+### Fresh evidence — 2026-08-14
+
+Still present, and it is not confined to agent or namespace pages — the ROOT
+page carries the most. Counted in the browser at 1280x720 against two live
+targets, the shared default having just booted onto HEAD:
+
+| Page | `renderer unavailable` | Total walk units |
+|---|---|---|
+| `http://127.0.0.1:7994/` (default root, HEAD) | 69 | 138 |
+| `http://127.0.0.1:7994/agent/root` | 69 | 138 |
+| `http://127.0.0.1:55156/` (drive root) | 67 | 138 |
+| `http://127.0.0.1:55156/agent/drive-one-agent-attempt-5` | 17 | 38 |
+
+Half of all rendered blocks on a root page are now this placeholder, and it is
+also the FIRST thing painted in the right-hand grid column on both roots. The
+visible content is still exactly `renderer unavailable`, with no shape,
+renderer, path, or diagnostic. Full walk:
+[ui-verification-2026-08-14](../../prds/sci-execution-runtime/research/ui-verification-2026-08-14.md).
+
 ## Owner
 
 `seon.render.web/unit-html` and the render failure value supplied by the walk.
