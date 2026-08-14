@@ -318,12 +318,26 @@ properties; no wave starts before the owner marks this document up.
 ## 7. Open decisions for the owner
 
 1. **Agent-entity dissolution mechanics (ruling 40).** Options owed:
-   (a) merge — agentic attributes move onto the ns entity, agent
-   family deleted (cleanest; a data migration in a system where data
-   is disposable by ruling); (b) keep the agent entity as internal
-   plumbing under one identity (`:seon.cluster.agent/id` == ns name;
-   no schema deletion now, less churn, one more join forever).
-   Recommendation: (a), given reset-freely.
+   (a) merge — agentic attributes move onto the ns entity; `run/agent`,
+   `message/to|from`, and plan refs repoint AT the namespace entity;
+   the agent family is deleted; the transcript's sources (message
+   rows, run forms, eval receipts) become one hop from the root
+   (cleanest; data is disposable by ruling — reset, never migrate);
+   (b) keep the agent entity as internal plumbing under one identity
+   (no schema deletion now, one more join forever).
+   Recommendation: (a).
+
+   **Companion piece — the fundamentals are Seon's clojure.core.**
+   Base capabilities (`my.message`, `my.run`, the injected
+   `help`/`dir`/`doc`, the `seon.db` read family — exact set to be
+   ruled) are AUTO-REFERRED into every agent namespace, recorded as
+   derived `:seon.ns/refers` facts at creation/index time — the
+   attribute already exists, distinct from `/requires`. Membership
+   stays pull-only (ruling 39): the refer facts are ordinary refs the
+   selector follows, so the fundamentals reach every context by
+   derivation while the authored ns form stays tiny and every
+   explicit require remains visible genuine intent. No cluster-level
+   injection — that is the drag-in ruling 39 killed.
 2. **Panel mechanics (ruling 38 details):** what qualifies as a panel
    (recommend: blocks with a declared `/html` face outside the
    transcript spine); reorder damping (recommend: morph in place
