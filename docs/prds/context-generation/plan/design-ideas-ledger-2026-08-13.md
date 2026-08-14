@@ -376,6 +376,22 @@ one decision away from queued work. Ruled items cite their record.
     shape-chips remains the ruled DESIGN for when budgets return, but
     it is not built now.
 
+38. **The namespace view's layout model: recency promotes, pinning
+    locks, everything is live** (owner, 2026-08-14 late evening): the
+    HTML side uses the same walk order but with NO diffing obligation —
+    every block always shows its full live content (morph to current
+    state; the append-only history discipline is an AI-seam
+    requirement only). The MOST RECENTLY CHANGED block holds the large
+    primary position; the remaining blocks sit in the right side panel
+    ordered by last update (~three visible on desktop). The namespace
+    LAYOUT RENDER sets all of this up as movable panels; a user PIN
+    locks the main view in place (browser-local, per ui.md — never a
+    fact). The transcript naturally holds primary most of the time
+    because it changes most; an agent that wants to show the user
+    something defines a function (ruling 36) and its block takes
+    primary by recency. No dedicated "present to user" mechanism
+    exists or is needed.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced

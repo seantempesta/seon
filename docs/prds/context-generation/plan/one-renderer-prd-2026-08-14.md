@@ -213,19 +213,24 @@ END TO END before touching any of this; failing to was fuckup #5.
   Corrected framing: this is where you FIND YOUR WAY BACK, not the
   assumed destination; chatting with root is available here but a chat
   session with root is not presumed to be the goal.
-- **`/agent/{id}` — the conversation, the default view.** The CHAT
-  face: the transcript's `/html` projection, newest at the bottom,
-  message bar FIXED AT THE BOTTOM with an auto-expanding textarea
-  (enter sends, shift-enter newline) — a polished chat tool, not a
-  form bolted to a page top. Entries without a real html face render
-  as chips that expand inline to pretty-printed highlighted data.
-  **The right column: agent-declared html render functions appear
-  AUTOMATICALLY as panels** (they are ordinary blocks discovered by
-  the pull/walk resolution chain — "ask for a visualization, define a
-  function, it's there"), sorted by newest-basis. **Click a panel to
-  PIN it**: the panel takes the primary position and the transcript
-  moves to the side column. Pin state is browser-local (a Datastar
-  signal), never a database fact — ui.md's rule stands.
+- **The agent's namespace view — the conversation, the default view**
+  (ruled R-a: the view IS `/ns/<ns>`; ruling 38 owns the layout
+  model). The layout: **the most recently changed block holds the
+  large primary position**; the remaining blocks sit in the right
+  side panel ordered by last update, roughly three visible on
+  desktop, all showing full live content (no diffing on the HTML
+  side — morph to current state). The transcript naturally holds
+  primary because it changes most; **an agent that wants to show the
+  user something defines a function** (an ordinary program fact the
+  pull acquires, ruling 36) **and its block takes primary by
+  recency** — no dedicated present-to-user mechanism. The namespace
+  layout render sets the panels up movable; a user PIN locks the main
+  view in place (browser-local Datastar signal, never a fact —
+  ui.md's rule stands). The chat face of the transcript: newest at
+  the bottom, message bar FIXED AT THE BOTTOM with an auto-expanding
+  textarea (enter sends, shift-enter newline) — a polished chat tool.
+  Entries without a real html face render as chips that expand inline
+  to pretty-printed highlighted data.
 - **`/agent/{id}/debug` — the honest face.** Always the `/ai` content,
   formatted: pretty spacing, syntax highlighting, turn chrome from
   receipt facts; character-faithful modulo whitespace and color; raw
