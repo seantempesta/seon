@@ -156,7 +156,7 @@
           (is (true? (:continue response)))
           (is (str/includes? feedback
                              "[warning/schema-exact-reuse]"))
-          (is (str/includes? feedback "same shape as existing"))))
+          (is (str/includes? feedback "same composite shape as"))))
       (finally
         (delete-files! [schema-file config directory])))))
 

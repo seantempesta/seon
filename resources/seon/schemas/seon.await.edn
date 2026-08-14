@@ -1,0 +1,54 @@
+#:seon.await{:config-attribute :qualified-keyword
+             :config-value
+             [:or
+              :seon.config.eval/time-limit-ms
+              :seon.config.agent/turn-completion-backstop-ms]
+             :bound
+             [:map
+              [:seon.await/config-attribute :seon.await/config-attribute]
+              [:seon.await/config-value :seon.await/config-value]]
+             :diagnostic
+             [:map
+              [:seon.error/diagnostic-layer :seon.schema/value]
+              [:seon.error/diagnostic-operation :seon.schema/value]
+              [:seon.error/diagnostic-member :seon.schema/value]
+              [:seon.error/diagnostic-expected :seon.schema/value]
+              [:seon.error/diagnostic-offending :seon.schema/value]
+              [:seon.error/diagnostic-evidence :seon.schema/value]]
+             :put-operation
+             [:tuple :seon.flow/channel :seon.schema/value]
+             :port-operation
+             [:or :seon.flow/channel :seon.await/put-operation]
+             :port-operations
+             [:vector {:min 1} :seon.await/port-operation]
+             :accept?
+             [:fn
+              {:error/message "must accept one completion value"
+               :gen/schema [:=> [:cat :seon.schema/value] :boolean]}
+              clojure.core/ifn?]
+             :blocking-deref
+             [:fn
+              {:error/message "must support a bounded blocking dereference"
+               :gen/gen seon.await/blocking-deref-generator}
+              seon.await/blocking-deref?]
+             :port-request
+             [:map
+              [:seon.await/bound :seon.await/bound]
+              [:seon.await/diagnostic :seon.await/diagnostic]
+              [:seon.await/port-operations :seon.await/port-operations]
+              [:seon.await/accept? {:optional true} :seon.await/accept?]]
+             :future-request
+             [:map
+              [:seon.await/bound :seon.await/bound]
+              [:seon.await/diagnostic :seon.await/diagnostic]
+              [:seon.await/future :seon.flow/future]]
+             :deref-request
+             [:map
+              [:seon.await/bound :seon.await/bound]
+              [:seon.await/diagnostic :seon.await/diagnostic]
+              [:seon.await/blocking-deref :seon.await/blocking-deref]]
+             :request
+             [:or
+              :seon.await/port-request
+              :seon.await/future-request
+              :seon.await/deref-request]}
