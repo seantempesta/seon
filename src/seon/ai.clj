@@ -349,8 +349,8 @@
         dials))
 
 (defn- resolved-target
-  [database target]
-  (if-let [model (model-details database (:seon.ai/model target))]
+  [target model]
+  (if model
     (let [provider (:seon.ai.model/provider model)
           thinking-dials (:seon.ai.model/thinking-dials model)
           configured-thinking (:seon.ai/thinking target)
@@ -394,10 +394,12 @@
   make a PARTIAL backup unrepresentable rather than merely refused.
   `:seon.config.ai.backup/model` decides whether a backup exists at
   all; endpoint, credential variable and deadline are optional and
-  inherit the primary's. So there is no configuration in which three
-  backup dials are set and the fourth silently voids them, and the
-  common case — a different model at the same provider — is one dial
-  rather than four copied lines.
+  inherit the primary's. Descriptor resolution replaces inherited
+  authentication when the backup model names a different provider;
+  an explicit backup credential variable still wins. So there is no
+  configuration in which three backup dials are set and the fourth
+  silently voids them, and the common case — a different model at the
+  same provider — is one dial rather than four copied lines.
 
   Absence, never nil: with no backup the key is simply not there, which
   is exactly what `:seon.ai/backup?` reads downstream."
@@ -429,7 +431,31 @@
                 (assoc :seon.ai/timeout-ms
                        (:seon.config.ai.backup/timeout-ms dials)))))))
   ([database dials]
-   (update-vals (targets dials) #(resolved-target database %))))
+   (let [{:seon.ai/keys [primary backup]} (targets dials)
+         primary-model (model-details database (:seon.ai/model primary))
+         backup-model (some->> backup :seon.ai/model
+                               (model-details database))
+         primary-provider-id
+         (get-in primary-model
+                 [:seon.ai.model/provider :seon.ai.model/provider-id])
+         backup-provider-id
+         (get-in backup-model
+                 [:seon.ai.model/provider :seon.ai.model/provider-id])
+         ;; Authentication inherited while assembling a backup is a valid
+         ;; caller choice only when both models use the same provider. Across
+         ;; providers, the backup descriptor supplies its own declaration;
+         ;; an explicit backup variable still wins below.
+         backup
+         (cond-> backup
+           (and backup-provider-id
+                (not= primary-provider-id backup-provider-id)
+                (not (:seon.config.ai.backup/api-key-variable dials)))
+           (dissoc :seon.ai/api-key-variable :seon.config.ai/no-auth))]
+     (cond-> {:seon.ai/primary
+              (resolved-target primary primary-model)}
+       backup
+       (assoc :seon.ai/backup
+              (resolved-target backup backup-model))))))
 
 (defn retry-strategy
   "The backoff strategy row, from the dials. Pure projection.

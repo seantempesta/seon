@@ -72,7 +72,7 @@
   stopped being derivable."
   (delay (config/defaults)))
 
-(deftest the-shipped-cluster-has-one-target-and-no-backup
+(deftest the-shipped-cluster-has-a-primary-and-configured-backup
   (let [targets (ai/targets @dials)]
     (is (schema/valid-candidate-value? :seon.ai/targets targets))
     (is (= {:seon.ai/endpoint (:seon.config.ai/endpoint @dials)
@@ -87,9 +87,9 @@
             :seon.ai/timeout-ms (:seon.config.ai/timeout-ms @dials)}
            (:seon.ai/primary targets))
         "the primary retains every effective AI dial without reshaping it")
-    (is (not (contains? targets :seon.ai/backup))
-        "ABSENT, never nil — a nil backup would read as `configured, and
-         broken` at every downstream site that asks whether one exists")
+    (is (= "deepseek/deepseek-v4-flash-20260731"
+           (get-in targets [:seon.ai/backup :seon.ai/model]))
+        "the pinned 0731 GA slug, never the bare 0423 preview slug")
     (testing "and a target is a request minus what to say, which is why
     the call site is one assoc"
       (is (schema/valid-candidate-value?
@@ -99,6 +99,44 @@
         "the interim output budget remains until flash calibration lands")
     (is (= :disabled (:seon.ai/thinking (:seon.ai/primary targets)))
         "the shipped fast-turn posture explicitly disables thinking")))
+
+(deftest the-shipped-openrouter-backup-resolves-through-its-provider-row
+  (test-support/with-database
+    (fn [connection]
+      (let [backup (:seon.ai/backup (ai/targets @connection @dials))]
+        (is (= {:seon.ai/model "deepseek/deepseek-v4-flash-20260731"
+                :seon.ai/endpoint
+                "https://openrouter.ai/api/v1/chat/completions"
+                :seon.ai/api-key-variable "OPENROUTER_API_KEY"
+                :seon.ai.model/output-token-wire-key "max_tokens"}
+               (select-keys
+                backup
+                [:seon.ai/model
+                 :seon.ai/endpoint
+                 :seon.ai/api-key-variable
+                 :seon.ai.model/output-token-wire-key])))
+        (is (= (:seon.config.ai/max-tokens @dials)
+               (:seon.ai/max-tokens backup))
+            "the backup inherits the configured output bound")
+        (is (= "EXPLICIT_BACKUP_KEY"
+               (get-in
+                (ai/targets
+                 @connection
+                 (assoc @dials
+                        :seon.config.ai.backup/api-key-variable
+                        "EXPLICIT_BACKUP_KEY"))
+                [:seon.ai/backup :seon.ai/api-key-variable]))
+            "an explicit backup credential still outranks its descriptor")
+        (is (= "PRIMARY_OVERRIDE_KEY"
+               (get-in
+                (ai/targets
+                 @connection
+                 (assoc @dials
+                        :seon.config.ai/api-key-variable
+                        "PRIMARY_OVERRIDE_KEY"
+                        :seon.config.ai.backup/model "deepseek-v4-pro"))
+                [:seon.ai/backup :seon.ai/api-key-variable]))
+            "same-provider backups inherit an explicit primary credential")))))
 
 (deftest thinking-is-one-config-fact-with-three-wire-states
   (testing "absence leaves the provider default untouched"
@@ -205,7 +243,9 @@
   ;; three of four backup dials cannot produce a half-built target
   (doseq [dial [:seon.config.ai.backup/endpoint
                 :seon.config.ai.backup/api-key-variable]]
-    (is (not (contains? (ai/targets (assoc @dials dial "set-but-alone"))
+    (is (not (contains? (ai/targets (-> @dials
+                                        (dissoc :seon.config.ai.backup/model)
+                                        (assoc dial "set-but-alone")))
                         :seon.ai/backup))
         (str dial " alone is not a backup, and it is not half of one"))))
 
@@ -302,7 +342,9 @@
 (deftest a-missing-registry-row-leaves-the-working-call-target-unchanged
   (test-support/with-database
     (fn [connection]
-      (let [settings (assoc @dials :seon.config.ai/model "unregistered-model")]
+      (let [settings (-> @dials
+                         (assoc :seon.config.ai/model "unregistered-model")
+                         (dissoc :seon.config.ai.backup/model))]
         (is (= (ai/targets settings)
                (ai/targets @connection settings)))))))
 

@@ -375,15 +375,13 @@
  ; not an internal readiness clock.
  :seon.config.ai/timeout-ms 180000
 
- ; THE BACKUP DESCRIPTOR ROW IS EXPLICITLY ABSENT. A shipped backup
- ; would be a second provider this repository picked for everybody, and
- ; the honest default is "one target, no failover": with no
- ; :seon.config.ai.backup/model, `disposition` never returns
- ; :failover-now and the no-backup path below is the only resilience
- ; there is. A cluster that wants failover sets ONE dial when the backup
- ; is another model at the same provider, or three more when it is not.
- ; Absence is the state; there is no nil to read.
- :seon.config.ai.backup/model :seon.config/absent
+ ; THE BACKUP IS OPENROUTER'S PINNED 0731 GA BUILD. The bare
+ ; deepseek/deepseek-v4-flash slug is the older 0423 preview build; model
+ ; identity is never inferred from the family name. Endpoint and credential
+ ; variable derive from the model's provider row, so this is the one dial
+ ; that arms failover while the direct DeepSeek target remains primary.
+ ; Provenance: provider-routing-openrouter-2026-08-14.md, Option A.
+ :seon.config.ai.backup/model "deepseek/deepseek-v4-flash-20260731"
  :seon.config.ai.backup/endpoint :seon.config/absent
  :seon.config.ai.backup/api-key-variable :seon.config/absent
  :seon.config.ai.backup/timeout-ms :seon.config/absent
@@ -475,6 +473,23 @@
    :seon.config.ai/api-key-variable "META_MODEL_API_KEY"
    :seon.ai.model/openai-chat-completions true
    :seon.ai.model/output-token-wire-key "max_tokens"}
+
+  {:seon.ai.model/provider-id "openrouter"
+   :seon.config.ai/endpoint
+   "https://openrouter.ai/api/v1/chat/completions"
+   :seon.config.ai/api-key-variable "OPENROUTER_API_KEY"
+   :seon.ai.model/openai-chat-completions true
+   :seon.ai.model/output-token-wire-key "max_tokens"}
+
+  ; OpenRouter's pinned DeepSeek V4 Flash 0731 GA build. The bare slug names
+  ; the 0423 preview build and is deliberately absent from this manifest.
+  {:seon.ai.model/id "deepseek/deepseek-v4-flash-20260731"
+   :seon.ai.model/provider [:seon.ai.model/provider-id "openrouter"]
+   :seon.ai.model/context-window-tokens 1000000
+   :seon.ai.model/input-usd-per-mtok 0.08
+   :seon.ai.model/output-usd-per-mtok 0.25
+   :seon.ai.model/input-modalities #{:text}
+   :seon.ai.model/thinking-dials #{:disabled :low :high :max}}
 
   ; Current DeepSeek prices and announced peak/off-peak schedule retrieved
   ; 2026-08-03: docs/prds/sci-execution-runtime/research/
