@@ -686,6 +686,10 @@
      [?test :seon.test/sym]
      [?test :seon.test/subject ?subject]
      (function-reaches ?subject ?target)]
+    [(test-gates-symbol ?test ?target ?target-symbol)
+     (test-reaches ?test ?target)]
+    [(test-gates-symbol ?test ?target ?target-symbol)
+     [?test :seon.test/pending-subject ?target-symbol]]
     [(test-currently-failing ?test)
      [?test :seon.test/fail-count ?count]
      [(pos? ?count)]]
@@ -693,23 +697,32 @@
      [?test :seon.test/error-count ?count]
      [(pos? ?count)]]])
 
-(defn tests-reaching
-  "Test symbols that directly or transitively reach a function."
+(defn gate-set
+  "Tests gating one function identity from one database value.
+
+  Includes direct and transitive call reachability, resolved explicit
+  subjects, and test-first rows whose pending subject names this identity."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
                   [:vector :seon.test/sym]]}
   [database function-symbol]
-  (if-let [target
-           (:db/id (db/pull database [:db/id]
-                            [:seon.fn/sym function-symbol]))]
+  (let [target (or (:db/id (db/pull database [:db/id]
+                                    [:seon.fn/sym function-symbol]))
+                   -1)]
     (->> (db/q '[:find [?test-symbol ...]
-                 :in $ % ?target
+                 :in $ % ?target ?target-symbol
                  :where
-                 (test-reaches ?test ?target)
+                 (test-gates-symbol ?test ?target ?target-symbol)
                  [?test :seon.test/sym ?test-symbol]]
-               database test-reach-rules target)
+               database test-reach-rules target function-symbol)
          sort
-         vec)
-    []))
+         vec)))
+
+(defn tests-reaching
+  "Compatibility spelling for the shared gate-set derivation."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
+                  [:vector :seon.test/sym]]}
+  [database function-symbol]
+  (gate-set database function-symbol))
 
 (defn currently-failing-functions
   "Function symbols reached by a test whose latest committed result is red.
