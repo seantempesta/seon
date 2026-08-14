@@ -48,8 +48,9 @@
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as sci.kernel]
-            [seon.test-support :as support])
-  (:import [java.util.concurrent CountDownLatch]
+            [seon.test-support :as support]
+            [starfederation.datastar.clojure.api :as datastar])
+  (:import [java.util.concurrent CompletableFuture CountDownLatch]
            [java.net BindException URI URLEncoder]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
             HttpResponse$BodyHandlers]))
@@ -71,9 +72,57 @@
 
 (def ^:private agent-id "root")
 
+(defn- web-private
+  [function-name]
+  (deref (ns-resolve 'seon.render.web function-name)))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Fixture
 ;;; ---------------------------------------------------------------------------
+
+(deftest accepted-socket-writes-have-a-loud-drain-backstop
+  (let [drained (CompletableFuture.)
+        closed? (atom false)
+        result
+        (with-redefs [http/send! (fn [& _] true)
+                      http/write-state
+                      (fn [_]
+                        {:http-kit.write/pending-bytes 17
+                         :http-kit.write/drained drained})
+                      datastar/close-sse! (fn [_] (reset! closed? true))]
+          ((web-private 'write-package!)
+           ::channel ::generator (byte-array [1]) 20 ::socket-drain))]
+    (is (= :seon.await/backstop-fired (:seon.error/kind result)))
+    (is (= ::socket-drain
+           (get-in result [:seon.error/data
+                           :seon.error/diagnostic-member])))
+    (is (true? @closed?))))
+
+(deftest initial-package-publication-has-a-loud-render-backstop
+  (support/with-database
+    (fn [connection]
+      (let [pages (async/chan)
+            pages-mult (async/mult pages)
+            result
+            ((web-private 'settle-package!)
+             {:seon.store/connection-object connection
+              :seon.render.web/registration (atom {})
+              :seon.render.web/render-channel (async/chan 1)
+              :seon.render.web/pages-mult pages-mult
+              :seon.render.web/latest-packages (atom {})
+              :seon.config.eval/time-limit-ms 20}
+             ::missing-page)]
+        (is (= :seon.await/backstop-fired (:seon.error/kind result)))
+        (is (= ::missing-page
+               (get-in result [:seon.error/data
+                               :seon.error/diagnostic-member])))
+        (is (integer?
+             (get-in result
+                     [:seon.error/data
+                      :seon.error/diagnostic-evidence
+                      :seon.await/observation
+                      :seon.render.package/basis-transaction])))
+        (async/close! pages)))))
 
 (defn- with-server
   "The whole render pipeline on real sockets: the render proc in its own

@@ -48,6 +48,7 @@
             [clojure.walk :as cwalk]
             [org.httpkit.server :as http]
             [reitit.ring :as ring]
+            [seon.await :as await]
             [seon.blob :as blob]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.message :as message]
@@ -73,7 +74,7 @@
   (:import [java.net URI URLDecoder]
            [java.nio.charset StandardCharsets]
            [java.util Date]
-           [java.util.concurrent CompletableFuture Executors]))
+           [java.util.concurrent Executors]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -1280,14 +1281,33 @@
   remote-delivery acknowledgement."
   {:seon.fn/external-sink :html-response
    :seon.fn/projection-boundary :seon.render/html}
-  [channel generator frame]
+  [channel generator frame backstop-ms member]
   (if (http/send! channel frame false)
     (let [{pending-bytes :http-kit.write/pending-bytes
            drained :http-kit.write/drained}
           (http/write-state channel)]
-      (when (pos? pending-bytes)
-        (.join ^CompletableFuture drained))
-      true)
+      (if (pos? pending-bytes)
+        (let [result
+              (await/await!
+               {:seon.await/bound
+                {:seon.await/config-attribute
+                 :seon.config.eval/time-limit-ms
+                 :seon.await/config-value backstop-ms}
+                :seon.await/diagnostic
+                {:seon.error/diagnostic-layer :web-delivery
+                 :seon.error/diagnostic-operation ::socket-queue-drain
+                 :seon.error/diagnostic-member member
+                 :seon.error/diagnostic-expected ::drained-or-closed
+                 :seon.error/diagnostic-offending ::pending
+                 :seon.error/diagnostic-evidence
+                 {:http-kit.write/pending-bytes pending-bytes}}
+                :seon.await/future drained})]
+          (if (:seon.error/kind result)
+            (do
+              (datastar/close-sse! generator)
+              result)
+            true))
+        true))
     (do
       (datastar/close-sse! generator)
       false)))
@@ -1298,7 +1318,8 @@
     render-channel :seon.render.web/render-channel
     pages-mult :seon.render.web/pages-mult
     connection :seon.store/connection-object
-    latest-packages :seon.render.web/latest-packages}
+    latest-packages :seon.render.web/latest-packages
+    backstop-ms :seon.config.eval/time-limit-ms}
    registration-key]
   (let [tap (async/chan (async/sliding-buffer 1))]
     (register-tab! registration registration-key)
@@ -1307,11 +1328,26 @@
       (or (fresh-fact-package connection latest-packages registration-key)
           (do
             (async/offer! render-channel {::join true})
-            (loop []
-              (when-let [packages (async/<!! tap)]
-                (if-let [package (get packages registration-key)]
-                  (join-package package)
-                  (recur))))))
+            (let [packages
+                  (await/await!
+                   {:seon.await/bound
+                    {:seon.await/config-attribute
+                     :seon.config.eval/time-limit-ms
+                     :seon.await/config-value backstop-ms}
+                    :seon.await/diagnostic
+                    {:seon.error/diagnostic-layer :web-delivery
+                     :seon.error/diagnostic-operation ::initial-package
+                     :seon.error/diagnostic-member registration-key
+                     :seon.error/diagnostic-expected ::registered-package
+                     :seon.error/diagnostic-offending ::pending
+                     :seon.error/diagnostic-evidence
+                     {:seon.render.package/basis-transaction
+                      (db/basis-t @connection)}}
+                    :seon.await/port-operations [tap]
+                    :seon.await/accept? #(get % registration-key)})]
+              (if (:seon.error/kind packages)
+                packages
+                (join-package (get packages registration-key))))))
       (finally
         (async/untap pages-mult tap)
         (async/close! tap)
@@ -1343,7 +1379,8 @@
             registration :seon.render.web/registration
             latest-packages :seon.render.web/latest-packages
             render-channel :seon.render.web/render-channel
-            fault-channel :seon.render.web/fault-channel}]
+            fault-channel :seon.render.web/fault-channel
+            backstop-ms :seon.config.eval/time-limit-ms}]
   (let [query (query-params request)
         debug? (= "true" (get query "debug"))
         registration-key (if debug? [::debug-tab id] id)
@@ -1370,9 +1407,17 @@
                      delivered-revision
                      (if initial
                        (do
-                         (write-package!
-                          channel generator
-                          (:seon.render.package/keyframe-bytes initial))
+                         (let [written
+                               (write-package!
+                                channel generator
+                                (:seon.render.package/keyframe-bytes initial)
+                                backstop-ms
+                                {:seon.render.web/tab-id tab-id
+                                 :seon.render.web/page registration-key})]
+                           (when (:seon.error/kind written)
+                             (throw
+                              (ex-info (:seon.error/message written)
+                                       written))))
                          (:seon.render.package/revision initial))
                        (do (async/offer! render-channel {::join true}) 0))]
                  (loop [delivered-revision delivered-revision
@@ -1409,11 +1454,23 @@
                              (recur delivered-revision painted?)
 
                              :else
-                             (when (write-package!
+                             (let [written
+                                   (write-package!
                                     channel generator
                                     (package-patches
-                                     delivered-revision package))
-                               (recur revision true))))
+                                     delivered-revision package)
+                                    backstop-ms
+                                    {:seon.render.web/tab-id tab-id
+                                     :seon.render.web/page registration-key
+                                     :seon.render.package/revision revision})]
+                               (cond
+                                 (:seon.error/kind written)
+                                 (throw
+                                  (ex-info (:seon.error/message written)
+                                           written))
+
+                                 written
+                                 (recur revision true)))))
                          (recur delivered-revision painted?))))))
                (catch Throwable failure
                  (async/offer!
@@ -1658,11 +1715,15 @@
    :seon.fn/projection-boundary :seon.render/html}
   [service
    agent-id]
-  (let [page (:seon.render.package/keyframe
-              (settle-package! service agent-id))
-        stream-html (get page stream-strip-id)
-        unit-html (vals (dissoc page stream-strip-id))]
-    {:status 200
+  (let [settled (settle-package! service agent-id)]
+    (if (:seon.error/kind settled)
+      {:status 503
+       :headers {"content-type" "text/plain; charset=utf-8"}
+       :body (:seon.error/message settled)}
+      (let [page (:seon.render.package/keyframe settled)
+            stream-html (get page stream-strip-id)
+            unit-html (vals (dissoc page stream-strip-id))]
+        {:status 200
      :headers {"content-type" "text/html; charset=utf-8"}
      :body (shell {:seon.cluster.agent/id agent-id
                    :seon.render/page
@@ -1678,7 +1739,7 @@
                            unit-html)
                      (hiccup/raw stream-html)]]
                    :seon.render.web/feed-url
-                   (route/path ::route/feed {:id agent-id})})}))
+                   (route/path ::route/feed {:id agent-id})})}))))
 
 (defn- debug-response
   [{connection :seon.store/connection-object
@@ -1757,6 +1818,7 @@
                (select-keys service
                             [:seon.store/connection-object
                              :seon.sci.admit/caps
+                             :seon.config.eval/time-limit-ms
                              :seon.cluster.run/process
                              :seon.render.web/pages-mult
                              :seon.render.web/registration

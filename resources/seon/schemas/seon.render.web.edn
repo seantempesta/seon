@@ -9,6 +9,8 @@
                     :seon.render.web/root-agent-id]
                    [:seon.store/connection-object :seon.store/connection-object]
                    [:seon.sci.admit/caps :seon.sci.admit/caps]
+                   [:seon.config.eval/time-limit-ms
+                    :seon.sci.eval/time-limit-ms]
                    [:seon.cluster.run/process
                     :seon.cluster.run/process]
                    [:seon.render.web/pages-mult
