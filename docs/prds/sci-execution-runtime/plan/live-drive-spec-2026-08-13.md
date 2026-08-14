@@ -13,6 +13,16 @@ open pricing and budget decisions are made against evidence instead of
 taste. The owner's framing governs: the goal is GOOD DERIVED CONTEXT —
 the drive measures fidelity first, cost second.
 
+## Drive series (owner deferred to orchestrator judgment, 2026-08-14)
+
+As many drives as the measurements need are authorized. **Drive 1**
+(first, on the proven machinery): the contracted-function task against
+a real `my.plan` with `:about` refs, a mid-session message, one
+rebirth, settle — zero shared-tree risk. **Drive 2** (after
+green-to-install lands): a real filed issue, the agent's edits gated by
+tests before landing. Later drives iterate on what the measurements
+surface.
+
 ## Preconditions (in order, all required)
 
 1. The [walk-history wedge blocker](../../seon/issues/walk-neighborhood-under-history-can-wedge-cluster-stop.md)
