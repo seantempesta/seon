@@ -310,7 +310,9 @@
 
 (defn render-ai
   "Render the grouped teaching face of an install refusal."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  {:malli/schema
+   [:=> [:cat :seon.test.accretion/install-refused-error]
+    :seon.render/ai]}
   [unit]
   (when (:seon.test.accretion/install-refused unit)
     (str/join
@@ -334,8 +336,9 @@
 
 (defn render-html
   "Render an install refusal as one HTML card."
-  {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:maybe :seon.render/hiccup]]}
+  {:malli/schema
+   [:=> [:cat :seon.test.accretion/install-refused-error]
+    :seon.render/hiccup]}
   [unit]
   (when-let [text (render-ai unit)]
     [:article {:class "seon-family-entry seon-test-gate-refusal"}

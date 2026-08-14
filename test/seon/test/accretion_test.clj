@@ -57,6 +57,14 @@
     (is (= (accretion/seed-for "receipt-id")
            (accretion/seed-for "receipt-id")))))
 
+(deftest refusal-renderers-accept-the-declaring-error-shape
+  (is (= [:=> [:cat :seon.test.accretion/install-refused-error]
+          :seon.render/ai]
+         (:malli/schema (meta #'accretion/render-ai))))
+  (is (= [:=> [:cat :seon.test.accretion/install-refused-error]
+          :seon.render/hiccup]
+         (:malli/schema (meta #'accretion/render-html)))))
+
 (deftest generatability-is-derived-by-malli-generator-construction
   (testing "test.chuck enables Malli regex generation on the runtime classpath"
     (is (true? (accretion/generatable? [:re #"[a-z]+"]))))
