@@ -31,9 +31,11 @@ function output (whole)
   → derivation               history unit / walk membership, from facts
   → projection selection     :seon.render/ai | /html | /form
   → render output or floor   declared face, or derived data face
-  → fit                      THE one budget: profile, form-aware,
-                             elision values                   [seam A]
-  → face assembly            prompt bytes | page hiccup
+  → value printer            quality: honest faces, structural
+                             windows — NO budget            
+  → assembly                 page hiccup; for a MODEL CALL only:
+                             member-level selection against the
+                             prompt budget                  [seam A]
   → delivery                 provider wire | SSE morphs
 ```
 
@@ -47,15 +49,26 @@ unconstructable, not discouraged.
 **Function outputs flow whole.** No function bounds, truncates,
 summarizes, or narrates what it returns.
 
-**Budgeting happens at the floor, never at the function-output level.**
-The fit/floor boundary (seam A) is the single place the consumer
-profile's budget applies, identically for both projections, emitting
-elision values — count, path, requery identity — never bare cuts. The
+**Budget is an LLM-call concern — it exists at exactly one seam
+(owner correction, 2026-08-14 evening, superseding the earlier
+"fit applies the budget" framing).** The pull/walk hands back a vector
+of units — whole data. The VALUE PRINTER (the floor) has NO budget:
+its only job is quality — honest, readable faces with no garbage —
+and its elisions are STRUCTURAL PAGINATION for readability (windows
+with cursors and requery identities, the drill discipline), identical
+for both projections. HTML never has a budget at all; disclosure and
+windowing are the browser's dimension. The one budget lives at
+CONTEXT ASSEMBLY for a model call: the generator selects members
+against the provider prompt budget
+(`:seon.config.ai/prompt-token-budget`, the beyond-closure dial,
+cheapest-form selection — machinery that already exists), and that
+decision is MEMBER-LEVEL: whole blocks enter, or elide as whole chips
+with requery identity. Token pressure can never reach inside a value,
+so a mid-form cut is not guarded against — it is unreachable. The
 only other place content legally shrinks is declared storage-admission
-caps (seam B, the `seon.sci.admit` config-fact family), which also
-emit honest elisions. `bounded-text` is internal machinery of these
-two seams; any bounding call inside ordinary code is the defect,
-asserted by graph query.
+caps (seam B, the `seon.sci.admit` config-fact family), emitting
+honest elisions. Any bounding call inside ordinary code is the
+defect, asserted by graph query.
 
 **Render outputs clean up; they never shrink.** A declared
 `:seon.render/ai` or `/html` face exists so a shape shows something
