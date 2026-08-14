@@ -883,6 +883,35 @@
                          "identity-admission-missing"]]
                       @connection))))))))
 
+(deftest uninstalled-pull-attributes-refuse-without-writing
+  (test-support/with-database
+   (fn [connection]
+     (db/transact! connection
+                   [{:seon.cluster.run/id "diagnostic-pull-run"}])
+     (let [database @connection
+           basis-before (db/basis-t database)
+           uninstalled [:seon.cluster.run/generated-at
+                        :seon.cluster.run/generation-complete-at]
+           results
+           (mapv (fn [attribute]
+                   (db/pull database
+                            [:seon.cluster.run/id attribute]
+                            [:seon.cluster.run/id "diagnostic-pull-run"]))
+                 uninstalled)]
+       (is (every? #(not (contains? (:schema database) %)) uninstalled))
+       (doseq [[attribute result] (map vector uninstalled results)]
+         (is (= :seon.db/invalid-read (:seon.error/kind result)))
+         (is (= attribute
+                (get-in result
+                        [:seon.error/data :seon.db/dependency-data
+                         :attribute]))))
+       (is (= basis-before (db/basis-t @connection))
+           "diagnostic reads cannot advance the database basis")
+       (is (= {:seon.cluster.run/id "diagnostic-pull-run"}
+              (db/pull @connection
+                       [:seon.cluster.run/id]
+                       [:seon.cluster.run/id "diagnostic-pull-run"])))))))
+
 (deftest temporal-database-identities-use-the-origin-schema
   (test-support/with-database
    (fn [connection]
