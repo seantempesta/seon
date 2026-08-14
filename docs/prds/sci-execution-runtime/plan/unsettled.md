@@ -287,6 +287,37 @@ seconds inside the derivation extent, and a naked render call outside
 any extent returns the typed refusal. Run it at the quiet tree right
 before the shared-root reset.
 
+**OVERNIGHT PROGRAM — 2026-08-14 (owner asked; runs autonomously,
+crash-resume standing, flash-only paid runs, no fable lanes):**
+
+*The spine, serial:* (1) harvest fix (green-to-install, in flight) →
+boot-refusal-fix commits → **RESET the shared root** → UI verified
+answering → the queued live-pull probe verification → (2) **DRIVE 1**
+(pre-authorized: proven task, independent observer lane, episode facts
+preserved) → drive report with all eight measurements → (3)
+green-to-install's live graduation transcript + measured install
+latency on the fresh root → (4) if Drive 1 is clean, **DRIVE 2** (a
+real filed issue, edits gated by green-to-install) → (5) the R2
+completion train, serial, red-tolerant: W3 consumers → W4/W5 kind
+deletion → `:seon.db/database-value`→`:seon.db/db` → run `sources-*`
+rename → **ONE closing `bin/test --all`** (fix-forward; the tally is
+the morning headline).
+
+*Parallel beside the spine (file-disjoint):* R3 tail (computed-guard
+live refusal + collision archival); six-word-error MCP face
+(cluster.clj now free); wedge-continuation classes (web delivery
+first — disjoint; host crossings + orderly-stop joins after W3 passes
+those files); test-premise remaining members (test_support free);
+db-diff follow-up (editscript comparison + the render-defect issue);
+store-bloat key-prefix census + exclusive sweep design probe (operator
+files free after R3 tail); ONE dogfood lane on the fresh root driving
+the agent-facing REPL (standing order, revived); issue class-kills by
+rank as lanes free.
+
+*Morning deliverables:* the drive report(s) + the working UI link +
+the closing --all tally + reconciled index + this block updated with
+what actually happened.
+
 **THE ORDERED QUEUE AFTER RETURNS:**
 1. R2 continuation, serial, red-tolerant: W2b (deferred producers in
    bootstrap/walk/plan once those lanes land) → W3 consumers dispatch on
