@@ -297,6 +297,8 @@
          " " omitted " more " measure
          (when-some [total (:seon.render.data/total unit)]
            (str " of " total))
+         (when-some [bound-by (:seon.print/bound-by unit)]
+           (str "; bounded by " bound-by))
          "; " requery " at " location
          " with " (pr-str (or (:seon.render.profile/id unit)
                                :seon.render.profile/unspecified)))))
@@ -700,6 +702,8 @@
     :seon.render.profile/id (:seon.render.profile/id profile)}
    (when (some? total) {:seon.render.data/total (long total)})
    (when (some? prefix) {::prefix prefix})
+   (when-some [bound-by (::bound-by profile)]
+     {::bound-by bound-by})
    (requery-fields profile)))
 
 (defn- preserve-requery
@@ -926,6 +930,33 @@
           (recur 0 (dec depth-limit) 0)
 
           :else candidate)))))
+
+(defn bounded-text
+  "Return text unchanged or one honest, requeryable elision value."
+  {:malli/schema
+   [:=> [:cat :seon.print/bounded-text-request]
+    :seon.print/bounded-text]}
+  [{text ::text
+    character-limit ::character-limit
+    bound-by ::bound-by
+    supplied-profile :seon.render/profile
+    profile-id :seon.render.profile/id
+    requery-id ::requery-id
+    path :seon.render.data/path}]
+  (let [path (vec (or path []))
+        profile
+        (merge
+         (or supplied-profile
+             {:seon.render.profile/id profile-id})
+         {::requery-id requery-id}
+         (when bound-by {::bound-by bound-by}))
+        node {::face ::string ::value text}
+        fitted (if (some? character-limit)
+                 (fit-string node profile path character-limit)
+                 (fit node profile))]
+    (if (= ::string (::face fitted))
+      (::value fitted)
+      fitted)))
 
 (schema/register-core-predicate! 'seon.print/sink? sink?)
 (schema/register-core-predicate! 'seon.print/print-number? print-number?)

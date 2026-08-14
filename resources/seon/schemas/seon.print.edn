@@ -219,6 +219,31 @@
              [:enum :children :characters :subtree :tokens],
              :requery-id :seon.schema/value,
              :requery-refusal [:string {:min 1}],
+             :bound-by :qualified-keyword,
+             :character-limit [:int {:min 0}],
+             :text :string,
+             :bounded-text-config
+             [:map
+              [:seon.print/text :seon.print/text]
+              [:seon.print/character-limit :seon.print/character-limit]
+              [:seon.print/bound-by :seon.print/bound-by]
+              [:seon.render.profile/id :seon.render.profile/id]
+              [:seon.print/requery-id :seon.print/requery-id]
+              [:seon.render.data/path
+               {:optional true}
+               :seon.render.data/path]],
+             :bounded-text-profile
+             [:map
+              [:seon.print/text :seon.print/text]
+              [:seon.render/profile :seon.render.profile/profile]
+              [:seon.print/requery-id :seon.print/requery-id]
+              [:seon.render.data/path
+               {:optional true}
+               :seon.render.data/path]],
+             :bounded-text-request
+             [:or :seon.print/bounded-text-config
+              :seon.print/bounded-text-profile],
+             :bounded-text [:or :string :seon.print/elision],
              :prefix :string,
              :elision-base
              [:map
@@ -232,6 +257,9 @@
               [:seon.render.data/next-offset
                :seon.render.data/next-offset]
               [:seon.render.profile/id :seon.render.profile/id]
+              [:seon.print/bound-by
+               {:optional true}
+               :seon.print/bound-by]
               [:seon.print/prefix {:optional true} :string]],
              :elision
              [:or
@@ -248,6 +276,9 @@
                [:seon.render.data/next-offset
                 :seon.render.data/next-offset]
                [:seon.render.profile/id :seon.render.profile/id]
+               [:seon.print/bound-by
+                {:optional true}
+                :seon.print/bound-by]
                [:seon.print/prefix {:optional true} :string]
                [:seon.print/requery-id :seon.print/requery-id]]
               [:map
@@ -261,6 +292,9 @@
                [:seon.render.data/next-offset
                 :seon.render.data/next-offset]
                [:seon.render.profile/id :seon.render.profile/id]
+               [:seon.print/bound-by
+                {:optional true}
+                :seon.print/bound-by]
                [:seon.print/prefix {:optional true} :string]
                [:seon.print/requery-refusal
                 :seon.print/requery-refusal]]],
