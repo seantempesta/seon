@@ -62,7 +62,7 @@ See `README.md` for the convention.
 | [Bound orderly-stop completion joins](orderly-stop-completion-joins-have-no-bound.md) | blocker | wedge class-kill continuation |
 | [Bound scheduled store collection before it holds the installation control lock](scheduled-store-collection-holds-the-control-lock-without-a-bound.md) | blocker | RULED keep-serial operator lock contention follow-up |
 
-## Friction (123)
+## Friction (124)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -70,6 +70,7 @@ See `README.md` for the convention.
 | [Render db diffs through fit with an html producer](db-diff-render-bypasses-print-fit-and-has-no-html.md) | friction | db-diff completion gate |
 | [Add the required instrumentation request to the repl skill](repl-skill-omits-required-instrumentation-request.md) | friction | skill accuracy sweep |
 | [Give maintenance messages plain identities, not printed EDN](maintenance-message-ids-embed-printed-edn.md) | friction | message identity cleanup |
+| [Fail over on payment-required refusals](payment-required-refusal-never-fails-over.md) | friction | provider routing repair |
 | [Refuse cluster names that collide with the store directory](cluster-named-store-collides-with-the-store-directory.md) | friction | R3 store-path decision |
 | [Carry the operator root explicitly instead of guessing from names](operator-root-inference-guesses-from-directory-names.md) | friction | R3 store-path decision |
 | [Bound the parallel-only confirmation protocol exchange](confirmation-parallel-failure-blocks-reading-worker-protocol.md) | friction | test-platform follow-up |
