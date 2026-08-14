@@ -57,6 +57,7 @@ See `README.md` for the convention.
 | [Supply the generated entry's required render output](generated-turn-omits-the-required-render-output.md) | blocker | generate-call-transition lane (held `loop.clj`) |
 | [Return from the generated opening's second live pull](generated-opening-live-pull-does-not-return-after-help.md) | blocker | prefix-drift bootstrap performance diagnosis (held `bootstrap.clj`) |
 | [Explain the 24-second live root pull of 189 members](live-root-pull-of-189-members-takes-24-seconds.md) | blocker | render acquisition performance wave |
+| [Append deltas to retained context, never whole snapshots](agent-context-history-appends-complete-snapshots.md) | blocker | drive fidelity wave |
 | [Bound orderly-stop completion joins](orderly-stop-completion-joins-have-no-bound.md) | blocker | wedge class-kill continuation |
 
 ## Friction (129)
@@ -74,6 +75,8 @@ See `README.md` for the convention.
 | [Seed drive clusters with their required plan facts](drive-one-starts-without-required-plan-facts.md) | friction | drive-1 defect wave |
 | [Serve the namespace page first byte under ten seconds](namespace-page-first-byte-exceeds-ten-seconds.md) | friction | drive-1 defect wave |
 | [Read foreign live roots in operator status](operator-status-refuses-foreign-live-root.md) | friction | drive-1 defect wave |
+| [Account the whole agent prompt, not an opening proxy](opening-cost-proxy-hides-agent-prompt-bulk.md) | friction | drive fidelity wave |
+| [Hand the render-cost recorder its connection](agent-context-render-cost-requires-unprovided-connection.md) | friction | drive fidelity wave |
 | [Refuse cluster names that collide with the store directory](cluster-named-store-collides-with-the-store-directory.md) | friction | R3 store-path decision |
 | [Carry the operator root explicitly instead of guessing from names](operator-root-inference-guesses-from-directory-names.md) | friction | R3 store-path decision |
 | [Bound the parallel-only confirmation protocol exchange](confirmation-parallel-failure-blocks-reading-worker-protocol.md) | friction | test-platform follow-up |
