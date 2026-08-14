@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, operator, class/n4, wave/operator-lock-contention]
 ---
@@ -11,7 +11,7 @@ tags: [issue, operator, class/n4, wave/operator-lock-contention]
 
 `with-operator-lock` now derives the launcher's lifecycle lock from the
 selected root, so two isolated `--root` operator commands no longer serialize
-([archived issue](archive/an-isolated-operator-root-locks-the-shared-repository-root.md)).
+([archived issue](an-isolated-operator-root-locks-the-shared-repository-root.md)).
 The JVM-side owner still has the same shape in four places: `cleanup-root!`,
 `cleanup-cluster!`, `collect!`, and `refork!` each take
 `state/with-control-lock!` — the INSTALLATION-wide lock — for work that
@@ -76,3 +76,12 @@ The current source therefore contradicts both itself and the recorded ruling.
 Closure requires the promised honest annotation/contract reconciliation; a
 contention-driven lock redesign remains deferred until the owner's measured
 four-worker condition is met.
+
+## Resolution — 2026-08-14
+
+Resolved according to the owner ruling, not by implementing the deferred
+per-root custody-transfer design. `with-control-lock!` now states the explicit
+keep-serial exception and names its measured four-worker revisit condition;
+the cleanup and refork call sites carry the same annotation. Scheduled
+collection no longer belongs to the exception: it uses the selected root lock
+only for store acquisition and performs writer GC outside lifecycle custody.

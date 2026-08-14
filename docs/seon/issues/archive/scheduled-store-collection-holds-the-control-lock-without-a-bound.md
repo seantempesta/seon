@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, operator, database, flow, wave/operator-lock-contention]
 ---
@@ -59,3 +59,18 @@ installation control lock across an unbounded dependency wait.
   exact bounded failure plus release of the lock to a waiting cluster start.
 - `bin/test seon.cluster.boot-test` reaches a total tally; the partial-cluster
   test cannot disappear behind absence of reporter progress.
+
+## Resolution — 2026-08-14
+
+Resolved in the bounded-boundary slice. `seon.operator/collect!` now takes the
+selected root's lifecycle lock only to acquire the operation store, then keeps
+that store's flock while both Datahike GC passes settle outside lifecycle
+custody. `parked-datahike-collection-yields-lock-and-retains-store-custody`
+withholds Datahike's completion and proves both halves: another lifecycle
+transition acquires immediately, while a second store open remains refused
+until collection is terminal. This dissolves the old acceptance premise that
+Datahike's non-cancellable GC promise itself must return a bounded failure:
+missing GC completion may retain store custody, but cannot retain a lifecycle
+lock. The generic lock seam separately requires positive acquisition and hold
+bounds and reports typed holder/waiter evidence; an expired hold retains
+kernel custody until its transition actually ends.
