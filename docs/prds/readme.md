@@ -23,9 +23,9 @@ The [issue index](/docs/seon/issues/index.md) is the ranked queue.
 
 Every localized PRD `AGENTS.md` is executable authority, while its adjacent
 `roadmap.md` carries that chunk's lifecycle. Their frontmatter statuses must
-match. Current authorities use `status: active`; retained superseded
-authorities use `status: superseded`; authorities below `archive/` use
-`status: archived`.
+match. Current authorities use `status: active`; README-only briefs closed into
+`archive/` use their verdict (`status: absorbed` or `status: superseded`);
+localized executable runbooks below `archive/` use `status: archived`.
 
 Historical `research/` documents and archived issue notes are dated records,
 not localized sequencing authorities. Their original lifecycle metadata stays
@@ -33,9 +33,11 @@ intact; no one retcons them to describe the current system.
 
 The recurring `seon.dev.markdown-test/historical-prd-authorities-fail-closed-test`
 discovers every `docs/prds/**/AGENTS.md`, requires a sibling roadmap, enforces
-matching lifecycle status, forces every archive runbook to `archived`, and
-requires every archived or superseded runbook to contain only the inert
-historical boundary. If discovery finds no runbooks, the test reports
+matching lifecycle status, forces every localized archive runbook to
+`archived`, and requires every archived or superseded runbook to contain only
+the inert historical boundary. Archived README-only briefs retain their
+closing verdict (`absorbed` or `superseded`) because they are not executable
+runbooks. If discovery finds no runbooks, the test reports
 `authority-subjects-absent` and fails.
 
 ## Historical reading
