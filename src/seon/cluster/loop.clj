@@ -49,13 +49,15 @@
             [seon.db :as db]
             [seon.error :as error]
             [seon.flow :as seon.flow]
+            [seon.fn :as seon.fn]
             [seon.problems :as problems]
             [seon.render :as render]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.schema.form :as schema.form])
+            [seon.schema.form :as schema.form]
+            [seon.test.accretion :as accretion])
   (:import [java.util Date]))
 
 ;;; ---------------------------------------------------------------------------
@@ -191,11 +193,128 @@
       (:seon.sci.eval/ending-ns evaluation)
       (assoc :seon.sci.eval/ending-ns
              (:seon.sci.eval/ending-ns evaluation))
+      (:seon.test.accretion/gate-tests settlement-evaluation)
+      (assoc :seon.test.accretion/gate-tests
+             (mapv (fn [test-symbol] [:seon.test/sym test-symbol])
+                   (:seon.test.accretion/gate-tests settlement-evaluation)))
+      (some? (:seon.test.accretion/gate-test-count settlement-evaluation))
+      (assoc :seon.test.accretion/gate-test-count
+             (:seon.test.accretion/gate-test-count settlement-evaluation))
+      (some? (:seon.test.accretion/gate-pass-count settlement-evaluation))
+      (assoc :seon.test.accretion/gate-pass-count
+             (:seon.test.accretion/gate-pass-count settlement-evaluation))
+      (some? (:seon.test.accretion/gate-fail-count settlement-evaluation))
+      (assoc :seon.test.accretion/gate-fail-count
+             (:seon.test.accretion/gate-fail-count settlement-evaluation))
+      (:seon.test.accretion/seed settlement-evaluation)
+      (assoc :seon.test.accretion/seed
+             (:seon.test.accretion/seed settlement-evaluation))
+      (some? (:seon.test.accretion/case-count settlement-evaluation))
+      (assoc :seon.test.accretion/case-count
+             (:seon.test.accretion/case-count settlement-evaluation))
+      (some? (:seon.test.accretion/executed-count settlement-evaluation))
+      (assoc :seon.test.accretion/executed-count
+             (:seon.test.accretion/executed-count settlement-evaluation))
+      (:seon.test.accretion/status settlement-evaluation)
+      (assoc :seon.test.accretion/status
+             (:seon.test.accretion/status settlement-evaluation))
+      (:seon.test.accretion/report-blob settlement-evaluation)
+      (assoc :seon.test.accretion/report-blob
+             (:seon.test.accretion/report-blob settlement-evaluation))
+      (:seon.test.accretion/report-size settlement-evaluation)
+      (assoc :seon.test.accretion/report-size
+             (:seon.test.accretion/report-size settlement-evaluation))
       (:seon.program/row evaluation)
       (assoc :seon.program/row
              (:seon.program/row evaluation))
       (seq rows) (assoc :seon.def/rows rows)
       value (assoc :my.run/value value))))
+
+(defn- append-output
+  [evaluation lines]
+  (if (seq lines)
+    (update evaluation :seon.cluster.eval/output
+            (fn [output]
+              (str (when (seq output) (str output "\n"))
+                   (str/join "\n" lines))))
+    evaluation))
+
+(defn- gate-function-install
+  "Evaluate one function's complete green-to-install decision from one db."
+  [cluster base-ctx agent-id receipt-id form evaluation]
+  (if-let [function-symbol (get-in evaluation [:seon.program/row :seon.fn/sym])]
+    (let [database @(:seon.db/connection cluster)
+          [_ analyzed-row]
+          (seon.fn/analyze-form
+           database
+           (:seon.cluster.run.form/source form)
+           (:seon.cluster.run.form/ns form)
+           (:seon.program/row evaluation))
+          test-symbols (seon.fn/gate-set database function-symbol)
+          seed (accretion/seed-for receipt-id)
+          candidate
+          (sci.eval/evaluate-candidate
+           {:seon.sci.eval/ctx base-ctx
+            :seon.db/db database
+            :seon.db/connection (:seon.db/connection cluster)
+            :seon.cluster.agent/id agent-id
+            :seon.cluster.run.form/source
+            (:seon.cluster.run.form/source form)
+            :seon.cluster.run.form/ns (:seon.cluster.run.form/ns form)
+            :seon.program/row analyzed-row
+            :seon.test.accretion/gate-set test-symbols
+            :seon.config.test/auto-check-cases
+            (:seon.config.test/auto-check-cases cluster)
+            :seon.test.accretion/seed seed
+            :seon.sci.eval/time-limit-ms
+            (:seon.config.eval/time-limit-ms cluster)
+            :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+            :seon.config/on-core-error (:seon.config/on-core-error cluster)})
+          check (:seon.test.accretion/auto-check candidate)
+          report
+          (accretion/gate-report
+           {:seon.fn/sym function-symbol
+            :seon.test.accretion/results
+            (:seon.test.accretion/results candidate)
+            :seon.test.accretion/auto-check check})
+          evidence
+          {:seon.test.accretion/gate-tests test-symbols
+           :seon.test.accretion/gate-test-count
+           (:seon.test.accretion/test-count report)
+           :seon.test.accretion/gate-pass-count
+           (:seon.test.accretion/test-pass-count report)
+           :seon.test.accretion/gate-fail-count
+           (:seon.test.accretion/test-fail-count report)
+           :seon.test.accretion/seed seed
+           :seon.test.accretion/case-count
+           (:seon.test.accretion/case-count check)
+           :seon.test.accretion/executed-count
+           (:seon.test.accretion/executed-count check)
+           :seon.test.accretion/status
+           (:seon.test.accretion/status check)
+           :seon.test.accretion/report-edn (pr-str report)}
+          evaluation (merge evaluation evidence
+                            {:seon.program/row analyzed-row})]
+      (if (:seon.test.accretion/install? report)
+        (append-output evaluation
+                       (:seon.test.accretion/advisories report))
+        (let [refusal (accretion/install-refusal report)
+              admitted
+              (admit/admit
+               {:seon.sci.admit/value refusal
+                :seon.sci.admit/interrupt-fn (constantly nil)
+                :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+                :seon.schema/projection
+                (schema/projection-from-database database)
+                :seon.config/on-core-error
+                (:seon.config/on-core-error cluster)})]
+          (-> evaluation
+              (dissoc :seon.program/row)
+              (merge admitted)
+              (assoc :seon.cluster.eval/error (accretion/render-ai refusal)
+                     :seon.error/kind
+                     :seon.test.accretion/install-refused)))))
+    evaluation))
 
 (defn- def-rows
   "Restore-ladder rows admitted by the terminal receipt transaction."
@@ -1474,7 +1593,12 @@
                                       :seon.cluster.run.form/ordinal ordinal
                                       :seon.error/value evaluation})
                             (report :error (inc ran)))
-                          (let [problem
+                          (let [evaluation
+                                (phase
+                                 #(gate-function-install
+                                   cluster base-ctx agent-id receipt-id
+                                   form evaluation))
+                                problem
                                 (phase
                                  #(problems/form-problem
                                    @connection

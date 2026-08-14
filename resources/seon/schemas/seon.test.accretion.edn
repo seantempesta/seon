@@ -14,6 +14,115 @@
                         :explanation :string,
                         :skip-reason :string,
                         :pass? :boolean,
+                        :failure-source [:enum :test :auto-check],
+                        :failure-shape :string,
+                        :expected-actual :string,
+                        :failures [:vector :seon.test.accretion/gate-failure],
+                        :failure-group
+                        [:map
+                         [:seon.test.accretion/failure-shape
+                          :seon.test.accretion/failure-shape]
+                         [:seon.test.accretion/failures
+                          :seon.test.accretion/failures]],
+                        :failure-groups
+                        [:vector :seon.test.accretion/failure-group],
+                        :gate-failure
+                        [:map
+                         [:seon.test.accretion/failure-source
+                          :seon.test.accretion/failure-source]
+                         [:seon.test.accretion/failure-shape
+                          :seon.test.accretion/failure-shape]
+                         [:seon.test/sym {:optional true} :seon.test/sym]
+                         [:seon.test/failing-assertions
+                          {:optional true}
+                          :seon.test/failing-assertions]
+                         [:seon.test.accretion/expected-actual
+                          {:optional true}
+                          :seon.test.accretion/expected-actual]
+                         [:seon.test.accretion/arguments
+                          {:optional true}
+                          :seon.schema/arguments]
+                         [:seon.test.accretion/actual
+                          {:optional true}
+                          :seon.test.accretion/actual]
+                         [:seon.test.accretion/expected
+                          {:optional true}
+                          :seon.test.accretion/expected]
+                         [:seon.test.accretion/explanation
+                          {:optional true}
+                          :seon.test.accretion/explanation]
+                         [:seon.test.accretion/seed
+                          {:optional true}
+                          :seon.test.accretion/seed]],
+                        :orientation :string,
+                        :test-count [:int {:min 0}],
+                        :test-pass-count [:int {:min 0}],
+                        :test-fail-count [:int {:min 0}],
+                        :advisories [:vector :string],
+                        :install? :boolean,
+                        :gate-tests
+                        [:vector {:seon.db/cardinality :many} :seon.db/ref],
+                        :gate-test-count [:int {:min 0}],
+                        :gate-pass-count [:int {:min 0}],
+                        :gate-fail-count [:int {:min 0}],
+                        :report-edn [:string {:min 1 :seon.db/no-history? true}],
+                        :report-blob :seon.blob/digest,
+                        :report-size [:int {:min 1}],
+                        :auto-check :seon.test.accretion/auto-check-result,
+                        :gate-report
+                        [:map
+                         [:seon.fn/sym :seon.fn/sym]
+                         [:seon.test.accretion/orientation
+                          :seon.test.accretion/orientation]
+                         [:seon.test.accretion/test-count
+                          :seon.test.accretion/test-count]
+                         [:seon.test.accretion/test-pass-count
+                          :seon.test.accretion/test-pass-count]
+                         [:seon.test.accretion/test-fail-count
+                          :seon.test.accretion/test-fail-count]
+                         [:seon.test.accretion/failure-groups
+                          :seon.test.accretion/failure-groups]
+                         [:seon.test.accretion/advisories
+                          :seon.test.accretion/advisories]
+                         [:seon.test.accretion/auto-check
+                          :seon.test.accretion/auto-check]
+                         [:seon.test.accretion/install?
+                          :seon.test.accretion/install?]],
+                        :gate-report-request
+                        [:map
+                         [:seon.fn/sym :seon.fn/sym]
+                         [:seon.test.accretion/results
+                          :seon.test.accretion/results]
+                         [:seon.test.accretion/auto-check
+                          :seon.test.accretion/auto-check]],
+                        :install-refused [:= true],
+                        :install-refused-error
+                        [:map
+                         {:seon.error/class true
+                          :seon.render/ai seon.test.accretion/render-ai
+                          :seon.render/html seon.test.accretion/render-html
+                          :error/message "must identify a refused green-to-install decision"}
+                         [:seon.test.accretion/install-refused
+                          :seon.test.accretion/install-refused]
+                         [:seon.error/kind :seon.error/kind]
+                         [:seon.error/message :seon.error/message]
+                         [:seon.fn/sym :seon.fn/sym]
+                         [:seon.test.accretion/orientation
+                          :seon.test.accretion/orientation]
+                         [:seon.test.accretion/test-count
+                          :seon.test.accretion/test-count]
+                         [:seon.test.accretion/test-pass-count
+                          :seon.test.accretion/test-pass-count]
+                         [:seon.test.accretion/test-fail-count
+                          :seon.test.accretion/test-fail-count]
+                         [:seon.test.accretion/failure-groups
+                          :seon.test.accretion/failure-groups]
+                         [:seon.test.accretion/advisories
+                          :seon.test.accretion/advisories]
+                         [:seon.test.accretion/auto-check
+                          :seon.test.accretion/auto-check]
+                         [:seon.test.accretion/install?
+                          :seon.test.accretion/install?]],
                         :failure
                         [:map
                          [:seon.test.accretion/arguments
@@ -91,6 +200,12 @@
                           :seon.cluster.run.form/source]
                          [:seon.test.accretion/gate-set
                           :seon.test.accretion/gate-set]
+                         [:seon.program/row {:optional true}
+                          :seon.program/row]
+                         [:seon.config.test/auto-check-cases {:optional true}
+                          :seon.config.test/auto-check-cases]
+                         [:seon.test.accretion/seed {:optional true}
+                          :seon.test.accretion/seed]
                          [:seon.sci.eval/time-limit-ms
                           :seon.sci.eval/time-limit-ms]
                          [:seon.sci.admit/caps :seon.sci.admit/caps]
@@ -106,4 +221,6 @@
                          [:seon.test.accretion/evaluation
                           :seon.test.accretion/evaluation]
                          [:seon.test.accretion/results
-                          :seon.test.accretion/results]]}
+                          :seon.test.accretion/results]
+                         [:seon.test.accretion/auto-check {:optional true}
+                          :seon.test.accretion/auto-check]]}

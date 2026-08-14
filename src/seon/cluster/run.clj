@@ -164,6 +164,17 @@
     [:tuple :map :map [:vector :seon.blob/staged-write]]]}
   [cluster evaluation]
   (let [receipt (settlement-result cluster evaluation)
+        receipt
+        (if-let [report-edn (:seon.test.accretion/report-edn receipt)]
+          (let [staged (blob/stage! (:seon.db/connection cluster) report-edn)]
+            (-> receipt
+                (dissoc :seon.test.accretion/report-edn)
+                (assoc :seon.test.accretion/report-blob
+                       (:seon.blob/digest staged)
+                       :seon.test.accretion/report-size
+                       (long (count report-edn)))
+                (update :seon.blob/staged-writes (fnil conj []) staged)))
+          receipt)
         defs (store-def-values! (:seon.db/connection cluster) evaluation)]
     [(dissoc receipt :seon.blob/staged-writes)
      (merge evaluation
@@ -1491,7 +1502,22 @@
    :seon.cluster.eval/output
    :seon.cluster.eval/read-basis-transaction
    :seon.cluster.eval/ns
-   :seon.sci.eval/ending-ns])
+   :seon.sci.eval/ending-ns
+   :seon.test.accretion/gate-test-count
+   :seon.test.accretion/gate-pass-count
+   :seon.test.accretion/gate-fail-count
+   :seon.test.accretion/seed
+   :seon.test.accretion/case-count
+   :seon.test.accretion/executed-count
+   :seon.test.accretion/status
+   :seon.test.accretion/report-blob
+   :seon.test.accretion/report-size])
+
+(defn- receipt-gate-test-assertions
+  [receipt request]
+  (mapv (fn [test-ref]
+          [:db/add (:db/id receipt) :seon.test.accretion/gate-tests test-ref])
+        (:seon.test.accretion/gate-tests request)))
 
 (defn- receipt-terminal-assertions
   "Terminal assertions present in `request`, targeting `receipt`."
@@ -1555,6 +1581,26 @@
           [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns]
           [:seon.sci.eval/ending-ns {:optional true}
            :seon.sci.eval/ending-ns]
+          [:seon.test.accretion/gate-tests {:optional true}
+           :seon.test.accretion/gate-tests]
+          [:seon.test.accretion/gate-test-count {:optional true}
+           :seon.test.accretion/gate-test-count]
+          [:seon.test.accretion/gate-pass-count {:optional true}
+           :seon.test.accretion/gate-pass-count]
+          [:seon.test.accretion/gate-fail-count {:optional true}
+           :seon.test.accretion/gate-fail-count]
+          [:seon.test.accretion/seed {:optional true}
+           :seon.test.accretion/seed]
+          [:seon.test.accretion/case-count {:optional true}
+           :seon.test.accretion/case-count]
+          [:seon.test.accretion/executed-count {:optional true}
+           :seon.test.accretion/executed-count]
+          [:seon.test.accretion/status {:optional true}
+           :seon.test.accretion/status]
+          [:seon.test.accretion/report-blob {:optional true}
+           :seon.test.accretion/report-blob]
+          [:seon.test.accretion/report-size {:optional true}
+           :seon.test.accretion/report-size]
           [:seon.program/row {:optional true}
            :seon.program/row]
           [:seon.def/rows {:optional true} :seon.def/rows]]]
@@ -1591,6 +1637,7 @@
                            contracted-id)
              (contracted-def-retractions db agent-eid contracted-id)
              (receipt-read-evidence-tx db receipt request)
+             (receipt-gate-test-assertions receipt request)
              (receipt-terminal-assertions receipt request)]))))
 
 (defn clear-defs-tx

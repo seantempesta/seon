@@ -74,7 +74,27 @@
                       :seon.cluster.eval/read-evidence]
                      [:seon.cluster.eval/read-basis-transaction
                       {:optional true}
-                      :seon.cluster.eval/read-basis-transaction]],
+                      :seon.cluster.eval/read-basis-transaction]
+                     [:seon.test.accretion/gate-tests {:optional true}
+                      :seon.test.accretion/gate-tests]
+                     [:seon.test.accretion/gate-test-count {:optional true}
+                      :seon.test.accretion/gate-test-count]
+                     [:seon.test.accretion/gate-pass-count {:optional true}
+                      :seon.test.accretion/gate-pass-count]
+                     [:seon.test.accretion/gate-fail-count {:optional true}
+                      :seon.test.accretion/gate-fail-count]
+                     [:seon.test.accretion/seed {:optional true}
+                      :seon.test.accretion/seed]
+                     [:seon.test.accretion/case-count {:optional true}
+                      :seon.test.accretion/case-count]
+                     [:seon.test.accretion/executed-count {:optional true}
+                      :seon.test.accretion/executed-count]
+                     [:seon.test.accretion/status {:optional true}
+                      :seon.test.accretion/status]
+                     [:seon.test.accretion/report-blob {:optional true}
+                      :seon.test.accretion/report-blob]
+                     [:seon.test.accretion/report-size {:optional true}
+                      :seon.test.accretion/report-size]],
                     :result-blob :seon.blob/digest,
                     :result-edn [:string #:seon.db{:no-history? true}],
                     :result-size [:int {:min 0}],
@@ -120,6 +140,26 @@
                      [:seon.sci.eval/ending-ns
                       {:optional true}
                       :seon.sci.eval/ending-ns]
+                     [:seon.test.accretion/gate-tests {:optional true}
+                      :seon.test.accretion/gate-tests]
+                     [:seon.test.accretion/gate-test-count {:optional true}
+                      :seon.test.accretion/gate-test-count]
+                     [:seon.test.accretion/gate-pass-count {:optional true}
+                      :seon.test.accretion/gate-pass-count]
+                     [:seon.test.accretion/gate-fail-count {:optional true}
+                      :seon.test.accretion/gate-fail-count]
+                     [:seon.test.accretion/seed {:optional true}
+                      :seon.test.accretion/seed]
+                     [:seon.test.accretion/case-count {:optional true}
+                      :seon.test.accretion/case-count]
+                     [:seon.test.accretion/executed-count {:optional true}
+                      :seon.test.accretion/executed-count]
+                     [:seon.test.accretion/status {:optional true}
+                      :seon.test.accretion/status]
+                     [:seon.test.accretion/report-blob {:optional true}
+                      :seon.test.accretion/report-blob]
+                     [:seon.test.accretion/report-size {:optional true}
+                      :seon.test.accretion/report-size]
                      [:seon.program/row
                       {:optional true}
                       :seon.program/row]

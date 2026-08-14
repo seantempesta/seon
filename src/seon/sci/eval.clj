@@ -2308,6 +2308,7 @@
     agent-id :seon.cluster.agent/id
     source :seon.cluster.run.form/source
     test-symbols :seon.test.accretion/gate-set
+    analyzed-row :seon.program/row
     :as request}]
   (let [ctx (fork-candidate-ctx
              {:seon.sci.eval/ctx base-ctx
@@ -2318,7 +2319,8 @@
         (evaluate (assoc request
                          :seon.sci.eval/ctx ctx
                          :seon.cluster.run.form/source source))
-        row (:seon.program/row evaluation)]
+        row (or analyzed-row (:seon.program/row evaluation))
+        evaluation (cond-> evaluation row (assoc :seon.program/row row))]
     (if (or (:seon.cluster.eval/error evaluation)
             (nil? (:seon.fn/sym row)))
       {:seon.test.accretion/candidate-ctx ctx
@@ -2326,11 +2328,23 @@
        :seon.test.accretion/results []}
       (do
         (install-candidate-function! ctx database row)
-        {:seon.test.accretion/candidate-ctx ctx
-         :seon.test.accretion/evaluation evaluation
-         :seon.test.accretion/results
-         (mapv (partial run-candidate-test! ctx database request)
-               test-symbols)}))))
+        (let [check
+              (when (and (:seon.config.test/auto-check-cases request)
+                         (:seon.test.accretion/seed request))
+                (accretion/auto-check
+                 (assoc request
+                        :seon.sci.eval/ctx ctx
+                        :seon.program/row row
+                        :seon.schema/projection (context-projection ctx))))]
+          (cond->
+           {:seon.test.accretion/candidate-ctx ctx
+            :seon.test.accretion/evaluation evaluation
+            ;; Auto-check is deliberately realized above this expression:
+            ;; the seeded contract probe precedes every example test.
+            :seon.test.accretion/results
+            (mapv (partial run-candidate-test! ctx database request)
+                  test-symbols)}
+            check (assoc :seon.test.accretion/auto-check check)))))))
 
 (defn auto-check-candidate
   "Run the seeded contract check against an already evaluated candidate."
