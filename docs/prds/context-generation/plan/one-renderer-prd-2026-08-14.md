@@ -42,18 +42,29 @@ finish: one coherent pipeline where nothing can go sideways, no data is
 ever silently swallowed, development panics hard, and production
 degrades to designed faces — never to garbage, never to absence.
 
-```text
-function output (whole)
-  → storage admission        declared caps, honest elisions   [seam B]
-  → derivation               history unit / walk membership, from facts
-  → projection selection     :seon.render/ai | /html | /form
-  → render output or floor   declared face, or derived data face
-  → value printer            quality: honest faces, structural
-                             windows — NO budget            
-  → assembly                 page hiccup; for a MODEL CALL only:
-                             member-level selection against the
-                             prompt budget                  [seam A]
-  → delivery                 provider wire | SSE morphs
+```mermaid
+flowchart TD
+    FO["<b>function output</b><br/>whole value — never bounds, clips, or narrates"]
+    ADMIT["<b>storage admission — seam B</b><br/>declared caps · shape-bearing elision values (ruling 33)"]
+    DERIVE["<b>derivation</b><br/>one pull rooted at the agent → ordered block vector<br/>membership = reachability · define-before-use order"]
+    SELECT{"<b>projection selection</b><br/>one chain per unit:<br/>/ai · /html · /form"}
+    FACE["<b>declared face — TERMINAL</b><br/>the goal for every load-bearing family,<br/>both projections (rulings 34-35)"]
+    FLOOR["<b>floor — last resort</b><br/>composes the declared faces of<br/>nested shapes nothing claimed"]
+    PRINT["<b>value printer</b><br/>one traversal, tee'd sinks:<br/>REPL-faithful text + structural hiccup<br/>quality only — NO budget"]
+    HIST["<b>append-only history</b><br/>diff/history: stale calls re-derive once, entries append<br/>prompt N+1 = prompt N + suffix"]
+    SEAMA["<b>seam A — model call</b><br/>join entries in order<br/>budget machinery DEFERRED (ruling 37)"]
+    SEAMB["<b>seam B′ — namespace view</b><br/>/ns/&lt;ns&gt; · / for root<br/>layout, disclosure — never a budget"]
+    WIRE(["provider wire"])
+    SSE(["SSE morphs per block"])
+
+    FO --> ADMIT --> DERIVE --> SELECT
+    SELECT -->|"explicit key · owning-ns program fact (ruling 36) · schema default"| FACE
+    SELECT -->|"nothing claimed it"| FLOOR
+    FACE --> PRINT
+    FLOOR --> PRINT
+    PRINT --> HIST
+    HIST --> SEAMA --> WIRE
+    HIST --> SEAMB --> SSE
 ```
 
 Every stage is **total** (never throws into the pipeline), **honest**
