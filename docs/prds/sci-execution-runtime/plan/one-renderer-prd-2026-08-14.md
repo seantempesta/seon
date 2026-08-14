@@ -282,7 +282,30 @@ the dial (so no-silent-swallowing must be a GRAPH QUERY over catch
 sites, property 9's census, never a convention); the seven old render
 dials are correctly deleted — today's single profile wins.
 
-## 7b. Gap-census mandate (running; report links land here)
+## 7b. Gap-census verdict (landed — [register + wave plan](../research/one-renderer-gap-census-2026-08-14.md))
+
+47 register rows (17 delete, 9 fix-in-owner, 5 accrete, 6
+keep-asserted-by-lock, 2 probe, 8 folded), 17 seams NEW beyond the
+prior audits — headline: the registry sweep found **42 declared `/ai`
+producers** (20 narrate and fall to rip-out #3), and **no contract
+check exists at any of the eight stage boundaries** (§0's panic policy
+is unimplemented for exactly its target class; `render.clj:468-474`
+silently substitutes the unprojected node when a producer's output
+fails its contract). **§4 corrections accepted:** block identity is
+WORK, not a stay (three competing derivations today); the profile's
+`request-profile` fallback + `default-agent-profile` global are
+ledger-28 defects; the elision schema stays but its narrating
+`render-elision-ai` face goes (audit seam 4).
+
+**THE WAVE PLAN (for the owner's markup, then execution):**
+0 settle the in-flight tree (re-derive marks past snapshot
+`38f18880b`) → 1 stage contracts + the panic seam (+ the catch-site
+graph query, dial panic-on in dev) → 2 results-are-data (project-node*
++ the 20 narrating producers) → 3 form-aware fit via sample→emit
+(archaeology-gated revival) → 4 chat + debug faces (tokenizer revival,
+chips, pretty-data; archaeology-gated) → 5 one block identity +
+delivery (chain-hash invalidation) → 6 derivation hygiene, floating.
+Each wave lands with its §5.5 properties as the drift alarm.
 
 Two research lanes: (a) the OLD implementation's render/print/transcript
 system mined from git history — inventory of what existed, quality
