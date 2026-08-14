@@ -1,0 +1,133 @@
+#:seon.render.lint{:defect
+                   [:enum
+                    :seon.render.lint/renderer-unavailable
+                    :seon.render.lint/truncated-form
+                    :seon.render.lint/duplicated-block
+                    :seon.render.lint/pr-str-soup
+                    :seon.render.lint/empty-region],
+                   :path [:vector [:int {:min 0}]],
+                   :tag :string,
+                   :classes [:set :string],
+                   :characters [:int {:min 0}],
+                   :nodes [:int {:min 0}],
+                   :excerpt :string,
+                   :repeats [:int {:min 2}],
+                   :unclosed [:vector :string],
+                   :unexpected-close :string,
+                   :unterminated-string [:= true],
+                   :region :string,
+                   :region-absent [:= true],
+                   :duplicate-node-floor [:int {:min 1}],
+                   :soup-character-floor [:int {:min 1}],
+                   :placeholder-classes [:set :string],
+                   :fence-tags [:set :string],
+                   :required-regions [:set :string],
+                   :floors
+                   [:map
+                    [:seon.render.lint/duplicate-node-floor
+                     :seon.render.lint/duplicate-node-floor]
+                    [:seon.render.lint/soup-character-floor
+                     :seon.render.lint/soup-character-floor]],
+                   :balance
+                   [:map
+                    [:seon.render.lint/unclosed :seon.render.lint/unclosed]
+                    [:seon.render.lint/unexpected-close
+                     {:optional true}
+                     :seon.render.lint/unexpected-close]
+                    [:seon.render.lint/unterminated-string
+                     {:optional true}
+                     :seon.render.lint/unterminated-string]],
+                   :detail
+                   [:map
+                    [:seon.render.lint/tag {:optional true}
+                     :seon.render.lint/tag]
+                    [:seon.render.lint/classes {:optional true}
+                     :seon.render.lint/classes]
+                    [:seon.render.lint/characters {:optional true}
+                     :seon.render.lint/characters]
+                    [:seon.render.lint/nodes {:optional true}
+                     :seon.render.lint/nodes]
+                    [:seon.render.lint/excerpt {:optional true}
+                     :seon.render.lint/excerpt]
+                    [:seon.render.lint/repeats {:optional true}
+                     :seon.render.lint/repeats]
+                    [:seon.render.lint/unclosed {:optional true}
+                     :seon.render.lint/unclosed]
+                    [:seon.render.lint/unexpected-close {:optional true}
+                     :seon.render.lint/unexpected-close]
+                    [:seon.render.lint/unterminated-string {:optional true}
+                     :seon.render.lint/unterminated-string]
+                    [:seon.render.lint/region {:optional true}
+                     :seon.render.lint/region]
+                    [:seon.render.lint/region-absent {:optional true}
+                     :seon.render.lint/region-absent]],
+                   :finding
+                   [:map
+                    [:seon.render.lint/defect :seon.render.lint/defect]
+                    [:seon.render.lint/path :seon.render.lint/path]
+                    [:seon.render.lint/detail :seon.render.lint/detail]],
+                   :findings [:vector :seon.render.lint/finding],
+                   :counts
+                   [:map-of :seon.render.lint/defect [:int {:min 1}]],
+                   :subject [:or :seon.render/hiccup :seon.render/page],
+                   :id [:string {:min 1}],
+                   :id-request
+                   [:map
+                    [:seon.render.lint/hiccup :seon.render.lint/subject]
+                    [:seon.render.lint/id :seon.render.lint/id]],
+                   :request
+                   [:map
+                    [:seon.render.lint/hiccup :seon.render.lint/subject]
+                    [:seon.render.lint/required-regions
+                     {:optional true}
+                     :seon.render.lint/required-regions]
+                    [:seon.render.lint/duplicate-node-floor
+                     {:optional true}
+                     :seon.render.lint/duplicate-node-floor]
+                    [:seon.render.lint/soup-character-floor
+                     {:optional true}
+                     :seon.render.lint/soup-character-floor]
+                    [:seon.render.lint/placeholder-classes
+                     {:optional true}
+                     :seon.render.lint/placeholder-classes]
+                    [:seon.render.lint/fence-tags
+                     {:optional true}
+                     :seon.render.lint/fence-tags]],
+                   :render-request
+                   [:map
+                    [:seon.db/db :seon.db/database-value]
+                    [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+                    [:seon.render/value :seon.render/value]
+                    [:seon.sci.admit/caps :seon.sci.admit/caps]
+                    [:seon.sci.eval/time-limit-ms
+                     :seon.sci.eval/time-limit-ms]
+                    [:seon.config/on-core-error :seon.config/on-core-error]
+                    [:seon.render.lint/required-regions
+                     {:optional true}
+                     :seon.render.lint/required-regions]
+                    [:seon.render.lint/duplicate-node-floor
+                     {:optional true}
+                     :seon.render.lint/duplicate-node-floor]
+                    [:seon.render.lint/soup-character-floor
+                     {:optional true}
+                     :seon.render.lint/soup-character-floor]
+                    [:seon.render.lint/placeholder-classes
+                     {:optional true}
+                     :seon.render.lint/placeholder-classes]
+                    [:seon.render.lint/fence-tags
+                     {:optional true}
+                     :seon.render.lint/fence-tags]],
+                   :report
+                   [:map
+                    [:seon.render.lint/findings :seon.render.lint/findings]
+                    [:seon.render.lint/counts :seon.render.lint/counts]
+                    [:seon.render.lint/nodes :seon.render.lint/nodes]
+                    [:seon.render.lint/characters
+                     :seon.render.lint/characters]
+                    [:seon.render.lint/floors :seon.render.lint/floors]
+                    [:seon.render.lint/placeholder-classes
+                     :seon.render.lint/placeholder-classes]
+                    [:seon.render.lint/fence-tags :seon.render.lint/fence-tags]
+                    [:seon.render.lint/required-regions
+                     {:optional true}
+                     :seon.render.lint/required-regions]]}
