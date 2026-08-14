@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, agent, flow, wave/runtime-boundary-refactor]
 ---
@@ -35,3 +35,17 @@ the agent/run, operation, member, and configured bound; it also interrupts or
 closes only the exact owned task/channel. Regressions inject a never-replying
 render proc, host handler, and capture task and prove every agent turn returns
 within its declared bound.
+
+## Resolution
+
+Resolved by `d452d0355`, `922c90e48`, and `6d374c247`. The one
+`seon.await/await!` owner requires a declared config attribute and its value,
+then returns a flat diagnostic naming the completion member that never
+arrived. Render context acquisition, effect-handler completion, and shell
+capture completion now cross that owner. The shell path interrupts only its
+exact capture thread after expiry.
+
+Focused verification passed 19 tests / 164 assertions for the render and
+effect crossings and 8 tests / 40 assertions for the shell crossing. The
+program-graph census in `seon.await-owner-census-test` derives all production
+callers of the owner rather than maintaining a source roster.
