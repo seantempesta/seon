@@ -253,6 +253,16 @@ one decision away from queued work. Ruled items cite their record.
     refusal itself. Remaining class/p1 members sweep against the same
     rule after.
 
+29. **`:about` is one plain vector of symbols and namespaced keywords**
+    (owner, 2026-08-14): authored as
+    `['seon.cluster.message/send! 'seon.db :seon.config.ai/model]` —
+    never hand-built lookup refs. Resolution derived per token
+    (slashed symbol → function row, bare symbol → namespace row,
+    keyword → registry row); unresolvable token = flat `plan!` refusal
+    naming it; the authored vector is stored faithfully and resolution
+    is never stored. Amends the hours-old T3 shape in place before
+    first real use (plan-t3 lane, in flight).
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
