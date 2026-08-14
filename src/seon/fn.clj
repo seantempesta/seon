@@ -946,6 +946,56 @@
                (conj visited visit-key)
                reports))))))))
 
+(defn- shortest-call-path
+  [calls source target]
+  (loop [pending (conj clojure.lang.PersistentQueue/EMPTY [source])
+         visited #{}]
+    (when-not (empty? pending)
+      (let [path (peek pending)
+            pending (pop pending)
+            current (peek path)]
+        (cond
+          (= current target) path
+          (contains? visited current) (recur pending visited)
+          :else
+          (recur (reduce (fn [queue called]
+                           (conj queue (conj path called)))
+                         pending
+                         (get calls current []))
+                 (conj visited current)))))))
+
+(defn- text-boundary-report
+  [graph]
+  (let [functions (:seon.fn.output.graph/functions graph)
+        calls (:seon.fn.output.graph/calls graph)
+        target "seon.print/bounded-text"
+        render-seam "seon.print/fit"
+        admission-seam "seon.sci.admit/admit"
+        authorized-callers #{"seon.print/admit-string"
+                             "seon.print/fit-text"}
+        callers
+        (->> calls
+             (keep (fn [[caller callees]]
+                     (when (some #{target} callees) caller)))
+             sort
+             vec)
+        target-found?
+        (boolean
+         (or (some #{target} functions)
+             (some #(some #{target} %) (vals calls))))]
+    {:seon.fn.output/text-boundary-target-found?
+     target-found?
+     :seon.fn.output/text-boundary-callers callers
+     :seon.fn.output/text-boundary-render-path
+     (vec (or (shortest-call-path calls render-seam target) []))
+     :seon.fn.output/text-boundary-admission-path
+     (vec (or (shortest-call-path calls admission-seam target) []))
+     :seon.fn.output/text-boundary-bypasses
+     (->> callers
+          (remove authorized-callers)
+          sort
+          vec)}))
+
 (defn output-path-report
   "Classified external-sink reachability with shortest path evidence.
 
@@ -981,8 +1031,9 @@
       :seon.fn.output/codec-paths (get sink-counts :codec-storage 0)
       :seon.fn.output/projected (get classification-counts :projected 0)
       :seon.fn.output/unresolved (get classification-counts :unresolved 0)
-      :seon.fn.output/bypasses (get classification-counts :bypass 0)}
-     :seon.fn.output/paths paths}))
+     :seon.fn.output/bypasses (get classification-counts :bypass 0)}
+     :seon.fn.output/paths paths
+     :seon.fn.output/text-boundary (text-boundary-report graph)}))
 
 (defn- capability-refused!
   [rule function-symbol data]

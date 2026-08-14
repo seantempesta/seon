@@ -416,45 +416,28 @@
     (is (= "{:rows [{:a 1, :b x} {:a 22, :b yy}]}" nested-text))
     (is (not (str/includes? nested-text "| :a |")))))
 
-(deftest bounded-text-is-the-one-honest-text-cut
-  (let [identity [:my.message/id "message-1"]
-        request {:seon.print/text "abcdef"
-                 :seon.print/character-limit 3
-                 :seon.print/bound-by :seon.config.message/preview-chars
-                 :seon.render.profile/id :seon.render.profile/agent
-                 :seon.print/requery-id identity}
-        bounded (print/bounded-text request)]
-    (is (= "abc"
-           (print/bounded-text
-            (assoc request :seon.print/text "abc"))))
-    (is (= {:seon.print/face :seon.print/elided
-            :seon.print/omitted 3
-            :seon.print/elision-unit :characters
-            :seon.render.data/path []
-            :seon.render.data/next-offset 3
-            :seon.render.profile/id :seon.render.profile/agent
-            :seon.render.data/total 6
-            :seon.print/prefix "\"abc\""
-            :seon.print/bound-by :seon.config.message/preview-chars
-            :seon.print/requery-id identity}
-           bounded))
-    (is (str/includes? (print/render-elision-ai bounded)
-                       "3 more characters of 6; bounded by"))
-    (is (str/includes? (print/render-elision-ai bounded)
-                       "requery by [:my.message/id \"message-1\"]"))))
-
-(deftest bounded-text-accepts-the-declared-render-profile
-  (let [bounded
-        (print/bounded-text
-         {:seon.print/text (apply str (repeat 200 "word "))
-          :seon.render/profile
-          {:seon.render.profile/id :seon.render.profile/agent
-           :seon.render.profile/token-budget 8
-           :seon.render.profile/max-depth 1
-           :seon.render.profile/max-children 1
-           :seon.render.profile/composition :single-line}
-          :seon.print/requery-id [:seon.effect/id "effect-1"]})]
-    (is (= :seon.print/elided (:seon.print/face bounded)))
-    (is (pos? (:seon.print/omitted bounded)))
-    (is (= [:seon.effect/id "effect-1"]
-           (:seon.print/requery-id bounded)))))
+(deftest storage-admission-and-render-fit-share-one-private-text-bounder
+  (let [admitted
+        (print/admit-string
+         {:seon.print/text "abcdef"
+          :seon.config.eval.result/max-string 3})
+        fitted
+        (print/enrich-elisions
+         admitted
+         {:seon.render.profile/id :seon.render.profile/agent
+          :seon.render.profile/token-budget 8
+          :seon.render.profile/max-depth 1
+          :seon.render.profile/max-children 1
+          :seon.render.profile/composition :single-line
+          :seon.print/requery-id [:my.message/id "message-1"]})]
+    (is (= {:seon.print/face :seon.print/truncated-string
+            :seon.print/value "abc"
+            :seon.print/length 6
+            :seon.print/bound-by :seon.config.eval.result/max-string}
+           admitted))
+    (is (= 3 (:seon.print/omitted fitted)))
+    (is (= 6 (:seon.render.data/total fitted)))
+    (is (= :seon.config.eval.result/max-string
+           (:seon.print/bound-by fitted)))
+    (is (= [:my.message/id "message-1"]
+           (:seon.print/requery-id fitted)))))

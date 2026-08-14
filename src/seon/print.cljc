@@ -765,8 +765,10 @@
     (update node ::value enrich-node profile (conj path ::throwable))
 
     ::truncated-string
-    (elision-node profile path (count (::value node)) 1 (::length node)
-                  :characters (pr-str (::value node)))
+    (elision-node (assoc profile ::bound-by (::bound-by node))
+                  path (count (::value node))
+                  (- (::length node) (count (::value node)))
+                  (::length node) :characters (pr-str (::value node)))
 
     ::elided
     (if (::omitted node)
@@ -824,30 +826,42 @@
       fitted-elision
       (conj fitted-elision))))
 
-(defn- fit-string
-  [node profile path string-limit]
-  (let [value (::value node)
-        original (long (or (::length node) (count value)))
-        retained (min string-limit (count value))]
-    (if (and (= retained (count value)) (= original retained))
-      node
-      (elision-node profile path retained (- original retained) original
-                    :characters (pr-str (subs value 0 retained))))))
-
 (defn- projected-text
   [node]
   (let [value (::value node)]
     (if (string? value) value (pr-str value))))
 
-(defn- fit-projected
+(defn- bounded-text
+  [text original character-limit]
+  (let [retained (min character-limit (count text))]
+    (when (or (< retained (count text)) (< retained original))
+      {::value (subs text 0 retained)
+       ::length original})))
+
+(defn admit-string
+  "Admit one string through the declared storage character cap."
+  {:malli/schema
+   [:=> [:cat :seon.print/admit-string-request]
+    :seon.print/node]}
+  [{text ::text
+    character-limit :seon.config.eval.result/max-string}]
+  (if-let [bounded (bounded-text text (count text) character-limit)]
+    (assoc bounded
+           ::face ::truncated-string
+           ::bound-by :seon.config.eval.result/max-string)
+    {::face ::string ::value text}))
+
+(defn- fit-text
   [node profile path string-limit]
-  (let [value (projected-text node)
-        original (count value)
-        retained (min string-limit original)]
-    (if (= retained original)
-      node
-      (elision-node profile path retained (- original retained) original
-                    :characters (pr-str (subs value 0 retained))))))
+  (let [value (if (= ::projected (::face node))
+                (projected-text node)
+                (::value node))
+        original (long (or (::length node) (count value)))]
+    (if-let [bounded (bounded-text value original string-limit)]
+      (elision-node profile path (count (::value bounded))
+                    (- original (count (::value bounded))) original
+                    :characters (pr-str (::value bounded)))
+      node)))
 
 (defn- structural-elision
   [node profile path]
@@ -886,11 +900,8 @@
         (update node ::value fit-node profile (inc depth)
                 (conj path ::throwable) child-limit string-limit)
 
-        (::string ::truncated-string)
-        (fit-string node profile path string-limit)
-
-        ::projected
-        (fit-projected node profile path string-limit)
+        (::string ::truncated-string ::projected)
+        (fit-text node profile path string-limit)
 
         node))))
 
@@ -930,33 +941,6 @@
           (recur 0 (dec depth-limit) 0)
 
           :else candidate)))))
-
-(defn bounded-text
-  "Return text unchanged or one honest, requeryable elision value."
-  {:malli/schema
-   [:=> [:cat :seon.print/bounded-text-request]
-    :seon.print/bounded-text]}
-  [{text ::text
-    character-limit ::character-limit
-    bound-by ::bound-by
-    supplied-profile :seon.render/profile
-    profile-id :seon.render.profile/id
-    requery-id ::requery-id
-    path :seon.render.data/path}]
-  (let [path (vec (or path []))
-        profile
-        (merge
-         (or supplied-profile
-             {:seon.render.profile/id profile-id})
-         {::requery-id requery-id}
-         (when bound-by {::bound-by bound-by}))
-        node {::face ::string ::value text}
-        fitted (if (some? character-limit)
-                 (fit-string node profile path character-limit)
-                 (fit node profile))]
-    (if (= ::string (::face fitted))
-      (::value fitted)
-      fitted)))
 
 (schema/register-core-predicate! 'seon.print/sink? sink?)
 (schema/register-core-predicate! 'seon.print/print-number? print-number?)

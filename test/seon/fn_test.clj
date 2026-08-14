@@ -1237,6 +1237,7 @@
       (let [report (seon.fn/output-path-report @connection)
             paths (:seon.fn.output/paths report)
             totals (:seon.fn.output/totals report)
+            text-boundary (:seon.fn.output/text-boundary report)
             visible-paths
             (filterv #(contains? #{:ai-visible-text :html-response}
                                  (:seon.fn.output/external-sink %))
@@ -1249,6 +1250,18 @@
             "a census with no identity-bearing sink subjects is a failure")
         (is (seq visible-paths)
             "the class check must exercise agent- or human-visible paths")
+        (is (true? (:seon.fn.output/text-boundary-target-found?
+                    text-boundary))
+            "a census with no bounded-text subject is a failure")
+        (is (= 2 (count (:seon.fn.output/text-boundary-callers
+                         text-boundary)))
+            (pr-str text-boundary))
+        (is (seq (:seon.fn.output/text-boundary-render-path text-boundary))
+            "the render seam must reach the private text bounder")
+        (is (seq (:seon.fn.output/text-boundary-admission-path text-boundary))
+            "the admission seam must reach the private text bounder")
+        (is (empty? (:seon.fn.output/text-boundary-bypasses text-boundary))
+            (pr-str text-boundary))
         (is (every? #(= :projected (:seon.fn.output/classification %))
                     visible-paths)
             (pr-str offenders))))))

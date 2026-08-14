@@ -235,13 +235,13 @@
       (value-node ::print/inst (java.util.Date. (inst-ms value)))
 
       (string? value)
-      (if (<= (count value) max-string)
-        (value-node ::print/string value)
-        (do
-          (flag! state)
-          {::print/face ::print/truncated-string
-           ::print/value (subs value 0 max-string)
-           ::print/length (count value)}))
+      (let [node
+            (print/admit-string
+             {:seon.print/text value
+              :seon.config.eval.result/max-string max-string})]
+        (when (= ::print/truncated-string (::print/face node))
+          (flag! state))
+        node)
 
       ;; EVERYTHING below this line projects to a structure — a
       ;; collection, or a marker map — and a structure emitted AT the

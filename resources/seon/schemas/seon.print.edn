@@ -160,7 +160,9 @@
                                [:seon.print/face
                                 [:= :seon.print/truncated-string]]
                                [:seon.print/value :string]
-                               [:seon.print/length [:int {:min 0}]]]]
+                               [:seon.print/length [:int {:min 0}]]
+                               [:seon.print/bound-by
+                                :seon.print/bound-by]]]
                              [:seon.print/failed
                               [:map
                                [:seon.print/face
@@ -220,30 +222,12 @@
              :requery-id :seon.schema/value,
              :requery-refusal [:string {:min 1}],
              :bound-by :qualified-keyword,
-             :character-limit [:int {:min 0}],
              :text :string,
-             :bounded-text-config
+             :admit-string-request
              [:map
               [:seon.print/text :seon.print/text]
-              [:seon.print/character-limit :seon.print/character-limit]
-              [:seon.print/bound-by :seon.print/bound-by]
-              [:seon.render.profile/id :seon.render.profile/id]
-              [:seon.print/requery-id :seon.print/requery-id]
-              [:seon.render.data/path
-               {:optional true}
-               :seon.render.data/path]],
-             :bounded-text-profile
-             [:map
-              [:seon.print/text :seon.print/text]
-              [:seon.render/profile :seon.render.profile/profile]
-              [:seon.print/requery-id :seon.print/requery-id]
-              [:seon.render.data/path
-               {:optional true}
-               :seon.render.data/path]],
-             :bounded-text-request
-             [:or :seon.print/bounded-text-config
-              :seon.print/bounded-text-profile],
-             :bounded-text [:or :string :seon.print/elision],
+              [:seon.config.eval.result/max-string
+               :seon.config.eval.result/max-string]],
              :prefix :string,
              :elision-base
              [:map
