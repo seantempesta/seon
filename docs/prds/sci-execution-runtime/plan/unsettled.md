@@ -286,6 +286,19 @@ the orchestrator runs `bin/seon reset --force` on the shared root
 verifies status + the web UI answering, then runs the queued probe
 verification below. Do not wait for a further go-ahead.
 
+**CHAT INTERFACE (owner, midday, from the live screenshot review):**
+the agent page is a POLISHED CHAT: the message bar moves to the BOTTOM
+(fixed, like every chat tool), the input is a textarea that
+AUTO-EXPANDS for large pastes (grows to a sane max then scrolls),
+send on enter with shift-enter newline, and the session timeline
+scrolls above it newest-at-bottom so conversation reads naturally.
+The screenshot's specific horrors confirmed as the filed set: hiccup
+painted as escaped text in the right-rail panels, EDN-soup fire ids,
+a dead left column, top message bar. Folds into ui-overhaul with the
+transcript design doc + pretty-data + the contribution/characters key.
+**RESTART BOTH UIS onto fixed code at each UI-commit landing so the
+owner sees progress, not archaeology.**
+
 **DEBUG-VIEW PRETTY-DATA (owner, midday): because results ARE data,
 the debug view pretty-prints and syntax-highlights every data entry** —
 parse the captured entry, pprint with namespaces intact, highlight
