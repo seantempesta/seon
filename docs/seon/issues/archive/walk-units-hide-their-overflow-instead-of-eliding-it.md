@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, web, class/n1, wave/visual-qa, wave/live-drive-render]
 ---
@@ -103,3 +103,26 @@ The census also proposes the recurring proof this note's acceptance asks for:
 for every rendered block, assert `scrollHeight <= clientHeight` OR computed
 `overflow-y` is `auto`/`scroll` OR a declared elision marker is present — with
 zero blocks found counting as a FAILURE, so the check cannot pass by absence.
+
+## Resolution
+
+Resolved 2026-08-14 at the stylesheet's four loss mechanisms, as one class:
+
+- `.seon-card-compact` and `.seon-rank-rail` / `.seon-rank-deep` retain their
+  bounded height but now own `overflow: auto` scrollports;
+- `.plan-title` / `.plan-goal` and `.seon-card-reply` no longer line-clamp or
+  hide content, so their complete text participates in layout;
+- the compliant disclosure-summary rules remain unchanged.
+
+The generated stylesheet proves the bytes served to browsers contain:
+
+```css
+.seon-card-compact { max-height: 10rem; overflow: auto; }
+.plan-title, .plan-goal { min-width: 0; overflow-wrap: anywhere; }
+.seon-card-reply { white-space: pre-wrap; overflow-wrap: anywhere; }
+.seon-rank-rail, .seon-rank-deep { max-height: 10rem; overflow: auto; }
+```
+
+Before, the same selectors contained `overflow: hidden` and three line clamps.
+The live browser verification checks the acceptance predicate against a
+non-empty unit set on both page specimens.
