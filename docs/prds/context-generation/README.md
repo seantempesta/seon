@@ -128,9 +128,13 @@ lane; no wave starts before the owner marks up the PRD.
   prompt-tail recency fix implemented (ablation-proven 2/2); the
   fidelity wave (single-snapshot prompts, accounting exact to 3
   tokens, cost facts recording).
-- IN FLIGHT at session end: `clip-ripout` finishing form-aware fit +
-  boundary-only conversions (check `bin/codex-agent status`; its
-  uncommitted state holds `src/seon/print.cljc` work).
+- `clip-ripout` LANDED at session end (`94116765e`, `9c3b4de51`,
+  `fd75232f3`, `597d273b7`): whole-value conversions in the ruled
+  boundary-only shape, the SCI source cap declared as config, isolated
+  proof showing 55 whole notes verbatim. Its one deferred item: the
+  live production `render-ai` proof timed out past 60 s — that is the
+  KNOWN slow-derivation class (the one-pull restructure's case), not a
+  regression; fresh evidence for wave 3. No lanes in flight.
 - The live clusters: shared `default` (:7994) and the drive specimen
   root `tmp/drive-1-root` (:55156, attempt-5 evidence preserved).
 - Issue index ~190 open / 1125 archived, green.
