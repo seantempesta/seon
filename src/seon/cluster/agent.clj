@@ -77,7 +77,8 @@
             [seon.flow :as seon.flow]
             [seon.schedule :as schedule]
             [seon.schema.edn :as schema.edn])
-  (:import [java.util Date]))
+  (:import [java.util Date]
+           [java.util.concurrent Executor]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -273,22 +274,92 @@
   (let [{connection :seon.db/connection
          cluster-name :seon.cluster/name
          process :seon.cluster.run/process
-         completion :seon.cluster.loop/completion}
+         completion :seon.cluster.loop/completion
+         executor :seon.flow/executor
+         fault-channel :seon.cluster.agent/fault-channel
+         carried-timeout-ms
+         :seon.config.agent/turn-completion-backstop-ms
+         backstop-state :seon.cluster.agent/turn-backstop-state}
         (:seon.cluster.loop/cluster state)
         agent-id (:seon.cluster.agent/id state)
         database @connection
         run-id (held-run-id database agent-id process)
         timeout-ms
-        (:seon.config.agent/turn-completion-backstop-ms
-         (config/effective database cluster-name))
+        (or carried-timeout-ms
+            (:seon.config.agent/turn-completion-backstop-ms
+             (config/effective database cluster-name)))
         [value selected]
         (async/alts!! [completion (async/timeout timeout-ms)] :priority true)]
     (if (= selected completion)
-      value
+      {::turn-permit value
+       ::connection connection
+       ::process process
+       ::executor executor
+       ::fault-channel fault-channel
+       ::backstop-state backstop-state
+       ::agent-id agent-id
+       ::timeout-ms timeout-ms}
       (throw
        (turn-completion-backstop-failure
         agent-id run-id timeout-ms ::turn-start ::turn-permit
         [:seon.cluster.loop/completion])))))
+
+(defn- offer-turn-backstop-fault!
+  [{::keys [connection process fault-channel agent-id timeout-ms]}]
+  (let [run-id (held-run-id @connection agent-id process)
+        failure
+        (turn-completion-backstop-failure
+         agent-id run-id timeout-ms ::turn-transform ::turn-terminal
+         [:seon.cluster.loop/completion])
+        fault
+        (cond->
+         {::flow/pid ::turn
+          ::flow/status :running
+          ::flow/op ::turn-completion-backstop
+          ::flow/ex failure
+          :seon.cluster.agent/id agent-id}
+          run-id (assoc :seon.cluster.run/id run-id))]
+    (when-not (and fault-channel (async/offer! fault-channel fault))
+      (binding [*out* *err*]
+        (println "SEON CORE FAULT (agent turn backstop):"
+                 (ex-message failure))
+        (flush)))
+    failure))
+
+(defn- arm-turn-completion-backstop!
+  "Arm the live bound after the ready permit is consumed.
+
+  Success cancels only after the permit is republished. An escaped transform
+  republishes the permit for lifecycle progress but deliberately leaves this
+  observer armed, so quiescence cannot hide the failed turn."
+  [{::keys [executor timeout-ms backstop-state] :as turn-bound}]
+  (when-not (instance? Executor executor)
+    (throw
+     (ex-info "An active agent turn requires its carried IO executor."
+              {:seon.error/kind ::turn-completion-backstop
+               :seon.cluster.agent/id (::agent-id turn-bound)
+               :seon.cluster.agent/turn-completion-backstop
+               (::agent-id turn-bound)})))
+  (let [cancel (async/chan 1)
+        timeout (async/timeout timeout-ms)
+        failure-channel (async/promise-chan)
+        backstop {::cancel cancel
+                  ::failure-channel failure-channel}]
+    (when backstop-state
+      (reset! backstop-state backstop))
+    (.execute
+     ^Executor executor
+     ^Runnable
+     (fn []
+       (let [[_ selected] (async/alts!! [cancel timeout] :priority true)]
+         (if (= selected timeout)
+           ;; Retain the fired bound in `backstop-state`: disarm joins this
+           ;; same failure instead of racing it with a second timer/fault.
+           (async/put! failure-channel
+                       (offer-turn-backstop-fault! turn-bound))
+           (when backstop-state
+             (compare-and-set! backstop-state backstop nil))))))
+    backstop))
 
 (defn turn-step
   "The turn transform, in Flow's four arities: ONE episode pass.
@@ -304,10 +375,11 @@
   core fault and rides this graph's error channel into the cluster's
   fault committer, tagged with the agent. The completion channel is an
   armed-ready permit: arm publishes it before Flow scheduling, an active
-  transform holds it, and `finally` republishes it without an interruptible
-  park. Disarm consumes and
-  closes that event, so it waits for real active work without depending
-  on a proc that may never have started."
+  transform holds it under the construction-time completion backstop, and
+  `finally` republishes it without an interruptible park. A successful pass
+  then cancels the bound; an escaped pass leaves it armed. Disarm consumes the
+  permit or joins that same active bound, so it waits for real active work
+  without depending on a proc that may never have started."
   {:malli/schema [:function
                   [:=> [:cat] [:map]]
                   [:=> [:cat :map] :map]
@@ -332,60 +404,75 @@
   ([state _input _message]
    (let [cluster (:seon.cluster.loop/cluster state)
          completion (:seon.cluster.loop/completion cluster)]
-     (if-some [_ready (await-turn-permit! state)]
-       (try
-         (let [agent-id (:seon.cluster.agent/id state)
-               connection (:seon.db/connection cluster)
-               process (:seon.cluster.run/process cluster)
-               now (Date.)
+     (if-some [turn-bound (await-turn-permit! state)]
+       (let [backstop (arm-turn-completion-backstop! turn-bound)
+             succeeded? (volatile! false)]
+        (try
+          (let [result
+                (let [agent-id (:seon.cluster.agent/id state)
+                      connection (:seon.db/connection cluster)
+                      process (:seon.cluster.run/process cluster)
+                      now (Date.)
                ;; SETTLE BEFORE DERIVING, scoped to this agent: an orphaned
                ;; run keeps its agent busy, and per-agent graphs settle their
                ;; own orphan (conservation §5)
                _ (when-let [orphan (work/interruption @connection agent-id)]
                    (cluster.loop/settle-interruption!
                     cluster (:seon.cluster.run/id orphan) now))
-               request {:seon.cluster.agent/id agent-id
-                        :seon.cluster.run/process process}
+                      request {:seon.cluster.agent/id agent-id
+                               :seon.cluster.run/process process}
                ;; ONE database value for the derivation
-               next (work/next-agent-work @connection request)]
-           (if (nil? next)
-             [(dissoc state :seon.cluster.run/id)
-              nil]
-             (let [report (cluster.loop/turn
-                           {:seon.cluster.loop/cluster cluster
-                            :seon.cluster.work/next next}
-                           now)]
+                      next (work/next-agent-work @connection request)]
+                  (if (nil? next)
+                    [(dissoc state :seon.cluster.run/id)
+                     nil]
+                    (let [report (cluster.loop/turn
+                                  {:seon.cluster.loop/cluster cluster
+                                   :seon.cluster.work/next next}
+                                  now)]
                ;; Run closure is an armer wake because first-agent
                ;; supervision is derived from closed-run and root-idle facts.
                ;; The signal is disposable: the armer re-derives the complete
                ;; supervision transition from the current database value.
-               (when (and (= :closed (:seon.cluster.loop/outcome report))
-                          (:seon.cluster.wake/armer-channel cluster))
-                 (async/offer!
-                  (:seon.cluster.wake/armer-channel cluster)
-                  ::wake))
+                      (when (and
+                             (= :closed (:seon.cluster.loop/outcome report))
+                             (:seon.cluster.wake/armer-channel cluster))
+                        (async/offer!
+                         (:seon.cluster.wake/armer-channel cluster)
+                         ::wake))
                ;; self-rewake into this agent's OWN mailbox, coalescing on
                ;; its (sliding-buffer 1): it cannot recurse, because the pass
                ;; is only re-entered after this transform returns
-               (when (and
-                      (not (:seon.cluster.loop/trigger-already-answered report))
-                      (work/more-agent-work? @connection request))
-                 (async/offer! (:seon.cluster.wake/channel cluster) ::wake))
-               [(let [run-id (held-run-id @connection agent-id process)]
-                  (cond-> (dissoc state :seon.cluster.run/id)
-                    run-id (assoc :seon.cluster.run/id run-id)))
+                      (when
+                       (and
+                        (not
+                         (:seon.cluster.loop/trigger-already-answered report))
+                        (work/more-agent-work? @connection request))
+                        (async/offer!
+                         (:seon.cluster.wake/channel cluster) ::wake))
+                      [(let [run-id
+                             (held-run-id @connection agent-id process)]
+                         (cond-> (dissoc state :seon.cluster.run/id)
+                           run-id (assoc :seon.cluster.run/id run-id)))
                 ;; flow's own report channel: observation, never a dependency
-                {::flow/report [report]}])))
+                       {::flow/report [report]}])))]
+           (vreset! succeeded? true)
+           result)
          (finally
-           (when-not (async/offer! completion ::ready)
+           (if (async/offer! completion ::ready)
+             (when @succeeded?
+               (async/offer! (::cancel backstop) ::completed)
+               (when-let [backstop-state
+                          (:seon.cluster.agent/turn-backstop-state cluster)]
+                 (compare-and-set! backstop-state backstop nil)))
              (throw
               (ex-info
                "The agent turn could not publish its terminal completion."
-                {:seon.error/kind ::turn-completion-undeliverable
-                 :seon.cluster.agent/id
-                 (:seon.cluster.agent/id state)
-                 :seon.cluster.agent/turn-completion-undeliverable
-                 (:seon.cluster.agent/id state)})))))
+               {:seon.error/kind ::turn-completion-undeliverable
+                :seon.cluster.agent/id
+                (:seon.cluster.agent/id state)
+                :seon.cluster.agent/turn-completion-undeliverable
+                (:seon.cluster.agent/id state)}))))))
        [state nil]))))
 
 ;;; ---------------------------------------------------------------------------
@@ -547,6 +634,10 @@
             schedule-channel (async/chan (async/sliding-buffer 1))
             completion (async/chan 1)
             turn-stopped (async/promise-chan)
+            turn-backstop-state (atom nil)
+            turn-completion-backstop-ms
+            (:seon.config.agent/turn-completion-backstop-ms
+             (config/effective @connection (:seon.cluster/name handle)))
             _ (async/>!! completion ::ready)
             agent-handle (assoc handle
                                 :seon.cluster.wake/armer-channel
@@ -554,6 +645,10 @@
                                 :seon.cluster.wake/channel wake-channel
                                 :seon.schedule/channel schedule-channel
                                 :seon.cluster.loop/completion completion
+                                ::fault-channel (::fault-channel @routing)
+                                ::turn-backstop-state turn-backstop-state
+                                :seon.config.agent/turn-completion-backstop-ms
+                                turn-completion-backstop-ms
                                 :seon.cluster.agent/turn-stopped turn-stopped)
             {graph :seon.flow/graph}
             (seon.flow/start-graph!
@@ -570,11 +665,12 @@
                    :seon.flow/tag {:seon.cluster.agent/id agent-id}}))}})
             entry {:seon.cluster.agent/id agent-id
                    :seon.cluster.agent/eid eid
-                   :seon.cluster.loop/cluster handle
+                   :seon.cluster.loop/cluster agent-handle
                    :seon.flow/graph graph
                    :seon.cluster.wake/channel wake-channel
                    :seon.schedule/channel schedule-channel
                    :seon.cluster.loop/completion completion
+                   ::turn-backstop-state turn-backstop-state
                    :seon.cluster.agent/turn-stopped turn-stopped}]
         (swap! routing
                (fn [current]
@@ -590,7 +686,6 @@
   (let [completion (:seon.cluster.loop/completion entry)
         turn-stopped (:seon.cluster.agent/turn-stopped entry)
         {connection :seon.db/connection
-         cluster-name :seon.cluster/name
          process :seon.cluster.run/process}
         (:seon.cluster.loop/cluster entry)]
     (if-some [terminal (or (async/poll! completion)
@@ -601,33 +696,47 @@
             run-id (held-run-id database agent-id process)
             timeout-ms
             (:seon.config.agent/turn-completion-backstop-ms
-             (config/effective database cluster-name))
-            backstop (async/timeout timeout-ms)
-            [value selected]
-            (async/alts!! [completion turn-stopped backstop] :priority true)]
-        (if (or (= selected completion)
-                (= selected turn-stopped))
-          value
-          (let [failure
-                (turn-completion-backstop-failure
-                 agent-id run-id timeout-ms ::disarm ::turn-completed
-                 [:seon.cluster.loop/completion
-                  :seon.cluster.agent/turn-stopped])
-                fault
-                (cond->
-                 {::flow/pid ::turn
-                  ::flow/status :stopping
-                  ::flow/op ::turn-completion-backstop
-                  ::flow/ex failure
-                  :seon.cluster.agent/id agent-id}
-                  run-id (assoc :seon.cluster.run/id run-id))]
-            (async/offer! (::fault-channel @routing) fault)
-            (binding [*out* *err*]
-              (println "SEON CORE FAULT (agent stop backstop):"
-                       (ex-message failure)
-                       (pr-str (ex-data failure)))
-              (flush))
-            (throw failure)))))))
+             (:seon.cluster.loop/cluster entry))
+            active-backstop-state (::turn-backstop-state entry)
+            active-backstop
+            (when active-backstop-state @active-backstop-state)]
+        (if active-backstop
+          (let [failure-channel (::failure-channel active-backstop)
+                [value selected]
+                (async/alts!! [completion turn-stopped failure-channel]
+                              :priority true)]
+            (if (= selected failure-channel)
+              (do
+                (compare-and-set! active-backstop-state active-backstop nil)
+                (throw value))
+              value))
+          (let [backstop (async/timeout timeout-ms)
+                [value selected]
+                (async/alts!! [completion turn-stopped backstop]
+                              :priority true)]
+            (if (or (= selected completion)
+                    (= selected turn-stopped))
+              value
+              (let [failure
+                    (turn-completion-backstop-failure
+                     agent-id run-id timeout-ms ::disarm ::turn-completed
+                     [:seon.cluster.loop/completion
+                      :seon.cluster.agent/turn-stopped])
+                    fault
+                    (cond->
+                     {::flow/pid ::turn
+                      ::flow/status :stopping
+                      ::flow/op ::turn-completion-backstop
+                      ::flow/ex failure
+                      :seon.cluster.agent/id agent-id}
+                      run-id (assoc :seon.cluster.run/id run-id))]
+                (async/offer! (::fault-channel @routing) fault)
+                (binding [*out* *err*]
+                  (println "SEON CORE FAULT (agent stop backstop):"
+                           (ex-message failure)
+                           (pr-str (ex-data failure)))
+                  (flush))
+                (throw failure)))))))))
 
 (defn disarm!
   "Orderly stop of one agent's graph, idempotent.

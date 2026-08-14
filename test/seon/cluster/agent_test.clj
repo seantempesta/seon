@@ -24,6 +24,7 @@
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
+            [seon.cluster.loop :as cluster.loop]
             [seon.cluster.prompt :as prompt]
             [seon.cluster.run :as run]
             [seon.cluster.wake :as wake]
@@ -99,7 +100,10 @@
               {:seon.config.flow.compute/queue-depth 10
                :seon.config.flow.compute/concurrency 3
                :seon.config.flow.io/queue-depth 2
-               :seon.config.flow.io/concurrency 2}})
+               :seon.config.flow.io/concurrency 2
+               :seon.config.agent/turn-completion-backstop-ms
+               (:seon.config.agent/turn-completion-backstop-ms
+                (config/defaults))}})
             context-channel
             (test-support/render-context-channel
              (render/agent-render-profile (config/defaults)))
@@ -178,6 +182,8 @@
                          :seon.config.eval.result/max-string 4096
                          :seon.config.eval.result/max-nodes 256}
    :seon.config.eval/time-limit-ms @shipped-eval-time-limit-ms
+   :seon.config.agent/turn-completion-backstop-ms
+   (:seon.config.agent/turn-completion-backstop-ms (config/defaults))
    :seon.config/on-core-error :panic
    :seon.config.error/recurrence-limit 3
    :seon.config.message/max-chain 16})
@@ -423,6 +429,7 @@
                                           "prompt-refusal-cap")))
               (is (= 1 (or (db/q '[:find (count ?error) .
                                    :where
+                                   [?error :seon.error/id _]
                                    [?error :seon.error/kind
                                     :seon.cluster.prompt/refused]]
                                  @connection)
@@ -882,7 +889,9 @@
            "lost-turn-permit"
            {:seon.config.agent/turn-completion-backstop-ms timeout-ms})])
         (let [cluster (assoc (handle connection ctx)
-                             :seon.cluster.loop/completion (async/chan))
+                             :seon.cluster.loop/completion (async/chan)
+                             :seon.config.agent/turn-completion-backstop-ms
+                             timeout-ms)
               started-at (System/nanoTime)
               failure
               (try
@@ -896,7 +905,9 @@
           (is (= ::agent/turn-completion-backstop
                  (:seon.error/kind (ex-data failure))))
           (is (= ::agent/turn-start
-                 (:seon.error/diagnostic-operation (ex-data failure))))
+                 (get-in (ex-data failure)
+                         [:seon.error/data
+                          :seon.error/diagnostic-operation])))
           (is (= agent-id (:seon.cluster.agent/id (ex-data failure))))
           (is (= timeout-ms
                  (:seon.config.agent/turn-completion-backstop-ms
@@ -904,6 +915,165 @@
           (is (< elapsed-ms 1000.0)
               (str "the lost permit failed within its declared 100 ms bound in "
                    elapsed-ms " ms")))))))
+
+(deftest failed-turn-transform-keeps-a-live-backstop-after-releasing-its-permit
+  (with-connection
+    (fn [connection ctx]
+      (let [agent-id "quiescent-failed-transform"
+            timeout-ms 100
+            completion (async/chan 1)
+            fault-channel (async/chan 1)
+            cluster (assoc (handle connection ctx)
+                           :seon.cluster.loop/completion completion
+                           :seon.cluster.agent/fault-channel fault-channel
+                           :seon.cluster.agent/turn-backstop-state (atom nil)
+                           :seon.config.agent/turn-completion-backstop-ms
+                           timeout-ms)]
+        (db/transact!
+         connection
+         [{:seon.cluster.agent/id agent-id}
+          (config-row
+           "quiescent-failed-transform"
+           {:seon.config.agent/turn-completion-backstop-ms timeout-ms})])
+        (async/>!! completion ::ready)
+        (let [escaped
+              (with-redefs [work/interruption (fn [& _] nil)
+                            work/next-agent-work
+                            (fn [& _]
+                              {:seon.cluster.work/situation :resume
+                               :seon.cluster.agent/id agent-id
+                               :seon.cluster.run/id "failed-transform-run"})
+                            cluster.loop/turn
+                            (fn [& _]
+                              (throw
+                               (ex-info "turn transform escaped"
+                                        {:seon.test/turn-escaped true})))]
+                (try
+                  (agent/turn-step
+                   {:seon.cluster.agent/id agent-id
+                    :seon.cluster.loop/cluster cluster}
+                   ::agent/episode ::wake)
+                  nil
+                  (catch clojure.lang.ExceptionInfo failure failure)))
+              _ (is (= "turn transform escaped" (ex-message escaped)))
+              _ (is (= ::agent/ready (async/poll! completion))
+                    "the failed transform released its lifecycle permit")
+              fault
+              (test-support/await-event!
+               fault-channel ::quiescent-transform-backstop)]
+          (is (= ::agent/turn-completion-backstop
+                 (:seon.error/kind (ex-data (::flow/ex fault)))))
+          (is (= ::agent/turn-transform
+                 (get-in (ex-data (::flow/ex fault))
+                         [:seon.error/data
+                          :seon.error/diagnostic-operation])))
+          (is (= agent-id (:seon.cluster.agent/id fault))))))))
+
+(deftest install-gate-failure-settles-commits-and-cancels-the-turn-backstop
+  (with-connection
+    (fn [connection ctx]
+      (let [routing (armory)
+            agent-id "install-gate-chain"
+            run-id "install-gate-chain-run"
+            message-id "install-gate-chain-message"
+            namespace-name 'my.agents.install-gate-chain
+            timeout-ms 500
+            gate-var (ns-resolve 'seon.cluster.loop 'gate-function-install)
+            events (database-events connection)]
+        (db/transact!
+         connection
+         [(agent-row agent-id)
+          (config-row
+           "install-gate-chain"
+           {:seon.config.agent/turn-completion-backstop-ms timeout-ms})
+          {:seon.cluster.message/id message-id
+           :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+           :seon.cluster.message/content "finish generated opening"
+           :seon.cluster.message/at now}])
+        (db/transact!
+         connection
+         (run/open-tx
+          {:seon.cluster.run/id run-id
+           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+           :seon.cluster.run/trigger
+           [:seon.cluster.message/id message-id]
+           :seon.cluster.run/opened-at now}))
+        (db/transact!
+         connection
+         (run/claim-tx
+          {:seon.cluster.run/id run-id
+           :seon.cluster.run/process process
+           :seon.cluster.run/live-processes #{process}
+           :seon.cluster.run/now now}))
+        (db/transact!
+         connection
+         (run/plan-tx
+          {:seon.cluster.run/id run-id
+           :seon.cluster.run/process process
+           :seon.cluster.run/starting-ns [:seon.ns/name namespace-name]
+           :seon.cluster.run/plan-digest (apply str (repeat 64 "a"))
+           :seon.cluster.run/sources
+           [{:seon.cluster.run.form/source
+             "(defn ^{:malli/schema [:=> [:cat] :int]} gate-chain [] 1)"
+             :seon.ns/name namespace-name}]}))
+        (try
+          (with-redefs-fn
+            {gate-var
+             (fn [& _]
+               (throw
+                (ex-info "install gate broke mid-opening"
+                         {:seon.test/install-gate-broke true})))}
+            (fn []
+              (let [entry (arm-one! connection ctx routing agent-id)
+                    terminal-db
+                    (await-database-state!
+                     connection
+                     (:seon.cluster.agent-test/events events)
+                     (fn [database]
+                       (some?
+                        (db/q '[:find ?result .
+                                :in $ ?run-id
+                                :where
+                                [?run :seon.cluster.run/id ?run-id]
+                                [?receipt :seon.cluster.eval/run ?run]
+                                [?receipt :seon.cluster.eval/ordinal 0]
+                                [?receipt :seon.cluster.eval/result-edn ?result]]
+                              database run-id))))
+                    receipt
+                    (db/q '[:find (pull ?receipt [*]) .
+                            :in $ ?run-id
+                            :where
+                            [?run :seon.cluster.run/id ?run-id]
+                            [?receipt :seon.cluster.eval/run ?run]
+                            [?receipt :seon.cluster.eval/ordinal 0]]
+                          terminal-db run-id)
+                    committed-failure
+                    (db/q '[:find (pull ?error [*]) .
+                            :in $ ?run-id
+                            :where
+                            [?run :seon.cluster.run/id ?run-id]
+                            [?error :seon.error/run ?run]
+                            [?error :seon.error/kind
+                             :seon.cluster.loop/phase-failed]]
+                          terminal-db run-id)]
+                (is (= "install gate broke mid-opening"
+                       (:seon.cluster.eval/error receipt)))
+                (is (= :seon.cluster.loop/phase-failed
+                       (:seon.error/kind committed-failure)))
+                (is (inst? (:seon.cluster.run/closed-at
+                            (db/pull terminal-db
+                                     [:seon.cluster.run/closed-at]
+                                     [:seon.cluster.run/id run-id]))))
+                (is (await-until
+                     #(nil? @(:seon.cluster.agent/turn-backstop-state entry)))
+                    "terminal settlement canceled the active bound")
+                (is (nil? (async/poll!
+                           (:seon.cluster.agent/fault-channel @routing)))
+                    "the successful failure settlement canceled the live bound")
+                (is (some? entry)))))
+          (finally
+            (stop-database-events! connection events)
+            (disarm-all! routing)))))))
 
 (deftest park-wake-test
   (with-connection
