@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, performance, wave/live-drive-context]
 ---
@@ -57,3 +57,26 @@ The generated-opening cost measurement and its join to the exact
   estimate without also exposing and reconciling the consumer-fit delta.
 - A recurring live fixture bounds full toolkit-directory contribution and
   fails when the opening proxy diverges materially from the captured prompt.
+
+## Resolution
+
+Commit `470ecf029` makes the render proc return the exact ordered retained
+history segments whose concatenation is the agent prompt. Prompt accounting
+records one contribution per segment. Each token count is the difference
+between calibrated cumulative-character estimates, so separators belong to a
+specific entry and the ordered sum is exactly the whole-prompt estimate.
+Commit `b57076d08` adds the recurring full-toolkit check: the fitted
+`(dir (quote my.web))` bytes are one bounded contribution inside that whole.
+The final prompt suite passed 10 tests and 121 assertions.
+
+The fresh isolated-root proof recorded these durable facts:
+
+| Capture | Characters | Entries / positions | Contribution-token sum |
+|---|---:|---:|---:|
+| `bootstrap:root-context-536870964` | 33,199 | 16 | 10,374 |
+| `context-fidelity-current-run-context-536871000` | 60,005 | 47 | 18,751 |
+
+For the second capture the in-memory whole-prompt budget estimate was also
+18,751. The contribution rows therefore reconcile to the exact
+agent-consumed bytes; stored source/result faces remain receipt evidence and
+are no longer the prompt-cost measurement.
