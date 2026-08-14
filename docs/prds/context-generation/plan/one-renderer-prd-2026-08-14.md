@@ -44,28 +44,44 @@ degrades to designed faces — never to garbage, never to absence.
 
 ```mermaid
 flowchart TD
-    FO["<b>function output</b><br/>whole value — never bounds, clips, or narrates"]
-    ADMIT["<b>storage admission — seam B</b><br/>declared caps · shape-bearing elision values (ruling 33)"]
-    DERIVE["<b>derivation</b><br/>one pull rooted at the agent → ordered block vector<br/>membership = reachability · define-before-use order"]
-    SELECT{"<b>projection selection</b><br/>one chain per unit:<br/>/ai · /html · /form"}
-    FACE["<b>declared face — TERMINAL</b><br/>the goal for every load-bearing family,<br/>both projections (rulings 34-35)"]
-    FLOOR["<b>floor — last resort</b><br/>composes the declared faces of<br/>nested shapes nothing claimed"]
-    PRINT["<b>value printer</b><br/>one traversal, tee'd sinks:<br/>REPL-faithful text + structural hiccup<br/>quality only — NO budget"]
-    HIST["<b>append-only history</b><br/>diff/history: stale calls re-derive once, entries append<br/>prompt N+1 = prompt N + suffix"]
-    SEAMA["<b>seam A — model call</b><br/>join entries in order<br/>budget machinery DEFERRED (ruling 37)"]
-    SEAMB["<b>seam B′ — namespace view</b><br/>/ns/&lt;ns&gt; · / for root<br/>layout, disclosure — never a budget"]
-    WIRE(["provider wire"])
-    SSE(["SSE morphs per block"])
+    ADMIT["function outputs & messages become FACTS<br/>through storage admission — declared caps,<br/>shape-bearing elisions (seam B, ruling 33)"]
+    DB[("one immutable<br/>database value")]
+    PULL["<b>ROOT PULL at the agent</b><br/>selector generated from schema refs —<br/>membership IS reachability"]
+    VEC["<b>ordered block vector</b><br/>pull-tree order · define-before-use ·<br/>deterministic ties · arrivals last"]
+    SEL{"per unit:<br/>which renderer?"}
+    FACE["<b>declared face</b> — terminal, owns its output<br/>(the goal for every family, rulings 34-35)"]
+    FLOOR["<b>floor printer</b> — last resort,<br/>composes declared faces of<br/>nested shapes nothing claimed"]
 
-    FO --> ADMIT --> DERIVE --> SELECT
-    SELECT -->|"explicit key · owning-ns program fact (ruling 36) · schema default"| FACE
-    SELECT -->|"nothing claimed it"| FLOOR
-    FACE --> PRINT
-    FLOOR --> PRINT
-    PRINT --> HIST
-    HIST --> SEAMA --> WIRE
-    HIST --> SEAMB --> SSE
+    AIENT["<b>/form + /ai</b> per unit<br/>the REPL entry: form, then printed value"]
+    HIST["<b>append-only history</b><br/>a change re-derives ONLY the stale block (diff)<br/>and APPENDS a new entry — old entries never edit,<br/>so prompt N+1 = prompt N + suffix (cache-stable)"]
+    PROMPT(["<b>prompt bytes</b> → provider<br/>join in order — no budget for now (ruling 37)"])
+
+    HTMLB["<b>/html</b> per unit<br/>live block — always full current content,<br/>no diffing obligation"]
+    LAYOUT["<b>namespace layout</b> (/ns/&lt;ns&gt;, / for root)<br/>newest-CHANGED block = large primary ·<br/>side panel by last update (~3 visible) ·<br/>user pin locks primary (ruling 38)"]
+    MORPH(["<b>SSE morph</b> per block id"])
+
+    ADMIT --> DB --> PULL --> VEC --> SEL
+    SEL -->|"explicit key · owning-ns<br/>program fact · schema default"| FACE
+    SEL -->|"nothing claimed it"| FLOOR
+
+    FACE --> AIENT
+    FLOOR --> AIENT
+    FACE --> HTMLB
+    FLOOR --> HTMLB
+
+    AIENT --> HIST --> PROMPT
+    HTMLB --> LAYOUT --> MORPH
 ```
+
+Read top to bottom: everything durable is a fact; ONE pull rooted at
+the agent decides membership; the walk fixes ONE order; each unit
+resolves ONE renderer (declared face, else the floor); and then the
+two sides diverge exactly once — the AI side turns each block into a
+form+value REPL entry and lives under the append-only diff/history
+discipline (stability for the cache, change-as-change for the agent),
+while the HTML side takes the same blocks LIVE and lets the layout do
+recency promotion, side-panel ordering, and pinning. Same pull, same
+order, same faces; the only asymmetry is history versus liveness.
 
 Every stage is **total** (never throws into the pipeline), **honest**
 (typed error values, never silence), **bounded** (declared budgets),
