@@ -268,12 +268,16 @@
                             (:seon.store/store instance))
                          [:config :keep-history?]))))
           (testing "flow structure consumes its applied values"
-            (is (= (select-keys applied
-                                [:seon.config.flow.compute/queue-depth
-                                 :seon.config.flow.compute/concurrency
-                                 :seon.config.flow.io/queue-depth
-                                 :seon.config.flow.io/concurrency])
-                   (::flow/configuration launcher))))
+            ;; membership, not an exact census — carried accretions
+            ;; (the turn-completion backstop rides here now) never
+            ;; break the four consumed values being applied
+            (let [flow-keys [:seon.config.flow.compute/queue-depth
+                             :seon.config.flow.compute/concurrency
+                             :seon.config.flow.io/queue-depth
+                             :seon.config.flow.io/concurrency]]
+              (is (= (select-keys applied flow-keys)
+                     (select-keys (::flow/configuration launcher)
+                                  flow-keys)))))
           (testing "eval, error, and message structure consumes applied values"
             (is (= (config/result-caps applied)
                    (:seon.sci.admit/caps handle)))
