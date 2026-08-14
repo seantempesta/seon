@@ -157,6 +157,18 @@ elision vocabulary on the way through. Fixing the budget dial without deleting
 `soft-clip` leaves the namespace page still clipping agent context outside the
 owner.
 
+## Clipping rip-out update — 2026-08-14
+
+The illegal twin is gone: `38f18880b` deleted `soft-clip`, the invented
+`[clipped]` token, the ellipsis rewriter, and both hard-78 calls while landing
+the coordinated block-coverage work. `ab693ea4d` then made the text bounder
+private to `seon.print` and added the program-graph lock requiring exactly the
+render-fit and storage-admission call paths, with zero-subject failure.
+
+This issue remains open. Those changes remove dishonest producer-side cuts;
+they do not supply the still-missing render token-budget facts described by
+this note.
+
 ## Behavioral ablation — 2026-08-14
 
 The exact Attempt 5 prompt carried a 32,159-character toolkit span. The paid

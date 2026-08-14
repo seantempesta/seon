@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, sci, config, wave/sci-reader-limit]
 ---
@@ -56,3 +56,26 @@ at `src/seon/flow.clj:1093-1096` (bare `160`), `src/seon/ai.clj:706-708,1386-138
 proposed class regression derives the member list from the program graph rather
 than maintaining it by hand, so this issue's fix should land as part of that
 class rather than as a one-site repair.
+
+## Resolution — 2026-08-14
+
+Resolved by `fd75232f3` (`admission-cap-declared`). The private fallback and
+its false no-production-caller comment are deleted. The shipped manifest and
+schema now declare `:seon.config.eval.result/max-source`; `seon.config/result-caps`
+carries it with the admission-cap family. Live evaluation and model-reply
+freezing pass that fact explicitly. Checks over already-stored source pass the
+source's exact derived length instead of inventing another policy.
+
+Before, omitting the reader option silently selected 1,048,576 characters.
+After, the same call returns `:seon.sci.reader/unreadable` with the absent
+`:seon.config.eval.result/max-source` in error data. An over-cap raw reply
+returns a typed refusal carrying both the observed length and configured cap;
+prose recovery happens only after that admission and uses the recovered
+value's exact length.
+
+The focused reader/reply gate passed 28 tests and 214 assertions. The broader
+source-family run exercised 165 tests and 905 assertions; its only remaining
+red outside the subsequently fixed reply case is the pre-existing
+`seon.config-application-test/applied-values-shape-the-running-system`
+expectation, which omits the launcher-owned
+`:seon.config.agent/turn-completion-backstop-ms` fact.

@@ -226,3 +226,42 @@ duplicates; `index.md` was not touched (owner-ranked, lanes do not edit it).
   member #12.
 - `render-token-budgets-are-private-dials-no-producer-supplies.md` —
   cross-referenced as the missing-FACT half of the same law.
+
+## Rip-out outcome — 2026-08-14
+
+The later owner correction superseded this census's proposed public helper:
+producers return whole values. Text becomes smaller only inside
+`seon.print/fit` or declared `seon.sci.admit` storage admission. The shared
+`bounded-text` operation is private to `seon.print`; its only direct callers
+are `seon.print/fit-text` and `seon.print/admit-string`. The graph report
+derives both seam paths, rejects any third caller, and fails when no target
+edge is found (`ab693ea4d`).
+
+The twelve Clojure members landed as:
+
+- **deleted-cap-boundary-covers:** #1–#4 and #6 in `94116765e`; #5 in the
+  coordinated block-coverage commit `38f18880b`; #7–#11 in `9c3b4de51`.
+- **admission-cap-declared:** #12 in `fd75232f3`. The raw source crosses the
+  declared reader admission fact; it is refused whole when over cap, never
+  clipped.
+- **routed-to-boundary:** no producer required a new local route. Every
+  declared AI and HTML producer already reaches the shared terminal
+  `seon.print/fit`; durable nested values already reach `seon.sci.admit`.
+
+Before/after source evidence: production no longer contains `clip-str`,
+`bounded-output`, `bounded-fault-string`, the runner's local `bounded-text`,
+`soft-clip`, `[clipped]`, or any producer call to the private owner. A source
+census finds `bounded-text` only at its private definition, its two print-owner
+calls, and the graph-lock target string.
+
+Focused gates:
+
+- print/admission/graph lock: 45 tests, 320 assertions;
+- agent-context producers: 88 tests found four owned fixture/API updates;
+  the complete affected rerun passed 72 tests, 417 assertions, while the
+  note/message/token tests had already passed;
+- diagnostic producers: 94 tests, 591 assertions;
+- reader/reply focused rerun: 28 tests, 214 assertions. The wider source run
+  executed 165 tests and 905 assertions; the remaining unrelated red is the
+  stale launcher-projection expectation recorded in the resolved source-cap
+  issue.
