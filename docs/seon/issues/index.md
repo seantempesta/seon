@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (42)
+## Blocker (41)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -59,15 +59,13 @@ See `README.md` for the convention.
 | [Return from the generated opening's second live pull](generated-opening-live-pull-does-not-return-after-help.md) | blocker | prefix-drift bootstrap performance diagnosis (held `bootstrap.clj`) |
 | [Explain the 24-second live root pull of 189 members](live-root-pull-of-189-members-takes-24-seconds.md) | blocker | render acquisition performance wave |
 | [Make the fault committer unable to lose a fault](started-receipt-can-outlive-a-lost-settlement-fault.md) | blocker | lost-settlement fix wave |
-| [Bound agent-facing host crossings](agent-facing-host-crossings-can-wait-without-a-bound.md) | blocker | wedge class-kill continuation |
 | [Bound orderly-stop completion joins](orderly-stop-completion-joins-have-no-bound.md) | blocker | wedge class-kill continuation |
 | [Bound scheduled store collection before it holds the installation control lock](scheduled-store-collection-holds-the-control-lock-without-a-bound.md) | blocker | RULED keep-serial operator lock contention follow-up |
 
-## Friction (130)
+## Friction (129)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [Bound web delivery awaits](web-delivery-awaits-have-no-bound.md) | friction | wedge class-kill continuation |
 | [Render db diffs through fit with an html producer](db-diff-render-bypasses-print-fit-and-has-no-html.md) | friction | db-diff completion gate |
 | [Add the required instrumentation request to the repl skill](repl-skill-omits-required-instrumentation-request.md) | friction | skill accuracy sweep |
 | [Give maintenance messages plain identities, not printed EDN](maintenance-message-ids-embed-printed-edn.md) | friction | message identity cleanup |
