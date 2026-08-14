@@ -36,7 +36,18 @@ raw value ──[admit]──▶ node tree ──[walk+select]──▶ block ve
 (Admission's storage caps are the PRD's seam B; the HTML seam is B' —
 no budget, arrangement only.)
 
-## Stage 1 — admission: the only code that touches a raw value
+## Stage 1 — CORRECTED (owner, 2026-08-14 night): rendering starts at the database value
+
+**Admission is NOT a render-pipeline stage.** The owner's correction:
+the render pipeline begins at one immutable database value, whose
+state is indexing plus whatever transactions agents made on reachable
+entities. How facts get written — including the eval-settlement
+machinery below — is upstream of and invisible to rendering; no
+"projection across seam B" exists in the render story. The paragraph
+below survives only as background on that upstream machinery, where
+ruling 33's shape-bearing elisions still apply to stored results.
+
+### Background: eval-settlement admission (upstream, not rendering)
 
 `seon.sci.admit` stays the one guarded walk (interrupt-fn, node
 budget), gaining the archive's lazy-realization guard: a poisoned
