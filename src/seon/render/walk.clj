@@ -593,7 +593,8 @@
                                     (:seon.db/tx-data failure-outcome))
                              (not failure)
                              (assoc :seon.render/output rendered))
-                           marker (distance-cap-unit member remaining)]
+                           marker (when (not= output :seon.render/html)
+                                    (distance-cap-unit member remaining))]
                        (cond-> [member-unit]
                          marker (conj marker))))))
                  order)))))))

@@ -18,15 +18,17 @@
   (java.util.Date. (long (+ 1786400000000 offset))))
 
 (defn- request
-  [database ctx distance]
+  ([database ctx distance]
+   (request database ctx distance :seon.render/ai))
+  ([database ctx distance output]
   {:seon.db/db database
    :seon.sci.eval/ctx ctx
    :seon.render.walk/lookup [:seon.cluster.agent/id agent-id]
-   :seon.render/output :seon.render/ai
+   :seon.render/output output
    :seon.render/distance distance
    :seon.sci.admit/caps caps
    :seon.sci.eval/time-limit-ms 5000
-   :seon.config/on-core-error :record})
+   :seon.config/on-core-error :record}))
 
 (defn- seed-agent-and-transcript!
   [connection]
@@ -127,3 +129,19 @@
        (is (not (str/includes? (str warnings)
                                "DECLARATION POPULATION FALLBACK"))
            "the complete traversal stays under its supplied projection")))))
+
+(deftest html-neighborhood-emits-no-traversal-only-elision-units
+  (support/with-database
+   (fn [connection]
+     (seed-agent-and-transcript! connection)
+     (let [units (walk/neighborhood
+                  (request @connection
+                           (support/fork-cluster-ctx connection)
+                           2
+                           :seon.render/html))]
+       (is (pos? (count units)) "the census must inspect a real neighborhood")
+       (is (empty? (filter #(= ::walk/elided
+                               (get-in % [:seon.error/value
+                                          :seon.error/kind]))
+                           units))
+           "HTML emits only units with renderable content")))))
