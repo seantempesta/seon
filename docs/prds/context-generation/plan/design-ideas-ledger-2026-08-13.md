@@ -444,13 +444,19 @@ one decision away from queued work. Ruled items cite their record.
     reachable namespace at `/ns/<full.ns.symbol>`. Consequences:
     `/agent/{id}` and `/agent/{id}/debug` are dead (agents ARE
     namespaces, ruling 40); the `/ns/{ns}/debug` and `/data` PAGES are
-    dead as routes — the honest `/ai` view (ledger 31) and the data
-    drill become in-page affordances of the namespace view
-    (browser-local toggles/panels under ruling 38), not addresses.
-    Non-navigable plumbing (the SSE feed, the message POST, static
-    assets) remains transport under those two pages, not part of the
-    navigable surface; ui.md's route table is amended to match in the
-    same wave that re-scopes §1.5.
+    dead as routes — the honest `/ai` view (ledger 31) becomes an
+    in-page affordance of the namespace view (browser-local, ruling
+    38), not an address. Amendment (same conversation): `/data` — the
+    ALREADY-WRITTEN global database browser (`route.clj:22`, the
+    structural floor with paged get-in navigation, cursor in the URL)
+    — survives as a third route. For the record, the dead `/agent/*`
+    rows are not hypothetical: `route.clj:13-17` declares them today
+    and `GET /agent/root/debug` served the live capture — they encode
+    the pre-ruling-40 agent-is-not-a-namespace model and are
+    deletions. Non-navigable plumbing (the SSE feed, the message
+    POST, static assets) remains transport, not navigable surface;
+    ui.md's route table is amended to match in the same wave that
+    re-scopes §1.5.
 
 ## Parked explicitly (owner said not yet / needs design first)
 

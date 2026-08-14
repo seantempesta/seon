@@ -286,13 +286,13 @@ the resolution chain). This section is a DELTA against it — the owner's
 ruled corrections plus what this cycle's evidence demands. Read ui.md
 END TO END before touching any of this; failing to was fuckup #5.
 
-**The routes are two (ruling 41): `/` and `/ns/<full.ns.symbol>`.**
-Everything below describes VIEWS WITHIN those two pages — the
-`/agent/*`, `*/debug`, and `/data` routes named in earlier drafts and
-in ui.md's table are dead as addresses; the honest `/ai` view and the
-data drill become in-page affordances (browser-local, ruling 38). The
-SSE feed, message POST, and static assets remain non-navigable
-transport.
+**The routes (ruling 41 as amended): `/`, `/ns/<full.ns.symbol>`, and
+the already-written `/data` global database browser.** Everything else
+below describes VIEWS WITHIN those pages — the `/agent/*` and
+`*/debug` routes that exist at `route.clj:13-17` today encode the
+pre-ruling-40 model and are deletions; the honest `/ai` view becomes
+an in-page affordance (browser-local, ruling 38). The SSE feed,
+message POST, and static assets remain non-navigable transport.
 
 **The views** (all projections of the same blocks; ledger 30-32):
 
