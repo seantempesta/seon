@@ -127,7 +127,8 @@
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]
             [seon.sci.kernel :as kernel]
-            [seon.sci.reader :as reader]))
+            [seon.sci.reader :as reader]
+            [seon.test.accretion :as accretion]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -1740,7 +1741,10 @@
               (schema/projection-with-schema
                projection schema-key definition
                {:seon.schema.admission/source :agent})
-              (assoc raw-row :seon.schema/form (pr-str definition))))
+              (accretion/schema-row
+               (assoc (:seon.schema.projection/forms projection)
+                      schema-key definition)
+               (assoc raw-row :seon.schema/form (pr-str definition)))))
           raw-row)
         base-declared-row
         (if (:seon.fn/spec base-declared-row)
@@ -1959,6 +1963,7 @@
     cluster-name :seon.boot/cluster-name
     work-launcher :seon.flow/work-launcher
     namespace-ref :seon.cluster.run.form/ns
+    output-prefix :seon.sci.eval/output-prefix
     time-limit-ms :seon.sci.eval/time-limit-ms
     on-core-error :seon.config/on-core-error}]
   (let [;; A supplied ctx keeps its accumulated defs. The only replacement is
@@ -2161,6 +2166,11 @@
            {:seon.sci.eval/admitted admitted
             :seon.sci.admit/caps caps
             :seon.sci.eval/printed printed
+            :seon.sci.eval/output-prefix
+            (str/join "\n"
+                      (remove str/blank?
+                              [output-prefix
+                               (accretion/non-generatable-advisory row)]))
             :seon.sci.eval/namespace-name namespace-name
             :seon.sci.eval/ending-namespace @ending-namespace
             :seon.print/options @print-options

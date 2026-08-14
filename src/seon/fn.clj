@@ -11,7 +11,8 @@
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
-            [seon.schema.edn :as schema.edn])
+            [seon.schema.edn :as schema.edn]
+            [seon.test.accretion :as accretion])
   (:import [java.nio.file Files]
            [java.security MessageDigest]))
 
@@ -1523,8 +1524,10 @@
 (defn- desired-rows
   [request progress!]
   (let [source-rows (rows request)
+        packaged-forms (schema.edn/packaged-forms)
         canonical-schemas
-        (schema/canonical-schema-rows (schema.edn/packaged-forms))
+        (mapv (partial accretion/schema-row packaged-forms)
+              (schema/canonical-schema-rows packaged-forms))
         canonical-keys (into #{} (map :seon.schema/key) canonical-schemas)
         source-only
         (remove (fn [row]

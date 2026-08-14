@@ -71,6 +71,10 @@
         ;; developer tests: goal grading loads them in the eval host.
         org.clojure/test.check {:mvn/version "1.1.1"}
 
+        ;; Malli delegates regex generation to test.chuck. Schema
+        ;; generatability is runtime evaluation material too.
+        com.gfredericks/test.chuck {:mvn/version "0.2.15"}
+
         ;; Protected JVM filesystem convenience only. Seon owns roots,
         ;; no-follow traversal, bounds, preconditions, and flat errors.
         babashka/fs {:local/root "reference-code/babashka/fs"}
