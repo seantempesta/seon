@@ -60,6 +60,28 @@ gathering evidence:
 - (c) parity kept only for result lines inside the transcript, ruled per
   face rather than per request.
 
+**Evidence landed
+([parity-elision-collision](../research/parity-elision-collision-2026-08-14.md)),
+repricing the options:** the collision was created by `e34eea186`
+(2026-08-04, a walk-totality fix that silently overwrote the sealed D5
+face with no ruling reference) and never reconciled — the two regimes
+are exercised by DISJOINT tests, which is why nothing caught it. Parity
+has numbered rulings (#25, #26); the elision law entered as a
+vocabulary note and was never ruled against them — and current
+`render-elision-ai` output VIOLATES live ruling #25 (the forbidden
+"N of M" annotation). Critically, the parity gate constrains far less
+than assumed: every elision-dependent parity row is already
+`:known-divergence` (the harness asserts they FAIL), so option (b)
+turns no green row red — its real cost is formally superseding
+#25/#26, and its implementation is profile wiring in three namespaces,
+not a printer change. Option (a)'s honest cost: the regime bit in emit
+options breaks P-TEE as currently stated. Under ANY option, four
+repairs are needed: `fit-terminal` re-cutting fitted nodes with bare
+defaults; the `::truncated-string` in-string ellipsis (lies in both
+regimes); the unrecorded `::address` parity trade (`3f6958fc2`); and
+the parity harness reporting health about a path half the system
+bypasses.
+
 ### Q1. Does the composing walk become THE renderer?
 
 The nested composition the owner wants — the walk detects recognizable

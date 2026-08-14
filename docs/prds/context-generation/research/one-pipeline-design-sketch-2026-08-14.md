@@ -85,7 +85,23 @@ line), payload-first degradation (`dominant-string` promotion), the
 verbatim probe for tiny values, and the current tee (text + structural
 hiccup in one traversal — P-TEE stands). The `fit` convergence loop and
 `fit-terminal`'s second character pass are deleted; **the printer has
-no budget** (owner's seam correction). Presentation WINDOWS (a `/data`
+no budget** (owner's seam correction).
+
+The [prior-art survey](value-browser-prior-art-2026-08-14.md) supplies
+the exact mechanics: reveal's `reduced`-propagating op stream bounds an
+arbitrary value in ONE traversal (the direct replacement for the
+re-emitting fit loop), and its `sf-wider-than?` is a `fits?` probe
+costing O(width) not O(value); orchard's independent `max-atom-length`
+vs `max-value-length` bounds structurally kill the halve-the-payload
+inversion, and its page-size+1 probe answers "is there more" without
+counting (uncountable renders as a typed `?`, never a guess); reveal's
+never-force-a-deref discipline (realized?-gated, pending/failed state
+names) and its semantic fill vocabulary extend our face set; malli's
+relevance masking (elide by relevance, preserve indices/lengths) is the
+principled generalization of dominant-string promotion; and the elision
+node's `next-offset` should be designed as exactly what a Datastar
+scroll/intersect handler posts back, unifying the drill protocol with
+the HTML window. Presentation WINDOWS (a `/data`
 page, an explicitly small view) are explicit request options that
 produce elision values — never ambient defaults.
 
