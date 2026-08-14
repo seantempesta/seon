@@ -55,6 +55,7 @@
    :seon.config.eval/time-limit-ms :arm-time
    :seon.config.test/auto-check-cases :live
    :seon.config.agent/turn-completion-backstop-ms :live
+   :seon.config.bootstrap/beyond-closure-token-budget :live
    :seon.config.error/recurrence-limit :mixed
    :seon.config.error/escalate-to :mixed
    :seon.config/on-core-error :mixed
@@ -127,6 +128,7 @@
    :seon.config.eval/time-limit-ms 1234
    :seon.config.test/auto-check-cases 7
    :seon.config.agent/turn-completion-backstop-ms 600000
+   :seon.config.bootstrap/beyond-closure-token-budget 512
    :seon.config.error/recurrence-limit 2
    :seon.config.error/escalate-to "root"
    :seon.config/on-core-error :record
