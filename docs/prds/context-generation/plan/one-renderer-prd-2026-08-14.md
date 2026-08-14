@@ -317,15 +317,27 @@ properties; no wave starts before the owner marks this document up.
 
 ## 7. Open decisions for the owner
 
-1. **Agent-entity dissolution mechanics (ruling 40).** Options owed:
-   (a) merge — agentic attributes move onto the ns entity; `run/agent`,
-   `message/to|from`, and plan refs repoint AT the namespace entity;
-   the agent family is deleted; the transcript's sources (message
-   rows, run forms, eval receipts) become one hop from the root
-   (cleanest; data is disposable by ruling — reset, never migrate);
-   (b) keep the agent entity as internal plumbing under one identity
-   (no schema deletion now, one more join forever).
-   Recommendation: (a).
+1. **The agent entity STAYS (owner, 2026-08-14 night, superseding the
+   merge option): agents need a place to write their own data.** Two
+   entities, two concerns, linked agent → namespace as today (one
+   agent per namespace; the pull reaches the agent from the namespace
+   root by the reverse ref in one hop): the NAMESPACE entity is the
+   code's home (requires/refers/source; functions and tests
+   reverse-ref it); the AGENT entity is the agentic life's home — its
+   defs, notes, plan items, per-agent instruction refs (all
+   agent-ref'd today), and messages (`/to`,`/from` address the agent).
+   PROPOSED for markup — the session family (the one new schema):
+   `session/agent` ref; `opened-at`; `archived-at` ABSENT = current;
+   the agent carries ONE forward `/session` ref to the current
+   session (the ref IS the one-current-session invariant); runs
+   repoint `run/session` (agent derivable through it); a session's
+   transcript derives from its runs' forms/receipts plus messages in
+   its basis interval. The pull's forward `/session` edge puts exactly
+   the current session in default context; archived sessions sit
+   behind the reverse edge — reachable identities, requeried on
+   demand, never flooding a fresh context. Archive = one transaction:
+   assert `archived-at`, retract-and-replace `agent/session` — "new
+   chat" and rebirth are the same move.
 
    **Companion piece — the fundamentals are Seon's clojure.core.**
    Base capabilities (`my.message`, `my.run`, the injected
