@@ -280,6 +280,17 @@ one decision away from queued work. Ruled items cite their record.
     is the quality incentive. Seam: `seon.render.transcript` history
     derivation + the web agent page. Folds into ui-overhaul.
 
+31. **Debug default face = the `/ai` views, pretty** (owner, 2026-08-14
+    afternoon): the debug view always renders what the model sees (the
+    `/ai` projection) but formatted — pretty-printed spacing, syntax
+    highlighting. Honesty falsifier amended from byte-identity to
+    CHARACTER-CONTENT identity modulo whitespace and color: strip
+    whitespace, compare — no character added, removed, reordered, or
+    rewritten. The raw toggle keeps exact bytes (token/cache
+    debugging). Amends decision 1/4 of
+    [transcript-view-design-2026-08-14](../research/transcript-view-design-2026-08-14.md);
+    folds into ui-overhaul with the chat-projection package.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
