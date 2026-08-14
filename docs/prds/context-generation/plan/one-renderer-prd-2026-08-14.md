@@ -59,7 +59,17 @@ flowchart TD
     LAYOUT["<b>namespace layout</b> (/ns/&lt;ns&gt;, / for root)<br/>newest-CHANGED block = large primary ·<br/>side panel by last update (~3 visible) ·<br/>user pin locks primary (ruling 38)"]
     MORPH(["<b>SSE morph</b> per block id"])
 
-    DB --> PULL --> VEC --> SEL
+    subgraph ORDER["the walk fixes ONE logical order — define-before-use"]
+        direction TB
+        O1["1 · who am I — cluster identity, config"]
+        O2["2 · the rules — instruction entities<br/>(the one place prose is legal)"]
+        O3["3 · what exists — (dir ns) per toolkit namespace:<br/>every name LISTED before any doc or call"]
+        O4["4 · what is mine — own namespace, plan, open run"]
+        O5["5 · what happened — messages, receipts, errors<br/>by ARRIVAL, newest nearest the next turn"]
+        O1 --> O2 --> O3 --> O4 --> O5
+    end
+
+    DB --> PULL --> ORDER --> VEC --> SEL
     SEL -->|"explicit key · owning-ns<br/>program fact · schema default"| FACE
     SEL -->|"nothing claimed it"| FLOOR
 
@@ -71,6 +81,50 @@ flowchart TD
     AIENT --> HIST --> PROMPT
     HTMLB --> LAYOUT --> MORPH
 ```
+
+### 0.1 The worked example — root's real context, today
+
+The complete annotated capture is
+[root-context-example-2026-08-14](../research/root-context-example-2026-08-14.md)
+— the LIVE `default` cluster's actual root context, fetched from the
+running render proc, walked stage by stage. The compressed story:
+
+The context IS a REPL session. Every entry is a real call and its
+rendered result, in the order the diagram's ORDER stages describe —
+verbatim from the capture:
+
+```text
+my.agents.root=> (db/pull db '[*] [:seon.cluster/name "default"])
+Cluster default. Configuration default; 1 shared instruction and 9 toolkit namespaces.
+my.agents.root=> (db/pull db '[*] [:seon.cluster.instruction/id :getting-started])
+This is a live Clojure REPL. … Your reply is read as forms and evaluated …
+my.agents.root=> (dir 'my.note)
+[(ns my.note …) {:seon.fn/sym "my.note/add!", :seon.fn/spec … :seon.fn/doc "Add or update…"} …
+ {:seon.print/face :seon.print/elided, :seon.print/omitted 25, … :seon.print/requery-id [:seon.ns/name my.note]}]
+my.agents.root=> (my.message/read "bootstrap-task:root")
+From outside this cluster to root: Define a durable contracted function named largest …
+```
+
+Stage by stage: the pull acquired cluster → config → instruction →
+nine toolkit namespaces → the agent's own namespace → live runs,
+messages, errors. Selection resolved the cluster/config entries to
+their declared faces, the instruction to its stored text (prose,
+legally), the `dir` listings to the floor (data rows + a real elision
+value with a requery id), and the run/message/error entries to the
+narrating faces the register deletes. The same capture shows five
+register rows LIVE: the run face printing the WRONG run's id on three
+different runs (#1/#3 — the sentence hides what a data face could
+not), `(dir 'my.background)` pr-str'd and character-chopped mid-string
+(#15/#8), elision values printed as raw seven-line EDN maps instead of
+ruling 33's compact shape marker, `schedule.fire` rows in the
+braceless second map face (#4), and printed maps whose string values
+have NO QUOTES (broken read-back). And it shows why ruling 37 says
+move data instead of clipping: one hourly failure, re-pulled as
+message+error+receipt+request+fire every hour with the agent's whole
+opening instruction embedded in each request row, stuffed the context
+until two runs died `budget-exceeded` at 41k/63k tokens against a 32k
+budget — a data-model repetition problem no clipper could fix
+honestly.
 
 Read top to bottom: rendering STARTS at the database value — its state
 is indexing plus whatever transactions agents made on reachable
