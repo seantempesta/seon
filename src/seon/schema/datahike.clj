@@ -389,14 +389,29 @@
    (fn [[namespace-name local-name]]
      (symbol namespace-name local-name))})
 
+(defn- canonical-print-string
+  [value]
+  (binding [*print-length* nil
+            *print-level* nil
+            *print-meta* false
+            *print-readably* true
+            *print-dup* false
+            *print-namespace-maps* true]
+    (pr-str value)))
+
+(defn- storage-compare
+  [left right]
+  (compare (canonical-print-string left)
+           (canonical-print-string right)))
+
 (defn- reader-round-trips?
   [value]
   (try
-    (= value (edn/read-string (pr-str value)))
+    (= value (edn/read-string (canonical-print-string value)))
     (catch Throwable _ false)))
 
 (defn- storage-data
-  "Replace reader-inexpressible identifiers with explicit EDN tagged values."
+  "Replace inexpressible identifiers and impose canonical collection order."
   [value]
   (walk/postwalk
    (fn [element]
@@ -409,12 +424,18 @@
        (tagged-literal 'seon.schema.datahike/symbol
                        [(namespace element) (name element)])
 
+       (map? element)
+       (into (sorted-map-by storage-compare) element)
+
+       (set? element)
+       (into (sorted-set-by storage-compare) element)
+
        :else element))
    value))
 
 (defn- storage-string
   [value]
-  (pr-str (storage-data value)))
+  (canonical-print-string (storage-data value)))
 
 (defn- encode-value-in
   [projection attr value]

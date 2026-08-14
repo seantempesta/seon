@@ -327,21 +327,133 @@
         (is (= 1 @resolutions)
             "resolution count is per transaction, never per entity")))))
 
-(deftest edn-backed-attributes-round-trip-reader-inexpressible-identifiers
+(deftest edn-backed-attributes-have-one-canonical-datahike-round-trip
   (let [projection (schema/declaration-projection)
         branch (keyword "seon.test-support.fixture" "0")
         revision
-        {:datahike.cache/connection-id [(random-uuid) branch]
-         :datahike.cache/generation (random-uuid)
+        {:datahike.cache/connection-id
+         [(java.util.UUID/fromString "05e76e86-dc27-4aa0-958a-a96274b83533")
+          branch]
+         :datahike.cache/generation
+         (java.util.UUID/fromString "aa7bc82c-65c4-44a0-98df-87c7c798b13b")
          :datahike.read/attributes #{:seon.cluster.agent/id}
          :datahike.cache/attribute-revisions
-         {:seon.cluster.agent/id (random-uuid)}}
+         {:seon.cluster.agent/id
+          (java.util.UUID/fromString "8d12cd47-3e5b-4d3e-9505-5dd72ee1cde9")}}
         encoded
         (get (first
               (schema.datahike/encode-transaction-in
                projection [{:datahike.read/revision revision}]))
              :datahike.read/revision)]
-    (is (= revision
-           (schema.datahike/decode-attribute-value-in
-            projection :datahike.read/revision encoded))
-        "numeric branch keywords remain exact across the string storage seam")))
+    (testing "reader-inexpressible identifiers remain exact"
+      (is (= revision
+             (schema.datahike/decode-attribute-value-in
+              projection :datahike.read/revision encoded))
+          "numeric branch keywords remain exact across the string storage seam"))
+
+    (support/with-database
+     (fn [connection]
+       (let [where
+             '[[?row :seon.call-preparation/key ?key]
+               [?row :seon.call-preparation/schema ?schema]
+               [?schema :seon.schema/key ?schema-key]
+               [?schema :seon.schema/shape ?shape]
+               [?shape :seon.schema.shape/fingerprint ?fingerprint]
+               [?row :seon.call-preparation/supplier ?function]
+               [?function :seon.fn/sym ?supplier]]
+             attributes
+             [:seon.call-preparation/key
+              :seon.call-preparation/schema
+              :seon.schema/key
+              :seon.schema/shape
+              :seon.schema.shape/fingerprint
+              :seon.call-preparation/supplier
+              :seon.fn/sym]
+             ascending-set (into (sorted-set-by compare) attributes)
+             descending-set
+             (into (sorted-set-by (fn [left right] (compare right left)))
+                   attributes)
+             query
+             (array-map
+              :find '[?key ?schema-key ?fingerprint ?supplier]
+              :in '[$]
+              :where where)
+             reversed-query
+             (array-map
+              :where where
+              :in '[$]
+              :find '[?key ?schema-key ?fingerprint ?supplier])
+             request
+             (array-map
+              :seon.db/read-operation :q
+              :seon.db/query-request
+              (array-map :query query :args [:seon.db/database]))
+             reversed-request
+             (array-map
+              :seon.db/query-request
+              (array-map :args [:seon.db/database] :query reversed-query)
+              :seon.db/read-operation :q)
+             plan
+             {:datahike.query.dependency/sources
+              [(array-map
+                :datahike.query.source/symbol '$
+                :datahike.query.source/argument-position 0
+                :datahike.query.source/attributes ascending-set)]}
+             reversed-plan
+             (array-map
+              :datahike.query.dependency/sources
+              [(array-map
+                :datahike.query.source/attributes descending-set
+                :datahike.query.source/argument-position 0
+                :datahike.query.source/symbol '$)])
+             receipt
+             (fn [id read-request dependency-plan]
+               {:seon.cluster.eval/id id
+                :seon.cluster.eval/read-evidence
+                [{:seon.db/source-argument-position 0
+                  :datahike.read/dependency-plan dependency-plan
+                  :datahike.read/revision
+                  {:datahike.read/attributes :all
+                   :datahike.read/cache-eligible? false}
+                  :seon.db/read-request read-request}]})]
+         (binding [*print-namespace-maps* false]
+           (db/transact! connection [(receipt "codec-forward" request plan)]))
+         (binding [*print-namespace-maps* true]
+           (db/transact! connection
+                         [(receipt "codec-reversed"
+                                   reversed-request
+                                   reversed-plan)]))
+         (let [selector '[*]
+               forward-raw
+               (d/pull @connection selector
+                       [:seon.cluster.eval/id "codec-forward"])
+               reversed-raw
+               (d/pull @connection selector
+                       [:seon.cluster.eval/id "codec-reversed"])
+               forward
+               (binding [*print-namespace-maps* true]
+                 (db/pull @connection selector
+                          [:seon.cluster.eval/id "codec-forward"]))
+               reversed
+               (binding [*print-namespace-maps* false]
+                 (db/pull @connection selector
+                          [:seon.cluster.eval/id "codec-reversed"]))
+               forward-raw-evidence
+               (first (:seon.cluster.eval/read-evidence forward-raw))
+               reversed-raw-evidence
+               (first (:seon.cluster.eval/read-evidence reversed-raw))
+               forward-evidence
+               (first (:seon.cluster.eval/read-evidence forward))
+               reversed-evidence
+               (first (:seon.cluster.eval/read-evidence reversed))]
+           (testing "the transaction codec emits one canonical representation"
+             (is (= (:seon.db/read-request forward-raw-evidence)
+                    (:seon.db/read-request reversed-raw-evidence)))
+             (is (= (:datahike.read/dependency-plan forward-raw-evidence)
+                    (:datahike.read/dependency-plan reversed-raw-evidence))))
+           (testing "wildcard receipt reads restore both exact logical values"
+             (is (= request (:seon.db/read-request forward-evidence)))
+             (is (= request (:seon.db/read-request reversed-evidence)))
+             (is (= plan (:datahike.read/dependency-plan forward-evidence)))
+             (is (= plan
+                    (:datahike.read/dependency-plan reversed-evidence))))))))))
