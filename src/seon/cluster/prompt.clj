@@ -163,10 +163,12 @@
                     (:seon.render/context-channel request)
                     (assoc request
                            :seon.db/db database
-                           :seon.render/distance distance))
-          text (:seon.cluster.prompt/text acquired)
-          report (tokens/budget-report text budget calibration)]
-      (case (:seon.ai.tokens/verdict report)
+                           :seon.render/distance distance))]
+      (if (:seon.error/kind acquired)
+        acquired
+        (let [text (:seon.cluster.prompt/text acquired)
+              report (tokens/budget-report text budget calibration)]
+          (case (:seon.ai.tokens/verdict report)
         ;; ADMITTED, BUT NOT SILENTLY: the point estimate fits and the
         ;; calibration's own worst observed miss does not. Saying
         ;; nothing here is exactly how three over-budget prompts left
@@ -202,7 +204,7 @@
                   :seon.config.ai/prompt-token-budget budget
                   :seon.context.contribution/tokens
                   (:seon.ai.tokens/estimated report)
-                  :seon.render/distance distance)})))))
+                  :seon.render/distance distance)})))))))
 
 (defn prompt
   "Acquire one retained walk for the agent holding the request's run.

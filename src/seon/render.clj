@@ -12,6 +12,7 @@
   lane. A redefinition therefore changes the next call and a cold context
   re-derives the same symbol from its database program row."
   (:require [clojure.core.async :as async]
+            [seon.await :as await]
             [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.db :as db]
@@ -710,13 +711,32 @@
   The cluster render proc supplies the bytes and database value; prompt
   assembly adds its capture contribution."
   {:malli/schema [:=> [:cat :seon.flow/channel :seon.cluster.prompt/request]
-                  :seon.render/acquired-context]}
+                  [:or :seon.render/acquired-context :seon.error/value]]}
   [context-channel request]
-  (let [reply (async/promise-chan)]
-    (async/>!! context-channel
-               {:seon.render.context/request request
-                :seon.render.context/reply reply})
-    (async/<!! reply)))
+  (let [reply (async/promise-chan)
+        agent-id (:seon.cluster.agent/id request)
+        run-id (:seon.cluster.run/id request)]
+    (await/await!
+     {:seon.await/bound
+      {:seon.await/config-attribute :seon.config.eval/time-limit-ms
+       :seon.await/config-value (:seon.sci.eval/time-limit-ms request)}
+      :seon.await/diagnostic
+      {:seon.error/diagnostic-layer :render
+       :seon.error/diagnostic-operation ::context-acquisition
+       :seon.error/diagnostic-member
+       {:seon.cluster.agent/id agent-id
+        :seon.cluster.run/id run-id
+        :seon.render/context-channel context-channel}
+       :seon.error/diagnostic-expected ::context-reply
+       :seon.error/diagnostic-offending ::pending
+       :seon.error/diagnostic-evidence
+       {:seon.cluster.agent/id agent-id
+        :seon.cluster.run/id run-id}}
+      :seon.await/port-operations
+      [[context-channel
+        {:seon.render.context/request request
+         :seon.render.context/reply reply}]
+       reply]})))
 
 (defn- failure-message-id
   [namespace-name failure]

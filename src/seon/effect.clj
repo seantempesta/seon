@@ -9,6 +9,7 @@
             [sci.core :as sci]
             [sci.impl.utils :as sci.utils]
             [seon.ai.tokens :as tokens]
+            [seon.await :as await]
             [seon.blob :as blob]
             [seon.config :as config]
             [seon.db :as db]
@@ -356,7 +357,7 @@
     (work)))
 
 (defn- dispatch
-  [handler request effective]
+  [handler owner-sym effect-id request effective]
   (let [executor (:io ((requiring-resolve
                         'seon.operator.runtime/root-executors)))
         ;; Captured on THIS thread and closed over as data, so the executor
@@ -370,7 +371,28 @@
                              #(handler request effective))))]
     (.execute ^Executor executor task)
     (try
-      (.get task)
+      (let [result
+            (await/await!
+             {:seon.await/bound
+              {:seon.await/config-attribute :seon.config.eval/time-limit-ms
+               :seon.await/config-value
+               (:seon.config.eval/time-limit-ms effective)}
+              :seon.await/diagnostic
+              {:seon.error/diagnostic-layer :effect
+               :seon.error/diagnostic-operation ::handler-completion
+               :seon.error/diagnostic-member
+               {:seon.effect/id effect-id
+                :seon.fn/sym (str owner-sym)}
+               :seon.error/diagnostic-expected ::handler-result
+               :seon.error/diagnostic-offending ::pending
+               :seon.error/diagnostic-evidence
+               {:seon.effect/id effect-id
+                :seon.cluster.run/id
+                (:seon.cluster.run/id *request-context*)}}
+              :seon.await/future task})]
+        (when (:seon.error/kind result)
+          (.cancel task true))
+        result)
       (catch InterruptedException interrupted
         ;; Waiting stopped, so the capability task must stop too. Capability
         ;; handlers own their resource-specific cleanup on interruption.
@@ -665,8 +687,10 @@
                        (let [outcome
                              (try
                                (let [handler-value
-                                     (dispatch
+                                    (dispatch
                                       handler
+                                      owner-sym
+                                      effect-id
                                       (:seon.sci.admit/value projected-request)
                                       effective)]
                                  (if (= :interrupted

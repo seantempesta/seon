@@ -240,7 +240,7 @@
   ;; end it.
   (test-support/with-database
     (fn [connection]
-      (db/transact! connection [{:seon.config/cluster "default"}
+      (db/transact! connection [(cluster-config 600000)
                                 {:seon.cluster.run/id "effect-run"}])
       (install-arm-probe! connection)
       (let [ctx @probe-ctx]
@@ -571,7 +571,7 @@
   (test-support/with-database
     (fn [connection]
       (reset! handler-calls [])
-      (db/transact! connection [{:seon.config/cluster "default"}
+      (db/transact! connection [(cluster-config 600000)
                                 {:seon.cluster.run/id "effect-run"}])
       (install-capability! connection)
       (let [first-result
@@ -619,12 +619,12 @@
 (deftest interrupted-handlers-mark-the-open-receipt-without-a-result
   (test-support/with-database
     (fn [connection]
-      (db/transact! connection [{:seon.config/cluster "default"}
+      (db/transact! connection [(cluster-config 600000)
                                 {:seon.cluster.run/id "effect-run"}])
       (install-capability! connection)
       (with-redefs-fn
         {(ns-resolve 'seon.effect 'dispatch)
-         (fn [_handler _request _effective]
+         (fn [_handler _owner-sym _effect-id _request _effective]
            (throw (InterruptedException. "test interruption")))}
         (fn []
           (let [result
@@ -642,7 +642,7 @@
 (deftest guarded-sci-evaluation-supplies-the-effect-identity-context
   (test-support/with-database
     (fn [connection]
-      (db/transact! connection [{:seon.config/cluster "default"}
+      (db/transact! connection [(cluster-config 600000)
                                 {:seon.cluster.run/id "effect-run"}])
       (install-capability! connection)
       (let [ctx (test-support/fork-cluster-ctx connection)
