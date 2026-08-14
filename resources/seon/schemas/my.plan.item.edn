@@ -4,7 +4,13 @@
                :agent :seon.db/ref,
                :parent :seon.db/ref,
                :needs [:set :seon.db/ref],
-               :about [:set :seon.db/ref],
+               :about-token [:or :symbol :qualified-keyword],
+               ;; The subset branch keeps the outer `:or` structurally present
+               ;; so the Datahike bridge uses its scalar EDN codec and preserves
+               ;; authored vector order.
+               :about [:or
+                       [:vector :my.plan.item/about-token]
+                       [:= []]],
                :completed-at :inst,
                :expected-result [:string {:min 1}],
                :item

@@ -270,7 +270,7 @@
          connection
          [[:db/add [:my.plan.item/id "use-target"]
            :my.plan.item/about
-           [:seon.fn/sym "fixture.intent/target"]]])
+           ['fixture.intent/target]]])
         (let [after (bootstrap/pull-result (generator-request connection))
               before-sources (set (candidate-sources before))
               delta (into []

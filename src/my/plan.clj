@@ -60,7 +60,7 @@
     {:my.plan.item/agent [:db/id]}
     {:my.plan.item/parent [:db/id :my.plan.item/id]}
     {:my.plan.item/needs [:db/id :my.plan.item/id]}
-    {:my.plan.item/about [:db/id]}])
+    :my.plan.item/about])
 
 (defn- error-value?
   [value]
@@ -93,6 +93,34 @@
   [database reference]
   (some-> (db/entity database reference) :db/id))
 
+(defn- subject-eid
+  [database token]
+  (cond
+    (keyword? token)
+    (db/q '[:find ?subject .
+            :in $ ?token
+            :where [?subject :seon.schema/key ?token]]
+          database token)
+
+    (namespace token)
+    (db/q '[:find ?subject .
+            :in $ ?function
+            :where [?subject :seon.fn/sym ?function]]
+          database (str token))
+
+    :else
+    (db/q '[:find ?subject .
+            :in $ ?namespace
+            :where [?subject :seon.ns/name ?namespace]]
+          database token)))
+
+(defn- resolve-subject!
+  [database token]
+  (or (subject-eid database token)
+      (refuse! ::subject-not-found
+               (str "Plan subject " (pr-str token) " does not exist.")
+               {:my.plan.item/about token})))
+
 (defn- item-owner
   [database item]
   (db/q '[:find ?agent .
@@ -123,21 +151,12 @@
         needs
         (into #{}
               (map #(owned-item-eid database agent-entity % :my.plan.item/needs))
-              (:my.plan.item/needs request))
-        about
-        (into #{}
-              (map
-               (fn [reference]
-                 (or (ref-eid database reference)
-                     (refuse! ::subject-not-found
-                              (str "Plan subject " (pr-str reference)
-                                   " does not exist.")
-                              {:my.plan.item/about reference}))))
-              (:my.plan.item/about request))]
+              (:my.plan.item/needs request))]
+    (doseq [token (:my.plan.item/about request)]
+      (resolve-subject! database token))
     (cond-> request
       parent (assoc :my.plan.item/parent parent)
-      (seq needs) (assoc :my.plan.item/needs needs)
-      (seq about) (assoc :my.plan.item/about about))))
+      (seq needs) (assoc :my.plan.item/needs needs))))
 
 (defn- add-item-call
   [database request]
@@ -202,14 +221,19 @@
 
 (defn- item-value
   [value]
-  (cond
-    (and (map? value) (map? (:seon.render/value value)))
-    (render.value/transacted (:seon.render/value value))
+  (let [entity
+        (cond
+          (and (map? value) (map? (:seon.render/value value)))
+          (:seon.render/value value)
 
-    (map? value)
-    (render.value/transacted value)
+          (map? value) value
 
-    :else value))
+          :else nil)]
+    (if-not entity
+      value
+      (cond-> (render.value/transacted entity)
+        (find entity :my.plan.item/about)
+        (assoc :my.plan.item/about (:my.plan.item/about entity))))))
 
 (defn- item-row
   [database item]
@@ -258,7 +282,8 @@
 (def ^:private authored-fields
   [:my.plan.item/title
    :my.plan.item/description
-   :my.plan.item/expected-result])
+   :my.plan.item/expected-result
+   :my.plan.item/about])
 
 (defn- document-entries
   [tree]
@@ -295,10 +320,6 @@
 (defn- need-ids
   [row]
   (into #{} (map :my.plan.item/id) (:my.plan.item/needs row)))
-
-(defn- about-ids
-  [row]
-  (into #{} (map :db/id) (:my.plan.item/about row)))
 
 (defn- candidate-ids
   [baseline wanted-parent-id title]
@@ -383,12 +404,8 @@
                    (str "Plan dependency " (pr-str reference)
                         " does not exist.")
                    {:my.plan.item/needs reference})))
-      (doseq [reference (:my.plan.item/about entry)]
-        (when-not (ref-eid database reference)
-          (refuse! ::subject-not-found
-                   (str "Plan subject " (pr-str reference)
-                        " does not exist.")
-                   {:my.plan.item/about reference}))))
+      (doseq [token (:my.plan.item/about entry)]
+        (resolve-subject! database token)))
     (let [known-labels (set labels)]
       (doseq [entry entries
               label (:my.plan/after entry)]
@@ -418,9 +435,7 @@
         (into #{}
               (map #(referenced-item-id database agent-entity %))
               (:my.plan.item/needs entry))
-        labelled-needs (into #{} (map #(get labels %)) (:my.plan/after entry))
-        about
-        (into #{} (map #(ref-eid database %)) (:my.plan.item/about entry))]
+        labelled-needs (into #{} (map #(get labels %)) (:my.plan/after entry))]
     (cond-> {:my.plan.item/id id
              :my.plan.item/title (:my.plan.item/title entry)
              :my.plan.item/agent agent-entity}
@@ -434,7 +449,8 @@
       wanted-parent-id (assoc :my.plan.item/parent wanted-parent-id)
       (seq (into direct-needs labelled-needs))
       (assoc :my.plan.item/needs (into direct-needs labelled-needs))
-      (seq about) (assoc :my.plan.item/about about))))
+      (find entry :my.plan.item/about)
+      (assoc :my.plan.item/about (:my.plan.item/about entry)))))
 
 (defn- scalar-ops
   [id current desired]
@@ -474,18 +490,14 @@
         current-parent (parent-id current)
         desired-parent (:my.plan.item/parent desired)
         current-needs (need-ids current)
-        desired-needs (into #{} (:my.plan.item/needs desired))
-        current-about (about-ids current)
-        desired-about (into #{} (:my.plan.item/about desired))]
+        desired-needs (into #{} (:my.plan.item/needs desired))]
     (vec
      (concat
       (scalar-ops id current desired)
       (ref-one-ops target-ref id :my.plan.item/parent
                    current-parent desired-parent)
       (ref-many-ops target-ref id :my.plan.item/needs
-                    current-needs desired-needs)
-      (ref-many-ops identity id :my.plan.item/about
-                    current-about desired-about)))))
+                    current-needs desired-needs)))))
 
 (defn- compile-plan
   [database agent-id tree allocated-ids]
@@ -660,10 +672,8 @@
 (defn ready-subjects
   "List the resolved subject entities named by this agent's ready items.
 
-  Ready-item order is retained and each item's cardinality-many subjects are
-  ordered by database identity. Repeated subjects collapse at their first
-  occurrence. The result contains entity ids because the walk derives the
-  stable declared lookup identity from the same database value it pulls."
+  Ready-item order and each authored subject-vector order are retained.
+  Repeated resolved rows collapse at their first occurrence."
   {:malli/schema
    [:=> [:cat :seon.db/db :seon.cluster.agent/id]
     [:or :my.plan/intent-subjects :seon.error/value]]}
@@ -671,12 +681,15 @@
   (let [items (ready database agent-id)]
     (if (error-value? items)
       items
-      (into []
-            (comp
-             (mapcat (fn [item]
-                       (sort (:my.plan.item/about item))))
-             (distinct))
-            items))))
+      (try
+        (into []
+              (comp
+               (mapcat :my.plan.item/about)
+               (map #(resolve-subject! database %))
+               (distinct))
+              items)
+        (catch clojure.lang.ExceptionInfo failure
+          (flat-refusal failure))))))
 
 (defn- message-obligations
   [database agent-id]

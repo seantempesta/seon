@@ -46,8 +46,11 @@ omission.
    to presence-based: identity (string id, unique), title, optional
    description, agent ref (items scope to one agent), optional parent ref
    (decomposition), cardinality-many `needs` refs (dependency), optional
-   **subject refs** (namespace / message / function / any entity the item
-   is about — the forward-looking member; see T3), optional
+   **subject tokens** as one faithfully stored ordered vector mixing
+   qualified symbols and fully namespaced keywords, for example
+   `['seon.cluster.message/send! 'seon.db :seon.config.ai/model]`
+   (function / namespace / registered schema key — the forward-looking
+   member; see T3), optional
    `completed-at`, optional expected-result. No pace, no stored status, no
    escalation members (archaeology §7: scheduling/escalation stays out).
 3. **Whole-value reconciliation** — the archaeology's strongest quarry
@@ -72,7 +75,10 @@ omission.
   declared listing form) with its real receipt like any collection, and
   the since-basis delta algebra applies with zero todo-specific code.
 - **T3 — intent-directed membership (GATED on one owner ruling):** ready
-  items' subject refs join the walk's pull membership, so the context an
+  items' subject tokens resolve at the membership seam (slashed symbol →
+  function row, bare symbol → namespace row, qualified keyword → registered
+  schema-key row), and those resolved rows join the walk's pull membership,
+  so the context an
   agent wakes into contains the units its next work is ABOUT — root's
   system view and a task agent's focus fall out of the same rule.
   Admission rides the EXISTING beyond-closure token budget (the one
@@ -123,3 +129,9 @@ T3's scope, recorded in the
    rule (docs for lookup, demonstrations on first real use via `:about`
    intent + no prior demonstrating artifact) governs how subject units
    render either way.
+
+5. **Authored `:about` is a simple mixed vector** (ledger entry 29): no
+   lookup refs are authored or stored. `plan!` derives resolution for every
+   token and refuses the whole plan with the offending token when no declared
+   program row exists; membership derives those same rows again from the
+   faithfully stored vector.

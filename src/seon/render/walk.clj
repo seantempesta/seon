@@ -95,10 +95,8 @@
   (let [installed (installed-attributes database)
         ref-attributes (into []
                              (keep (fn [[attribute properties]]
-                                     (when (and (= :db.type/ref
-                                                   (:db/valueType properties))
-                                                (not= :my.plan.item/about
-                                                      attribute))
+                                     (when (= :db.type/ref
+                                              (:db/valueType properties))
                                        attribute)))
                              installed)
         identity-attributes (into []
@@ -187,8 +185,7 @@
                 (mapv #(ref-identity id-attributes %) value)
                 :else value))
        result))
-   (apply dissoc entity :my.plan.item/about
-          (map reverse-attribute ref-attributes))
+   (apply dissoc entity (map reverse-attribute ref-attributes))
    ref-attributes))
 
 (defn- acquisition-members
@@ -196,9 +193,8 @@
   (let [installed (installed-attributes database)
         refs (into []
                    (keep (fn [[attribute properties]]
-                           (when (and (= :db.type/ref
-                                        (:db/valueType properties))
-                                      (not= :my.plan.item/about attribute))
+                           (when (= :db.type/ref
+                                    (:db/valueType properties))
                              attribute)))
                    installed)
         identities (db/populated-identity-attributes database)
@@ -234,9 +230,7 @@
                             [[:seon.ns/requires false]
                              [:seon.ns/requires true]]
                             (concat
-                             (map vector
-                                  (remove #{:my.plan.item/about} refs)
-                                  (repeat false))
+                             (map vector refs (repeat false))
                              (map vector refs (repeat true))))
                           connections
                           (into []

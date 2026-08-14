@@ -308,13 +308,12 @@
             result
             (plan/plan!
              [{:my.plan.item/title "Investigate the missing subject"
-               :my.plan.item/about [[:seon.fn/sym
-                                     "fixture.plan/does-not-exist"]]}]
+               :my.plan.item/about ['fixture.plan/does-not-exist]}]
              @connection connection "alice")]
         (is (= :my.plan/subject-not-found (:seon.error/kind result)))
         (is (true? (:my.plan/subject-not-found result)))
         (is (= {:my.plan.item/about
-                [:seon.fn/sym "fixture.plan/does-not-exist"]}
+                'fixture.plan/does-not-exist}
                (:seon.error/data result)))
         (is (= basis (db/basis-t @connection)))
         (is (zero? (item-count @connection)))))))
@@ -337,16 +336,43 @@
       (add connection "dependency" "Dependency")
       (add connection "blocked" "Blocked"
            {:my.plan.item/needs #{[:my.plan.item/id "dependency"]}
-            :my.plan.item/about #{[:seon.fn/sym "fixture.plan/beta"]}})
+            :my.plan.item/about ['fixture.plan/beta]})
       (add connection "ready" "Ready"
            {:my.plan.item/about
-            #{[:seon.fn/sym "fixture.plan/beta"]
-              [:seon.fn/sym "fixture.plan/alpha"]}})
+            ['fixture.plan/beta 'fixture.plan/alpha]})
       (let [subjects (plan/ready-subjects @connection "alice")]
         (is (= 2 (count subjects)))
-        (is (= #{"fixture.plan/alpha" "fixture.plan/beta"}
-               (set (map #(db/q '[:find ?sym .
-                                   :in $ ?entity
-                                   :where [?entity :seon.fn/sym ?sym]]
-                                 @connection %)
-                         subjects))))))))
+        (is (= ["fixture.plan/beta" "fixture.plan/alpha"]
+               (mapv #(db/q '[:find ?sym .
+                              :in $ ?entity
+                              :where [?entity :seon.fn/sym ?sym]]
+                            @connection %)
+                     subjects)))))))
+
+(deftest plan-preserves-a-mixed-authored-subject-vector
+  (with-plan
+    (fn [connection]
+      (let [about ['my.plan/plan! 'my.plan :my.plan.item/title]
+            result (plan/plan!
+                    [{:my.plan.item/id "mixed-about"
+                      :my.plan.item/title "Use mixed subjects"
+                      :my.plan.item/about about}]
+                    @connection connection "alice")
+            item (first (plan/ready @connection "alice"))]
+        (is (= 1 (:my.plan/added (:my.plan/diff result))))
+        (is (= about (:my.plan.item/about item)))
+        (is (= ["my.plan/plan!" 'my.plan :my.plan.item/title]
+               (mapv (fn [subject]
+                       (or (db/q '[:find ?function .
+                                   :in $ ?subject
+                                   :where [?subject :seon.fn/sym ?function]]
+                                 @connection subject)
+                           (db/q '[:find ?namespace .
+                                   :in $ ?subject
+                                   :where [?subject :seon.ns/name ?namespace]]
+                                 @connection subject)
+                           (db/q '[:find ?key .
+                                   :in $ ?subject
+                                   :where [?subject :seon.schema/key ?key]]
+                                 @connection subject)))
+                     (plan/ready-subjects @connection "alice"))))))))
