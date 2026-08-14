@@ -12,6 +12,7 @@
   lane. A redefinition therefore changes the next call and a cold context
   re-derives the same symbol from its database program row."
   (:require [clojure.core.async :as async]
+            [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.db :as db]
             [seon.error :as error]
@@ -23,7 +24,8 @@
             [seon.schema.edn :as schema.edn]
             [seon.schema.form :as schema.form]
             [seon.sci.admit :as admit]
-            [seon.sci.kernel :as sci.kernel]))
+            [seon.sci.kernel :as sci.kernel])
+  (:import [java.util Date]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -335,6 +337,33 @@
      (cond-> argument
        (map? value)
        (assoc :seon.render/value (dissoc value :seon.db/db)))}))
+
+(defn- cost-shape-key
+  [projection request selected output]
+  (let [value (render-value request)
+        matches (concat
+                 (schema/matching-shapes-in
+                  projection (render.value/transacted value))
+                 (schema/matching-shapes-in projection value))]
+    (or (->> matches
+             (filter #(= selected (get % output)))
+             (sort-by (juxt (comp - count :seon.schema/required-attrs)
+                            (comp str :seon.schema/key)))
+             first
+             :seon.schema/key)
+        :seon.schema/value)))
+
+(defn- render-cost-fact
+  [request selected output rendered]
+  {:seon.render.cost/shape-key
+   (cost-shape-key
+    (sci.kernel/context-projection (:seon.sci.eval/ctx request))
+    request selected output)
+   :seon.render.cost/profile
+   (get-in request [:seon.render/profile :seon.render.profile/id])
+   :seon.render.cost/estimated-tokens
+   (tokens/estimate (if (string? rendered) rendered (pr-str rendered)))
+   :seon.render.cost/at (Date.)})
 
 (defn- invoke-selected
   [{ctx :seon.sci.eval/ctx
@@ -667,6 +696,12 @@
                      :seon.render.call/output rendered})]
         (when (and call-id captured-calls)
           (swap! captured-calls assoc call-id entry))
+        (when (and (not reusable?)
+                   call-id
+                   captured-calls
+                   (:seon.db/connection request))
+          (db/transact! (:seon.db/connection request)
+                        [(render-cost-fact request selected output rendered)]))
         rendered))))))
 
 (defn acquire-context!

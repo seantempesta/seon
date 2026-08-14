@@ -1,0 +1,13 @@
+#:seon.render.cost{:shape-key :seon.schema/registry-key,
+                   :profile :seon.render.profile/id,
+                   :estimated-tokens :seon.ai.tokens/estimated,
+                   :at :seon.cluster.eval/at,
+                   :fact
+                   [:map
+                    {:seon.db/attributes true}
+                    [:seon.render.cost/shape-key
+                     :seon.render.cost/shape-key]
+                    [:seon.render.cost/profile :seon.render.cost/profile]
+                    [:seon.render.cost/estimated-tokens
+                     :seon.render.cost/estimated-tokens]
+                    [:seon.render.cost/at :seon.render.cost/at]]}

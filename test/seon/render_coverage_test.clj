@@ -125,6 +125,38 @@
                      [:seon.error/data
                       :seon.error/diagnostic-operation]))))))
 
+(deftest a-new-render-receipt-records-one-cost-fact
+  (support/with-database
+   (fn [connection]
+     (seed-entities! connection)
+     (let [database @connection
+           ctx (support/fork-cluster-ctx connection)
+           value (pulled database [:seon.config/cluster cluster-name])
+           captured (atom {})
+           output (render/render-call
+                   (assoc (render-request database ctx value)
+                          :seon.db/connection connection
+                          :seon.render/output :seon.render/ai
+                          :seon.render/profile
+                          (render/agent-render-profile (config/defaults))
+                          :seon.render.call/id [:cost :config]
+                          :seon.render/captured-calls captured))
+           facts (db/q '[:find ?shape ?profile ?tokens ?at
+                         :where
+                         [?cost :seon.render.cost/shape-key ?shape]
+                         [?cost :seon.render.cost/profile ?profile]
+                         [?cost :seon.render.cost/estimated-tokens ?tokens]
+                         [?cost :seon.render.cost/at ?at]]
+                       @connection)]
+       (is (string? output))
+       (is (= 1 (count @captured)))
+       (is (= 1 (count facts)))
+       (let [[shape profile estimated at] (first facts)]
+         (is (= :seon.config/entity shape))
+         (is (= :seon.render.profile/agent profile))
+         (is (= (tokens/estimate output) estimated))
+         (is (inst? at)))))))
+
 (defn- walk-output-by-attribute
   [units attribute]
   (:seon.render/output
