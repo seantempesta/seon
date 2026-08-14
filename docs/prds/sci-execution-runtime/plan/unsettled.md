@@ -6,6 +6,21 @@ tags: [prd, agent, architecture]
 
 # What is not settled
 
+## RESUMPTION — 2026-08-14 session end (READ THIS FIRST)
+
+The owner restarted with a fresh session. THE ENTRY POINT IS NOW
+[docs/prds/context-generation/README.md](../../context-generation/README.md)
+— the program mandate (one pipeline for agent context AND html views;
+NO RUSHING; understand the system and its warts before building), the
+reading order, the where-we-fucked-up record, and the current state.
+The one-renderer PRD there awaits the owner's markup; NO WAVE STARTS
+before it. One lane may still be in flight at resumption
+(`clip-ripout`, form-aware fit in `src/seon/print.cljc`) — check
+`bin/codex-agent status`, fold or resume per its summary. The deferred
+R2 spine (W3-W5 kind deletion, `:seon.db/database-value`→`:seon.db/db`,
+run `sources-*` rename, ONE closing `--all`, Drive 2) remains queued in
+the blocks below.
+
 **THE PROGRAM lives in README §3 ("THE PROGRAM, 2026-07-28 evening")**
 — the agents-are-flows rebuild F0–F4 + everything re-sequenced + the
 collected owner decisions. This file stays the working edge below.
