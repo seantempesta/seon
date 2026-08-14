@@ -59,9 +59,20 @@ violation renders as ONE polite, concise, HUMAN-DESIGNED error face —
 a small declared card (the `seon.error` card family is the seat):
 one plain sentence of what failed, the identity to requery or report,
 consistent styling, deduplicated when repeated — never a stack trace,
-never an EDN dump, never garbage, never absence. The pair is the whole
-policy: dev panics so defects cannot slip by; prod stays up and tells
-the human the truth in one designed breath.
+never an EDN dump, never garbage, never absence. **And it is the EXISTING error mechanism, not a new system** (owner,
+same day): a production render failure is one ordinary `:seon.error`
+FACT (the evidence-complete diagnostic constructor — layer, producer,
+offending value, contract, requery identity), which then renders like
+every other value through the pipeline itself: the HUMAN face is the
+designed card above; the AGENT face is the flat error value in its
+context — data it can query, diagnose, and act on. Agents never crash
+in production and can always fix their own fuckups: when the failing
+producer is agent-authored, the error value names it, the agent
+redefines it, and green-to-install gates the fix — the self-repair
+loop closes with zero new machinery. Dev-panic is for US (defects
+cannot slip past development); the error-fact-with-faces is for
+production humans AND agents. Three faces, one fact, one pipeline —
+the pipeline's own failures flow through it as values.
 "Thousands of lines of garbage" becomes impossible because every
 stage's output is checked and bounded before the next stage sees it,
 and the end-to-end invariants (whole-prompt accounting exact to the
