@@ -44,7 +44,8 @@ degrades to designed faces — never to garbage, never to absence.
 
 ```mermaid
 flowchart TD
-    ADMIT["function outputs & messages become FACTS<br/>through storage admission — declared caps,<br/>shape-bearing elisions (seam B, ruling 33)"]
+    PROG["<b>program graph</b><br/>functions, schemas, tests indexed<br/>at definition — reachable from the<br/>agent's namespace (ruling 36)"]
+    EVID["<b>run evidence</b><br/>messages · runs · eval receipts, whose<br/>ADMITTED result projections cross seam B<br/>(declared caps, shape-bearing elisions);<br/>bulk → blobs · derived renders NEVER stored"]
     DB[("one immutable<br/>database value")]
     PULL["<b>ROOT PULL at the agent</b><br/>selector generated from schema refs —<br/>membership IS reachability"]
     VEC["<b>ordered block vector</b><br/>pull-tree order · define-before-use ·<br/>deterministic ties · arrivals last"]
@@ -60,7 +61,9 @@ flowchart TD
     LAYOUT["<b>namespace layout</b> (/ns/&lt;ns&gt;, / for root)<br/>newest-CHANGED block = large primary ·<br/>side panel by last update (~3 visible) ·<br/>user pin locks primary (ruling 38)"]
     MORPH(["<b>SSE morph</b> per block id"])
 
-    ADMIT --> DB --> PULL --> VEC --> SEL
+    PROG --> DB
+    EVID --> DB
+    DB --> PULL --> VEC --> SEL
     SEL -->|"explicit key · owning-ns<br/>program fact · schema default"| FACE
     SEL -->|"nothing claimed it"| FLOOR
 
@@ -73,8 +76,11 @@ flowchart TD
     HTMLB --> LAYOUT --> MORPH
 ```
 
-Read top to bottom: everything durable is a fact; ONE pull rooted at
-the agent decides membership; the walk fixes ONE order; each unit
+Read top to bottom: two things feed the database — the program graph
+(functions themselves, indexed at definition) and run evidence
+(messages plus eval receipts whose ADMITTED result projections are the
+only place seam B applies; derived renders are never stored). ONE pull
+rooted at the agent decides membership; the walk fixes ONE order; each unit
 resolves ONE renderer (declared face, else the floor); and then the
 two sides diverge exactly once — the AI side turns each block into a
 form+value REPL entry and lives under the append-only diff/history
