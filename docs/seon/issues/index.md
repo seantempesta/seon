@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (44)
+## Blocker (46)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -57,6 +57,8 @@ See `README.md` for the convention.
 | [Supply the generated entry's required render output](generated-turn-omits-the-required-render-output.md) | blocker | generate-call-transition lane (held `loop.clj`) |
 | [Return from the generated opening's second live pull](generated-opening-live-pull-does-not-return-after-help.md) | blocker | prefix-drift bootstrap performance diagnosis (held `bootstrap.clj`) |
 | [Explain the 24-second live root pull of 189 members](live-root-pull-of-189-members-takes-24-seconds.md) | blocker | render acquisition performance wave |
+| [Quote prose in printed data, never splice it](prose-renders-splice-unquoted-into-printed-data.md) | blocker | results-as-data rip-out |
+| [Return attributes from an entity pull, never a sentence](an-entity-pull-returns-a-sentence-instead-of-its-attributes.md) | blocker | results-as-data rip-out |
 | [Render walk-unit hiccup as markup, never escaped EDN text](walk-units-render-their-hiccup-as-escaped-edn-text.md) | blocker | ui verification wave |
 | [Name the run a history entry actually pulled](a-run-history-entry-can-name-a-different-run-than-its-form-pulled.md) | blocker | ui verification wave |
 | [Elide walk-unit overflow, never hide it](walk-units-hide-their-overflow-instead-of-eliding-it.md) | blocker | ui verification wave |
@@ -65,7 +67,7 @@ See `README.md` for the convention.
 | [Answer no-forms replies with correction or re-wake](no-forms-replies-close-without-correction-or-rewake.md) | blocker | OWNER DESIGN GATE (correction vs re-wake) |
 | [Bound orderly-stop completion joins](orderly-stop-completion-joins-have-no-bound.md) | blocker | wedge class-kill continuation |
 
-## Friction (128)
+## Friction (129)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -81,6 +83,7 @@ See `README.md` for the convention.
 | [Serve the namespace page first byte under ten seconds](namespace-page-first-byte-exceeds-ten-seconds.md) | friction | drive-1 defect wave |
 | [Read foreign live roots in operator status](operator-status-refuses-foreign-live-root.md) | friction | drive-1 defect wave |
 | [Wrap the debug AI pane](the-debug-ai-pane-never-wraps.md) | friction | session-view lane |
+| [Make the value floor map face readable EDN](the-value-floors-map-face-is-not-readable-edn.md) | friction | results-as-data rip-out |
 | [Refuse cluster names that collide with the store directory](cluster-named-store-collides-with-the-store-directory.md) | friction | R3 store-path decision |
 | [Carry the operator root explicitly instead of guessing from names](operator-root-inference-guesses-from-directory-names.md) | friction | R3 store-path decision |
 | [Bound the parallel-only confirmation protocol exchange](confirmation-parallel-failure-blocks-reading-worker-protocol.md) | friction | test-platform follow-up |
