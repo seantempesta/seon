@@ -46,7 +46,7 @@ consumer work after the compiled database pull.
 ## Evidence — 2026-08-13 live-pull attribution
 
 The isolated HEAD probe in
-[the dated attribution report](../../prds/sci-execution-runtime/research/live-pull-attribution-2026-08-13.md)
+[the dated attribution report](../../prds/context-generation/research/live-pull-attribution-2026-08-13.md)
 returned 198 acquisition members from a 78,974,355-byte database in
 4,465–5,251 ms. It did not reproduce 24.2 seconds, but 4,228–5,006 ms of the
 wall time was inside Datahike `pull-spec`; selector-plan generation was only
@@ -64,7 +64,7 @@ HEAD acquisition is still seconds rather than interactive and the historical
 
 ## Evidence — 2026-08-13 the live path also pays a render-side storm
 
-[The dated after-help diagnosis](../../prds/sci-execution-runtime/research/live-pull-after-help-diagnosis-2026-08-13.md)
+[The dated after-help diagnosis](../../prds/context-generation/research/live-pull-after-help-diagnosis-2026-08-13.md)
 measured the same acquisition inside its real live consumer. Datahike
 `pull-spec` cost 4.3–5.4 seconds whether or not the consumer carried a render
 profile, confirming this note's attribution — but the surrounding live

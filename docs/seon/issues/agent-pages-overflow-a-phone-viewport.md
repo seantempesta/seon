@@ -55,4 +55,4 @@ adjacent layout facts for the same owner:
   `resources/public/css/input.css` and should be settled in one pass.
 
 Full walk:
-[ui-verification-2026-08-14](../../prds/sci-execution-runtime/research/ui-verification-2026-08-14.md).
+[ui-verification-2026-08-14](../../prds/context-generation/research/ui-verification-2026-08-14.md).

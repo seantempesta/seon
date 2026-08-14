@@ -144,7 +144,7 @@ that integration.
 ## Census cross-reference — 2026-08-14
 
 The outward-bounding census
-([context-clipping-census-2026-08-14](../../prds/sci-execution-runtime/research/context-clipping-census-2026-08-14.md))
+([context-clipping-census-2026-08-14](../../prds/context-generation/research/context-clipping-census-2026-08-14.md))
 records this note as the missing-FACT half of the §2.4 law, beside a
 missing-HONESTY half. `seon.render.ns`'s budgeted assembly is a MODEL member of
 the compliant pattern in shape — `:337-341,470-478,587-609` emit a real

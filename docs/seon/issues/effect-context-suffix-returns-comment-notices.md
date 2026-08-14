@@ -44,7 +44,7 @@ No `;;`-prefixed effect notice appears in the Drive 1 stored capture facts
 background or long foreground effect, so the context suffix never fired. The
 note stands unchanged on its own source evidence; this records only that the
 drive could not corroborate it. Recorded during the
-[results-as-data audit](../../prds/sci-execution-runtime/research/results-as-data-audit-2026-08-14.md).
+[results-as-data audit](../../prds/context-generation/research/results-as-data-audit-2026-08-14.md).
 
 ## N1 disposition — 2026-08-12
 

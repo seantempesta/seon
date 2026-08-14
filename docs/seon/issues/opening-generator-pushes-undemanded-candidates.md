@@ -52,7 +52,7 @@ render owner.
 ## Evidence — 2026-08-13 live-pull attribution
 
 The isolated full-publication probe in
-[the dated attribution report](../../prds/sci-execution-runtime/research/live-pull-attribution-2026-08-13.md)
+[the dated attribution report](../../prds/context-generation/research/live-pull-attribution-2026-08-13.md)
 expanded 37 direct and 37 listing members into 78 candidates. Cold direct and
 listing expansion consumed 88 ms and 39 ms respectively, while the enclosing
 database acquisition consumed 3,188 ms and Datahike `pull-spec` alone consumed

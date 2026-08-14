@@ -8,7 +8,7 @@ tags: [issue, render, database, schema]
 # `seon.db/diff`'s render bypasses `seon.print/fit` and declares no HTML producer
 
 Found while researching the general diff
-([general-diff-and-render-2026-08-13.md](../../prds/sci-execution-runtime/research/general-diff-and-render-2026-08-13.md) §4).
+([general-diff-and-render-2026-08-13.md](../../prds/context-generation/research/general-diff-and-render-2026-08-13.md) §4).
 
 `resources/seon/schemas/seon.db.diff.edn:16-24` declares the diff result map
 with `{:seon.render/ai seon.db/render-diff-ai}`. Three defects follow from

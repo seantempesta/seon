@@ -24,7 +24,7 @@ silent fallback that happens to be right until it isn't (§2.4).
 The boot value should carry the operator root explicitly (values carry
 their world) instead of any consumer re-deriving it from path spelling.
 Discovered during the R3 store-path archaeology
-([options doc](../../prds/sci-execution-runtime/research/store-path-rename-options-2026-08-13.md));
+([options doc](../../prds/context-generation/research/store-path-rename-options-2026-08-13.md));
 option 3 there deletes both upward inferences, but the explicit-carry fix
 does not need to wait for R3.
 

@@ -85,7 +85,7 @@ result structurally cannot — see
 corroborated three more times in this capture.
 
 Full walk and counts:
-[results-as-data audit](../../prds/sci-execution-runtime/research/results-as-data-audit-2026-08-14.md).
+[results-as-data audit](../../prds/context-generation/research/results-as-data-audit-2026-08-14.md).
 
 ## Owner
 

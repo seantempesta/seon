@@ -64,7 +64,7 @@ truth-checks, not gates.
    (flat typed value vs ex-info surfacing as a Datahike write-rejected
    prose string).
 4. **Installation-lock scope for single-root operator work**
-   ([issue](../../../seon/issues/jvm-operator-work-takes-the-installation-lock-for-one-root.md))
+   ([issue](../../../seon/issues/archive/jvm-operator-work-takes-the-installation-lock-for-one-root.md))
    — cleanup/collect/refork still serialize on the installation lock;
    the obvious per-root change DEADLOCKS because a child JVM inherits
    the parent command's root lock through the `-under-lock!`

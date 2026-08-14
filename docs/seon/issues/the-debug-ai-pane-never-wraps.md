@@ -46,7 +46,7 @@ my.agents.drive-one-agent-attempt-5=> (db/pull db (quote [*]) [:seon.cluster.ins
 ```
 
 Full walk:
-[ui-verification-2026-08-14](../../prds/sci-execution-runtime/research/ui-verification-2026-08-14.md).
+[ui-verification-2026-08-14](../../prds/context-generation/research/ui-verification-2026-08-14.md).
 
 ## Owner
 

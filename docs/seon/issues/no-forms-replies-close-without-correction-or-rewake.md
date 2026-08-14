@@ -62,7 +62,7 @@ there was no subsequent correction run, message, or re-wake.
 ## Context ablation — 2026-08-14
 
 The paid flash-only ablation in
-`docs/prds/sci-execution-runtime/research/context-ablation-2026-08-14.md`
+`docs/prds/context-generation/research/context-ablation-2026-08-14.md`
 isolated the preventative prompt factors with the exact captured bytes:
 
 - The `/ai` capture already contained the complete balanced fenced `greet`
@@ -78,6 +78,22 @@ isolated the preventative prompt factors with the exact captured bytes:
 Weak recency is therefore the cleanest demonstrated cause and prevention.
 Toolkit volume contributes, but trimming it does not teach the terminal
 prose-only edge and produced much less disciplined replies.
+
+## Prevention landed — 2026-08-14
+
+Every assembled agent prompt now ends with the exact ablation-winning
+reply-medium reminder from the existing `:getting-started` instruction entity.
+The reminder is declared as
+`:seon.cluster.instruction/reply-medium-reminder`; its ordinary instruction
+render and its generation-tail placement both derive from that one content
+fact. Prompt budgeting and contribution accounting cover the augmented whole
+prompt, including the final `\n\n` separator and reminder bytes. Missing or
+ambiguous reminder content refuses prompt assembly instead of silently omitting
+the prevention.
+
+This lands only the demonstrated prevention. The recovery contract below
+remains open and owner-gated; no correction turn or obligation-driven re-wake
+was added.
 
 ## Open design boundary — no ruling in this note
 
@@ -115,6 +131,7 @@ derived obligations and bounded provider-turn contract.
   and diagnostic retained.
 - A genuinely prose-complete conversational task remains representable without
   manufacturing a Clojure form.
-- The final task-adjacent medium instruction states the prose-only edge
-  explicitly; a recurring flash ablation proves it elicits a reader-accepted
-  form without relying on the remote opening demonstration.
+- **Landed prevention:** the final task-adjacent medium instruction states the
+  prose-only edge explicitly, with recurring byte-tail and whole-prompt
+  accounting regressions. The retained flash ablation proves it elicited a
+  reader-accepted form 2/2 without relying on the remote opening demonstration.

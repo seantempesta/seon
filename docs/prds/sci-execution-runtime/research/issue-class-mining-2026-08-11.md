@@ -228,7 +228,7 @@ Each row cites the member issue that supports its primary membership claim.
 | [instrumentation-compiles-under-one-clusters-projection](docs/seon/issues/instrumentation-compiles-under-one-clusters-projection.md) | P1 — ambient reach-sideways state |
 | [instrumentation-headline-unbounded-when-caps-absent](docs/seon/issues/instrumentation-headline-unbounded-when-caps-absent.md) | N1 — outward value bypasses total render contract |
 | [interrupted-blob-staging-leaves-no-observable-artifact](docs/seon/issues/interrupted-blob-staging-leaves-no-observable-artifact.md) | N10 — accepted work lacks terminal evidence |
-| [jvm-operator-work-takes-the-installation-lock-for-one-root](docs/seon/issues/jvm-operator-work-takes-the-installation-lock-for-one-root.md) | N4 — mutable resource lacks root/lifetime |
+| [jvm-operator-work-takes-the-installation-lock-for-one-root](docs/seon/issues/archive/jvm-operator-work-takes-the-installation-lock-for-one-root.md) | N4 — mutable resource lacks root/lifetime |
 | [keep-history-is-on-by-default-without-a-decision](docs/seon/issues/keep-history-is-on-by-default-without-a-decision.md) | singleton |
 | [latest-closed-run-orders-by-id-string](docs/seon/issues/latest-closed-run-orders-by-id-string.md) | N8 — domain order falls through to strings/hashes |
 | [live-publication-has-a-hand-maintained-predicate-owner-reload](docs/seon/issues/live-publication-has-a-hand-maintained-predicate-owner-reload.md) | N3 — loaded artifact lacks source identity |

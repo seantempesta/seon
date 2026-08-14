@@ -59,7 +59,7 @@ and schedule families do the same thing. Fixing this renderer alone leaves the
 class alive — the class note is
 [an-entity-pull-returns-a-sentence-instead-of-its-attributes](an-entity-pull-returns-a-sentence-instead-of-its-attributes.md),
 with the complete walk in
-[results-as-data audit](../../prds/sci-execution-runtime/research/results-as-data-audit-2026-08-14.md).
+[results-as-data audit](../../prds/context-generation/research/results-as-data-audit-2026-08-14.md).
 
 ## N1 disposition — 2026-08-12
 

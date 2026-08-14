@@ -28,7 +28,7 @@ reserved sibling names (`store`, `store.lock`, `blob-staging`) at cluster
 creation — or the R3 layout change that moves the non-cluster children
 out of `data/clusters/` entirely, which dissolves the collision
 structurally
-([options doc](../../prds/sci-execution-runtime/research/store-path-rename-options-2026-08-13.md),
+([options doc](../../prds/context-generation/research/store-path-rename-options-2026-08-13.md),
 option 2 + addendum).
 
 ## Acceptance

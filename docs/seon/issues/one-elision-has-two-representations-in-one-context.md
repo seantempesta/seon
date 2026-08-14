@@ -42,7 +42,7 @@ The prose tail is `seon.print/render-elision-ai`
 same sentence at `src/seon/db.clj:1666`.
 
 Full walk and counts:
-[results-as-data audit](../../prds/sci-execution-runtime/research/results-as-data-audit-2026-08-14.md).
+[results-as-data audit](../../prds/context-generation/research/results-as-data-audit-2026-08-14.md).
 
 ## Owner
 

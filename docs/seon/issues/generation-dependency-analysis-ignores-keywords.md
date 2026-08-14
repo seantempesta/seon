@@ -21,7 +21,7 @@ symbols AND spec'ed keywords are the literal programmatic dependencies.
 ## Evidence
 
 The 2026-08-13 probe
-([explained-set-results-probe-2026-08-13.md](../../prds/sci-execution-runtime/research/explained-set-results-probe-2026-08-13.md)):
+([explained-set-results-probe-2026-08-13.md](../../prds/context-generation/research/explained-set-results-probe-2026-08-13.md)):
 verdict PARTIALLY — identities and result symbols grow readiness;
 keywords are invisible to the analysis (`src/seon/bootstrap.clj` frontier
 construction). Isolated live probe plus `seon.bootstrap-test` 5/107/0.

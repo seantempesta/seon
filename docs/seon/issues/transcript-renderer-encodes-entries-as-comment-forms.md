@@ -60,7 +60,7 @@ reached the transcript.
 This neither confirms nor refutes the comment-encoding subclass; it records
 that the required live failed-form proof is still outstanding and that this
 drive could not supply it. Recorded during the
-[results-as-data audit](../../prds/sci-execution-runtime/research/results-as-data-audit-2026-08-14.md).
+[results-as-data audit](../../prds/context-generation/research/results-as-data-audit-2026-08-14.md).
 
 ## N1 disposition — 2026-08-12
 

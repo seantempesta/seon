@@ -51,7 +51,7 @@ Beside the run blocks the page shows only two message blocks and 17
 empty.
 
 Full walk with screenshots described:
-[ui-verification-2026-08-14](../../prds/sci-execution-runtime/research/ui-verification-2026-08-14.md).
+[ui-verification-2026-08-14](../../prds/context-generation/research/ui-verification-2026-08-14.md).
 
 ## Owner
 

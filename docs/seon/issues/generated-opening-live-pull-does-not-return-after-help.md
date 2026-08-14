@@ -52,7 +52,7 @@ do not patch the observed stall at a neighboring render seam.
 ## Evidence — 2026-08-13 live-pull attribution
 
 The isolated HEAD probe in
-[the dated attribution report](../../prds/sci-execution-runtime/research/live-pull-attribution-2026-08-13.md)
+[the dated attribution report](../../prds/context-generation/research/live-pull-attribution-2026-08-13.md)
 called `seon.bootstrap/next-entry` after a settled `help` receipt. It returned
 `(dir (quote my.run))` normally in 2,801 ms on a 68,885,520-byte database with
 37 acquisition members. Root acquisition consumed 2,768 ms, of which Datahike
@@ -87,7 +87,7 @@ unbounded non-return. The database-codec repair did not alter this owner.
 
 ## Evidence — 2026-08-13 root cause: the per-render projection rebuild
 
-[The dated after-help diagnosis](../../prds/sci-execution-runtime/research/live-pull-after-help-diagnosis-2026-08-13.md)
+[The dated after-help diagnosis](../../prds/context-generation/research/live-pull-after-help-diagnosis-2026-08-13.md)
 reproduced the failure on a pinned export of `30ccf1ff2` and named the owner.
 It is **slow, not hung**: every derivation returns.
 

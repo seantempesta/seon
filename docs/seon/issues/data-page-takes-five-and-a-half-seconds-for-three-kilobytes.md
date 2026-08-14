@@ -245,4 +245,4 @@ That is a distinct defect with a distinct owner — the route reads
 [the-data-route-refuses-because-it-never-hands-the-projection](the-data-route-refuses-because-it-never-hands-the-projection.md).
 This note's remaining acceptance edges cannot be re-measured until that
 refusal is fixed. Full walk:
-[ui-verification-2026-08-14](../../prds/sci-execution-runtime/research/ui-verification-2026-08-14.md).
+[ui-verification-2026-08-14](../../prds/context-generation/research/ui-verification-2026-08-14.md).

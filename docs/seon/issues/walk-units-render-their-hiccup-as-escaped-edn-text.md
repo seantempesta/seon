@@ -51,7 +51,7 @@ single elision, with a trailing `… 5711 more characters of 7349; requery by
 :seon.render.profile/agent`.
 
 Full walk with per-page verdicts:
-[ui-verification-2026-08-14](../../prds/sci-execution-runtime/research/ui-verification-2026-08-14.md).
+[ui-verification-2026-08-14](../../prds/context-generation/research/ui-verification-2026-08-14.md).
 
 ## Owner
 

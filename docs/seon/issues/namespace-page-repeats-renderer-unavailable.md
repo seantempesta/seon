@@ -56,7 +56,7 @@ Half of all rendered blocks on a root page are now this placeholder, and it is
 also the FIRST thing painted in the right-hand grid column on both roots. The
 visible content is still exactly `renderer unavailable`, with no shape,
 renderer, path, or diagnostic. Full walk:
-[ui-verification-2026-08-14](../../prds/sci-execution-runtime/research/ui-verification-2026-08-14.md).
+[ui-verification-2026-08-14](../../prds/context-generation/research/ui-verification-2026-08-14.md).
 
 ## Owner
 
