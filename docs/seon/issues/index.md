@@ -67,7 +67,7 @@ See `README.md` for the convention.
 | [Answer no-forms replies with correction or re-wake](no-forms-replies-close-without-correction-or-rewake.md) | blocker | OWNER DESIGN GATE (correction vs re-wake) |
 | [Bound orderly-stop completion joins](orderly-stop-completion-joins-have-no-bound.md) | blocker | wedge class-kill continuation |
 
-## Friction (129)
+## Friction (130)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -84,6 +84,7 @@ See `README.md` for the convention.
 | [Read foreign live roots in operator status](operator-status-refuses-foreign-live-root.md) | friction | drive-1 defect wave |
 | [Wrap the debug AI pane](the-debug-ai-pane-never-wraps.md) | friction | session-view lane |
 | [Make the value floor map face readable EDN](the-value-floors-map-face-is-not-readable-edn.md) | friction | results-as-data rip-out |
+| [One elision, one representation](one-elision-has-two-representations-in-one-context.md) | friction | results-as-data rip-out |
 | [Refuse cluster names that collide with the store directory](cluster-named-store-collides-with-the-store-directory.md) | friction | R3 store-path decision |
 | [Carry the operator root explicitly instead of guessing from names](operator-root-inference-guesses-from-directory-names.md) | friction | R3 store-path decision |
 | [Bound the parallel-only confirmation protocol exchange](confirmation-parallel-failure-blocks-reading-worker-protocol.md) | friction | test-platform follow-up |
