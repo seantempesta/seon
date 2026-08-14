@@ -37,3 +37,18 @@ size).
 A drive turn that returns pure prose leaves a queryable fact carrying the
 complete reply (or its blob digest); the observer's FLOOR query pattern
 returns it; one regression proves a no-forms reply is stored.
+
+## Live durable proof — Drive 1 Attempt 5, 2026-08-14
+
+The original durability hole is no longer present on the preserved Attempt 5
+specimen. Error entity `30679`, joined to run
+`a887d305-c8ae-4b6e-842f-43287f7f7496`, carries
+`:seon.error/kind :seon.cluster.reply/no-forms` and its
+`:seon.error/data-edn` contains the complete 97-token prose reply under
+`:seon.cluster.reply/text`.
+
+The remaining behavioral defect is distinct: the loop closes after recording
+that refusal and gives the model no correction or fact-driven re-wake. It is
+filed in `no-forms-replies-close-without-correction-or-rewake.md`; this note
+continues to own only raw-reply durability and should be closed/archived by its
+owner after the recurring acceptance proof is confirmed.

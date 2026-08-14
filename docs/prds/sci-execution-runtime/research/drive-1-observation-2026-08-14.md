@@ -436,3 +436,138 @@ contains the superseded bootstrap task zero times, contains
 contribution positions sum to 18,751 tokens, exactly the whole-prompt budget
 estimate. The opening capture's 16 positions sum to 10,374 tokens. The same
 live acquisitions recorded 130 agent-context render-cost facts.
+
+## Attempt 5 independent behavioral observation — 2026-08-14
+
+### Read-only boundary
+
+I observed isolated root `tmp/drive-1-root`, cluster `default`, PID 69568,
+prepl 55155, and web UI `http://127.0.0.1:55156` through JVM-mode MCP reads and
+filesystem census only. I sent no message, used no SCI door evaluation,
+transacted no fact, and issued no lifecycle or collection command. The
+specimen remained running.
+
+The relevant paid run was `a887d305-c8ae-4b6e-842f-43287f7f7496`; its exact
+durable capture was
+`a887d305-c8ae-4b6e-842f-43287f7f7496-context-536871133`.
+
+### Exact task and exact reply
+
+The task at the end of the capture was:
+
+```text
+From outside this cluster to drive-one-agent-attempt-5: Author and follow one my.plan for this task. Every authored item must use the NEW :my.plan.item/about plain-vector token shape, mixing quoted qualified function symbols and namespaced keywords and targeting the actual functions and schema attributes that item will use. Define a durable contracted function sum-of-squares in your namespace that accepts a sequential collection of integers and returns the sum of their squares, with a complete Malli contract. Define a discoverable clojure.test usage test covering a non-empty input and the empty input, run it through seon.test/run, complete every plan item, and close with my.run/complete reporting the exact test result. Do not edit repository files.
+```
+
+DeepSeek returned `finish_reason=stop` after 97 completion tokens. The raw
+reply, recovered from the durable `:seon.cluster.reply/no-forms` error fact,
+was exactly:
+
+```text
+I'll start by understanding my plan and checking the current state. Let me look at what I need to do:
+
+1. Author a plan with items using the NEW `:my.plan.item/about` plain-vector token shape
+2. Define `sum-of-squares` function with Malli contract
+3. Define and run tests through `seon.test/run`
+4. Complete all plan items and report results
+
+Let me first check my current state and any messages:
+```
+
+The reader correctly refused it with:
+
+```text
+The reply carried no Clojure forms — its whole text read as prose. Prose runs nothing and settles nothing; write the Clojure you want evaluated.
+```
+
+### Why no form appeared
+
+This was not a clarifying question. There is no question in the reply; its
+last colon announces an intended next action. It was not a material task
+misread either: the four numbered lines accurately preserve plan authoring,
+the new `:about` shape, the contracted `sum-of-squares`, test execution, and
+completion obligations.
+
+The medium was present and demonstrated. At character 833 of the 34,955-byte
+prompt, the getting-started block says:
+
+```text
+This is a live Clojure REPL. Everything above is the output of `(seon.render/walk)` — run it yourself with `:depth`/`:root` to see more. Your reply is read as forms and evaluated in your namespace. A `defn` with `:malli/schema` becomes permanent; anything else is scratch. Talk to other agents with `(my.message/send "agent-id" "message")`. Prose lines are kept as `;;` comments.
+```
+
+It immediately shows a complete fenced `(defn greet ...)` form. Every other
+history entry also uses the visible
+`my.agents.drive-one-agent-attempt-5=> (form)` followed by printed-value
+grammar.
+
+The instruction was therefore not absent or initially hidden, but it was
+remote from the decision point: `Your reply is read as forms...` begins at
+character 970, while the actual task begins at character 34,253. Roughly
+33,200 characters of toolkit directory output intervene. The sentence
+`Prose lines are kept as ;; comments` also omits the decisive exception that
+prose alone carries no reader event. The best-supported reading is a medium
+execution lapse under weak recency: the model understood the work, narrated
+its intended first step, and stopped before emitting that step as Clojure.
+
+### Missing behavioral response
+
+Durability worked: error entity 30679 retained the entire reply under
+`:seon.cluster.reply/text`. Behavior did not recover. The agent has exactly
+two runs—the generated opening and this task run. The task run closed at
+`2026-08-14T11:28:56.922Z`; there is no correction run or later re-wake.
+
+Current source explains the terminal boundary. Every reply-reader error other
+than the separately handled unreadable case reaches `fail!` at
+`src/seon/cluster/loop.clj:1337-1338`. The diagnostic is stored for observers,
+but never becomes context for the model that needs to correct it.
+
+I filed
+`docs/seon/issues/no-forms-replies-close-without-correction-or-rewake.md`
+without ruling between a bounded correction turn, durable prose plus open
+obligations and a fact-driven re-wake, or prose-terminal settlement only when
+no executable obligations remain.
+
+### Single-session retained footprint
+
+At the first filesystem census, the root's FileStore contained 8,554 `.ksv`
+files, 11,711,643,648 allocated bytes (10.907 GiB), and 11,692,409,267 logical
+bytes (10.889 GiB). The derived Lucene directory was 1.8 MiB and build
+artifacts 7.9 MiB; the FileStore was effectively the whole root.
+
+During the live observation a later census found 12,434 files and 11.172 GiB
+allocated. The root was concurrently live, so that delta is not attributed to
+a particular proc or to the observer; it shows only that retention continued
+to grow.
+
+The cheap current-fact payload attribution totalled 17.52 MiB:
+
+| Attribute family | Bytes |
+|---|---:|
+| `seon.error` | 9,564,409 |
+| `seon.fn` | 3,033,164 |
+| `seon.test` | 2,040,511 |
+| `seon.schema.shape` | 1,310,773 |
+| `seon.ns` | 365,826 |
+| `seon.schema.map-entry` | 333,134 |
+| `seon.ai.attempt` | 328,295 |
+| `seon.context.capture` | 291,093 |
+| `seon.cluster.eval` | 76,270 |
+
+Current payload is about 1/636 of physical logical bytes. The live Konserve
+key face exposed only opaque UUID keys and `:type :edn`, so it cannot honestly
+attribute retained bytes by domain family. The store-bloat issue now records
+this boundary: physical attribution still needs retained-history/index versus
+unreachable-object accounting, not a filename convention.
+
+### Attempt 5 defect list
+
+New issue:
+
+- `docs/seon/issues/no-forms-replies-close-without-correction-or-rewake.md`
+
+Existing issues updated with live evidence:
+
+- `docs/seon/issues/prose-only-model-replies-are-not-durable-facts.md`
+- `docs/seon/issues/store-grew-to-69-gigabytes-in-one-day-of-lanes.md`
+
+Per the observer assignment, `docs/seon/issues/index.md` was not edited.
