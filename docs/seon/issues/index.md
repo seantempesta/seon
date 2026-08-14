@@ -16,7 +16,7 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (41)
+## Blocker (44)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -58,11 +58,14 @@ See `README.md` for the convention.
 | [Supply the generated entry's required render output](generated-turn-omits-the-required-render-output.md) | blocker | generate-call-transition lane (held `loop.clj`) |
 | [Return from the generated opening's second live pull](generated-opening-live-pull-does-not-return-after-help.md) | blocker | prefix-drift bootstrap performance diagnosis (held `bootstrap.clj`) |
 | [Explain the 24-second live root pull of 189 members](live-root-pull-of-189-members-takes-24-seconds.md) | blocker | render acquisition performance wave |
+| [Install generated-at before generated runs transact it](generated-run-transacts-uninstalled-generated-at.md) | blocker | drive-1 defect wave |
+| [Capture context before the generated opening can refuse](generated-opening-refuses-before-context-capture.md) | blocker | drive-1 defect wave |
+| [Stop read-only GETs writing render-cost facts](web-get-records-render-cost-facts.md) | blocker | drive-1 defect wave |
 | [Bound agent-facing host crossings](agent-facing-host-crossings-can-wait-without-a-bound.md) | blocker | wedge class-kill continuation |
 | [Bound orderly-stop completion joins](orderly-stop-completion-joins-have-no-bound.md) | blocker | wedge class-kill continuation |
 | [Bound scheduled store collection before it holds the installation control lock](scheduled-store-collection-holds-the-control-lock-without-a-bound.md) | blocker | RULED keep-serial operator lock contention follow-up |
 
-## Friction (124)
+## Friction (130)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -73,6 +76,11 @@ See `README.md` for the convention.
 | [Boot past half-edited foreign vars with a typed diagnostic](cluster-boot-instruments-in-flight-working-tree-vars.md) | friction | boot instrumentation scope design |
 | [Commit the babashka-process AOT patch to a fork](vendored-babashka-process-carries-a-local-aot-patch.md) | cleanup | vendoring hygiene |
 | [Tolerate entries vanishing during recursive deletion](recursive-delete-throws-when-entries-vanish-mid-walk.md) | friction | operator velocity fixes |
+| [Fit the root maintenance context to the provider budget](root-maintenance-context-exceeds-provider-budget.md) | friction | drive-1 defect wave |
+| [Render namespace pages without renderer-unavailable spam](namespace-page-repeats-renderer-unavailable.md) | friction | drive-1 defect wave |
+| [Seed drive clusters with their required plan facts](drive-one-starts-without-required-plan-facts.md) | friction | drive-1 defect wave |
+| [Serve the namespace page first byte under ten seconds](namespace-page-first-byte-exceeds-ten-seconds.md) | friction | drive-1 defect wave |
+| [Read foreign live roots in operator status](operator-status-refuses-foreign-live-root.md) | friction | drive-1 defect wave |
 | [Refuse cluster names that collide with the store directory](cluster-named-store-collides-with-the-store-directory.md) | friction | R3 store-path decision |
 | [Carry the operator root explicitly instead of guessing from names](operator-root-inference-guesses-from-directory-names.md) | friction | R3 store-path decision |
 | [Bound the parallel-only confirmation protocol exchange](confirmation-parallel-failure-blocks-reading-worker-protocol.md) | friction | test-platform follow-up |
