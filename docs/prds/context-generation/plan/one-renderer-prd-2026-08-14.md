@@ -45,7 +45,7 @@ degrades to designed faces — never to garbage, never to absence.
 ```mermaid
 flowchart TD
     DB[("<b>one immutable database value</b><br/>state from indexing and any transactions<br/>agents made on reachable entities")]
-    PULL["<b>ROOT PULL at the agent</b><br/>selector generated from schema refs —<br/>membership IS reachability"]
+    PULL["<b>ROOT PULL at the agent's NAMESPACE</b> (ruling 39)<br/>selector GENERATED from installed schema refs —<br/>no manual membership, the agent discovers<br/>everything from the pull"]
     VEC["<b>ordered block vector</b><br/>pull-tree order · define-before-use ·<br/>deterministic ties · arrivals last"]
     SEL{"per unit:<br/>which renderer?"}
     FACE["<b>declared face</b> — terminal, owns its output<br/>(the goal for every family, rulings 34-35)"]
@@ -59,14 +59,12 @@ flowchart TD
     LAYOUT["<b>namespace layout</b> (/ns/&lt;ns&gt;, / for root)<br/>newest-CHANGED block = large primary ·<br/>side panel by last update (~3 visible) ·<br/>user pin locks primary (ruling 38)"]
     MORPH(["<b>SSE morph</b> per block id"])
 
-    subgraph ORDER["the walk fixes ONE logical order — define-before-use"]
+    subgraph ORDER["order is DERIVED, never staged by hand (ruling 39 amendment)"]
         direction TB
-        O1["1 · who am I — cluster identity, config"]
-        O2["2 · the rules — instruction entities<br/>(the one place prose is legal)"]
-        O3["3 · what exists — (dir ns) per toolkit namespace:<br/>every name LISTED before any doc or call"]
-        O4["4 · what is mine — own namespace, plan, open run"]
-        O5["5 · what happened — messages, receipts, errors<br/>by ARRIVAL, newest nearest the next turn"]
-        O1 --> O2 --> O3 --> O4 --> O5
+        O1["pull-tree order — a parent's listing<br/>precedes any child lookup"]
+        O2["define-before-use — the ns form introduces<br/>requires; names are listed before doc or call"]
+        O3["deterministic ties (alphabetical) ·<br/>live material by ARRIVAL, newest<br/>nearest the next model turn"]
+        O1 --> O2 --> O3
     end
 
     DB --> PULL --> ORDER --> VEC --> SEL
@@ -105,13 +103,18 @@ my.agents.root=> (my.message/read "bootstrap-task:root")
 From outside this cluster to root: Define a durable contracted function named largest …
 ```
 
-Stage by stage: the pull acquired cluster → config → instruction →
-nine toolkit namespaces → the agent's own namespace → live runs,
-messages, errors. Selection resolved the cluster/config entries to
-their declared faces, the instruction to its stored text (prose,
-legally), the `dir` listings to the floor (data rows + a real elision
-value with a requery id), and the run/message/error entries to the
-narrating faces the register deletes. The same capture shows five
+**Ruling 39 reframes this capture: it documents the WRONG ROOT.** The
+live walk roots at the agent ENTITY and follows every installed ref —
+which is exactly why the context opens with the CLUSTER entity
+(config, the parked instruction-facts residue, nine toolkit
+namespaces dir'd from `:seon.cluster/toolkit` refs) while root's own
+`(ns my.agents.root)` requires only four namespaces. Under ruling 39
+the pull roots at the NAMESPACE and none of that cluster grab-bag
+appears unless genuinely ref-reachable from it. What the capture still
+proves: the form+value façade runs in production; `dir` listings reach
+the floor as data with real requery-bearing elisions; and selection
+resolved the run/message/error entries to the narrating faces the
+register deletes. The same capture shows five
 register rows LIVE: the run face printing the WRONG run's id on three
 different runs (#1/#3 — the sentence hides what a data face could
 not), `(dir 'my.background)` pr-str'd and character-chopped mid-string
@@ -152,12 +155,17 @@ unconstructable, not discouraged.
 There is no context builder beside a UI renderer; there are five stages
 over one substrate (ruled with the owner, 2026-08-14 late evening):
 
-1. **Collect** — one Datahike pull rooted at the agent entity, its
-   selector GENERATED from installed schema ref declarations; the pull
-   result is both the data and the membership index. Nothing configures
-   what blocks exist; reachability from the agent at one immutable
-   database value decides. Authority:
-   [context.md "Membership is the root pull"](../../../seon/architecture/context.md).
+1. **Collect** — one Datahike pull rooted at the AGENT'S NAMESPACE
+   (ruling 39: an agent can be any namespace, and its context is a
+   pull of its namespace's data — THAT'S IT), selector GENERATED from
+   installed schema ref declarations, with NO manual membership
+   specification ever: the agent discovers everything from the pull
+   and the system renders what came back. Rooting at the agent entity
+   and following every ref into the cluster entity — today's live
+   behavior, see the worked example — is ruled the wrong thing.
+   Authority: ruling 39; [context.md "Membership is the root
+   pull"](../../../seon/architecture/context.md) (to be amended to the
+   namespace root in the same wave).
 2. **Order** — the walk emits one deterministic ordered vector of
    blocks: pull-tree order, define-before-use, alphabetical ties, live
    material by arrival. This vector is the ONE shared substrate — the

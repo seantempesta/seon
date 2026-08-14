@@ -392,6 +392,53 @@ one decision away from queued work. Ruled items cite their record.
     primary by recency. No dedicated "present to user" mechanism
     exists or is needed.
 
+39. **THE ROOT PULL IS THE AGENT'S NAMESPACE — anything else is the
+    wrong thing** (owner, 2026-08-14 night, correcting the live
+    system): an agent can be ANY namespace, and its context is a pull
+    of ITS NAMESPACE'S DATA. Period. Membership is what the namespace
+    reaches: its ns form and requires (define-before-use starts at the
+    ns form), its indexed functions and schemas, and the agent's own
+    live material through the namespace's reverse ref (namespace ←
+    agent → runs, messages, plan). NOT ruled in: rooting at the agent
+    entity; following every installed ref bidirectionally; dragging
+    the cluster entity (config, instruction set, toolkit refs) into
+    every context — the live capture
+    ([root-context-example](../research/root-context-example-2026-08-14.md))
+    shows exactly that wrong root: nine toolkit namespaces dir'd from
+    CLUSTER refs while root's own ns requires only four. Cluster-level
+    instructions/config appear in a context only if the namespace or
+    agent genuinely refs them — the parked instruction-facts design
+    does not ride in through the pull. The `:seon.cluster/toolkit`
+    refs and `toolkit-namespaces` vector as a membership source are
+    dead under this ruling.
+
+    **Amendment, same conversation: NO MANUAL SPECIFICATION OF WHAT TO
+    PULL — EVER.** The selector stays generated from installed schema
+    refs; the agent DISCOVERS everything from the pull and the system
+    renders what came back. Any enumerated membership list — including
+    category stagings like "identity, rules, toolkit, mine, events" —
+    is the banned hand-maintained mirror. What appears in a context is
+    decided by exactly two things: the namespace root and the schema's
+    declared refs. Ordering is derived (pull-tree order,
+    define-before-use from the ns form, arrivals last), never staged
+    by hand.
+
+40. **AGENTS ARE NAMESPACES — identity, not association** (owner,
+    2026-08-14 night, sharpening ruling 39 and R-a): the namespace IS
+    the agent. Its requires are its capabilities, its indexed
+    functions are its skills, its runs, messages, and plan are facts
+    reaching IT. Creating an agent is creating a namespace; root can
+    be `my.agent.root` — every existing name is open for renaming.
+    The current data model's separate `:seon.cluster.agent` entity
+    joined to an ns entity by a `/namespace` ref is an artifact of the
+    old view; the dissolution direction is agentic attributes
+    accreting on the namespace entity itself (an entity IS its
+    attributes — a namespace that carries an open run is an agent at
+    work). Exact schema unification (merge the families vs retain the
+    ref as internal plumbing under one identity) is the next
+    data-model decision, brought to the owner with options before any
+    schema edit.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced

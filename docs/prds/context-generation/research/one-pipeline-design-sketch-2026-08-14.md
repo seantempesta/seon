@@ -19,7 +19,8 @@ the in-flight [seam-hole census](seam-hole-census-2026-08-14.md) and
 
 ## The whole system in one sentence
 
-One walk derives an ordered vector of blocks from one database value;
+One walk derives an ordered vector of blocks from one database value,
+rooted at the agent's NAMESPACE with no manual membership (ruling 39);
 one recursive printer gives every block its two faces through one
 selection chain; the AI seam is `join` plus a member-level budget; the
 HTML seam is the namespace view's arrangement of the same vector — and
