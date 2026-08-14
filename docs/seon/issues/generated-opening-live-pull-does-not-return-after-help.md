@@ -2,7 +2,8 @@
 type: issue
 status: open
 severity: blocker
-tags: [issue, agent, render, performance, class/n9, wave/prefix-drift-bootstrap]
+tags: [issue, agent, render, schema, performance, class/p1, class/n9,
+       wave/prefix-drift-bootstrap]
 ---
 
 # Generated opening live pull does not return after help
@@ -66,3 +67,39 @@ carry the immutable result through one-entry-at-a-time generation state,
 rather than rerunning this seconds-long acquisition after every settled form.
 The issue remains open pending that structural change and an interactive
 single-acquisition result.
+
+## Evidence — 2026-08-13 root cause: the per-render projection rebuild
+
+[The dated after-help diagnosis](../../prds/sci-execution-runtime/research/live-pull-after-help-diagnosis-2026-08-13.md)
+reproduced the failure on a pinned export of `30ccf1ff2` and named the owner.
+It is **slow, not hung**: every derivation returns.
+
+Sharpened reproduction conditions — the earlier report's fixture missed this
+because it did not instrument `seon.config/effective`:
+
+- The "second live pull" is the **first** `seon.bootstrap/next-entry`
+  invocation. `seon.bootstrap/seed-tx` writes the ordinal-0 `(help)` source at
+  agent creation (`src/seon/bootstrap.clj:788-792`), so the run loop never
+  derives `(help)` and its first derivation is already the post-`help` one.
+- The cluster entity and its config dials must be present. With them,
+  `seon.render/request-profile` (`src/seon/render.clj:63-81`) falls through to
+  `seon.config/effective`, which unconditionally rebuilds the whole Malli
+  schema projection (`src/seon/config.clj:530-534`) — about 851 ms per call,
+  ~2.5 calls per render call, ~99 render calls per derivation.
+- `seon.bootstrap/next-entry` establishes no projection extent, so `seon.db`
+  reads outside `root-acquisition`/`neighborhood` rebuild it too
+  (`src/seon/db.clj:497-501`).
+
+Controlled A/B on one 72.8 MB, 172,848-datom published database, one changed
+request key: the post-`help` derivation took **276,262 ms** without
+`:seon.render/profile` on the request and **6,953 ms** with it (39.7×).
+`render-call` fell from 269,126 ms to 70 ms across the same 99 calls;
+`seon.config/effective` fell from 246 calls to zero. Datahike `pull-spec` cost
+4.3–5.4 seconds in **both** arms, so it is 1.6% of the failing derivation.
+
+This is the same class as
+[[walk-neighborhood-under-history-can-wedge-cluster-stop]]: `walk/history`
+calls `neighborhood` twice (`src/seon/render/walk.clj:915,917`) and neither
+carries a profile; one uncarried `neighborhood` measured 91,252 ms, and the
+wedge's retained dump shows the identical `walk.clj:590,566,546` frames. Fix
+the class once.

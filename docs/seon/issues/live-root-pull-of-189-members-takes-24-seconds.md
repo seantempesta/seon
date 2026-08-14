@@ -61,3 +61,19 @@ recursive selector supplied by `seon.render.walk/root-acquisition`, not
 selector parsing or downstream rendering. The issue remains open because one
 HEAD acquisition is still seconds rather than interactive and the historical
 24.2-second condition was not reproduced exactly.
+
+## Evidence — 2026-08-13 the live path also pays a render-side storm
+
+[The dated after-help diagnosis](../../prds/sci-execution-runtime/research/live-pull-after-help-diagnosis-2026-08-13.md)
+measured the same acquisition inside its real live consumer. Datahike
+`pull-spec` cost 4.3–5.4 seconds whether or not the consumer carried a render
+profile, confirming this note's attribution — but the surrounding live
+derivation cost 276 seconds, because `seon.render/request-profile`
+(`src/seon/render.clj:63-81`) re-derives the render profile through
+`seon.config/effective`, which rebuilds the whole Malli schema projection per
+call (`src/seon/config.clj:530-534`).
+
+Any future timing of "the exact live path" required by this note's acceptance
+must record whether the request carried `:seon.render/profile`; without that
+condition the measurement is dominated by the projection rebuild rather than
+by the pull this note owns.
