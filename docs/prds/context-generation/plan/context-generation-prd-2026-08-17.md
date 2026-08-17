@@ -148,7 +148,16 @@ nothing hand-maintains it.**
   extraction) → non-admissible degrades honestly to inference/floor.
   Guard: provenance of CALLS is stored; derived VIEWS never become
   authority — regeneration re-derives at current basis using the
-  stored inputs to know what call to re-derive.
+  stored inputs to know what call to re-derive. **Write-provenance ≠
+  read-recipe (owner question, 2026-08-17):** tx-meta explains how
+  data got INTO the database (attribution; renderable history) — it
+  never prescribes how the CURRENT agent reads an edge, because reads
+  are derived, not stored. Tier 0 therefore covers replay (your
+  session's receipted reads) and attribution only; `:seon.render/form`
+  survives in exactly two narrowed roles — the tier-1 declared
+  read-recipe for an edge's FIRST acquisition, and the floor's total
+  form — while tier 2 makes "how to call it" mechanical (input-refs +
+  call preparation) or the function simply does not win.
 
   **Ruling 43 hardens the ladder:** a winning reader must satisfy BOTH
   criteria — auto-injectable-only required inputs AND offered render
