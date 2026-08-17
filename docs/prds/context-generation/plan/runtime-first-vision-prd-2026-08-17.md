@@ -169,6 +169,28 @@ trigger (config-dialed); otherwise `(help)` is one call away and the
 opening teaches that. No hand-ranked importance, no curated help text,
 no per-agent configuration — three queries over the enriched graph.
 
+**Refinement (owner, 2026-08-17): help teaches RECIPES; the generated
+context then DEMONSTRATES per derived need.** `(help)` IS the queries —
+it introduces the ideas by listing the recipes that later generated
+context naturally realizes as evals. Need is a derived dial per
+symbol: error-adjacent > first-use > repeated-correct-use, and the
+dial selects the recipe set the generator emits. Error-level need
+emits the full recipe — `(dir ns)`, `(doc fn)` for the functions
+involved, the in/out schemas, AND a usage DEMONSTRATION with
+schema-GENERATED inputs run in a bounded candidate fork, so the agent
+watches correct data flow right after watching its own fail.
+Correct-use need emits only the depth they demonstrably required.
+Help re-derives by STALENESS, not schedule: a new error fact stales
+it; a quiet turn costs nothing.
+
+**Provenance and no-re-eval (owner question, answered):** replay never
+re-evaluates agent-authored forms — authorship law makes re-execution
+unrepresentable; their results render from receipts. Result-chaining
+provenance is the `uses-result` edge family. GAP (family 4, from the
+verification): receipts need a durable `result/<id>` identity —
+derive it deterministically from the receipt identity; the
+process-local handle machinery stays as-is.
+
 ## What this PRD will need to settle later (not now)
 
 - The exact edge schema for the session graph (which edges are new
