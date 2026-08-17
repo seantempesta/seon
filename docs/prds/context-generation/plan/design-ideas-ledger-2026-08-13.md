@@ -494,6 +494,24 @@ one decision away from queued work. Ruled items cite their record.
     a derivable edge, and written entities enter the neighborhood and
     render through the same mechanism as everything else.
 
+44. **The `/form` face DIES — forms are constructed, never authored**
+    (owner, 2026-08-17 night): the declared read-recipe was a second
+    declaration of what contracts already declare — the banned mirror.
+    The ladder is THREE tiers: stored provenance (replay/attribution)
+    → contract inference (output-refs cover the edge's identity
+    attributes WITH SHAPE participating — collection-shaped outputs
+    win collection edges, single-entity outputs win dig-ins — inputs
+    auto-injectable, faces offered, distance-weighted) → the floor's
+    mechanical identity pull. Hard constraints: `:seon.render/form` is
+    REMOVED FROM THE GRAMMAR (unconstructable, not censused);
+    ambiguity at equal distance is a loud error fixed ONLY by refining
+    contracts — no tiebreaker declaration exists; the floor census
+    names every family without a qualifying reader. Agents and humans
+    can never hand-construct context by authoring forms — send →
+    inbound refs → (inbox) output connects by rules alone. The
+    architecture docs' "three projections" amend to two authored
+    faces (/ai, /html) plus constructed forms in the same wave.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced

@@ -149,15 +149,21 @@ nothing hand-maintains it.**
   Guard: provenance of CALLS is stored; derived VIEWS never become
   authority — regeneration re-derives at current basis using the
   stored inputs to know what call to re-derive. **Write-provenance ≠
-  read-recipe (owner question, 2026-08-17):** tx-meta explains how
-  data got INTO the database (attribution; renderable history) — it
-  never prescribes how the CURRENT agent reads an edge, because reads
-  are derived, not stored. Tier 0 therefore covers replay (your
-  session's receipted reads) and attribution only; `:seon.render/form`
-  survives in exactly two narrowed roles — the tier-1 declared
-  read-recipe for an edge's FIRST acquisition, and the floor's total
-  form — while tier 2 makes "how to call it" mechanical (input-refs +
-  call preparation) or the function simply does not win.
+  read-recipe:** tx-meta explains how data got INTO the database
+  (attribution; renderable history) — it never prescribes how the
+  current agent reads an edge, because reads are derived, not stored.
+
+  **Ruling 44 — the `/form` face DIES; the ladder is THREE tiers.**
+  Forms are CONSTRUCTED, never authored: spliced from provenance
+  (replay), built from contracts + call preparation (first reads —
+  output-refs cover the edge's identity attributes with SHAPE
+  participating: collection-shaped outputs win collection edges,
+  single-entity outputs win dig-ins), or the floor's mechanical
+  identity pull. Hard constraints: `:seon.render/form` is removed
+  from the grammar (unconstructable); equal-distance ambiguity is a
+  loud error fixed ONLY by refining contracts — no tiebreaker
+  declaration exists; the floor census names every family without a
+  qualifying reader. Two authored faces remain: `/ai` and `/html`.
 
   **Ruling 43 hardens the ladder:** a winning reader must satisfy BOTH
   criteria — auto-injectable-only required inputs AND offered render
