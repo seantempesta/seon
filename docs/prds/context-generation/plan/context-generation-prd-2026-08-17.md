@@ -112,6 +112,23 @@ nothing hand-maintains it.**
   reproducibility; the flow-state prompt order is DELETED, demoted to
   pure memo ([substrate](../research/regeneration-substrate-2026-08-17.md),
   10 determinism threats + 15 gaps enumerated there).
+- **How an edge becomes a call — the reader-selection rule (owner
+  dialogue, 2026-08-17):** the pull discovers EDGES and identities,
+  never content. The call that materializes an edge is selected like
+  every face: (1) EXPLICIT — the attribute schema names its reader;
+  (2) DERIVED — the producers-of-key query: functions whose declared
+  OUTPUT refs (alias-chased through the registry) cover the discovered
+  identity attributes, filtered to those whose declared INPUTS are
+  satisfiable from ambient bindings (db, self-id, discovered
+  identities); unique fit wins, ambiguity is a loud error; (3) FLOOR —
+  the identity pull. The message case: `my.message/inbox` declared
+  outputs over `:my.message/id` (≡ `:seon.cluster.message/id`) and
+  inputs `[db agent-id]` — so discovering messages addressed to me
+  selects `(my.message/inbox db me)` with NOTHING wired anywhere: the
+  contract IS the registration (36 at the query level). Delete the
+  reader and the edge falls honestly to the floor; define a better
+  one and it wins. Faces then attach to the CALL'S RESULT, so the
+  same discovery that found the call found the rendering.
 - **Three cases, one function:** initial context = empty settled set
   (bootstrap is the fixpoint's first iteration, no init function);
   turn N = replay + the small frontier (diff-stale reads re-enter;
