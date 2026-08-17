@@ -458,6 +458,20 @@ one decision away from queued work. Ruled items cite their record.
     ui.md's route table is amended to match in the same wave that
     re-scopes §1.5.
 
+42. **Execution start-gate rulings** (owner, 2026-08-17): (a) the
+    unified execution document REPLACES both PRDs — one authority; the
+    PRDs become history on its landing. (b) Core-call edges land as
+    name-only `:seon.fn/fn` rows for core/library vars (the accretion
+    precedent at `fn.clj:1604-1612`), accepting call-relation growth,
+    with `bin/seon init` timed before and after. (c) The write
+    carrier: `:seon.db/receipt` stamped into transaction metadata at
+    the run loop's transact seam, UNSKIPPABLE (the absent-signal trap:
+    an unstamped write must be impossible, not merely discouraged).
+    (d) Background implementation of the verified graph work proceeds
+    WHILE design iteration continues; the freeze-vs-receipts
+    transaction shape is confirmed correct as built (sources atomic in
+    one basis, receipts ascending per form).
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
