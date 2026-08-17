@@ -2813,6 +2813,25 @@
   (or (:seon.schema.projection/forms (active-projection))
       (candidate-forms)))
 
+(defn- dependency-first-schema-keys
+  [reference-graph schema-keys]
+  (letfn [(visit [ordered seen schema-key]
+            (if (contains? seen schema-key)
+              [ordered seen]
+              (let [[ordered seen]
+                    (reduce
+                     (fn [[ordered seen] reference]
+                       (visit ordered seen reference))
+                     [ordered seen]
+                     (sort-by str (get reference-graph schema-key)))]
+                [(conj ordered schema-key) (conj seen schema-key)])))]
+    (first
+     (reduce
+      (fn [[ordered seen] schema-key]
+        (visit ordered seen schema-key))
+      [[] #{}]
+      (sort-by str schema-keys)))))
+
 (defn canonical-schema-rows
   "Build the complete canonical schema-row population."
   {:malli/schema
@@ -2822,20 +2841,40 @@
   ([]
    (canonical-schema-rows (registered-schemas)))
   ([forms]
-   (let [projection {:seon.schema.projection/forms forms}
+   (let [projection (build-projection forms)
+         materialized-keys (into #{} (filter keyword?) (keys forms))
+         reference-graph
+         (into {}
+               (map (fn [schema-key]
+                      [schema-key
+                       (set/intersection
+                        materialized-keys
+                        (get
+                         (:seon.schema.projection/schema-dependencies
+                          projection)
+                         schema-key))]))
+               materialized-keys)
          storable-properties-in
          (requiring-resolve
           'seon.schema.datahike/storable-properties-in)]
      (into
       []
-      (keep
+      (map
        (fn [[schema-key definition]]
-         (when (keyword? schema-key)
-           (merge (storable-properties-in projection definition)
-                  {:seon.schema/key schema-key
-                   :seon.schema/form (pr-str definition)
-                   :seon.schema.admission/source :core})))
-      forms)))))
+         (let [references (get reference-graph schema-key)]
+           (cond->
+            (merge (storable-properties-in projection definition)
+                   {:seon.schema/key schema-key
+                    :seon.schema/form (pr-str definition)
+                    :seon.schema.admission/source :core})
+             (seq references)
+             (assoc :seon.schema/references
+                    (into #{}
+                          (map #(vector :seon.schema/key %))
+                          references))))))
+      (map (fn [schema-key] [schema-key (get forms schema-key)])
+           (dependency-first-schema-keys
+            reference-graph materialized-keys))))))
 
 (defn canonical-database-attributes
   "Compute the complete production database-attribute population.

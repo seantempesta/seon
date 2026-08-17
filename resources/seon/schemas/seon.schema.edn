@@ -39,6 +39,11 @@
                {:seon.db/identity true, :seon.search/index :symbol}],
               :form :string,
               :shape :seon.db/ref,
+              :references
+              [:set
+               {:description
+                "Canonical schema rows directly referenced by this schema."}
+               :seon.db/ref],
               :identity :qualified-keyword,
               :identity-only :boolean,
               :generatable? :boolean,
@@ -56,6 +61,9 @@
                [:seon.schema/form :seon.schema/form]
                [:seon.schema/generatable? :seon.schema/generatable?]
                [:seon.schema/shape {:optional true} :seon.schema/shape]
+               [:seon.schema/references
+                {:optional true}
+                :seon.schema/references]
                [:seon.db.id/generator
                 {:optional true}
                 :seon.db.id/generator]],
