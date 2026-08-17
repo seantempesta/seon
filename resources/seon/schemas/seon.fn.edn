@@ -20,7 +20,7 @@
            [:seon.schema.admission/source
             :seon.schema.admission/source]
            [:seon.fn/ns :seon.fn/ns]
-           [:seon.fn/source :seon.fn/source]
+           [:seon.fn/source {:optional true} :seon.fn/source]
            [:seon.fn/arglists {:optional true} :seon.fn/arglists]
            [:seon.fn/arglists-override?
             {:optional true}

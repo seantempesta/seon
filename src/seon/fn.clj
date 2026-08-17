@@ -230,6 +230,21 @@
                             (str (::analyzer/name %))))))
         (::analyzer/var-definitions analysis)))
 
+(defn- usage-symbol
+  [usage]
+  (when (and (::analyzer/to usage) (::analyzer/name usage))
+    (str (symbol (str (::analyzer/to usage))
+                 (str (::analyzer/name usage))))))
+
+(defn- call-target
+  [usage]
+  (when (contains? usage ::analyzer/arity)
+    (usage-symbol usage)))
+
+(defn- external-target?
+  [first-party-functions target]
+  (and target (not (contains? first-party-functions target))))
+
 (defn- call-targets-by-caller
   [analysis first-party-functions]
   (reduce
@@ -238,13 +253,8 @@
            (when (and (::analyzer/from usage) (::analyzer/from-var usage))
              (str (symbol (str (::analyzer/from usage))
                           (str (::analyzer/from-var usage)))))
-           target
-           (when (and (::analyzer/to usage) (::analyzer/name usage))
-             (str (symbol (str (::analyzer/to usage))
-                          (str (::analyzer/name usage)))))]
-       (if (and (contains? usage ::analyzer/arity)
-                (contains? first-party-functions caller)
-                (contains? first-party-functions target))
+           target (call-target usage)]
+       (if (and (contains? first-party-functions caller) target)
          (update calls caller (fnil conj #{}) target)
          calls)))
    {}
@@ -514,21 +524,12 @@
      :seon.fn/first-source-row first-source-row
      :seon.fn/function-rows function-rows}))
 
-(defn- usage-target
-  [usage]
-  (when (and (contains? usage ::analyzer/arity)
-             (::analyzer/to usage)
-             (::analyzer/name usage))
-    (str (symbol (str (::analyzer/to usage))
-                 (str (::analyzer/name usage))))))
-
 (defn- form-calls
-  [analysis first-source-row first-party-functions]
+  [analysis first-source-row]
   (into (sorted-set)
         (comp
          (filter #(>= (long (or (::analyzer/row %) 0)) first-source-row))
-         (keep usage-target)
-         (filter first-party-functions)
+         (keep call-target)
          (map (fn [target] [:seon.fn/sym target])))
         (::analyzer/var-usages analysis)))
 
@@ -593,9 +594,9 @@
               subject (assoc :seon.test/subject subject))))
         form-facts
         (cond-> {}
-          (seq (form-calls analysis first-source-row first-party-functions))
+          (seq (form-calls analysis first-source-row))
           (assoc :seon.fn/calls
-                 (form-calls analysis first-source-row first-party-functions))
+                 (form-calls analysis first-source-row))
           (seq (form-keywords analysis first-source-row))
           (assoc :seon.fn/keywords
                  (form-keywords analysis first-source-row))
@@ -615,23 +616,53 @@
   [finding]
   (contains? load-refusal-finding-types (::analyzer/type finding)))
 
+(def ^:private source-span-keys
+  [::analyzer/filename ::analyzer/row ::analyzer/col
+   ::analyzer/end-row ::analyzer/end-col])
+
+(defn- source-span
+  [entry]
+  (select-keys entry source-span-keys))
+
+(defn- external-usage-spans
+  [analysis first-party-functions]
+  (into #{}
+        (comp
+         (filter #(external-target? first-party-functions (usage-symbol %)))
+         (map source-span))
+        (::analyzer/var-usages analysis)))
+
+(defn- admitted-external-finding?
+  [external-spans finding]
+  (and (= :unresolved-var (::analyzer/type finding))
+       (contains? external-spans (source-span finding))))
+
 (defn- publication-findings
-  [analysis]
-  (mapv #(cond-> %
-           (not (load-refusal-finding? %))
-           (assoc ::analyzer/level :warning))
-        (::analyzer/findings analysis)))
+  [analysis first-party-functions]
+  (let [external-spans
+        (external-usage-spans analysis first-party-functions)]
+    (mapv #(cond-> %
+             (or (not (load-refusal-finding? %))
+                 (admitted-external-finding? external-spans %))
+             (assoc ::analyzer/level :warning))
+          (::analyzer/findings analysis))))
 
 (defn- blocking-findings
-  [analysis]
-  (filterv load-refusal-finding? (::analyzer/findings analysis)))
+  [analysis first-party-functions]
+  (let [external-spans
+        (external-usage-spans analysis first-party-functions)]
+    (filterv #(and (load-refusal-finding? %)
+                   (not (admitted-external-finding? external-spans %)))
+             (::analyzer/findings analysis))))
 
 (defn- assert-clean-analysis!
-  [analysis]
-  (when (seq (blocking-findings analysis))
+  [analysis first-party-functions]
+  (when (seq (blocking-findings analysis first-party-functions))
     (throw (ex-info "Static program analysis found blocking errors."
                     {:seon.error/kind ::index-refused
-                     ::findings (publication-findings analysis) :seon.fn/index-refused true}))))
+                     ::findings
+                     (publication-findings analysis first-party-functions)
+                     :seon.fn/index-refused true}))))
 
 (defn- analysis-rows-by-file
   [analysis first-party-functions]
@@ -1132,11 +1163,11 @@
                        :seon.fn.file/path (.getCanonicalPath file) :seon.fn/index-refused true})))
     (let [canonical-path (.getCanonicalPath file)
           analysis (analyzer/analyze {::analyzer/paths [canonical-path]})
-          findings (publication-findings analysis)
           first-party-functions
           (into (set known-functions)
-                (first-party-function-symbols analysis))]
-      (assert-clean-analysis! analysis)
+                (first-party-function-symbols analysis))
+          findings (publication-findings analysis first-party-functions)]
+      (assert-clean-analysis! analysis first-party-functions)
       (artifact file
                 (get (analysis-rows-by-file analysis first-party-functions)
                      canonical-path
@@ -1224,9 +1255,10 @@
         files (source-files roots)
         paths (mapv #(.getCanonicalPath ^java.io.File %) files)
         analysis (analyzer/analyze {::analyzer/paths paths})
-        findings-by-file
-        (group-by ::analyzer/filename (publication-findings analysis))
         first-party-functions (first-party-function-symbols analysis)
+        findings-by-file
+        (group-by ::analyzer/filename
+                  (publication-findings analysis first-party-functions))
         rows-by-file (analysis-rows-by-file analysis first-party-functions)
         artifacts
         (mapv (fn [file]
@@ -1242,7 +1274,7 @@
         (manifest-data
          (mapv #(.getCanonicalPath ^java.io.File (rooted-file %)) roots)
          artifacts)]
-    (assert-clean-analysis! analysis)
+    (assert-clean-analysis! analysis first-party-functions)
     manifest))
 
 (defn- row-by-identity
@@ -1599,18 +1631,45 @@
                 source-rows)
         source-namespace-names
         (into #{} (keep :seon.ns/name) source-only)
+        source-function-symbols
+        (into #{} (keep :seon.fn/sym) source-only)
+        call-target-symbols
+        (into #{}
+              (comp
+               (mapcat #(or (:seon.fn/calls %) []))
+               (keep (fn [[identity-attribute function-symbol]]
+                       (when (= :seon.fn/sym identity-attribute)
+                         function-symbol))))
+              source-only)
+        external-function-symbols
+        (set/difference call-target-symbols source-function-symbols)
+        external-function-namespace-names
+        (into #{}
+              (keep (fn [function-symbol]
+                      (some-> function-symbol symbol namespace symbol)))
+              external-function-symbols)
         required-namespace-names
         (into #{}
               (comp
                (mapcat #(or (:seon.ns/requires %) []))
                (map second))
               source-only)
+        referenced-namespace-names
+        (into required-namespace-names external-function-namespace-names)
         external-namespace-rows
-        (->> required-namespace-names
+        (->> referenced-namespace-names
              (remove source-namespace-names)
              (sort-by str)
              (mapv (fn [namespace-name]
-                     {:seon.ns/name namespace-name})))]
+                     {:seon.ns/name namespace-name})))
+        external-function-rows
+        (->> external-function-symbols
+             (sort-by str)
+             (mapv (fn [function-symbol]
+                     {:seon.fn/sym function-symbol
+                      :seon.fn/ns
+                      [:seon.ns/name
+                       (symbol (namespace (symbol function-symbol)))]})))]
     (doseq [{schema-key :seon.schema/key
              form-string :seon.schema/form}
             (filter :seon.schema/key source-only)]
@@ -1622,7 +1681,8 @@
                    :seon.schema/key schema-key :seon.fn/index-refused true}))))
     (add-contract-facts
      (mapv #(assoc % :seon.schema.admission/source :core)
-           (into (into (vec source-only) external-namespace-rows)
+           (into (into (into (vec source-only) external-namespace-rows)
+                       external-function-rows)
                  canonical-schemas))
      progress!)))
 
