@@ -1,24 +1,64 @@
 ---
-type: defect
+type: issue
 status: open
 severity: blocker
-tags: [operator, indexing, tests]
+tags: [issue, test, operator, wave/program-graph-indexing]
 ---
 
 # bin/seon init is red: indexed test reaches script-side seon.dev.markdown
 
-`bin/seon init` exits 1 at HEAD (~17.9s in) on unresolved
-`md/validate-repository-pins` at `test/seon/dev/markdown_test.clj:203`:
-the implementation lives in `script/seon/dev/markdown.clj` (moved there
-by `fd9777027`, operator-boundary intent), outside the indexed
-`src/`+`test/` inputs. `bin/test`'s own program-graph build still
-passes (observed green 2026-08-17), so the breakage is publication-
-specific — but it blocks every task that must time or run full init
-(the graph-enrichment lanes hit it first; schema-references stopped
-honestly on it). Fix directions, owner to pick: (a) move the test to
-the script side with its subject (removes it from the gate — an
-absence-as-health cost that must be named, not slid); (b) move
-`seon.dev.markdown` back into `src/` as first-party; (c) teach init's
-analysis that script-side namespaces are name-only externals like
-other non-indexed requires. (c) matches the existing name-only
-external precedent and keeps the gate.
+## Problem
+
+`bin/seon init` exits 1 at HEAD on unresolved
+`md/validate-repository-pins` at `test/seon/dev/markdown_test.clj:203` and
+`:211`. The public implementation is
+`script/seon/dev/markdown.clj:1112` (moved there by `fd9777027` for the
+operator boundary), outside the indexed `src/` + `test/` inputs. Clj-kondo
+therefore emits a blocking `:unresolved-var` finding before publication.
+
+## Evidence
+
+An isolated `bin/seon --root tmp/core-call-init-before.EhUpvA init` refused
+before source publication completed on 2026-08-17. Its 17.97-second wall time
+is a failed attempt, not an initialization baseline. `bin/test`'s own
+program-graph build was green the same day, so the breakage is
+publication-specific.
+
+The refusal blocks every lane that must run or time a complete initialization.
+It also prints every warning around the one blocking finding; that separate
+diagnostic defect remains recorded in
+`docs/seon/issues/context-wave-leaves-three-small-honesty-defects.md`.
+
+## Owner
+
+The program-graph publication boundary must make the repository-pin test and
+its implementation occupy one indexed source model. Candidate resolutions are:
+
+1. Move the test to the script side with its subject, explicitly accepting
+   that the main gate no longer discovers it.
+2. Move `seon.dev.markdown` back under `src/` as first-party code.
+3. Admit script-side namespace targets as name-only externals during source
+   publication, preserving the test in the gate.
+
+The third follows the existing name-only external precedent without reading an
+absent subject as health.
+
+## Acceptance
+
+The repository-pin regression remains discovered by its intended gate, and a
+fresh isolated `bin/seon init` completes without an unresolved-var finding for
+`md/validate-repository-pins`.
+
+## Resolution (2026-08-17, orchestrator)
+
+Option 1 executed after option 2 was falsified live: moving the
+namespace into `src/` traded the unresolved-var refusal for a
+projection refusal — its contracts use var-quoted private schemas,
+which the STATIC indexer cannot read (neither can bare symbols; only
+registered keywords or self-contained forms). Namespace AND test now
+live together on the script side; isolated init is green. NAMED COST:
+the repository-pin regression is no longer discovered by the main
+gate. Follow-up debt: convert seon.dev.markdown's schemas to a
+registered family (resources/seon/schemas/), after which both files
+may return to the indexed model and this issue's original acceptance
+is restorable.
