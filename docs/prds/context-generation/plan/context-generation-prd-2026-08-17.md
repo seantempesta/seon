@@ -149,6 +149,22 @@ nothing hand-maintains it.**
   Guard: provenance of CALLS is stored; derived VIEWS never become
   authority — regeneration re-derives at current basis using the
   stored inputs to know what call to re-derive.
+
+  **Ruling 43 hardens the ladder:** a winning reader must satisfy BOTH
+  criteria — auto-injectable-only required inputs AND offered render
+  faces — so the agent gets the designed view, never the dense map,
+  by construction; the view is NO MAGIC (an ordinary composition,
+  `(render-x (reader …))`, the agent could type; raw data one call
+  beneath); NO hardcoded bootstrap forms exist anywhere; ONE NAME PER
+  ATTRIBUTE — surface functions return storage keys, the `my.*` alias
+  key mirrors die (deletion register; rename sweep rides wave D;
+  message entities rename in the same sweep; alias-chasing survives
+  only the transition), enforced by **P-NAME-ALIGNED**: every reader's
+  output-refs are stored attributes of the family it reads, every
+  writer's inputs likewise, drift is red. tx-meta joins discovery:
+  the receipt stamp makes "what this agent wrote" a derivable edge,
+  and written entities enter the neighborhood and render like
+  everything else.
 - **Three cases, one function:** initial context = empty settled set
   (bootstrap is the fixpoint's first iteration, no init function);
   turn N = replay + the small frontier (diff-stale reads re-enter;
