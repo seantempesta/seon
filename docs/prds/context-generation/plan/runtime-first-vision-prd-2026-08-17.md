@@ -151,6 +151,24 @@ env is a map of Vars); values serialize as their GENERATORS (source to
 re-execute); live host references are `:seon.schema/identity-only` —
 identity plus rebuild recipe, never object graphs.
 
+## Generated help — discovery as a derived face (owner direction, 2026-08-17)
+
+`(help)` is auto-generated from the agent's world, never static text:
+the namespace-root pull supplies "everything in your world"
+(docstrings + Malli metadata are program facts); the session dataflow
+edges supply IMPORTANCE as a Datalog aggregation — reference frequency
+per symbol/keyword with basis-recency decay, so the agent's own
+behavior weights its help; unresolved errors join outward through the
+keyword graph to the refusing contract, its referenced schemas, real
+usage examples (reverse `:seon.fn/calls` with source spans), and
+`tests-reaching` as executable examples. Every line is form-honest
+data with a requery. Delivery: a CALLABLE, conditionally auto-surfaced
+— the generator emits a help entry unprompted only at the opening
+(the base-level discovery insert) and on a derived error-streak
+trigger (config-dialed); otherwise `(help)` is one call away and the
+opening teaches that. No hand-ranked importance, no curated help text,
+no per-agent configuration — three queries over the enriched graph.
+
 ## What this PRD will need to settle later (not now)
 
 - The exact edge schema for the session graph (which edges are new
