@@ -123,6 +123,34 @@ record it). Session archival (the session family,
 compaction within a session, archival between sessions, rebirth from
 facts — three scales of the same rebuild-from-generators move.
 
+## Graph enrichment — ruled in scope (owner, 2026-08-17)
+
+The rich graph is mostly recorded already (`:seon.fn` calls/keywords/
+arity contracts, `:seon.ns` requires, `:seon.test` subjects, AEVT for
+data-side keyword usage). Five edge families are cheap at the existing
+indexing/settlement seams and each unlocks a named query; the owner
+ruled them into this work. Each lands DERIVED (never hand-maintained)
+with its query and a drift regression:
+
+1. **Core-call edges** (kondo already resolves them) → makes the
+   seam censuses ("no printing outside the printer") non-vacuous.
+2. **`:seon.schema/references`** (parse stored forms once at
+   declaration) → schema closure and impact analysis become Datalog;
+   the keyword graph's spine.
+3. **Per-arity OUTPUT refs** beside input refs → "which functions
+   produce a value carrying this key" — the efficient contract-fit
+   index for the context generator, and provenance-of-data queries.
+4. **Session dataflow edges** (uses-var / uses-result / reads /
+   writes / defines / requires per receipt — computed at settlement
+   already) → liveness, compaction, last-referenced-at-basis.
+5. **Test→schema edges** (from subject contracts) → "which schemas
+   lack generative coverage," a merge-gate criterion.
+
+Serialization law restated for this section: vars are data (the SCI
+env is a map of Vars); values serialize as their GENERATORS (source to
+re-execute); live host references are `:seon.schema/identity-only` —
+identity plus rebuild recipe, never object graphs.
+
 ## What this PRD will need to settle later (not now)
 
 - The exact edge schema for the session graph (which edges are new
