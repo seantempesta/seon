@@ -21,7 +21,7 @@ carries session state until this program grows its own).
 
 ## Reading order for a fresh session
 
-1. **[The one-renderer PRD](plan/one-renderer-prd-2026-08-14.md)** —
+1. **[The one-renderer PRD](plan/context-generation-prd-2026-08-17.md)** —
    THE document: the eight-stage pipeline, the failure policy (panic
    hard in dev; production never crashes — designed human cards, flat
    error data for agents, three faces one fact), the verified rip-out
@@ -68,7 +68,7 @@ carries session state until this program grows its own).
 
 ## The plan documents
 
-- [one-renderer-prd-2026-08-14.md](plan/one-renderer-prd-2026-08-14.md) — active, awaiting markup
+- [one-renderer-prd-2026-08-14.md](plan/context-generation-prd-2026-08-17.md) — active, awaiting markup
 - [live-drive-spec-2026-08-13.md](plan/live-drive-spec-2026-08-13.md) — the drive series (drives are the measurement instrument; drive 1 attempts 1-5 complete)
 - [plan-context-prd-2026-08-13.md](plan/plan-context-prd-2026-08-13.md) — my.plan + intent membership (T1-T3 LANDED)
 - [design-ideas-ledger-2026-08-13.md](plan/design-ideas-ledger-2026-08-13.md) — every idea with status; rulings 17-32
