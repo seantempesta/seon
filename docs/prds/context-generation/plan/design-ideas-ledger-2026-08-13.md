@@ -472,6 +472,28 @@ one decision away from queued work. Ruled items cite their record.
     transaction shape is confirmed correct as built (sources atomic in
     one basis, receipts ascending per form).
 
+43. **One name per attribute; readers must offer faces; no magic and
+    no hardcoded openings** (owner, 2026-08-17 night): (a) the
+    `my.*`-alias key mirrors are dumb and DIE — surface functions
+    return STORAGE keys; message entities get their rename in the same
+    sweep; the alias rows join the deletion register; P-NAME-ALIGNED
+    (every reader's output-refs are stored attributes of the family it
+    reads; every writer's inputs likewise) is the enforcing census.
+    (b) Entities stay independent and may reference ANYTHING — each
+    datum's own reference graph is its discovery surface. (c) The
+    reader-selection filter gains the second criterion: a winning
+    reader has auto-injectable-only required inputs AND offers render
+    faces — so the agent gets the designed view, never the dense map,
+    by construction. (d) NO MAGIC: the nicer view is an ordinary
+    composition the agent could type — the face is a real function,
+    `(render-x (reader …))` reconstructs it explicitly, and the raw
+    data is always one call beneath. (e) NO hardcoded bootstrap forms
+    anywhere: the opening derives entirely from find-data →
+    discover-reader-with-faces → reconstruct-call. (f) tx-meta joins
+    discovery: the receipt stamp (42c) makes "what this agent wrote"
+    a derivable edge, and written entities enter the neighborhood and
+    render through the same mechanism as everything else.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
