@@ -74,6 +74,10 @@
   "The current cluster's live branch connection, bound by its owning pass."
   nil)
 
+(def ^:dynamic ^:private *receipt*
+  "The current evaluation receipt lookup ref, bound with connection custody."
+  nil)
+
 (def ^:dynamic *read-evidence-sink*
   "An optional invocation-local atom collecting Datahike read evidence."
   nil)
@@ -1843,6 +1847,16 @@
      :seon.error/data (merge data conflict)
      ::transaction-refused true}))
 
+(defn- stamp-receipt
+  [transaction]
+  (if (nil? *receipt*)
+    transaction
+    (if (map? transaction)
+      (update transaction :tx-meta
+              #(assoc (or % {}) ::receipt *receipt*))
+      {:tx-data transaction
+       :tx-meta {::receipt *receipt*}})))
+
 (defn- transact-call
   [connection transaction]
   (if (error-value? connection)
@@ -1859,7 +1873,8 @@
                  ((requiring-resolve 'seon.schema.edn/packaged-forms))))]
         (d/transact connection
                     (schema.datahike/encode-transaction-in
-                     projection (jdk-integers->long transaction))))
+                     projection
+                     (jdk-integers->long (stamp-receipt transaction)))))
       (catch Throwable throwable
         (let [data (error.refusal/refusal throwable)]
           (cond

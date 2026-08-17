@@ -1927,7 +1927,8 @@
 
   Order is the contract:
   1. bind the compiled `seon.db/*conn*` from the supplied cluster ctx,
-     or nil for an isolated base ctx;
+     or nil for an isolated base ctx, and carry the current receipt through
+     that same custody when run and form identities are present;
   2. use the SUPPLIED live cluster ctx, or make a fresh guarded base for
      an isolated one-off when none was given;
   3. arm through `kernel/arm` with `::time-limit-ms`, the ONLY limit —
@@ -2003,6 +2004,9 @@
         printed (java.io.StringWriter.)
         connection (get-in evaluation-ctx
                            [::custody :seon.db/connection])
+        receipt (when (and run-id (some? form-ordinal))
+                  [:seon.cluster.eval/id
+                   (pr-str [run-id form-ordinal])])
         namespace-name (or (second namespace-ref)
                            (when (and connection agent-id)
                              (agent-namespace @connection agent-id))
@@ -2019,28 +2023,29 @@
     (schema/call-with-projection-state
      projection-state
      (fn []
-       (binding [db/*conn* connection
-                 effect/*request-context*
-                 (when (and run-id (some? form-ordinal) cluster-name)
-                   {;; The environment the ctx carries, scoped to this turn.
-                    ;; Every crossing this request makes — a background io
-                    ;; submission above all — carries it as DATA rather than
-                    ;; hoping the executor inherited a binding frame.
-                    :seon.env/environment
-                    (some-> (env/of evaluation-ctx)
-                            (env/scope
-                             {:seon.cluster.agent/id agent-id
-                              :seon.cluster.run/id run-id
-                              :seon.cluster.run.form/ordinal form-ordinal}))
-                    :seon.db/connection connection
-                    :seon.cluster.run/id run-id
-                    :seon.cluster.run.form/ordinal form-ordinal
-                    :seon.cluster.agent/id agent-id
-                    :seon.flow/work-launcher work-launcher
-                    :seon.boot/cluster-name cluster-name
-                    :seon.sci.admit/caps caps
-                    :seon.config/on-core-error on-core-error
-                    :seon.effect/counter (atom -1)})]
+       (with-bindings {#'db/*conn* connection
+                       #'db/*receipt* receipt
+                       #'effect/*request-context*
+                       (when (and run-id (some? form-ordinal) cluster-name)
+                         {;; The environment the ctx carries, scoped to this turn.
+                          ;; Every crossing this request makes — a background io
+                          ;; submission above all — carries it as DATA rather than
+                          ;; hoping the executor inherited a binding frame.
+                          :seon.env/environment
+                          (some-> (env/of evaluation-ctx)
+                                  (env/scope
+                                   {:seon.cluster.agent/id agent-id
+                                    :seon.cluster.run/id run-id
+                                    :seon.cluster.run.form/ordinal form-ordinal}))
+                          :seon.db/connection connection
+                          :seon.cluster.run/id run-id
+                          :seon.cluster.run.form/ordinal form-ordinal
+                          :seon.cluster.agent/id agent-id
+                          :seon.flow/work-launcher work-launcher
+                          :seon.boot/cluster-name cluster-name
+                          :seon.sci.admit/caps caps
+                          :seon.config/on-core-error on-core-error
+                          :seon.effect/counter (atom -1)})}
       (try
         (let [_ (vreset! arm-state (kernel/arm evaluation-ctx time-limit-ms))
             before-reader-context

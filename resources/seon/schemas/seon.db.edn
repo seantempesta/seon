@@ -144,6 +144,7 @@
             {:optional true}
             [:or :nil [:sequential :seon.schema/value]]]],
           :process [:and #:seon.db{:index true} :seon.db/ref],
+          :receipt [:and #:seon.db{:index true} :seon.db/ref],
           :pull-many-options
           [:map
            [:selector :seon.db/pull-selector]
