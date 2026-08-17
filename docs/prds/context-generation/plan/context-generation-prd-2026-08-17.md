@@ -129,6 +129,26 @@ nothing hand-maintains it.**
   reader and the edge falls honestly to the floor; define a better
   one and it wins. Faces then attach to the CALL'S RESULT, so the
   same discovery that found the call found the rendering.
+
+  **Refinement — stored provenance outranks inference (owner,
+  2026-08-17):** receipts accrete the STRUCTURED call pair —
+  `:seon.fn/sym` + `:seon.render/inputs` (named non-ambient args;
+  ambient db/self supplied by call preparation, so rebuilt forms are
+  portable across namespaces; the recorded basis is the db arg's
+  serialization). Reversal becomes a splice, not a parse. The full
+  selection ladder, priority-ordered, all queries: (0) STORED
+  PROVENANCE — this data came from this call, no inference; (1)
+  explicit attribute-declared reader; (2) contract inference
+  (producers-of-key, alias-chased, input-satisfiable),
+  DISTANCE-WEIGHTED — the nearest declared reader/face wins,
+  in-namespace before N-hops, equal distance a loud ambiguity; (3)
+  the floor identity pull. Robustness ladder for inputs: none/
+  ambient-only → admissible named-map EDN → `result/<id>` handles
+  (provenance chains = the uses-result edges by storage rather than
+  extraction) → non-admissible degrades honestly to inference/floor.
+  Guard: provenance of CALLS is stored; derived VIEWS never become
+  authority — regeneration re-derives at current basis using the
+  stored inputs to know what call to re-derive.
 - **Three cases, one function:** initial context = empty settled set
   (bootstrap is the fixpoint's first iteration, no init function);
   turn N = replay + the small frontier (diff-stale reads re-enter;
