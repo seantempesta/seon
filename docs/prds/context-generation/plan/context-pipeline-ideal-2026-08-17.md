@@ -73,6 +73,21 @@ the namespace view. Functions like `my.message/inbox` are VERBS the
 agent discovers via `dir` and calls itself — receipted, replayed,
 never part of generation.
 
+## The face contract, confirmed against real data (2026-08-17 probe)
+
+A live pull of root's inbound edge returns the group as a VECTOR OF
+COMPLETE MESSAGE MAPS under the reverse-attribute key
+(`:seon.cluster.message/_to [...]`). So a verb like `inbox` IS a
+face: contract `[:vector <message>] → :seon.render/ai` — an
+input-shape match against exactly the pulled group, resolved at level
+2 (required namespace). The face eats what the pull caught; nothing
+re-queries. Two pull-shape rules the real data demands: (1) the
+GROUP'S NAME is the reverse attribute — ruling 43 renaming makes the
+whole chain legible; (2) EVERY REF LEAF CARRIES ITS IDENTITY
+ATTRIBUTE — a bare `{:db/id N}` in a pulled value is a defect (the
+production selector already asks identities; ad-hoc subselectors must
+too).
+
 ## Turn N and message arrival
 
 Replay all receipts by (basis-t, ordinal) — byte-identical prefix.
