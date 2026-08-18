@@ -165,6 +165,24 @@ nothing hand-maintains it.**
   declaration exists; the floor census names every family without a
   qualifying reader. Two authored faces remain: `/ai` and `/html`.
 
+  **Naming IS the fingerprint (owner, 2026-08-17):** under ruling 43a
+  a pulled value's fingerprint is the triple it carries on its face —
+  attribute set, IDENTITY ATTRIBUTE (which names the family; never a
+  kind stamp), and shape — resolved through the registry with zero
+  inference. **The generator-suppliable argument vocabulary:** call
+  preparation accretes a small closed set of recognized window
+  parameters — a reader optionally declaring `:seon.db/since` is
+  supplied the agent's last-observed basis (so `(inbox)` is "since I
+  last looked" at turn N by CONTRACT, not hardcoding); declared
+  limits likewise; the floor remains the display constraint beneath
+  (shape-bearing elision + requery when a reader returns the world).
+  "What I wrote recently" = the tx-meta writes edge filtered by basis
+  window — derived. **The composition graph is a join, live today:**
+  `output-refs(f) ∩ input-refs(g)` ⟹ g processes f's results, used
+  together before or not — powering help's "these functions accept
+  what you're holding," dig-in suggestions, and later planning. No
+  pipeline registry; the contracts are the composition knowledge.
+
   **Ruling 43 hardens the ladder:** a winning reader must satisfy BOTH
   criteria — auto-injectable-only required inputs AND offered render
   faces — so the agent gets the designed view, never the dense map,
