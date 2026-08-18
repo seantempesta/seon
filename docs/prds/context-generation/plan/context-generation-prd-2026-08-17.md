@@ -169,15 +169,18 @@ nothing hand-maintains it.**
   a pulled value's fingerprint is the triple it carries on its face —
   attribute set, IDENTITY ATTRIBUTE (which names the family; never a
   kind stamp), and shape — resolved through the registry with zero
-  inference. **The generator-suppliable argument vocabulary:** call
-  preparation accretes a small closed set of recognized window
-  parameters — a reader optionally declaring `:seon.db/since` is
-  supplied the agent's last-observed basis (so `(inbox)` is "since I
-  last looked" at turn N by CONTRACT, not hardcoding); declared
-  limits likewise; the floor remains the display constraint beneath
-  (shape-bearing elision + requery when a reader returns the world).
-  "What I wrote recently" = the tx-meta writes edge filtered by basis
-  window — derived. **The composition graph is a join, live today:**
+  inference. **Time is explicit, never injected (owner correction,
+  2026-08-17, superseding the suppliable-`since` draft):**
+  batteries-included assumes NOW — call preparation supplies only
+  db/self; no window parameter is ever silently filled. Any temporal
+  aspect is SPELLED IN THE FORM, and diffs are ordinary composition:
+  `(diff (inbox {:at <t1>}) (inbox))` — constructible by the system
+  and by the agent identically, because every printed result carries
+  its basis-t, so "when did I last call this" is read off the
+  transcript, not off hidden state. The floor remains the display
+  constraint beneath (shape-bearing elision + requery when a reader
+  returns the world). "What I wrote recently" = the tx-meta writes
+  edge filtered by an explicit basis window — derived. **The composition graph is a join, live today:**
   `output-refs(f) ∩ input-refs(g)` ⟹ g processes f's results, used
   together before or not — powering help's "these functions accept
   what you're holding," dig-in suggestions, and later planning. No
