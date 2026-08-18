@@ -209,6 +209,31 @@ nothing hand-maintains it.**
   filtered by dataflow liveness (§5), the one priced cache break.
   Rebirth = the same function, fresh session.
 
+### 2.2.1 The mechanics register — unclear outcomes, suspect code, missing universal principles
+
+Owner-ordered de-hand-waving (2026-08-17 night). Each row: the exact
+gap, its evidence, and what rule or fix closes it. Nothing below is
+optional; every row either gets a ruled principle or a falsifier
+before its wave lands.
+
+| # | Step | The gap | Evidence / status |
+|---|---|---|---|
+| M1 | Pull | **Width windowing keeps the OLDEST members** — Datahike `:limit` takes index (creation) order, so an overflowing reverse edge drops the newest data | **PROVEN LIVE** 2026-08-17: `:limit 3` on root's messages returned bootstrap + two ancient maintenance rows, dropping five just-written messages. Fix direction: recency-ordered edge windows (sort at acquisition by the edge's instant/basis, or pull unlimited + window post-index) — needs a ruled universal rule, not per-edge hacks |
+| M2 | Pull | **No per-edge expansion policy** — one global distance integer treats "expand a require into its functions" and "expand a message's `/from` into the sender's world" identically; uniform caps then truncate the wrong things | The live capture's shape; principle missing: is expansion depth schema-declared per ref, derived from component/ownership, or config? UNRULED |
+| M3 | Pull | Selector size scales with the installed-schema count (~2.4k), not with data | `root-selector` enumerates every ref attribute bidirectionally; cost unmeasured at scale — needs a measurement, may be fine |
+| M4 | Family | **Entities without an identity attribute have no family** (component children, arity nodes) — fingerprint-by-attrs collides under open maps | Principle candidate, UNRULED: family = identity attribute ONLY; identityless values are reached through their owners and take the floor |
+| M5 | Family | Alias chasing measured nearly vacuous: `:seon.entity/id-attr` covers 37/2231 keys | Verification lane A4 note; ruling 43a (name unification) dissolves the need, but selection must survive the TRANSITION window — the chasing code is the suspect code until wave D |
+| M6 | Producers | **Shape is not in the index** — `output-refs` flattens collection-of-family vs single-entity away, so ruling 44's shape matching has no index support | Needs either an accreted per-arity output-shape fact or AST interrogation at selection time; UNDECIDED |
+| M7 | Producers | **"Offers faces" is an undefined predicate** — faces are declared mostly on the FAMILY schema, not the reader; does a family face qualify any reader, or must the reader's own output schema carry faces? | One rule needed; recommend: family faces qualify (faces attach to data, not to callers) — UNRULED |
+| M8 | Producers | **Distance weighting is unbuilt and its failure mode is tie explosion** — in a flat toolkit world most readers sit at equal require-distance, making equal-distance-is-error fire constantly | Recommend the colocation principle FIRST: the reader in the namespace that owns the family's schema wins outright; hop distance only breaks remaining ties — UNRULED |
+| M9 | Producers | **Auto-run vs offered** — collection-edge readers auto-run; single-entity dig-ins (`read` on one message) must be OFFERED (help/requery), not executed, or openings explode | Stated here for the first time; needs the ruling |
+| M10 | Ordering | `form-symbols` is spelling-syntactic (no alias resolution, no env); `explained-symbol?` compares spellings | Substrate report §2; the env-grounding rewrite (wave B1) is the fix; until then ordering correctness is luck |
+| M11 | Execution | **Rendering that TRANSACTS** (cost facts written during derivation) — a derivation that writes can stale itself; self-triggering loop risk | Substrate report threat list; must move to settlement or a separate proc before wave B |
+| M12 | Execution | **No generation-failure retry policy** — a generated read that errors re-qualifies as stale next turn and re-fires forever (error → stale → error) | Rule needed: a failed system read is retried only when its READ INPUTS change, not on schedule; the error fact carries the suppression basis — UNRULED |
+| M13 | Faces | **Diff results have no designed face** — `seon.db/diff` output (editscript-shaped) will render as soup through the floor, in the exact position (message injection) the design showcases | Face work, wave E; until designed, the marquee mechanism produces ugly output |
+| M14 | Injection | **Suppression matching is approximate** — "the agent already did this read" can only be matched for exact-function receipted reads; an agent's arbitrary equivalent query is undetectable | Accept the approximation as the RULE (suppress only on exact system-read identity), state it, and let duplicates be visible rather than silently guessed — recommend, UNRULED |
+| M15 | Injection | The explicit-basis composition depends on readers taking an explicit db positionally (`(inbox (as-of t₁) me)`) — holds for `seon.db`-idiom readers, unverified across all `my.*` readers | One census: every inference-qualifying reader accepts explicit db in arity — cheap, unwritten |
+
 ### 2.3 Face
 
 Three projections per value — `/form` (the real call producing the
