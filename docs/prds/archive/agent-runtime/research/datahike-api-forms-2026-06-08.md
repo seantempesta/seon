@@ -95,7 +95,7 @@ bindings bind positionally to the following inputs.
 ;; db binds $, "Alice" binds ?target
 (d/q '[:find ?n :in $ ?target :where [?e :name ?n] [(= ?n ?target)]]
      @conn "Alice")
-;; => #{["Alice"]}   (verified live, JVM + CLJS pod)
+⟹ #{["Alice"]}   (verified live, JVM + CLJS pod)
 ```
 
 If `:in` is omitted, datahike defaults to `[$]`, so `(d/q '[:find ?n
@@ -112,7 +112,7 @@ inputs are **ignored with a warning**.
 (d/q {:query '[:find ?n :where [?e :name ?n]]
       :args  [@conn]
       :limit 1})
-;; => #{["Alice"]}   (verified live)
+⟹ #{["Alice"]}   (verified live)
 ```
 
 Extra map keys hoisted out of the query by `normalize-q-input`:
@@ -293,7 +293,7 @@ pull-many
 
 ```clojure
 (d/pull @conn [:db/id :name :likes {:friends [:db/id :name]}] 1)
-;; => {:db/id 1, :name "Alice"}     (verified live)
+⟹ {:db/id 1, :name "Alice"}     (verified live)
 (d/pull @conn {:selector [:db/id :name] :eid 1})           ; arg-map variant
 (d/pull-many @conn [:name] [1 2 3])                         ; verified: [{:name "Alice"}]
 ```

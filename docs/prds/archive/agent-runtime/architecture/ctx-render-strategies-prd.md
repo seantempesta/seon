@@ -218,11 +218,11 @@ literal source → `;; => result` (or `;; ! error`) → handle.
 ```clojure
 ;; Define add and test it.
 (defn add [x y] (+ x y))
-;; => #'seon.agent.XAR-2605261000/add
+⟹ #'seon.agent.XAR-2605261000/add
 ;; #:seon.eval{:id "ev-1"}
 
 (add 2 3)
-;; => 5
+⟹ 5
 ;; #:seon.eval{:id "ev-2"}
 
 ```

@@ -310,7 +310,7 @@ Keep config compilation pure:
 
 ```clojure
 (compile-desired-config defaults manifest env)
-;; => [{:seon.config/id ...}
+⟹ [{:seon.config/id ...}
 ;;     {:seon.route/name ...}
 ;;     {:my.skills/name ...}]
 ```

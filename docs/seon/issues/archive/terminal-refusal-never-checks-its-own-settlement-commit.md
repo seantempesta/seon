@@ -42,7 +42,7 @@ Live probe against real running receipts on scratch cluster
 ```clojure
 (probe2! "audit-g" "string-kind"
   {:seon.error/kind "not-a-keyword" :seon.error/message "hostile kind"})
-;; => {:minimal-commit #:seon.error{:kind :seon.db/rejected,
+⟹ {:minimal-commit #:seon.error{:kind :seon.db/rejected,
 ;;      :message "Bad entity value \"not-a-keyword\" at
 ;;                [:db/add 2570 :seon.error/kind \"not-a-keyword\"] …"},
 ;;     :terminal-refused!-returned true,

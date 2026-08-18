@@ -137,7 +137,7 @@ Through the pod's bootstrap compile-state:
 (seon.eval/eval @seon.repl/!compile-state
   "(let [f my-async-double r (f 10)]
      {:fn-ctor (.. f -constructor -name) :ret-promise? (instance? js/Promise r)})")
-;; => {:ok true :value {:fn-ctor "AsyncFunction" :ret-promise? true} …}
+⟹ {:ok true :value {:fn-ctor "AsyncFunction" :ret-promise? true} …}
 ```
 
 A `^:async` fn compiles to a JS `AsyncFunction` and returns a `js/Promise`.
@@ -167,9 +167,9 @@ Live, through the bootstrap compile-state (the exact agent path):
 ```clojure
 (seon.eval/eval @seon.repl/!compile-state
   "(defn ^:async my-async-double [x] (await (js/Promise.resolve (* 2 x))))")
-;; => {:ok true :value #'cljs.user/my-async-double :ns cljs.user}
+⟹ {:ok true :value #'cljs.user/my-async-double :ns cljs.user}
 (seon.eval/eval @seon.repl/!compile-state "(my-async-double 21)")
-;; => {:ok true :value #object[Promise …] :ns cljs.user}
+⟹ {:ok true :value #object[Promise …] :ns cljs.user}
 ```
 
 The `(await …)` inside the `^:async` body compiles and runs in self-host. The
@@ -181,7 +181,7 @@ Live, same path:
 
 ```clojure
 (seon.eval/eval @seon.repl/!compile-state "(await (js/Promise.resolve 5))")
-;; => {:ok false
+⟹ {:ok false
 ;;     :error {:seon.error/message "Could not eval seon.dynamic" …
 ;;             … :clojure.error/phase :macroexpansion
 ;;             … cause: "Assert failed: await can only be used in async contexts
@@ -274,9 +274,9 @@ Live-proven:
 
 ```clojure
 (seon.eval/maybe-await-value (js/Promise.resolve {:resolved 99}))
-;; => {:ok true :value {:resolved 99}}
+⟹ {:ok true :value {:resolved 99}}
 (seon.eval/maybe-await-value [:plain :data])
-;; => {:ok true :value [:plain :data]}     ; non-Promise passes through
+⟹ {:ok true :value [:plain :data]}     ; non-Promise passes through
 ```
 
 Note the agent-facing surface is `eval-batch!`/`eval-form-entry!` (which calls
@@ -296,7 +296,7 @@ Live-proven:
 
 ```clojure
 (seon.eval/maybe-await-value (js/Promise. (fn [_ _] nil))) ; never resolves
-;; => {:ok false :error {:seon.error/message "auto-await timed out after 10000ms" …}}
+⟹ {:ok false :error {:seon.error/message "auto-await timed out after 10000ms" …}}
 ```
 
 The underlying Promise keeps running in the background (no JS preemption — see

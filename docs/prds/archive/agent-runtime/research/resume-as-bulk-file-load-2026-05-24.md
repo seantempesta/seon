@@ -42,7 +42,7 @@ Sean's analogy: CIDER/Calva ctrl+enter sends the whole file. The analyzer ingest
 
 ```clojure
 (seval/eval !state "(ns probe.bulk1) (defn foo [] 1) (defn bar [] 2) (foo)" {:analyze-deps? true})
-;; => {:ok true, :value 1, :ns probe.bulk1}
+⟹ {:ok true, :value 1, :ns probe.bulk1}
 
 ```
 
@@ -58,7 +58,7 @@ After Q1.1:
  :bar-resolves (some? (seval/lookup-value 'probe.bulk1/bar))
  :foo-call ((seval/lookup-value 'probe.bulk1/foo))
  :bar-call ((seval/lookup-value 'probe.bulk1/bar))}
-;; => {:defs #{bar foo}, :foo-resolves true, :bar-resolves true,
+⟹ {:defs #{bar foo}, :foo-resolves true, :bar-resolves true,
 ;;     :foo-call 1, :bar-call 2}
 
 ```
@@ -69,7 +69,7 @@ After Q1.1:
 (seval/eval !state
   "(ns probe.bulk5) (defn before [] :before) (do (throw (js/Error. \"runtime-bang\")) nil) (defn after [] :after)"
   {:analyze-deps? true})
-;; => {:ok false, :error {:seon.error/message "ERROR" ...}}
+⟹ {:ok false, :error {:seon.error/message "ERROR" ...}}
 ;; before-resolves: true   ; form 1 did execute
 ;; after-resolves: false   ; form 3 did NOT execute
 
@@ -83,7 +83,7 @@ This is the critical correctness property: **when the JS emitted for the whole s
 (seval/eval !state
   "(ns probe.bulk3) (defn ok-fn [] :ok) (defn :not-a-symbol [] :bad) (defn after [] :after)"
   {:analyze-deps? true})
-;; => {:ok false, :error {:seon.error/message "Could not eval seon.dynamic"}}
+⟹ {:ok false, :error {:seon.error/message "Could not eval seon.dynamic"}}
 ;; ok-fn-resolves: false   ; form 1 made it into :defs but NOT onto globalThis
 ;; after-resolves: false
 ;; analyzer :defs: (ok-fn)  ; only the form before the error landed in analyzer
@@ -98,7 +98,7 @@ When the **compile phase** fails on a form, `cljs.js/eval-str` doesn't emit any 
 (seval/eval !state
   "(ns probe.bulk4) (def !state (atom 0)) (swap! !state inc) (defn after [] :after)"
   {:analyze-deps? true})
-;; => {:ok true, :value #'probe.bulk4/after}
+⟹ {:ok true, :value #'probe.bulk4/after}
 ;; after-resolves: true; !state is an atom with value 1
 
 ```
@@ -150,7 +150,7 @@ For CLJS (bootstrap), `cljs.js/eval-str` is the equivalent primitive but works a
 (seval/eval !state
   "(ns probe.fwd1) (defn bar [] (foo)) (defn foo [] 42) (bar)"
   {:analyze-deps? true})
-;; => {:ok true, :value 42, :ns probe.fwd1}
+⟹ {:ok true, :value 42, :ns probe.fwd1}
 
 ```
 
@@ -160,7 +160,7 @@ For CLJS (bootstrap), `cljs.js/eval-str` is the equivalent primitive but works a
 (seval/eval !state
   "(ns probe.fwd2) (defn bar [] (foo)) (defn foo [] 99) (bar)"
   {:analyze-deps? false})
-;; => {:ok true, :value 99}
+⟹ {:ok true, :value 99}
 
 ```
 
@@ -199,12 +199,12 @@ If we wanted to be paranoid, the reconstituted file could start with `(declare f
   "(ns probe.s2)
    (defn add-one {:malli/schema [:=> [:cat :probe.s2/n] :probe.s2/n]} [n] (inc n))"
   {:analyze-deps? true})
-;; => {:ok true, :value #'probe.s2/add-one}
+⟹ {:ok true, :value #'probe.s2/add-one}
 
 ;; Inspect the var-map:
 (let [vm (get-in @!state [:cljs.analyzer/namespaces 'probe.s2 :defs 'add-one])]
   (:malli/schema (:meta vm)))
-;; => [:=> [:cat :probe.s2/n] :probe.s2/n]   ; preserved verbatim
+⟹ [:=> [:cat :probe.s2/n] :probe.s2/n]   ; preserved verbatim
 
 ```
 

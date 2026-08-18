@@ -12,7 +12,7 @@ Observed live (2026-08-01, default cluster, real door probe):
 ```clojure
 ;; through seon.sci.eval/evaluate in my.agents.tally
 (my.message/send)
-;; => #:seon.error{:kind :seon.sci.eval/evaluation-failed,
+⟹ #:seon.error{:kind :seon.sci.eval/evaluation-failed,
 ;;                 :message ":malli.core/invalid-schema", …}
 ```
 

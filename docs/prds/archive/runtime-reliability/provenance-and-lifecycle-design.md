@@ -196,7 +196,7 @@ Config resolution is a pure precedence function:
 
 ```clojure
 (compile-desired-config defaults manifest environment)
-;; => canonical identity maps
+⟹ canonical identity maps
 ```
 
 Explicit environment values override the selected manifest, which overrides

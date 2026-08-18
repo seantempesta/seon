@@ -135,7 +135,7 @@ chunk to avoid scope creep):
    (require '[seon.config :as config] '[integrant.core :as ig])
    (let [cfg (config/system-config {:profile :dev})]
      (remove #(contains? (methods ig/init-key) %) (keys cfg)))
-   ;; => () after the edit (was (:seon.db/flow :seon.flow/infrastructure
+   ⟹ () after the edit (was (:seon.db/flow :seon.flow/infrastructure
    ;;                            :seon.flow/pool :seon.orchestrator/sessions))
    ```
 

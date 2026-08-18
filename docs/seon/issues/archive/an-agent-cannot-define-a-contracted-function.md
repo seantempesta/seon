@@ -88,10 +88,10 @@ HEAD before anything was built on it:
 
 ```clojure
 (program/declaration-row event :contracted)
-;; => threw, "missing required key" for three families
+⟹ threw, "missing required key" for three families
 (keys (program/declaration-row
        (assoc event :seon.schema.admission/source :agent) :contracted))
-;; => (:seon.fn/sym :seon.fn/ns :seon.fn/source :seon.fn/arglists
+⟹ (:seon.fn/sym :seon.fn/ns :seon.fn/source :seon.fn/arglists
 ;;     :seon.fn/private? :seon.fn/spec :seon.schema.admission/source)
 ```
 

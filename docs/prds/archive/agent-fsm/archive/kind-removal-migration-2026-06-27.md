@@ -189,9 +189,9 @@ Derivation + decomposition (in-memory, from `{:seon.db/entity true}`):
 
 ```clojure
 (:seon.entity/id-attr (si/schema-properties (schema/schema-definition :my.probe.a)))
-;; => :my.probe.a/id                ; derived, never stored on rows
+⟹ :my.probe.a/id                ; derived, never stored on rows
 (schema/entity-schema-tx-data :my.probe.a)
-;; => [[:db/add "schema-:my.probe.a" :seon.schema/key          :my.probe.a]
+⟹ [[:db/add "schema-:my.probe.a" :seon.schema/key          :my.probe.a]
 ;;     [:db/add "schema-:my.probe.a" :seon.schema/id-attr      :my.probe.a/id]
 ;;     [:db/add "schema-:my.probe.a" :seon.schema/required-attrs :my.probe.a/id]
 ;;     [:db/add "schema-:my.probe.a" :seon.schema/required-attrs :my.probe.a/name]]

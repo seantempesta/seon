@@ -331,7 +331,7 @@ produced a DB-grounded answer:
   (seon.db/query {:seon.db/query '[:find ?path ?title
                                    :where [?e :kb.doc/path ?path]
                                           [?e :kb.doc/title ?title]]})
-  ;; => #{}   (empty; never noticed the typo, never recovered)
+  ⟹ #{}   (empty; never noticed the typo, never recovered)
 
   ```
 

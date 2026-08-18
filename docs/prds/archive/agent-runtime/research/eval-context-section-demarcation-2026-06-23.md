@@ -333,7 +333,7 @@ This is decisive: any elision we use must read back cleanly.
 ```clojure
 ;; add 1 and 2
 (+ 1 2)
-;;=> 3 ;; result/EVLabc-123
+⟹ 3 ;; result/EVLabc-123
 ```
 
 - The value is a **`;;=>` comment** (so re-eval runs only the form).
@@ -597,9 +597,9 @@ and the line the cache boundary sits after.
 ;;; ◀ from :user @ 14:04:12 — "refactor the foo namespace"
 ;; On it.
 my.agent.seon=> (in-ns 'my.foo)
-;;=> my.foo
+⟹ my.foo
 my.foo=> (refactor)
-;;=> {:moved 3 :ok true} ;; result/b7
+⟹ {:moved 3 :ok true} ;; result/b7
 
 ;;; ── turn 2 · 14:09:40 · loop 2/20 · my.foo ──────────────────────────────
 my.foo=>
@@ -947,7 +947,7 @@ If you inspect the namespace mappings via clojure.core/ns-map, a freshly initial
 If you switch to a brand new namespace via in-ns and immediately try to define a function, the compilation will fail:
 (in-ns 'brand.new.ns)
 (defn my-func [] :hello)
-;; => Syntax error compiling: Unable to resolve symbol: defn in this context
+⟹ Syntax error compiling: Unable to resolve symbol: defn in this context
 Because the Clojure reader and compiler resolve symbols against the namespace currently bound to *ns*, and defn is not mapped in brand.new.ns, the compiler cannot find the definition.
 
 To make the namespace usable, you must either:
@@ -1190,7 +1190,7 @@ Instead of embedding the literal value directly in the transcript:
 
 ### Example REPL Transcript Output
 user> (db/query-large-dataset)
-;; => #'user/r-1234
+⟹ #'user/r-1234
 ;; Info: 4823 datoms.
 ;; Use (take 5 user/r-1234) or (clojure.set/project user/r-1234 [:db/id]) to inspect.
 
@@ -1292,12 +1292,12 @@ To achieve safe, eval'able Clojure transcripts that keep large data structures q
 ;; --- TRANSCRIPT ---
 ;; Agent executes a query that yields 5,000 maps:
 user> (def result (db/fetch-all-users))
-;; => #result/elided {:id "r-1049281" :type :vector :count 5000 :var-sym user/r-1049281}
+⟹ #result/elided {:id "r-1049281" :type :vector :count 5000 :var-sym user/r-1049281}
 
 ;; The transcript stays tiny. The reader safely parses the TaggedLiteral.
 ;; The Agent notes the var-sym 'user/r-1049281' and queries it:
 user> (count user/r-1049281)
-;; => 5000
+⟹ 5000
 
 user> (my.repl.elision/inspect user/r-1049281 0 3)
 ;; --- Slicing 3 items starting at offset 0 ---

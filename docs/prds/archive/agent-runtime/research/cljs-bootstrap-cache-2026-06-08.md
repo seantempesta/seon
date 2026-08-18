@@ -312,16 +312,16 @@ Verified against the running `:client` pod, MCP session "default":
 ```clojure
 ;; runtime var meta — the ONLY reliable source of the spec
 (:malli/schema (meta #'seon.db/transact!))
-;; => [:=> [:cat :seon.db/transact-request] :seon.db/transact-response]
+⟹ [:=> [:cat :seon.db/transact-request] :seon.db/transact-response]
 (:malli/schema (meta #'seon.db/query))
-;; => [:=> [:cat :seon.db/query-request] :any]
+⟹ [:=> [:cat :seon.db/query-request] :any]
 (:malli/schema (meta #'seon.schema/register!))
-;; => nil   ; genuinely unspecced — ABSENCE is correct
+⟹ nil   ; genuinely unspecced — ABSENCE is correct
 
 ;; m/form round-trips it cleanly (PRD's :seon.fn/spec string)
 (malli.core/form (malli.core/schema
                    (:malli/schema (meta #'seon.db/transact!))))
-;; => [:=> [:cat :seon.db/transact-request] :seon.db/transact-response]
+⟹ [:=> [:cat :seon.db/transact-request] :seon.db/transact-response]
 
 ;; runtime :arglists — MANGLED for instrumented fns, intact otherwise
 (:arglists (meta #'seon.db/transact!))  ; => ([arg])   ← instrumented, mangled

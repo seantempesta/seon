@@ -269,7 +269,7 @@ ever seen, said, or done is one nested pull away.**
 
 ```clojure
 (seon.agent/root-pull)
-;; => {:seon.agent/id        "AbCdEfGh1234"
+⟹ {:seon.agent/id        "AbCdEfGh1234"
 ;;     :seon.agent/state     :idle
 ;;     :seon.agent/current-ns :seon.trading
 ;;     :seon.agent/sessions
@@ -685,12 +685,12 @@ applies once we cut over to the Phase 3 pod.
 
 ```clojure
 (seon.blob/put! {:seon.blob/content "..." :seon.blob/mime "text/plain"})
-;; => hash string. If a blob with this hash already exists, the file
+⟹ hash string. If a blob with this hash already exists, the file
 ;; is NOT rewritten and the metadata entity is NOT re-transacted. The
 ;; tx still happens so the read returns; idempotent on duplicates.
 
 (seon.blob/get hash)
-;; => decompressed bytes (or string when mime is text/*). Throws if
+⟹ decompressed bytes (or string when mime is text/*). Throws if
 ;; the on-disk file is missing — the datahike metadata and the disk
 ;; file are intended to be in sync; "metadata without bytes" is an
 ;; error to surface, not paper over.
@@ -1736,7 +1736,7 @@ fn — substrate AND agent-authored — flows through this seam, because
 ;; turn profiling on for the next render or for a specific form
 (seon.perf/with-profiling
   (assemble-ctx input))
-;; => {:value <result> :stats #tufte/PStats { … }}
+⟹ {:value <result> :stats #tufte/PStats { … }}
 
 ;; or globally for a window of time
 (seon.perf/set-enabled! true)
@@ -1825,7 +1825,7 @@ agent can pull the section entity to find out which function ran:
 
 ```clojure
 (seon.db/pull-by-name {:seon.ctx/name :recent-evals})
-;; => {:seon.ctx/name :recent-evals
+⟹ {:seon.ctx/name :recent-evals
 ;;     :seon.ctx/priority 50
 ;;     :seon.ctx/fn 'seon.render.default/recent-evals-section}
 

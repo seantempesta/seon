@@ -512,6 +512,20 @@ one decision away from queued work. Ruled items cite their record.
     architecture docs' "three projections" amend to two authored
     faces (/ai, /html) plus constructed forms in the same wave.
 
+45. **Comment-shaped results are banned everywhere, forever** (owner,
+    2026-08-17 night, re-arming first-implementation law): a result
+    rendered or WRITTEN AS A COMMENT (`;; =>`, `; ⟹`) teaches agents
+    to fabricate results as comments — observed destroying agents in
+    both implementations. Results print BARE on the line after the
+    form (the transcript's `⟹` glyph is deliberately not
+    comment-shaped). The ban covers production, docs, skills, and
+    examples: 300+ teaching instances swept this night (100+ files,
+    including the repl skill); prose WARNINGS naming the ban are kept.
+    The docstring guard that once flagged `;; =>` echoes was found
+    INVERTED (test/seon/dev/docstring_test.clj:104 "NO LONGER
+    flagged") — re-arming it is the acceptance criterion, filed as an
+    issue.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced

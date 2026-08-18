@@ -22,11 +22,15 @@ result is the work list — data groups paired with their most-specific
 render function:
 
 ```clojure
-(seon.render/plan db 'my.agents.k3f9)
-;; ⟹ [[:seon.message/_to      my.message/render-inbox]
-;;    [:seon.agent/run        my.run/render-run]
-;;    [:seon.agent/plan       my.plan/render-plan]]
+my.agents.k3f9=> (seon.render/plan db 'my.agents.k3f9)
+[[:seon.message/_to my.message/render-inbox]
+ [:seon.agent/run   my.run/render-run]
+ [:seon.agent/plan  my.plan/render-plan]]
 ```
+
+(Results print BARE on the line after the form — never as comments.
+Comment-shaped results taught agents to fabricate results as comments;
+the pattern is banned everywhere, including documentation.)
 
 `seon.render/plan` is: the three index scans (own attrs, refs-in
 grouped by attribute, refs-out grouped by attribute — measured ~1 ms

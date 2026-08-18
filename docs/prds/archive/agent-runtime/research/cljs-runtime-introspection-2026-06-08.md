@@ -71,7 +71,7 @@ analyzer cache.
 
 ```clojure
 (sort (keys @@seon.repl/!compile-state))
-;; => (:options
+⟹ (:options
 ;;     :cljs.analyzer/constant-table
 ;;     :cljs.analyzer/data-readers
 ;;     :cljs.analyzer/externs
@@ -107,7 +107,7 @@ for resume topo-sort; `snapshot-defs`/`defs-since` read `:defs`.
 (let [vm (get-in @@seon.repl/!compile-state
                  [:cljs.analyzer/namespaces 'seon.schema :defs 'register!])]
   (sort (keys vm)))
-;; => (:arglists :arglists-meta :column :doc :end-column :end-line :file
+⟹ (:arglists :arglists-meta :column :doc :end-column :end-line :file
 ;;     :fn-var :line :max-fixed-arity :meta :method-params :name
 ;;     :protocol-impl :protocol-inline :variadic?)
 
@@ -228,7 +228,7 @@ Key observations:
 ```clojure
 (pr-str (m/form (m/schema [:=> [:cat :seon.db/transact-request]
                                 :seon.db/transact-response])))
-;; => "[:=> [:cat :seon.db/transact-request] :seon.db/transact-response]"
+⟹ "[:=> [:cat :seon.db/transact-request] :seon.db/transact-response]"
 ```
 
 Stable, idempotent string. This is the basis for `:seon.fn/spec` (string) that
@@ -275,12 +275,12 @@ reader-conditionals, and namespaced maps all pass through verbatim:
 
 ```clojure
 ;; extract-form-at-line(txt, (:line (meta #'seon.db/query)))
-;; => 442 chars, head "(defn query\n  \"Run a Datalog query...",
+⟹ 442 chars, head "(defn query\n  \"Run a Datalog query...",
 ;;    tail "...(apply d/q query db args)))", balanced? true   ✓
 
 ;; For the INSTRUMENTED, arglists-mangled transact!:
 ;; extract-form-at-line(txt, (:line (meta #'seon.db/transact!)))
-;; => 3748 chars, head "(defn ^:async transact!\n  \"Commit tx-data...",
+⟹ 3748 chars, head "(defn ^:async transact!\n  \"Commit tx-data...",
 ;;    balanced? true   ✓  -- the REAL arglists are inside this text
 ```
 

@@ -45,7 +45,7 @@ added):
 
 ```clojure
 (clojure.data/diff before after)
-;; =>
+⟹ 
 [[#:seon.message{:read? false}
   #:seon.message{:text "second", :id "m2"}
   #:seon.message{:text "third", :id "m3"}]
@@ -67,7 +67,7 @@ misreports every row after it. This is the failure the ruling anticipated.
 ```clojure
 (clojure.data/diff (update-vals (group-by :seon.message/id before) first)
                    (update-vals (group-by :seon.message/id after)  first))
-;; =>
+⟹ 
 ({"m1" #:seon.message{:read? false},                            ; changed: only the delta
   "m2" #:seon.message{:id "m2", :text "second", :read? false}}  ; removed: whole row
  {"m4" #:seon.message{:id "m4", :text "fourth", :read? false}   ; added: whole row
@@ -91,17 +91,17 @@ algebra on the triple:
   {:added   (set/difference (set (keys a)) (set (keys b)))
    :removed (set/difference (set (keys b)) (set (keys a)))
    :changed (set/intersection (set (keys a)) (set (keys b)))})
-;; => {:added #{"m4"}, :removed #{"m2"}, :changed #{"m1"}}
+⟹ {:added #{"m4"}, :removed #{"m2"}, :changed #{"m1"}}
 ```
 
 ### `clojure.set` on raw sets — insufficient
 
 ```clojure
 (set/difference (set before) (set after))
-;; => #{{:id "m2" :text "second" :read? false}    ; genuinely removed
+⟹ #{{:id "m2" :text "second" :read? false}    ; genuinely removed
 ;;      {:id "m1" :text "hello"  :read? false}}   ; a CHANGE, reported as removal
 (set/difference (set after) (set before))
-;; => #{{:id "m4" ...}                            ; genuinely added
+⟹ #{{:id "m4" ...}                            ; genuinely added
 ;;      {:id "m1" :text "hello" :read? true}}     ; the same change, as an addition
 ```
 
@@ -113,7 +113,7 @@ it keys by a SUBMAP and values are SETS, which defeats `data/diff` entirely:
 ```clojure
 (data/diff (set/index (set before) [:seon.message/id])
            (set/index (set after)  [:seon.message/id]))
-;; => (... ... nil)   ; third slot nil: no per-attribute delta survives
+⟹ (... ... nil)   ; third slot nil: no per-attribute delta survives
 ```
 
 So: `update-vals`+`group-by`, not `clojure.set/index`.
@@ -139,7 +139,7 @@ added, `m2` retracted after `basis-t`):
 
 ```clojure
 (d/q '[:find ?id :where [?e :seon.message/id ?id]] (d/since db basis-t))
-;; => (["m4"])
+⟹ (["m4"])
 ```
 
 **Only `m4`.** This is the decisive result. `since` is not a "what changed"
@@ -149,7 +149,7 @@ through identity loses it. `m2`'s retraction is invisible entirely:
 
 ```clojure
 (mapv (juxt :e :a :v :tx :added) (d/datoms (d/since db basis-t) :eavt))
-;; => [[536870917 :db/txInstant #inst"..." 536870917 true]
+⟹ [[536870917 :db/txInstant #inst"..." 536870917 true]
 ;;     [4 :seon.message/read? true  536870915 true]     ; m1's new value only
 ;;     [7 :seon.message/read? false 536870916 true]     ; m4
 ;;     [7 :seon.message/text "fourth" 536870916 true]
@@ -163,7 +163,7 @@ The datom level CAN be made to answer it, but only through full history:
 ```clojure
 (->> (d/datoms (d/history db) :eavt) (filter #(> (:tx %) basis-t))
      (mapv (juxt :e :a :v :tx :added)))
-;; => [[4 :seon.message/read? false 536870915 false]   ; m1 retract old
+⟹ [[4 :seon.message/read? false 536870915 false]   ; m1 retract old
 ;;     [4 :seon.message/read? true  536870915 true]    ; m1 assert new
 ;;     [5 :seon.message/id   "m2"   536870917 false]   ; m2 retracted
 ;;     [5 :seon.message/read? false 536870917 false]
@@ -224,7 +224,7 @@ written at `src/seon/program.cljc:516,554`; already consumed by the doc face at
                                            [?f :seon.fn/arities ?a]
                                            [?a :seon.fn.arity/output-refs ?r]
                                            [?r :seon.schema/key ?k]])}
-;; =>
+⟹ 
 {:input-refs  #{[:my.message/inbox-options] [:seon.db/database-value] [:seon.cluster.agent/id]},
  :output-refs #{[:my.message/inbox] [:seon.error/value]}}
 ```
@@ -259,10 +259,10 @@ registered keys):
 {:entity-kinds 37, :total 2231, :fraction 0.0166}
 
 (internal/derive-entity-id-attr schemas (:seon.cluster.message/message schemas))
-;; => :seon.cluster.message/id          ; the STORED entity: fine
+⟹ :seon.cluster.message/id          ; the STORED entity: fine
 
 (internal/derive-entity-id-attr schemas (:my.message/inbox-entry schemas))
-;; => nil                              ; the RENDERED ROW: no identity
+⟹ nil                              ; the RENDERED ROW: no identity
 ```
 
 **The canonical read surface named in the ruling has no derivable identity
@@ -280,7 +280,7 @@ declared as `:seon.cluster.message/id`:
 
 ```clojure
 (take 3 (iterate #(get schemas % %) :my.message/id))
-;; => (:my.message/id
+⟹ (:my.message/id
 ;;     :seon.cluster.message/id
 ;;     [:string {:min 1, :seon.db/identity true}])
 ```
@@ -308,10 +308,10 @@ All three ran against a live in-memory Datahike with a real read surface
 
 ```clojure
 (inbox (d/as-of db basis-t) "root")
-;; => [#:my.message{:id "m1", :preview "hello"}
+⟹ [#:my.message{:id "m1", :preview "hello"}
 ;;     #:my.message{:id "m2", :preview "second"}]
 (inbox db "root")
-;; => [#:my.message{:id "m1", :preview "hello, edited"}
+⟹ [#:my.message{:id "m1", :preview "hello, edited"}
 ;;     #:my.message{:id "m4", :preview "fourth"}]
 ```
 
@@ -319,7 +319,7 @@ All three ran against a live in-memory Datahike with a real read surface
 
 ```clojure
 (seon.db/diff basis-t #'my.message/inbox "root")
-;; => ({"m1" #:my.message{:preview "hello"},
+⟹ ({"m1" #:my.message{:preview "hello"},
 ;;      "m2" #:my.message{:id "m2", :preview "second"}}
 ;;     {"m4" #:my.message{:id "m4", :preview "fourth"},
 ;;      "m1" #:my.message{:preview "hello, edited"}}
@@ -335,7 +335,7 @@ same shape the identity-less fallback returns, so there is ONE return contract.
 
 ```clojure
 (seon.db/diff current-t #'my.message/inbox "root")   ; nothing changed
-;; => [nil nil {"m1" #:my.message{:id "m1", :preview "hello, edited"},
+⟹ [nil nil {"m1" #:my.message{:id "m1", :preview "hello, edited"},
 ;;              "m4" #:my.message{:id "m4", :preview "fourth"}}]
 ```
 
@@ -350,7 +350,7 @@ rendered context, every turn.
 
 ```clojure
 (seon.db/diff basis-t #'my.message/inbox "root")
-;; => {:seon.db.diff/added   [#:my.message{:id "m4", :preview "fourth"}],
+⟹ {:seon.db.diff/added   [#:my.message{:id "m4", :preview "fourth"}],
 ;;     :seon.db.diff/removed [#:my.message{:id "m2", :preview "second"}],
 ;;     :seon.db.diff/changed [#:seon.db.diff{:before #:my.message{:id "m1", :preview "hello"},
 ;;                                           :after  #:my.message{:id "m1", :preview "hello, edited"}}],
@@ -358,7 +358,7 @@ rendered context, every turn.
 ;;     :seon.db/current-basis-t 536870917}
 
 ;; nothing changed:
-;; => #:seon.db.diff{:added [], :removed [], :changed []}   + the two basis keys
+⟹ #:seon.db.diff{:added [], :removed [], :changed []}   + the two basis keys
 ```
 
 Signature (positional, matching `seon.db/as-of`'s own shape — see below):
@@ -389,7 +389,7 @@ fine and is one visible core call.
 ### C — return the pairing only, let the agent filter
 
 ```clojure
-;; => {"m1" [#:my.message{:id "m1" :preview "hello"} #:my.message{:id "m1" :preview "hello, edited"}]
+⟹ {"m1" [#:my.message{:id "m1" :preview "hello"} #:my.message{:id "m1" :preview "hello, edited"}]
 ;;     "m2" [#:my.message{:id "m2" :preview "second"} nil]
 ;;     "m4" [nil #:my.message{:id "m4" :preview "fourth"}]}
 ```

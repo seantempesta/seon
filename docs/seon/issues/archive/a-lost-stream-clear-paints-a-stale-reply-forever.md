@@ -50,7 +50,7 @@ REPL falsification of the drop:
   (a/offer! ch {:seon.cluster.agent/id "a"})                                  ; A's clear
   (a/offer! ch {:seon.cluster.agent/id "b" :seon.ai/partial {:seon.ai/text "hi"}})
   (a/poll! ch))
-;; => {:seon.cluster.agent/id "b", :seon.ai/partial #:seon.ai{:text "hi"}}
+⟹ {:seon.cluster.agent/id "b", :seon.ai/partial #:seon.ai{:text "hi"}}
 ;; A's clear is gone; nothing will ever remove A's ::streams entry.
 ```
 

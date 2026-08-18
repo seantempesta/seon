@@ -22,10 +22,10 @@ committing `:seon.test.run/id "dogfood-run-001"`:
 
 ```clojure
 (seon.db/q '[:find ?e :where [?e :seon.test.run/idd _]])
-;; => #{}
+⟹ #{}
 
 (seon.db/pull '[*] [:seon.test.run/id 'dogfood-run-001])
-;; => nil
+⟹ nil
 ```
 
 The installed declaration queried immediately beforehand states that

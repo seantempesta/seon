@@ -61,7 +61,7 @@ pending Promise exactly as `eval-form-entry!` does in its `pending?` branch:
 (e/bind-result-var! cs "tpend1" slow-p)
 
 ;; the stash holds a RAW Promise:
-;; => {:stashed-type #object[Promise], :is-promise true}
+⟹ {:stashed-type #object[Promise], :is-promise true}
 
 ;; BARE reference — result-var-ref? routes it through :expr; e/eval returns the
 ;; Promise (the full eval-once pipeline's maybe-await-value would then await it):

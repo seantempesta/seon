@@ -316,7 +316,7 @@ written so reading them teaches the three core moves:
 (seon.db/transact!
   [{:seon.db/ref [:seon.agent/id "kXQ-2606101814"]
     :seon.render.live-canvas/content 'seon.render.live-canvas/welcome}])
-;; => {:seon.db/ok? true}
+⟹ {:seon.db/ok? true}
 
 ;; Second: my todo view. A context section is just a query rendered
 ;; every turn — register it once, and the section appears whenever
@@ -324,7 +324,7 @@ written so reading them teaches the three core moves:
 (seon.agent/add-section!
   {:seon.ctx/id :open-todos
    :seon.ctx/render 'seon.agent.todo/open-todos-section})
-;; => {:seon.ctx/ok? true}
+⟹ {:seon.ctx/ok? true}
 
 ;; Third: what's already in the shared store? Other agents stored
 ;; knowledge here before me — checking BEFORE researching is how I
@@ -332,7 +332,7 @@ written so reading them teaches the three core moves:
 ;; in seon.db below — it's an ordinary query; I re-run it whenever I
 ;; need current numbers.)
 (seon.db/store-inventory)
-;; => [{:kind :my.kb.codebase  :id-attr :my.kb.codebase/question :rows 14}
+⟹ [{:kind :my.kb.codebase  :id-attr :my.kb.codebase/question :rows 14}
 ;;     {:kind :seon.workout    :id-attr :seon.workout/date       :rows 9}
 ;;     …]
 
@@ -340,7 +340,7 @@ written so reading them teaches the three core moves:
 ;; agents in this cluster. Anyone (my human, another agent, me) can
 ;; append a row; I re-read when I want the current set.
 (my.kb.system/instructions)
-;; => ["Always store provenance (:my.kb/source-path) with findings."
+⟹ ["Always store provenance (:my.kb/source-path) with findings."
 ;;     "Prefer editing an existing schema over registering a parallel one."]
 
 ;; Anything I store this way survives restarts; anything I only

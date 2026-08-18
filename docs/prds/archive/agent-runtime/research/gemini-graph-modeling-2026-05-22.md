@@ -929,7 +929,7 @@ The library is built around serving agents. The mental model is
 
 ```clojure
 (seon.agent/my)
-;; => {:seon.agent/id          "AbCdEfGh1234"
+⟹ {:seon.agent/id          "AbCdEfGh1234"
 ;;     :seon.agent/state       :idle
 ;;     :seon.agent/turn-count  7
 ;;     :seon.agent/current-ns  :seon.trading
@@ -1947,7 +1947,7 @@ fn — substrate AND agent-authored — flows through this seam, because
 ;; turn profiling on for the next render or for a specific form
 (seon.perf/with-profiling
   (assemble-ctx input))
-;; => {:value <result> :stats #tufte/PStats { … }}
+⟹ {:value <result> :stats #tufte/PStats { … }}
 
 ;; or globally for a window of time
 (seon.perf/set-enabled! true)
@@ -2036,7 +2036,7 @@ agent can pull the section entity to find out which function ran:
 
 ```clojure
 (seon.db/pull-by-name {:seon.ctx/name :recent-evals})
-;; => {:seon.ctx/name :recent-evals
+⟹ {:seon.ctx/name :recent-evals
 ;;     :seon.ctx/priority 50
 ;;     :seon.ctx/fn 'seon.render.default/recent-evals-section}
 

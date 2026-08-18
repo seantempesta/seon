@@ -77,7 +77,7 @@ still exercised the old Var:
 
 ```clojure
 (seon.config/effective (seon.db/db) "dogfood-missing-cluster")
-;; => {}
+⟹ {}
 ```
 
 The naked empty map is exactly the old misleading face: it neither says the

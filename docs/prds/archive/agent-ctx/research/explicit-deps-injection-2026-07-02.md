@@ -126,7 +126,7 @@ L403-417) is untouched.
       info (m/-function-info s)                 ; {:min :max :input :output}
       arg0 (first (m/children (:input info)))]  ; the request-schema ref/inline
   (mapv first (m/entries (m/deref arg0))))      ; the declared map keys
-;; => [:seon.db/db :seon.agent/id :my.foo/x]   ; refs AND inline :map both work
+⟹ [:seon.db/db :seon.agent/id :my.foo/x]   ; refs AND inline :map both work
 ```
 
 `m/deref` resolves a registered ref (`::foo-request` → its `:map`) and passes

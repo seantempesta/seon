@@ -185,7 +185,7 @@ belongs in `my.skills` and returns errors as data:
 (compile-source
   {:my.skills/source source
    :my.skills/expected-name expected-name})
-;; => {:my.skills/fact
+⟹ {:my.skills/fact
 ;;     {:my.skills/name :datahike
 ;;      :my.skills/description "..."
 ;;      :my.skills/source source}}

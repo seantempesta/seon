@@ -61,7 +61,7 @@ drive's only real token waste.
     {:seon.agent/purpose "…3-city trip; record best-month/currency/daily-budget
                           as schema'd data w/ provenance; plan it as todos;
                           compute total; recall in a later message…"})))
-;; => AAt-2606282036
+⟹ AAt-2606282036
 
 ;; 2. arm (the #30 gap — a minted agent isn't woken by a message until this runs)
 (seon.client/rearm-wake-triggers!)

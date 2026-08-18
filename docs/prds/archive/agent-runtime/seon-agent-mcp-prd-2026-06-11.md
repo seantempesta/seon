@@ -106,10 +106,10 @@ either way, so the choice is revisable inside unit 1.
 
 (seon.agent.mcp/configure!  {:seon.agent.mcp/servers [...]
                              :seon.agent.mcp/allowed-servers #{"spotify"}})
-;; => the new config map (fs/configure! contract)
+⟹ the new config map (fs/configure! contract)
 
 (await (seon.agent.mcp/import! {}))            ;; optional :seon.agent.mcp/path
-;; => {:seon.agent.mcp/ok? true
+⟹ {:seon.agent.mcp/ok? true
 ;;     :seon.agent.mcp/discovered
 ;;     [{:seon.agent.mcp/server "spotify"
 ;;       :seon.agent.mcp/transport :stdio
@@ -118,14 +118,14 @@ either way, so the choice is revisable inside unit 1.
 ;; populates defs; NOTHING is callable until allowed-servers names it.
 
 (seon.agent.mcp/list-servers {})
-;; => {:seon.agent.mcp/ok? true
+⟹ {:seon.agent.mcp/ok? true
 ;;     :seon.agent.mcp/servers
 ;;     [{:seon.agent.mcp/server "spotify"
 ;;       :seon.agent.mcp/allowed? true
 ;;       :seon.agent.mcp/status :running | :stopped | :failed} ...]}
 
 (await (seon.agent.mcp/list-tools {:seon.agent.mcp/server "spotify"}))
-;; => {:seon.agent.mcp/ok? true
+⟹ {:seon.agent.mcp/ok? true
 ;;     :seon.agent.mcp/tools
 ;;     [{:seon.agent.mcp/tool "playPause"
 ;;       :seon.agent.mcp/description "..."
@@ -138,7 +138,7 @@ either way, so the choice is revisable inside unit 1.
           :seon.agent.mcp/arguments {}          ;; tool's own schema — the
                                                 ;; ONE deliberately open map
           :seon.agent.mcp/timeout-ms 30000}))   ;; optional, default below
-;; => {:seon.agent.mcp/ok? true
+⟹ {:seon.agent.mcp/ok? true
 ;;     :seon.agent.mcp/content [{:seon.agent.mcp/type :text
 ;;                               :seon.agent.mcp/text "..."} ...]
 ;;     :seon.agent.mcp/is-error? false}        ;; MCP-level tool error ≠

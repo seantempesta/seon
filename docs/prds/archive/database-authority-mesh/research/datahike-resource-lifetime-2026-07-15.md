@@ -387,7 +387,7 @@ requiring callers to inspect `*connections*`:
 
 ```clojure
 (d/connection-status config)
-;; => {:datahike.connection/state :active
+⟹ {:datahike.connection/state :active
 ;;     :datahike.connection/reference-count 3
 ;;     :datahike.connection/branch :db
 ;;     :datahike.connection/physical-store-key ...}
@@ -405,7 +405,7 @@ were retained or closed and summarize cleanup errors:
 
 ```clojure
 (d/release conn)
-;; => {:datahike.connection/release :retained
+⟹ {:datahike.connection/release :retained
 ;;     :datahike.connection/reference-count 2}
 ```
 
@@ -440,10 +440,10 @@ cascade release:
 ```clojure
 (d/retain-db {:datahike.db/value db
               :datahike.db/owner session-key})
-;; => {:datahike.db/id opaque-id}
+⟹ {:datahike.db/id opaque-id}
 
 (d/release-dbs {:datahike.db/owner session-key})
-;; => {:datahike.db/released-count n}
+⟹ {:datahike.db/released-count n}
 ```
 
 The handle ID must remain process-local. Datahike can own retention, lookup,

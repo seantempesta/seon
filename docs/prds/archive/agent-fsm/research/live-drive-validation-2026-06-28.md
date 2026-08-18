@@ -110,24 +110,24 @@ verbatim, all real DeepSeek output against the live store):
 ```clojure
 ;; after done! Research + done! Build-data-query:
 (seon.agent.todo/next {})
-;; => [{:id "ZBU-2606280012" :title "Design the tile layout" …}]
+⟹ [{:id "ZBU-2606280012" :title "Design the tile layout" …}]
 ;;    Wire is NOT offered — still blocked on Design.
 
 ;; after done! Design:
 (seon.agent.todo/next {})
-;; => [{:id "uAU-2606280012" :title "Wire the tile" …}]
+⟹ [{:id "uAU-2606280012" :title "Wire the tile" …}]
 ;;    Wire now ready (both deps satisfied).
 
 ;; after done! Wire:
 (seon.agent.todo/next {})
-;; => []      ; all done — empty queue is the done-signal
+⟹ []      ; all done — empty queue is the done-signal
 ```
 
 Then the agent sent an accurate summary to its human and halted:
 
 ```clojure
 (complete "done — dashboard project executed with dependency ordering, all closed")
-;; => :idle      ; FSM run closed cleanly (log: "halt verb — complete")
+⟹ :idle      ; FSM run closed cleanly (log: "halt verb — complete")
 ```
 
 So `plan!` / `next` / `done!` / `tree` / `list-open` / `complete` all work
@@ -157,7 +157,7 @@ the agent ACTUALLY experienced before it succeeded. The full eval arc
    *operation* failed):
    ```clojure
    (seon.agent.todo/done! {:seon.agent.todo/id "1uC-2606280011"})
-   ;; => {:seon.agent.todo/ok? false
+   ⟹ {:seon.agent.todo/ok? false
    ;;     :seon.agent.todo/error "done!: no todo \"1uC-2606280011\" —
    ;;        (seon.agent.todo/list-open {}) shows the open ids."}
    ```

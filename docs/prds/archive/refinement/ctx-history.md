@@ -90,7 +90,7 @@ Decision: Build our own delta history layer on top of Datalevin's simple key-val
 ```clojure
 (require '[seon.ctx.history :as h])
 (h/map-diff {::h/before {:a 1 :b 2} ::h/after {:a 1 :b 3 :c 4}})
-;; => {::h/added {:b 3 :c 4} ::h/retracted {:b 2}}
+⟹ {::h/added {:b 3 :c 4} ::h/retracted {:b 2}}
 
 ```
 
@@ -120,7 +120,7 @@ Decision: Build our own delta history layer on top of Datalevin's simple key-val
 
 ```clojure
 (create-history!  {::instance-id "abc" ::base-state {:a 1}})
-;; => atom holding {::base ... ::deltas [] ::cursor 0}
+⟹ atom holding {::base ... ::deltas [] ::cursor 0}
 
 (record-delta!    {::instance-id "abc" ::delta {...}})
 ;; Appends delta, advances cursor, truncates future if mid-history
@@ -132,7 +132,7 @@ Decision: Build our own delta history layer on top of Datalevin's simple key-val
 ;; Moves cursor forward, returns delta to apply to ctx
 
 (history-info     {::instance-id "abc"})
-;; => {::cursor 3 ::total 5 ::can-undo true ::can-redo true}
+⟹ {::cursor 3 ::total 5 ::can-undo true ::can-redo true}
 
 ```
 
@@ -195,7 +195,7 @@ Each delta becomes one entity: `entry-id = "{instance-id}-{seq}"`.
 (persist-delta!   {::conn conn ::instance-id "abc" ::seq 3 ::delta {...}})
 (persist-base!    {::conn conn ::instance-id "abc" ::base-state {...}})
 (load-history!    {::conn conn ::instance-id "abc"})
-;; => {::base-state {...} ::deltas [...] ::cursor N}
+⟹ {::base-state {...} ::deltas [...] ::cursor N}
 (compact-history! {::conn conn ::instance-id "abc"})
 ;; Compacts oldest deltas into new base checkpoint
 
@@ -213,7 +213,7 @@ Each delta becomes one entity: `entry-id = "{instance-id}-{seq}"`.
 ;; Make changes, restart server
 ;; History should survive:
 (ctx.history/history-info {::ctx/instance-id "test"})
-;; => {::cursor 3 ::total 3 ::can-undo true ::can-redo false}
+⟹ {::cursor 3 ::total 3 ::can-undo true ::can-redo false}
 
 ```
 

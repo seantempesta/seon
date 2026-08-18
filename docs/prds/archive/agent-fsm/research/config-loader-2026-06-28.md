@@ -163,7 +163,7 @@ deliberately decoupled from context blocks. It is NOT a datom and NOT a block.
 ;; PROOF 1 — routes are datoms with late-resolved symbol handlers:
 (seon.db/query '[:find ?name ?h :where
                  [?e :seon.route/name ?name][?e :seon.route/handler ?h]] db)
-;; => [:seon.route/root  seon.web.serve/serve-root!]
+⟹ [:seon.route/root  seon.web.serve/serve-root!]
 ;;    [:seon.route/agent seon.web.datastar/serve-agent-page!] … etc.
 ;;    *** ALSO still present: :seon.route/world + :seon.route/world-feed ***
 ```
@@ -176,7 +176,7 @@ the loader's `:replace` strategy must close (risk R1 below).
 ```clojure
 ;; PROOF 2 — the root agent's seeded blocks ARE plain maps (name/priority/slot):
 (seon.agent.ctx/ctx-entities {:seon.agent/id "root"})
-;; => [:soul 5 [:file "SOUL.md"]]              ; file-block stores the PATH
+⟹ [:soul 5 [:file "SOUL.md"]]              ; file-block stores the PATH
 ;;    [:shared-instructions 10 [:sym my.kb.shared/instructions-block]]
 ;;    [:namespaces 20 [:sym …/namespaces-block]] … [:transcript 100 …]
 
@@ -185,7 +185,7 @@ the loader's `:replace` strategy must close (risk R1 below).
 (cljs.reader/read-string
   (pr-str {:seon.agent.ctx/name :doctrine :seon.agent.ctx/priority 15
            :seon.render/ai 'seon.agent.ctx.namespaces/namespaces-block}))
-;; => {:seon.agent.ctx/name :doctrine, :seon.agent.ctx/priority 15,
+⟹ {:seon.agent.ctx/name :doctrine, :seon.agent.ctx/priority 15,
 ;;     :seon.render/ai seon.agent.ctx.namespaces/namespaces-block}
 ```
 

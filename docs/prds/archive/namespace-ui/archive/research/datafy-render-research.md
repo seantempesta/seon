@@ -39,7 +39,7 @@ Both `Datafiable` and `Navigable` protocols have `:extend-via-metadata true`, me
                   :keys (keys this)})}))
 
 (d/datafy custom-map)
-;; => {:summary "Map with 2 keys", :keys (:raw-data :count)}
+⟹ {:summary "Map with 2 keys", :keys (:raw-data :count)}
 
 ```
 
@@ -58,7 +58,7 @@ When `nav` returns a value with metadata, that metadata controls subsequent data
 
 (let [ticker (d/nav position :ticker "AAPL")]
   (d/datafy ticker))
-;; => {:symbol "AAPL", :name "Apple Inc.", :enriched? true}
+⟹ {:symbol "AAPL", :name "Apple Inc.", :enriched? true}
 
 ```
 
@@ -83,7 +83,7 @@ We can attach Malli schemas to values via metadata, then extract render hints fr
 (let [schema (:malli/schema (meta pos))
       props (m/properties schema)]
   (:seon.ui/render props))
-;; => :position
+⟹ :position
 
 ```
 
@@ -295,7 +295,7 @@ Malli's `mu/merge` preserves and can override properties:
              [:pnl :double]]))
 
 (m/properties AnalyzedPosition)
-;; => {:seon.ui/render :analyzed-position}
+⟹ {:seon.ui/render :analyzed-position}
 
 ```
 

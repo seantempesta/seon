@@ -85,7 +85,7 @@ Live proof (7890):
 
 ```clojure
 (md/md->hiccup "## Hi\n\n- a\n- b\n\n**bold** and `code`")
-;; => [:div {:class "text-xs"}
+⟹ [:div {:class "text-xs"}
 ;;     [:h2 {:class "text-sm font-bold text-signal …"} "Hi"]
 ;;     [:ul {:class "list-disc pl-5 my-1 …"} [:li … "a"] [:li … "b"]]
 ;;     [:p … [:strong … "bold"] " and " [:code … "code"]]]

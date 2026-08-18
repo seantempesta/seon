@@ -40,7 +40,7 @@ One form through the production entry point:
   (try {:acquired (seon.sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db db})}
        (catch Throwable t {:threw (ex-message t)
                            :data (select-keys (ex-data t) [:seon.error/kind])})))
-;; => {:threw "seon.schema.internal/assert-compilable-schema! violated its
+⟹ {:threw "seon.schema.internal/assert-compilable-schema! violated its
 ;;             contract (invalid-input): [nil nil [\"must be a parseable,
 ;;             EDN-readable Malli form\"]]",
 ;;     :data #:seon.error{:kind :seon.instrument/contract-violated}}

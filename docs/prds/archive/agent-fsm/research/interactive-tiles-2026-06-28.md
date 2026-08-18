@@ -81,14 +81,14 @@ single-quoted `@post('…')` string.
 (require '[seon.web.reactive.transform :as xf])
 (xf/transform-hiccup 'my.agent.demo
   [:button {:on-click (list 'inc-counter! "x-1")} "+1"])
-;; => [:button {:data-on:click
+⟹ [:button {:data-on:click
 ;;     "@post('/agent/demo/call?fn=my.agent.demo%2Finc-counter!&args=%5B%22x-1%22%5D')"} "+1"]
 
 (xf/transform-hiccup 'my.agent.demo
   [:form {:on-submit 'save-note!}
    [:input {:data-bind "note" :placeholder "note..."}]
    [:button {:type "submit"} "Save"]])
-;; => [:form {:data-on:submit "@post('/agent/demo/call?fn=my.agent.demo%2Fsave-note!')"}
+⟹ [:form {:data-on:submit "@post('/agent/demo/call?fn=my.agent.demo%2Fsave-note!')"}
 ;;     [:input {:data-bind "note", :placeholder "note..."}]   ;; data-bind PASSES THROUGH
 ;;     [:button {:type "submit"} "Save"]]
 ```
@@ -132,9 +132,9 @@ just an eval authored as hiccup and routed by its namespace" (`call.cljs:2-12`).
 ```clojure
 (require '[seon.web.reactive.call :as call] '[seon.db :as db])
 (call/capability-check @db/*conn* 'fs/readFileSync)
-;; => {::refused "no agent owns the namespace of `fs/readFileSync` …"}
+⟹ {::refused "no agent owns the namespace of `fs/readFileSync` …"}
 (call/capability-check @db/*conn* 'my.agent.root/bogus-fn)
-;; => {::refused "`my.agent.root/bogus-fn` is not a granted :seon.fn of agent root …"}
+⟹ {::refused "`my.agent.root/bogus-fn` is not a granted :seon.fn of agent root …"}
 ```
 
 (The positive granted path is the exact query inversion of `granted-fn?` — it

@@ -54,13 +54,13 @@ Selection proof, on a value the model never saw, through the shipped seams:
                              :seon.render/value {:turns 3 :prompt-total 36000
                                                  :completion-total 8300 :ratio 0.23}
                              :seon.render/output-schema :seon.render/ai})
-;; => ["my.agents.root/token-pressure-line"]   (of three public fns in the ns)
+⟹ ["my.agents.root/token-pressure-line"]   (of three public fns in the ns)
 
 (seon.render/render-call {… :seon.render/output :seon.render/ai
                             :seon.render/namespace 'my.agents.root
                             :seon.render/value {:turns 9 :prompt-total 120000
                                                 :completion-total 15000 :ratio 0.125}})
-;; => "Across 9 turns, prompt tokens totaled 120000, completion tokens totaled
+⟹ "Across 9 turns, prompt tokens totaled 120000, completion tokens totaled
 ;;     15000, and the completion/prompt ratio was 0.125."
 ```
 

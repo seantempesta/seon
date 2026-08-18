@@ -467,7 +467,7 @@ Flow handles **when** to trigger re-renders; `after-ns-reload` handles **what** 
 ```clojure
 ;; From REPL or Observatory
 (seon.web.sse.flow/ping)
-;; => {:aggregator {:seon.sse.flow/status :running
+⟹ {:aggregator {:seon.sse.flow/status :running
 ;;                  :seon.sse.flow/state {:pending-namespaces #{}
 ;;                                        :last-change-ms 1706621234567}}
 ;;     :registry {:seon.sse.flow/status :running
@@ -477,7 +477,7 @@ Flow handles **when** to trigger re-renders; `after-ns-reload` handles **what** 
 ;;                   :seon.sse.flow/state {:last-broadcast-ms 1706621234500}}}
 
 (seon.web.sse.flow/connected-clients)
-;; => {:seon.sse.flow/state {:clients {...}}
+⟹ {:seon.sse.flow/state {:clients {...}}
 ;;     :seon.sse.flow/count 3}
 
 ```

@@ -40,7 +40,7 @@ into a running `:node-script` runtime).
 ```clojure
 ;; vars-in-ns lookup works after restart
 (some? (js/goog.getObjectByName "seon.test.async_fixture_test"))
-;; => true
+⟹ true
 
 ;; the live driver test passes
 (seon.test.runner/run-ns! {:seon.test.runner/ns 'seon.test.async-fixture-test
@@ -78,11 +78,11 @@ warning consumers that the value is a CLJS Symbol, not a JS object —
 ```clojure
 (seon.test.runner/run-ns! {:seon.test.runner/ns 'seon.test.runner-test
                             :seon.test.runner/record? false})
-;; => {:type :summary, :test 7, :pass 26, :fail 0, :error 0}
+⟹ {:type :summary, :test 7, :pass 26, :fail 0, :error 0}
 
 (seon.test.runner/run-ns! {:seon.test.runner/ns 'seon.test.fixture-support-test
                             :seon.test.runner/record? false})
-;; => {:type :summary, :test 1, :pass 4, :fail 0, :error 0}
+⟹ {:type :summary, :test 1, :pass 4, :fail 0, :error 0}
 
 ```
 

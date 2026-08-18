@@ -130,7 +130,7 @@ This makes REPL introspection natural:
 
 ```clojure
 (:url (:seon.web/caddy @integrant.repl.state/system))
-;; => "https://localhost:3030"
+⟹ "https://localhost:3030"
 
 ```
 

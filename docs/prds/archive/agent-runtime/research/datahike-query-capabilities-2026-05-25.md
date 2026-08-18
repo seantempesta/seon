@@ -101,7 +101,7 @@ This is **only useful for transitive walks along a single ref attr**, not joins.
 
 ```clojure
 (d/pull @conn '[:seon.ns/name {:seon.ns/requires ...}] [:seon.ns/name :seon.agent.loop])
-;; => {:seon.ns/name :seon.agent.loop
+⟹ {:seon.ns/name :seon.agent.loop
 ;;     :seon.ns/requires [{:seon.ns/name :seon.db
 ;;                         :seon.ns/requires [...]}
 ;;                        ...]}

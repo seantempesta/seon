@@ -58,7 +58,7 @@ LIVE-PROVEN on the running pod (2026-06-28, pod booted 16:23):
 (let [cs   @seon.repl/!compile-state
       home (seon.agent.ctx/home-ns "root")]
   (get-in @cs [:cljs.analyzer/namespaces home]))
-;; => nil   ;; my.agent.root has NO analyzer ns entry at all
+⟹ nil   ;; my.agent.root has NO analyzer ns entry at all
 ```
 
 So in every live `root` turn, `(message/user …)` / `(wait …)` / `(complete …)`
@@ -180,10 +180,10 @@ refer form and a defn into the home ns:
 ;; normal ns refer — NO prime, NO probe
 (eval cs "(ns my.probe.y (:require [seon.agent.lifecycle :refer [wait complete]]
                                     [seon.agent.message :as message]))" …)
-;; => :ok true   (clean — no error, no warning)
+⟹ :ok true   (clean — no error, no warning)
 
 (eval cs "(defn greet [] (complete))" {:ns 'my.probe.y})
-;; => :ok true   (the clean ns emit PROVIDED the runtime object;
+⟹ :ok true   (the clean ns emit PROVIDED the runtime object;
 ;;                the defn wrote into a real object, not undefined)
 ```
 
@@ -373,7 +373,7 @@ else is prose. The pipeline:
 ;;          (this is the EXACT owner-observed failure)
 
 (parse-forms "(defmacro m [x] `(inc ~x))")
-;; => ONE {:kind :form}   ;; legit syntax-quote INSIDE a (…) form is UNTOUCHED
+⟹ ONE {:kind :form}   ;; legit syntax-quote INSIDE a (…) form is UNTOUCHED
 ```
 
 Diagnosis: both hard-fail because their reader message

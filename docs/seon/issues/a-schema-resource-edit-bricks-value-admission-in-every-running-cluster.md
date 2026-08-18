@@ -51,7 +51,7 @@ Tool-exercise lane, 2026-08-07, isolated operator root
    (pr-str {:has-step-var? (seon.schema/core-predicate-registered?
                             'seon.flow/step-var?)
             :flow-loaded? (some? (find-ns 'seon.flow))})
-   ;; => "{:has-step-var? false, :flow-loaded? true}"
+   ⟹ "{:has-step-var? false, :flow-loaded? true}"
    ```
 
    `seon.flow` was loaded and `seon.flow/graph?` WAS registered — only the

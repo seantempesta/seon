@@ -121,16 +121,16 @@ via attr". Source: `impl/entity.cljc:30-39` (`-lookup-backwards`) and
 ```clojure
 ;; pull_api_test.cljc:80
 (d/pull test-db '[:name :_child] 2)
-;; => {:name "David" :_child [{:db/id 1}]}
+⟹ {:name "David" :_child [{:db/id 1}]}
 
 ;; with subpattern — pull_api_test.cljc:84
 (d/pull test-db '[:name {:_child [:name]}] 2)
-;; => {:name "David" :_child [{:name "Petr"}]}
+⟹ {:name "David" :_child [{:name "Petr"}]}
 
 ;; cardinality-many forward implies reverse returns a vector
 ;; pull_api_test.cljc:90
 (d/pull test-db '[:name :_father] 1)
-;; => {:name "Petr" :_father [{:db/id 2} {:db/id 3}]}
+⟹ {:name "Petr" :_father [{:db/id 2} {:db/id 3}]}
 
 ```
 
@@ -142,7 +142,7 @@ single map, not a vector:
 ```clojure
 ;; pull_api_test.cljc:135 — :_part returns ONE map (because :part is component)
 (d/pull test-db [:name :_part] 11)
-;; => {:name "Part A.A" :_part {:db/id 10}}
+⟹ {:name "Part A.A" :_part {:db/id 10}}
 
 ```
 
@@ -153,7 +153,7 @@ are auto-detected and yield `{:db/id N}` placeholders (`pull_api.cljc:55-65`
 ```clojure
 ;; pull_api_test.cljc:275
 (d/pull db '[:db/id :name {:friend ...}] 4)
-;; => entire chain Lucy → Elizabeth → Matthew → Eunan → Kerri
+⟹ entire chain Lucy → Elizabeth → Matthew → Eunan → Kerri
 
 ;; pull_api_test.cljc:278
 (d/pull db '[:db/id :name {:friend 2 :enemy 2}] 4)
@@ -174,11 +174,11 @@ as `{:db/id N}` and `:db/id` automatically included
 ```clojure
 ;; pull_api_test.cljc:144
 (d/pull test-db '[*] 1)
-;; => {:db/id 1 :name "Petr" :aka ["Devil" "Tupen"] :child [{:db/id 2} {:db/id 3}]}
+⟹ {:db/id 1 :name "Petr" :aka ["Devil" "Tupen"] :child [{:db/id 2} {:db/id 3}]}
 
 ;; combine wildcard + reverse — pull_api_test.cljc:149
 (d/pull test-db '[* :_child] 2)
-;; => {:db/id 2 :name "David" :_child [{:db/id 1}] :father {:db/id 1}}
+⟹ {:db/id 2 :name "David" :_child [{:db/id 1}] :father {:db/id 1}}
 
 ```
 
@@ -490,14 +490,14 @@ the tx. So pulling the tx entity returns the eval-entity map:
 ```clojure
 ;; after a transact with :tx-meta {:seon.eval/id "K9p..." :seon.eval/agent ref}
 (d/pull db '[*] tx-id)
-;; => {:db/id 536870915
+⟹ {:db/id 536870915
 ;;     :db/txInstant #inst "..."
 ;;     :seon.eval/id "K9p..."
 ;;     :seon.eval/agent {:db/id 5}}
 
 ;; or by the unique :seon.eval/id
 (d/pull db '[*] [:seon.eval/id "K9p..."])
-;; => same map; the eval IS the tx
+⟹ same map; the eval IS the tx
 
 ```
 
@@ -508,7 +508,7 @@ To get the datoms written by that tx, query history with the 5-tuple:
        :in $ ?tx
        :where [?e ?a ?v ?tx ?op]]
      (d/history db) tx-id)
-;; => the assertions and retractions made by that one eval
+⟹ the assertions and retractions made by that one eval
 
 ```
 

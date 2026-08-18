@@ -151,7 +151,7 @@ the declaration and not the registration:
 (pr-str {:has-step-var? (seon.schema/core-predicate-registered?
                          'seon.flow/step-var?)
          :flow-loaded? (some? (find-ns 'seon.flow))})
-;; => "{:has-step-var? false, :flow-loaded? true}"
+⟹ "{:has-step-var? false, :flow-loaded? true}"
 ```
 
 From that moment every `eval_clj` in that cluster failed — including calls

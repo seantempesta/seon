@@ -416,14 +416,14 @@ An agent with REPL access should be able to:
 (defn components
   "List all components with their status."
   []
-  ;; => [{:key :seon.db.datalevin/server :status :running :config {:port 8898 ...}}
+  ⟹ [{:key :seon.db.datalevin/server :status :running :config {:port 8898 ...}}
   ;;      {:key :seon.web/server :status :running :config {:port 8080}}
   ;;      ...]
 
 (defn component
   "Get detailed info about a single component."
   [key]
-  ;; => {:key :seon.db.datalevin/server
+  ⟹ {:key :seon.db.datalevin/server
   ;;     :status :running
   ;;     :config {:port 8898 :root "data/datalevin"}
   ;;     :config-schema [:map [:port [:int ...]] ...]

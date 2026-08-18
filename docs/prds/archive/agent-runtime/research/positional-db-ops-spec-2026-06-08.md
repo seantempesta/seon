@@ -60,7 +60,7 @@ full Malli enforcement with named-slot errors.
 ```clojure
 (def S [:catn [:db [:fn map?]] [:query [:vector :any]]])
 (m/explain S [[:not-a-map] [:find ?e]])
-;; => {:errors ({:path [:db], :in [0], :schema [:fn map?], :value [:not-a-map]})}
+⟹ {:errors ({:path [:db], :in [0], :schema [:fn map?], :value [:not-a-map]})}
 
 ```
 

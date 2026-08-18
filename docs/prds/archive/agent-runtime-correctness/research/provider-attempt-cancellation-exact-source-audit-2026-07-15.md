@@ -94,7 +94,7 @@ ClojureScript dependency was then run through `cljs.main` on Node:
     (fn [] (swap! events conj [(.-aborted s) (.-reason s)])))
   (.abort c "cljs-attempt-timeout")
   {:events @events :aborted? (.-aborted s) :reason (.-reason s)})
-;; => {:events [[true "cljs-attempt-timeout"]],
+⟹ {:events [[true "cljs-attempt-timeout"]],
 ;;     :aborted? true,
 ;;     :reason "cljs-attempt-timeout"}
 ```

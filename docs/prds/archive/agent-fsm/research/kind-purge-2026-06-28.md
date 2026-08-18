@@ -41,13 +41,13 @@ the examples the purged code/docs/skill now carry verbatim.
 ```clojure
 ;; (1) FIND by attribute-presence — scan the attr's index (AEVT)
 (seon.db/query {:seon.db/query '[:find ?e :where [?e :seon.agent/id]]})
-;; => #{[1920] [1919] [1660] [1638] [1918]}
+⟹ #{[1920] [1919] [1660] [1638] [1918]}
 
 ;; (2) IDENTIFY one by its :db.unique/identity attr (also how transact upserts)
 (seon.db/query {:seon.db/query '[:find ?id . :in $ ?e
                                  :where [?e :seon.agent/id ?id]]
                 :seon.db/inputs [1918]})
-;; => "root"
+⟹ "root"
 
 ;; (3) ENUMERATE stored data BY ID-ATTR PRESENCE — group entities by which
 ;;     :db.unique/identity attr they carry (the inventory's real job).
@@ -61,7 +61,7 @@ the examples the purged code/docs/skill now carry verbatim.
                                               :seon.db/query [:find '?e :where ['?e a]]}))]
                  (when (pos? n) [a n]))))
        (sort-by (comp - second))))
-;; => ([:seon.schema/key 635] [:seon.fn/sym 614] [:seon.eval/id 317]
+⟹ ([:seon.schema/key 635] [:seon.fn/sym 614] [:seon.eval/id 317]
 ;;     [:seon.test/sym 217] [:seon.ns/name 119] [:seon.agent.turn/id 51]
 ;;     [:seon.agent.todo/id 32] [:seon.agent.message/id 21]
 ;;     [:my.kb.runtime/slug 7] [:seon.agent.run/id 7] [:seon.agent/id 5]
@@ -70,7 +70,7 @@ the examples the purged code/docs/skill now carry verbatim.
 
 ;; (3b) the same idea, namespace-grouped, as the API surfaces it
 (seon.db/store-inventory)
-;; => {:seon.db/attr-groups   [{:seon.db/attr-ns :my.kb.runtime
+⟹ {:seon.db/attr-groups   [{:seon.db/attr-ns :my.kb.runtime
 ;;                              :seon.db/attrs {:my.kb.runtime/slug 7 …}} …]
 ;;     :seon.db/attr-ns-count 13 :seon.db/attr-count … :seon.db/datom-count …}
 

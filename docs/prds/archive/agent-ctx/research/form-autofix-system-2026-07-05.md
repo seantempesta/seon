@@ -77,19 +77,19 @@ extra key against the missing/optional key set. Key-set extraction is cheap:
 (map first (m/entries req))            ;; => (:seon.foo/id :seon.foo/option)
 ;; required vs optional:
 (into {} (map (fn [[k props _]] [k (boolean (:optional props))]) (m/children req)))
-;; => #:seon.foo{:id false, :option true}
+⟹ #:seon.foo{:id false, :option true}
 ```
 
 ### 2. Malli: arity from `:=>`/`:catn` via `m/-function-info`
 
 ```clojure
 (m/-function-info (m/schema [:=> [:cat :string :int] :boolean]))
-;; => {:min 2, :arity 2, :input [:cat :string :int], :output :boolean, :max 2}
+⟹ {:min 2, :arity 2, :input [:cat :string :int], :output :boolean, :max 2}
 (map m/-function-info (m/children (m/schema [:function [:=> [:cat :string] :boolean]
                                              [:=> [:cat :string :int] :boolean]])))
-;; => ({:min 1 :arity 1 …} {:min 2 :arity 2 …})
+⟹ ({:min 1 :arity 1 …} {:min 2 :arity 2 …})
 (m/-function-info (m/schema [:=> [:cat :string [:* :int]] :boolean]))
-;; => {:min 1, :arity :varargs, :input …}     ← varargs handled
+⟹ {:min 1, :arity :varargs, :input …}     ← varargs handled
 ```
 
 Candidate-call arity check: `(dec (count call-form))` ∈ each arity's

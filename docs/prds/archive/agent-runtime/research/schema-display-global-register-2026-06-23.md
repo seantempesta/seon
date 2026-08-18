@@ -670,12 +670,12 @@ It is critical to distinguish between the declaration of a schema and its runtim
 
 ;; Extract form back from compiled object
 (m/form compiled-schema)
-;; => [:string {:min 14 :max 14}]
+⟹ [:string {:min 14 :max 14}]
 
 ;; Dereferencing keyword references
 (def ref-schema (m/schema :seon.db/id))
 (m/deref ref-schema)
-;; => [:string {:min 14 :max 14}]
+⟹ [:string {:min 14 :max 14}]
 ```
 
 ---

@@ -33,7 +33,7 @@ Observed 2026-07-31, cluster `visual-qa`, agent `flowkeeper` assigned to
 (count (seon.render.ns/render-ai {:seon.db/db db :db/id 944
                                   :seon.ns/name 'seon.flow
                                   :seon.render/distance 1}))
-;; => 1883   (the ns form + referenced schemas; zero functions)
+⟹ 1883   (the ns form + referenced schemas; zero functions)
 ```
 
 `rg '^; fn seon\.flow/' tmp/visual-qa/ai-flowkeeper.txt` → no matches, in a

@@ -20,13 +20,13 @@ Scratch cluster `codex-repl-dogfood-0804`, MCP `eval_clj`, `door` mode:
 
 ```clojure
 (seon.db/q {:args []})
-;; => Cannot parse :find ... :fragment nil
+⟹ Cannot parse :find ... :fragment nil
 
 (seon.db/pull {:eid [:seon.test.run/id "dogfood-run-001"]})
-;; => Cannot parse pull pattern ... :operation :datahike.pull/result
+⟹ Cannot parse pull pattern ... :operation :datahike.pull/result
 
 (seon.db/transact! {:not-tx-data []})
-;; => seon.schema.datahike/encode-transaction violated its contract ...
+⟹ seon.schema.datahike/encode-transaction violated its contract ...
 ```
 
 The transaction face serializes the bad value twice inside

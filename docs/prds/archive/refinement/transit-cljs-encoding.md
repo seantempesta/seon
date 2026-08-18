@@ -162,7 +162,7 @@ UUIDs perfectly.
 (ns seon.browser (:require [cognitect.transit :as t]))
 (def w (t/writer :json))
 (t/write w {:seon.health/exercise "Pull-up" :tags #{:strength}})
-;; => transit JSON string with keywords + sets preserved
+⟹ transit JSON string with keywords + sets preserved
 
 ```
 

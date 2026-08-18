@@ -65,7 +65,7 @@ whole call on a well-formed missing lookup ref:
 
 ```clojure
 (d/pull-many test-db '[:name] [1 999 5])
-;; => [{:name "Petr"} {:name "Elizabeth"}]
+⟹ [{:name "Petr"} {:name "Elizabeth"}]
 
 (d/pull-many unique-db '[:person/name]
              [[:person/id "a"] [:person/id "missing"]])

@@ -50,7 +50,7 @@ The reporter is called from `malli.core/-instrument-f` as `(report ::invalid-inp
                        (fn [a b] (+ a b)))]
   (try (f 1 "bad") (catch :default _ nil))
   @captured)
-;; => {:type :malli.core/invalid-output
+⟹ {:type :malli.core/invalid-output
 ;;     :data {:output :int
 ;;            :value  "1bad"
 ;;            :args   [1 "bad"]
@@ -268,7 +268,7 @@ This makes the error **programmable**: an agent can write its own diagnostic fun
 (let [exp (m/explain [:map {:closed true} [:seon.db/tx-data :any]]
                      {:seon.db/tx-datas []})]
   (-> exp me/with-spell-checking me/humanize))
-;; => {:seon.db/tx-datas ["should be spelled :seon.db/tx-data"]}
+⟹ {:seon.db/tx-datas ["should be spelled :seon.db/tx-data"]}
 
 ```
 
@@ -277,7 +277,7 @@ On **open maps** the spell-check is a no-op:
 ```clojure
 (let [exp (m/explain [:map [:seon.db/tx-data :any]] {:seon.db/tx-datas []})]
   (-> exp me/with-spell-checking me/humanize))
-;; => {:seon.db/tx-data ["missing required key"]}   ; doesn't notice :tx-datas exists
+⟹ {:seon.db/tx-data ["missing required key"]}   ; doesn't notice :tx-datas exists
 
 ```
 

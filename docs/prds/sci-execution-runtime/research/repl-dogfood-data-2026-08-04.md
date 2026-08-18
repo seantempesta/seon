@@ -199,7 +199,7 @@ unknown cluster. The newly booted branch, hosted in the old PID, returned:
 
 ```clojure
 (seon.config/effective (seon.db/db) "dogfood-missing-cluster")
-;; => {}
+⟹ {}
 ```
 
 This is not a source regression: `runtime_status` already identified 15 stale

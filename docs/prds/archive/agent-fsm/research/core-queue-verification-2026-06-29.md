@@ -89,7 +89,7 @@ on `seon.db` — entity-schema validation does not exist today — not a turn fi
       (.then (seon.eval/eval cs "(ns my.verifyfoo73)" {:ns 'cljs.user})
         (fn [_] (seon.eval/eval cs "(db/query {:seon.db/query (quote [:find ?e :where [?e :seon.agent/id]])})"
                                 {:ns 'my.verifyfoo73}))))))
-;; => `db/query` is not defined (alias is home-only)
+⟹ `db/query` is not defined (alias is home-only)
 ```
 
 ## Entry points

@@ -76,7 +76,7 @@ non-empty walk. Reproduced live at distance 0 on a perfectly healthy entity:
 ```clojure
 (neighborhood {… :seon.render.walk/lookup [:seon.cluster/name "default"]
                  :seon.render/distance 0})
-;; => invalid-output: [#:seon.render{:output
+⟹ invalid-output: [#:seon.render{:output
 ;;      [{:value "Cluster default.\nConfiguration default and bootstrap plan
 ;;                :default; 1 shared instruction and 7 toolkit namespaces.",
 ;;        :message "should be either :seon.render/ai or :seon.render/html"}]}]

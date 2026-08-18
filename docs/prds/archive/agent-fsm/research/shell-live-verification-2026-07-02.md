@@ -53,15 +53,15 @@ one-line `defn` heads (docstring + `:malli/schema` + arglist) for `grants`,
 
 ```
 (shell/run {:seon.shell/cmd "node" :seon.shell/args ["--version"]})
-;; => {:seon.agent.shell/ok? false, :seon.error/message ":seon.agent.shell/cmd is required and must be non-blank — argv[0], PATH-resolved (e.g. \"git\")."}
+⟹ {:seon.agent.shell/ok? false, :seon.error/message ":seon.agent.shell/cmd is required and must be non-blank — argv[0], PATH-resolved (e.g. \"git\")."}
 
 (shell/run {:seon.shell/cmd "node" :seon.shell/args ["--version"]})   ; retried verbatim, same failure
 
 (shell/run {:seon.shell/cmd "find" :seon.shell/args ["src/seon" "-name" "*.cljs" "-type" "f"]})
-;; => same ok?-false envelope (":seon.agent.shell/cmd is required…")
+⟹ same ok?-false envelope (":seon.agent.shell/cmd is required…")
 
 (count (clojure.string/split-lines (:seon.agent.shell/out result/nB4-2607021124)))
-;; => ERR: `result/nB4-2607021124` is not defined.
+⟹ ERR: `result/nB4-2607021124` is not defined.
 
 (message/user (str "Here you go:\n\n- **Node version:** v22.14.0\n- **`.cljs` files under `src/seon/`:** 41"))
 (todo/done! …)
@@ -90,7 +90,7 @@ itself; noted in §5):
 (shell/run {:seon.shell/cmd "node" :seon.shell/args ["--version"]})       ; FAILS, same as drive 1
 (shell/run {:seon.shell/cmd "find" :seon.shell/args [...]})               ; FAILS, same as drive 1
 (shell/run {:seon.agent.shell/cmd "node" :seon.agent.shell/args ["--version"]})
-;; => {:seon.agent.shell/ok? true, :seon.agent.shell/exit 0, :seon.agent.shell/out "v24.2.0\n", …}   ; SELF-CORRECTED, SUCCEEDED
+⟹ {:seon.agent.shell/ok? true, :seon.agent.shell/exit 0, :seon.agent.shell/out "v24.2.0\n", …}   ; SELF-CORRECTED, SUCCEEDED
 ```
 
 Same first-attempt mistake as drive 1 — strong confirmation the wrong guess
@@ -156,7 +156,7 @@ Traced to the stored `:seon.fn/spec` datom itself, not a render-time bug:
 (seon.db/pull @seon.db/*conn*
   '[:seon.fn/sym :seon.fn/spec]
   <eid of seon.agent.shell/run>)
-;; => {:seon.fn/sym "seon.agent.shell/run",
+⟹ {:seon.fn/sym "seon.agent.shell/run",
 ;;     :seon.fn/spec "[:=> [:cat :seon.shell/run-request] :seon.shell/run-response]"}
 ```
 

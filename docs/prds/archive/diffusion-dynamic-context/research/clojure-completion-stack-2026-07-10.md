@@ -226,7 +226,7 @@ written and verified during this research:
 (let [c (ctx/cache-context "(defn process [items {:keys [limit] :as opts}]
                               (let [sorted (sort items)] (take limit __prefix__)))")]
   (bindings-from-context c))
-;; => (sorted process items opts limit)
+⟹ (sorted process items opts limit)
 ```
 
 ---

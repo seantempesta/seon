@@ -186,7 +186,7 @@ an EDN-backed attribute failed:
 ```clojure
 (db/transact! conn [{:seon.cluster.agent/id "agent-a"
                      :seon.cluster.registry/from :core}])
-;; => #:seon.error{:kind :seon.db/unknown-failure
+⟹ #:seon.error{:kind :seon.db/unknown-failure
 ;;                 :message ":malli.core/invalid-schema"}
 ```
 

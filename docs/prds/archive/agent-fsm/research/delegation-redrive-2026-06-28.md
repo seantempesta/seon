@@ -103,7 +103,7 @@ human kickoff sent. Parent spawned (eventually) `EIP` (DuckDB, worked) + `SOv`
 ;; what the parent did (straight from the docstring's "let-bind it" guidance):
 (let [duckdb-child (agent/start! {…})]
   (message/agent (:seon.agent/id duckdb-child) "…"))
-;; => {:seon.db/ok? false … "expected map or :seon.db/ref, got [:seon.agent/id nil]"}
+⟹ {:seon.db/ok? false … "expected map or :seon.db/ref, got [:seon.agent/id nil]"}
 ```
 
 Live-confirmed in isolation:

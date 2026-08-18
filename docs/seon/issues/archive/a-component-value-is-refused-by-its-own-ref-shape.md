@@ -38,12 +38,12 @@ admission-source fix.
 ;; an agent's first defn
 (ev/evaluate {… :seon.cluster.run.form/source
               "(defn ^{:malli/schema [:=> [:cat :int] :int]} probe-fn [x] x)"})
-;; => "seon.program/with-contract-facts violated its contract (invalid-output)"
+⟹ "seon.program/with-contract-facts violated its contract (invalid-output)"
 
 ;; an agent's first ns form with an alias
 (ev/evaluate {… :seon.cluster.run.form/source
               "(ns probe.alias (:require [clojure.set :as set]))"})
-;; => "seon.program/declaration-row violated its contract (invalid-output)"
+⟹ "seon.program/declaration-row violated its contract (invalid-output)"
 
 ;; the same form with no alias now settles
 (ev/evaluate {… :seon.cluster.run.form/source
@@ -55,12 +55,12 @@ Direct, at the registry:
 ```clojure
 (schema/valid-candidate-value? :seon.db/ref
   {:seon.ns.alias/local 'set :seon.ns.alias/target-ns 'clojure.set})
-;; => false
+⟹ false
 (schema/valid-candidate-value? :seon.fn/fn
   {:seon.fn/sym "a/b" :seon.schema.admission/source :agent
    :seon.fn/ns [:seon.ns/name 'a] :seon.fn/source "x"
    :seon.fn/arities [{:seon.fn.arity/order 0}]})
-;; => false
+⟹ false
 ```
 
 46 declaration sites carry `:seon.db/component true`, in

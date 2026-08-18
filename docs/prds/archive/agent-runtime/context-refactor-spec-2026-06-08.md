@@ -402,21 +402,21 @@ by `run-turn!`).**
   {:agent-exists? (some? ent) :render-ai-slot (:seon.render/ai ent)
    :ctx-raw (:seon.agent/ctx ent)
    :ctx-entities-count (count (seon.agent/ctx-entities {:seon.agent/id id}))})
-;; => {:agent-exists? true, :render-ai-slot nil, :ctx-raw nil, :ctx-entities-count 0}
+⟹ {:agent-exists? true, :render-ai-slot nil, :ctx-raw nil, :ctx-entities-count 0}
 
 ;; render-prompt + assemble-ctx
-;; => {:render-prompt-len 0, :render-prompt-sample "", :assemble-ctx-len 0}
+⟹ {:render-prompt-len 0, :render-prompt-sample "", :assemble-ctx-len 0}
 
 ;; Claim 3: per-section lengths
-;; => {:system 1098 :messages 1510 :current-ns 0 :warnings 77 :recent-evals 9790 :prompt 38}
+⟹ {:system 1098 :messages 1510 :current-ns 0 :warnings 77 :recent-evals 9790 :prompt 38}
 ;; code-default composed => {:default-composed-len 12521 :resolves-all? true}
 
 ;; Claim 4: inspector path
-;; => {:assemble-ai-len 6129 :n-entities 13 :token-est 1532
+⟹ {:assemble-ai-len 6129 :n-entities 13 :token-est 1532
 ;;     :sample ";; You are a Clojure-fluent agent running inside a CLJS pod on Node.…"}
 
 ;; Claim 5: persisted prompt-text per turn
-;; => {:turn-count 3 :prompt-text-lengths [{:status :done :pt-len 0}{:status :done :pt-len 0}{:status :done :pt-len 0}]}
+⟹ {:turn-count 3 :prompt-text-lengths [{:status :done :pt-len 0}{:status :done :pt-len 0}{:status :done :pt-len 0}]}
 
 ;; current-ns root cause
 ;; current-ns => :seon.agent.LZL-2605271732 ; ns-entity-exists? false

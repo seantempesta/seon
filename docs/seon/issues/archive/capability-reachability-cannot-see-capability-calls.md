@@ -67,7 +67,7 @@ Resolution classes:
   (into {} (map (fn [s] [s {:class (.getName (class (sci/resolve ctx s)))
                             :sci-var? (sci.impl.utils/var? (sci/resolve ctx s))}]))
         '[my.fs/read my.message/send seon.db/transact! +]))
-;; => {my.fs/read        {:class "clojure.lang.Var" :sci-var? false}
+⟹ {my.fs/read        {:class "clojure.lang.Var" :sci-var? false}
 ;;     my.message/send   {:class "clojure.lang.Var" :sci-var? false}
 ;;     seon.db/transact! {:class "sci.lang.Var"     :sci-var? true}
 ;;     +                 {:class "sci.lang.Var"     :sci-var? true}}

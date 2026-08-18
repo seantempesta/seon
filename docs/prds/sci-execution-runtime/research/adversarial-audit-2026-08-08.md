@@ -217,7 +217,7 @@ unrepresentable.** Live:
 
 ```clojure
 (sci.core/init {:not-a-real-option 1})
-;; => "Unsupported option passed to sci/init: [:not-a-real-option]"
+⟹ "Unsupported option passed to sci/init: [:not-a-real-option]"
 ;;    {:unsupported-options [:not-a-real-option]
 ;;     :supported-options [… :built-in-call-observer :call-preparation-hook
 ;;                         :host-interop-observer :interrupt-fn …]}

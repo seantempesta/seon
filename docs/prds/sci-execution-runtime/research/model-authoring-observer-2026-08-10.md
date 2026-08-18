@@ -124,7 +124,7 @@ Two further mechanics future observers need:
 ```clojure
 (d/q '[:find ?spec . :where [?f :seon.fn/sym "my.agents.root/token-pressure"]
                             [?f :seon.fn/spec ?spec]] db)
-;; =>
+⟹ 
 "[:=> [:cat [:sequential [:map [:prompt-tokens :int] [:completion-tokens :int]]]]
       [:map [:turns :int] [:prompt-total :int] [:completion-total :int] [:ratio :double]]]"
 ```
@@ -199,7 +199,7 @@ producer, no schema declaration, nothing naming the function:
    :seon.db/db db :seon.render/output :seon.render/ai
    :seon.sci.admit/caps {...} :seon.sci.eval/time-limit-ms 30000
    :seon.config/on-core-error :record})
-;; => "Across 2 turns, prompt tokens totaled 400, completion tokens totaled 100,
+⟹ "Across 2 turns, prompt tokens totaled 400, completion tokens totaled 100,
 ;;     and the completion/prompt ratio was 0.25."
 ```
 

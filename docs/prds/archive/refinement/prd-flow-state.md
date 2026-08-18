@@ -221,7 +221,7 @@ An agent connects to a namespace instance. The API:
    ::runtime/session-id "a1b2"        ;; or auto-generated
    ::runtime/location :external       ;; or :in-process
    ::runtime/initial-ctx {...}})
-;; => {::runtime/session-id "a1b2"
+⟹ {::runtime/session-id "a1b2"
 ;;     ::runtime/nrepl-port 7901
 ;;     ::runtime/namespace "seon.trading.signals"
 ;;     ::runtime/status :running}
@@ -229,11 +229,11 @@ An agent connects to a namespace instance. The API:
 ;; Eval code in the session (MCP does this)
 (runtime/eval! {::runtime/session-id "a1b2"
                 ::runtime/code "(+ 1 2)"})
-;; => "3"
+⟹ "3"
 
 ;; Get session state
 (runtime/instance {::runtime/namespace "seon.trading.signals"})
-;; => {::runtime/status :running
+⟹ {::runtime/status :running
 ;;     ::runtime/location :external
 ;;     ::runtime/nrepl-port 7901
 ;;     ::runtime/ctx {...}
@@ -241,7 +241,7 @@ An agent connects to a namespace instance. The API:
 
 ;; List all instances
 (runtime/instances)
-;; => [{::runtime/namespace "seon.db.datalevin.server"
+⟹ [{::runtime/namespace "seon.db.datalevin.server"
 ;;      ::runtime/location :in-process
 ;;      ::runtime/status :running}
 ;;     {::runtime/namespace "seon.trading.signals"
@@ -439,7 +439,7 @@ Same reasoning as original PRD: the code graph must exist before runtime entitie
         [?e :seon.runtime/status :running]
         [?e :seon.runtime/location ?location]]
       @conn)
-;; => #{["seon.db.datalevin.server" :running :in-process]
+⟹ #{["seon.db.datalevin.server" :running :in-process]
 ;;      ["seon.web.server" :running :in-process]
 ;;      ["seon.trading.signals" :running :external]}
 
@@ -701,7 +701,7 @@ Incrementally. Each phase is independently buildable and testable. The existing 
 
    ```clojure
    (runtime/instances)
-   ;; => [{:seon.runtime/namespace "seon.db.datalevin.server"
+   ⟹ [{:seon.runtime/namespace "seon.db.datalevin.server"
    ;;      :seon.runtime/status :running
    ;;      :seon.runtime/location :in-process} ...]
 
@@ -711,7 +711,7 @@ Incrementally. Each phase is independently buildable and testable. The existing 
 
    ```clojure
    (runtime/instance {::runtime/namespace "seon.trading.signals"})
-   ;; => {:status :running, :location :external, :nrepl-port 7901,
+   ⟹ {:status :running, :location :external, :nrepl-port 7901,
    ;;     :ctx {:last-signal {...}},
    ;;     :agent-runs [{:id "a1b2" :status :completed :cost 0.23}],
    ;;     :fn-count 12, :spec-count 8}
@@ -805,7 +805,7 @@ Generalize the bridge's promise-based reply pattern:
 (runtime/send! {::runtime/to-id "a1b2"
                 ::msg/fn "seon.trading.signals/ema"
                 ::msg/args [[1.0 2.0 3.0]]})
-;; => promise that delivers the reply
+⟹ promise that delivers the reply
 
 ;; Or by namespace (routes to the running instance of that namespace):
 (runtime/send! {::msg/to-ns "seon.trading.signals"

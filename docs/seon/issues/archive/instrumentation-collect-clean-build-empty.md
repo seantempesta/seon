@@ -67,9 +67,9 @@ Then in the pod runtime:
 ```clojure
 (require '[malli.core :as m])
 (keys (m/function-schemas :cljs))
-;; => (seon.db seon.schema seon.test.runner)   ; only 3 nses
+⟹ (seon.db seon.schema seon.test.runner)   ; only 3 nses
 (boolean (get-in (m/function-schemas :cljs) ['seon.eval 'result-var-ref?]))
-;; => false                                    ; core fn NOT instrumented
+⟹ false                                    ; core fn NOT instrumented
 
 ```
 

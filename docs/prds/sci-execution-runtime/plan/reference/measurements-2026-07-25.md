@@ -509,7 +509,7 @@ but not `clojure-string`. Carry D16 forward only as an invariant the new
 
 ```clojure
 (alength (byte-array 200000000))
-;; => 200,033,752 bytes allocated, 1 ms, 0 fn entries, outcome :ok
+⟹ 200,033,752 bytes allocated, 1 ms, 0 fn entries, outcome :ok
 ;; under BOTH a 500 ms time-limit AND a 64 MB allocation cap
 
 ```

@@ -97,13 +97,13 @@ REPL-probed (pod, session default):
 (required+optional [:map [:probe.x/a :string]
                          [:probe.x/b {:optional true} :int]
                          [:probe.x/c :keyword]])
-;; => {:required #{:probe.x/a :probe.x/c}, :optional #{:probe.x/b}}
+⟹ {:required #{:probe.x/a :probe.x/c}, :optional #{:probe.x/b}}
 
 ;; Nested-map containment — confirms no bleed:
 (required+optional [:map [:outer/id :string]
                          [:outer/nested [:map [:inner/x :string]
                                               [:inner/y {:optional true} :int]]]])
-;; => {:required #{:outer/id :outer/nested}, :optional #{}}
+⟹ {:required #{:outer/id :outer/nested}, :optional #{}}
 
 ```
 

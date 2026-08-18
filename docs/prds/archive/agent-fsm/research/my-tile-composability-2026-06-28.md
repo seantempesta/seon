@@ -89,7 +89,7 @@ canvas:
   {:seon.db/tx-data
    [{:seon.agent/id (db/current-agent-id)
      :seon.render.live-canvas/content 'my.agent.GrZ-2606282304/morning-tile}]})
-;; => {:seon.db/ok? true … :seon.db/added 7}
+⟹ {:seon.db/ok? true … :seon.db/added 7}
 ```
 
 This is the ideal answer: derive-from-db (booleans pulled live, progress

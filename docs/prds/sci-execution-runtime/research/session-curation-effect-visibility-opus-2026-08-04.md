@@ -95,7 +95,7 @@ a `my.message/send`, and a `seon.db/transact!`; folded through the real
         [?owner-eid :seon.fn/sym             ?owner]
         [?owner-eid :seon.effect/capability  ?handler]]
       db "probe-effects-1")
-;; => ([1 0 "my.fs/read" seon.fs.jvm/read "[\"probe-effects-1\" 1 0]"])
+⟹ ([1 0 "my.fs/read" seon.fs.jvm/read "[\"probe-effects-1\" 1 0]"])
 ```
 
 Form 1 issued one door request; the capability family is named twice over —
@@ -109,7 +109,7 @@ families on this branch:
 
 ```clojure
 (db/q '[:find ?s ?h :where [?f :seon.effect/capability ?h] [?f :seon.fn/sym ?s]])
-;; => my.edit/{exact,form,lines} -> seon.edit.jvm/edit
+⟹ my.edit/{exact,form,lines} -> seon.edit.jvm/edit
 ;;    my.fs/{read,write,glob,stat} -> seon.fs.jvm/{read,write,glob,stat}
 ;;    my.shell/run -> seon.shell.jvm/run
 ;;    my.web/{fetch,search} -> seon.web.jvm/{fetch,search}
@@ -180,7 +180,7 @@ src/seon/db.clj` returns nothing. Live, through the door:
 ```clojure
 (let [r (seon.db/transact! [{:seon.cluster.agent/id "probe-agent-door"}])]
   (select-keys r [:tx-meta :tempids]))
-;; => {:tx-meta #:db{:txInstant #inst "2026-08-04T20:32:32.417-00:00"
+⟹ {:tx-meta #:db{:txInstant #inst "2026-08-04T20:32:32.417-00:00"
 ;;                   :commitId #uuid "6a724c60-04e5-50f5-b3b8-1475dc97c4cf"}
 ;;     :tempids #:db{:current-tx 536870977}}
 ```
@@ -290,7 +290,7 @@ the live cluster ctx:
   (into {} (map (fn [s] [s {:class (.getName (class (sci/resolve ctx s)))
                             :sci-var? (sci.impl.utils/var? (sci/resolve ctx s))}]))
         '[my.fs/read my.message/send seon.db/transact! +]))
-;; => {my.fs/read        {:class "clojure.lang.Var" :sci-var? false}
+⟹ {my.fs/read        {:class "clojure.lang.Var" :sci-var? false}
 ;;     my.message/send   {:class "clojure.lang.Var" :sci-var? false}
 ;;     seon.db/transact! {:class "sci.lang.Var"     :sci-var? true}
 ;;     +                 {:class "sci.lang.Var"     :sci-var? true}}
@@ -302,11 +302,11 @@ measured directly:
 
 ```clojure
 (check "(my.fs/read {:my.fs/path \"deps.edn\"})")
-;; => {:referenced [] :unproven [] :capability-free? true}
+⟹ {:referenced [] :unproven [] :capability-free? true}
 (check "(+ 1 2)")
-;; => {:referenced [clojure.core/+] :unproven [] :capability-free? true}
+⟹ {:referenced [clojure.core/+] :unproven [] :capability-free? true}
 (check "(seon.db/transact! [{:seon.cluster.agent/id \"z\"}])")
-;; => {:referenced [seon.db/transact!] :unproven [seon.db/transact!]
+⟹ {:referenced [seon.db/transact!] :unproven [seon.db/transact!]
 ;;     :capability-free? true}
 ```
 
@@ -334,7 +334,7 @@ Probe: a run whose single form was a contracted `defn` calling the door.
 ;; the resulting program row
 (db/pull db '[* {:seon.fn/calls [:seon.fn/sym]}]
          [:seon.fn/sym "my.agents.root/grab-deps"])
-;; => has :seon.fn/sym :seon.fn/ns :seon.fn/source :seon.fn/spec
+⟹ has :seon.fn/sym :seon.fn/ns :seon.fn/source :seon.fn/spec
 ;;         :seon.fn/arities :seon.fn/ast :seon.fn/arglists
 ;;    and NO :seon.fn/calls
 ```
@@ -365,7 +365,7 @@ metadata lift landed (`fn.clj:344-345`). The derivation did not. Live:
 
 ```clojure
 (db/q '[:find ?s ?w :where [?f :seon.fn/workload ?w] [?f :seon.fn/sym ?s]])
-;; => exactly 10 rows, all :io — the same 10 capability leaves as §1
+⟹ exactly 10 rows, all :io — the same 10 capability leaves as §1
 ```
 
 There is no derived `:io`/`:compute`/`:mixed` answer for any non-leaf function

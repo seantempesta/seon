@@ -141,7 +141,7 @@ Live-probed via mcp:
 ```clojure
 ;; Agent-eval (no require needed — seon.schema is on globalThis from the host bundle)
 (seon.schema/register! :probe.schema/ticker :string)
-;; => {:ok true ...}
+⟹ {:ok true ...}
 
 ;; Registry diff (before=265, after=266, new key = :probe.schema/ticker)
 
@@ -152,7 +152,7 @@ Live-probed via mcp:
              (seon.schema/register! :probe.schema/price [:and :int [:fn pos?]])" {})
          (fn [_]
            (set/difference (set (keys (mr/schemas (m/-registry)))) before))))
-;; => #{:probe.schema/volume :probe.schema/price}
+⟹ #{:probe.schema/volume :probe.schema/price}
 
 ```
 

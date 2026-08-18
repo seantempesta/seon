@@ -861,7 +861,7 @@ No licensing concerns for adopting patterns or copying code snippets.
 ```clojure
 ;; Phase 1 deliverable
 (render-value {:name "test" :count 42 :tags [:a :b]})
-;; => [:div ...]  ;; styled Hiccup
+⟹ [:div ...]  ;; styled Hiccup
 
 ```
 
@@ -904,7 +904,7 @@ No licensing concerns for adopting patterns or copying code snippets.
 (render-entity db {:xt/id "ses-abc123"
                    :seon.ai/namespace "seon.trading"
                    :seon.ai/status :active})
-;; => entity card with clickable session-id link
+⟹ entity card with clickable session-id link
 
 ```
 
@@ -989,7 +989,7 @@ No licensing concerns for adopting patterns or copying code snippets.
 ```clojure
 ;; Phase 7 deliverable
 (render-schema ::ai/message-entity)
-;; => schema card with tree view, clickable refs
+⟹ schema card with tree view, clickable refs
 
 ```
 

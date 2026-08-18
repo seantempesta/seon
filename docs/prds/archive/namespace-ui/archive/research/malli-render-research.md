@@ -36,7 +36,7 @@ Malli supports arbitrary properties on schemas:
 
 ;; Access properties
 (m/properties position-schema)
-;; => {:seon.ui/render {...}, :seon.ui/summary-keys [...]}
+⟹ {:seon.ui/render {...}, :seon.ui/summary-keys [...]}
 
 ```
 
@@ -50,7 +50,7 @@ Malli supports arbitrary properties on schemas:
 
 ;; Must dereference first:
 (m/properties (m/deref (m/schema :trading/position)))
-;; => {:seon.ui/render {...}, ...}
+⟹ {:seon.ui/render {...}, ...}
 
 ```
 
@@ -69,7 +69,7 @@ Malli supports arbitrary properties on schemas:
              [:analysis :string]])
 
 (mu/merge parent child)
-;; => [:map {:seon.ui/render {:ai :child-ai},      ;; LOST :html!
+⟹ [:map {:seon.ui/render {:ai :child-ai},      ;; LOST :html!
 ;;          :seon.ui/label "Position"}
 ;;     [:ticker :string] [:analysis :string]]
 
@@ -90,7 +90,7 @@ Malli supports arbitrary properties on schemas:
     (mu/update-properties (mu/merge parent child) (constantly final-props))))
 
 (merge-render-schemas parent child)
-;; => [:map {:seon.ui/render {:ai :child-ai, :html :parent-html}, ...} ...]
+⟹ [:map {:seon.ui/render {:ai :child-ai, :html :parent-html}, ...} ...]
 
 ```
 

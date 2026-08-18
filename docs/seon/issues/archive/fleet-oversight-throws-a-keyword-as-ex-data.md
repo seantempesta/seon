@@ -45,7 +45,7 @@ REPL falsification:
 ```clojure
 (try (throw (ex-info "boom" :seon.render/unroutable))
      (catch Throwable t [(class t) (.getMessage t)]))
-;; => [java.lang.ClassCastException
+⟹ [java.lang.ClassCastException
 ;;     "class clojure.lang.Keyword cannot be cast to class
 ;;      clojure.lang.IPersistentMap"]
 ```

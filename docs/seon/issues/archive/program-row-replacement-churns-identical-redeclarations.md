@@ -27,7 +27,7 @@ which compares the PULLED entity against the DESIRED row:
 
 ```clojure
 (program/changed-attributes existing row)
-;; => [:seon.fn/ns :seon.fn/arities :seon.fn/ast]
+⟹ [:seon.fn/ns :seon.fn/arities :seon.fn/ast]
 ;; existing :seon.fn/ns => #:db{:id 13991}
 ;; desired  :seon.fn/ns => [:seon.ns/name my.agents.root]
 ```

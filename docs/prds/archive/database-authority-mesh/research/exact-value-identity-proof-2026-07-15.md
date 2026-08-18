@@ -166,7 +166,7 @@ Proposed minimal functions, names illustrative:
 (datahike.cache/clear-context db)
 
 (datahike.cache/committed-value-identity db)
-;; => [connection-id generation commit-id] or nil
+⟹ [connection-id generation commit-id] or nil
 
 (datahike.query/propagate-committed-cache!
   parent-committed-db child-committed-db modified-attrs)

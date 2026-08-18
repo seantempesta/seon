@@ -18,7 +18,7 @@ commit records:
 
 ```clojure
 (d/attached-commit-info head-db requested-commit-id)
-;; => {:datahike.commit/id requested-commit-id
+⟹ {:datahike.commit/id requested-commit-id
 ;;     :datahike.commit/max-t max-t}
 ;; or nil when the commit is absent or is not reachable from head-db
 ```

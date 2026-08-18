@@ -33,7 +33,7 @@ Read-only investigation, 2026-06-25, branch `feature/agent-fsm` (live pod) + `fe
 ```clojure
 ;; pod env: {:SEON_EMBED nil, :GEMINI_API_KEY-present? true, :conn-bound? true}
 (seon.embed/search {:seon.embed/query "transact a datom into the database" :seon.embed/k 3})
-;; => {:seon.embed/hits []}   ; clean OK envelope, empty hits, NO error
+⟹ {:seon.embed/hits []}   ; clean OK envelope, empty hits, NO error
 ```
 Wire-server JVM (`ps`): running with SIMD module flags, `GEMINI_API_KEY` set, `SEON_EMBED` absent. Empty-but-successful is the documented OFF behavior (`knn` returns nil when the index isn't in `:secondary-indices`; `knn-search` coerces to `[]`).
 

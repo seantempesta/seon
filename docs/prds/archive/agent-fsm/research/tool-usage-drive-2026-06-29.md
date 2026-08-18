@@ -91,7 +91,7 @@ The agent's own aggregation query (eval 20, ok) and its result:
 ```clojure
 (db/query '[:find ?agent-id (count ?e)
             :where [?e :seon.eval/agent ?a] [?a :seon.agent/id ?agent-id]])
-;; => [["XeG-2606282241" 69] ["EIP-2606282242" 47] ["SOv-2606282246" 61]
+⟹ [["XeG-2606282241" 69] ["EIP-2606282242" 47] ["SOv-2606282246" 61]
 ;;     ["root" 38] ["gkq-2606290010" 20] ["tzY-2606282302" 2]]
 ```
 

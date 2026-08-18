@@ -166,7 +166,7 @@ walks its index entries. Probe, on `flooraudit`:
 ```clojure
 (seon.sci.admit/admit-value
   {:seon.sci.admit/value {:report/db-after @conn} …caps…})
-;; => {:probe/db-class        "datahike.db.DB"
+⟹ {:probe/db-class        "datahike.db.DB"
 ;;     :probe/node-edn-chars  993583
 ;;     :probe/emitted-chars   589
 ;;     :probe/capped?         true
@@ -250,7 +250,7 @@ Two probes on `flooraudit`, both against the real production seams:
 (seon.cluster/project-next-prepl-value!)
 (count (seon.cluster/mcp-valf "flooraudit" eff
          (seon.sci.eval/evaluate {… "(apply str (repeat 1048576 \"x\"))" …})))
-;; => {:probe/result-edn-count 262220
+⟹ {:probe/result-edn-count 262220
 ;;     :probe/capped?          true
 ;;     :probe/mcp-face-chars   262641      ; <-- the face
 ;;     :probe/blob-threshold   4096

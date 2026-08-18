@@ -51,7 +51,7 @@ disabling that widening and re-running:
 ```clojure
 (with-redefs [sform/widen-component-children identity]
   (attempt))
-;; => "A durable Malli definition contains an unnamed callable."   (unchanged)
+⟹ "A durable Malli definition contains an unnamed callable."   (unchanged)
 ```
 
 Reproduced again on 2026-08-10 after `375f79b01` through both

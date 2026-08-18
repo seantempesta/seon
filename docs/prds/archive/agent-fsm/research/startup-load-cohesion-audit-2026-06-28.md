@@ -116,10 +116,10 @@ AGENTS.md are not seed steps; they are live `file-block`s re-read every render
 ;; wrote {:seon.config/skills {:seon.config/exclude [:datahike]}} to a temp file
 (set! (.. js/globalThis -process -env -SEON_CONFIG) tmp)
 (seon.config/load-manifest)
-;; => {:seon.config/skills {:seon.config/exclude [:datahike]}}   ; read the custom file
+⟹ {:seon.config/skills {:seon.config/exclude [:datahike]}}   ; read the custom file
 ;; cleared SEON_CONFIG:
 (seon.config/load-manifest)
-;; => {:seon.config/skills {:seon.config/exclude [:browser-automation :clojure-testing]}} ; fell back to config/system.edn
+⟹ {:seon.config/skills {:seon.config/exclude [:browser-automation :clojure-testing]}} ; fell back to config/system.edn
 ```
 
 So `SEON_CONFIG=/path/to/test.edn` **does** make the pod load that file

@@ -550,7 +550,7 @@ End-state vignette:
 
 ;; Agent runs the test, sees structured results
 (seon.test/run 'cljs.user/reagent-atom-works)
-;; => {:summary {:pass 1 :fail 0 :error 0} :events [...]}
+⟹ {:summary {:pass 1 :fail 0 :error 0} :events [...]}
 
 ;; Renderer turns those events into a context tile the agent reads next turn.
 

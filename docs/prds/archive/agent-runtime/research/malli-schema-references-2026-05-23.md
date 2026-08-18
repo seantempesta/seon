@@ -28,7 +28,7 @@ Read `/Users/sean/src/seon/reference-code/malli/src/malli/core.cljc`:
 
 ;; (A) Bare-keyword wrap with outer props — FAILS at schema construction
 (m/schema [:probe/id {:seon.db/identity true}])
-;; => Execution error: :malli.core/invalid-schema
+⟹ Execution error: :malli.core/invalid-schema
 ;; Malli does not accept [<reg-keyword> {props}] as a wrapping form.
 
 ;; (B) Bare keyword reference — WORKS but no props slot
@@ -39,17 +39,17 @@ Read `/Users/sean/src/seon/reference-code/malli/src/malli/core.cljc`:
 
 ;; (C) :ref wrap — WORKS, outer props preserved
 (m/properties (m/schema [:ref {:seon.db/identity true} :probe/id]))
-;; => {:seon.db/identity true}
+⟹ {:seon.db/identity true}
 (m/validate    [:ref {:seon.db/identity true} :probe/id] "12345678901234") ; => true
 (m/validate    [:ref {:seon.db/identity true} :probe/id] "short")          ; => false
 
 ;; (D) :schema wrap — WORKS, outer props preserved (same behavior as :ref for our use)
 (m/properties (m/schema [:schema {:seon.db/identity true} :probe/id]))
-;; => {:seon.db/identity true}
+⟹ {:seon.db/identity true}
 
 ;; (E) :and wrap — WORKS, outer props preserved, validation strict
 (m/properties (m/schema [:and {:seon.db/identity true} :probe/id]))
-;; => {:seon.db/identity true}
+⟹ {:seon.db/identity true}
 (m/validate    [:and {:seon.db/identity true} :probe/id] "12345678901234") ; => true
 (m/validate    [:and {:seon.db/identity true} :probe/id] "short")          ; => false
 
@@ -76,17 +76,17 @@ Read `src/seon/db.cljs:803-1015`. Relevant functions:
 (schema/register! :probe.agent.and/id    [:and    {:seon.db/identity true} :probe/id])
 
 (db/malli->datahike-attr :probe.agent.bare/id)
-;; => {:db/ident :probe.agent.bare/id, :db/valueType :db.type/string, :db/cardinality :db.cardinality/one}
+⟹ {:db/ident :probe.agent.bare/id, :db/valueType :db.type/string, :db/cardinality :db.cardinality/one}
 ;;    (correct type, BUT no identity — no place to put it)
 
 (db/malli->datahike-attr :probe.agent.ref/id)
-;; => FAIL: "Cannot map Malli type to datahike type: [:ref {:seon.db/identity true} :probe/id]"
+⟹ FAIL: "Cannot map Malli type to datahike type: [:ref {:seon.db/identity true} :probe/id]"
 
 (db/malli->datahike-attr :probe.agent.schema/id)
-;; => FAIL: "Cannot map Malli type to datahike type: [:schema {:seon.db/identity true} :probe/id]"
+⟹ FAIL: "Cannot map Malli type to datahike type: [:schema {:seon.db/identity true} :probe/id]"
 
 (db/malli->datahike-attr :probe.agent.and/id)
-;; => {:db/ident       :probe.agent.and/id
+⟹ {:db/ident       :probe.agent.and/id
 ;;     :db/valueType   :db.type/string
 ;;     :db/cardinality :db.cardinality/one
 ;;     :db/unique      :db.unique/identity}     ;; <-- IDENTITY PROPERLY DERIVED
@@ -297,9 +297,9 @@ In the live pod:
 ;; Each of these should print the same map shape, with :db/unique present
 ;; for identity attrs and absent for tx-meta scalars.
 (db/malli->datahike-attr :seon.agent/id)
-;; => {... :db/valueType :db.type/string ... :db/unique :db.unique/identity}
+⟹ {... :db/valueType :db.type/string ... :db/unique :db.unique/identity}
 (db/malli->datahike-attr :seon.db/agent-id)
-;; => {... :db/valueType :db.type/string ...}   ; no :db/unique
+⟹ {... :db/valueType :db.type/string ...}   ; no :db/unique
 
 ;; Validation still strict
 (m/validate :seon.agent/id "12345678901234") ; => true

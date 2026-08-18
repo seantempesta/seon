@@ -191,7 +191,7 @@ what the agent did. Renders as:
 ```clojure
 ;; Define add.
 (defn add [x y] (+ x y))
-;; => #'seon.agent.XAR-2605251544/add
+⟹ #'seon.agent.XAR-2605251544/add
 ;; #seon.eval/id "ev-1"
 
 ```
@@ -565,11 +565,11 @@ it, user asks to make it variadic, agent redefines + tests.
 
 ;; Define add and test it.
 (defn add [x y] (+ x y))
-;; => #'seon.agent.XAR-2605261000/add
+⟹ #'seon.agent.XAR-2605261000/add
 ;; #seon.eval/id "ev-1"
 
 (add 2 3)
-;; => 5
+⟹ 5
 ;; #seon.eval/id "ev-2"
 
 (seon.db/transact!
@@ -577,7 +577,7 @@ it, user asks to make it variadic, agent redefines + tests.
    [#:seon.message{:role :assistant :from #'self :to [:user]
                    :content "add ready: (add 2 3) ;; => 5"
                    :at #inst "2026-05-26T10:00:01.000Z"}]})
-;; => {:tempids {} :tx-data [,,,]}
+⟹ {:tempids {} :tx-data [,,,]}
 ;; #seon.eval/id "ev-3"
 
 (comment
@@ -587,15 +587,15 @@ it, user asks to make it variadic, agent redefines + tests.
 
 ;; Redefine add to take any number of args.
 (defn add [& xs] (apply + xs))
-;; => #'seon.agent.XAR-2605261000/add
+⟹ #'seon.agent.XAR-2605261000/add
 ;; #seon.eval/id "ev-4"
 
 (add 1 2 3 4)
-;; => 10
+⟹ 10
 ;; #seon.eval/id "ev-5"
 
 (add)
-;; => 0
+⟹ 0
 ;; #seon.eval/id "ev-6"
 
 (seon.db/transact!
@@ -603,7 +603,7 @@ it, user asks to make it variadic, agent redefines + tests.
    [#:seon.message{:role :assistant :from #'self :to [:user]
                    :content "variadic: (add) ;; => 0; (add 1 2 3 4) ;; => 10"
                    :at #inst "2026-05-26T10:00:31.000Z"}]})
-;; => {:tempids {} :tx-data [,,,]}
+⟹ {:tempids {} :tx-data [,,,]}
 ;; #seon.eval/id "ev-7"
 
 ```

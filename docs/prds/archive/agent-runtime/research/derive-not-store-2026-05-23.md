@@ -189,7 +189,7 @@ Probe on the live agent (`agent-id "seon"`):
           (reverse evals))))
 
 ;; Live result (no :seon.eval/ns datoms yet — attr does not exist):
-;; => {:n-evals 12, :latest-ns nil, :home-ns "seon.agent.seon"}
+⟹ {:n-evals 12, :latest-ns nil, :home-ns "seon.agent.seon"}
 ;; Cost of the full 12-eval query: 1.7ms.
 
 ```
@@ -284,7 +284,7 @@ make this a single bound-attr lookup (`(d/q '[:find ?ns :where
                     #inst "2026-05-23T13:30:39.352"]
    :derive-ms 6.0
    :stored-read-ms 3.5})
-;; => stored=4, derived=2.   STORED IS WRONG by 2.
+⟹ stored=4, derived=2.   STORED IS WRONG by 2.
 
 ```
 

@@ -126,7 +126,7 @@ Returns a **plain TOUCHED map** — `:db/id` plus every attr (`touch->map`,
 ```clojure
 (db/store-inventory)                          ; post-bootstrap data rows only
 (db/store-inventory {::db/system? true})      ; full, incl. core boot index
-;; => [{::db/kind :my.kb.codebase
+⟹ [{::db/kind :my.kb.codebase
 ;;      ::db/attrs {:my.kb.codebase/question 3 :my.kb.codebase/answer 3}} …]
 ```
 
@@ -301,7 +301,7 @@ Proof: `compare-and-swap` raises `:transact/cas` on mismatch —
 ```clojure
 ;; relation (set of tuples) — DEFAULT:
 (db/query '[:find ?t ?r :where [?e :my.kb.doc/title ?t] [?e :my.kb.doc/rating ?r]])
-;; => #{["A" 5] ["B" 4]}
+⟹ #{["A" 5] ["B" 4]}
 ;; scalar `.`:
 (db/query '[:find (count ?e) . :where [?e :my.kb.doc/id]])      ;=> a number
 ;; collection [?x ...] — one column as a vector:
@@ -360,7 +360,7 @@ aggregates (`[(> ?v 2)]`) — `query_aggregates_test.cljc:103-127`.
 ```clojure
 ;; lookup-ref source + wildcard:
 (db/pull '[*] [:my.kb.doc/id "d1"])
-;; => {:db/id N :my.kb.doc/id "d1" :my.kb.doc/title "…"
+⟹ {:db/id N :my.kb.doc/id "d1" :my.kb.doc/title "…"
 ;;     :my.kb.doc/author {:db/id M}            ; plain ref → {:db/id M}
 ;;     :my.kb.doc/notes [{:db/id K :my.kb.note/body "…"}]}  ; component auto-expands
 ;; nested ref sub-pattern to read the author's fields:
@@ -389,7 +389,7 @@ unresolved lookup-ref:
 
 ```clojure
 (db/entity [:my.kb.doc/id "d1"])
-;; => {:db/id N :my.kb.doc/id "d1" :my.kb.doc/title "…" :my.kb.doc/author {:db/id M}}
+⟹ {:db/id N :my.kb.doc/id "d1" :my.kb.doc/title "…" :my.kb.doc/author {:db/id M}}
 ```
 
 Lazy/touch semantics + cardinality-many reads back as a SET (`:aka #{"X" "Y"}`) —

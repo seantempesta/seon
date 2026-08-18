@@ -692,7 +692,7 @@ system makes this transparent.
 
  (require '[seon.health.nutrition :as nutrition])
  (nutrition/metabolic-rate 75 180)
- ;; => 1850  (transparently routed through flow)
+ ⟹ 1850  (transparently routed through flow)
 
  ;; Under the hood, the proxy var calls:
  ;;   bridge/remote-call! -> reverse channel -> orchestrator
@@ -827,28 +827,28 @@ No `add-proc`, `remove-proc`, `update-conns`, or anything similar.
 ;; Graph protocol methods
 (->> clojure.core.async.flow.impl.graph.Graph
      .getDeclaredMethods (mapv #(.getName %)))
-;; => ["start" "stop" "resume" "ping" "inject" "pause"
+⟹ ["start" "stop" "resume" "ping" "inject" "pause"
 ;;     "pause_proc" "resume_proc" "command_proc" "ping_proc"]
 
 ;; Pause preserves state
 (flow/pause f)
 (flow/ping f :timeout-ms 2000)
-;; => {:p1 {::flow/status :paused, ::flow/state {:count 0}, ...}}
+⟹ {:p1 {::flow/status :paused, ::flow/state {:count 0}, ...}}
 (flow/resume f)
 (flow/ping f :timeout-ms 2000)
-;; => {:p1 {::flow/status :running, ::flow/state {:count 0}, ...}}
+⟹ {:p1 {::flow/status :running, ::flow/state {:count 0}, ...}}
 
 ;; Stop -> start resets state (init called again)
 (flow/stop f)
 (flow/start f)  ;; fresh channels, fresh init
 (flow/resume f)
 (flow/ping f :timeout-ms 2000)
-;; => {:p1 {::flow/status :running, ::flow/state {:count 0}, ...}}
+⟹ {:p1 {::flow/status :running, ::flow/state {:count 0}, ...}}
 ;; count reset to 0 because init was called again
 
 ;; datafy returns snapshot, not live refs
 (clojure.datafy/datafy f)
-;; => {:procs {:p1 {:proc {...}}}, :conns [], :execs {...},
+⟹ {:procs {:p1 {:proc {...}}}, :conns [], :execs {...},
 ;;     :chans {:ins {[:p1 :in] {:buffer {...}}}, :outs {[:p1 :out] nil}, ...}}
 
 ```

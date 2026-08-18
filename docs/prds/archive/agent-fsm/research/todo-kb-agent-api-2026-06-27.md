@@ -131,7 +131,7 @@ in §6.3 (`:seon.db/order-by` is not a `seon.db/query` request key).
    [{:my.todo/title "process notes-a.md" :my.todo/ref "a"}
     {:my.todo/title "process notes-b.md" :my.todo/ref "b"}
     {:my.todo/title "synthesize findings" :my.todo/after ["a" "b"]}]})
-;; => {:my.todo/ok? true
+⟹ {:my.todo/ok? true
 ;;     :my.todo/root "Kpx-2606271830"
 ;;     :my.todo/ids  {"a" "Lq2-2606271830" "b" "Mr8-2606271830"
 ;;                    :root "Kpx-2606271830" "synthesize findings" "Nt4-2606271830"}}
@@ -178,7 +178,7 @@ flat vector. The plan above compiles to exactly:
      :my.todo/agent [:seon.agent/id "iCg-2606101519"]
      :my.todo/parent "t-root" :my.todo/depends-on ["t-a" "t-b"]
      :my.todo/created-at #inst "…"}]})
-;; => {:seon.db/ok? true
+⟹ {:seon.db/ok? true
 ;;     :seon.db/tempids {"t-root" 1042 "t-a" 1043 "t-b" 1044 "t-syn" 1045 …}}
 ```
 

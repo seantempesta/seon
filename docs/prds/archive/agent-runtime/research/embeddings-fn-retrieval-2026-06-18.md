@@ -60,7 +60,7 @@ backfills existing data and maintains the index on every tx:
 ;; query
 (def vt (get-in (d/db conn) [:secondary-indices :idx/fn-vectors]))
 (sec/-slice-ordered vt {:vector (float-array q) :k 12} nil nil :asc nil)
-;; => [{:entity-id 1 :distance 0.0} {:entity-id 3 :distance 0.14} ...]
+⟹ [{:entity-id 1 :distance 0.0} {:entity-id 3 :distance 0.14} ...]
 ```
 
 Key properties that fit Seon well:
@@ -135,7 +135,7 @@ Clojure + ~4.5k LOC Java). Corrects two things from the first pass:
 
 ;; returns external ids (our eids) + distance, ready to pull full source
 (search idx query-vec 12)
-;; => [{:id 1043 :distance 0.0} {:id 1102 :distance 0.14} ...]
+⟹ [{:id 1043 :distance 0.0} {:id 1102 :distance 0.14} ...]
 
 ;; namespace pre-filter falls out — pass a set of eids to consider
 (search-filtered idx query-vec 12 #{eid1 eid2 ...})

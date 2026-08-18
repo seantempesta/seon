@@ -191,19 +191,19 @@ Candidate ordinary functions, names illustrative:
 
 ```clojure
 (datahike.api/capabilities)
-;; => {:datahike.capability/operations #{:datahike.operation/query ...}
+⟹ {:datahike.capability/operations #{:datahike.operation/query ...}
 ;;     :datahike.capability/exact-value-identity? true
 ;;     :datahike.capability/single-flight? true
 ;;     :datahike.capability/cancellation? true}
 
 (datahike.value/identity db)
-;; => process-local immutable data; never a DB/index object
+⟹ process-local immutable data; never a DB/index object
 
 (datahike.value/resolve conn
   {:datahike.value/commit-id commit-id
    :datahike.value/view {:datahike.view/name :datahike.view/as-of
                          :datahike.view/time-point t}})
-;; => opaque DB value inside the host
+⟹ opaque DB value inside the host
 
 (datahike.query/cache-metrics {:datahike.cache/scope scope})
 (datahike.query/evict-cache-scope! {:datahike.cache/scope scope

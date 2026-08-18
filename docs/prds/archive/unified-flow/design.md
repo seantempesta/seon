@@ -327,14 +327,14 @@ Layer 3 errors are caller-side. The promise is never delivered. `request!` clean
 ```clojure
 ;; See all recent errors
 (flow/ping-proc topology :seon.flow/error-sink)
-;; => {::flow/state {:recent-errors [...]} ...}
+⟹ {::flow/state {:recent-errors [...]} ...}
 
 ;; See flow-level errors (transform exceptions)
 (async/poll! error-chan)
 
 ;; See writer stats
 (flow/ping-proc topology :seon.flow/writer)
-;; => {::flow/state {:total-writes 142 :total-errors 3 :pending 0} ...}
+⟹ {::flow/state {:total-writes 142 :total-errors 3 :pending 0} ...}
 
 ```
 

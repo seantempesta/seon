@@ -21,7 +21,7 @@ The render pipeline was not resolving functions because the graph database conta
 
 ```clojure
 (analyzer/analyze-project! {})
-;; => Success, 1146 functions, 102 namespaces, 15232 var-usages
+⟹ Success, 1146 functions, 102 namespaces, 15232 var-usages
 
 ```
 
@@ -31,7 +31,7 @@ The analyzer correctly parses the codebase using clj-kondo.
 
 ```clojure
 (scanner/scan-directory {:seon.graph.scanner/dir-path "src/"})
-;; => 717 specs, 3 with :seon.render/* keys
+⟹ 717 specs, 3 with :seon.render/* keys
 
 ```
 
@@ -41,7 +41,7 @@ The scanner correctly finds specs including render-related specs.
 
 ```clojure
 (scanner/link-fns-to-specs fns specs)
-;; => 3 render functions with :seon.fn/render-input-keys
+⟹ 3 render functions with :seon.fn/render-input-keys
 
 ```
 
@@ -53,7 +53,7 @@ Checking the database showed only 1 render function:
 
 ```clojure
 (d/q '[:find ?e :where [?e :seon.fn/render-input-keys]] @conn)
-;; => [[1324 "seon.render.example/position-render"]]
+⟹ [[1324 "seon.render.example/position-render"]]
 
 ```
 
@@ -83,10 +83,10 @@ After re-ingestion:
 
 ```clojure
 (render/has-renderer? {:seon.health.workout/exercise "Squat" ...} :ai)
-;; => true
+⟹ true
 
 (render/try-render {:seon.health.workout/exercise "Squat" ...} :ai)
-;; => "Squat — 5x5 @ 100kg"
+⟹ "Squat — 5x5 @ 100kg"
 
 ```
 

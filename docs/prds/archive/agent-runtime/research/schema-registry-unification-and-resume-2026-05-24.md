@@ -39,7 +39,7 @@ The unified design: **`seon.schema/register!` keeps its current signature** (so 
    :seon-count (count (filter #(and (qualified-keyword? %)
                                     (str/starts-with? (namespace %) "seon."))
                               (keys (mr/schemas reg))))})
-;; => {:total 268, :seon-count 124}
+⟹ {:total 268, :seon-count 124}
 
 ```
 
@@ -109,7 +109,7 @@ When you write:
 
 ```
 (get-in @!compile-state [:cljs.analyzer/namespaces 'probe.variants :defs 'with-attr :meta])
-;; => {:doc "docs" :arglists '([x])
+⟹ {:doc "docs" :arglists '([x])
 ;;     :malli/schema [:=> [:cat :int] :int]}     ← preserved verbatim
 
 ```

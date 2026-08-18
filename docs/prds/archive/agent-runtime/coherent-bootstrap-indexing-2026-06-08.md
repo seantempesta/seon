@@ -127,11 +127,11 @@ AST is analyzed for summary fields then DISCARDED). But var meta carries
       file (str (.cwd js/process) "/src/" (:file m))]
   [(.cwd js/process) (.existsSync fs file)
    (nth (clojure.string/split-lines (.readFileSync fs file "utf8")) (dec (:line m)))])
-;; => ["/Users/sean/src/seon" true "(defn ^:async transact!"]
+⟹ ["/Users/sean/src/seon" true "(defn ^:async transact!"]
 
 ;; spec round-trips cleanly to the :seon.fn/spec string:
 (malli.core/form (malli.core/schema (:malli/schema (meta #'seon.db/transact!))))
-;; => [:=> [:cat :seon.db/transact-request] :seon.db/transact-response]
+⟹ [:=> [:cat :seon.db/transact-request] :seon.db/transact-response]
 
 ```
 

@@ -117,7 +117,7 @@ cloth and failed on it repeatedly:
 (seon.schema/register! {:seon.schema.attr/name :my.kb.runtime/body
                         :seon.schema.attr/doc  "Full body text…"
                         :seon.schema.attr/kind :seon.schema.kind/string …})
-;; => :malli.core/invalid-arity
+⟹ :malli.core/invalid-arity
 ```
 
 (The real call the manual teaches is `(seon.schema/register! :my.kb.runtime/body :string)`.)

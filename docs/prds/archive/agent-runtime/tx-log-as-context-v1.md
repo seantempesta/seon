@@ -512,7 +512,7 @@ Yes. `assemble-ai-context` is callable from agent code:
 ```clojure
 (seon.render/assemble-ai-context
   {:seon.db/db @conn :seon.agent/id "A-..."})
-;; => {:seon.render/text "..." :seon.render/entities [...]}
+⟹ {:seon.render/text "..." :seon.render/entities [...]}
 
 ```
 

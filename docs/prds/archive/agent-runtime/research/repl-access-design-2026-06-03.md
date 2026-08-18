@@ -154,7 +154,7 @@ is a function call:
 ```clojure
 ;; what clusters exist?
 (seon.server.session/list-sessions {})
-;; => {::session [{::db-name :cluster/alpha ::backend :file} ...]}
+⟹ {::session [{::db-name :cluster/alpha ::backend :file} ...]}
 
 ;; query cluster alpha's DB directly (read-only inspection)
 (let [{:keys [seon.server.session/conn]}

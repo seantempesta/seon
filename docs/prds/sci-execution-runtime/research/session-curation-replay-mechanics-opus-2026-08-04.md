@@ -67,9 +67,9 @@ with caller-provided sources and no bootstrap plan involved:
                                    [(run/open-tx  {…})
                                     (run/claim-tx {…})
                                     (run/plan-tx  {… :seon.cluster.run/sources sources})])}))
-;; => 19 datoms, no refusal
+⟹ 19 datoms, no refusal
 (work/next-agent-work @fc {:seon.cluster.agent/id "root" …})
-;; => {:seon.cluster.work/situation :resume
+⟹ {:seon.cluster.work/situation :resume
 ;;     :seon.cluster.run/id "curated:probe1"
 ;;     :seon.cluster.agent/id "root"
 ;;     :seon.cluster.run.form/ordinal 0}
@@ -176,7 +176,7 @@ the fork's own ctx substituted, driven through the ordinary public
 ```clojure
 (def fcl (assoc cl :seon.store/branch-connection fc :seon.sci.eval/ctx fctx))
 (cloop/turn {:seon.cluster.loop/cluster fcl :seon.cluster.work/next w} now)
-;; => {:seon.cluster.work/situation :resume
+⟹ {:seon.cluster.work/situation :resume
 ;;     :seon.cluster.loop/forms-run 2
 ;;     :seon.cluster.loop/outcome :released
 ;;     :seon.cluster.run/id "curated:probe1"}
@@ -215,7 +215,7 @@ compares the PULLED entity shape against the DESIRED row shape, so
 
 ```clojure
 (program/changed-attributes existing row)
-;; => [:seon.fn/ns :seon.fn/arities :seon.fn/ast]
+⟹ [:seon.fn/ns :seon.fn/arities :seon.fn/ast]
 ;; existing :seon.fn/ns => #:db{:id 13991}     desired => [:seon.ns/name my.agents.root]
 ```
 

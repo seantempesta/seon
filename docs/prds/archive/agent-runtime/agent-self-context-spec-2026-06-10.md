@@ -98,7 +98,7 @@ Substrate default sections migrate to the same signature in P5.
 ```clojure
 (seon.agent/add-section!
   {:seon.ctx/name :doctrine :seon.ctx/priority 15 :seon.render/ai "…"})
-;; => {:seon.agent/ok? true :seon.ctx/name :doctrine}     ; envelope, like todo
+⟹ {:seon.agent/ok? true :seon.ctx/name :doctrine}     ; envelope, like todo
 (seon.agent/remove-section! {:seon.ctx/name :doctrine})
 ```
 
