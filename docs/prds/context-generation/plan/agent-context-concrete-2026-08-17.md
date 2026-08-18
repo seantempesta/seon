@@ -42,7 +42,44 @@ algorithm.
 
 ---
 
-## 1 · A normal agent — `my.agents.k3f9`
+## 1 · A normal agent — `my.agents.k3f9` (AFFORDANCE OPENING, ruling 46)
+
+```clojure
+;; You are my.agents.k3f9. Purpose: graph sean's sleep data.
+;; Your namespace documents itself:
+my.agents.k3f9=> (dir 'my.agents.k3f9)
+(ns my.agents.k3f9 (:require [my.message] [my.run] [my.plan] [seon.db]))
+my.message/send [to content] → message      ; address another agent
+my.message/render-inbox [messages] → view   ; your inbox, newest first
+my.run/complete [reply] · my.run/wait []    ; every run ends with one
+my.plan/plan! [tree] → plan                 ; externalize intent
+seon.db/q · seon.db/pull · seon.db/refs-in  ; the database is yours
+  :seon.message/content [:string {:min 1}]  ; …and the schemas these
+  :seon.message/to      :seon.db/ref        ;    functions speak
+
+;; Your world, as commands you COULD run (nothing pre-pulled):
+my.agents.k3f9=> (help)
+inbound  :seon.message/_to (2, newest 15:04) →
+         (my.message/render-inbox (seon.db/refs-in db self :seon.message/to))
+outbound :seon.agent/run (open, turn 1) →
+         (my.run/render-run (seon.db/ref-out db self :seon.agent/run))
+own      :seon.agent/purpose "graph sean's sleep data"
+
+;; The message that opened this run:
+my.agents.k3f9=> (my.message/render-inbox
+                   (seon.db/refs-in db self :seon.message/to))
+2 messages, newest first (basis t 536871204)
+  [1] sean · 15:04 · "can you graph my sleep data? it's in
+      :acme.sleep/reading entities" · id "chat-3f9-1"
+  [2] root · 15:06 · "welcome — your namespace is yours" · id "welcome-3f9"
+```
+
+The opening volunteers: identity + purpose, the self-documenting
+namespace, the affordance list with live counts and newest-basis
+hints, and the ONE eagerly rendered group — the trigger. Everything
+else is a command shown, not content pulled. ~25 lines total.
+
+## 1b · The same agent, eager variant (pre-ruling-46, for comparison)
 
 ```clojure
 my.agents.k3f9=> (dir 'my.agents.k3f9)

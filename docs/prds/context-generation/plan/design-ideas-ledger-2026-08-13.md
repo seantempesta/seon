@@ -526,6 +526,25 @@ one decision away from queued work. Ruled items cite their record.
     flagged") — re-arming it is the acceptance criterion, filed as an
     issue.
 
+46. **The affordance opening — help shows the world in function terms**
+    (owner, 2026-08-17 night): the opening does NOT eagerly render
+    every group. `(help)` generates, per attribute group on/around the
+    agent (own, inbound, outbound), the CALL THE AGENT COULD RUN with
+    a one-line docstring — affordances, not content — so no context
+    the agent doesn't need is pulled in. Eagerly rendered: only the
+    situation header (identity + `:seon.agent/purpose`) and the
+    TRIGGER (the arrival that opened the run). The NAMESPACE entity's
+    default `/ai` face is dir-style self-teaching: every function with
+    its one-line doc and in/out schemas, plus the referenced schemas
+    explained — the namespace documents itself; root overrides with a
+    locally defined function (level 3), same as its page.
+    **`:seon.agent/purpose`** is a plain string attribute written at
+    creation (create arg or derived from the first message),
+    agent-updatable, rebirth-safe, rendered by the situation face —
+    one attribute, no mechanism. Staleness/arrival injection is
+    unchanged: new data still appends as its explicit query + rendered
+    result; affordances govern only what the OPENING volunteers.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
