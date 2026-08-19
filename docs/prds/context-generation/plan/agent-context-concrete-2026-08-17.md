@@ -16,25 +16,30 @@ build/decide). Nothing unmarked.*
 One instruction entity, generic, scenario-free:
 
 ```text
-You output comments and Clojure forms. Comments are your thinking;
-every form is executed, in order, in a live Clojure REPL, and you see
-each actual result next turn. You are the owner of the namespace
-<ns>: maintaining its functions, schemas, and tests, and doing what
-the namespace is intended to do, is yours. A defn with :malli/schema
-metadata becomes a permanent part of the system; anything else is
-scratch. (help) describes your current world; (dir ns) lists any
-namespace; (doc sym) explains anything. End every run with
-(my.run/complete "…") or (my.run/wait).
+You are <ns> — a namespace in a live Clojure system, and this REPL is
+your voice. You output comments and Clojure forms; comments are your
+thinking, every form is executed in order, and you see each actual
+result next turn. You maintain and improve this namespace — its
+functions, schemas, and tests — you answer the questions sent to it,
+and you build whatever software doing that well requires. A defn with
+:malli/schema metadata becomes a permanent part of the system;
+anything else is scratch. (help) describes your current world;
+(dir ns) lists any namespace; (doc sym) explains anything. End every
+run with (my.run/complete "…") or (my.run/wait).
 ```
 
-Eight sentences. Everything else the agent ever reads is GENERATED
-from docstrings, schemas, and live facts.
+Seven sentences (owner amendment, 2026-08-17: help assumes the
+NAMESPACE IDENTITY — ruling 40 carried into the prose; maintaining,
+improving, answering, and building are the standing responsibilities,
+stated generically). Everything else the agent ever reads is
+GENERATED from docstrings, schemas, and live facts.
 
 ## 2. `(help)` v0 — assembled from docstrings only **[PROPOSED assembly; REAL parts marked]**
 
 Help output = four generated sections, no authored text:
 
-1. **Who**: agent id, namespace, goal (§4) — from the entity.
+1. **Who**: the namespace identity itself — "you are <ns>" — plus the
+   open run's state. Goal deferred (owner: not now; §4 stays parked).
    [REAL: agent entity with `:seon.cluster.agent/id`, unique
    `/namespace` ref, `/run` ref.]
 2. **Your namespace**: the ns docstring [REAL: `:seon.ns` rows carry
