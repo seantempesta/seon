@@ -124,7 +124,8 @@
   {:seon.config.flow.compute/queue-depth 8
    :seon.config.flow.compute/concurrency 2
    :seon.config.flow.io/queue-depth 8
-   :seon.config.flow.io/concurrency 4})
+   :seon.config.flow.io/concurrency 4
+   :seon.config.agent/turn-completion-backstop-ms 60000})
 
 (deftest a-submission-delivers-exactly-its-own-environment
   (let [environments (mapv #(test-support/environment (str "launcher-" %))

@@ -42,64 +42,72 @@
                    {:seon.env/environment @test-environment})))))
 
 (deftest every-built-graph-proc-declares-a-specific-workload
-  (let [compute-executor (sut/bounded-platform-executor 1)
-        fault-channel (async/chan)
-        completion (async/promise-chan)]
-    (try
-      (let [graph-definitions
-            [[:work-launcher
-              ((private-var 'seon.flow 'work-launcher-graph-definition)
-               {:seon.env/environment @test-environment
-                ::sut/parallelism 1
-                ::sut/active-work (atom {})
-                ::sut/queue-depth 1
-                ::sut/compute-executor compute-executor
-                ::sut/task-executor compute-executor
-                ::sut/io-parallelism 1
-                ::sut/io-queue-depth 1
-                ::sut/io-submissions (atom {})
-                ::sut/proc-stopped (promise)})]
-             [:fault
-              ((private-var 'seon.flow 'fault-graph-definition)
-               {:seon.env/environment @test-environment
-                ::sut/fault-channel fault-channel
-                ::sut/completion completion
-                ::sut/read-core-error-mode (constantly :record)
-                ::sut/commit-fault! identity
-                ::sut/commit-drop! identity
-                ::sut/panic! identity})]
-             [:cluster
-              ;; the render proc joins the census automatically: it is
-              ;; built through `var-process`, which refuses `:mixed` at
-              ;; construction, and `describe` needs no live channels
-              ((private-var 'seon.cluster 'cluster-graph-definition)
-               {:seon.env/environment @test-environment} (atom {}) {})]
-             [:agent
-              (seon.cluster.agent/graph-definition
-               {:seon.cluster.loop/cluster
-                {:seon.env/environment @test-environment
-                 :seon.cluster.wake/channel
-                 (async/chan (async/sliding-buffer 1))}
-                :seon.cluster.agent/id "census"})]]
-            proc-facts
-            (into
-             []
-             (mapcat
-              (fn [[graph-name graph-definition]]
-                (map
-                 (fn [[pid {:keys [proc]}]]
-                   {::graph-name graph-name
-                    ::pid pid
-                    ::workload
-                    (:workload (flow.spi/describe proc))})
-                 (:procs graph-definition))))
-             graph-definitions)]
-        (is (seq proc-facts))
-        (is (= #{:io :compute} (set (map ::workload proc-facts))))
-        (is (every? #(contains? #{:io :compute} (::workload %))
-                    proc-facts)
-            (pr-str proc-facts)))
-      (finally
-        (async/close! fault-channel)
-        (async/close! completion)
-        (.shutdownNow ^ExecutorService compute-executor)))))
+  ;; the fault graph's io-exec wraps its work in the schema projection,
+  ;; so this census hands one over explicitly, like the production caller
+  (test-support/with-database
+    (fn [connection]
+      (let [environment (test-support/environment
+                         "seon.flow-configuration-test" connection)
+            projection (:seon.schema/projection environment)
+            compute-executor (sut/bounded-platform-executor 1)
+            fault-channel (async/chan)
+            completion (async/promise-chan)]
+        (try
+          (let [graph-definitions
+                [[:work-launcher
+                  ((private-var 'seon.flow 'work-launcher-graph-definition)
+                   {:seon.env/environment environment
+                    ::sut/parallelism 1
+                    ::sut/active-work (atom {})
+                    ::sut/queue-depth 1
+                    ::sut/compute-executor compute-executor
+                    ::sut/task-executor compute-executor
+                    ::sut/io-parallelism 1
+                    ::sut/io-queue-depth 1
+                    ::sut/io-submissions (atom {})
+                    ::sut/proc-stopped (promise)})]
+                 [:fault
+                  ((private-var 'seon.flow 'fault-graph-definition)
+                   {:seon.env/environment environment
+                    ::sut/fault-channel fault-channel
+                    ::sut/completion completion
+                    ::sut/read-core-error-mode (constantly :record)
+                    ::sut/commit-fault! identity
+                    ::sut/commit-drop! identity
+                    ::sut/panic! identity}
+                   projection)]
+                 [:cluster
+                  ;; the render proc joins the census automatically: it is
+                  ;; built through `var-process`, which refuses `:mixed` at
+                  ;; construction, and `describe` needs no live channels
+                  ((private-var 'seon.cluster 'cluster-graph-definition)
+                   {:seon.env/environment environment} (atom {}) {})]
+                 [:agent
+                  (seon.cluster.agent/graph-definition
+                   {:seon.cluster.loop/cluster
+                    {:seon.env/environment environment
+                     :seon.cluster.wake/channel
+                     (async/chan (async/sliding-buffer 1))}
+                    :seon.cluster.agent/id "census"})]]
+                proc-facts
+                (into
+                 []
+                 (mapcat
+                  (fn [[graph-name graph-definition]]
+                    (map
+                     (fn [[pid {:keys [proc]}]]
+                       {::graph-name graph-name
+                        ::pid pid
+                        ::workload
+                        (:workload (flow.spi/describe proc))})
+                     (:procs graph-definition))))
+                 graph-definitions)]
+            (is (seq proc-facts))
+            (is (= #{:io :compute} (set (map ::workload proc-facts))))
+            (is (every? #(contains? #{:io :compute} (::workload %))
+                        proc-facts)
+                (pr-str proc-facts)))
+          (finally
+            (async/close! fault-channel)
+            (async/close! completion)
+            (.shutdownNow ^ExecutorService compute-executor)))))))
