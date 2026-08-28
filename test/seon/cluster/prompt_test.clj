@@ -28,6 +28,7 @@
   {:seon.config.eval.result/max-depth 12
    :seon.config.eval.result/max-collection 64
    :seon.config.eval.result/max-string 4096
+   :seon.config.eval.result/max-source 65536
    :seon.config.eval.result/max-nodes 4096})
 
 (defn- planted
