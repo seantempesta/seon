@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, test, flow, config, wave/contract-gate]
 ---
@@ -53,3 +53,20 @@ before repairing individual expectations.
 Run the six tests together in one isolated `bin/test` invocation and observe
 zero failures and zero errors, then run `bin/test --platform` and observe the
 complete platform tier green so reachability gates can enter their bulk tier.
+
+## Resolution (2026-08-28)
+
+All six identities green together (21 tests, 227 assertions, 0/0) and
+`bin/test --platform` complete green. Three root causes, each with its
+class fix: (1) the work-launcher fixtures lacked the declared
+`:seon.config.agent/turn-completion-backstop-ms` (three env-test reds);
+(2) the workload census called `fault-graph-definition` without the
+projection production now hands over (one red); (3) two production
+defects — schema reconciliation re-transacted the wave-A reference
+graph on every reopen because convergence compared entity maps against
+lookup refs (`b97181f1a`), and a fresh task with no fire history read
+absence as overdue-since-epoch, firing the weekly store collection at
+first boot so the second cohosted start hit the reachability sweep
+(`d38e3e093`, with the class regression
+`a-nominal-predating-the-task-never-fires`). The cohost fixture also
+gained the declared `max-source` cap.
