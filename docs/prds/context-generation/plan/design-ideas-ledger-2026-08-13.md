@@ -545,6 +545,16 @@ one decision away from queued work. Ruled items cite their record.
     unchanged: new data still appends as its explicit query + rendered
     result; affordances govern only what the OPENING volunteers.
 
+    **Amendment (owner, 2026-08-28): `:seon.agent/purpose` DIES before
+    it is built.** Evergreen purpose lives in the NAMESPACE DOCSTRING —
+    already indexed, already rendered by the dir-style namespace face,
+    one home, no new attribute. The situation header renders identity
+    plus the ns docstring's first line. The episodic GOAL remains the
+    [v0 opening spec §4](agent-context-concrete-2026-08-17.md) decision
+    (root plan item recommended, still open). This resolves the
+    conflict between this ruling as first written and the later v0
+    spec, in the v0 spec's favor.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced

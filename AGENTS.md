@@ -425,7 +425,7 @@ writing.
 | `(sliding-buffer 1)` tap | core.async's own newest-only delivery | latest-wins mailbox |
 | tuple (`:db/tupleType`) | Datahike's single-value ordered construct; cardinality-many is a SET (`reference-code/datahike/src/datahike/index/persistent_set.cljc`) | small limited vector |
 | `my.agents.<id>` | the DEFAULT namespace for a temp agent only; real agents own namespaces anywhere; a namespace has at most one assigned agent | agent workspace, sandbox ns |
-| render function; `:seon.render/form` | an ordinary function a render schema property names; `/form` is the third declared projection beside `/ai` and `/html` (`resources/seon/schemas/seon.render.edn` ↔ `src/seon/render.clj`) | producer, view, read form |
+| render function | an ordinary function a render schema property names; the two authored projections are `/ai` and `/html` (`resources/seon/schemas/seon.render.edn` ↔ `src/seon/render.clj`). **[TARGET]** ruling 44 (context-generation ledger): `:seon.render/form` leaves the grammar — forms are CONSTRUCTED from provenance/contracts/floor, never authored; the attribute still exists at HEAD until its wave lands | producer, view, read form, `/form` face |
 | `:seon.render/ai` | the string consumed by agent context, or the symbol naming its function | prose, text render |
 | `:seon.render/html` | the Hiccup consumed by the web UI, or the symbol naming its function (`src/seon/render/hiccup.clj`) | hiccup contract |
 | identity-only admission | a registered reference predicate names `:seon.schema/identity-only` plus a qualified projection; admission retains only that identity at every depth (`resources/seon/schemas/seon.db.edn` ↔ `src/seon/sci/admit.clj`) | object serialization |

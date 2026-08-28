@@ -21,13 +21,18 @@ carries session state until this program grows its own).
 
 ## Reading order for a fresh session
 
-1. **[The one-renderer PRD](plan/context-generation-prd-2026-08-17.md)** —
-   THE document: the eight-stage pipeline, the failure policy (panic
-   hard in dev; production never crashes — designed human cards, flat
-   error data for agents, three faces one fact), the verified rip-out
-   register, the archaeology revivals, the generative property suite,
-   the wave plan, and the owner's three open questions. STATUS: draft,
-   awaiting the owner's markup. No wave starts before it.
+1. **[The unified PRD](plan/context-generation-prd-2026-08-17.md)** —
+   THE document (ruling 42a: it REPLACED the one-renderer and
+   runtime-first PRDs; both live in git history): the five stages, the
+   mechanics register, the failure policy, the rip-out register, the
+   revivals, the property suite, the wave plan, and §11's open owner
+   decisions. STATUS: wave A landed; §11 markup still owed; no wave
+   beyond A starts before it (42d: verified background graph work
+   proceeds). Then the v0 concretization trio:
+   [the minimal opening spec](plan/agent-context-concrete-2026-08-17.md),
+   [the measured pipeline](plan/context-pipeline-detailed-2026-08-17.md)
+   (companion: [ideal](plan/context-pipeline-ideal-2026-08-17.md)), and
+   [the messaging loop](plan/messaging-flow-2026-08-17.md).
 2. **[Where we fucked up](#where-we-fucked-up)** — below. Read it so
    you do not repeat it.
 3. The evidence, as needed per PRD section:
@@ -68,7 +73,10 @@ carries session state until this program grows its own).
 
 ## The plan documents
 
-- [one-renderer-prd-2026-08-14.md](plan/context-generation-prd-2026-08-17.md) — active, awaiting markup
+- [context-generation-prd-2026-08-17.md](plan/context-generation-prd-2026-08-17.md) — THE unified program document (ruling 42a); §11 awaiting markup
+- [agent-context-concrete-2026-08-17.md](plan/agent-context-concrete-2026-08-17.md) — the v0 minimal opening, gated on the platform-tier repair
+- [context-pipeline-detailed-2026-08-17.md](plan/context-pipeline-detailed-2026-08-17.md) + [ideal](plan/context-pipeline-ideal-2026-08-17.md) — the measured pipeline
+- [messaging-flow-2026-08-17.md](plan/messaging-flow-2026-08-17.md) — one message, birth to the model's eyes
 - [live-drive-spec-2026-08-13.md](plan/live-drive-spec-2026-08-13.md) — the drive series (drives are the measurement instrument; drive 1 attempts 1-5 complete)
 - [plan-context-prd-2026-08-13.md](plan/plan-context-prd-2026-08-13.md) — my.plan + intent membership (T1-T3 LANDED)
 - [design-ideas-ledger-2026-08-13.md](plan/design-ideas-ledger-2026-08-13.md) — every idea with status; rulings 17-32
@@ -117,7 +125,30 @@ quality is a REPL query); read the named authority END TO END before
 designing; producers/functions hand back whole values; one file, one
 lane; no wave starts before the owner marks up the PRD.
 
-## Current state (2026-08-14, session end)
+## Current state (2026-08-28, session start)
+
+- **Rulings through 46 sealed** in the
+  [ledger](plan/design-ideas-ledger-2026-08-13.md): 42 (unified PRD +
+  core-var rows + unskippable receipt stamp + background-start gate),
+  43 (one name per attribute; readers offer faces; no magic; no
+  hardcoded openings), 44 (`/form` dies; forms constructed), 45
+  (comment-shaped results banned everywhere; 300+ instances swept),
+  46 (the affordance opening; amended 2026-08-28 — purpose lives in
+  the ns docstring, `:seon.agent/purpose` unbuilt and dead).
+- **Wave A landed** on the 2026-08-17 reset system: core-call edges
+  (`4b4d73517`), the persisted schema reference graph (`b7761e931`),
+  the receipt tx-stamp (`e23b8105a`).
+- **BLOCKER: the platform tier is red** (six tests;
+  [issue](../../seon/issues/restore-the-platform-tier-before-further-integration-gates.md));
+  the v0 live test and every reachability gate wait on it.
+- Uncommitted 2026-08-14 residue in the tree (prompt-tail
+  reply-medium reminder, web.clj transcript view, CSS, tests) is
+  under review-to-land; the tmp/ exhaust deletions ride with it.
+- §11 owner markup still owed: session family + supersedes (O-5),
+  regeneration cadence (O-1), error liveness (O-2), drive-2
+  sequencing (O-10), the name for one walked piece.
+
+## Previous state (2026-08-14, session end)
 
 - Landed this cycle: `/data` 500 fixed; CSS hiding removed; 67→12
   placeholders; boilerplate → identity references; SCI pair fix; the
