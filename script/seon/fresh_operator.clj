@@ -2749,6 +2749,9 @@
               (reconcile-process-records! root)))
     (fail! "Recorded JVMs remain after forced down; reset refused."
            {:seon.fresh-operator/root root}))
+  (let [reclaimed (operator.state/reclaim-invalid-claims! (repository-root))]
+    (when (pos? (long reclaimed))
+      (println (str "● reclaimed " reclaimed " invalid external claims"))))
   ;; The old store may be impossible to open because its persisted creation
   ;; config predates the current one. The operations owner therefore performs
   ;; unconditional no-follow deletion without opening Datahike. Exact process

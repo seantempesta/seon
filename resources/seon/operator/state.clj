@@ -888,6 +888,25 @@
    (fs/path (control-root repository-root) "claims" "roots")
    root-claim?))
 
+(defn reclaim-invalid-claims!
+  "Delete every invalid external claim record and return how many.
+
+  Invalid means the census could not use it: the record is unreadable
+  or fails validation (malformed), or it names a root that no longer
+  exists on disk (orphaned). Every valid claim survives untouched.
+  This is the reclamation `bin/seon status` advertises for its invalid
+  external claims counter; `reset --force` runs it."
+  [repository-root]
+  (with-control-lock*
+    repository-root
+    "reclaim invalid external claims"
+    #(let [errors (into (:errors (root-claims repository-root))
+                        (:errors (process-claims repository-root)))]
+       (doseq [{path :seon.operator.claim/path} errors]
+         (when path
+           (fs/delete-if-exists (fs/path path))))
+       (count errors))))
+
 (defn read-advertisement
   "Read one cluster advertisement as ordinary data when valid EDN exists."
   [managed-root cluster-name]
