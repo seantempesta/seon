@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, prompt, render, test, wave/live-drive-context]
 ---
@@ -35,3 +35,13 @@ fix for a stale expectation is the expectation.
 
 `bin/test seon.cluster.prompt-test` green on a clean tree, with any
 behavior change named against its ruling.
+
+## Resolution (2026-08-28)
+
+Root cause: the fixture class, not production — clip-ripout's required
+`:seon.config.eval.result/max-source` was missing from the prompt-test
+caps map (the earlier three-vs-seven attribution was an artifact of a
+truncated log; the clean tree failed seven, all this class). One line
+added; `bin/test seon.cluster.prompt-test` fully green. Other test
+files still carry caps maps without `max-source`; they cross no
+validated boundary today and light up loudly if one ever does.

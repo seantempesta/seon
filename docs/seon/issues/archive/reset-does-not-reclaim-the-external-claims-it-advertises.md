@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, operator, directory-claims, wave/directory-claims]
 ---
@@ -29,3 +29,11 @@ the real remedy.
 
 After a `bin/seon reset --force` on a root whose status reports
 invalid external claims, the next `bin/seon status` reports zero.
+
+## Resolution (2026-08-28)
+
+`seon.operator.state/reclaim-invalid-claims!` deletes unreadable and
+absent-root claim records (root and process registries) under the
+control lock; `reset --force` now runs it before cleanup. Verified
+live: `reclaimed 8 invalid external claims`, and the next status
+prints no invalid-claims line.

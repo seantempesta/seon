@@ -16,11 +16,10 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (47)
+## Blocker (46)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [Call edges to first-party macros reference unpublished rows](call-edges-to-first-party-macros-reference-unpublished-rows.md) | blocker | program-graph indexing wave |
 | [Repair init: indexed test reaches script-side markdown](init-red-indexed-test-reaches-script-side-markdown.md) | blocker | platform-tier repair (this session, orchestrator) |
 | [Elide fenced projected forms atomically at the print owner](fit-splits-fenced-projected-forms-by-character.md) | blocker | clip-ripout lane |
 | [Attribute and bound the store's one-day 69 GB growth](store-grew-to-69-gigabytes-in-one-day-of-lanes.md) | blocker | exclusive sweep implementation wave |
@@ -68,12 +67,10 @@ See `README.md` for the convention.
 | [Answer no-forms replies with correction or re-wake](no-forms-replies-close-without-correction-or-rewake.md) | blocker | OWNER DESIGN GATE (correction vs re-wake) |
 | [Bound orderly-stop completion joins](orderly-stop-completion-joins-have-no-bound.md) | blocker | wedge class-kill continuation |
 
-## Friction (137)
+## Friction (135)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [Reset does not reclaim the external claims it advertises](reset-does-not-reclaim-the-external-claims-it-advertises.md) | friction | directory-claims wave |
-| [Three prompt regressions are red on a clean tree](three-prompt-regressions-red-on-a-clean-tree.md) | friction | live-drive context repair wave |
 | [Rearm the docstring comment-result guard](rearm-the-docstring-comment-result-guard.md) | friction | ruling-45 sweep follow-up (dev-tooling-face-hygiene wave) |
 | [Fix edit-hook kondo false positives on seon.db dynamic vars](edit-hook-kondo-false-positives-on-seon-db-dynamic-vars.md) | friction | dev-tooling-face-hygiene wave |
 | [Accept cluster-ctx delegating arities under instrumentation](cluster-ctx-delegating-arities-refused-under-instrumentation.md) | friction | sci-eval-context-owner wave |

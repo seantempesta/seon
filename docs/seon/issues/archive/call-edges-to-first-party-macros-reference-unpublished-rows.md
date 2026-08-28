@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, program-graph, indexing, wave/program-graph-indexing]
 ---
@@ -45,3 +45,16 @@ absence-as-health class.
 A cohost-boot (or any fresh-cluster) run logs zero
 `:datahike/write-rejected` events for `:seon.fn/sym` lookup refs, and a
 regression proves a call edge to a first-party macro lands as a fact.
+
+## Resolution (2026-08-28)
+
+Root cause was wider than macros: ANY run-form call target without a
+program row — first-party macro, unindexed core var — was settled as a
+lookup ref, which resolves against the before-db and rejected the
+whole settlement transaction. `seon.fn/analyze-form` now rewrites
+missing targets to string tempids resolved by ruling-42b name-only
+companion rows riding the same transaction (`portable-calls`); the
+class regression
+`seon.cluster.run-test/settlement-mints-rows-for-unindexed-call-targets`
+proves the settlement commits, the row is minted, and the call edge
+lands. Cohost boot re-verified with zero writer rejections.
