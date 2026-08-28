@@ -494,6 +494,66 @@
                      [?namespace :seon.ns/name ?namespace-name]]
                    @connection))))))
 
+(deftest settlement-mints-rows-for-unindexed-call-targets
+  ;; The class this kills: a run form may call any callable var — a
+  ;; first-party macro (seon.bootstrap/help has no indexed row), a core
+  ;; function no source form ever used — and its call edges settle as
+  ;; [:seon.fn/sym target] lookup refs. A ref to a missing row rejected
+  ;; the WHOLE settlement transaction, silently losing every fact on it.
+  ;; Settlement now mints the ruling-42b name-only row in the same
+  ;; transaction, so the edge lands and the settlement commits.
+  (test-support/with-database
+    (fn [connection]
+      (db/transact!
+       connection
+       [{:seon.ns/name 'my.macro-caller}
+        {:seon.cluster.agent/id "macro-caller"
+         :seon.cluster.agent/namespace [:seon.ns/name 'my.macro-caller]}])
+      (db/transact!
+       connection
+       (run/system-run-tx
+        @connection
+        {:seon.cluster.agent/id "macro-caller"
+         ::run/id "macro-call-run"
+         ::run/process "macro-call-process"
+         ::run/opened-at t0
+         ::run/starting-ns [:seon.ns/name 'my.macro-caller]
+         ::run/plan-digest "macro-call-digest"
+         ::run/sources
+         [{:seon.cluster.run.form/source "(seon.bootstrap/help)"}]}))
+      (db/transact!
+       connection
+       (run/receipt-start-tx
+        {::run/id "macro-call-run"
+         :seon.cluster.eval/ordinal 0
+         :seon.cluster.eval/at t0}))
+      (is (nil? (:db/id (db/pull @connection [:db/id]
+                                 [:seon.fn/sym "seon.bootstrap/help"])))
+          "the macro has no program row before settlement — non-vacuous")
+      (let [result
+            (db/transact!
+             connection
+             (run/receipt-settle-tx
+              @connection
+              {::run/id "macro-call-run"
+               :seon.cluster.eval/ordinal 0
+               :seon.cluster.eval/result-edn "nil"}))]
+        (is (not (:seon.error/kind result))
+            "the settlement transaction commits"))
+      (let [row (db/pull @connection
+                         [:db/id {:seon.fn/ns [:seon.ns/name]}]
+                         [:seon.fn/sym "seon.bootstrap/help"])]
+        (is (:db/id row)
+            "the name-only row was minted in the settling transaction")
+        (is (= 'seon.bootstrap (get-in row [:seon.fn/ns :seon.ns/name]))))
+      (let [form (db/pull @connection
+                          [{:seon.fn/calls [:seon.fn/sym]}]
+                          [:seon.cluster.run.form/id
+                           (run/form-identity "macro-call-run" 0)])]
+        (is (some #(= "seon.bootstrap/help" (:seon.fn/sym %))
+                  (:seon.fn/calls form))
+            "the call edge to the macro landed as a fact")))))
+
 (deftest refreshes-only-terminal-system-reads-once
   (test-support/with-database
     (fn [connection]

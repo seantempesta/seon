@@ -1076,7 +1076,7 @@
 (defn- analyze-settlement
   [database request]
   (if-let [form (settlement-form database request)]
-    (let [[form-facts program-row]
+    (let [[form-facts program-row companion-rows]
           (seon.fn/analyze-form
            database
            (:seon.cluster.run.form/source form)
@@ -1090,6 +1090,7 @@
                        (not subject-present?) (dissoc :seon.test/subject))]
       (cond-> (assoc request ::form-facts
                      (assoc form-facts :db/id (:db/id form)))
+        (seq companion-rows) (assoc ::companion-rows companion-rows)
         program-row (assoc :seon.program/row program-row)))
     request))
 
@@ -1113,8 +1114,14 @@
                 (not (contains? request :seon.cluster.eval/result-size)))
            (assoc :seon.cluster.eval/result-size
                   (long (count (:seon.cluster.eval/result-edn request))))
-           database (->> (analyze-settlement database)))]
-     [[:db.fn/call #'receipt-settle-call request]])))
+           database (->> (analyze-settlement database)))
+         companion-rows (::companion-rows request)]
+     ;; companion rows ride the SAME transaction so the form facts'
+     ;; call-edge lookup refs resolve by upsert instead of rejecting
+     ;; the whole settlement (first-party macros, unindexed core vars)
+     (into [[:db.fn/call #'receipt-settle-call
+             (dissoc request ::companion-rows)]]
+           companion-rows))))
 
 (defn- affected-schema-attributes
   "Database attributes derived by the affected schema forms."
