@@ -16,10 +16,11 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (46)
+## Blocker (47)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Bulk tier: the coordinator wedges on a worker that never answers](bulk-tier-coordinator-wedges-on-a-worker-that-never-answers.md) | blocker | parallel-stress triage (next session, first item after S1) |
 | [Repair init: indexed test reaches script-side markdown](init-red-indexed-test-reaches-script-side-markdown.md) | blocker | platform-tier repair (this session, orchestrator) |
 | [Elide fenced projected forms atomically at the print owner](fit-splits-fenced-projected-forms-by-character.md) | blocker | clip-ripout lane |
 | [Attribute and bound the store's one-day 69 GB growth](store-grew-to-69-gigabytes-in-one-day-of-lanes.md) | blocker | exclusive sweep implementation wave |
