@@ -91,3 +91,15 @@ bloated store names the writer.
   are not treated as family evidence.
 - The recurring sweep provably bounds the shared root's store across a day
   of lane work, or the writer's amplification is fixed at cause.
+
+### Post-reset regrowth data point — 2026-08-28 session start
+
+The 2026-08-17 full reset brought the shared root to 0.27 GiB. At the
+2026-08-28 session start, with zero clusters alive since, `data/store`
+held 5,232 `.ksv` files totaling 9.6 GiB — the largest single blobs
+158–184 MB each — a ~36× regrowth produced by one session of wave-A
+work (init republish plus core-call-edge and schema-reference-graph
+indexing). The class therefore reproduces without lanes and without a
+long-lived live cluster; publication/indexing write amplification alone
+accounts for order-of-magnitude regrowth. Store reset again this
+session after this census.
