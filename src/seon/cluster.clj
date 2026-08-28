@@ -835,16 +835,54 @@
       (map (fn [process-id] {:seon.db.process/id process-id})))
      [boot-process-identity config/managing-process-identity])))
 
+(defn- schema-lookup-ref?
+  [value]
+  (and (vector? value)
+       (= 2 (count value))
+       (= :seon.schema/key (first value))))
+
+(defn- schema-reference-valued?
+  [value]
+  (or (schema-lookup-ref? value)
+      (and (set? value) (seq value) (every? schema-lookup-ref? value))))
+
+(defn- as-schema-lookup-refs
+  "Normalize a pulled ref value into the canonical lookup-ref shape.
+
+  Canonical rows reference other schema rows as `[:seon.schema/key k]`
+  lookup refs; a pull returns those refs as entity maps (one map or a
+  collection of them). Convergence compares in the canonical shape, so
+  an already-installed reference graph reads as equal instead of
+  re-transacting on every reopen."
+  [value]
+  (cond
+    (map? value) [:seon.schema/key (:seon.schema/key value)]
+    (coll? value) (into #{} (map as-schema-lookup-refs) value)
+    :else value))
+
 (defn- schema-row-changes
   [db forms]
   (into
    []
    (keep
     (fn [{schema-key :seon.schema/key :as desired}]
-      (let [current
-            (some-> (db/pull db (vec (keys desired))
-                            [:seon.schema/key schema-key])
-                    (dissoc :db/id))]
+      (let [selector (mapv (fn [[attribute value]]
+                             (if (schema-reference-valued? value)
+                               {attribute [:seon.schema/key]}
+                               attribute))
+                           desired)
+            pulled (some-> (db/pull db selector
+                                    [:seon.schema/key schema-key])
+                           (dissoc :db/id))
+            current
+            (when pulled
+              (into {}
+                    (map (fn [[attribute value]]
+                           (if (schema-reference-valued?
+                                (get desired attribute))
+                             [attribute (as-schema-lookup-refs value)]
+                             [attribute value])))
+                    pulled))]
         (when-not (= desired (select-keys current (keys desired)))
           desired))))
    (schema/canonical-schema-rows forms)))
