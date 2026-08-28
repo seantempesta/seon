@@ -214,6 +214,26 @@
                :seon.schedule/zone-id zone-id}))
        (sort-by :seon.schedule.task/id)))
 
+(defn- task-created-at
+  "The transaction instant that asserted the task's identity.
+
+  A task with no fire history measures dueness from its own creation:
+  a nominal instant that predates the task never fires. Without this
+  floor a fresh cluster's first boot fired every seeded portfolio task
+  at once — including the weekly store collection, whose reachability
+  sweep then refused any concurrent cluster start on the same store."
+  ^Date [database task-eid]
+  (or (db/q '[:find ?instant .
+              :in $ ?task
+              :where
+              [?task :seon.schedule.task/id _ ?tx]
+              [?tx :db/txInstant ?instant]]
+            database task-eid)
+      (throw (ex-info "The task has no creation transaction instant."
+                      {:seon.error/kind ::task-without-creation-instant
+                       :db/id task-eid
+                       :seon.schedule/task-without-creation-instant true}))))
+
 (defn- latest-fire-at
   [database task-eid]
   (->> (db/q '[:find [?nominal ...]
@@ -585,7 +605,10 @@
              :seon.schedule/zone-id (:seon.schedule/zone-id task)
              :seon.schedule/reference-at observed-at})]
        (if (and nominal
-                (or (nil? last-fire) (.after ^Date nominal ^Date last-fire)))
+                (if last-fire
+                  (.after ^Date nominal ^Date last-fire)
+                  (.after ^Date nominal
+                          (task-created-at database (:db/id task)))))
          (let [task-id (:seon.schedule.task/id task)
                claimed-fire-id (nominal-fire-id task-id nominal)
                request

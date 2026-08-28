@@ -13,6 +13,15 @@
   [text]
   (Date/from (Instant/parse text)))
 
+(defn- observed-after-seed
+  "An observation two whole minutes ahead of now.
+
+  The seeded every-minute expression then has a latest nominal that is
+  a minute boundary strictly after the seeding transaction, so dueness
+  measured from task creation fires exactly once."
+  []
+  (Date. (+ (System/currentTimeMillis) 120000)))
+
 (def ^:private handler-calls (atom []))
 
 (defn successful-handler
@@ -113,7 +122,7 @@
       (reset! handler-calls [])
       (seed-task! connection "schedule-test/success"
                   "seon.schedule-test/successful-handler")
-      (let [observed-at (instant "2025-04-05T12:34:45Z")]
+      (let [observed-at (observed-after-seed)]
         (is (= 1 (schedule/fire-due! connection "root" observed-at
                                      (execution-context))))
         (is (= 0 (schedule/fire-due! connection "root" observed-at
@@ -134,6 +143,24 @@
                        :seon.schedule.fire/nominal-at
                        :seon.schedule.fire/observed-at)
                (dissoc (execution-context) :seon.cluster.loop/cluster)))))))
+
+(deftest a-nominal-predating-the-task-never-fires
+  ;; The class this kills: a fresh task has no fire history, and reading
+  ;; that absence as "overdue since the epoch" fired every seeded
+  ;; portfolio task at first boot — including the weekly store
+  ;; collection, whose reachability sweep refused a concurrent cluster
+  ;; start on the same store (the cohost regression's red).
+  (test-support/with-database
+    (fn [connection]
+      (reset! handler-calls [])
+      (seed-task! connection "schedule-test/preexisting-nominal"
+                  "seon.schedule-test/successful-handler")
+      (is (= 0 (schedule/fire-due! connection "root"
+                                   (instant "2025-04-05T12:34:45Z")
+                                   (execution-context)))
+          "an observation before the task's creation finds nothing due")
+      (is (empty? @handler-calls))
+      (is (= 0 (count-with @connection :seon.schedule.fire/id))))))
 
 (deftest restart-marks-a-claimed-receipt-interrupted-without-reexecution
   (test-support/with-database
@@ -177,7 +204,7 @@
           (reset! handler-calls [])
           (seed-task! connection task-id handler)
           (is (= 1 (schedule/fire-due!
-                    connection "root" (instant "2025-04-05T12:34:45Z")
+                    connection "root" (observed-after-seed)
                     (execution-context))))
           (is (= 1 (count @handler-calls)))
           (is (= 1 (count-with @connection :seon.maintenance.receipt/id)))
