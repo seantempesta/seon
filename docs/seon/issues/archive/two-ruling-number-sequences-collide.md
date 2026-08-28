@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, docs, plan]
 ---
@@ -30,3 +30,12 @@ sweep existing bare citations in the two plan trees and AGENTS.md.
 
 A stated convention in both plan READMEs; no remaining bare cross-
 sequence citation that a reader could bind to the wrong ledger.
+
+## Resolution (2026-08-28, owner convention)
+
+Bare "ruling N" means the context-generation ledger; the
+sci-execution-runtime sequence is cited as "R<N> (runtime)"
+everywhere outside its own directory. The convention is stated at the
+top of both authorities; living documents (AGENTS.md, the ledger, the
+active PRDs) were swept; dated research records are exempt as
+point-in-time history.

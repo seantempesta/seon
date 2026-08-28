@@ -6,12 +6,12 @@ tags: [prd, agent, context, data-model]
 
 # The plan: resurrected mechanics, context-integrated
 
-(Owner ruling 2026-08-13: the one task noun is **my.plan** — ruling 49's
+(Owner ruling 2026-08-13: the one task noun is **my.plan** — R49 (runtime)'s
 semantics unchanged, its noun amended; the colliding run-internal
 `plan-tx`/`plan-digest` spellings rename to `sources-*` in R2.)
 
 Owner-directed 2026-08-13: resurrect the proven `my.plan` lineage mechanisms
-in fact-first form under ruling 49's frame, and make the plan a first-class
+in fact-first form under R49 (runtime)'s frame, and make the plan a first-class
 citizen of the generated-context system. This supersedes the implementation
 PRD's thinner Phase 5 sketch
 ([evolving-session-implementation-2026-08-12.md](evolving-session-implementation-2026-08-12.md));

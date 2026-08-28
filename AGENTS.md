@@ -401,7 +401,7 @@ writing.
 | attributes + connections | the Datahike model | entity kind/type |
 | build, operator, artifact | the `bin/seon`/`bin/acme` supervisor scope; the digested publication output | flavor |
 | get-in, path | paged navigation into a nested value | drill |
-| `my.plan`, "the plan" | the ONE task system: derived obligations plus authored item facts with `:about` subject refs joining opening membership through the beyond-closure budget (ruling 49 as amended 2026-08-13; [PRD](docs/prds/context-generation/plan/plan-context-prd-2026-08-13.md); `resources/seon/schemas/my.plan.edn` ↔ `src/my/plan.clj`, membership in `src/seon/render/walk.clj`). The run-internal `plan-tx`/`plan-digest` spellings still rename to `sources-*` in R2 | todo, bare "plan" for run sources |
+| `my.plan`, "the plan" | the ONE task system: derived obligations plus authored item facts with `:about` subject refs joining opening membership through the beyond-closure budget (R49 (runtime) as amended 2026-08-13; [PRD](docs/prds/context-generation/plan/plan-context-prd-2026-08-13.md); `resources/seon/schemas/my.plan.edn` ↔ `src/my/plan.clj`, membership in `src/seon/render/walk.clj`). The run-internal `plan-tx`/`plan-digest` spellings still rename to `sources-*` in R2 | todo, bare "plan" for run sources |
 | provider descriptor row | one hosted provider's data row under the config singleton | adapter, integration |
 | packages/, package.json, deps.edn | each ecosystem's own manifest names | npm-pkgs, maven-pkgs |
 | contexts on hosts, binding tables | sci's own vocabulary for agent execution | sandbox, VM, jail |

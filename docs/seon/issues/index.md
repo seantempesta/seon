@@ -206,11 +206,10 @@ See `README.md` for the convention.
 | [Reconcile the error-class catalog with declared schemas and renderers](error-class-catalog-and-renderers-disagree.md) | friction | error class contract repair |
 | [Generate only action-demanded opening candidates](opening-generator-pushes-undemanded-candidates.md) | friction | prefix-drift demand-first generation design (held `bootstrap.clj`) |
 
-## Cleanup (16)
+## Cleanup (15)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [Disambiguate the two ruling-number sequences](two-ruling-number-sequences-collide.md) | cleanup | docs-honesty wave |
 | [Unify :seon.db/database-value into :seon.db/db](database-value-shape-name-duplicates-the-db-key.md) | cleanup | post-gate rename wave (with kind migration) |
 | [Reject readerless rows and duplicate mechanisms at publication](class-readerless-duplicate-mechanisms-survive-cuts.md) | cleanup | class-kill queue |
 | [Derive callable shape documentation from executable contracts](class-documentation-restates-executable-contracts.md) | cleanup | class-kill queue |

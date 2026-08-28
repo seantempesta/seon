@@ -9,6 +9,13 @@ Terminology: the process holding a run is `:seon.cluster.run/process`
 an earlier note here claimed an `:seon.agent.run/process` rename that never
 landed — verified against HEAD 2026-08-13.
 
+**Ruling-number convention (owner, 2026-08-28):** this file's ruling
+sequence is cited everywhere OUTSIDE this directory as "R\<N\>
+(runtime)". A bare "ruling N" in the context-generation program means
+that program's [design ideas
+ledger](../../context-generation/plan/design-ideas-ledger-2026-08-13.md)
+— the sequences overlap numerically.
+
 # Seon runtime — the plan
 
 **You are in the right place. Read these four files, in this order, and nothing

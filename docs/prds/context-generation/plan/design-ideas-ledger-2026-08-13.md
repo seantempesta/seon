@@ -10,9 +10,14 @@ Every design idea that surfaced in the owner session, with its status.
 AWAITING-OWNER rows are the ones he may not have responded to yet — each is
 one decision away from queued work. Ruled items cite their record.
 
+**Ruling-number convention (owner, 2026-08-28):** a bare "ruling N"
+means THIS ledger's sequence. The sci-execution-runtime sequence is
+always cited as "R\<N\> (runtime)" — the two sequences overlap
+numerically and a bare cross-citation is a defect to fix on sight.
+
 ## Ruled today (no response needed)
 
-1. **my.plan is the one task noun** — semantics of ruling 49 unchanged
+1. **my.plan is the one task noun** — semantics of R49 (runtime) unchanged
    ([ruling batch](README.md#rulings-2026-08-13-owner) #1).
 2. **T3 intent-directed membership** — ready items' `:about` refs join
    pull membership through the existing beyond-closure budget; refless
@@ -32,7 +37,7 @@ one decision away from queued work. Ruled items cite their record.
    AGENTS.md ideas become instruction entities with program-graph subject
    refs and declared renders; the file becomes a render-equality
    artifact; lessons reach agents through the walk (teach-on-miss) and
-   self-fade via ruling 46.
+   self-fade via R46 (runtime).
 6. **The five laws' demonstrations as suite-gated usage tests** — part of
    the instruction-facts PRD.
 7. **Class-issue member lists become tag queries** — replace each class
@@ -212,7 +217,7 @@ one decision away from queued work. Ruled items cite their record.
     it helps), and REBIRTH structurally cleans mistakes on compaction —
     regeneration derives from current facts, so a failed form that left
     no durable fact simply does not appear in the reborn opening
-    (authorship fence + ruling 46 self-fade + supersedes edges). What
+    (authorship fence + R46 (runtime) self-fade + supersedes edges). What
     we know about a mistake is queryable (the form, its error receipt,
     whether anything superseded it), and the compaction form that
     cleans it is the one we already run: generate(current facts, empty
@@ -561,4 +566,4 @@ one decision away from queued work. Ruled items cite their record.
     options owed to the owner before any edit.
 16. **Effectful re-execution tag** (`idempotent-read`) — pre-approved
     design, lands only with its never-lie falsifier when a capability
-    leaf first declares it (ruling 50).
+    leaf first declares it (R50, runtime).
