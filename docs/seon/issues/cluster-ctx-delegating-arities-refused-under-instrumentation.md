@@ -1,8 +1,8 @@
 ---
-type: defect
+type: issue
 status: open
 severity: friction
-tags: [sci, instrument, repl]
+tags: [issue, sci, instrument, repl]
 ---
 
 # cluster-ctx's 1- and 2-arities are uncallable under instrumentation

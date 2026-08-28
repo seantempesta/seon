@@ -16,10 +16,12 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (45)
+## Blocker (47)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Restore the platform tier before further integration gates](restore-the-platform-tier-before-further-integration-gates.md) | blocker | platform-tier repair (this session, orchestrator) |
+| [Repair init: indexed test reaches script-side markdown](init-red-indexed-test-reaches-script-side-markdown.md) | blocker | platform-tier repair (this session, orchestrator) |
 | [Elide fenced projected forms atomically at the print owner](fit-splits-fenced-projected-forms-by-character.md) | blocker | clip-ripout lane |
 | [Attribute and bound the store's one-day 69 GB growth](store-grew-to-69-gigabytes-in-one-day-of-lanes.md) | blocker | exclusive sweep implementation wave |
 | [Carry the agent-scoped environment into generated turn forks](generated-turn-fork-omits-the-agent-scoped-environment.md) | blocker | evolving-session implementation phases |
@@ -66,10 +68,14 @@ See `README.md` for the convention.
 | [Answer no-forms replies with correction or re-wake](no-forms-replies-close-without-correction-or-rewake.md) | blocker | OWNER DESIGN GATE (correction vs re-wake) |
 | [Bound orderly-stop completion joins](orderly-stop-completion-joins-have-no-bound.md) | blocker | wedge class-kill continuation |
 
-## Friction (131)
+## Friction (135)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Rearm the docstring comment-result guard](rearm-the-docstring-comment-result-guard.md) | friction | ruling-45 sweep follow-up (dev-tooling-face-hygiene wave) |
+| [Fix edit-hook kondo false positives on seon.db dynamic vars](edit-hook-kondo-false-positives-on-seon-db-dynamic-vars.md) | friction | dev-tooling-face-hygiene wave |
+| [Accept cluster-ctx delegating arities under instrumentation](cluster-ctx-delegating-arities-refused-under-instrumentation.md) | friction | sci-eval-context-owner wave |
+| [Project effective config in the MCP health probe](mcp-health-probe-lacks-projection-for-effective-config.md) | friction | dev-mcp wave |
 | [Render db diffs through fit with an html producer](db-diff-render-bypasses-print-fit-and-has-no-html.md) | friction | db-diff completion gate |
 | [Add the required instrumentation request to the repl skill](repl-skill-omits-required-instrumentation-request.md) | friction | skill accuracy sweep |
 | [Give maintenance messages plain identities, not printed EDN](maintenance-message-ids-embed-printed-edn.md) | friction | message identity cleanup |
@@ -201,10 +207,11 @@ See `README.md` for the convention.
 | [Reconcile the error-class catalog with declared schemas and renderers](error-class-catalog-and-renderers-disagree.md) | friction | error class contract repair |
 | [Generate only action-demanded opening candidates](opening-generator-pushes-undemanded-candidates.md) | friction | prefix-drift demand-first generation design (held `bootstrap.clj`) |
 
-## Cleanup (15)
+## Cleanup (16)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Disambiguate the two ruling-number sequences](two-ruling-number-sequences-collide.md) | cleanup | docs-honesty wave |
 | [Unify :seon.db/database-value into :seon.db/db](database-value-shape-name-duplicates-the-db-key.md) | cleanup | post-gate rename wave (with kind migration) |
 | [Reject readerless rows and duplicate mechanisms at publication](class-readerless-duplicate-mechanisms-survive-cuts.md) | cleanup | class-kill queue |
 | [Derive callable shape documentation from executable contracts](class-documentation-restates-executable-contracts.md) | cleanup | class-kill queue |

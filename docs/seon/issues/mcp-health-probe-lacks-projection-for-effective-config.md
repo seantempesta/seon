@@ -1,8 +1,8 @@
 ---
-type: defect
+type: issue
 status: open
 severity: friction
-tags: [mcp, config, observability]
+tags: [issue, mcp, config, observability]
 ---
 
 # The MCP runtime health probe fails config reads for want of a projection

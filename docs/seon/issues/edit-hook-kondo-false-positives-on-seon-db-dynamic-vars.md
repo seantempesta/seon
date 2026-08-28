@@ -1,8 +1,8 @@
 ---
-type: defect
+type: issue
 status: open
 severity: friction
-tags: [tooling, edit-hook, clj-kondo]
+tags: [issue, tooling, edit-hook, clj-kondo]
 ---
 
 # Edit hook blocks test edits on kondo false positives for real dynamic vars

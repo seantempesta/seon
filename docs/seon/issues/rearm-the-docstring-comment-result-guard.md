@@ -1,8 +1,8 @@
 ---
-type: defect
+type: issue
 status: open
 severity: friction
-tags: [tooling, docstring, context]
+tags: [issue, tooling, docstring, context]
 ---
 
 # The comment-shaped-result guard was inverted; re-arm it
