@@ -837,10 +837,17 @@
                 :seon.program/ns namespace-ref}
                deletion))
         (db/transact! connection (run/receipt-settle-tx settlement))
-        (is (nil? (db/pull @connection [:db/id]
-                          [:seon.fn/sym function-sym])))
-        (is (nil? (db/pull @connection [:db/id]
-                          [:seon.test/sym function-sym])))))))
+        ;; Ruling 47 makes program identities permanent: ns-unmap retracts
+        ;; definition facts, not the identity row (nor a retained ns ref).
+        (doseq [[identity-attribute namespace-attribute]
+                [[:seon.fn/sym :seon.fn/ns]
+                 [:seon.test/sym :seon.test/ns]]
+                :let [row (db/pull @connection '[*]
+                                   [identity-attribute function-sym])]]
+          (is (= function-sym (get row identity-attribute)))
+          (is (every? #{:db/id identity-attribute namespace-attribute}
+                      (keys row))
+              (pr-str row)))))))
 
 (deftest schema-unregister-is-one-global-typed-deletion
   (let [event (one-event

@@ -91,6 +91,13 @@
   [result-edn]
   (#'admit/semantic-value (edn/read-string result-edn)))
 
+(defn- stable-program-identity-row?
+  [row identity-attribute identity-value namespace-attribute]
+  (and (= identity-value (get row identity-attribute))
+       (every? (cond-> #{:db/id identity-attribute}
+                 namespace-attribute (conj namespace-attribute))
+               (keys row))))
+
 ;;; THE REAL EVALUATOR, injected through the same seam. The one thing it
 ;;; adds is the deadline: `turn` passes source + caps only, so the time
 ;;; limit — the ONE limit — has nowhere to come from at that call site.
@@ -553,11 +560,12 @@
                          [?receipt :seon.cluster.eval/result-edn _]]
                        @connection)))
               "the declaration and deletion both leave receipts")
-          (is (nil?
-               (db/pull @connection
-                       [:seon.fn/sym]
-                       [:seon.fn/sym "my.agents.agent-a/obsolete"]))
-              "the explicit delete retracts the durable identity"))))))
+          ;; Ruling 47: unmap retracts definition facts; identity never retracts.
+          (is (stable-program-identity-row?
+               (db/pull @connection '[*]
+                        [:seon.fn/sym "my.agents.agent-a/obsolete"])
+               :seon.fn/sym "my.agents.agent-a/obsolete" :seon.fn/ns)
+              "the explicit delete leaves only stable identity facts"))))))
 
 (deftest reply-reading-follows-evaluated-alias-and-dynamic-require-state
   (with-cluster
@@ -606,8 +614,10 @@
                "(clojure.core/ns-unmap "
                "(find-ns 'my.agents.agent-a) (symbol \"dynamic-obsolete\"))")})]
           (drive! cluster 10)
-          (is (nil? (db/pull @connection [:db/id]
-                            [:seon.fn/sym function-sym])))
+          ;; Ruling 47: the qualified unmap removes definition facts, not identity.
+          (is (stable-program-identity-row?
+               (db/pull @connection '[*] [:seon.fn/sym function-sym])
+               :seon.fn/sym function-sym :seon.fn/ns))
           (let [fresh (sci.eval/cluster-ctx @connection)]
             (is (nil? (sci.core/eval-string*
                        fresh
@@ -1197,8 +1207,11 @@
                            db))]
             (is (= schema-key (get results 2))
                 "unregister has ordinary REPL return semantics")
-            (is (nil? (db/pull db [:db/id]
-                              [:seon.schema/key schema-key])))
+            ;; Ruling 47 keeps the ctx-resolvable schema identity row while
+            ;; unregister retracts its definition and installed DB schema.
+            (is (stable-program-identity-row?
+                 (db/pull db '[*] [:seon.schema/key schema-key])
+                 :seon.schema/key schema-key nil))
             (is (not (contains? (:schema db) schema-key)))
             (is (not (contains?
                       (:seon.schema.projection/forms
@@ -1329,9 +1342,11 @@
                 "V2 replaces the live test exactly")
             (is (nil? (get results 6))
                 "ns-unmap removes the live SCI binding")
-            (is (nil? (db/pull @connection [:db/id]
-                              [:seon.test/sym test-sym]))
-                "ns-unmap removes the committed test row")))))))
+            ;; Ruling 47: test definition facts retract; identity never does.
+            (is (stable-program-identity-row?
+                 (db/pull @connection '[*] [:seon.test/sym test-sym])
+                 :seon.test/sym test-sym :seon.test/ns)
+                "ns-unmap leaves only the committed test identity")))))))
 
 (deftest incompatible-clusters-alternate-runtime-schema-validation-without-bleed
   (with-cluster

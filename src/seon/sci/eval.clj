@@ -693,6 +693,26 @@
     (kernel/mark-installed! ctx function-symbol)
     function-symbol))
 
+(def ^:private namespace-reference-attributes
+  {:seon.fn/sym :seon.fn/ns
+   :seon.test/sym :seon.test/ns})
+
+(defn- remaining-definition-facts
+  [db [identity-attribute identity-value :as program-identity]]
+  (let [committed
+        (dissoc (db/pull db '[*] program-identity) :db/id)
+        namespace-attribute
+        (get namespace-reference-attributes identity-attribute)
+        identity-row
+        (cond-> {identity-attribute identity-value}
+          (and namespace-attribute
+               (find committed namespace-attribute))
+          (assoc namespace-attribute (get committed namespace-attribute)))
+        attributes (program/changed-attributes committed identity-row)]
+    (when (seq attributes)
+      {:seon.program/identity program-identity
+       :seon.program/definition-attributes attributes})))
+
 (defn install-row!
   "Install one declaration from the terminal transaction's db-after.
   The exact committed row is resolved by identity. Receipts are never
@@ -777,14 +797,14 @@
       (let [schema-deletion? (boolean (deleted-schema-key row))
             namespace-name (second (:seon.program/ns row))]
         (when-let [remaining
-                   (some (fn [[identity-attribute identity-value]]
-                           (when (db/pull db [:db/id]
-                                         [identity-attribute identity-value])
-                             [identity-attribute identity-value]))
-                         value)]
-          (throw (ex-info "Deleted declaration is still present after commit."
+                   (some #(remaining-definition-facts db %) value)]
+          (throw (ex-info "Deleted declaration definition facts remain after commit."
                           {:seon.error/kind ::install-delete-mismatch
-                           :seon.program/identity remaining :seon.sci.eval/install-mismatch true})))
+                           :seon.program/identity
+                           (:seon.program/identity remaining)
+                           :seon.program/definition-attributes
+                           (:seon.program/definition-attributes remaining)
+                           :seon.sci.eval/install-mismatch true})))
         (when (and (not schema-deletion?)
                    (nil? (::namespace-state row)))
           (let [event (one-event (:seon.program/source row)
