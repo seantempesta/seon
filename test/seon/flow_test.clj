@@ -35,10 +35,15 @@
   ;; in this namespace names.
   (delay (test-support/environment "seon.flow-test")))
 
+(def ^:private test-launcher-configuration
+  (select-keys (test-support/effective-config)
+               sut/flow-workload-attributes))
+
 (def ^:private test-io-configuration
-  {:seon.config.flow.io/queue-depth 2
-   :seon.config.flow.io/concurrency 2
-   :seon.config.agent/turn-completion-backstop-ms 60000})
+  (assoc test-launcher-configuration
+         :seon.config.flow.io/queue-depth 2
+         :seon.config.flow.io/concurrency 2
+         :seon.config.agent/turn-completion-backstop-ms 60000))
 
 (defn- earliest-resume-fault-step
   ([]
@@ -271,8 +276,9 @@
         wedge-started (CountDownLatch. wedge-count)
         release-wedges (CountDownLatch. 1)
         configuration
-        {:seon.config.flow.compute/queue-depth 2
-         :seon.config.flow.compute/concurrency parallelism}
+        (assoc test-launcher-configuration
+               :seon.config.flow.compute/queue-depth 2
+               :seon.config.flow.compute/concurrency parallelism)
         launcher
         (install-test-work-launcher!
          {::sut/configuration configuration})
@@ -340,8 +346,9 @@
         virtual? (atom [])
         _ (install-test-work-launcher!
            {::sut/configuration
-            {:seon.config.flow.compute/queue-depth 3
-             :seon.config.flow.compute/concurrency parallelism}})
+            (assoc test-launcher-configuration
+                   :seon.config.flow.compute/queue-depth 3
+                   :seon.config.flow.compute/concurrency parallelism)})
         submissions
         (mapv
          (fn [ordinal]
@@ -386,11 +393,12 @@
         release (CountDownLatch. 1)
         virtual? (atom [])
         configuration
-        {:seon.config.flow.compute/queue-depth 1
-         :seon.config.flow.compute/concurrency 1
-         :seon.config.flow.io/queue-depth 1
-         :seon.config.flow.io/concurrency 1
-         :seon.config.agent/turn-completion-backstop-ms 60000}
+        (assoc test-launcher-configuration
+               :seon.config.flow.compute/queue-depth 1
+               :seon.config.flow.compute/concurrency 1
+               :seon.config.flow.io/queue-depth 1
+               :seon.config.flow.io/concurrency 1
+               :seon.config.agent/turn-completion-backstop-ms 60000)
         launcher
         (sut/start-work-launcher! {:seon.env/environment @test-environment
                                    ::sut/configuration configuration})
@@ -434,10 +442,10 @@
         (sut/start-work-launcher!
          {:seon.env/environment @test-environment
           ::sut/configuration
-          (merge test-io-configuration
-                 {:seon.config.flow.compute/queue-depth 1
-                  :seon.config.flow.compute/concurrency 1
-                  :seon.config.agent/turn-completion-backstop-ms 20})})
+          (assoc test-io-configuration
+                 :seon.config.flow.compute/queue-depth 1
+                 :seon.config.flow.compute/concurrency 1
+                 :seon.config.agent/turn-completion-backstop-ms 20)})
         result
         (sut/stop-work-launcher!
          (assoc launcher ::sut/proc-stopped (promise)))]
@@ -456,8 +464,9 @@
     (let [launcher
           (install-test-work-launcher!
            {::sut/configuration
-            {:seon.config.flow.compute/queue-depth 2
-             :seon.config.flow.compute/concurrency 1}})
+            (assoc test-launcher-configuration
+                   :seon.config.flow.compute/queue-depth 2
+                   :seon.config.flow.compute/concurrency 1)})
           graph (::sut/graph launcher)]
       (try
         (flow/pause graph)
@@ -483,8 +492,9 @@
           release (CountDownLatch. 1)
           _ (install-test-work-launcher!
              {::sut/configuration
-              {:seon.config.flow.compute/queue-depth 2
-               :seon.config.flow.compute/concurrency 1}})
+              (assoc test-launcher-configuration
+                     :seon.config.flow.compute/queue-depth 2
+                     :seon.config.flow.compute/concurrency 1)})
           occupied
           (future
             (submit-test!!
@@ -521,8 +531,9 @@
         launcher
         (install-test-work-launcher!
          {::sut/configuration
-          {:seon.config.flow.compute/queue-depth 1
-           :seon.config.flow.compute/concurrency 1}})
+          (assoc test-launcher-configuration
+                 :seon.config.flow.compute/queue-depth 1
+                 :seon.config.flow.compute/concurrency 1)})
         graph (::sut/graph launcher)
         occupied
         (future
@@ -589,8 +600,9 @@
         launcher
         (install-test-work-launcher!
          {::sut/configuration
-          {:seon.config.flow.compute/queue-depth queue-depth
-           :seon.config.flow.compute/concurrency 1}})
+          (assoc test-launcher-configuration
+                 :seon.config.flow.compute/queue-depth queue-depth
+                 :seon.config.flow.compute/concurrency 1)})
         graph (::sut/graph launcher)
         step-var (ns-resolve 'seon.flow 'work-launcher-step)
         original-step @step-var
@@ -662,10 +674,9 @@
 
 (deftest starting-a-sibling-launcher-does-not-interrupt-accepted-work
   (let [configuration
-        (merge
-         test-io-configuration
-         {:seon.config.flow.compute/queue-depth 2
-          :seon.config.flow.compute/concurrency 1})
+        (assoc test-io-configuration
+               :seon.config.flow.compute/queue-depth 2
+               :seon.config.flow.compute/concurrency 1)
         entered-a (CountDownLatch. 1)
         release-a (CountDownLatch. 1)
         calls-a (atom 0)
@@ -718,8 +729,9 @@
 (deftest turn-evaluation-completion-is-a-flat-diagnostic-value
   (install-test-work-launcher!
    {::sut/configuration
-    {:seon.config.flow.compute/queue-depth 1
-     :seon.config.flow.compute/concurrency 1}})
+    (assoc test-launcher-configuration
+           :seon.config.flow.compute/queue-depth 1
+           :seon.config.flow.compute/concurrency 1)})
   (try
     (let [evaluation
           (#'cluster.loop/submit-evaluation!!
@@ -827,11 +839,13 @@
         (var-get (ns-resolve 'seon.cluster 'commit-fault!))
         resolve-var #'schema.datahike/resolve-datahike-form-in
         resolve-filter (mi/-filter-var #{resolve-var})
-        caps {:seon.config.eval.result/max-depth 8
-              :seon.config.eval.result/max-collection 8
-              :seon.config.eval.result/max-string 256
-              :seon.config.eval.result/max-source 1048576
-              :seon.config.eval.result/max-nodes 64}
+        caps (assoc (config/result-caps
+                     (test-support/effective-config))
+                    :seon.config.eval.result/max-depth 8
+                    :seon.config.eval.result/max-collection 8
+                    :seon.config.eval.result/max-string 256
+                    :seon.config.eval.result/max-source 1048576
+                    :seon.config.eval.result/max-nodes 64)
         contract-fault
         {::flow/pid :render
          ::flow/op :step
@@ -934,11 +948,13 @@
         committer-step
         (var-get (ns-resolve 'seon.flow 'fault-committer-step))
         inline-ceiling 96
-        caps {:seon.config.eval.result/max-depth 8
-              :seon.config.eval.result/max-collection 8
-              :seon.config.eval.result/max-string 64
-              :seon.config.eval.result/max-source 1048576
-              :seon.config.eval.result/max-nodes 64}
+        caps (assoc (config/result-caps
+                     (test-support/effective-config))
+                    :seon.config.eval.result/max-depth 8
+                    :seon.config.eval.result/max-collection 8
+                    :seon.config.eval.result/max-string 64
+                    :seon.config.eval.result/max-source 1048576
+                    :seon.config.eval.result/max-nodes 64)
         repeated-message
         (str "one repeated cause: " (apply str (repeat 10000 "x")))
         repeated-fault
@@ -1298,11 +1314,13 @@
               (var-get (ns-resolve 'seon.cluster 'commit-fault!))
               fault-buffer-capacity 2
               fault-count 5
-              caps {:seon.config.eval.result/max-depth 8
-                    :seon.config.eval.result/max-collection 8
-                    :seon.config.eval.result/max-string 64
-                    :seon.config.eval.result/max-source 1048576
-                    :seon.config.eval.result/max-nodes 64}
+              caps (assoc (config/result-caps
+                           (test-support/effective-config))
+                          :seon.config.eval.result/max-depth 8
+                          :seon.config.eval.result/max-collection 8
+                          :seon.config.eval.result/max-string 64
+                          :seon.config.eval.result/max-source 1048576
+                          :seon.config.eval.result/max-nodes 64)
               effective
               (fn [_database _cluster-name]
                 {:seon.config.error/recurrence-limit 3
@@ -1505,8 +1523,9 @@
 (deftest flow-monitor-attaches-and-publishes-the-render-graph
   (install-test-work-launcher!
    {::sut/configuration
-    {:seon.config.flow.compute/queue-depth 2
-     :seon.config.flow.compute/concurrency 1}})
+    (assoc test-launcher-configuration
+           :seon.config.flow.compute/queue-depth 2
+           :seon.config.flow.compute/concurrency 1)})
   (let [{::sut/keys [graph started]} @test-work-launcher
         client (HttpClient/newHttpClient)
         fanout
