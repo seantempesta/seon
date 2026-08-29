@@ -331,7 +331,9 @@
               (set (map :seon.render.walk/lookup at-zero))))
        (is (contains? (set (map :seon.render.walk/lookup at-one))
                       [:seon.ns/name fixture-b]))
-       (is (<= (count (remove :seon.error/value capped)) 1))))))
+       (is (= #{[:seon.ns/name fixture-a]}
+              (set (map :seon.render.walk/lookup
+                        (remove :seon.error/value capped)))))))))
 
 (deftest old-slot-and-ref-markers-are-inert-renderer-output
   (support/with-database

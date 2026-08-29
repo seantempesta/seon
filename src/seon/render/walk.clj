@@ -80,6 +80,11 @@
   [attribute width]
   [attribute :limit (inc (long width))])
 
+(defn- bounded-acquisition-distance
+  [distance caps]
+  (min (long distance)
+       (dec (long (:seon.config.eval.result/max-nodes caps)))))
+
 (defn root-selector
   "A concrete bidirectional pull selector for an agent-root distance.
 
@@ -87,7 +92,9 @@
   explicit forward and reverse subpattern, so Datahike records the canonical
   stored ref in the dependency plan and never widens component expansion to
   `:all`. The pull asks for one value beyond the collection cap so the walk can
-  emit an exact elision observation without a second read."
+  emit an exact elision observation without a second read. Acquisition depth
+  also stops at one less than the node cap: a deeper member's path alone would
+  already consume more nodes than the result can retain."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.render/distance
          :seon.sci.admit/caps]
@@ -115,6 +122,7 @@
                                           attribute)))
                                 installed)
         width (:seon.config.eval.result/max-collection caps)
+        distance (bounded-acquisition-distance distance caps)
         leaf (into [:db/id] identity-attributes)]
     (letfn [(selector-at [remaining]
               (let [nested (if (pos? remaining)
@@ -142,7 +150,7 @@
                                  asked-for-nested
                                  nested)})
                             ref-attributes)))))]
-      (selector-at (long distance)))))
+      (selector-at distance))))
 
 (defn- stable-lookup
   [id-attributes entity]
@@ -399,7 +407,9 @@
                             :datahike.pull/plan plan})]
          (merge pull-plan
                 {:seon.render.walk/root root}
-                (acquisition-members database root distance caps)))))))
+                (acquisition-members database root
+                                     (bounded-acquisition-distance distance caps)
+                                     caps)))))))
 
 (defn membership-diff
   "Changed, added, and removed members between two root acquisitions."
