@@ -66,3 +66,11 @@ into the typed unconfirmed outcome it already knows how to report.
 A planted worker-launch failure (or kill of a worker mid-task) ends
 the run with a typed per-task outcome and a total tally, no watchdog;
 two consecutive bare `bin/test` runs at HEAD complete with a tally.
+
+## Root cause (2026-08-29)
+
+The retained dumps falsify the launch-failure hypothesis: nine workers were idle, but `pool-8` was alive and executing `seon.render-simplification-test/distance-spends-only-real-ref-hops-and-caps-win` in both wedges.
+The coordinator had dispatched that ordinary bulk task and waited unboundedly in `read_worker_protocol_BANG_`; worker `pool-8` had not returned from `walk/neighborhood`, so no task-complete frame yet existed.
+The `confirmation-7` message came from the injected regression at `test/seon/test_runner_test.clj:158-209`; no retained `confirmation-launch.edn` exists, so production confirmation never started.
+The constructibility defect is one raw pipe read with neither `Process.onExit` nor a declared task deadline, followed by an unbounded pool-future `.get`.
+Require one total exchange seam that journals identity before a checked write and races reply versus exact process exit versus deadline, converting either non-reply terminal event into an attributed typed tally result.
