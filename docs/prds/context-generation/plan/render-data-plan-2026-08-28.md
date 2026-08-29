@@ -14,6 +14,19 @@ the critical path; receipts rename to evals; stored prompt bytes
 demote to a memo). LEGEND: [REAL] exists at HEAD, verified this
 session; [P] proposed.*
 
+## 0a. REFOCUS (owner, 2026-08-29, ruling 52)
+
+View 1 is the whole plan: FULLY REGENERATED context every turn — the
+transcript is one recursive render of the graph from the agent's
+perspective; stability is a property (P-STABLE-REGEN), so caching is
+automatic and the replay/frontier split, settled-set bookkeeping, and
+retained prompt bytes below are all DELETED from the design. The
+fresh/diff duality of §0 collapses to fresh-only; the per-turn diff
+EVAL survives as content (the newest appended entry), not as a cache
+mechanism. View 2 (believably extending an existing context) is
+parked unless view 1's stability fails. Everything below reads under
+this refocus.
+
 ## 0. The essence (owner, 2026-08-28 dialogue)
 
 - **context = fn(db-value)**: `db' = db ⊕ settle(eval(model(render(pull db))))`.

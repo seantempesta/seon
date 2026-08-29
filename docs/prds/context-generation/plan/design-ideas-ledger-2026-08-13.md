@@ -649,6 +649,25 @@ numerically and a bare cross-citation is a defect to fix on sight.
     agents, own namespaces, in parallel, no scheduler. The derivation
     ships as a demonstrated query (help/recipes), not a new mechanism.
 
+52. **View 1 is THE focus: fully regenerated, stable context; view 2
+    is parked** (owner, 2026-08-29): context is regenerated whole
+    every turn — explore the graph from the agent's perspective, and
+    the transcript is a PROJECTION: one render function recursively
+    calling render functions (the eval history renders in (basis,
+    ordinal) order like any other data). STABILITY IS THE PROPERTY,
+    NOT A MECHANISM: because the derivation is a pure function of
+    facts and facts only accrete, two consecutive regenerations with
+    no new facts are byte-identical, and with new facts the prior
+    prefix is byte-identical — caching falls out; no replay/frontier
+    split, no settled-set bookkeeping, no retained prompt bytes.
+    Falsifier: **P-STABLE-REGEN** — regenerate twice at one basis
+    (byte-equal), transact one fact, regenerate (old prefix
+    byte-equal, new bytes appended only). Drives test with full
+    per-turn regeneration from day one. View 2 (extending an existing
+    context believably via generated-by + time diffs) is PARKED —
+    built only if view 1's stability fails in practice. Platform
+    repairs and bad-design fixes continue alongside as enablers.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
