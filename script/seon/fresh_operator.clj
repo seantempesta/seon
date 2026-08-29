@@ -1547,6 +1547,7 @@
                [:seon.config.eval.result/max-depth
                 :seon.config.eval.result/max-collection
                 :seon.config.eval.result/max-string
+                :seon.config.eval.result/max-source
                 :seon.config.eval.result/max-nodes])})))))))
 
 (defn- refresh-instrument-form
