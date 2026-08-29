@@ -59,6 +59,20 @@ four Aug-14 breakages hid behind the 12-day bulk blackout.
    identities) — then result projections at settlement (48b).
 5. Then the generator work — gated on the owner's context-design go.
 
+## The armed-boot regression round (2026-08-29 night, lane running)
+
+The distance-2 bootstrap fix (28 s -> 1.2 s per advance, measured
+live) unstarved the armed backstops and exposed three REAL
+regressions from the day's landed work, now with the
+`armed-regressions` lane: (1) BOOT SPENDS A MODEL CALL — the
+no-model-at-boot gate broke (`booting-spends-no-model-call` red,
+`:seon.ai/no-credential` where an injected kind belonged); (2) a
+boot-window message's run opens with trigger `bootstrap-task:root`
+instead of the message; (3) an agent's own def fails to resolve in
+its live ctx across cohosted clusters. Evidence root:
+`tmp/test-runs/run.FiH5MT`. THE FULLY-GREEN BARE (the freeze gate) is
+blocked on this round.
+
 ## Open blockers the edge tracks
 
 - [generated-model-attempt-traces-diverge-from-durable-facts](../../../seon/issues/generated-model-attempt-traces-diverge-from-durable-facts.md)
