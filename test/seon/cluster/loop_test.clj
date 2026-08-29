@@ -85,10 +85,13 @@
         evidence {:seon.ai/usage {"prompt_tokens" 3}
                   :seon.ai.model/last-latency-ms 42
                   :seon.ai/reasoning-content "reasoning"
-                  :seon.ai/finish-reason "length"}]
+                  :seon.ai/finish-reason "length"}
+        settings (ai/settings
+                  (test-support/effective-config)
+                  {:seon.config.ai/thinking :high})]
     (is (= {:seon.ai/target {:seon.ai/endpoint "https://provider.invalid"
                              :seon.ai/model "model"}
-            :seon.ai/settings {:seon.config.ai/thinking :high}
+            :seon.ai/settings settings
             :seon.cluster.run/id "run-1"
             :seon.cluster.agent/id "agent-1"
             :seon.ai.attempt/ordinal 2
@@ -102,7 +105,7 @@
            ((private-loop-fn 'attempt-request)
             {:seon.ai/target {:seon.ai/endpoint "https://provider.invalid"
                               :seon.ai/model "model"}
-             :seon.ai/settings {:seon.config.ai/thinking :high}
+             :seon.ai/settings settings
              :seon.cluster.run/id "run-1"
              :seon.cluster.agent/id "agent-1"
              :seon.ai.attempt/ordinal 2
@@ -172,7 +175,9 @@
        {:seon.ai/target
         {:seon.ai/endpoint "https://api.deepseek.com/chat/completions"
          :seon.ai/model "deepseek-v4-flash"}
-        :seon.ai/settings {:seon.config.ai/model "deepseek-v4-flash"}
+        :seon.ai/settings
+        (ai/settings (test-support/effective-config)
+                     {:seon.config.ai/model "deepseek-v4-flash"})
         :seon.cluster.run/id "gauge-run"
         :seon.cluster.agent/id "gauge-agent"
         :seon.ai.attempt/ordinal 0
@@ -834,11 +839,14 @@
                     :seon.config.eval/time-limit-ms 2000
                     :seon.config/on-core-error :panic
                     :seon.sci.admit/caps
-                    {:seon.config.eval.result/max-depth 6
+                    (assoc
+                     (config/result-caps
+                      (test-support/effective-config))
+                     :seon.config.eval.result/max-depth 6
                      :seon.config.eval.result/max-collection 8
                      :seon.config.eval.result/max-string 4096
                      :seon.config.eval.result/max-source 1048576
-                     :seon.config.eval.result/max-nodes 256}
+                     :seon.config.eval.result/max-nodes 256)
                     :seon.config.error/recurrence-limit 3
                     :seon.config.message/max-chain 8}
            unpaid {:seon.error/kind :seon.ai/transport-failure
@@ -1155,11 +1163,13 @@
                 :seon.sci.eval/time-limit-ms 1000
                 :seon.config/on-core-error :record
                 :seon.sci.admit/caps
-                {:seon.config.eval.result/max-depth 12
+                (assoc
+                 (config/result-caps (test-support/effective-config))
+                 :seon.config.eval.result/max-depth 12
                  :seon.config.eval.result/max-collection 64
                  :seon.config.eval.result/max-string 4096
                  :seon.config.eval.result/max-source 1048576
-                 :seon.config.eval.result/max-nodes 4096}
+                 :seon.config.eval.result/max-nodes 4096)
                 :seon.cluster.agent/id agent-id
                 :seon.render.transcript/token-budget 100000})]
           (is (inst?
