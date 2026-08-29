@@ -18,15 +18,18 @@
 
   Issue: docs/seon/issues/value-admission-resolves-the-declaration-population-per-node.md"
   (:require [clojure.test :refer [deftest is testing]]
+            [seon.config :as config]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.sci.admit :as admit]))
+            [seon.sci.admit :as admit]
+            [seon.test-support :as test-support]))
 
 (def ^:private caps
-  {:seon.config.eval.result/max-depth 8
-   :seon.config.eval.result/max-collection 64
-   :seon.config.eval.result/max-string 1000
-   :seon.config.eval.result/max-nodes 10000})
+  (assoc (config/result-caps (test-support/effective-config))
+         :seon.config.eval.result/max-depth 8
+         :seon.config.eval.result/max-collection 64
+         :seon.config.eval.result/max-string 1000
+         :seon.config.eval.result/max-nodes 10000))
 
 (defn- request
   ([value] (request value nil))
