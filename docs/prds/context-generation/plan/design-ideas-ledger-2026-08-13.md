@@ -705,6 +705,27 @@ numerically and a bare cross-citation is a defect to fix on sight.
     closure from current goals — which is §5's liveness rule: demand
     and liveness are one computation run at two moments.
 
+53. **Faces return FORMS; context entries are evals all the way down**
+    (owner, 2026-08-29): the goal of `:seon.render/ai` is not a text
+    representation but the FUNCTION + ARGS whose execution yields it —
+    the generator composes `(face-sym <read-form>)`, executes it, and
+    the entry is that form with its stored result; `/html` identically
+    (forms yielding hiccup). Generated render forms are SAVED and
+    kondo-parsed like settled forms (51), so everything ever shown to
+    an agent accretes usage edges — rendering, teaching, and
+    graph-linking are one mechanism. Args are explicit in the form;
+    ambient db rides call preparation with the basis rendered beside
+    the result (17), so any context line replays verbatim. The schema
+    property's split codifies: STRING = direct content, instruction
+    entities only; SYMBOL = the face function the generator composes.
+    Defaults: a function renders as `(doc 'sym)`; a namespace as the
+    dir composition (46); a claimed family as `(face-sym <read>)`; the
+    agent's namespace root as the opening composition. PRIORITY
+    CHUNKING BY PROVENANCE: the end block is the agent's own evals
+    (newest last); priority explanations are the data the agent
+    CREATED (the 42c write-stamp join) and its own namespace's
+    functions — self first, world by graph distance, never curation.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
