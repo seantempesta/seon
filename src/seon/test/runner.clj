@@ -7,6 +7,9 @@
             [clojure.test :as test]
             [clojure.test.check.generators :as gen]
             [sci.impl.utils :as sci.utils]
+            [seon.cluster.registry :as registry]
+            [seon.cluster.source :as source]
+            [seon.cluster.store :as store]
             [seon.config :as config]
             [seon.db :as db]
             [seon.schema :as schema]
@@ -1012,6 +1015,34 @@
       (finally
         ((requiring-resolve 'seon.cluster/stop!) instance)))))
 
+(def ^:private persistent-results-branch :test-results)
+
+(defn- record-persistent-results!
+  "Commit one bare-gate completion to the operator-owned results branch."
+  [store-dir run-result]
+  (let [held-store (store/open-store! {:seon.store/dir store-dir})]
+    (try
+      (registry/branch! {:seon.store/store held-store
+                         :seon.cluster.registry/from source/current-branch
+                         :seon.store/branch persistent-results-branch})
+      (let [connection (store/open-branch! held-store
+                                           persistent-results-branch)]
+        (try
+          (let [database (db/db connection)
+                projection (schema/projection-from-database database)
+                completion
+                {:seon.test.runner/results
+                 (:seon.test.runner/results run-result)
+                 :seon.test/run-basis-t (db/basis-t database)
+                 :seon.test/run-at (:seon.test.run/at run-result)}]
+            (schema/call-with-projection
+             projection
+             #(commit-results! connection completion)))
+          (finally
+            (store/release-branch! connection))))
+      (finally
+        (store/release-store! held-store)))))
+
 (defn- print-skipped!
   [skipped]
   (when (seq skipped)
@@ -1768,8 +1799,9 @@
   regressions FIRST and stops there when they are red. The bulk tier follows:
   every eligible test under `all`/`full`, or only the tests reaching code
   changed since the last recorded GREEN basis under the bare `changed`
-  default. Record results when the cluster argument names a non-default
-  cluster, then exit zero exactly when no test failed or errored."
+  default. Record results in either the explicitly named non-default cluster
+  or the persistent operator-owned branch selected by the launcher, then exit
+  zero exactly when no test failed or errored."
   {:malli/schema
    [:=> [:cat :seon.boot/cluster-name :seon.boot/root :string :string
          [:sequential :string]]
@@ -1897,10 +1929,14 @@
                :seon.test.runner/results
                (into [] (mapcat ::task-results) task-results)
                ::stopped-after (when platform-red? :platform)}
-            _ (when-not (= "-" cluster-name)
+            _ (if-not (= "-" cluster-name)
                 (record! {:seon.test.runner/run-result run-result
                           :seon.boot/cluster-name cluster-name
-                          :seon.boot/root root}))
+                          :seon.boot/root root})
+                (when-let [store-dir
+                           (System/getProperty
+                            "seon.test.persistent-results-store-dir")]
+                  (record-persistent-results! store-dir run-result)))
             green? (zero? (+ (::fail-count summary) (::error-count summary)))
             failures (->> (:seon.test.runner/results run-result)
                           (filter #(pos? (+ (:seon.test/fail-count %)

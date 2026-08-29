@@ -22,6 +22,7 @@
 (def ^:private init-result-prefix "SEON-INIT-RESULT ")
 (def ^:private roster-result-prefix "SEON-ROSTER-RESULT ")
 (def ^:private cleanup-result-prefix "SEON-CLEANUP-RESULT ")
+(def ^:private test-status-result-prefix "SEON-TEST-STATUS-RESULT ")
 
 (defn- repository-root
   []
@@ -654,6 +655,223 @@
         (str/split-lines output))
        (fail! "The persisted cluster roster reader returned no result."
               {:seon.fresh-operator/output output})))))
+
+(def ^:private current-test-query
+  '[:find ?namespace-name ?test-symbol
+    :where
+    [?test :seon.test/sym ?test-symbol]
+    [?test :seon.test/ns ?namespace]
+    [?namespace :seon.ns/name ?namespace-name]])
+
+(def ^:private latest-test-result-query
+  '[:find ?test-symbol ?passes ?failures ?errors ?basis-t ?run-at
+    :where
+    [?test :seon.test/sym ?test-symbol]
+    [?test :seon.test/pass-count ?passes]
+    [?test :seon.test/fail-count ?failures]
+    [?test :seon.test/error-count ?errors]
+    [?test :seon.test/run-basis-t ?basis-t]
+    [?test :seon.test/run-at ?run-at]])
+
+(defn- test-status-reader-form
+  []
+  `(fn [store#]
+     (let [branches# (seon.cluster.registry/roster store#)]
+       (if-not (contains? branches# :current-src)
+         {:seon.error/kind :seon.error/unknown
+          :seon.error/message "the current-src branch is absent"}
+         (let [current-db#
+               (datahike.api/branch-as-db
+                (:seon.store/connection-object store#) :current-src)
+               results-db#
+               (when (contains? branches# :test-results)
+                 (datahike.api/branch-as-db
+                  (:seon.store/connection-object store#) :test-results))]
+           (try
+             {:seon.test.status/current-tests
+              (datahike.api/q '~current-test-query current-db#)
+              :seon.test.status/latest-results
+              (if results-db#
+                (datahike.api/q '~latest-test-result-query results-db#)
+                [])}
+             (finally
+               (when results-db#
+                 (datahike.api/release-materialized-db results-db#))
+               (datahike.api/release-materialized-db current-db#))))))))
+
+(defn- test-status-form
+  ([store-expression release-store?]
+   (test-status-form store-expression release-store? nil))
+  ([store-expression release-store? result-prefix]
+   (let [reader (test-status-reader-form)
+         store-symbol (gensym "store")
+         reader-symbol (gensym "read-status")
+         read-expression
+         `(let [~store-symbol ~store-expression
+                ~reader-symbol ~reader]
+            ~(if release-store?
+               `(try
+                  (~reader-symbol ~store-symbol)
+                  (finally
+                    (seon.cluster.store/release-store! ~store-symbol)))
+               `(~reader-symbol ~store-symbol)))]
+     (pr-str
+      `(do
+         (require 'datahike.api 'seon.cluster.registry 'seon.cluster.store)
+         ~(if result-prefix
+            `(println ~result-prefix (pr-str ~read-expression))
+            read-expression))))))
+
+(defn- offline-test-status
+  [root]
+  (if-not (fs/directory? (store-directory root))
+    {:seon.error/kind :seon.error/unknown
+     :seon.error/message "the operator store is absent"}
+    (let [{output :seon.operator.subprocess/output
+           exit :seon.operator.subprocess/exit}
+          (run-child-jvm!
+           {:seon.fresh-operator/root root
+            :seon.fresh-operator/arguments
+            ["-e"
+             (test-status-form
+              `(seon.cluster.store/open-store!
+                {:seon.store/dir ~(str (store-directory root))})
+              true
+              test-status-result-prefix)]})]
+      (if-not (zero? exit)
+        {:seon.error/kind :seon.error/unknown
+         :seon.error/message
+         (str "the persistent test evidence could not be read: "
+              (str/trim output))}
+        (or
+         (some
+          (fn [line]
+            (when (str/starts-with? line test-status-result-prefix)
+              (edn/read-string
+               (subs line (count test-status-result-prefix)))))
+          (str/split-lines output))
+         {:seon.error/kind :seon.error/unknown
+          :seon.error/message
+          "the persistent test evidence reader returned no result"})))))
+
+(defn- derive-namespace-test-statuses
+  [{current-tests :seon.test.status/current-tests
+    latest-results :seon.test.status/latest-results
+    :as observation}]
+  (cond
+    (:seon.error/kind observation)
+    observation
+
+    (empty? current-tests)
+    {:seon.error/kind :seon.error/unknown
+     :seon.error/message "the current program has no declared test rows"}
+
+    :else
+    (let [results-by-symbol
+          (into {}
+                (map (fn [[test-symbol passes failures errors basis-t run-at]]
+                       [test-symbol
+                        {:seon.test/pass-count passes
+                         :seon.test/fail-count failures
+                         :seon.test/error-count errors
+                         :seon.test/run-basis-t basis-t
+                         :seon.test/run-at run-at}]))
+                latest-results)]
+      (->> current-tests
+           (group-by first)
+           (map
+            (fn [[namespace-name rows]]
+              (let [test-symbols (into #{} (map second) rows)
+                    evidence (keep results-by-symbol test-symbols)
+                    absent (->> test-symbols
+                                (remove results-by-symbol)
+                                sort
+                                vec)
+                    red (->> test-symbols
+                             (filter
+                              (fn [test-symbol]
+                                (let [result (get results-by-symbol
+                                                  test-symbol)]
+                                  (and result
+                                       (pos? (+ (:seon.test/fail-count result)
+                                                (:seon.test/error-count result)))))))
+                             sort
+                             vec)
+                    green? (and (empty? absent) (empty? red))]
+                {:seon.test.status/namespace namespace-name
+                 :seon.test.status/state
+                 (cond (seq absent) :unknown
+                       (seq red) :red
+                       :else :green)
+                 :seon.test.status/all-current-tests-last-known-green?
+                 green?
+                 :seon.test.status/oldest-proof-basis-t
+                 (when (seq evidence)
+                   (reduce min (map :seon.test/run-basis-t evidence)))
+                 :seon.test.status/oldest-run-at
+                 (when (seq evidence)
+                   (reduce #(if (neg? (compare %1 %2)) %1 %2)
+                           (map :seon.test/run-at evidence)))
+                 :seon.test.status/absent absent
+                 :seon.test.status/red red})))
+           (sort-by (comp str :seon.test.status/namespace))
+           vec))))
+
+(declare prepl-value!)
+
+(defn- test-status-observation!
+  [root rows]
+  (try
+    (if-let [advertisement
+             (some (fn [row]
+                     (when (:seon.fresh-operator/process-alive? row)
+                       (:seon.fresh-operator/transport-advertisement row)))
+                   rows)]
+      (prepl-value!
+       advertisement
+       (test-status-form
+        `(some :seon.store/store
+               (vals @(var-get
+                       (ns-resolve 'seon.cluster
+                                   (symbol "running-instances")))))
+        false))
+      (offline-test-status root))
+    (catch Throwable failure
+      {:seon.error/kind :seon.error/unknown
+       :seon.error/message
+       (str "the persistent test evidence is unavailable: "
+            (ex-message failure))})))
+
+(defn- days-ago
+  [now run-at]
+  (max 0 (quot (- (.getTime ^java.util.Date now)
+                  (.getTime ^java.util.Date run-at))
+               86400000)))
+
+(defn- namespace-test-status-line
+  [now status]
+  (let [namespace-name (:seon.test.status/namespace status)
+        basis (:seon.test.status/oldest-proof-basis-t status)
+        run-at (:seon.test.status/oldest-run-at status)
+        floor (when run-at
+                (str "oldest proof basis " basis ", "
+                     (days-ago now run-at) " days ago"))]
+    (case (:seon.test.status/state status)
+      :green
+      (str "namespace " namespace-name
+           ": all current tests last known green; " floor)
+
+      :red
+      (str "namespace " namespace-name ": last known RED; " floor
+           "; red tests: "
+           (str/join ", " (:seon.test.status/red status)))
+
+      (str "namespace " namespace-name ": UNKNOWN; absent results: "
+           (str/join ", " (:seon.test.status/absent status))
+           (when (seq (:seon.test.status/red status))
+             (str "; red tests: "
+                  (str/join ", " (:seon.test.status/red status))))
+           (when floor (str "; " floor))))))
 
 (declare prepl-eval! terminal-value)
 
@@ -2343,7 +2561,11 @@
                                                rows)))
         row-format (str "%-" name-width "s %8s %-9s %7s %-24s %s")
         footprint (operator.state/record-footprint-under-lock!
-                   (repository-root) root)]
+                   (repository-root) root)
+        test-statuses
+        (derive-namespace-test-statuses
+         (test-status-observation! root rows))
+        status-now (java.util.Date.)]
     (println (format row-format
                      "CLUSTER" "PID" "STATE" "PREPL" "URL" "DRIFT"))
     (println (apply str (repeat (+ 90 name-width) "-")))
@@ -2388,6 +2610,11 @@
                           (:seon.fresh-operator/roster-source roster))
                      "a live JVM owns the store; status is derived from claims and advertisements"
                      reason))))))
+    (if (:seon.error/kind test-statuses)
+      (println (str "test evidence: UNKNOWN; "
+                    (:seon.error/message test-statuses)))
+      (doseq [test-status test-statuses]
+        (println (namespace-test-status-line status-now test-status))))
     (doseq [record process-records]
       (println
        (str "recorded JVM pid " (:seon.boot/pid record)

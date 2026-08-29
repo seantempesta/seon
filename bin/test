@@ -15,13 +15,14 @@
 # in seconds instead of poisoning the bulk. The bare default then runs only the
 # tests that reach changed code, derived from `:seon.fn/calls` edges in the one
 # program-graph manifest — never a file modification time or a filename
-# convention. The green basis is a recorded artifact under
-# `tmp/test-basis/green-basis.edn`; a green tiered run rewrites it.
+# convention. The checkout-local green-basis file remains the temporary
+# selection input; each completed bare gate also replaces its per-test facts
+# on the operator-owned `:test-results` branch.
 #
 # Each invocation owns one isolated operator root below `tmp/test-runs`, copies
 # the first-party checkout into it, and deletes it on success. Exit code is the
-# suite verdict. Result facts are opt-in only and refuse the owner's `default`
-# cluster.
+# suite verdict. Explicit result clusters remain opt-in and refuse the owner's
+# `default` cluster.
 
 set -euo pipefail
 
@@ -208,6 +209,14 @@ if [ "$result_cluster" = "default" ]; then
 fi
 
 git_sha=$(git rev-parse HEAD)
+
+persistent_results_store_dir=
+if [ "$explicit_selection" -eq 0 ] &&
+   [ -z "$requested_mode" ] &&
+   [ ${#changed_paths[@]} -eq 0 ] &&
+   [ -z "$result_cluster" ]; then
+  persistent_results_store_dir="$source_root/data/store"
+fi
 
 # A suite is a complete isolated operator root and working directory. Fresh
 # first-party roots are copy-on-write clones so canonical-path analysis sees a
@@ -452,13 +461,22 @@ if [ "$base_status" -ne 0 ]; then
   exit "$status"
 fi
 
+coordinator_jvm_arguments=(
+  "-J-Dseon.operator.root=$run_root"
+  "-J-Dseon.test.root=$run_root"
+  "-J-Dseon.test.source-root=$source_root"
+  "-J-Dseon.test.changed-paths-file=$changed_paths_file"
+  "-J-Dseon.test.worker-parent=$worker_parent"
+  "-J-Dseon.test.published-base=$shared_published_base"
+)
+if [ -n "$persistent_results_store_dir" ]; then
+  coordinator_jvm_arguments+=(
+    "-J-Dseon.test.persistent-results-store-dir=$persistent_results_store_dir"
+  )
+fi
+
 launch_runner clojure \
-  "-J-Dseon.operator.root=$run_root" \
-  "-J-Dseon.test.root=$run_root" \
-  "-J-Dseon.test.source-root=$source_root" \
-  "-J-Dseon.test.changed-paths-file=$changed_paths_file" \
-  "-J-Dseon.test.worker-parent=$worker_parent" \
-  "-J-Dseon.test.published-base=$shared_published_base" \
+  "${coordinator_jvm_arguments[@]}" \
   -M:test -m seon.test.runner \
   "${result_cluster:--}" "$result_root" "$git_sha" "$selection_mode" \
   "${namespaces[@]}"

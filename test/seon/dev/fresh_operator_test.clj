@@ -153,6 +153,26 @@
       {:seon.dev.fresh-operator-test/message (ex-message failure)
        :seon.dev.fresh-operator-test/data (ex-data failure)})))
 
+(deftest current-test-without-result-evidence-is-unknown
+  (let [namespace-name 'seon.absence-proof-test
+        absent-test 'seon.absence-proof-test/planted-absence
+        status
+        (first
+         (operator-private-value
+          'derive-namespace-test-statuses
+          {:seon.test.status/current-tests
+           [[namespace-name absent-test]]
+           :seon.test.status/latest-results []}))]
+    (is (= namespace-name (:seon.test.status/namespace status)))
+    (is (= :unknown (:seon.test.status/state status)))
+    (is (false?
+         (:seon.test.status/all-current-tests-last-known-green? status)))
+    (is (= [absent-test] (:seon.test.status/absent status)))
+    (is (= (str "namespace " namespace-name
+                ": UNKNOWN; absent results: " absent-test)
+           (operator-private-value
+            'namespace-test-status-line (Date.) status)))))
+
 (deftest reachable-prepl-without-roster-evidence-is-not-called-unreachable
   (let [root (.getCanonicalPath (fresh-root))
         source-observations-var
