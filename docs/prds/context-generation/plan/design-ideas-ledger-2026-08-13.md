@@ -592,21 +592,19 @@ numerically and a bare cross-citation is a defect to fix on sight.
     receipts→evals; kind→shape and database-value→db stay staged as
     spelling hygiene.
 
-49. **All keywords are fully namespaced — values included** (owner,
-    2026-08-29): map keys and database attributes were already
-    absolute law; this extends it to every KEYWORD VALUE stored as a
-    datom — enum members and sentinels (`:io`, `:agent`, `:panic`,
-    `:interrupted`, …; census: ~45 schema files carry unqualified enum
-    values). Each enum namespaces into its owning family
-    (`:seon.fn/workload` values become qualified members of a declared
-    family, spelled at declaration). One flagged tension, resolved in
-    favor of this ruling: where a dependency's own vocabulary is
-    unqualified (core.async's `:io`/`:compute`), STORAGE uses the
-    qualified spelling and the integration seam translates at the
-    boundary — the dependency's name survives in code at its seam,
-    never as a datom. Rides the orchestrator's atomic quiet-tree pass
-    (with 47's sym retype and 48c's receipts→evals); database data is
-    disposable — retype + reset.
+49. **Keys are always fully namespaced; values follow the vocabulary
+    law** (owner, 2026-08-29, amended same day): the absolute law is
+    about KEYS — every map key and database attribute is fully
+    namespaced so the fact self-identifies and installs under a
+    declared, validatable schema; no exceptions, and the edit-time
+    check is that no bare-keyword key ever reaches a schema or a
+    transaction. KEYWORD VALUES may stay unqualified where they map
+    1:1 to a dependency's own vocabulary (core.async's
+    `:io`/`:compute`, kondo's finding types) — the seam's name
+    survives verbatim, and validation comes from the declared
+    `[:enum …]` on the namespaced attribute, not from qualifying the
+    member. The earlier storage-translates clause is WITHDRAWN; the
+    ~45-file enum sweep is off the atomic pass.
 
 50. **Store the full parse — the indexer is a bridge, not a curator**
     (owner, 2026-08-29): clj-kondo is the one parser, and its analysis
