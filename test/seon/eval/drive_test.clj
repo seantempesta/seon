@@ -38,12 +38,13 @@
             instance {:seon.boot/cluster-connection connection
                       :seon.sci.eval/ctx
                       (support/fork-cluster-ctx connection)}
-            settings {:seon.config.eval/time-limit-ms 1000
-                      :seon.config/on-core-error :record
-                      :seon.config.eval.result/max-depth 8
-                      :seon.config.eval.result/max-collection 32
-                      :seon.config.eval.result/max-string 4096
-                      :seon.config.eval.result/max-nodes 4096}]
+            settings (assoc (support/effective-config)
+                            :seon.config.eval/time-limit-ms 1000
+                            :seon.config/on-core-error :record
+                            :seon.config.eval.result/max-depth 8
+                            :seon.config.eval.result/max-collection 32
+                            :seon.config.eval.result/max-string 4096
+                            :seon.config.eval.result/max-nodes 4096)]
         (is (= "user=> 42\n42"
                (full-transcript database "projection-proof"
                                 instance settings)))))))
