@@ -805,12 +805,15 @@
 (defn- write-command!
   [^PrintWriter writer value]
   (.println writer (pr-str value))
-  (.flush writer))
+  (.flush writer)
+  (not (.checkError writer)))
 
 (defn- worker-command-loop!
   "Read and execute worker commands serially until explicitly stopped."
   [worker-id ^BufferedReader reader ^PrintWriter writer]
-  (write-protocol! writer {::worker-event :ready ::worker-id worker-id})
+  (write-protocol! writer {::worker-event :ready
+                           ::worker-id worker-id
+                           ::exchange-id (str worker-id "/readiness")})
   (loop []
     (when-let [line (.readLine reader)]
       (let [command (edn/read-string line)]
@@ -822,6 +825,7 @@
             (write-protocol! writer
                              {::worker-event :initialized
                               ::worker-id worker-id
+                              ::exchange-id (::exchange-id command)
                               ::worker-namespace-count (count namespaces)})
             (recur))
 
@@ -830,12 +834,15 @@
             (write-protocol! writer
                              (assoc (run-task! (::worker-task command))
                                     ::worker-event :task-complete
-                                    ::worker-id worker-id))
+                                    ::worker-id worker-id
+                                    ::exchange-id (::exchange-id command)))
             (recur))
 
           :stop
           (write-protocol! writer
-                           {::worker-event :stopped ::worker-id worker-id})
+                           {::worker-event :stopped
+                            ::worker-id worker-id
+                            ::exchange-id (::exchange-id command)})
 
           (throw
            (ex-info "A test worker received an unknown command."
@@ -1101,16 +1108,161 @@
   [worker-id]
   (io/file (worker-parent) worker-id))
 
-(defn- read-worker-protocol!
-  [worker]
+(defn- append-worker-line!
+  [worker line]
+  (spit (::worker-error-log worker) (str line "\n") :append true))
+
+(defn- matching-worker-reply?
+  [expected reply]
+  (and (= (::worker-id expected) (::worker-id reply))
+       (= (::worker-event expected) (::worker-event reply))
+       (= (::exchange-id expected) (::exchange-id reply))))
+
+(defn- read-exchange-reply!
+  [worker expected exit-future]
   (loop []
     (if-let [line (.readLine ^BufferedReader (::worker-reader worker))]
       (if (str/starts-with? line protocol-prefix)
-        (edn/read-string (subs line (count protocol-prefix)))
+        (let [reply
+              (try
+                (edn/read-string (subs line (count protocol-prefix)))
+                (catch Throwable _ ::unparseable-worker-reply))]
+          (if (and (map? reply) (matching-worker-reply? expected reply))
+            {::exchange-terminal :reply ::exchange-reply reply}
+            (do
+              (append-worker-line! worker
+                                   (str "UNMATCHED_WORKER_REPLY " line))
+              (recur))))
         (do
-          (spit (::worker-error-log worker) (str line "\n") :append true)
+          (append-worker-line! worker line)
           (recur)))
-      nil)))
+      ;; Pipe EOF is not a fourth terminal event. Await the already-registered
+      ;; exact process exit; if the process stays live, the declared bound wins.
+      (.join ^CompletableFuture exit-future))))
+
+(defn- event-backstop-seconds
+  []
+  (long @(requiring-resolve 'seon.test-support/event-backstop-seconds)))
+
+(defn- append-dispatch!
+  [worker dispatch]
+  (let [journal (io/file (::worker-root worker) "logs" "worker-dispatch.edn")]
+    (spit journal (str (pr-str dispatch) "\n") :append true)
+    (.getCanonicalPath journal)))
+
+(defn- retire-worker!
+  [worker destroy?]
+  (reset! (::worker-retired? worker) true)
+  (let [process ^Process (::worker-process worker)]
+    (when (and destroy? (.isAlive process))
+      (.destroyForcibly process))))
+
+(defn- exchange-failure?
+  [value]
+  (true? (::worker-exchange-failure value)))
+
+(defn- worker-exchange!
+  [{worker ::worker
+    command ::exchange-command
+    expected-event ::expected-worker-event
+    exchange-id ::exchange-id
+    task-symbols ::task-symbols
+    completion-bound-seconds ::completion-bound-seconds}]
+  (let [process ^Process (::worker-process worker)
+        worker-id (::worker-id worker)
+        dispatch-at (Instant/now)
+        expected {::worker-id worker-id
+                  ::worker-event expected-event
+                  ::exchange-id exchange-id}
+        dispatch (cond-> {::worker-id worker-id
+                          ::worker-pid (.pid process)
+                          ::exchange-id exchange-id
+                          ::expected-worker-event expected-event
+                          ::completion-bound-seconds completion-bound-seconds
+                          ::dispatch-at (str dispatch-at)}
+                   (seq task-symbols) (assoc ::task-symbols task-symbols))]
+    (if @(::worker-retired? worker)
+      (assoc dispatch
+             ::worker-exchange-failure true
+             :seon.error/kind ::worker-retired
+             ::missing-worker-event expected-event)
+      (let [executor (Executors/newVirtualThreadPerTaskExecutor)
+            exact-exit (.onExit process)
+            exit-future
+            (.thenApply
+             exact-exit
+             (reify java.util.function.Function
+               (apply [_ exited]
+                 {::exchange-terminal :exit
+                  ::worker-exit (.exitValue ^Process exited)})))
+            reply-future
+            (CompletableFuture/supplyAsync
+             (reify java.util.function.Supplier
+               (get [_]
+                 (read-exchange-reply! worker expected exit-future)))
+             executor)
+            bound-future
+            (CompletableFuture/supplyAsync
+             (reify java.util.function.Supplier
+               (get [_] {::exchange-terminal :bound}))
+             (CompletableFuture/delayedExecutor
+              completion-bound-seconds TimeUnit/SECONDS))]
+        (try
+          (let [journal (append-dispatch! worker dispatch)
+                command (when command (assoc command ::exchange-id exchange-id))]
+            (if (and command
+                     (not (write-command! (::worker-writer worker) command)))
+              (do
+                (retire-worker! worker true)
+                (assoc dispatch
+                       ::dispatch-journal journal
+                       ::worker-exchange-failure true
+                       :seon.error/kind ::worker-write-failure
+                       ::missing-worker-event expected-event))
+              (let [{terminal ::exchange-terminal :as outcome}
+                    (.get
+                     (CompletableFuture/anyOf
+                      (into-array CompletableFuture
+                                  [reply-future exit-future bound-future])))]
+                (case terminal
+                  :reply (::exchange-reply outcome)
+                  :exit
+                  (do
+                    (retire-worker! worker false)
+                    (assoc dispatch
+                           ::dispatch-journal journal
+                           ::worker-exchange-failure true
+                           :seon.error/kind ::worker-exited
+                           ::worker-exit (::worker-exit outcome)
+                           ::worker-error-log (::worker-error-log worker)
+                           ::missing-worker-event expected-event))
+                  :bound
+                  (do
+                    (retire-worker! worker true)
+                    (assoc dispatch
+                           ::dispatch-journal journal
+                           ::worker-exchange-failure true
+                           :seon.error/kind ::worker-exchange-bound
+                           ::worker-error-log (::worker-error-log worker)
+                           ::missing-worker-event expected-event))))))
+          (catch InterruptedException failure
+            (.interrupt (Thread/currentThread))
+            (retire-worker! worker true)
+            (assoc dispatch
+                   ::worker-exchange-failure true
+                   :seon.error/kind ::worker-exchange-interrupted
+                   ::missing-worker-event expected-event
+                   ::failure-message (ex-message failure)))
+          (catch Throwable failure
+            (retire-worker! worker true)
+            (assoc dispatch
+                   ::worker-exchange-failure true
+                   :seon.error/kind ::worker-exchange-failed
+                   ::missing-worker-event expected-event
+                   ::failure-class (.getName (class failure))
+                   ::failure-message (or (ex-message failure) "")))
+          (finally
+            (.shutdownNow executor)))))))
 
 (defn- start-worker!
   [worker-id checkout-root operator-root]
@@ -1147,51 +1299,40 @@
                 ::worker-process process
                 ::worker-reader (io/reader (.getInputStream process))
                 ::worker-writer (PrintWriter. (.getOutputStream process) true)
+                ::worker-retired? (atom false)
                 ::worker-checkout (.getCanonicalPath checkout-root)
                 ::worker-root (.getCanonicalPath operator-root)
                 ::worker-error-log (.getCanonicalPath error-log)}
-        ready (read-worker-protocol! worker)]
-    (when-not ready
+        readiness-id (str worker-id "/readiness")
+        ready (worker-exchange!
+               {::worker worker
+                ::exchange-id readiness-id
+                ::expected-worker-event :ready
+                ::completion-bound-seconds (event-backstop-seconds)})]
+    (when (exchange-failure? ready)
       (throw
-       (ex-info "A test worker exited before publishing readiness."
-                {:seon.error/kind ::worker-launch-failure
-                 ::worker-id worker-id
-                 ::worker-exit (when-not (.isAlive process)
-                                 (.exitValue process))
-                 ::worker-error-log (::worker-error-log worker) :seon.test.runner/worker-launch-failure true})))
-    (when-not (= :ready (::worker-event ready))
-      (throw
-       (ex-info "A test worker published an invalid readiness value."
-                {:seon.error/kind ::worker-launch-failure
-                 ::worker-id worker-id
-                 ::worker-ready ready
-                 ::worker-error-log (::worker-error-log worker) :seon.test.runner/worker-launch-failure true})))
+       (ex-info "A test worker did not publish readiness."
+                (assoc ready
+                       :seon.error/kind ::worker-launch-failure
+                       ::underlying-failure-kind (:seon.error/kind ready)
+                       :seon.test.runner/worker-launch-failure true))))
     worker))
-
-(defn- worker-rpc!
-  [worker command]
-  (write-command! (::worker-writer worker) command)
-  (if-let [result (read-worker-protocol! worker)]
-    result
-    (throw
-     (ex-info "A test worker exited without returning its task result."
-              {::worker-id (::worker-id worker)
-               ::worker-exit
-               (when-not (.isAlive ^Process (::worker-process worker))
-                 (.exitValue ^Process (::worker-process worker)))
-               ::worker-error-log (::worker-error-log worker)}))))
 
 (defn- initialize-worker!
   [worker namespace-names]
-  (let [result (worker-rpc!
-                worker
-                {::worker-command :initialize
-                 ::worker-namespaces (mapv str namespace-names)})]
-    (when-not (= :initialized (::worker-event result))
+  (let [exchange-id (str (::worker-id worker) "/initialize")
+        result (worker-exchange!
+                {::worker worker
+                 ::exchange-command
+                 {::worker-command :initialize
+                  ::worker-namespaces (mapv str namespace-names)}
+                 ::exchange-id exchange-id
+                 ::expected-worker-event :initialized
+                 ::completion-bound-seconds (event-backstop-seconds)})]
+    (when (exchange-failure? result)
       (throw
        (ex-info "A test worker refused namespace initialization."
-                {::worker-id (::worker-id worker)
-                 ::worker-result result})))
+                result)))
     worker))
 
 (def ^:private process-tree-exit-backstop-seconds
@@ -1259,9 +1400,12 @@
   (let [process ^Process (::worker-process worker)]
     (when (.isAlive process)
       (let [ownership (process-tree-ownership process)]
-        (try
-          (write-command! (::worker-writer worker) {::worker-command :stop})
-          (catch Throwable _))
+        (worker-exchange!
+         {::worker worker
+          ::exchange-command {::worker-command :stop}
+          ::exchange-id (str (::worker-id worker) "/stop")
+          ::expected-worker-event :stopped
+          ::completion-bound-seconds (event-backstop-seconds)})
         (stop-owned-process-tree! ownership)
         (.waitFor process)))))
 
@@ -1278,8 +1422,41 @@
   (announce! progress
              (str "BEGIN worker=" (::worker-id worker)
                   " task=" (str/join "," (::task-symbols task))))
-  (let [result (worker-rpc! worker
-                            {::worker-command :run ::worker-task task})]
+  (let [result
+        (worker-exchange!
+         {::worker worker
+          ::exchange-command {::worker-command :run ::worker-task task}
+          ::exchange-id (::task-id task)
+          ::expected-worker-event :task-complete
+          ::task-symbols (::task-symbols task)
+          ::completion-bound-seconds (event-backstop-seconds)})
+        result
+        (if (exchange-failure? result)
+          (let [test-symbols (mapv str (::task-symbols task))
+                message (str "Worker exchange failed: " (pr-str result))]
+            (assoc task
+                   ::task-summary {::test-count (count test-symbols)
+                                   ::pass-count 0
+                                   ::fail-count 0
+                                   ::error-count (count test-symbols)}
+                   ::task-results
+                   (mapv
+                    (fn [test-symbol]
+                      (let [failure-id
+                            (schema/sha-256
+                             [(.getBytes
+                               (pr-str [test-symbol :worker-exchange message])
+                               StandardCharsets/UTF_8)])]
+                        #:seon.test{:sym test-symbol
+                                    :pass-count 0
+                                    :fail-count 0
+                                    :error-count 1
+                                    :failing-assertions [failure-id]
+                                    :failure-message message}))
+                    test-symbols)
+                   ::task-output (str message "\n")
+                   ::worker-exchange-result result))
+          result)]
     (announce! progress
                (str "END worker=" (::worker-id worker)
                     " elapsed-ms=" (::task-elapsed-ms result)
@@ -1363,9 +1540,11 @@
                 :seon.error/kind failure-kind
                 ::failure-class (.getName (class failure))
                 ::failure-message (or (ex-message failure) ""))
+          (::injected? (ex-data failure)) (assoc ::injected? true)
           underlying-kind (assoc ::underlying-failure-kind underlying-kind)
           (ex-data failure) (assoc ::failure-data (ex-data failure)))]
     (println "bin/test: confirmation unconfirmed"
+             (when (::injected? (ex-data failure)) "[INJECTED FIXTURE]")
              (str/join "," (::task-symbols task-result))
              "worker=" (::worker-id launch)
              "kind=" failure-kind)
@@ -1474,6 +1653,7 @@
         (let [failure (::confirmation-failure task-result)]
           (println " -" (str/join "," (::task-symbols task-result))
                    "worker=" (::worker-id failure)
+                   (when (::injected? failure) "[INJECTED FIXTURE]")
                    "kind=" (:seon.error/kind failure)))))))
 
 (defn- run-parallel-stage!

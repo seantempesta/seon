@@ -12,7 +12,8 @@
             [seon.test-runner-failure-fixture]
             [seon.test.runner :as runner]
             [seon.test-support :as test-support])
-  (:import [java.util.concurrent CountDownLatch TimeUnit]))
+  (:import [java.io PrintWriter]
+           [java.util.concurrent CountDownLatch TimeUnit]))
 
 (def ^:private at (java.util.Date. 1785283200000))
 (def ^:private git-sha (apply str (repeat 40 "a")))
@@ -70,6 +71,70 @@
   (let [fake-getconf (io/file fake-bin "getconf")]
     (spit fake-getconf "#!/usr/bin/env bash\necho 2\n")
     (is (.setExecutable fake-getconf true false))))
+
+(defn- start-injected-worker!
+  [case-name program]
+  (let [root (doto (io/file project-root "tmp" "test-runner-exchange"
+                            (str case-name "-" (random-uuid)))
+               .mkdirs)
+        logs (doto (io/file root "logs") .mkdirs)
+        error-log (io/file logs "worker-stderr.log")
+        process (.start
+                 (doto
+                  (ProcessBuilder.
+                   ^java.util.List ["/usr/bin/python3" "-u" "-c" program
+                                    (.getCanonicalPath root)])
+                  (.redirectError error-log)))]
+    {::runner/worker-id (str case-name)
+     ::runner/worker-process process
+     ::runner/worker-reader (io/reader (.getInputStream process))
+     ::runner/worker-writer (PrintWriter. (.getOutputStream process) true)
+     ::runner/worker-retired? (atom false)
+     ::runner/worker-root (.getCanonicalPath root)
+     ::runner/worker-error-log (.getCanonicalPath error-log)}))
+
+(defn- stop-injected-worker!
+  [worker]
+  (let [process ^Process (::runner/worker-process worker)
+        root (io/file (::runner/worker-root worker))]
+    (when (.isAlive process)
+      (.destroyForcibly process)
+      (.get (.onExit (.toHandle process))
+            test-support/event-backstop-seconds TimeUnit/SECONDS))
+    (when (.exists root)
+      (test-support/delete-recursively! root))))
+
+(defn- exchange-task
+  [case-name]
+  {::runner/task-id (str case-name)
+   ::runner/task-ordinal 1
+   ::runner/task-symbols [(str "seon.exchange-test/" case-name)]})
+
+(defn- execute-injected-task!
+  [worker task]
+  (#'runner/execute-worker-task!
+   (atom {::runner/description "injected worker exchange"
+          ::runner/at-nanos (System/nanoTime)
+          ::runner/at (java.time.Instant/now)})
+   worker task))
+
+(defn- assert-one-terminal-error!
+  [case-name result expected-kind]
+  (is (= {::runner/test-count 1
+          ::runner/pass-count 0
+          ::runner/fail-count 0
+          ::runner/error-count 1}
+         (::runner/task-summary result))
+      (str case-name " contributes one terminal task to the total tally"))
+  (is (= 1 (count (::runner/task-results result))))
+  (is (= (str "seon.exchange-test/" case-name)
+         (:seon.test/sym (first (::runner/task-results result)))))
+  (is (= expected-kind
+         (get-in result [::runner/worker-exchange-result
+                         :seon.error/kind])))
+  (is (= [(str "seon.exchange-test/" case-name)]
+         (get-in result [::runner/worker-exchange-result
+                         ::runner/task-symbols]))))
 
 (deftest root-owning-tasks-never-co-run-inside-one-worker-group
   (let [group-a-tasks (atom [:a-1 :a-2])
@@ -183,7 +248,8 @@
                     (ex-info
                      "Injected confirmation process launch refusal."
                      {:seon.error/kind
-                      ::runner/worker-launch-failure}))))
+                      ::runner/worker-launch-failure
+                      ::runner/injected? true}))))
                 summary (#'runner/summarize-task-results confirmed)]
             (reset! confirmed* confirmed)
             (reset! summary* summary)
@@ -206,7 +272,122 @@
     (is (str/includes? output "1 failures, 0 errors."))
     (is (str/includes?
          output
-         "Unconfirmed tasks:\n - seon.example-test/unlaunchable"))))
+         "Unconfirmed tasks:\n - seon.example-test/unlaunchable"))
+    (is (str/includes? output "[INJECTED FIXTURE]")
+        "fixture output cannot be mistaken for a production launch line")))
+
+(deftest exit-before-readiness-is-one-attributed-terminal-value
+  (let [worker (start-injected-worker! "readiness-exit"
+                                       "import sys; sys.exit(17)\n")]
+    (try
+      (let [result
+            (#'runner/worker-exchange!
+             {::runner/worker worker
+              ::runner/exchange-id "readiness-exit/readiness"
+              ::runner/expected-worker-event :ready
+              ::runner/completion-bound-seconds 1})]
+        (is (= ::runner/worker-exited (:seon.error/kind result)))
+        (is (= "readiness-exit" (::runner/worker-id result)))
+        (is (= 17 (::runner/worker-exit result)))
+        (is (= :ready (::runner/missing-worker-event result)))
+        (is (true? @(::runner/worker-retired? worker))))
+      (finally
+        (stop-injected-worker! worker)))))
+
+(deftest kill-after-command-acceptance-is-one-attributed-task-result
+  (let [accepted-name "accepted"
+        worker
+        (start-injected-worker!
+         "killed"
+         (str "import os, signal, sys\n"
+              "root = sys.argv[1]\n"
+              "sys.stdin.readline()\n"
+              "open(os.path.join(root, '" accepted-name "'), 'w').write('accepted')\n"
+              "signal.pause()\n"))
+        root (io/file (::runner/worker-root worker))
+        watcher (.newWatchService (java.nio.file.FileSystems/getDefault))]
+    (try
+      (.register (.toPath root)
+                 watcher
+                 (into-array java.nio.file.WatchEvent$Kind
+                             [java.nio.file.StandardWatchEventKinds/ENTRY_CREATE]))
+      (let [result-future
+            (future (execute-injected-task! worker (exchange-task "killed")))
+            _ (is (= accepted-name (await-created! watcher accepted-name)))
+            process ^Process (::runner/worker-process worker)]
+        (.destroyForcibly process)
+        (.get (.onExit (.toHandle process))
+              test-support/event-backstop-seconds TimeUnit/SECONDS)
+        (let [result (deref result-future
+                            (* 1000 test-support/event-backstop-seconds)
+                            ::task-backstop)]
+          (is (not= ::task-backstop result))
+          (assert-one-terminal-error! "killed" result
+                                      ::runner/worker-exited)))
+      (finally
+        (.close watcher)
+        (stop-injected-worker! worker)))))
+
+(deftest checked-write-failure-is-one-attributed-task-result
+  (let [worker (start-injected-worker! "write-failure"
+                                       "import sys; sys.exit(19)\n")
+        process ^Process (::runner/worker-process worker)]
+    (try
+      (.get (.onExit (.toHandle process))
+            test-support/event-backstop-seconds TimeUnit/SECONDS)
+      (let [result (execute-injected-task! worker
+                                           (exchange-task "write-failure"))]
+        (assert-one-terminal-error! "write-failure" result
+                                    ::runner/worker-write-failure))
+      (finally
+        (stop-injected-worker! worker)))))
+
+(deftest live-worker-exceeding-its-bound-is-one-attributed-task-result
+  (let [worker
+        (start-injected-worker!
+         "bounded"
+         (str "import signal, sys\n"
+              "sys.stdin.readline()\n"
+              "signal.pause()\n"))]
+    (try
+      (let [result
+            (with-redefs-fn
+              {#'runner/event-backstop-seconds (constantly 1)}
+              #(execute-injected-task! worker (exchange-task "bounded")))]
+        (assert-one-terminal-error! "bounded" result
+                                    ::runner/worker-exchange-bound)
+        (is (false? (.isAlive ^Process (::runner/worker-process worker)))
+            "the bounded worker is retired before another dispatch"))
+      (finally
+        (stop-injected-worker! worker)))))
+
+(deftest ordinary-worker-reply-is-one-attributed-terminal-value
+  (let [worker
+        (start-injected-worker!
+         "ordinary"
+         (str
+          "import sys\n"
+          "sys.stdin.readline()\n"
+          "print('SEON_TEST_WORKER_EDN {:seon.test.runner/worker-event :task-complete "
+          ":seon.test.runner/worker-id \\\"ordinary\\\" "
+          ":seon.test.runner/exchange-id \\\"ordinary\\\" "
+          ":seon.test.runner/task-id \\\"ordinary\\\" "
+          ":seon.test.runner/task-symbols [\\\"seon.exchange-test/ordinary\\\"] "
+          ":seon.test.runner/task-summary {:seon.test.runner/test-count 1 "
+          ":seon.test.runner/pass-count 1 :seon.test.runner/fail-count 0 "
+          ":seon.test.runner/error-count 0} :seon.test.runner/task-results [] "
+          ":seon.test.runner/task-elapsed-ms 1}', flush=True)\n"))]
+    (try
+      (let [result (execute-injected-task! worker (exchange-task "ordinary"))]
+        (is (= {::runner/test-count 1
+                ::runner/pass-count 1
+                ::runner/fail-count 0
+                ::runner/error-count 0}
+               (::runner/task-summary result)))
+        (is (= "ordinary" (::runner/task-id result)))
+        (is (nil? (::runner/worker-exchange-result result))))
+      (finally
+        (stop-injected-worker! worker)))))
 
 (deftest boot-tests-have-no-namespace-wide-execution-shape
   (let [namespace-object (find-ns 'seon.cluster.boot-test)
