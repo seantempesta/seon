@@ -608,6 +608,29 @@ numerically and a bare cross-citation is a defect to fix on sight.
     (with 47's sym retype and 48c's receipts→evals); database data is
     disposable — retype + reset.
 
+50. **Store the full parse — the indexer is a bridge, not a curator**
+    (owner, 2026-08-29): clj-kondo is the one parser, and its analysis
+    output is stored COMPREHENSIVELY as namespaced facts instead of
+    hand-picked projections — every cherry-picking omission has
+    returned as a defect (the macro flag, M6's missing shape,
+    location-less call sets). Concretely: var-definitions keep every
+    field kondo emits (defined-by, fixed-arities, varargs-min-arity,
+    macro, spans); VAR-USAGES BECOME ENTITIES — one per usage with
+    from/to refs, the called arity, and source location — replacing
+    the reduced `:seon.fn/calls` set as the authority (a calls-shaped
+    set stays derivable as a query); namespace-usages, keyword sites,
+    and protocol impls land as their own families. Field names follow
+    kondo's own vocabulary under our namespaces (the seam's names and
+    semantics, rank-2 naming law); new attributes are born compliant
+    with rulings 47–49 (symbols as symbols, namespaced keyword
+    values). Volume is datom-cheap (usage entities are the big family;
+    prior measurement ~26k core usages alone — well within Datahike's
+    ordinary range, and the store's growth problem is blobs, not
+    datoms). SEQUENCE: after the orchestrator's atomic identity pass,
+    so the new families are born on clean foundations; the render/help
+    machinery (mention tracing, error adjacency, composition join,
+    tests-reaching) consumes the richer edges instead of re-deriving.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
