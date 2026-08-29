@@ -39,8 +39,6 @@
   (:require [clojure.string :as str]
             [seon.context :as context]
             [seon.db :as db]
-            [seon.ai.tokens :as tokens]
-            [seon.effect :as effect]
             [seon.print :as print]
             [seon.render :as render]
             [seon.schema :as schema]
@@ -612,111 +610,6 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Assembly — the ai kind
 ;;; ---------------------------------------------------------------------------
-
-(defn prose
-  "A rendered neighbourhood as text. THE `:seon.render/ai` ASSEMBLY.
-
-  Each unit gets one compact comment carrying its depth and output. A
-  branch root also retains the literal `:branch` path accepted by
-  `seon.render/walk`, so shortening presentation never removes the drill
-  handle. A node that rendered nothing contributes nothing — omission is
-  nil-punning here exactly as it is in a block, so a family with nothing to
-  say costs no tokens.
-
-  A node carrying a flat error contributes ITS MESSAGE, because a reader
-  told nothing about a neighbour that exists would reason from a gap it
-  cannot see. That is the same rule `seon.cluster.prompt` applies to a
-  failed block."
-  {:malli/schema
-   [:function
-    [:=> [:cat :seon.db/database-value :seon.render.walk/units]
-     [:maybe :string]]
-    [:=>
-     [:cat
-      :seon.db/database-value
-      :seon.render.walk/units
-      [:map
-       [:seon.render.walk/branch
-        {:optional true}
-        [:vector [:or :keyword :int]]]]]
-     [:maybe :string]]]}
-  ([db rendered-units]
-   (prose db rendered-units {}))
-  ([db rendered-units {requested-branch :seon.render.walk/branch}]
-   (letfn [(provenance [unit]
-            (or (get-in unit [:seon.error/value :seon.error/kind])
-                (:seon.render.walk/lookup unit)))
-          (within-branch? [path]
-            (or (nil? requested-branch)
-                (and (<= (count requested-branch) (count path))
-                     (= requested-branch
-                        (subvec path 0 (count requested-branch))))))
-          (elision-unit? [unit]
-            (= ::elided
-               (get-in unit [:seon.error/value :seon.error/kind])))
-          (unit-lines [unit]
-            (let [path (:seon.render.walk/path unit)
-                  depth (:seon.render.walk/found-depth unit)
-                  unit-provenance (provenance unit)
-                  failure (:seon.error/value unit)
-                  output (:seon.render/output unit)
-                  text (cond
-                         (string? output) output
-                         (some? output) (pr-str output)
-                         failure (:seon.error/message failure))]
-              {:seon.render.walk/lines
-               [(str ";; d" depth " · " (pr-str unit-provenance)) text]
-               :seon.render.walk/branch-metadata
-               (when (= path (:seon.render.walk/branch unit))
-                 (str ";; unit=" (pr-str unit-provenance)
-                      " branch=" (pr-str path)))}))]
-     (let [root-unit (first (sort-by #(count (:seon.render.walk/path %))
-                                     rendered-units))
-           root (:seon.render.walk/lookup root-unit)
-           requested-depth (:seon.render/distance root-unit)
-           options (cond-> {:root root :depth requested-depth}
-                     (some? requested-branch)
-                     (assoc :branch requested-branch))
-           header (str ";; (seon.render/walk " (pr-str options) ")"
-                       " => root=" (pr-str root)
-                       " depth=" requested-depth
-                       (when (some? requested-branch)
-                         (str " branch=" (pr-str requested-branch))))
-           ordered (->> rendered-units
-                        (filter (comp within-branch?
-                                      :seon.render.walk/path)))
-           elisions (filter elision-unit? ordered)
-           visible (remove elision-unit? ordered)
-           rendered-visible (map unit-lines visible)
-           agent-id
-           (when (= :seon.cluster.agent/id (first root))
-             (second root))
-           elision-summary
-           (when (seq elisions)
-             (let [former-noise (str/join "\n" (keep :seon.render/output
-                                                       elisions))]
-               {:seon.render.walk/guidance
-                (str ";; Some branches are elided · inspect with "
-                     "(seon.render/walk "
-                     (pr-str {:root root :depth (inc requested-depth)}) ")")
-                :seon.render.walk/metadata
-                (str ";; branches-elided=" (count elisions)
-                     " elided-tokens=" (tokens/estimate former-noise))}))
-           lines (concat [header]
-                         (some-> elision-summary
-                                 :seon.render.walk/guidance
-                                 vector)
-                         (mapcat :seon.render.walk/lines rendered-visible)
-                         [";; Volatile context metadata"]
-                         (some-> elision-summary
-                                 :seon.render.walk/metadata
-                                 vector)
-                         (when agent-id
-                           [(effect/context-suffix db agent-id)])
-                         (keep :seon.render.walk/branch-metadata
-                               rendered-visible))
-           text (str/join "\n" lines)]
-       (when-not (str/blank? text) text)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The generated opening episode

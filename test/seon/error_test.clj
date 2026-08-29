@@ -742,7 +742,8 @@
                    (assoc request :seon.render/output :seon.render/ai))
             html-units (walk/neighborhood
                         (assoc request :seon.render/output :seon.render/html))
-            text (walk/prose db units)]
+            text (clojure.string/join
+                  "\n" (keep :seon.render/output units))]
         (is (str/includes? text "The loop :step failed"))
         (is (str/includes? text "Inspect error"))
         (is (not (str/includes? text "projection threw")))

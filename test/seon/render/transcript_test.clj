@@ -45,18 +45,20 @@
     :seon.sci.admit/caps render-caps}))
 
 (defn- full-agent-ai
+  ;; the complete /ai projection as one string: joined unit outputs
+  ;; (walk/prose died with its authored headers — census 2026-08-28)
   [db]
-  (walk/prose
-   db
-   (walk/neighborhood
-    {:seon.db/db db
-     :seon.render.walk/lookup [:seon.cluster.agent/id agent-id]
-     :seon.render/output :seon.render/ai
-     :seon.render/distance 2
-     :seon.sci.eval/ctx (sci.eval/cluster-ctx db)
-     :seon.sci.eval/time-limit-ms 1000
-     :seon.config/on-core-error :record
-     :seon.sci.admit/caps caps})))
+  (->> (walk/neighborhood
+        {:seon.db/db db
+         :seon.render.walk/lookup [:seon.cluster.agent/id agent-id]
+         :seon.render/output :seon.render/ai
+         :seon.render/distance 2
+         :seon.sci.eval/ctx (sci.eval/cluster-ctx db)
+         :seon.sci.eval/time-limit-ms 1000
+         :seon.config/on-core-error :record
+         :seon.sci.admit/caps caps})
+       (keep :seon.render/output)
+       (clojure.string/join "\n")))
 
 (defn- nodes
   [hiccup]

@@ -54,33 +54,3 @@
                        (:seon.cluster.run/background-results opened))))
           (is (nil? (:seon.cluster.run/trigger opened))))))))
 
-(deftest background-pane-is-behind-the-stable-prefix-boundary
-  (support/with-database
-    (fn [connection]
-      (db/transact!
-       connection
-       [{:seon.cluster.agent/id "suffix-agent"}
-        {:seon.cluster.run/id "suffix-run"}
-        {:seon.fn/sym "my.example/background-call"}
-        {:seon.effect/id "suffix-effect"
-         :seon.effect/run [:seon.cluster.run/id "suffix-run"]
-         :seon.effect/owner [:seon.fn/sym "my.example/background-call"]
-         :seon.effect/form-ordinal 0
-         :seon.effect/ordinal 0
-         :seon.effect/request-edn "{}"
-         :seon.effect/opened-at (Date.)
-         :seon.effect/notify [:seon.cluster.agent/id "suffix-agent"]}])
-      (let [text
-            (walk/prose
-             @connection
-             [{:seon.render.walk/lookup
-               [:seon.cluster.agent/id "suffix-agent"]
-               :seon.render.walk/path []
-               :seon.render.walk/found-depth 0
-               :seon.render/distance 1
-               :seon.render/output "stable agent context"}])
-            marker (str/index-of text ";; Volatile context metadata")
-            pane (str/index-of text ";; Background work:")]
-        (is (number? marker))
-        (is (number? pane))
-        (is (< marker pane))))))
