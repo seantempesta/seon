@@ -668,6 +668,23 @@ numerically and a bare cross-citation is a defect to fix on sight.
     built only if view 1's stability fails in practice. Platform
     repairs and bad-design fixes continue alongside as enablers.
 
+    **52a — `(help)` is the render of a DERIVED COVERAGE SET** (owner,
+    same day): help is not authored text but
+    `(render (coverage db agent))` — the seed of the mention fixpoint.
+    Coverage's five derived sources: self (ns docstring + publics),
+    the trigger, the data neighborhood (affordance lines), the
+    PROTOCOL VOCABULARY (the symbols the run loop's own code consumes
+    when parsing replies — post-bridge, a usage query over the loop
+    itself, so the system's protocol section derives from the
+    system's source), and the injected world (the ctx bindings' rows,
+    47). Experience stays DERIVED, never stored: ordering =
+    names-before-use fixpoint; salience = cross-agent usage frequency
+    with recency decay + error adjacency (51); teaching-state = this
+    agent's own evals and errors (correct use → near-silence, errors
+    → doc + schema + a real test as the demonstration via
+    tests-reaching). No stored salience, ordering, or curriculum —
+    those are queries or they rot.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
