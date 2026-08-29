@@ -68,12 +68,11 @@ See `README.md` for the convention.
 | [Answer no-forms replies with correction or re-wake](no-forms-replies-close-without-correction-or-rewake.md) | blocker | OWNER DESIGN GATE (correction vs re-wake) |
 | [Bound orderly-stop completion joins](orderly-stop-completion-joins-have-no-bound.md) | blocker | wedge class-kill continuation |
 
-## Friction (136)
+## Friction (135)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [A stale dev-dependency cache serves wrong classes silently](stale-dev-dependency-cache-serves-wrong-classes-silently.md) | friction | boot-velocity wave |
-| [Rearm the docstring comment-result guard](rearm-the-docstring-comment-result-guard.md) | friction | ruling-45 sweep follow-up (dev-tooling-face-hygiene wave) |
 | [Fix edit-hook kondo false positives on seon.db dynamic vars](edit-hook-kondo-false-positives-on-seon-db-dynamic-vars.md) | friction | dev-tooling-face-hygiene wave |
 | [Accept cluster-ctx delegating arities under instrumentation](cluster-ctx-delegating-arities-refused-under-instrumentation.md) | friction | sci-eval-context-owner wave |
 | [Project effective config in the MCP health probe](mcp-health-probe-lacks-projection-for-effective-config.md) | friction | dev-mcp wave |
