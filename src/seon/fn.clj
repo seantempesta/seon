@@ -224,8 +224,7 @@
   [analysis]
   (into #{}
         (comp
-         (filter #(and (seq (::analyzer/arglist-strs %))
-                       (not (::analyzer/macro %))))
+         (filter #(seq (::analyzer/arglist-strs %)))
          (map #(str (symbol (str (::analyzer/ns %))
                             (str (::analyzer/name %))))))
         (::analyzer/var-definitions analysis)))
@@ -358,8 +357,7 @@
         (test-subject metadata)
         (assoc :seon.test/subject (test-subject metadata)))
 
-      (and (seq (::analyzer/arglist-strs entry))
-           (not (::analyzer/macro entry)))
+      (seq (::analyzer/arglist-strs entry))
       (cond-> {:seon.fn/sym (str qualified)
                :seon.fn/ns [:seon.ns/name namespace-name]
                :seon.fn/source source

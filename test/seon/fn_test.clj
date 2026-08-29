@@ -210,7 +210,8 @@
              "            [clojure.test.check.clojure-test :refer [defspec]]\n"
              "            [clojure.string :as str])\n"
              "  (:import [java.util Date]))\n"
-             "(defn ^:private helper [x] (str/trim x))\n"
+             "(defmacro sample-macro \"Macro doc.\" [x] x)\n"
+             "(defn ^:private helper [x] (sample-macro (str/trim x)))\n"
              "(defn ^{:malli/schema [:=> [:cat fn?] string?]\n"
              "         :seon.workload :compute\n"
              "         :seon.fn/external-sink :ai-visible-text\n"
@@ -228,7 +229,8 @@
       (testing "top-level source is analyzed and never evaluated"
         (is (contains? by-id [:seon.fn/sym "sample.core/contracted"])))
       (testing "functions, tests, records, and types keep JVM parity"
-        (is (= #{"sample.core/helper" "sample.core/contracted"
+        (is (= #{"sample.core/sample-macro"
+                 "sample.core/helper" "sample.core/contracted"
                  "sample.core/->Pair" "sample.core/map->Pair"
                  "sample.core/->Cell"}
                (into #{} (keep :seon.fn/sym) rows)))
@@ -255,10 +257,25 @@
         (is (= [[:seon.fn/sym "sample.core/contracted"]]
                (:seon.fn/calls
                 (get by-id [:seon.test/sym "sample.core/example-test"]))))
-        (is (= [[:seon.fn/sym "clojure.string/trim"]]
+        (is (= "Macro doc."
+               (:seon.fn/doc
+                (get by-id [:seon.fn/sym "sample.core/sample-macro"]))))
+        (is (= "([x])"
+               (:seon.fn/arglists
+                (get by-id [:seon.fn/sym "sample.core/sample-macro"]))))
+        (is (= "(defmacro sample-macro \"Macro doc.\" [x] x)"
+               (:seon.fn/source
+                (get by-id [:seon.fn/sym "sample.core/sample-macro"]))))
+        (is (false? (:seon.fn/private?
+                     (get by-id [:seon.fn/sym "sample.core/sample-macro"]))))
+        (is (nil? (:seon.fn/spec
+                   (get by-id [:seon.fn/sym "sample.core/sample-macro"])))
+            "macro rows do not claim runtime function contracts")
+        (is (= [[:seon.fn/sym "clojure.string/trim"]
+                [:seon.fn/sym "sample.core/sample-macro"]]
                (:seon.fn/calls
                 (get by-id [:seon.fn/sym "sample.core/helper"])))
-            "dependency targets are recorded as name-only rows (ruling 42b)")
+            "macro calls remain first-party graph edges")
         (is (= "(defrecord Pair [left right])"
                (:seon.fn/source
                 (get by-id [:seon.fn/sym "sample.core/map->Pair"]))))
