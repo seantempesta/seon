@@ -28,17 +28,19 @@
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [seon.cluster :as cluster]
+            [seon.config :as config]
             [seon.instrument :as instrument]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support]))
 
 (def ^:private caps
-  {:seon.config.eval.result/max-depth 8
-   :seon.config.eval.result/max-collection 64
-   :seon.config.eval.result/max-string 4096
-   :seon.config.eval.result/max-source 65536
-   :seon.config.eval.result/max-nodes 4096})
+  (assoc (config/result-caps (test-support/effective-config))
+         :seon.config.eval.result/max-depth 8
+         :seon.config.eval.result/max-collection 64
+         :seon.config.eval.result/max-string 4096
+         :seon.config.eval.result/max-source 65536
+         :seon.config.eval.result/max-nodes 4096))
 
 (def ^:dynamic *published-root* nil)
 
