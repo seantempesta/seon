@@ -553,8 +553,8 @@
   "Keep only analyzer entries owned by the submitted form, after the prelude."
   [analysis first-source-row]
   (reduce
-   (fn [source-analysis analysis-key]
-     (update source-analysis analysis-key
+   (fn [projected analysis-key]
+     (update projected analysis-key
              (fn [entries]
                (filterv #(>= (long (or (::analyzer/row %) 0))
                               first-source-row)
@@ -590,12 +590,12 @@
         first-party-functions
         (cond-> (into #{} (map :seon.fn/sym) function-rows)
           program-symbol (conj program-symbol))
-        source-analysis (source-analysis analysis first-source-row)
+        submitted-analysis (source-analysis analysis first-source-row)
         calls-by-caller
-        (call-targets-by-caller source-analysis
+        (call-targets-by-caller submitted-analysis
                                 first-party-functions
                                 first-party-functions)
-        used-keywords (keywords-by-holder source-analysis)
+        used-keywords (keywords-by-holder submitted-analysis)
         program-facts
         (when program-symbol
           (let [qualified (symbol program-symbol)
@@ -604,7 +604,7 @@
                                 (str (symbol (str (::analyzer/ns %))
                                              (str (::analyzer/name %)))))
                          %)
-                      (::analyzer/var-definitions source-analysis))
+                      (::analyzer/var-definitions submitted-analysis))
                 subject (or (:seon.test/subject program-row)
                             (test-subject (::analyzer/meta definition)))]
             (cond-> {}
@@ -620,12 +620,12 @@
               subject (assoc :seon.test/subject subject))))
         form-facts
         (cond-> {}
-          (seq (form-calls source-analysis first-party-functions))
+          (seq (form-calls submitted-analysis first-party-functions))
           (assoc :seon.fn/calls
-                 (form-calls source-analysis first-party-functions))
-          (seq (form-keywords source-analysis))
+                 (form-calls submitted-analysis first-party-functions))
+          (seq (form-keywords submitted-analysis))
           (assoc :seon.fn/keywords
-                 (form-keywords source-analysis))
+                 (form-keywords submitted-analysis))
           (:seon.test/subject program-facts)
           (assoc :seon.test/subject (:seon.test/subject program-facts)))
         merged-row (when program-row (merge program-row program-facts))]
