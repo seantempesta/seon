@@ -41,6 +41,22 @@
       (when (and name ns)
         (symbol (str ns) (str name))))))
 
+(defn- on-caller-loader
+  "Wrap `task` so it runs under the submitting thread's classloader.
+
+  A virtual thread's context classloader is not Clojure's dynamic
+  loader, so a lazy require on an executor task compiles record classes
+  onto a SIBLING loader chain — the main thread's concurrent loads then
+  fail with ClassNotFoundException or 'namespace not found' for
+  whichever source-compiled dependency loses the race (observed live:
+  sci one run, clj-kondo's inlined tools.reader the next). Every
+  executor submission in this runner pins the caller's loader first."
+  ^java.util.concurrent.Callable [task]
+  (let [loader (.getContextClassLoader (Thread/currentThread))]
+    (fn []
+      (.setContextClassLoader (Thread/currentThread) loader)
+      (task))))
+
 (defn- event-symbol
   [event]
   (var-symbol (or (:var event) (first test/*testing-vars*))))
@@ -346,13 +362,14 @@
            (.submit
             executor
             ^java.util.concurrent.Callable
-            (fn []
-              (try
-                {::dump-process process
-                 ::dump-path (persist-virtual-thread-dump! process)}
-                (catch Throwable failure
-                  {::dump-process process
-                   ::dump-error (ex-message failure)})))))
+            (on-caller-loader
+             (fn []
+               (try
+                 {::dump-process process
+                  ::dump-path (persist-virtual-thread-dump! process)}
+                 (catch Throwable failure
+                   {::dump-process process
+                    ::dump-error (ex-message failure)}))))))
          processes)]
     (try
       (mapv #(.get ^java.util.concurrent.Future %) futures)
@@ -1309,11 +1326,16 @@
                 ::worker-root (.getCanonicalPath operator-root)
                 ::worker-error-log (.getCanonicalPath error-log)}
         readiness-id (str worker-id "/readiness")
+        ;; worker exchanges are bounded by the suite's declared silence
+        ;; horizon: readiness and initialization cover a JVM boot plus
+        ;; namespace loading, and a task legitimately runs minutes — the
+        ;; fixture event backstop (seconds) mis-bounded all three and
+        ;; killed real long tests as exchange failures
         ready (worker-exchange!
                {::worker worker
                 ::exchange-id readiness-id
                 ::expected-worker-event :ready
-                ::completion-bound-seconds (event-backstop-seconds)})]
+                ::completion-bound-seconds (silence-seconds)})]
     (when (exchange-failure? ready)
       (throw
        (ex-info "A test worker did not publish readiness."
@@ -1333,7 +1355,7 @@
                   ::worker-namespaces (mapv str namespace-names)}
                  ::exchange-id exchange-id
                  ::expected-worker-event :initialized
-                 ::completion-bound-seconds (event-backstop-seconds)})]
+                 ::completion-bound-seconds (silence-seconds)})]
     (when (exchange-failure? result)
       (throw
        (ex-info "A test worker refused namespace initialization."
@@ -1434,7 +1456,7 @@
           ::exchange-id (::task-id task)
           ::expected-worker-event :task-complete
           ::task-symbols (::task-symbols task)
-          ::completion-bound-seconds (event-backstop-seconds)})
+          ::completion-bound-seconds (silence-seconds)})
         result
         (if (exchange-failure? result)
           (let [test-symbols (mapv str (::task-symbols task))
@@ -1489,12 +1511,13 @@
                (.submit
                 executor
                 ^java.util.concurrent.Callable
-                (fn []
-                  (drain-worker-tasks!
-                   (fn []
-                     (let [task (.take queue)]
-                       (when-not (identical? finished task) task)))
-                   #(execute-worker-task! progress worker %)))))
+                (on-caller-loader
+                 (fn []
+                   (drain-worker-tasks!
+                    (fn []
+                      (let [task (.take queue)]
+                        (when-not (identical? finished task) task)))
+                    #(execute-worker-task! progress worker %))))))
              workers)
             ;; The serial remainder uses the same sequential worker loop,
             ;; without a second scheduler or concurrent command on its root.
@@ -1503,9 +1526,10 @@
               (.submit
                executor
                ^java.util.concurrent.Callable
-               (fn []
-                 (mapv #(execute-worker-task! progress serial-worker %)
-                       unresolved-tasks))))
+               (on-caller-loader
+                (fn []
+                  (mapv #(execute-worker-task! progress serial-worker %)
+                        unresolved-tasks)))))
             parallel-results (mapcat #(.get %) parallel-futures)
             serial-results (if serial-future (.get serial-future) [])]
         (vec (concat parallel-results serial-results)))
@@ -1604,15 +1628,16 @@
                           (.submit
                            executor
                            ^java.util.concurrent.Callable
-                           (fn []
-                             (try
-                               (confirm! progress result)
-                               (catch InterruptedException failure
-                                 (.interrupt (Thread/currentThread))
-                                 (throw failure))
-                               (catch Throwable failure
-                                 (unconfirmed-confirmation
-                                  result failure)))))]))
+                           (on-caller-loader
+                            (fn []
+                              (try
+                                (confirm! progress result)
+                                (catch InterruptedException failure
+                                  (.interrupt (Thread/currentThread))
+                                  (throw failure))
+                                (catch Throwable failure
+                                  (unconfirmed-confirmation
+                                   result failure))))))]))
                   failures)]
         (try
           (mapv (fn [result]
@@ -1732,11 +1757,12 @@
                (.submit
                 launch-executor
                 ^java.util.concurrent.Callable
-                (fn []
-                  (let [checkout (worker-checkout worker-id)
-                        worker (start-worker! worker-id checkout checkout)]
-                    (swap! workers* conj worker)
-                    (initialize-worker! worker namespaces)))))
+                (on-caller-loader
+                 (fn []
+                   (let [checkout (worker-checkout worker-id)
+                         worker (start-worker! worker-id checkout checkout)]
+                     (swap! workers* conj worker)
+                     (initialize-worker! worker namespaces))))))
              worker-ids)]
         ;; Coordinator namespace loading and manifest construction overlap the
         ;; workers' JVM startup and namespace loading.
@@ -1744,7 +1770,14 @@
           (announce! progress
                      (str "LOAD " (inc index) "/" (count namespaces)
                           " " test-namespace))
-          (require test-namespace)
+          ;; The worker-launch virtual threads lazily load through
+          ;; `requiring-resolve`, which serializes on REQUIRE_LOCK — a
+          ;; bare `require` here raced them, interleaving `*loaded-libs*`
+          ;; so whichever source-compiled dependency lost the race failed
+          ;; with 'namespace not found' (observed live: sci, then
+          ;; clj-kondo's inlined tools.reader). One lock, both entries.
+          (locking clojure.lang.RT/REQUIRE_LOCK
+            (require test-namespace))
           (announce! progress
                      (str "LOADED " (inc index) "/" (count namespaces)
                           " " test-namespace)))
