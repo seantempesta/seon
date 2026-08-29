@@ -157,10 +157,12 @@
           (seon.flow/start-work-launcher!
            {:seon.env/environment @test-environment
             ::seon.flow/configuration
-            {:seon.config.flow.compute/queue-depth 10
-             :seon.config.flow.compute/concurrency 2
-             :seon.config.flow.io/queue-depth 2
-             :seon.config.flow.io/concurrency 2}})]
+            (assoc (select-keys (test-support/effective-config)
+                                seon.flow/flow-workload-attributes)
+                   :seon.config.flow.compute/queue-depth 10
+                   :seon.config.flow.compute/concurrency 2
+                   :seon.config.flow.io/queue-depth 2
+                   :seon.config.flow.io/concurrency 2)})]
      (try
       (test-support/seed-cluster! connection "turn-test")
       (db/transact! connection
@@ -220,10 +222,12 @@
              ;; prompt contribution now (the one cap set) — sized so a
              ;; real prompt is never elided while eval results stay small
                :seon.sci.admit/caps
-               {:seon.config.eval.result/max-depth 6
-                :seon.config.eval.result/max-collection 8
-                :seon.config.eval.result/max-string 4096
-                :seon.config.eval.result/max-nodes 256}}
+               (assoc (config/result-caps
+                       (test-support/effective-config))
+                      :seon.config.eval.result/max-depth 6
+                      :seon.config.eval.result/max-collection 8
+                      :seon.config.eval.result/max-string 4096
+                      :seon.config.eval.result/max-nodes 256)}
          body)
       (finally
         (seon.flow/stop-work-launcher! launcher)))))))
