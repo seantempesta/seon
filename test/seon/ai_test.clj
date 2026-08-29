@@ -574,7 +574,7 @@
     (is (false? (get body "stream")))))
 
 (deftest settings-resolve-by-one-agent-over-cluster-merge
-  (let [cluster (config/defaults)
+  (let [cluster (test-support/effective-config)
         override {:seon.config.ai/model "planner-model"
                   :seon.config.ai/thinking :high}
         resolved (ai/settings cluster override)]
