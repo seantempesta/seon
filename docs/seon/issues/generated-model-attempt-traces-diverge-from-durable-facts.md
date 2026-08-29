@@ -20,6 +20,20 @@ seed `202607280402`. The shrunk counterexample was one credential failure,
 `backup? false`, and `maximum-retries 0`. The property does not exercise the
 launcher or caps fixtures changed by the effective-config census sweep.
 
+Exact shrunk case from the repair-lane reproduction:
+
+```clojure
+#:seon.cluster.turn-test
+{:outcomes
+ [#:seon.cluster.turn-test
+  {:error-class :credential
+   :kind :seon.ai/no-credential
+   :transmitted? false
+   :outcome :failure}]
+ :backup? false
+ :maximum-retries 0}
+```
+
 ## Owner
 
 The model-attempt settlement derivation and its independent oracle in
