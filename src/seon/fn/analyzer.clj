@@ -149,7 +149,12 @@
   ;; clj-kondo's parallel analysis has combined an outer call's location and
   ;; arity with an inner call's resolved var, then emitted the corruption
   ;; twice. Its sequential path retains the same linters and dependency cache.
-  (let [result (invoke-kondo {:lint paths})
+  (let [result (invoke-kondo
+                ;; a synthesized stdin buffer must never write the shared
+                ;; cache: only complete canonical-source analysis may
+                ;; (cache-poisoning root cause, 2026-08-29)
+                (cond-> {:lint paths}
+                  (some #{"-"} paths) (assoc :cache false)))
         analysis (:analysis result)]
     {::namespace-definitions
      (filterv jvm-entry?

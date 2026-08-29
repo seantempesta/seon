@@ -168,12 +168,21 @@
   (try
     (let [absolute-paths (mapv absolute-file-path file-paths)
           argv (if prospective-content
+                 ;; a prospective buffer must never write the shared cache:
+                 ;; a partial definition replaces the namespace's cache entry
+                 ;; and every later lint of its consumers reports unresolved
+                 ;; vars, vetoing all edits (poisoning reproduced 2026-08-29)
                  ["clj-kondo" "--lint" "-"
                   "--filename" (first absolute-paths)
+                  "--cache" "false"
                   "--config" clj-kondo-output-config]
+                 ;; the post-edit single-file lint is also a partial view;
+                 ;; complete source publication owns first-party cache
+                 ;; refresh — the hook never persists analysis
                  (into ["clj-kondo" "--lint"]
                        (concat absolute-paths
-                               ["--config" clj-kondo-output-config])))
+                               ["--cache" "false"
+                                "--config" clj-kondo-output-config])))
           result (process/sh {:cmd argv
                               :dir repo-root
                               :in (or prospective-content "")
