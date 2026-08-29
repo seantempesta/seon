@@ -167,11 +167,13 @@
                          :my.message/preview (str "message " ordinal)})
                       (range 3))
            root [:my.message/inbox "root"]
-           profile {:seon.render.profile/id :seon.render.profile/test
-                    :seon.render.profile/token-budget 1024
-                    :seon.render.profile/max-depth 8
-                    :seon.render.profile/max-children 1
-                    :seon.render.profile/composition :single-line}
+           profile (assoc (render/agent-render-profile
+                           (support/effective-config))
+                          :seon.render.profile/id :seon.render.profile/test
+                          :seon.render.profile/token-budget 1024
+                          :seon.render.profile/max-depth 8
+                          :seon.render.profile/max-children 1
+                          :seon.render.profile/composition :single-line)
            floor-unit (assoc (registered-unit connection rows)
                              :seon.render.value/root root
                              :seon.render/profile profile)
