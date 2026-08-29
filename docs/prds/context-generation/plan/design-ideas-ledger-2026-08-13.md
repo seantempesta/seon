@@ -726,6 +726,35 @@ numerically and a bare cross-citation is a defect to fix on sight.
     CREATED (the 42c write-stamp join) and its own namespace's
     functions — self first, world by graph distance, never curation.
 
+54. **The write door, the missile rule, and the steward scenario**
+    (owner, 2026-08-29): (a) the GRAPH BOUNDARY is the discovery
+    boundary — data enters an agent's world only through `transact!`,
+    and a graph write must carry its provenance (eval ref → agent,
+    function + explicit args, the tx as the replay identity) or be
+    REFUSED at the seam; in-graph ⟹ auto-discoverable, outside ⟹
+    invisible to context by design. (b) Explanation speaks the READ
+    vocabulary: the read-recipe belongs to the FAMILY (its declared
+    reader/face), never the writer — send writes, context says
+    `(inbox)`; a defn's `:seon.render/ai` metadata for its result
+    family is code, contract, and context-presentation in one act.
+    (c) EXECUTE-VS-REPLAY: a composed form with a matching stored eval
+    pulls the stored result back into the SCI context — never re-run;
+    absent → execute and mint. The guard is the program graph's
+    `:seon.fn/external-sink` fact: pure reads/renders re-derive freely
+    on regeneration; any form whose closure touches an external sink
+    is REPLAY-ONLY — missiles fire once because the graph knows which
+    forms are missiles. (d) Compaction = retract/supersede the agent's
+    context evals and regenerate; a fresh agent is regeneration with
+    zero evals — one function. (e) Ordering: ref distance CHUNKS
+    (0 = self + own evals as the end block; 1 = pointed-at/created;
+    2 = the world using it), 52b demand topology ORDERS within.
+    (f) THE STEWARD SCENARIO is the drive target: a namespace agent
+    whose opening is per-function name + docstring first line +
+    concise in/out, plus the two derived stewardship rows — who uses
+    your functions (51 analytics) and where they hurt (error
+    adjacency) — which ARE the self-improvement queue; helping other
+    agents and users falls out of working the hot, erroring rows.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
