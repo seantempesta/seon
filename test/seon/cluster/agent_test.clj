@@ -97,13 +97,12 @@
             (seon.flow/start-work-launcher!
              {:seon.env/environment @test-environment
               ::seon.flow/configuration
-              {:seon.config.flow.compute/queue-depth 10
-               :seon.config.flow.compute/concurrency 3
-               :seon.config.flow.io/queue-depth 2
-               :seon.config.flow.io/concurrency 2
-               :seon.config.agent/turn-completion-backstop-ms
-               (:seon.config.agent/turn-completion-backstop-ms
-                (config/defaults))}})
+              (assoc (select-keys (test-support/effective-config)
+                                  seon.flow/flow-workload-attributes)
+                     :seon.config.flow.compute/queue-depth 10
+                     :seon.config.flow.compute/concurrency 3
+                     :seon.config.flow.io/queue-depth 2
+                     :seon.config.flow.io/concurrency 2)})
             context-channel
             (test-support/render-context-channel
              (render/agent-render-profile (config/defaults)))
@@ -131,10 +130,13 @@
                   {:seon.db/connection connection
                    :seon.cluster.loop/stream-channel stream-channel
                    :seon.sci.admit/caps
-                   {:seon.config.eval.result/max-depth 6
+                   (assoc
+                    (config/result-caps
+                     (test-support/effective-config))
+                    :seon.config.eval.result/max-depth 6
                     :seon.config.eval.result/max-collection 8
                     :seon.config.eval.result/max-string 4096
-                    :seon.config.eval.result/max-nodes 256}
+                    :seon.config.eval.result/max-nodes 256)
                    :seon.sci.eval/ctx ctx
                    :seon.config.eval/time-limit-ms
                    @shipped-eval-time-limit-ms
@@ -177,10 +179,12 @@
    :seon.cluster.wake/channel (async/chan (async/sliding-buffer 1))
    :seon.cluster.loop/completion (async/promise-chan)
    :seon.cluster.loop/evaluate 'seon.cluster.agent-test/fake-evaluate
-   :seon.sci.admit/caps {:seon.config.eval.result/max-depth 6
-                         :seon.config.eval.result/max-collection 8
-                         :seon.config.eval.result/max-string 4096
-                         :seon.config.eval.result/max-nodes 256}
+   :seon.sci.admit/caps
+   (assoc (config/result-caps (test-support/effective-config))
+          :seon.config.eval.result/max-depth 6
+          :seon.config.eval.result/max-collection 8
+          :seon.config.eval.result/max-string 4096
+          :seon.config.eval.result/max-nodes 256)
    :seon.config.eval/time-limit-ms @shipped-eval-time-limit-ms
    :seon.config.agent/turn-completion-backstop-ms
    (:seon.config.agent/turn-completion-backstop-ms (config/defaults))
@@ -374,10 +378,12 @@
                 :seon.cluster.agent/id "missing-context"
                 :seon.db/connection connection
                 :seon.sci.admit/caps
-                {:seon.config.eval.result/max-depth 6
-                 :seon.config.eval.result/max-collection 8
-                 :seon.config.eval.result/max-string 4096
-                 :seon.config.eval.result/max-nodes 256}
+                (assoc (config/result-caps
+                        (test-support/effective-config))
+                       :seon.config.eval.result/max-depth 6
+                       :seon.config.eval.result/max-collection 8
+                       :seon.config.eval.result/max-string 4096
+                       :seon.config.eval.result/max-nodes 256)
                 :seon.sci.eval/ctx ctx
                 :seon.sci.eval/time-limit-ms @shipped-eval-time-limit-ms
                 :seon.config/on-core-error :panic}))]
