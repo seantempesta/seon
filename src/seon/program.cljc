@@ -27,6 +27,7 @@
 #?(:clj
    (defn base-context-injected-symbols
      "Qualified host symbols copied into every base SCI context."
+     {:malli/schema [:=> [:cat] [:vector :symbol]]}
      []
      (->> base-context-injections
           (mapcat
