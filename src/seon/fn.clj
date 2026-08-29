@@ -1730,6 +1730,8 @@
         (into #{} (keep :seon.ns/name) source-only)
         source-function-symbols
         (into #{} (keep :seon.fn/sym) source-only)
+        injected-function-symbols
+        (into #{} (map str) (program/base-context-injected-symbols))
         call-target-symbols
         (into #{}
               (comp
@@ -1739,7 +1741,8 @@
                          function-symbol))))
               source-only)
         external-function-symbols
-        (set/difference call-target-symbols source-function-symbols)
+        (set/difference (into call-target-symbols injected-function-symbols)
+                        source-function-symbols)
         external-function-namespace-names
         (into #{}
               (keep (fn [function-symbol]

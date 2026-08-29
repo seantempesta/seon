@@ -11,6 +11,35 @@
   "Program-row identity attributes in deterministic admission order."
   [:seon.ns/name :seon.fn/sym :seon.schema/key :seon.test/sym])
 
+(def base-context-injections
+  "Host Vars copied into every base SCI context.
+
+  A vector names explicit Vars. `:publics` derives the complete public
+  namespace at construction, so context construction and program population
+  consume one declaration rather than parallel member lists."
+  {'seon.schema ['register! 'unregister!]
+   'clojure.test :publics
+   'my.run ['wait 'complete]
+   'my.background ['background 'poll 'await]
+   'my.message ['send 'decline]
+   'seon.bootstrap ['help 'dir 'doc]})
+
+#?(:clj
+   (defn base-context-injected-symbols
+     "Qualified host symbols copied into every base SCI context."
+     []
+     (->> base-context-injections
+          (mapcat
+           (fn [[namespace-name members]]
+             (let [members
+                   (if (= :publics members)
+                     (do (require namespace-name)
+                         (keys (ns-publics namespace-name)))
+                     members)]
+               (map #(symbol (str namespace-name) (str %)) members))))
+          (sort-by str)
+          vec)))
+
 (def shapes
   "Program-row shapes keyed by their database identity attribute."
   {:seon.ns/name

@@ -113,7 +113,7 @@
             [sci.impl.utils :as sci.utils]
             [sci.interrupt :as sci.interrupt]
             [seon.blob :as blob]
-            [seon.bootstrap :as bootstrap]
+            [seon.bootstrap]
             [seon.call-preparation :as call-preparation]
             [seon.config :as config]
             [seon.db :as db]
@@ -187,12 +187,20 @@
   {:malli/schema [:=> [:cat] :seon.sci.eval/ctx]}
   []
   (let [{guard ::kernel/guard :as kernel-options} (kernel/context-options)
-        run-ns (sci/create-ns 'my.run)
-        background-ns (sci/create-ns 'my.background)
-        message-ns (sci/create-ns 'my.message)
-        bootstrap-ns (sci/create-ns 'seon.bootstrap)
-        schema-ns (sci/create-ns 'seon.schema)
-        test-ns (sci/create-ns 'clojure.test)
+        injected-namespaces
+        (into {}
+              (map
+               (fn [[namespace-name symbols]]
+                 (let [sci-namespace (sci/create-ns namespace-name)]
+                   [namespace-name
+                    (into {}
+                          (map (fn [qualified]
+                                 [(symbol (name qualified))
+                                  (sci/copy-var* (requiring-resolve qualified)
+                                                 sci-namespace)]))
+                          symbols)])))
+              (group-by (comp symbol namespace)
+                        (program/base-context-injected-symbols)))
         ctx
         (sci/init
         {:interrupt-fn (:interrupt-fn kernel-options)
@@ -210,38 +218,9 @@
          ;; alternatives for exactly this and they are opt-in
          ;; (interrupt.md:56-60).
          :namespaces
-         {'clojure.core sci.interrupt/clojure-core
-          'clojure.string sci.interrupt/clojure-string
-          ;; The schema surface is exactly its two lifecycle functions. Their
-          ;; dynamic registration overlay is bound per evaluation below.
-          'seon.schema
-          {'register! (sci/copy-var schema/register! schema-ns)
-           'unregister! (sci/copy-var schema/unregister! schema-ns)}
-          ;; A deftest must have clojure.test's actual macro and Var semantics.
-          ;; Derive the complete public namespace instead of maintaining a
-          ;; second hand list that silently omits a runnable test operation.
-          'clojure.test
-          (into {}
-                (map (fn [[sym v]] [sym (sci/copy-var* v test-ns)]))
-                (ns-publics 'clojure.test))
-          'my.run {'wait (sci/copy-var my.run/wait run-ns)
-                   'complete (sci/copy-var my.run/complete run-ns)}
-          'my.background
-          {'background (sci/copy-var my.background/background background-ns)
-           'poll (sci/copy-var my.background/poll background-ns)
-           'await (sci/copy-var my.background/await background-ns)}
-          ;; the second agent-facing value family, bound the same way and
-          ;; for the same reason: it is a PURE function returning a map,
-          ;; so copying the var into the base ctx is the whole binding —
-          ;; there is no capability to thread, no connection to close
-          ;; over, and nothing an agent could hold onto after the eval
-          'my.message {'send (sci/copy-var my.message/send message-ns)
-                       ;; the can't-fix answer is the same kind of value,
-                       ;; so it is the same kind of binding. Without it a
-                       ;; routed problem has no third arm at all: the
-                       ;; owner's only reachable answers are "fixed" —
-                       ;; which no fact can confirm — and silence.
-                   'decline (sci/copy-var my.message/decline message-ns)}}
+         (merge {'clojure.core sci.interrupt/clojure-core
+                 'clojure.string sci.interrupt/clojure-string}
+                injected-namespaces)
          ;; two broad roots rather than an enumeration of exception
          ;; subclasses — an agent needs to catch things, not to be given
          ;; a curated taxonomy
@@ -249,9 +228,9 @@
                    'java.lang.Throwable Throwable
                    'Error Error
                    'java.lang.Error Error}})
-        help-var (sci/copy-var bootstrap/help bootstrap-ns)
-        dir-var (sci/copy-var bootstrap/dir bootstrap-ns)
-        doc-var (sci/copy-var bootstrap/doc bootstrap-ns)]
+        help-var (get-in injected-namespaces ['seon.bootstrap 'help])
+        dir-var (get-in injected-namespaces ['seon.bootstrap 'dir])
+        doc-var (get-in injected-namespaces ['seon.bootstrap 'doc])]
     ;; `dir` and `doc` are REPL operations, so every namespace resolves
     ;; them bare through the same clojure.core refer it already receives.
     ;; `acquire!` replaces only `doc` with its row-derived macro.

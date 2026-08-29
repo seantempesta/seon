@@ -27,6 +27,7 @@
             [seon.env :as env]
             [seon.fn :as seon.fn]
             [seon.instrument :as instrument]
+            [seon.program :as program]
             [sci.addons.future :as sci.future]
             [sci.core :as sci]
             [seon.render :as render]
@@ -534,6 +535,17 @@
            (get-in evaluation
                    [:seon.program/row :seon.ns/requires]))
         "SCI symbols become canonical lookup refs only at persistence")))
+
+(deftest base-context-injections-have-program-rows
+  (let [injected (set (map str (program/base-context-injected-symbols)))
+        rows (#'seon.fn/desired-rows
+              {:seon.fn/roots ["src" "test"]} nil)
+        published (set (keep :seon.fn/sym rows))
+        ctx (eval/build-base-ctx)]
+    (is (empty? (set/difference injected published))
+        "the context declaration is the population's binding authority")
+    (is (every? #(sci/resolve ctx %) (program/base-context-injected-symbols))
+        "every declared injection resolves in the constructed context")))
 
 (deftest runtime-function-rows-carry-parsed-contract-facts
   (let [ctx (eval/build-base-ctx)

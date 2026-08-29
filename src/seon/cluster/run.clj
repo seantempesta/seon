@@ -1087,10 +1087,22 @@
           (or (nil? subject)
               (:db/id (db/pull database [:db/id] subject)))
           form-facts (cond-> form-facts
-                       (not subject-present?) (dissoc :seon.test/subject))]
+                       (not subject-present?) (dissoc :seon.test/subject))
+          required-namespace-rows
+          (into []
+                (comp
+                 (map second)
+                 (remove (fn [namespace-name]
+                           (:db/id (db/pull database [:db/id]
+                                            [:seon.ns/name namespace-name]))))
+                 (map (fn [namespace-name]
+                        {:seon.ns/name namespace-name})))
+                (:seon.ns/requires program-row))]
       (cond-> (assoc request ::form-facts
                      (assoc form-facts :db/id (:db/id form)))
         (seq companion-rows) (assoc ::companion-rows companion-rows)
+        (seq required-namespace-rows)
+        (assoc ::required-namespace-rows required-namespace-rows)
         program-row (assoc :seon.program/row program-row)))
     request))
 
@@ -1115,13 +1127,15 @@
            (assoc :seon.cluster.eval/result-size
                   (long (count (:seon.cluster.eval/result-edn request))))
            database (->> (analyze-settlement database)))
-         companion-rows (::companion-rows request)]
+         companion-rows (::companion-rows request)
+         required-namespace-rows (::required-namespace-rows request)
+         request (dissoc request ::companion-rows ::required-namespace-rows)]
      ;; companion rows ride the SAME transaction so the form facts'
      ;; call-edge lookup refs resolve by upsert instead of rejecting
      ;; the whole settlement (first-party macros, unindexed core vars)
-     (into [[:db.fn/call #'receipt-settle-call
-             (dissoc request ::companion-rows)]]
-           companion-rows))))
+     (into (vec required-namespace-rows)
+           (into [[:db.fn/call #'receipt-settle-call request]]
+                 companion-rows)))))
 
 (defn- affected-schema-attributes
   "Database attributes derived by the affected schema forms."
