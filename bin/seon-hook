@@ -18,7 +18,8 @@
          '[cheshire.core :as json]
          '[clojure.edn :as edn]
          '[clojure.java.io :as io]
-         '[clojure.string :as str])
+         '[clojure.string :as str]
+         '[cognitect.transit :as transit])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Paths
@@ -151,7 +152,14 @@
 ;;; ---------------------------------------------------------------------------
 
 (def ^:private clj-kondo-output-config
-  "{:output {:format :edn}}")
+  "{:output {:format :edn} :analysis {:var-usages true}}")
+
+(def ^:private clj-kondo-definition-output-config
+  (str "{:output {:format :edn} "
+       ":analysis {:var-usages true :var-definitions true}}"))
+
+(def ^:private shared-kondo-cache-v1-directory
+  (root-file ".clj-kondo/.cache/v1"))
 
 (defn- display-path [file-path]
   (try
@@ -193,7 +201,9 @@
                       (catch Exception _ nil))]
       (if (and (map? parsed) (vector? (:findings parsed)))
         {:seon.hook.analysis/status :available
-         :seon.hook.analysis/findings (:findings parsed)}
+         :seon.hook.analysis/findings (:findings parsed)
+         :seon.hook.analysis/var-usages
+         (vec (get-in parsed [:analysis :var-usages]))}
         {:seon.hook.analysis/status :unavailable
          :seon.hook.analysis/reason
          (str "clj-kondo returned no findings result"
@@ -209,8 +219,163 @@
    (map (fn [{:keys [filename row col level type message]}]
           (str (display-path filename) ":" (or row "?") ":" (or col "?")
                " [" (name (or level :unknown)) "/"
-               (name (or type :unknown)) "] " message))
+               (if (= :seon.hook/cache-entry-missing-var type)
+                 (str type)
+                 (name (or type :unknown)))
+               "] " message))
         findings)))
+
+(defn- finding-var-usage
+  "The structured var usage at an unresolved-var finding's location."
+  [analysis finding]
+  (some
+   (fn [usage]
+     (when (and (= (:filename finding) (:filename usage))
+                (= (:row finding) (:row usage))
+                (= (:col finding) (:col usage))
+                (symbol? (:to usage))
+                (symbol? (:name usage)))
+       usage))
+   (:seon.hook.analysis/var-usages analysis)))
+
+(defn- cache-languages
+  "Cache language directories that may define a usage from `filename`."
+  [filename usage]
+  (if-let [language (:lang usage)]
+    [language]
+    (let [lower (str/lower-case (str filename))]
+      (cond
+        (str/ends-with? lower ".cljs") [:cljs :cljc]
+        (str/ends-with? lower ".cljc") [:clj :cljs :cljc]
+        :else [:clj :cljc]))))
+
+(defn- cache-entry-files
+  [cache-v1-directory finding usage]
+  (map
+   #(io/file cache-v1-directory
+             (name %)
+             (str (:to usage) ".transit.json"))
+   (cache-languages (:filename finding) usage)))
+
+(defn- read-transit-entry
+  "A readable Transit cache map, or nil."
+  [^java.io.File file]
+  (try
+    (when (.isFile file)
+      (with-open [input (io/input-stream file)]
+        (let [entry (transit/read (transit/reader input :json))]
+          (when (map? entry) entry))))
+    (catch Exception _ nil)))
+
+(defn- readable-recorded-source
+  [recorded-source]
+  (when (string? recorded-source)
+    (let [source (io/file recorded-source)
+          source (if (.isAbsolute source)
+                   source
+                   (root-file recorded-source))]
+      (when (and (.isFile source) (.canRead source)) source))))
+
+(defn- uncached-definition-analysis
+  "Structured kondo data from one source path or synthesized source string."
+  [{:seon.hook/keys [file-path prospective-content]}]
+  (try
+    (let [argv (if prospective-content
+                 ["clj-kondo" "--lint" "-"
+                  "--filename" file-path
+                  "--cache" "false"
+                  "--config" clj-kondo-definition-output-config]
+                 ["clj-kondo" "--lint" file-path
+                  "--cache" "false"
+                  "--config" clj-kondo-definition-output-config])
+          result (process/sh {:cmd argv
+                              :dir repo-root
+                              :in (or prospective-content "")
+                              :out :string
+                              :err :string
+                              :continue true})
+          parsed (try (edn/read-string (:out result))
+                      (catch Exception _ nil))]
+      (when (map? parsed) parsed))
+    (catch Exception _ nil)))
+
+(defn- source-defines-target?
+  [^java.io.File source target-namespace target-var]
+  (let [analysis
+        (uncached-definition-analysis
+         {:seon.hook/file-path (.getPath source)})]
+    (some
+     #(and (= target-namespace (:ns %))
+           (= target-var (:name %)))
+     (get-in analysis [:analysis :var-definitions]))))
+
+(def ^:private builtin-resolution-keys
+  [:private :macro :fixed-arities :varargs-min-arity :deprecated])
+
+(defn- packaged-builtin-defines-target?
+  "True when uncached analysis carries definition metadata for a builtin."
+  [target-namespace target-var]
+  (let [probe-namespace 'seon.hook.cache-probe
+        probe-alias 'target
+        source (str "(ns " probe-namespace " (:require ["
+                    target-namespace " :as " probe-alias "]))\n"
+                    "(def observed " probe-alias "/" target-var ")\n")
+        analysis
+        (uncached-definition-analysis
+         {:seon.hook/file-path "seon_hook_cache_probe.clj"
+          :seon.hook/prospective-content source})]
+    (some
+     (fn [usage]
+       (when (and (= target-namespace (:to usage))
+                  (= target-var (:name usage))
+                  (some #(contains? usage %) builtin-resolution-keys))
+         true))
+     (get-in analysis [:analysis :var-usages]))))
+
+(defn- cache-entry-missing-var-diagnostic
+  [cache-v1-directory analysis finding]
+  (when-let [usage (finding-var-usage analysis finding)]
+    (let [target-namespace (:to usage)
+          target-var (:name usage)
+          target-symbol (symbol (str target-namespace) (str target-var))]
+      (some
+       (fn [^java.io.File cache-file]
+         (when-let [entry (read-transit-entry cache-file)]
+           (let [recorded-source (:filename entry)
+                 source (readable-recorded-source recorded-source)]
+             (when (and (not (contains? entry target-var))
+                        (if source
+                          (source-defines-target?
+                           source target-namespace target-var)
+                          (packaged-builtin-defines-target?
+                           target-namespace target-var)))
+               (assoc
+                finding
+                :type :seon.hook/cache-entry-missing-var
+                :message
+                (str
+                 "Shared clj-kondo cache entry omits a definition present "
+                 "under uncached analysis: "
+                 (pr-str
+                  {:seon.hook/cache-path (display-path (.getPath cache-file))
+                   :seon.hook/target-symbol target-symbol
+                   :seon.hook/recorded-source recorded-source
+                   :seon.hook/cache-byte-size (.length cache-file)
+                   :seon.hook/cache-mtime
+                   (str (java.time.Instant/ofEpochMilli
+                         (.lastModified cache-file)))})))))))
+       (cache-entry-files cache-v1-directory finding usage)))))
+
+(defn- diagnose-blocking-findings
+  "Replace proven cache corruption; preserve every other finding exactly."
+  [cache-v1-directory analysis findings]
+  (mapv
+   (fn [finding]
+     (or (when (= :unresolved-var (:type finding))
+           (cache-entry-missing-var-diagnostic
+            cache-v1-directory analysis finding))
+         finding))
+   findings))
 
 (defn- analysis-error [analysis]
   (when (= :unavailable (:seon.hook.analysis/status analysis))
@@ -352,7 +517,9 @@
                              :seon.hook/prospective-content
                              (:seon.hook.reconstruction/source reconstruction)})
                   errors (filterv #(= :error (:level %))
-                                  (:seon.hook.analysis/findings analysis))]
+                                  (:seon.hook.analysis/findings analysis))
+                  errors (diagnose-blocking-findings
+                          shared-kondo-cache-v1-directory analysis errors)]
               (cond
                 (analysis-error analysis)
                 {:decision "block"
