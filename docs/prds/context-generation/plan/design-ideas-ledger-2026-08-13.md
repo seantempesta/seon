@@ -560,6 +560,24 @@ numerically and a bare cross-citation is a defect to fix on sight.
     conflict between this ruling as first written and the later v0
     spec, in the v0 spec's favor.
 
+47. **Program identities are symbols; the context and the population
+    are one act** (owner, 2026-08-29): `:seon.fn/sym` and
+    `:seon.test/sym` retype from string to `:symbol`, matching
+    `:seon.ns/name` (map to Clojure primitives; database data is
+    disposable — retype + reset, never migrate). THE INVARIANT: every
+    name the SCI context can resolve has a program row, minted where
+    the context learns it — publication indexes macros as rows (they
+    are callable, documented, sourced); the injected REPL bindings'
+    rows derive from ctx construction itself (closing the hand-list
+    blocker); a settled `(require …)` mints its namespace row at
+    settlement. Call edges are recorded only for env-resolvable
+    targets — an unresolvable mention is an error fact plus a mention,
+    never an edge. Identity rows never retract (unmap retracts
+    definition facts, not identity), so lookup refs are stable
+    forever. The always-tempid tx-preparation direction is REJECTED as
+    a band-aid over incomplete population; the settlement tempid
+    machinery reverts to plain lookup refs once the invariant holds.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
