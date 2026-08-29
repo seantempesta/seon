@@ -255,9 +255,10 @@
         (is (= [[:seon.fn/sym "sample.core/contracted"]]
                (:seon.fn/calls
                 (get by-id [:seon.test/sym "sample.core/example-test"]))))
-        (is (nil? (:seon.fn/calls
-                   (get by-id [:seon.fn/sym "sample.core/helper"])))
-            "dependency and unresolved targets never become function refs")
+        (is (= [[:seon.fn/sym "clojure.string/trim"]]
+               (:seon.fn/calls
+                (get by-id [:seon.fn/sym "sample.core/helper"])))
+            "dependency targets are recorded as name-only rows (ruling 42b)")
         (is (= "(defrecord Pair [left right])"
                (:seon.fn/source
                 (get by-id [:seon.fn/sym "sample.core/map->Pair"]))))
@@ -356,7 +357,8 @@
           {:seon.cluster.run/id run-id
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/result-edn ":done"}))
-        (is (= #{"my.run/complete" "seon.db/q"}
+        ;; ruling 42b: core targets (here the do wrapper) are edges too
+        (is (= #{"clojure.core/do" "my.run/complete" "seon.db/q"}
                (set
                 (db/q '[:find [?symbol ...]
                         :in $ ?form-id
@@ -487,8 +489,12 @@
                 (edge-facts :seon.cluster.run.form/id
                             (run/form-identity "settlement-parity-run" 0))]
             (is (= expected program-facts))
-            (is (= (:seon.fn/calls expected)
-                   (:seon.fn/calls form-facts)))
+            ;; ruling 42b: the FORM records every call target, including
+            ;; the definition wrapper macro as a name-only core edge; the
+            ;; function row's first-party edges are the parity subset
+            (is (= (into #{[:seon.fn/sym "clojure.core/defn"]}
+                         (:seon.fn/calls expected))
+                   (set (:seon.fn/calls form-facts))))
             (is (= (:seon.test/subject expected)
                    (:seon.test/subject form-facts)))
             (is (every? (:seon.fn/keywords form-facts)
@@ -826,8 +832,10 @@
                           (:seon.fn.manifest/artifacts changed)))
                (map :seon.fn.file/path
                     (:seon.fn.manifest/artifacts changed))))))
-    (testing "one-file analysis retains only calls to known first-party rows"
-      (is (= [[:seon.fn/sym "artifact.alpha/target"]]
+    (testing "one-file analysis records every call target (ruling 42b)"
+      (is (= [[:seon.fn/sym "artifact.alpha/target"]
+              [:seon.fn/sym "clojure.core/str"]
+              [:seon.fn/sym "clojure.string/trim"]]
              (:seon.fn/calls beta-caller)))
       (is (= beta-artifact incremental)))
     (testing "the file digest covers exact bytes, including CRLF"
