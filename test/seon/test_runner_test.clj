@@ -18,6 +18,7 @@
 (def ^:private at (java.util.Date. 1785283200000))
 (def ^:private git-sha (apply str (repeat 40 "a")))
 (def ^:private run-id "test-run-1")
+(def ^:private fake-cache-digest (apply str (repeat 64 "a")))
 (def ^:private project-root
   (.getCanonicalFile (io/file (System/getProperty "user.dir"))))
 
@@ -71,6 +72,17 @@
   (let [fake-getconf (io/file fake-bin "getconf")]
     (spit fake-getconf "#!/usr/bin/env bash\necho 2\n")
     (is (.setExecutable fake-getconf true false))))
+
+(def ^:private fake-dev-cache-prologue
+  (str
+   "if [ \"${1-}\" = \"-T:dev-cache\" ]; then\n"
+   "  if [ -n \"${SEON_FAKE_CACHE_CALL-}\" ]; then\n"
+   "    printf '%s\\n' \"$*\" >\"$SEON_FAKE_CACHE_CALL\"\n"
+   "  fi\n"
+   "  printf '#:seon.dev-cache{:digest \\\"%s\\\", :status :rebuilt, :path \\\"%s\\\"}\\n' \\\n"
+   "    \"$SEON_FAKE_CACHE_DIGEST\" \"$SEON_FAKE_CACHE_PATH\"\n"
+   "  exit 0\n"
+   "fi\n"))
 
 (defn- start-injected-worker!
   [case-name program]
@@ -729,10 +741,12 @@
         fake-clojure (io/file fake-bin "clojure")
         reaped-file (io/file fixture-root "child-reaped.txt")
         run-parent (io/file fixture-root "runs")
+        cache-path (io/file fixture-root "cache" fake-cache-digest)
         fake-runner
         (str
          "#!/usr/bin/env bash\n"
          "set -euo pipefail\n"
+         fake-dev-cache-prologue
          "child=\n"
          "stop() {\n"
          "  trap - TERM\n"
@@ -751,6 +765,7 @@
     (try
       (.mkdirs fake-bin)
       (.mkdirs run-parent)
+      (.mkdirs cache-path)
       (install-single-worker-getconf! fake-bin)
       (spit fake-clojure fake-runner)
       (is (.setExecutable fake-clojure true false))
@@ -766,6 +781,11 @@
                     "SEON_TEST_RUN_PARENT" (.getCanonicalPath run-parent))
             _ (.put (.environment builder)
                     "SEON_FAKE_REAPED" (.getCanonicalPath reaped-file))
+            _ (.put (.environment builder)
+                    "SEON_FAKE_CACHE_DIGEST" fake-cache-digest)
+            _ (.put (.environment builder)
+                    "SEON_FAKE_CACHE_PATH"
+                    (.getCanonicalPath cache-path))
             _ (.put (.environment builder)
                     "PATH"
                     (str (.getCanonicalPath fake-bin)
@@ -1000,30 +1020,66 @@
         (when (.exists fixture-root)
           (test-support/delete-recursively! fixture-root))))))
 
-(deftest worker-checkouts-own-the-writable-clj-kondo-cache
+(deftest stale-dependency-cache-is-refused-or-selected-and-recorded
   (let [fixture-root
         (io/file project-root "tmp" "test-runner-worker-cache"
                  (str (random-uuid)))
         fake-bin (io/file fixture-root "bin")
         fake-clojure (io/file fake-bin "clojure")
         run-parent (io/file fixture-root "runs")
+        cache-path (io/file fixture-root "cache" fake-cache-digest)
+        cache-call (io/file fixture-root "cache-call.txt")
+        transcript (io/file fixture-root "test-run.txt")
         fake-runner
         (str
          "#!/usr/bin/env bash\n"
          "set -euo pipefail\n"
+         fake-dev-cache-prologue
          "prepare=false\n"
          "for argument in \"$@\"; do\n"
          "  if [ \"$argument\" = \"--prepare-base\" ]; then prepare=true; fi\n"
          "done\n"
          "if [ \"$prepare\" = true ]; then exit 0; fi\n"
+         "test \"$(cd target/dev-dependency-classes && pwd -P)\" = \"$SEON_FAKE_CACHE_PATH\"\n"
          "test -d workers/pool-1/.clj-kondo\n"
-         "test ! -L workers/pool-1/.clj-kondo\n")]
+         "test ! -L workers/pool-1/.clj-kondo\n"
+         "cp test-run.txt \"$SEON_FAKE_TRANSCRIPT\"\n")]
     (try
       (.mkdirs fake-bin)
       (.mkdirs run-parent)
+      (.mkdirs cache-path)
       (install-single-worker-getconf! fake-bin)
       (spit fake-clojure fake-runner)
       (is (.setExecutable fake-clojure true false))
+      (let [mismatched-digest (apply str (repeat 64 "b"))
+            builder
+            (doto
+             (ProcessBuilder.
+              ^java.util.List
+              [(str (io/file project-root "bin" "test"))
+               "seon.test-runner-test"])
+              (.directory project-root)
+              (.redirectErrorStream true))
+            _ (.put (.environment builder)
+                    "SEON_TEST_RUN_PARENT" (.getCanonicalPath run-parent))
+            _ (.put (.environment builder)
+                    "SEON_FAKE_CACHE_DIGEST" mismatched-digest)
+            _ (.put (.environment builder)
+                    "SEON_FAKE_CACHE_PATH" (.getCanonicalPath cache-path))
+            _ (.put (.environment builder)
+                    "SEON_FAKE_CACHE_CALL" (.getCanonicalPath cache-call))
+            _ (.put (.environment builder)
+                    "PATH"
+                    (str (.getCanonicalPath fake-bin)
+                         java.io.File/pathSeparator
+                         (System/getenv "PATH")))
+            launched (.start builder)
+            output (slurp (.getInputStream launched))]
+        (is (pos? (.waitFor launched)) output)
+        (is (str/includes? output "dependency cache digest mismatch") output)
+        (is (str/includes? output mismatched-digest) output)
+        (is (str/includes? (slurp cache-call)
+                           "-T:dev-cache ensure-cache")))
       (let [builder
             (doto
              (ProcessBuilder.
@@ -1035,6 +1091,14 @@
             _ (.put (.environment builder)
                     "SEON_TEST_RUN_PARENT" (.getCanonicalPath run-parent))
             _ (.put (.environment builder)
+                    "SEON_FAKE_CACHE_DIGEST" fake-cache-digest)
+            _ (.put (.environment builder)
+                    "SEON_FAKE_CACHE_PATH" (.getCanonicalPath cache-path))
+            _ (.put (.environment builder)
+                    "SEON_FAKE_CACHE_CALL" (.getCanonicalPath cache-call))
+            _ (.put (.environment builder)
+                    "SEON_FAKE_TRANSCRIPT" (.getCanonicalPath transcript))
+            _ (.put (.environment builder)
                     "PATH"
                     (str (.getCanonicalPath fake-bin)
                          java.io.File/pathSeparator
@@ -1042,6 +1106,8 @@
             launched (.start builder)
             output (slurp (.getInputStream launched))]
         (is (zero? (.waitFor launched)) output)
+        (is (str/includes? (slurp transcript)
+                           (str "dev-cache-digest=" fake-cache-digest)))
         (is (empty? (vec (.listFiles run-parent)))
             "a successful structural probe leaves no retained run root"))
       (finally

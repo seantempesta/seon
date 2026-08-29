@@ -210,6 +210,33 @@ fi
 
 git_sha=$(git rev-parse HEAD)
 
+if ! dev_cache_output=$(clojure -T:dev-cache ensure-cache 2>&1); then
+  printf '%s\n' "$dev_cache_output" >&2
+  echo "bin/test: dependency cache freshness check failed" >&2
+  exit 1
+fi
+printf '%s\n' "$dev_cache_output"
+dev_cache_result=$(printf '%s\n' "$dev_cache_output" | tail -n 1)
+if ! dev_cache_digest=$(bb -e \
+  '(require (quote [clojure.edn :as edn]))
+   (print (:seon.dev-cache/digest
+           (edn/read-string (first *command-line-args*))))' \
+  "$dev_cache_result") ||
+   ! dev_cache_path=$(bb -e \
+  '(require (quote [clojure.edn :as edn]))
+   (print (:seon.dev-cache/path
+           (edn/read-string (first *command-line-args*))))' \
+  "$dev_cache_result"); then
+  echo "bin/test: dependency cache returned no readable selection" >&2
+  exit 1
+fi
+if ! [[ "$dev_cache_digest" =~ ^[0-9a-f]{64}$ ]] ||
+   [ ! -d "$dev_cache_path" ] ||
+   [ "${dev_cache_path##*/}" != "$dev_cache_digest" ]; then
+  echo "bin/test: dependency cache digest mismatch: digest=$dev_cache_digest path=$dev_cache_path" >&2
+  exit 1
+fi
+
 persistent_results_store_dir=
 if [ "$explicit_selection" -eq 0 ] &&
    [ -z "$requested_mode" ] &&
@@ -309,10 +336,7 @@ populate_checkout_root() {
   if [ -e "$source_root/.env" ]; then
     ln -s "$source_root/.env" "$target_root/.env"
   fi
-  if [ -d "$source_root/target/dev-dependency-classes" ]; then
-    ln -s "$source_root/target/dev-dependency-classes" \
-      "$target_root/target/dev-dependency-classes"
-  fi
+  ln -s "$dev_cache_path" "$target_root/target/dev-dependency-classes"
 }
 
 populate_checkout_root "$run_root"
@@ -338,11 +362,12 @@ if [ -z "$result_root" ]; then
   result_root="$run_root/data/clusters"
 fi
 
-printf 'pid=%s process-start=%s suite-start=%s git=%s selection=%s\n' \
+printf 'pid=%s process-start=%s suite-start=%s git=%s dev-cache-digest=%s selection=%s\n' \
   "$$" \
   "$(ps -p "$$" -o lstart= | sed 's/^[[:space:]]*//')" \
   "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
   "$git_sha" \
+  "$dev_cache_digest" \
   "$selection" >"$run_root/test-run.txt"
 
 suite_pid=
