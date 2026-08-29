@@ -578,6 +578,20 @@ numerically and a bare cross-citation is a defect to fix on sight.
     a band-aid over incomplete population; the settlement tempid
     machinery reverts to plain lookup refs once the invariant holds.
 
+48. **Data-model-first triplet** (owner, 2026-08-29, question round):
+    (a) function identity stays ONE SCALAR qualified symbol — no
+    composite tuple; the sym's namespace half is redundant with the
+    `/ns` ref, so a drift regression (one query: every row's sym
+    namespace ≡ its `/ns` target) rides the retype pass; (b) eval
+    results are the admitted EDN **plus derived queryable projections
+    accreted at settlement** — the result's schema families and the
+    identities it references as edges (the uses-result family) — so
+    "which evals returned messages" is one Datalog query; full
+    datomization rejected; (c) the orchestrator's atomic quiet-tree
+    rename pass covers the sym retype (string→symbol) AND
+    receipts→evals; kind→shape and database-value→db stay staged as
+    spelling hygiene.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced

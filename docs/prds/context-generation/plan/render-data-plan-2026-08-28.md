@@ -76,11 +76,16 @@ P-RENDER-TOTAL-ONE-ARG — generated pulled values render without db
 access (instrument: any db call inside render is red).
 
 **S3 — evals: results as data.** Settlement stores the admitted result
-(it already does: `result-edn` [REAL]); the eval family's `/ai` face
-renders form + result via `(render data)`; retained prompt bytes
-(`:seon.render.history/bytes`) demote to memo. Rename sweep
-receipts→evals rides wave D's ruling-43 rename train. Property:
-P-NO-STORED-PROSE — no fact family stores rendered bytes as authority.
+(it already does: `result-edn` [REAL]) **plus derived queryable
+projections accreted in the same settlement (ruling 48b): the result's
+schema families and referenced identities as edges (the uses-result
+family)** — "which evals returned messages" is one Datalog query. The
+eval family's `/ai` face renders form + result via `(render data)`;
+retained prompt bytes (`:seon.render.history/bytes`) demote to memo.
+Rename sweep receipts→evals is the ORCHESTRATOR'S atomic quiet-tree
+pass together with the sym retype (rulings 47/48c), not wave D's
+train. Property: P-NO-STORED-PROSE — no fact family stores rendered
+bytes as authority.
 
 **S4 — acquisition = generated pull + recency windows.** Selector from
 schema refs [REAL: root-selector] + datom-`:tx` newest-first windowing
