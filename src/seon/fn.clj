@@ -495,6 +495,26 @@
              (seq requires) (conj (apply list :require requires))
              (seq imports) (conj (apply list :import imports))))))
 
+(defn- function-population-revision
+  "A cheap invalidation key for the function-row population of `database`.
+
+  The newest transaction that touched any `:seon.fn/sym` datom plus the
+  population count: a new, renamed, or removed function row changes it;
+  ordinary domain transactions (message sends, eval settlements) do
+  not. One AVET scan, microseconds against the multi-second prelude
+  derivation it guards."
+  [database]
+  (let [rows (db/datoms database :avet :seon.fn/sym)]
+    [(count rows) (transduce (map :tx) max 0 rows)]))
+
+(def ^:private program-prelude-cache
+  ;; Derived state guarded by its own revision key (§2.1: the same
+  ;; defect that reads stale state also recomputes on every call —
+  ;; rebuilding this prelude per settled form put a 25-minute kondo
+  ;; parse storm on one curation replay). One entry: a new program
+  ;; population replaces the old wholesale.
+  (atom nil))
+
 (defn- runtime-function-rows
   [database]
   (mapv #(db/pull database
@@ -503,6 +523,20 @@
         (sort (db/q '[:find [?function ...]
                       :where [?function :seon.fn/sym]]
                     database))))
+
+(defn- program-prelude-state
+  "The function rows and analysis prelude for `database`, revision-cached."
+  [database]
+  (let [revision (function-population-revision database)
+        cached @program-prelude-cache]
+    (if (= revision (::revision cached))
+      cached
+      (let [function-rows (runtime-function-rows database)
+            state {::revision revision
+                   ::function-rows function-rows
+                   ::prelude (analysis-program-prelude function-rows)}]
+        (reset! program-prelude-cache state)
+        state))))
 
 (defn- runtime-analysis
   [database namespace-name source]
@@ -514,8 +548,8 @@
                    {:seon.ns/imports [*]}
                    {:seon.ns/refers [*]}]
                  [:seon.ns/name namespace-name])
-        function-rows (runtime-function-rows database)
-        prelude (analysis-program-prelude function-rows)
+        {function-rows ::function-rows prelude ::prelude}
+        (program-prelude-state database)
         namespace-source (pr-str (runtime-namespace-form namespace-name
                                                          namespace-row
                                                          function-rows))
