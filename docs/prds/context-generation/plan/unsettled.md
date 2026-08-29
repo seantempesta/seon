@@ -32,8 +32,12 @@ implementable generator spec is OFFERED, awaiting the owner's go.
 failure); walk acquisition 8.5 ms; hook feedback restored after a
 15-day silent outage; fixture derivation primitive + 53-site sweep
 landed; five graph-consequence regressions fixed; schema lifecycle
-over persisted references repaired. The masking meta-lesson: four
-Aug-14 breakages hid behind the 12-day bulk blackout.
+over persisted references repaired; the bare-remainder singletons
+landed (`c5036aaa2`) — and their one refused red exposed the
+25-minute curation replay storm, killed by the population-revision
+prelude cache (`e8c8ea6d0`: the prelude derives once per program
+population, not once per settled form). The masking meta-lesson:
+four Aug-14 breakages hid behind the 12-day bulk blackout.
 
 ## The ordering (owner rulings, 2026-08-29 question round)
 
@@ -64,6 +68,11 @@ Aug-14 breakages hid behind the 12-day bulk blackout.
   dev-cache staleness issue (rides item 2).
 - `effective-config` deferred census rows in lane-protected files
   (effect_test launcher rows 2–3) — sweep them when those files quiet.
+- `seon.cluster.curate-test` re-verify after the visibility lane
+  lands: its residual red ("first-party program namespace
+  seon.dev.fresh-operator-test could not be loaded") coincides with
+  that lane's in-flight edits to exactly that file — torn-snapshot
+  suspicion, not yet attributed.
 
 ## Standing session-start line
 
