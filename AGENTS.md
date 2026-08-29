@@ -48,6 +48,21 @@ with one live command before acting on it. Nothing stores what a query can
 derive: `open?` means no `closed-at`; a boolean is legitimate only when
 someone genuinely asserts the false.
 
+**No seam may act on a pre-read or a mirror that its authority will
+re-decide: derive at the authority, or hand it the decision** (owner
+law, 2026-08-29; the five-class synthesis in
+`docs/prds/sci-execution-runtime/research/class-root-cause-synthesis-2026-08-29.md`
+is the evidence — hand-rostered fixtures vs the config compiler,
+existence pre-reads vs the writer's upsert, a reply pipe vs the
+process's own exit, a lint cache vs canonical analysis: one disease).
+A pre-read is legitimate only when its answer cannot change before the
+authority acts. Two ruled corollaries (ruling 47, context-generation
+ledger): PROGRAM IDENTITY ROWS NEVER RETRACT — deletion retracts
+definition facts, the identity survives as a tombstone, so refs to
+identities are stable forever; and THE POPULATION INVARIANT — every
+name the SCI context can resolve has a program row, minted where the
+context learns it, so call edges cannot dangle by construction.
+
 **The recurring failure class of this whole project is a check that reads
 ABSENCE OF SIGNAL as health** — a query against a descriptor that no longer
 exists, a regression walking less than the writer admits, a monitor that

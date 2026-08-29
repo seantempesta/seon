@@ -15,9 +15,11 @@ here and reads in the order below.
 
 Successor program to
 [sci-execution-runtime](../sci-execution-runtime/README.md) (its README
-carries the ruling archive; its
-[unsettled.md](../sci-execution-runtime/plan/unsettled.md) working edge
-carries session state until this program grows its own).
+carries the runtime ruling archive, cited as "R<N> (runtime)"). THE
+WORKING EDGE is this program's own
+[plan/unsettled.md](plan/unsettled.md) — the one live record of
+current state and ordering; the old runtime unsettled.md is
+tombstoned.
 
 ## Reading order for a fresh session
 

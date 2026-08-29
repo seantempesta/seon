@@ -4,6 +4,12 @@ status: active
 tags: [prd, agent, architecture]
 ---
 
+> **TOMBSTONE (2026-08-29, owner ruling):** this file is HISTORICAL —
+> frozen at the 2026-08-12 era. The live working edge is
+> [docs/prds/context-generation/plan/unsettled.md](../../context-generation/plan/unsettled.md).
+> Nothing below sequences current work.
+
+
 # What is not settled
 
 ## RESUMPTION — 2026-08-14 session end (READ THIS FIRST)
