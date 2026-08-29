@@ -1789,7 +1789,14 @@
             (:seon.config.eval/time-limit-ms cluster)
             :seon.config/on-core-error (:seon.config/on-core-error cluster)
             :seon.render/output :seon.render/form
-            :seon.render/distance 3}
+            ;; measured live 2026-08-29 on the ruling-47 population:
+            ;; distance 3 = 499 units / 28 s PER ADVANCE (the third hop
+            ;; explodes into every namespace's function detail), starving
+            ;; every armed backstop; distance 2 = 109 units / 1.2 s and
+            ;; keeps the toolkit hop. Ruling 46 already retired eager
+            ;; deep openings — the world arrives as affordances, not as
+            ;; a three-hop content walk.
+            :seon.render/distance 2}
            run-id))]
     (cond
       (:seon.error/kind entry)
