@@ -10,6 +10,7 @@
             [seon.cluster.agent :as agent]
             [seon.cluster.message :as message]
             [seon.cluster.work :as work]
+            [seon.config :as config]
             [seon.db :as db]
             [seon.render.transcript :as transcript]
             [seon.sci.eval :as sci.eval]
@@ -20,10 +21,11 @@
 (set! *warn-on-reflection* true)
 
 (def ^:private render-caps
-  {:seon.config.eval.result/max-depth 12
-   :seon.config.eval.result/max-collection 64
-   :seon.config.eval.result/max-string 4096
-   :seon.config.eval.result/max-nodes 4096})
+  (assoc (config/result-caps (test-support/effective-config))
+         :seon.config.eval.result/max-depth 12
+         :seon.config.eval.result/max-collection 64
+         :seon.config.eval.result/max-string 4096
+         :seon.config.eval.result/max-nodes 4096))
 
 (defn- transcript-unit
   [database agent-id]
@@ -94,6 +96,8 @@
            recipient "streams-test-recipient"
            at (Date.)]
        (test-support/seed-cluster! connection cluster-name)
+       (config/apply! {:seon.db/connection connection
+                       :seon.boot/cluster-name cluster-name})
        (create-agent! connection cluster-name sender 'streams.test.sender)
        (create-agent! connection cluster-name recipient 'streams.test.recipient)
        (let [value
