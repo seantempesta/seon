@@ -685,6 +685,26 @@ numerically and a bare cross-citation is a defect to fix on sight.
     tests-reaching). No stored salience, ordering, or curriculum —
     those are queries or they rot.
 
+    **52b — generation is BACKWARD, demand-driven; the goal is the
+    seed** (owner, same day): generate from the END — the trigger +
+    standing goal — and chain backwards: every entry's DEMANDS are the
+    names its form and rendered result mention (usage children +
+    :symbols + keyword families) and the data identities it
+    references; each unmet demand generates its enabler (doc / schema
+    render / affordance line), recursively; demands bottom out at the
+    axioms (injected bindings + the intro) and at ALREADY-SATISFIED —
+    the agent's stored evals are satisfiers (correct prior use demands
+    nothing; a prior error demands the demonstration). Order is the
+    topological sort of the demand DAG, dependencies before
+    dependents, goal last — tail recency becomes a theorem. Nothing
+    re-executes: history renders from stored results; defs restore
+    from facts; faces stay invisible (registry-resolved at render).
+    (help) is not special: it is the demand closure at empty history.
+    STABILITY: backward generation governs ADMISSION; retention is
+    MONOTONE between compactions; compaction re-runs the pure demand
+    closure from current goals — which is §5's liveness rule: demand
+    and liveness are one computation run at two moments.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
