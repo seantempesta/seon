@@ -512,11 +512,9 @@
                 (edge-facts :seon.cluster.run.form/id
                             (run/form-identity "settlement-parity-run" 0))]
             (is (= expected program-facts))
-            ;; ruling 42b: the FORM records every call target, including
-            ;; the definition wrapper macro as a name-only core edge; the
-            ;; function row's first-party edges are the parity subset
-            (is (= (into #{[:seon.fn/sym "clojure.core/defn"]}
-                         (:seon.fn/calls expected))
+            ;; The form and declaration retain only graph-resolvable calls;
+            ;; analyzer built-ins without program rows are not edges.
+            (is (= (set (:seon.fn/calls expected))
                    (set (:seon.fn/calls form-facts))))
             (is (= (:seon.test/subject expected)
                    (:seon.test/subject form-facts)))

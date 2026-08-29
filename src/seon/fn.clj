@@ -245,7 +245,9 @@
   (and target (not (contains? first-party-functions target))))
 
 (defn- call-targets-by-caller
-  [analysis first-party-functions]
+  ([analysis first-party-functions]
+   (call-targets-by-caller analysis first-party-functions nil))
+  ([analysis first-party-functions resolvable-targets]
   (reduce
    (fn [calls usage]
      (let [caller
@@ -253,11 +255,14 @@
              (str (symbol (str (::analyzer/from usage))
                           (str (::analyzer/from-var usage)))))
            target (call-target usage)]
-       (if (and (contains? first-party-functions caller) target)
+       (if (and (contains? first-party-functions caller)
+                target
+                (or (nil? resolvable-targets)
+                    (contains? resolvable-targets target)))
          (update calls caller (fnil conj #{}) target)
          calls)))
    {}
-   (::analyzer/var-usages analysis)))
+   (::analyzer/var-usages analysis))))
 
 (defn- keywords-by-holder
   "Qualified keywords read literally inside each analyzed declaration body.
@@ -526,34 +531,39 @@
 (declare source-span)
 
 (defn- form-calls
-  [analysis first-source-row]
-  (let [unresolved-spans
-        (into #{}
-              (comp
-               (filter #(contains? #{:unresolved-symbol
-                                     :unresolved-namespace
-                                     :unresolved-var}
-                                   (::analyzer/type %)))
-               (map source-span))
-              (::analyzer/findings analysis))]
-    (into (sorted-set)
-          (comp
-           (filter #(>= (long (or (::analyzer/row %) 0)) first-source-row))
-           (remove #(contains? unresolved-spans (source-span %)))
-           (keep call-target)
-           (map (fn [target] [:seon.fn/sym target])))
-          (::analyzer/var-usages analysis))))
-
-(defn- form-keywords
-  [analysis first-source-row]
+  [analysis resolvable-targets]
   (into (sorted-set)
         (comp
-         (filter #(>= (long (or (::analyzer/row %) 0)) first-source-row))
+         (keep call-target)
+         (filter resolvable-targets)
+         (map (fn [target] [:seon.fn/sym target])))
+        (::analyzer/var-usages analysis)))
+
+(defn- form-keywords
+  [analysis]
+  (into (sorted-set)
+        (comp
          (keep (fn [entry]
                  (when (and (::analyzer/ns entry) (::analyzer/name entry))
                    (keyword (str (::analyzer/ns entry))
                             (str (::analyzer/name entry)))))))
         (::analyzer/keywords analysis)))
+
+(defn- source-analysis
+  "Keep only analyzer entries owned by the submitted form, after the prelude."
+  [analysis first-source-row]
+  (reduce
+   (fn [source-analysis analysis-key]
+     (update source-analysis analysis-key
+             (fn [entries]
+               (filterv #(>= (long (or (::analyzer/row %) 0))
+                              first-source-row)
+                        entries))))
+   analysis
+   [::analyzer/var-definitions
+    ::analyzer/var-usages
+    ::analyzer/keywords
+    ::analyzer/findings]))
 
 (defn analyze-form
   "Analyze one planned form through the static program-graph owner."
@@ -580,9 +590,12 @@
         first-party-functions
         (cond-> (into #{} (map :seon.fn/sym) function-rows)
           program-symbol (conj program-symbol))
+        source-analysis (source-analysis analysis first-source-row)
         calls-by-caller
-        (call-targets-by-caller analysis first-party-functions)
-        used-keywords (keywords-by-holder analysis)
+        (call-targets-by-caller source-analysis
+                                first-party-functions
+                                first-party-functions)
+        used-keywords (keywords-by-holder source-analysis)
         program-facts
         (when program-symbol
           (let [qualified (symbol program-symbol)
@@ -591,7 +604,7 @@
                                 (str (symbol (str (::analyzer/ns %))
                                              (str (::analyzer/name %)))))
                          %)
-                      (::analyzer/var-definitions analysis))
+                      (::analyzer/var-definitions source-analysis))
                 subject (or (:seon.test/subject program-row)
                             (test-subject (::analyzer/meta definition)))]
             (cond-> {}
@@ -607,12 +620,12 @@
               subject (assoc :seon.test/subject subject))))
         form-facts
         (cond-> {}
-          (seq (form-calls analysis first-source-row))
+          (seq (form-calls source-analysis first-party-functions))
           (assoc :seon.fn/calls
-                 (form-calls analysis first-source-row))
-          (seq (form-keywords analysis first-source-row))
+                 (form-calls source-analysis first-party-functions))
+          (seq (form-keywords source-analysis))
           (assoc :seon.fn/keywords
-                 (form-keywords analysis first-source-row))
+                 (form-keywords source-analysis))
           (:seon.test/subject program-facts)
           (assoc :seon.test/subject (:seon.test/subject program-facts)))
         merged-row (when program-row (merge program-row program-facts))]
