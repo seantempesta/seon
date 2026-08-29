@@ -81,10 +81,16 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest reserved-glyph-literal-test
-  (testing "a result-open ⟹ echo in the docstring body is flagged"
+  (testing "a result-open ⟹ echo in the docstring body is flagged —
+           in comment position the more specific comment-shaped-result
+           rule claims it (ruling 45); the glyph rule covers bare uses"
     (is (contains?
          (rules (str "(ns foo)\n(defn bar\n  \"Store one thing.\n\n"
                      "     (bar 1)\n     ; ⟹ 1\"\n  [x] x)"))
+         :comment-shaped-result))
+    (is (contains?
+         (rules (str "(ns foo)\n(defn bar\n  \"Store one thing.\n\n"
+                     "     value ⟹ arrives bare.\"\n  [x] x)"))
          :reserved-glyph-literal)))
 
   (testing "a result-close ⟸ literal is flagged"
@@ -101,10 +107,12 @@
            :reserved-glyph-literal)
           (str g " is a reserved glyph"))))
 
-  (testing "a stale `;; =>` echo is NO LONGER flagged (rule inverted)"
-    (is (empty?
+  (testing "a `;; =>` echo IS flagged — comment-shaped results are banned
+           everywhere (ruling 45; this guard was found inverted and re-armed)"
+    (is (contains?
          (rules (str "(ns foo)\n(defn bar\n  \"Store one thing.\n\n"
-                     "     (bar 1)\n     ;; => 1\"\n  [x] x)")))))
+                     "     (bar 1)\n     ;; => 1\"\n  [x] x)"))
+         :comment-shaped-result)))
 
   (testing "prose showing the CALL and describing the return is CLEAN"
     (is (empty?

@@ -85,6 +85,17 @@
    require-a-`; ⟹`-echo rule)."
   #"[\x{27F9}\x{27F8}\x{22D8}\x{22D9}\x{276F}]")
 
+(def ^:private comment-result-re
+  "A COMMENT-SHAPED RESULT echo in a docstring line — `;; =>`, `; =>`,
+   or a comment followed by the result glyph. Ruling 45
+   (context-generation ledger): results print BARE; a result rendered
+   as a comment teaches agents to fabricate results as comments —
+   observed destroying agents in both implementations. The 2026-08-17
+   sweep removed 300+ instances; this guard keeps them from
+   reseeding. Prose comments describing the return (`; returns 1`)
+   carry no arrow and stay clean."
+  #"^\s*;{1,3}\s*(=>|\x{27F9})")
+
 ;;; ---------------------------------------------------------------------------
 ;;; Contracts (ordinary Vars keep this Babashka-loadable)
 ;;; ---------------------------------------------------------------------------
@@ -228,16 +239,27 @@
   [{:keys [fn-name doc line]}]
   (when doc
     (into []
-          (comp (filter #(re-find wrong-echo-re %))
-                (map (fn [ln]
-                       {::fn-name fn-name
-                        ::rule :reserved-glyph-literal
-                        ::line line
-                        ::first-line (str/trim ln)
-                        ::message (str fn-name ": docstring carries a reserved"
-                                       " runtime result-grammar glyph — describe"
-                                       " the return in prose; the runtime alone"
-                                       " emits the glyph from its constant")})))
+          (keep (fn [ln]
+                  (cond
+                    (re-find comment-result-re ln)
+                    {::fn-name fn-name
+                     ::rule :comment-shaped-result
+                     ::line line
+                     ::first-line (str/trim ln)
+                     ::message (str fn-name ": docstring carries a"
+                                    " comment-shaped result echo — results"
+                                    " print bare (ruling 45); show the call"
+                                    " and describe the return in prose")}
+
+                    (re-find wrong-echo-re ln)
+                    {::fn-name fn-name
+                     ::rule :reserved-glyph-literal
+                     ::line line
+                     ::first-line (str/trim ln)
+                     ::message (str fn-name ": docstring carries a reserved"
+                                    " runtime result-grammar glyph — describe"
+                                    " the return in prose; the runtime alone"
+                                    " emits the glyph from its constant")})))
           (str/split-lines doc))))
 
 (defn- check-fn
