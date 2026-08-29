@@ -1358,13 +1358,17 @@
           (into []
                 (keep (fn [[identity-attribute identity-value]]
                         (when-let [declaration
-                                   (db/pull db [:db/id]
+                                   (db/pull db '[*]
                                            [identity-attribute identity-value])]
-                          declaration)))
+                          [identity-attribute identity-value declaration])))
                 deleted-identities)]
       (into schema-tx
-            (map (fn [declaration]
-                   [:db/retractEntity (:db/id declaration)]))
+            (mapcat
+             (fn [[identity-attribute identity-value declaration]]
+               (map (fn [attribute]
+                      [:db.fn/retractAttribute (:db/id declaration) attribute])
+                    (program/changed-attributes
+                     declaration {identity-attribute identity-value}))))
             declarations))
     (let [row (or (program/declaration-row row :contracted :agent)
                   (refuse! `receipt-settle-call

@@ -516,7 +516,9 @@
          ::run/plan-digest "macro-call-digest"
          ::run/sources
          [{:seon.cluster.run.form/source "(seon.bootstrap/help)"}
-          {:seon.cluster.run.form/source "(missing.target/nope)"}]}))
+          {:seon.cluster.run.form/source "(missing.target/nope)"}
+          {:seon.cluster.run.form/source
+           "(require 'unindexed.required)"}]}))
       (db/transact!
        connection
        (run/receipt-start-tx
@@ -571,7 +573,33 @@
                    [?form :seon.fn/calls ?target]]
                  @connection
                  (run/form-identity "macro-call-run" 1)))
-          "an unresolvable mention is not a call edge"))))
+          "an unresolvable mention is not a call edge")
+      (is (nil? (:db/id (db/pull @connection [:db/id]
+                                 [:seon.ns/name 'unindexed.required]))))
+      (db/transact!
+       connection
+       (run/receipt-start-tx
+        {::run/id "macro-call-run"
+         :seon.cluster.eval/ordinal 2
+         :seon.cluster.eval/at t0}))
+      (let [result
+            (db/transact!
+             connection
+             (run/receipt-settle-tx
+              @connection
+              {::run/id "macro-call-run"
+               :seon.cluster.eval/ordinal 2
+               :seon.cluster.eval/result-edn "nil"
+               :seon.program/row
+               {:seon.ns/name 'my.macro-caller
+                :seon.ns/source "(require 'unindexed.required)"
+                :seon.ns/requires
+                #{[:seon.ns/name 'unindexed.required]}}}))]
+        (is (not (:seon.error/kind result))
+            "the required namespace identity precedes its lookup ref"))
+      (is (:db/id (db/pull @connection [:db/id]
+                           [:seon.ns/name 'unindexed.required]))
+          "settlement mints the required namespace identity"))))
 
 (deftest refreshes-only-terminal-system-reads-once
   (test-support/with-database
