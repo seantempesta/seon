@@ -293,6 +293,13 @@
   (or
    (let [deletion (program/deletion-row event)]
      (when (deleted-schema-key deletion) deletion))
+   ;; A schema's source form is executable SCI code, not yet a Malli value.
+   ;; Its canonical row is derived from the value evaluated inside the
+   ;; registration delta in `declared-row`; validating this source expression
+   ;; here would execute zero times and reject ordinary `(do ... schema)`.
+   (when (:seon.schema/key event)
+     (assoc (select-keys event [:seon.schema/key :seon.schema/form])
+            :seon.schema.admission/source :agent))
    (let [row (program/declaration-row event :contracted :agent)]
      (cond
        (:seon.fn/sym row)
@@ -302,10 +309,6 @@
           projection function-symbol definition
           {:seon.schema.admission/source :agent})
          row)
-
-       ;; The reader owns identity and exact source; the evaluated declaration
-       ;; supplies the canonical value below. Raw syntax is not schema data.
-       (:seon.schema/key row) row
 
        (:seon.test/sym row) row
 
