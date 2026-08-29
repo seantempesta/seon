@@ -717,26 +717,26 @@
            (is (= ["db-diff-m2"]
                   (mapv :my.message/id (:seon.db.diff/removed result))))
            (is (= [{:seon.db.diff/identity "db-diff-m1"
-                    :seon.db.diff/changed-attributes [:my.message/preview]
+                    :seon.db.diff/changed-attributes [:my.message/content]
                     :seon.db.diff/before
                     {:my.message/id "db-diff-m1"
                      :my.message/from "db-diff-alice"
                      :my.message/at
                      #inst "2026-08-13T20:00:00.000-00:00"
-                     :my.message/preview nil}
+                     :my.message/content nil}
                     :seon.db.diff/after
                     {:my.message/id "db-diff-m1"
                      :my.message/from "db-diff-alice"
                      :my.message/at
                      #inst "2026-08-13T20:00:00.000-00:00"
-                     :my.message/preview "hello, edited"}}]
+                     :my.message/content "hello, edited"}}]
                   (:seon.db.diff/changed result)))
            (is (= result (eval (:seon.db.diff/requery-id result)))
                "the rendered requery form replays verbatim for an agent")
            (let [rendered (db/render-diff-ai result)]
              (is (str/includes? rendered "+1 -1 ~1"))
              (is (str/includes? rendered "db-diff-m1"))
-             (is (str/includes? rendered ":my.message/preview"))
+             (is (str/includes? rendered ":my.message/content"))
              (is (str/includes? rendered "approximately"))
              (is (str/includes? rendered "requery by")))))))))
 
