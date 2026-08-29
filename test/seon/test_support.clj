@@ -5,12 +5,13 @@
             [clojure.java.io :as io]
             [clojure.test :as test]
             [datahike.api :as d]
-            [seon.db :as db]
             [seon.cluster :as cluster]
             [seon.cluster.export :as cluster.export]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
             [seon.cluster.store :as store]
+            [seon.config :as config]
+            [seon.db :as db]
             [seon.env :as env]
             [seon.fs :as fs]
             [seon.fn :as seon.fn]
@@ -24,6 +25,18 @@
 (def event-backstop-seconds
   "The loud clock around test events whose publishers are observable."
   20)
+
+(defn effective-config
+  "Compile shipped defaults plus an optional sparse manifest without writes."
+  {:malli/schema
+   [:function
+    [:=> [:cat] :seon.config/effective]
+    [:=> [:cat :seon.config/manifest] :seon.config/effective]]}
+  ([]
+   (config/defaults))
+  ([manifest]
+   (:seon.config/effective
+    (config/compile-manifest {:seon.config/manifest manifest}))))
 
 (defn render-context-channel
   "Create a channel supplying one profile to every context request."
