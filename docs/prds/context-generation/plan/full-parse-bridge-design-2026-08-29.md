@@ -27,28 +27,52 @@ replaced wholesale when the owner re-indexes — no hand lifecycle:
 #:seon.fn.usage{:to        :seon.db/ref     ; the TARGET row — guaranteed
                                             ; resolvable by ruling 47's
                                             ; population invariant
-                :arity     [:int {:min 0}]  ; optional — absent on non-call refs
-                :row       :int  :col :int
-                :end-row   :int  :end-col :int
-                :alias     [:symbol]        ; optional, as written at the site
-                :refer     :boolean         ; optional, present when true
-                :macro-call :boolean}       ; optional, present when true
+                :arity     [:int {:min 0}]  ; optional — present on calls
+                :row :int  :col :int  :end-row :int  :end-col :int
+                :name-row :int :name-col :int      ; optional — absent on
+                :name-end-row :int :name-end-col :int ; non-invocation sites
+                :defmethod :boolean                 ; optional, when true
+                :dispatch-val-str [:string]}        ; optional, defmethods
+;; VERIFIED against reference-code/clj-kondo/analysis/README.md:119-143.
+;; Kondo also copies the TARGET's properties onto each usage (:private,
+;; :macro, :fixed-arities, …) — the bridge DROPS those copies: they are
+;; the target row's own attributes, and storing them per usage is a
+;; mirror that drifts (the one principled exception to store-it-all).
+;; :alias and :refer are NOT var-usage fields (they live on
+;; namespace-usages and keywords) — earlier draft error, corrected.
 ```
 
-Same construction, three more owners:
+Same construction, four more owners:
 
 ```clojure
-:seon.ns/usages       ; component children of the ns row
-#:seon.ns.usage{:to :seon.db/ref, :alias [:symbol], :row :int, :col :int}
+:seon.ns/usages       ; component children of the ns row (kondo
+                      ; :namespace-usages — alias/refer live HERE)
+#:seon.ns.usage{:to :seon.db/ref, :alias [:symbol],
+                :row :int, :col :int}
 
 :seon.fn/keyword-sites ; component children (definer-owned), superseding
                        ; the bare :seon.fn/keywords set as authority
-#:seon.keyword.site{:keyword :qualified-keyword, :reg [:symbol],
+#:seon.keyword.site{:keyword :qualified-keyword ; synthesized ns+name,
+                                                ; the queryable handle
+                    :alias [:symbol]            ; optional
+                    :auto-resolved :boolean     ; optional, when true
+                    :keys-destructuring :boolean ; optional, when true
+                    :reg [:symbol]              ; optional, hook-registered
                     :row :int, :col :int}
 
-:seon.ns/protocol-impls
-#:seon.protocol.impl{:protocol :seon.db/ref, :method [:symbol],
+:seon.ns/protocol-impls ; kondo :protocol-impls fields verbatim
+#:seon.protocol.impl{:protocol :seon.db/ref ; resolved from
+                                            ; protocol-ns/protocol-name
+                     :method [:symbol], :defined-by [:symbol],
                      :row :int, :col :int}
+
+:seon.fn/symbol-sites  ; kondo :symbols — symbols in QUOTED forms and
+                       ; EDN, with :to resolved through aliases. This
+                       ; is the mention-tracing feed for quoted
+                       ; teaching forms and agent-quoted data — the
+                       ; render plan's fixpoint reads it directly.
+#:seon.symbol.site{:symbol [:symbol], :to [:symbol] ; optional
+                   :row :int, :col :int}
 ```
 
 **Var-definition fields kondo emits and we currently drop, accreted
