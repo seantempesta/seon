@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, performance, test, wave/render-acquisition-performance]
 ---
@@ -42,3 +42,16 @@ close this one.
 The test completes in single-digit seconds on the pooled worker, and a
 bare `bin/test` run passes through the bulk tier without the liveness
 watchdog firing on this task.
+
+## Resolution (2026-08-29)
+
+Diagnosis (walk-stall lane, from the preserved wedge dumps + a fresh
+probe): pathological cost, not a hang — the selector recursively
+expanded all 126 ref attributes to the requested distance before the
+node cap applied (distance 0/1 = 10.5/13.8 ms; distance 4 with
+max-nodes 1 ≈ 50 s). Fix: acquisition depth floors at max-nodes - 1 —
+an implication of the existing cap, not a tuned constant (a member at
+depth d costs d+1 nodes). After: 8.5 ms acquisition, 46 ms render;
+the distance-cap regression strengthened and green in two full
+integration rounds; the suite passes through this test in ordinary
+time. The measured numbers feed the render plan's S1 baseline.
