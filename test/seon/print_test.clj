@@ -13,6 +13,7 @@
             [sci.core :as sci]
             [seon.config :as config]
             [seon.print :as print]
+            [seon.render :as render]
             [seon.render.hiccup :as hiccup]
             [seon.schema :as schema]
             [seon.sci.admit :as admit]
@@ -245,12 +246,14 @@
              (normalize-whitespace (lexical-hiccup-text hiccup)))))))
 
 (deftest terminal-projections-fit-to-complete-elision-values
-  (let [profile {:seon.render.profile/id :seon.render.profile/agent
-                 :seon.render.profile/token-budget 16
-                 :seon.render.profile/max-depth 8
-                 :seon.render.profile/max-children 32
-                 :seon.render.profile/composition :multiline
-                 :seon.print/requery-id [:seon.render.call/id :fixture/long]}
+  (let [profile (assoc (render/agent-render-profile
+                        (test-support/effective-config))
+                       :seon.render.profile/token-budget 16
+                       :seon.render.profile/max-depth 8
+                       :seon.render.profile/max-children 32
+                       :seon.render.profile/composition :multiline
+                       :seon.print/requery-id
+                       [:seon.render.call/id :fixture/long])
         long-text (apply str (repeat 512 "outward "))]
     (doseq [node [{:seon.print/face :seon.print/projected
                    :seon.render/output :seon.render/ai
@@ -341,10 +344,13 @@
              "(admit/admit-value {:seon.sci.admit/value value "
              ":seon.sci.admit/interrupt-fn (fn []) "
              ":seon.sci.admit/caps "
-             "{:seon.config.eval.result/max-depth 8 "
-             ":seon.config.eval.result/max-collection 32 "
-             ":seon.config.eval.result/max-string 4096 "
-             ":seon.config.eval.result/max-nodes 4096} "
+             (pr-str
+              (assoc (config/result-caps (test-support/effective-config))
+                     :seon.config.eval.result/max-depth 8
+                     :seon.config.eval.result/max-collection 32
+                     :seon.config.eval.result/max-string 4096
+                     :seon.config.eval.result/max-nodes 4096))
+             " "
              ":seon.config/on-core-error :record}))] "
              "(print/emit-text node " (pr-str no-cuts) "))) values)] "
              "(print (pr-str rendered)))")
@@ -377,11 +383,12 @@
                 :seon.print/requery-id [:seon.db/query :requires]}]}
         fitted (print/fit
                 node
-                {:seon.render.profile/id :seon.render.profile/agent
-                 :seon.render.profile/token-budget 1
-                 :seon.render.profile/max-depth 8
-                 :seon.render.profile/max-children 1
-                 :seon.render.profile/composition :multiline})
+                (assoc (render/agent-render-profile
+                        (test-support/effective-config))
+                       :seon.render.profile/token-budget 1
+                       :seon.render.profile/max-depth 8
+                       :seon.render.profile/max-children 1
+                       :seon.render.profile/composition :multiline))
         items (:seon.print/items fitted)
         elision (if items (peek items) fitted)
         rendered (if items (dec (count items)) 0)]
@@ -424,12 +431,13 @@
         fitted
         (print/enrich-elisions
          admitted
-         {:seon.render.profile/id :seon.render.profile/agent
-          :seon.render.profile/token-budget 8
-          :seon.render.profile/max-depth 1
-          :seon.render.profile/max-children 1
-          :seon.render.profile/composition :single-line
-          :seon.print/requery-id [:my.message/id "message-1"]})]
+         (assoc (render/agent-render-profile
+                 (test-support/effective-config))
+                :seon.render.profile/token-budget 8
+                :seon.render.profile/max-depth 1
+                :seon.render.profile/max-children 1
+                :seon.render.profile/composition :single-line
+                :seon.print/requery-id [:my.message/id "message-1"]))]
     (is (= {:seon.print/face :seon.print/truncated-string
             :seon.print/value "abc"
             :seon.print/length 6
