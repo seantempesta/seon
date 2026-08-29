@@ -43,7 +43,12 @@
     ;; neither creates custody nor changes its reference count. Returning that
     ;; exact connection is the function's declared purpose.
     ["seon.cluster.registry/active-branch-connection"
-     :seon.db/connection]})
+     :seon.db/connection]
+    ;; Ruling 47 grew the program population to every ctx-resolvable name.
+    ;; These ordinary public functions are therefore visible to the derived
+    ;; custody census and require the same explicit review as prior members.
+    ["seon.operator/connection" :seon.db/connection]
+    ["seon.sci.eval/fork-candidate-ctx" :seon.sci.eval/ctx]})
 
 (def ^:private custody-returning-query
   '[:find ?function-symbol ?schema-key
@@ -162,6 +167,8 @@
              (db/q '[:find ?function-symbol ?namespace-name
                      :where
                      [?function :seon.fn/sym ?function-symbol]
+                     [?function :seon.fn/source _]
+                     [?function :seon.fn/private? _]
                      [?function :seon.fn/ns ?namespace]
                      [?namespace :seon.ns/name ?namespace-name]]
                    db))
@@ -194,6 +201,10 @@
                  (some-> root-var meta :ns ns-name))
               (pr-str {:seon.custody-stability/consumer consumer-symbol
                        :seon.custody-stability/root-var root-var})))
+        ;; Ruling 47 gives every ctx-resolvable name a row, including macros
+        ;; and injected non-function bindings. Publics cover those bindings;
+        ;; the graph side therefore selects source-backed function definitions
+        ;; instead of treating every identity row as an installed function.
         (is (= expected installed)
             (pr-str {:seon.custody-stability/expected expected
                      :seon.custody-stability/installed installed}))))))
