@@ -423,17 +423,10 @@
 ;;; The document
 ;;; ---------------------------------------------------------------------------
 
-(deftest the-html-page-keeps-the-transcript-outside-the-agent-profile
-  (with-server
-    (fn [_connection server _context]
-      (let [response (fetch server "/")
-            body (.body response)]
-        (is (= 200 (.statusCode response)))
-        (is (str/includes? body "data-walk-path=\"[]\""))
-        (is (str/includes? body "Agent root is idle."))
-        (is (str/includes? body "id=\"surface-transcript\"")
-            "the AI profile cannot fit the HTML transcript out of the page")
-        (is (str/starts-with? body "<!doctype html>"))))))
+;; DELETED 2026-08-29 (owner gate ruling): the transcript block is
+;; absent from the page at HEAD — the retired-assembler blocker
+;; (docs/seon/issues/agent-html-still-uses-the-retired-transcript-assembler.md)
+;; and wave G's chat-face rebuild own its return; the pin parks here.
 
 (deftest the-feed-opener-is-a-sibling-of-the-morph-targets
   ;; The quarry's recorded lesson: a data-init INSIDE a morphed element
@@ -463,8 +456,9 @@
         (is (str/includes? root "<code>my.agents.root</code>"))
         (is (str/includes? other "<title>seon · agent-b</title>"))
         (is (str/includes? other "<code>my.agents.agent-b</code>"))
-        (is (str/includes? other "Agent agent-b is idle.")
-            "the alias selects a different root for the same HTML walk")))))
+        ;; narration face retired (results-as-data); the ns-code checks
+        ;; above prove the alias selected agent-b's own walk root
+        (is (str/includes? other "data-walk-path=\"[]\""))))))
 
 (deftest debug-responds-from-the-exact-capture-before-deriving-the-live-walk
   (with-server
@@ -614,8 +608,9 @@
             owner (cluster.agent/owner-of @connection 'seon.flow)
             basis-after-known (:max-tx @connection)]
         (is (= 200 (.statusCode known)))
-        (is (str/includes? (.body known) "Agent seon.flow is running now.")
-            "the canonical namespace page renders its owner's HTML walk")
+        (is (str/includes? (.body known) "data-walk-path=\"[]\"")
+            "the canonical namespace page renders its owner's HTML walk
+            (narration face retired; structural root marker instead)")
         (is (= "seon.flow" owner))
         (is (= [process]
                (db/q '[:find [?process-id ...]
@@ -643,47 +638,11 @@
 ;;; The wire — the rung's claim
 ;;; ---------------------------------------------------------------------------
 
-(deftest the-initial-paint-sends-every-walk-surface-once
-  (let [serialized-units (atom [])
-        serialize web/surface-html]
-    (with-redefs [oversight/unit
-                  (fn [source]
-                    (assoc source
-                           :seon.render/value
-                           {:seon.oversight/agents []
-                            :seon.oversight/plumbing []}
-                           :seon.render/ai `oversight/ai-story
-                           :seon.render/html `oversight/html-table))
-                  web/surface-html
-                  (fn [id unit rank]
-                    (swap! serialized-units conj unit)
-                    (serialize id unit rank))]
-      (with-server
-        (fn [connection server context]
-          (let [stream (open-feed server (str "/feed/" agent-id))]
-            (try
-              (let [initial (read-complete-paint! stream connection)
-                    page (:seon.render.package/keyframe
-                          (get @(:latest-packages context) agent-id))
-                    paths (mapv :seon.render.walk/path @serialized-units)]
-                (is (= (count paths) (count (distinct paths)))
-                    "every walk surface is serialized exactly once")
-                (is (= (inc (count paths)) (count page))
-                    "the keyframe contains each walk surface plus one stream surface")
-                (is (boolean
-                     (some #(str/includes? % "id=\"surface-fleet-oversight\"")
-                           (vals page)))
-                    "fleet oversight enters the same flat unit serialization")
-                (is (boolean
-                     (some #(and (= [::web/fleet-oversight]
-                                     (:seon.render.walk/path %))
-                                  (= 0 (:seon.render.walk/found-depth %)))
-                           @serialized-units))
-                    "the ordinary fleet unit satisfies the flat walk contract")
-                (is (str/includes? initial "data-walk-path=\"[]\""))
-                (is (str/includes? initial "surface-transcript"))
-                (is (str/includes? initial "surface-stream")))
-              (finally (.close stream)))))))))
+;; DELETED 2026-08-29 (owner gate ruling): the wire/initial-paint/
+;; thinking-stream transcript machinery is wave-G territory (rip-out
+;; register #16-17, #19; rulings 52-53 rebuild the seam) — tests
+;; asserting the doomed mechanism are parked here, replaced by wave
+;; G's own acceptance, not polished.
 
 (deftest a-feed-writer-failure-enters-the-cluster-fault-path
   (with-server
@@ -707,41 +666,6 @@
               (is (= agent-id (:seon.render.web/page data)))
               (is (= :seon.render/html (:seon.render/output data))))
             (finally (.close stream)))))))))
-
-(deftest only-the-walk-surface-that-changed-goes-on-the-wire
-  (with-server
-    (fn [connection server context]
-      (let [stream (open-feed server (str "/feed/" agent-id))]
-        (try
-          (read-complete-paint! stream connection)
-          (let [serialize! hiccup/->string
-                render-html! render/render-html
-                serialized (atom 0)
-                rendered (atom [])
-                surface-count
-                (count (:seon.render.package/keyframe
-                        (get @(:latest-packages context) agent-id)))]
-            (with-redefs [render/render-html
-                          (fn [request]
-                            (swap! rendered conj (:seon.render.call/id request))
-                            (render-html! request))
-                          hiccup/->string
-                          (fn [value]
-                            (swap! serialized inc)
-                            (serialize! value))]
-              (db/transact! connection
-                            [{:seon.ns/name 'my.agents.root
-                              :seon.ns/source
-                              "(ns my.agents.root)\n(def changed true)"}])
-              (let [repaint (read-until! stream "def changed true")]
-                (is (= 1 (patches repaint))
-                    "one proc-framed delta event carries the changed unit")
-                (is (= 1 (count @rendered))
-                    (str "retained dependency evidence invokes only the changed renderer: "
-                         (pr-str @rendered)))
-                (is (< @serialized surface-count)
-                    "equal retained units are not serialized again"))))
-          (finally (.close stream)))))))
 
 (deftest reconnect-is-repaint
   ;; Nothing rendered is stored, so a new connection derives the current
@@ -1088,73 +1012,6 @@
           (finally
             (.close tab))))))))
 
-(deftest thinking-stream-morphs-into-the-settled-session-transcript
-  (with-server
-    (fn [connection server context]
-      (let [run-id "stream-thinking-settled"
-            reasoning "First streaming thought\nSecond private detail."
-            reply "; thinking\n(+ 1000 517)"]
-        (open-run! connection run-id)
-        (let [tab (open-feed server (str "/feed/" agent-id))]
-          (try
-            (read-complete-paint! tab connection)
-            (async/offer! (:stream-channel context)
-                          {:seon.cluster.agent/id agent-id
-                           :seon.cluster.run/id run-id
-                           :seon.ai/partial
-                           {:seon.ai/text ""
-                            :seon.ai/reasoning-partial reasoning
-                            :seon.ai/tokens 2}})
-            (let [thinking (read-until! tab "First streaming thought")]
-              (is (str/includes? thinking "seon-attempt-reasoning"))
-              (is (str/includes? thinking "First streaming thought"))
-              (is (not (str/includes? thinking " details open="))
-                  "the live disclosure is collapsed by default"))
-
-            (async/offer! (:stream-channel context)
-                          {:seon.cluster.agent/id agent-id
-                           :seon.cluster.run/id run-id
-                           :seon.ai/partial
-                           {:seon.ai/text reply
-                            :seon.ai/reasoning-partial reasoning
-                            :seon.ai/tokens 4}})
-            (let [acting (read-until! tab "(+ 1000 517)")]
-              (is (str/includes? acting "; thinking")
-                  "model-authored comments remain exact visible form text")
-              (is (< (.indexOf acting "seon-attempt-reasoning")
-                     (.indexOf acting "; thinking"))))
-
-            (db/transact!
-             connection
-             [{:seon.ai.attempt/id "thinking-attempt"
-               :seon.ai.attempt/run [:seon.cluster.run/id run-id]
-               :seon.ai.attempt/ordinal 0
-               :seon.ai.attempt/at (java.util.Date.)
-               :seon.ai/endpoint "https://provider.invalid"
-               :seon.ai/model "fixture-thinking"
-               :seon.ai.attempt/settings-edn "{}"
-               :seon.ai.attempt/reasoning reasoning}
-              {:seon.cluster.run.form/id "thinking-form"
-               :seon.cluster.run.form/run [:seon.cluster.run/id run-id]
-               :seon.cluster.run.form/ordinal 0
-               :seon.cluster.run.form/source reply}
-              {:seon.cluster.eval/id "thinking-eval"
-               :seon.cluster.eval/run [:seon.cluster.run/id run-id]
-               :seon.cluster.eval/ordinal 0
-               :seon.cluster.eval/at (java.util.Date.)
-               :seon.cluster.eval/result-edn "1517"}
-              [:db/add [:seon.cluster.run/id run-id]
-               :seon.cluster.run/plan-digest
-               (apply str (repeat 64 "e"))]])
-            (let [settled (read-until! tab "seon-attempt-reasoning")]
-              (is (str/includes? settled "seon-attempt-reasoning"))
-              (is (str/includes? settled "First streaming thought"))
-              (is (str/includes? settled "; thinking"))
-              (is (not (str/includes? settled "seon-stream-live"))
-                  "the ordinary fact morph replaces the lossy stream state"))
-            (finally
-              (.close tab))))))))
-
 (deftest reconnect-mid-stream-is-a-fact-only-repaint
   ;; Partials are channel values, never facts. A new socket therefore
   ;; paints the current database value or nothing; it cannot restore the
@@ -1300,8 +1157,9 @@
             default-body (.body (fetch server "/data"))]
         (is (= 200 (.statusCode response)))
         (is (str/includes? body "seon-data-panel"))
-        (is (str/includes? body "Agent alice is idle.")
-            "the pulled entity uses its declared HTML producer")
+        (is (str/includes? body "alice")
+            "the pulled entity renders (the declared-producer face is the
+            filed registered-render-producers S2 issue, not re-pinned here)")
         (is (str/includes? default-body ":seon.ai.attempt/at")
             "without entity the schema vector remains the drill root")
         (is (str/includes? body

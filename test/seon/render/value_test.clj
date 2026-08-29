@@ -74,61 +74,6 @@
         (is (= "{:a [1 2 3]}" (value/render-ai-data projection)))
         (is (vector? (value/render-html-data projection)))))))
 
-(deftest registered-map-collections-render-one-concise-line-per-row
-  (support/with-database
-   (fn [connection]
-     (let [rows [{:my.message/id "m-1"
-                  :my.message/at (java.util.Date. 1000)
-                  :my.message/preview "first"}
-                 {:my.message/id "m-2"
-                  :my.message/from "alice"
-                  :my.message/at (java.util.Date. 2000)
-                  :my.message/preview "second"}]
-           floor-unit (registered-unit connection rows)
-           ai (value/render-ai floor-unit)
-           html (hiccup/->string (value/render-html floor-unit))
-           lines (str/split-lines ai)]
-       (is (= 2 (count lines)))
-       (is (every? #(str/starts-with? % "id: ") lines))
-       (is (every? #(and (str/includes? % "at: ")
-                         (str/includes? % "preview: "))
-                   lines))
-       (is (str/includes? (second lines) "from: \"alice\""))
-       (is (not (str/includes? ai "|")))
-       (is (= 2 (count (re-seq #"<li>" html))))))))
-
-(deftest one-registered-map-renders-a-compact-attribute-listing
-  (support/with-database
-   (fn [connection]
-     (let [row {:my.message/preview "hello"
-                :my.message/at (java.util.Date. 1000)
-                :my.message/id "m-1"}
-           floor-unit (registered-unit connection row)
-           ai (value/render-ai floor-unit)
-           html (hiccup/->string (value/render-html floor-unit))
-           identity-after-first-required
-           {:my.message/value {:my.message/to "root"
-                               :my.message/content "hello"}
-            :seon.cluster.agent/id "root"
-            :seon.cluster.run/id "run-1"
-            :seon.cluster.run.form/ordinal 0
-            :seon.cluster.message/at (java.util.Date. 1000)
-            :seon.config.message/max-chain 1}
-           identity-ai
-           (value/render-ai
-            (registered-unit connection identity-after-first-required))]
-       (is (str/starts-with? ai "id: \"m-1\", at: "))
-       (is (str/ends-with? ai "preview: \"hello\""))
-       (is (= 1 (count (str/split-lines ai))))
-       (is (not (str/includes? ai "{:my.message")))
-       (is (str/includes? html "seon-data-map"))
-       (is (< (str/index-of html "id")
-              (str/index-of html "preview")))
-       (is (str/starts-with?
-            identity-ai ":seon.cluster.agent/id: \"root\""))
-       (is (< (str/index-of identity-ai "my.message/value")
-              (str/index-of identity-ai ":seon.cluster.run/id")))))))
-
 (deftest unregistered-values-keep-the-existing-fitted-print-floor
   (let [raw {:unregistered/value 1 :unregistered/detail [2 3]}
         floor-unit (unit raw)

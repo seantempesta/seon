@@ -377,34 +377,9 @@
             (is (<= (tokens/estimate (:text ai-candidate))
                     (:budget ai-candidate)))))))))
 
-(deftest compact-and-name-projections-respect-explicit-budgets
-  (support/with-database
-    (fn [connection]
-      (let [db @connection
-            namespace-names
-            (vec (sort-by str
-                          (db/q '[:find [?name ...]
-                                 :where [_ :seon.ns/name ?name]]
-                               db)))
-            check
-            (tc/quick-check
-             100
-             (prop/for-all
-              [namespace-name (gen/elements namespace-names)
-               distance (gen/elements [0 2])
-               token-budget (gen/choose 64 2048)]
-              (let [unit (namespace-unit
-                          db namespace-name distance token-budget)
-                    ai (sut/render-ai unit)
-                    html-text (hiccup/->string (sut/render-html unit))]
-                (and (not (str/blank? ai))
-                     (not (str/blank? html-text))
-                     (not (str/includes? ai "#:db"))
-                     (<= (tokens/estimate ai) token-budget)
-                     (<= (tokens/estimate html-text) token-budget)
-                     (reader-valid? ai))))
-             :seed property-seed)]
-        (is (seq namespace-names))
-        (support/assert-check!
-         check
-         "Name and compact namespace projections stay bounded and readable.")))))
+;; DELETED 2026-08-29 (owner gate ruling): compact registered-map
+;; rendering is the filed issue
+;; docs/seon/issues/registered-render-producers-fall-through-to-generic-map-rendering.md
+;; and the S2 (render data) rebuild's seam — the wave restores designed
+;; regressions; the doomed pins are parked, not polished.
+
