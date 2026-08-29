@@ -523,14 +523,26 @@
      :seon.fn/first-source-row first-source-row
      :seon.fn/function-rows function-rows}))
 
+(declare source-span)
+
 (defn- form-calls
   [analysis first-source-row]
-  (into (sorted-set)
-        (comp
-         (filter #(>= (long (or (::analyzer/row %) 0)) first-source-row))
-         (keep call-target)
-         (map (fn [target] [:seon.fn/sym target])))
-        (::analyzer/var-usages analysis)))
+  (let [unresolved-spans
+        (into #{}
+              (comp
+               (filter #(contains? #{:unresolved-symbol
+                                     :unresolved-namespace
+                                     :unresolved-var}
+                                   (::analyzer/type %)))
+               (map source-span))
+              (::analyzer/findings analysis))]
+    (into (sorted-set)
+          (comp
+           (filter #(>= (long (or (::analyzer/row %) 0)) first-source-row))
+           (remove #(contains? unresolved-spans (source-span %)))
+           (keep call-target)
+           (map (fn [target] [:seon.fn/sym target])))
+          (::analyzer/var-usages analysis))))
 
 (defn- form-keywords
   [analysis first-source-row]
@@ -543,96 +555,8 @@
                             (str (::analyzer/name entry)))))))
         (::analyzer/keywords analysis)))
 
-(defn- companion-call-rows
-  "Name-only rows for call targets the database has no row for.
-
-  A run form may reference any callable var — a first-party macro,
-  a core function no source form ever used — and its call edges are
-  `[:seon.fn/sym target]` lookup refs. A lookup ref to a missing row
-  rejects the WHOLE settlement transaction, losing every fact riding
-  it. These are the ruling-42b name-only rows, minted in the same
-  transaction so the refs resolve by upsert; an existing row simply
-  matches its identity."
-  [database targets]
-  (into
-   []
-   (comp
-    (remove (fn [target]
-              (:db/id (db/pull database [:db/id] [:seon.fn/sym target]))))
-    (mapcat
-     (fn [target]
-       (let [namespace-name (some-> target symbol namespace symbol)]
-         (cond-> [{:seon.fn/sym target
-                   :seon.fn/ns [:seon.ns/name namespace-name]}]
-           (not (:db/id (db/pull database [:db/id]
-                                 [:seon.ns/name namespace-name])))
-           (conj {:seon.ns/name namespace-name}))))))
-   (sort targets)))
-
-(defn- row-present?
-  [database identity-attribute identity-value]
-  (boolean
-   (:db/id (db/pull database [:db/id] [identity-attribute identity-value]))))
-
-(defn- portable-calls
-  "Rewrite call edges so a settlement can commit them against `database`.
-
-  A run form may reference any callable var — a first-party macro, a
-  core function no source form ever used — and a call edge to a target
-  with no row is a lookup ref that resolves against the BEFORE-db, so
-  it rejects the whole settlement transaction, losing every fact riding
-  it. A missing target therefore becomes a string tempid (the `:string`
-  arm of `:seon.db/ref`) resolved by a ruling-42b name-only companion
-  row in the same transaction; tempids unify transaction-wide, and the
-  identity attribute upserts, so a concurrently minted row is harmless.
-  Targets with rows keep their lookup refs.
-
-  Returns `{::calls rewritten ::companion-rows rows}`."
-  [database calls]
-  (reduce
-   (fn [result [identity-attribute target :as call]]
-     (if (or (not= :seon.fn/sym identity-attribute)
-             (row-present? database :seon.fn/sym target))
-       (update result ::calls conj call)
-       (let [function-tempid (str "seon.fn/sym " target)
-             namespace-name (some-> target symbol namespace symbol)
-             namespace-present?
-             (row-present? database :seon.ns/name namespace-name)
-             namespace-tempid (str "seon.ns/name " namespace-name)]
-         (cond-> (-> result
-                     (update ::calls conj function-tempid)
-                     (update ::companion-rows conj
-                             {:db/id function-tempid
-                              :seon.fn/sym target
-                              :seon.fn/ns
-                              (if namespace-present?
-                                [:seon.ns/name namespace-name]
-                                namespace-tempid)}))
-           (not namespace-present?)
-           (update ::companion-rows conj
-                   {:db/id namespace-tempid
-                    :seon.ns/name namespace-name})))))
-   {::calls [] ::companion-rows []}
-   calls))
-
-(defn- with-portable-calls
-  [database facts]
-  (if (seq (:seon.fn/calls facts))
-    (let [{calls ::calls companion-rows ::companion-rows}
-          (portable-calls database (:seon.fn/calls facts))]
-      ;; a plain set: a sorted set cannot compare tempid strings with
-      ;; lookup-ref vectors, and cardinality-many facts are sets anyway
-      [(assoc facts :seon.fn/calls (into #{} calls)) companion-rows])
-    [facts []]))
-
 (defn analyze-form
-  "Analyze one planned form through the static program-graph owner.
-
-  Returns `[form-facts program-row companion-rows]`; the companion
-  rows are name-only `:seon.fn`/`:seon.ns` rows for call targets
-  absent from `database` — the rewritten call edges reference them by
-  string tempid, so they MUST ride the same transaction as the form
-  facts."
+  "Analyze one planned form through the static program-graph owner."
   {:malli/schema
    [:=>
     [:catn
@@ -645,8 +569,7 @@
       [:seon.fn/calls {:optional true} :seon.fn/calls]
       [:seon.fn/keywords {:optional true} :seon.fn/keywords]
       [:seon.test/subject {:optional true} :seon.test/subject]]
-     [:maybe :seon.program/row]
-     [:vector :map]]]}
+     [:maybe :seon.program/row]]]}
   [database source namespace-ref program-row]
   (let [namespace-name (:seon.ns/name
                         (db/pull database [:seon.ns/name] namespace-ref))
@@ -692,14 +615,8 @@
                  (form-keywords analysis first-source-row))
           (:seon.test/subject program-facts)
           (assoc :seon.test/subject (:seon.test/subject program-facts)))
-        merged-row (when program-row (merge program-row program-facts))
-        [form-facts form-companions] (with-portable-calls database form-facts)
-        [merged-row row-companions]
-        (if merged-row
-          (with-portable-calls database merged-row)
-          [nil []])]
-    [form-facts merged-row
-     (into [] (distinct) (concat form-companions row-companions))]))
+        merged-row (when program-row (merge program-row program-facts))]
+    [form-facts merged-row]))
 
 (def ^:private load-refusal-finding-types
   #{:syntax
