@@ -629,6 +629,26 @@ numerically and a bare cross-citation is a defect to fix on sight.
     machinery (mention tracing, error adjacency, composition join,
     tests-reaching) consumes the richer edges instead of re-deriving.
 
+51. **The graph closes over code, data, render, and errors; agent
+    forms keep linking it; self-improvement is a derivation** (owner,
+    2026-08-29): the program graph must store enough to answer the
+    context-generation question BY QUERY. Six edge families close it:
+    code→code (ruling-50 usage children), code→data (the 42c tx-meta
+    eval stamp + the eval's usages = "what function made this datom"),
+    data→readers and data→faces (declared on family schemas, 36/43),
+    forms→graph (SETTLED RUN FORMS CARRY USAGE CHILDREN — resolving
+    the bridge design's open question 1 YES: every form an agent
+    writes accretes located, arity-exact edges, so each turn links the
+    graph further), and errors→sites (error facts joined through the
+    failing eval's usages land on the exact call site). CONSEQUENCE —
+    self-improvement tasks are DERIVED, never enumerated: "which of my
+    namespace's functions do other agents call most, and which of
+    those calls recur in errors" is one Datalog query over usage
+    children + error facts; a namespace-agent turns its top rows into
+    my.plan items `:about` those functions and works them — many
+    agents, own namespaces, in parallel, no scheduler. The derivation
+    ships as a demonstrated query (help/recipes), not a new mechanism.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced

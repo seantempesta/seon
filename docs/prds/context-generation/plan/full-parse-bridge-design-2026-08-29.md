@@ -126,8 +126,9 @@ rides arities + spans, no AST interrogation needed at selection time).
 
 ## 5. Open to the owner
 
-1. Do settled run forms carry usage children too (recommended — the
-   evals' mention tracing reads them directly), or only program rows?
+1. RULED YES (owner, 2026-08-29, ruling 51): settled run forms carry
+   usage children — every agent form links the graph; cross-agent
+   call analytics and the self-improvement derivation depend on it.
 2. Locals/local-usages: kondo can emit them; recommended OFF (noise,
    volume) until a consumer exists — but state it so the omission is a
    decision, not a drop.
