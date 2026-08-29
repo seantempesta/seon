@@ -351,8 +351,10 @@
               "signal.pause()\n"))]
     (try
       (let [result
+            ;; task exchanges bound at the suite silence horizon; the
+            ;; matrix injects a one-second horizon to trip it fast
             (with-redefs-fn
-              {#'runner/event-backstop-seconds (constantly 1)}
+              {#'runner/silence-seconds (constantly 1)}
               #(execute-injected-task! worker (exchange-task "bounded")))]
         (assert-one-terminal-error! "bounded" result
                                     ::runner/worker-exchange-bound)

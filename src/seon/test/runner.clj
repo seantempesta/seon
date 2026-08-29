@@ -1177,7 +1177,14 @@
   (reset! (::worker-retired? worker) true)
   (let [process ^Process (::worker-process worker)]
     (when (and destroy? (.isAlive process))
-      (.destroyForcibly process))))
+      (.destroyForcibly process)
+      ;; retirement returns only when the worker can no longer act; the
+      ;; wait is bounded — a process the OS will not reap is reported,
+      ;; never awaited forever
+      (when-not (.waitFor process 10 TimeUnit/SECONDS)
+        (binding [*out* *err*]
+          (println "bin/test: retired worker survived destroyForcibly"
+                   "pid=" (.pid process)))))))
 
 (defn- exchange-failure?
   [value]
@@ -1514,9 +1521,20 @@
                 (on-caller-loader
                  (fn []
                    (drain-worker-tasks!
+                    ;; a retired worker must stop TAKING: consuming the
+                    ;; queue after retirement converted one bound firing
+                    ;; into a cascade of attributed failures for every
+                    ;; remaining task (observed: 1 bound -> 22 errors on
+                    ;; a one-worker pool). Leftovers stay queued for the
+                    ;; other workers or the serial fallback below.
                     (fn []
-                      (let [task (.take queue)]
-                        (when-not (identical? finished task) task)))
+                      (when-not @(::worker-retired? worker)
+                        (let [task (.take queue)]
+                          (cond
+                            (identical? finished task) nil
+                            @(::worker-retired? worker)
+                            (do (.put queue task) nil)
+                            :else task))))
                     #(execute-worker-task! progress worker %))))))
              workers)
             ;; The serial remainder uses the same sequential worker loop,
@@ -1531,8 +1549,45 @@
                   (mapv #(execute-worker-task! progress serial-worker %)
                         unresolved-tasks)))))
             parallel-results (mapcat #(.get %) parallel-futures)
-            serial-results (if serial-future (.get serial-future) [])]
-        (vec (concat parallel-results serial-results)))
+            serial-results (if serial-future (.get serial-future) [])
+            ;; tasks left behind by retired workers: one bounded wave on
+            ;; the serial worker when it is alive; otherwise a typed
+            ;; pool-exhausted result per task — never a silent drop
+            leftovers (loop [tasks []]
+                        (let [entry (.poll queue)]
+                          (cond
+                            (nil? entry) tasks
+                            (identical? finished entry) (recur tasks)
+                            :else (recur (conj tasks entry)))))
+            leftover-results
+            (when (seq leftovers)
+              (if (and serial-worker
+                       (not @(::worker-retired? serial-worker)))
+                (mapv #(execute-worker-task! progress serial-worker %)
+                      leftovers)
+                (mapv (fn [task]
+                        (let [test-symbols (mapv str (::task-symbols task))
+                              message
+                              (str "Worker pool exhausted before this task"
+                                   " could run; every pool worker retired.")]
+                          (assoc task
+                                 ::task-summary
+                                 {::test-count (count test-symbols)
+                                  ::pass-count 0
+                                  ::fail-count 0
+                                  ::error-count (count test-symbols)}
+                                 ::task-results
+                                 (mapv (fn [test-symbol]
+                                         #:seon.test{:sym test-symbol
+                                                     :pass-count 0
+                                                     :fail-count 0
+                                                     :error-count 1
+                                                     :failure-message message})
+                                       test-symbols)
+                                 ::task-output (str message "\n")
+                                 ::worker-pool-exhausted true)))
+                      leftovers)))]
+        (vec (concat parallel-results serial-results leftover-results)))
       (finally
         (.shutdownNow executor)))))
 
