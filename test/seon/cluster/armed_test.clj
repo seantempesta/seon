@@ -214,21 +214,21 @@
                   :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
                   :seon.cluster.agent/id agent-id}))
               definition
-              (request left-handle "agent-a"
+              (request left-handle "root"
                        (str
                         "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
                         "shared-live [x] (inc x))"))
               shared-call
-              (request left-handle "agent-b"
-                       "(my.agents.agent-a/shared-live 41)")
+              (request left-handle "root"
+                       "(my.agents.root/shared-live 41)")
               isolated-call
-              (request right-handle "agent-b"
-                       "(my.agents.agent-a/shared-live 41)")]
+              (request right-handle "root"
+                       "(my.agents.root/shared-live 41)")]
           (is (not (identical? (:env left-ctx) (:env right-ctx)))
               "cluster construction allocates distinct SCI env atoms")
           (is (nil? (:seon.cluster.eval/error definition)))
           (is (= 42 (:seon.sci.admit/value shared-call))
-              "another agent in the left cluster sees the live definition")
+              "the committed agent resolves its left-cluster definition")
           (is (= :seon.sci.eval/evaluation-failed
                  (:seon.error/kind
                   (:seon.sci.admit/value isolated-call)))
