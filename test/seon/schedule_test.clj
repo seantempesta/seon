@@ -2,6 +2,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [malli.core :as m]
             [seon.cluster.agent :as agent]
+            [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
             [seon.schedule :as schedule]
@@ -49,10 +50,11 @@
                   {:seon.error/kind :seon.schedule-test/thrown-failure})))
 
 (def ^:private result-caps
-  {:seon.config.eval.result/max-depth 16
-   :seon.config.eval.result/max-collection 100
-   :seon.config.eval.result/max-string 4096
-   :seon.config.eval.result/max-nodes 1000})
+  (assoc (config/result-caps (test-support/effective-config))
+         :seon.config.eval.result/max-depth 16
+         :seon.config.eval.result/max-collection 100
+         :seon.config.eval.result/max-string 4096
+         :seon.config.eval.result/max-nodes 1000))
 
 (defn- execution-context
   []
