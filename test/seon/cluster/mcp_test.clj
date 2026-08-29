@@ -227,7 +227,11 @@
             (is (false? (:seon.dev.mcp/windowed? result)))
             (is (not (contains? result :seon.blob/digest))
                 "a small exception does not retain its bulky prepl envelope")
-            (is (< (utf8-size result) 1024)
+            ;; Diagnostic evidence accretes without changing the boundary:
+            ;; require the flat face to stay an order of magnitude smaller
+            ;; than the complete Throwable->map instead of freezing one byte
+            ;; count for today's declared evidence attributes.
+            (is (< (* 10 (utf8-size result)) (utf8-size envelope))
                 "the complete Throwable->map does not become the inline face")
             (is (true? (:seon.dev.mcp/windowed? oversized-result)))
             (is (string? (:seon.blob/digest oversized-result)))

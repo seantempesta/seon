@@ -7,6 +7,7 @@
             [konserve.core :as k]
             [konserve.impl.defaults :as konserve.defaults]
             [seon.blob :as blob]
+            [seon.cluster :as cluster]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.db :as db]
@@ -54,7 +55,8 @@
 
 (deftest publication-and-collection-are-exclusive-in-both-orderings
   (let [root (str "tmp/blob-publication-test/" (random-uuid))
-        directory (str root "/store")
+        directory (:seon.boot/store-dir
+                   (cluster/resolve-bootstrap {:seon.boot/root root}))
         branch (registry/cluster-branch "blob-publication")
         first-content "reused orphan fixed in a delete batch"
         second-content "publisher admitted before sweep"

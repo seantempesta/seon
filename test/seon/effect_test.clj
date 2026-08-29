@@ -645,7 +645,13 @@
   (test-support/with-database
     (fn [connection]
       (db/transact! connection [(cluster-config 600000)
-                                {:seon.cluster.run/id "effect-run"}])
+                                {:seon.cluster.run/id "effect-run"}
+                                {:seon.cluster.eval/id
+                                 (pr-str ["effect-run" 3])
+                                 :seon.cluster.eval/run
+                                 [:seon.cluster.run/id "effect-run"]
+                                 :seon.cluster.eval/ordinal 3
+                                 :seon.cluster.eval/at (Date.)}])
       (install-capability! connection)
       (let [ctx (test-support/fork-cluster-ctx connection)
             effective (config/defaults)

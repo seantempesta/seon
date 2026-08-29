@@ -3,7 +3,6 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
-            [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [malli.core :as m]
             [malli.generator :as mg]
@@ -21,14 +20,6 @@
 (def ^:private floor-producers
   #{'seon.render.value/render-ai
     'seon.render.value/render-html})
-
-(def ^:private hexadecimal-character-generator
-  (gen/elements [\0 \1 \2 \3 \4 \5 \6 \7 \8 \9
-                 \a \b \c \d \e \f]))
-
-(def ^:private hexadecimal-digest-generator
-  (gen/fmap #(apply str %)
-            (gen/vector hexadecimal-character-generator 64)))
 
 (defn- class-properties
   [form]
@@ -52,36 +43,23 @@
      :rows rows
      :class-keys class-keys}))
 
-(defn- marker-attribute
+(defn- evidence-attributes
   [row]
-  (let [markers (disj (:seon.schema/required-attrs row)
-                      :seon.error/message)]
-    (when (= 1 (count markers))
-      (first markers))))
+  (disj (:seon.schema/required-attrs row)
+        :seon.error/message))
 
-(defn- validated-generator
-  [compiled]
-  (try
-    (mg/generator compiled)
-    (catch Throwable failure
-      (if (m/validate compiled (apply str (repeat 64 \0)))
-        hexadecimal-digest-generator
-        (throw failure)))))
-
+;; Error classes are flat, open evidence maps. Some need one identifying
+;; attribute; others legitimately require a larger evidence packet. The
+;; declared class schema owns that shape, not an exactly-one-marker taxonomy.
 (defn- class-value-generator
-  [projection row]
+  [projection schema-key]
   (let [registry (:seon.schema.projection/registry projection)
-        marker (marker-attribute row)
-        marker-schema (m/schema marker {:registry registry})
-        message-schema (m/schema :seon.error/message {:registry registry})]
-    (gen/let [subject (validated-generator marker-schema)
-              message (validated-generator message-schema)]
-      {marker subject
-       :seon.error/message message})))
+        compiled (m/schema schema-key {:registry registry})]
+    (mg/generator compiled)))
 
 (defn- generated-class-value
-  [projection row seed]
-  (mg/generate (class-value-generator projection row)
+  [projection schema-key seed]
+  (mg/generate (class-value-generator projection schema-key)
                {:seed seed :size 8}))
 
 (defn- matching-class-keys
@@ -116,16 +94,17 @@
       (let [form (get forms schema-key)
             row (get rows schema-key)
             properties (class-properties form)
-            marker (marker-attribute row)
+            required-attrs (:seon.schema/required-attrs row)
+            evidence-attrs (evidence-attributes row)
             compiled (m/schema schema-key
                                {:registry
                                 (:seon.schema.projection/registry projection)})
-            value (generated-class-value projection row
+            value (generated-class-value projection schema-key
                                          (+ 2026080600 ordinal))]
         (testing (str schema-key)
-          (is (= #{:seon.error/message marker}
-                 (:seon.schema/required-attrs row)))
-          (is (contains? forms marker))
+          (is (contains? required-attrs :seon.error/message))
+          (is (seq evidence-attrs))
+          (is (every? #(contains? forms %) required-attrs))
           (is (not (str/blank? (:error/message properties))))
           (is (qualified-symbol? (:seon.render/ai properties)))
           (is (qualified-symbol? (:seon.render/html properties)))
@@ -157,14 +136,13 @@
           (is (m/validate compiled generated)))))))
 
 (deftest generated-class-values-match-exactly-one-error-class
-  (let [{:keys [projection forms rows class-keys]} (projection-fixture)]
+  (let [{:keys [projection forms class-keys]} (projection-fixture)]
     (doseq [[ordinal schema-key] (map-indexed vector (sort class-keys))]
-      (let [row (get rows schema-key)
-            check
+      (let [check
             (tc/quick-check
              5
              (prop/for-all
-              [value (class-value-generator projection row)]
+              [value (class-value-generator projection schema-key)]
               (= #{schema-key}
                  (matching-class-keys projection forms value)))
              :seed (+ 2026080610 ordinal))]
@@ -173,10 +151,10 @@
          (str "Error class must be structurally unambiguous: " schema-key))))))
 
 (deftest no-error-class-reaches-the-generic-value-floor
-  (let [{:keys [projection forms rows class-keys]} (projection-fixture)]
+  (let [{:keys [projection forms class-keys]} (projection-fixture)]
     (doseq [[ordinal schema-key] (map-indexed vector (sort class-keys))]
       (let [properties (class-properties (get forms schema-key))
-            value (generated-class-value projection (get rows schema-key)
+            value (generated-class-value projection schema-key
                                          (+ 2026080700 ordinal))
             ai-producer (:seon.render/ai properties)
             html-producer (:seon.render/html properties)]
@@ -192,8 +170,7 @@
        (let [database @connection
              ctx (test-support/fork-cluster-ctx connection)
              representative-key (first (sort class-keys))
-             value (generated-class-value projection
-                                          (get rows representative-key)
+             value (generated-class-value projection representative-key
                                           2026080799)
              request (render-request database ctx value)
              floor-unit {:seon.render/value value
