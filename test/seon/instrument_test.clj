@@ -20,6 +20,7 @@
             [clojure.string :as str]
             [malli.instrument :as mi]
             [seon.ai.tokens :as tokens]
+            [seon.config :as config]
             [seon.dev.docstring :as docstring]
             [seon.dev.markdown :as markdown]
             [seon.db :as db]
@@ -173,10 +174,11 @@
 (deftest interpreted-contracts-use-the-active-registry-and-core-error-dial
   (let [projection (or (schema/current-projection)
                        (schema/build-projection (schema/snapshot)))
-        caps {:seon.config.eval.result/max-depth 4
-              :seon.config.eval.result/max-collection 8
-              :seon.config.eval.result/max-string 256
-              :seon.config.eval.result/max-nodes 64}
+        caps (assoc (config/result-caps (test-support/effective-config))
+                    :seon.config.eval.result/max-depth 4
+                    :seon.config.eval.result/max-collection 8
+                    :seon.config.eval.result/max-string 256
+                    :seon.config.eval.result/max-nodes 64)
         original identity
         wrapped
         (instrument/wrap-interpreted
@@ -244,10 +246,11 @@
                   :seon.error/diagnostic-evidence]))))))))
 
 (deftest a-violation-carries-bounded-arguments-only-when-it-can
-  (let [caps {:seon.config.eval.result/max-depth 4
-              :seon.config.eval.result/max-collection 4
-              :seon.config.eval.result/max-string 32
-              :seon.config.eval.result/max-nodes 64}]
+  (let [caps (assoc (config/result-caps (test-support/effective-config))
+                    :seon.config.eval.result/max-depth 4
+                    :seon.config.eval.result/max-collection 4
+                    :seon.config.eval.result/max-string 32
+                    :seon.config.eval.result/max-nodes 64)]
     (try
       (instrument/apply! {:seon.config/on-core-error :panic
                           :seon.sci.admit/caps caps})
@@ -299,10 +302,11 @@
                           :args [42]})))))))
 
 (deftest contract-problems-are-semantic-once-never-a-serialized-print-tree
-  (let [caps {:seon.config.eval.result/max-depth 8
-              :seon.config.eval.result/max-collection 32
-              :seon.config.eval.result/max-string 4096
-              :seon.config.eval.result/max-nodes 1024}]
+  (let [caps (assoc (config/result-caps (test-support/effective-config))
+                    :seon.config.eval.result/max-depth 8
+                    :seon.config.eval.result/max-collection 32
+                    :seon.config.eval.result/max-string 4096
+                    :seon.config.eval.result/max-nodes 1024)]
     (try
       (instrument/apply! {:seon.config/on-core-error :panic
                           :seon.sci.admit/caps caps})
@@ -332,10 +336,11 @@
         (instrument/remove!)))))
 
 (deftest many-problem-contract-violations-have-bounded-headlines
-  (let [caps {:seon.config.eval.result/max-depth 4
-              :seon.config.eval.result/max-collection 4
-              :seon.config.eval.result/max-string 64
-              :seon.config.eval.result/max-nodes 64}
+  (let [caps (assoc (config/result-caps (test-support/effective-config))
+                    :seon.config.eval.result/max-depth 4
+                    :seon.config.eval.result/max-collection 4
+                    :seon.config.eval.result/max-string 64
+                    :seon.config.eval.result/max-nodes 64)
         offending (many-invalid-values)]
     (try
       (instrument/apply! {:seon.config/on-core-error :panic
@@ -365,10 +370,7 @@
         (instrument/remove!)))))
 
 (deftest registry-sized-contract-evidence-is-bounded-at-construction
-  (let [caps {:seon.config.eval.result/max-depth 64
-              :seon.config.eval.result/max-collection 8192
-              :seon.config.eval.result/max-string 262144
-              :seon.config.eval.result/max-nodes 65536}
+  (let [caps (config/result-caps (test-support/effective-config))
         inline-ceiling 4096
         allocation-ceiling (* 16 1024 1024)
         registry (schema/snapshot)
