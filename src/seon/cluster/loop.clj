@@ -1809,21 +1809,27 @@
         (report :error 0))
 
       (nil? entry)
-      (let [advanced
+      (let [bootstrap? (= run-id (bootstrap/run-id agent-id))
+            terminal
             (db/transact!
              connection
-             (run/generation-complete-tx
-              {:seon.cluster.run/id run-id
-               :seon.cluster.run/process process}))]
-        (if (:seon.error/kind advanced)
+             (if bootstrap?
+               (run/close-tx
+                {:seon.cluster.run/id run-id
+                 :seon.cluster.run/process process
+                 :seon.cluster.run/closed-at now})
+               (run/generation-complete-tx
+                {:seon.cluster.run/id run-id
+                 :seon.cluster.run/process process})))]
+        (if (:seon.error/kind terminal)
           (do
             (settle! {::cluster cluster
                       ::now now
                       :seon.cluster.agent/id agent-id
                       :seon.cluster.run/id run-id
-                      :seon.error/value advanced})
+                      :seon.error/value terminal})
             (report :error 0))
-          (report :released 0)))
+          (report (if bootstrap? :closed :released) 0)))
 
       :else
       (let [appended
