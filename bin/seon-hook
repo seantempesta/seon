@@ -655,10 +655,26 @@
   (require namespace))
 
 (defn- clip-feedback [config message]
+  ;; clip-str died in the clip-ripout (94116765e); a nil requiring-resolve
+  ;; then NPE'd here on EVERY post-edit for fifteen days, silently killing
+  ;; all advisory feedback — resolve loudly, bound through the token owner,
+  ;; and elide with a counted line, never a bare truncation
   (load-direct-check! 'seon.ai.tokens)
-  ((requiring-resolve 'seon.ai.tokens/clip-str)
-   message
-   (get-in config [:feedback :max-tokens] 300)))
+  (let [resolve-loudly!
+        (fn [sym]
+          (or (requiring-resolve sym)
+              (throw (ex-info (str "The feedback sizer is missing: " sym)
+                              {:seon.hook/missing-var sym}))))
+        estimate (resolve-loudly! 'seon.ai.tokens/estimate)
+        estimate-chars (resolve-loudly! 'seon.ai.tokens/estimate-chars)
+        max-tokens (get-in config [:feedback :max-tokens] 300)
+        total (estimate message)]
+    (if (<= total max-tokens)
+      message
+      (str (subs message 0 (min (long (estimate-chars max-tokens))
+                                (count message)))
+           "\n… feedback elided (approximately " (- total max-tokens)
+           " tokens over the " max-tokens "-token budget)."))))
 
 (defn- markdown-feedback [event config]
   (when (and (= (:hook_event_name event) "PostToolUse")
@@ -1245,8 +1261,13 @@
                   feedback (vec feedback)]
               (output! (feedback-response feedback)))))
         (catch Exception e
-          (let [message (throwable-message e)]
-            (log! "ERROR" message)
+          (let [message (throwable-message e)
+                stack (with-out-str
+                        (binding [*err* *out*]
+                          (.printStackTrace e (java.io.PrintWriter. *out* true))))]
+            ;; the class name alone hid an all-afternoon feedback outage;
+            ;; the stack is the diagnosis, log it every time
+            (log! "ERROR" message (str/replace stack "\n" " | "))
             (binding [*out* *err*]
               (println "HOOK ERROR:" message))
             (output! {:continue true}))))))))
