@@ -1,5 +1,9 @@
 #:seon.fn{:arglists :string,
           :arglists-override? :boolean,
+          :macro?
+          [:boolean
+           {:description
+            "Asserts clj-kondo's ::analyzer/macro fact at indexing; absent means the function is not a macro."}],
           :arities [:vector #:seon.db{:component true} :seon.db/ref],
           :ast [:and #:seon.db{:component true} :seon.db/ref],
           :calls [:set :seon.db/ref],
@@ -27,6 +31,7 @@
             :seon.fn/arglists-override?]
            [:seon.fn/doc {:optional true} :seon.fn/doc]
            [:seon.fn/private? {:optional true} :seon.fn/private?]
+           [:seon.fn/macro? {:optional true} :seon.fn/macro?]
            [:seon.fn/spec {:optional true} :seon.fn/spec]
            [:seon.fn/calls {:optional true} :seon.fn/calls]
            [:seon.fn/keywords {:optional true} :seon.fn/keywords]

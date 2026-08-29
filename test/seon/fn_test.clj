@@ -268,6 +268,12 @@
                 (get by-id [:seon.fn/sym "sample.core/sample-macro"]))))
         (is (false? (:seon.fn/private?
                      (get by-id [:seon.fn/sym "sample.core/sample-macro"]))))
+        (is (true? (:seon.fn/macro?
+                    (get by-id [:seon.fn/sym "sample.core/sample-macro"]))))
+        (is (not (contains?
+                  (get by-id [:seon.fn/sym "sample.core/helper"])
+                  :seon.fn/macro?))
+            "ordinary function rows carry no false macro assertion")
         (is (nil? (:seon.fn/spec
                    (get by-id [:seon.fn/sym "sample.core/sample-macro"])))
             "macro rows do not claim runtime function contracts")

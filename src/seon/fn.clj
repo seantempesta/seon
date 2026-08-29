@@ -363,6 +363,7 @@
                :seon.fn/source source
                :seon.fn/arglists (str "(" (str/join " " (::analyzer/arglist-strs entry)) ")")
                :seon.fn/private? (boolean (::analyzer/private entry))}
+        (::analyzer/macro entry) (assoc :seon.fn/macro? true)
         (::analyzer/doc entry) (assoc :seon.fn/doc (::analyzer/doc entry))
         (:malli/schema metadata)
         (assoc :seon.fn/spec
@@ -671,6 +672,8 @@
                 subject (or (:seon.test/subject program-row)
                             (test-subject (::analyzer/meta definition)))]
             (cond-> {}
+              (::analyzer/macro definition)
+              (assoc :seon.fn/macro? true)
               (seq (get calls-by-caller program-symbol))
               (assoc :seon.fn/calls
                      (mapv (fn [target] [:seon.fn/sym target])
