@@ -33,6 +33,7 @@
             [seon.ai :as ai]
             [seon.blob :as blob]
             [seon.cluster.loop]
+            [seon.config :as config]
             [seon.test-support :as support])
   (:import [java.util Date]))
 
@@ -51,10 +52,11 @@
 
 (def ^:private caps
   "The one cap set every surfaces request carries (context-blocks seal)."
-  {:seon.config.eval.result/max-depth 12
-   :seon.config.eval.result/max-collection 64
-   :seon.config.eval.result/max-string 4096
-   :seon.config.eval.result/max-nodes 4096})
+  (assoc (config/result-caps (support/effective-config))
+         :seon.config.eval.result/max-depth 12
+         :seon.config.eval.result/max-collection 64
+         :seon.config.eval.result/max-string 4096
+         :seon.config.eval.result/max-nodes 4096))
 
 (def ^:private usage-chunk
   "The OpenAI-compatible shape: a final choices-empty chunk with usage."
@@ -382,7 +384,8 @@
             base-request {:seon.ai/target
                           {:seon.ai/endpoint "http://provider.invalid"
                            :seon.ai/model "fixture"}
-                          :seon.ai/settings {}
+                          :seon.ai/settings
+                          (ai/settings (support/effective-config) {})
                           :seon.cluster.run/id "reasoning-run"
                           :seon.cluster.agent/id "reasoning-agent"}]
         (doseq [[ordinal reasoning] [[0 inline-reasoning] [1 large]]]
