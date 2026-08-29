@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, sci, wave/schema-codec-deletion]
 ---
@@ -32,3 +32,12 @@ The post-commit declaration installation path in `seon.sci.eval`.
 
 Committed declaration deletions disappear from the fresh SCI context and all
 four named tests pass without a post-commit refusal.
+
+## Resolution (2026-08-29)
+
+Fixed by `d16466b1d` (graph-consequences lane): `install-row!` threw
+whenever a stable identity row survived deletion — directly
+contradicting ruling 47 (identity rows never retract; deletion
+retracts definition facts). It now verifies definition-fact absence.
+All four named turn tests green in the lane's five-namespace gate
+(149 tests / 901 assertions).
