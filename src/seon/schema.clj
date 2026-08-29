@@ -401,8 +401,10 @@
 
 (defn- canonical-reference-graph
   "Direct canonical references without eagerly expanding canonical forms."
-  [forms predicate-functions]
-  (let [canonical-keys (set (keys forms))
+  ([forms predicate-functions]
+   (canonical-reference-graph forms predicate-functions (set (keys forms))))
+  ([forms predicate-functions canonical-keys]
+   (let [canonical-keys (set canonical-keys)
         bootstrap-forms
         (into {}
               (remove (comp qualified-keyword? key))
@@ -429,7 +431,16 @@
              ;; forms. This preflight owns only the reference graph needed to
              ;; make recursive expansion unrepresentable.
              #{}))]))
-     forms)))
+     forms))))
+
+(defn- reference-candidate-keys
+  "Population keys plus qualified keywords Malli may classify as refs."
+  [forms]
+  (into (into #{} (filter keyword?) (keys forms))
+        (comp
+         (mapcat #(tree-seq coll? seq %))
+         (filter qualified-keyword?))
+        (vals forms)))
 
 (defn- direct-reference-keys-in
   [definition predicate-functions canonical-keys fallback]
@@ -2833,7 +2844,14 @@
       (sort-by str schema-keys)))))
 
 (defn canonical-schema-rows
-  "Build the complete canonical schema-row population."
+  "Build canonical rows for a complete or database-extending population.
+
+  A database-extending population may reference an already persisted schema
+  whose definition is deliberately absent from `forms`. Malli's own walker
+  classifies those external references so the row still carries its durable
+  edge; the terminal transaction validates the candidate against the complete
+  database-derived projection before admitting it. Every other projection
+  error remains a refusal here."
   {:malli/schema
    [:function
     [:=> [:cat] [:vector :map]]
@@ -2841,19 +2859,30 @@
   ([]
    (canonical-schema-rows (registered-schemas)))
   ([forms]
-   (let [projection (build-projection forms)
-         materialized-keys (into #{} (filter keyword?) (keys forms))
+   (let [complete-projection
+         (try
+           (build-projection forms)
+           (catch clojure.lang.ExceptionInfo error
+             (if (:seon.schema/missing-reference (ex-data error))
+               nil
+               (throw error))))
+         projection
+         (or complete-projection
+             {:seon.schema.projection/forms forms})
+         materialized-keys
+         (into #{} (filter keyword?) (keys forms))
+         predicate-functions
+         (or (:seon.schema.projection/predicate-functions projection)
+             (predicate-functions-with
+              {:seon.schema.projection/predicate-functions {}}
+              (vals forms)))
          reference-graph
-         (into {}
-               (map (fn [schema-key]
-                      [schema-key
-                       (set/intersection
-                        materialized-keys
-                        (get
-                         (:seon.schema.projection/schema-dependencies
-                          projection)
-                         schema-key))]))
-               materialized-keys)
+         (or (:seon.schema.projection/schema-dependencies projection)
+             (canonical-reference-graph
+              forms predicate-functions (reference-candidate-keys forms)))
+         ordering-graph
+         (update-vals reference-graph
+                      #(set/intersection materialized-keys %))
          storable-properties-in
          (requiring-resolve
           'seon.schema.datahike/storable-properties-in)]
@@ -2874,7 +2903,7 @@
                           references))))))
       (map (fn [schema-key] [schema-key (get forms schema-key)])
            (dependency-first-schema-keys
-            reference-graph materialized-keys))))))
+            ordering-graph materialized-keys))))))
 
 (defn canonical-database-attributes
   "Compute the complete production database-attribute population.

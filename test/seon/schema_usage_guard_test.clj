@@ -66,9 +66,24 @@
        projection
        (schema.datahike/database-attributes-for-in
         projection selected-forms))
-      (map (fn [[schema-key definition]]
-             (schema-row schema-key definition)))
-      selected-forms))))
+      (schema/canonical-schema-rows selected-forms)))))
+
+(defn- schema-reference-edges
+  [database]
+  (db/q
+   '[:find ?source-key ?target-key
+     :where
+     [?source :seon.schema/key ?source-key]
+     [?source :seon.schema/references ?target]
+     [?target :seon.schema/key ?target-key]]
+   database))
+
+(defn- live-schema-row?
+  [database schema-key]
+  (boolean
+   (:seon.schema/form
+    (db/pull database [:seon.schema/form]
+             [:seon.schema/key schema-key]))))
 
 (deftest unregister-stages-removal-in-the-evaluation-delta
   (let [projection (schema/build-projection {base-key :int})
@@ -368,12 +383,22 @@
              entity-child-key [:int {:seon.db/index true}]
              entity-key entity-form}]
         (install-forms! connection selected-forms)
+        (is (= #{[entity-key entity-id-key]
+                 [entity-key entity-child-key]}
+               (into #{}
+                     (filter (fn [[source _]] (= entity-key source)))
+                     (schema-reference-edges @connection))))
         (is (nil?
              (:error
               (transact-result
                connection
                (row-tx
                 (schema-row entity-key reduced-entity-form))))))
+        (is (= #{[entity-key entity-id-key]}
+               (into #{}
+                     (filter (fn [[source _]] (= entity-key source)))
+                     (schema-reference-edges @connection)))
+            "replacement retracts the removed child reference edge")
         (is (nil?
              (:error
               (transact-result
@@ -381,11 +406,13 @@
                (row-tx
                 {:seon.program/delete-identities
                  [[:seon.schema/key entity-key]]})))))
-        (is (nil? (db/pull @connection [:db/id]
-                          [:seon.schema/key entity-key])))
+        (is (not (live-schema-row? @connection entity-key)))
+        (is (not-any? (fn [[source target]]
+                        (or (= entity-key source) (= entity-key target)))
+                      (schema-reference-edges @connection))
+            "removal leaves no current incoming or outgoing reference edge")
         (doseq [leaf-key [entity-id-key entity-child-key]]
-          (is (some? (db/pull @connection [:db/id]
-                             [:seon.schema/key leaf-key])))
+          (is (live-schema-row? @connection leaf-key))
           (is (contains? (:schema @connection) leaf-key)))
         (db/transact! connection [{entity-id-key "survivor"
                                  entity-child-key 7}])
@@ -408,8 +435,11 @@
               {:seon.program/delete-identities
                [[:seon.schema/key base-key]]}))]
         (is (nil? (:error result)))
-        (is (nil? (db/pull @connection [:db/id]
-                          [:seon.schema/key base-key])))
+        (is (not (live-schema-row? @connection base-key))
+            "the unique key may remain as an identity tombstone")
+        (is (not-any? (fn [[source target]]
+                        (or (= base-key source) (= base-key target)))
+                      (schema-reference-edges @connection)))
         (is (not (contains? (:schema @connection) base-key)))))))
 
 (deftest retracted-data-allows-removal-and-historical-rows-restore-validation
@@ -433,8 +463,10 @@
               past (db/as-of @connection data-t)
               past-projection (schema/projection-from-database past)]
           (is (nil? (:error result)))
-          (is (nil? (db/pull @connection [:db/id]
-                            [:seon.schema/key base-key])))
+          (is (not (live-schema-row? @connection base-key)))
+          (is (not-any? (fn [[source target]]
+                          (or (= base-key source) (= base-key target)))
+                        (schema-reference-edges @connection)))
           (is (not (contains? (:schema @connection) base-key)))
           (is (= 7
                  (d/q '[:find ?value .

@@ -354,6 +354,9 @@
         "a declared but non-storable property remains compile-time Malli data")
     (is (not (contains? row :seon.unknown/property))
         "an undeclared property remains compile-time Malli data")
+    (is (= #{[:seon.schema/key :seon.error/message]}
+           (:seon.schema/references row))
+        "an external canonical reference remains a persisted direct edge")
     (is (= (pr-str definition) (:seon.schema/form row)))))
 
 (deftest matching-shapes-derive-required-attributes-through-and-refs
