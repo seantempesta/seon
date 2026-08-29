@@ -884,7 +884,11 @@
   "Transaction data replacing each test row's complete latest result.
 
   The attribute retractions make the update total: a later green run removes
-  every stale failure identity and message in the same transaction."
+  every stale failure identity and message in the same transaction. This
+  runs as a `:db.fn/call` transaction function, so the presence decision
+  reads the WRITER's own database value — a caller pre-read could strand
+  a retract's lookup ref against a concurrently retracted row and reject
+  the whole result transaction."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.test.runner/completion]
                   :seon.test.runner/record-tx]}
@@ -941,7 +945,8 @@
         transaction-report
         (if (:seon.error/kind database)
           database
-          (db/transact! connection (record-tx database completion)))]
+          (db/transact! connection
+                        [[:db.fn/call #'record-tx completion]]))]
     (if (:seon.error/kind transaction-report)
       transaction-report
       (mapv (fn [{test-symbol :seon.test/sym}]

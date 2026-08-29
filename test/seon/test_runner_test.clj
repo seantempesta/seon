@@ -472,6 +472,35 @@
       (is (= 1 (occurrences repeated-message
                             "the same refusal reached the reporter again"))))))
 
+(deftest result-recording-is-total-under-concurrent-test-retraction
+  ;; The class this kills: the presence decision ran as a caller
+  ;; pre-read, so a test row retracted between building the record
+  ;; transaction and the writer executing it stranded the retract's
+  ;; lookup ref and rejected the WHOLE result transaction. record-tx
+  ;; now runs as a transaction function: the writer re-decides, the
+  ;; absent branch recreates the row, and recording always commits.
+  (test-support/with-database
+    (fn [connection]
+      (test-support/seed-cluster! connection "test")
+      (let [run-result (captured-run)
+            completion
+            {:seon.test.runner/results
+             (:seon.test.runner/results run-result)
+             :seon.test/run-basis-t (db/basis-t @connection)
+             :seon.test/run-at at}
+            test-symbol (:seon.test/sym
+                         (first (:seon.test.runner/results run-result)))]
+        (is (seq (runner/commit-results! connection completion))
+            "first recording installs the row")
+        (db/transact!
+         connection
+         [[:db.fn/retractEntity [:seon.test/sym test-symbol]]])
+        (let [recorded (runner/commit-results! connection completion)]
+          (is (not (:seon.error/kind recorded))
+              "recording after the retraction still commits")
+          (is (some #(= test-symbol (:seon.test/sym %)) recorded)
+              "the retracted row was recreated by the writer's decision"))))))
+
 (deftest result-facts-live-on-the-test-row-and-reruns-replace-them
   (test-support/with-database
     (fn [connection]
