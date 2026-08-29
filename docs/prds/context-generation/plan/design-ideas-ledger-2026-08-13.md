@@ -755,6 +755,28 @@ numerically and a bare cross-citation is a defect to fix on sight.
     adjacency) — which ARE the self-improvement queue; helping other
     agents and users falls out of working the hot, erroring rows.
 
+55. **Instance args: the pull supplies instances, contracts supply
+    calls** (owner dialogue, 2026-08-29): the generator never guesses
+    args — acquisition discovers CONCRETE identity values on ref
+    edges; a reader's declared input schema is satisfiable from
+    exactly two sources — ambient (db, self via call preparation) and
+    the discovered identities, plugged into the parameter slot the
+    contract names. Type-level fit (output-refs → family) × instance
+    knowledge (the pull) = the composed call. COLLECTION-FIRST:
+    a collection-shaped edge selects the collection reader — one
+    `(inbox)` explains all N and teaches the reusable command;
+    instance reads `(read id)` are OFFERED dig-ins, auto-promoted only
+    by demand (the trigger, a mention) — never one read per item
+    (M9). Fit = family match + input satisfiability + SHAPE agreement;
+    ties loud (43); zero fits → the floor identity pull is always
+    constructible since the pull holds the identity attribute — the
+    ladder is total. M6 CLOSES WITHOUT NEW DECLARATIONS: output shape
+    (collection-of vs single-of family) derives at registration from
+    the declared Malli output form the registry already stores — one
+    derived fact at the schema seam, no author burden. Writers never
+    appear in explanations by construction: the family's reader is
+    selected from the recipient's side regardless of who wrote.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
