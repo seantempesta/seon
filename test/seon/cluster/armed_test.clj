@@ -174,7 +174,11 @@
               (is (str/starts-with?
                    (:seon.ai/endpoint (:seon.ai/primary targets))
                    "https://"))
-              (is (not (contains? targets :seon.ai/backup)))
+              ;; the shipped config carries the OpenRouter backup since
+              ;; the 402-failover work — a boot derives BOTH targets
+              (is (str/starts-with?
+                   (:seon.ai/endpoint (:seon.ai/backup targets))
+                   "https://"))
               (is (seon.schema/valid-candidate-value?
                    :seon.ai.retry/strategy
                    (ai/retry-strategy settings))))))))))

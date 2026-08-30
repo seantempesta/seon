@@ -436,6 +436,17 @@
              ::configured configured})))
         seconds))))
 
+(defn- exchange-bound-seconds
+  "The per-exchange bound: strictly inside the suite silence horizon.
+
+  Both cannot sit at the same 300 s — when a task legitimately exceeds
+  it, the suite watchdog raced the typed task bound and sometimes won,
+  killing the run at exit 124 with the coordinator parked mid-exchange.
+  The exchange fires first, converts to an attributed result, and that
+  result IS reporter progress, so the watchdog never needs to."
+  []
+  (max 60 (- (silence-seconds) 30)))
+
 (defn- start-liveness-backstop!
   [progress silence-limit-seconds suite-start]
   (let [fired? (atom false)
@@ -1373,7 +1384,7 @@
                {::worker worker
                 ::exchange-id readiness-id
                 ::expected-worker-event :ready
-                ::completion-bound-seconds (silence-seconds)})]
+                ::completion-bound-seconds (exchange-bound-seconds)})]
     (when (exchange-failure? ready)
       (throw
        (ex-info "A test worker did not publish readiness."
@@ -1393,7 +1404,7 @@
                   ::worker-namespaces (mapv str namespace-names)}
                  ::exchange-id exchange-id
                  ::expected-worker-event :initialized
-                 ::completion-bound-seconds (silence-seconds)})]
+                 ::completion-bound-seconds (exchange-bound-seconds)})]
     (when (exchange-failure? result)
       (throw
        (ex-info "A test worker refused namespace initialization."
@@ -1494,7 +1505,7 @@
           ::exchange-id (::task-id task)
           ::expected-worker-event :task-complete
           ::task-symbols (::task-symbols task)
-          ::completion-bound-seconds (silence-seconds)})
+          ::completion-bound-seconds (exchange-bound-seconds)})
         result
         (if (exchange-failure? result)
           (let [test-symbols (mapv str (::task-symbols task))
