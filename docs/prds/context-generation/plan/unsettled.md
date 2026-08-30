@@ -70,8 +70,20 @@ no-model-at-boot gate broke (`booting-spends-no-model-call` red,
 boot-window message's run opens with trigger `bootstrap-task:root`
 instead of the message; (3) an agent's own def fails to resolve in
 its live ctx across cohosted clusters. Evidence root:
-`tmp/test-runs/run.FiH5MT`. THE FULLY-GREEN BARE (the freeze gate) is
-blocked on this round.
+`tmp/test-runs/run.FiH5MT`. ROUND OUTCOME: the armed-regressions lane
+closed the model-call gate (bootstrap closes atomically before the
+model boundary, `108b753ca`) and grounded the cross-cluster fixture
+(`801347921`); the orchestrator fixed the backup-target expectation
+(402-failover config), and the exchange-vs-watchdog horizon collision
+(exchange bounds now fire strictly inside the silence horizon). THE
+FREEZE REMAINDER IS EXACTLY THREE: (1)
+`the-first-cluster-proc-fault-at-resume-becomes-a-fact` — the injected
+first resume fault never reaches its terminal worker event (real
+behavior question in the fault-at-resume path); (2)
+`a-message-committed-during-boot-arming-is-conserved` — the test
+conflates run opening with downstream provider progress and needs its
+await reworked onto the run-open fact; (3) the standing seed-recorded
+generated-attempt-traces blocker.
 
 ## Open blockers the edge tracks
 
