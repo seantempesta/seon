@@ -11,7 +11,52 @@ tags: [prd, agent, context, architecture]
 commits. The sci-execution-runtime `unsettled.md` is tombstoned and
 historical. Dates are absolute; a stale claim here is a defect.*
 
-## Current state (2026-08-29, evening)
+## Current state (2026-09-02, afternoon)
+
+**Owner reframe (2026-09-02, conversational, supersedes the reader-centric
+spelling of 53–55):** the agent is dropped into a Clojure REPL in its own
+namespace. Context = the data discovered from the agent's entity outward
++ the BEST render function for each value (priority chain: an inline
+render on the value → a function in the agent's own namespace whose input
+schema is the data's schema and whose output schema is `:seon.render/ai`
+→ the family's schema-declared face → the floor) + the teaching needed to
+explain what was shown, derived by walking back from the render/query
+functions used: `doc` and `dir`, never prose walls. `doc` becomes
+polymorphic — anything, or a list of anythings (namespace, function,
+test, schema, value) — showing the relevant parts; we own every tool and
+tailor it to the system while keeping its Clojure spirit. Queries stay
+legit Datalog/pull with good examples: easy first query, then "what is
+new" via `since`/`as-of`/tx-meta conventions. Every agent in every
+namespace is tutorialized on ITS neighbourhood and encouraged to write
+its own render functions, which also become HTML interfaces. Delta
+mechanism: OPEN — probe in the REPL first (evidence:
+[repl-first-probes-2026-09-02.md](../research/repl-first-probes-2026-09-02.md)).
+Budget: compaction over evals (ruled). Sequencing: reds first, then the
+generator concurrent with the bridge lane (ruled).
+
+**Platform (derived 2026-09-02, `bin/test --all` at 43e5e2fff,
+tmp/gate-all-2026-09-02.log):** platform tier 72 tests, 1 error —
+`cohost-boot-test/a-second-cluster-boots-…` hit the 270 s exchange bound
+under heavy load and passed its isolated confirmation (202 s); five
+platform tests take 200–244 s each (slow-is-a-bug, unmeasured cause).
+The bulk tier did not run. NEW DEFECTS this session, lanes launched (all
+six first launches died to intermittent DNS failures reaching the Codex
+endpoint; relaunched under `-2` names): bare `bin/test` cannot record
+persistent results while any cluster holds the store AND the refusal
+throws before the tally (`gate-evidence-2`); `runtime_status`
+missing-projection (`mcp-status-2`); `/agent/<id>/debug` swallows the
+prospective-context cause (`debug-page`, relaunch owed); two
+`gen.loop-test` census errors (`gen-loop-2`); the two armed reds
+(`armed-reds-2`); the attempt-traces blocker (`attempt-traces-2`). Filed
+without a lane yet: `seon.db` reads rebuild the projection per call when
+none is handed — 2.4 s vs 0.1 ms raw
+([issue](../../../seon/issues/seon-db-reads-rebuild-the-projection-per-call-when-none-is-handed.md),
+class/p1, blocker for "context is queries"); `doc` contract lines print
+schema bodies and flatten arities
+([issue](../../../seon/issues/doc-contract-lines-print-schema-bodies-and-flatten-arity-alternatives.md),
+now critical-path teaching work).
+
+## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
 rulings 47–55 sealed in the [ledger](design-ideas-ledger-2026-08-13.md):
