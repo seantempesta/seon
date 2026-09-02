@@ -75,6 +75,9 @@ tombstoned.
 
 ## The plan documents
 
+- [context-as-queries-handoff-2026-08-29.md](plan/context-as-queries-handoff-2026-08-29.md) — THE ENTRY DOCUMENT for the next session: the goal, the owner's "it's all queries" idea to explore deliberately, the trials, and the platform gate
+- [unsettled.md](plan/unsettled.md) — the working edge (current state, ordering, blockers)
+- [render-data-plan-2026-08-28.md](plan/render-data-plan-2026-08-28.md) + [full-parse-bridge-design-2026-08-29.md](plan/full-parse-bridge-design-2026-08-29.md) — the sequenced (render data) plan (read under its §0a refocus) and the ruling-50 bridge design
 - [context-generation-prd-2026-08-17.md](plan/context-generation-prd-2026-08-17.md) — THE unified program document (ruling 42a); §11 awaiting markup
 - [agent-context-concrete-2026-08-17.md](plan/agent-context-concrete-2026-08-17.md) — the v0 minimal opening, gated on the platform-tier repair
 - [context-pipeline-detailed-2026-08-17.md](plan/context-pipeline-detailed-2026-08-17.md) + [ideal](plan/context-pipeline-ideal-2026-08-17.md) — the measured pipeline

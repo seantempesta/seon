@@ -102,6 +102,9 @@ generated-attempt-traces blocker.
 
 ## Standing session-start line
 
-Read THIS file end to end, then the ledger's newest rulings, then
-`bin/seon status` + `git log --oneline -15`. The program README's
-reading order covers the rest.
+Read the
+[context-as-queries handoff](context-as-queries-handoff-2026-08-29.md)
+first — it is the entry document for the next session (the goal, the
+owner's "it's all queries" idea to explore WITHOUT rushing, the trials,
+and the platform gate). Then THIS file end to end, then the ledger's
+newest rulings, then `bin/seon status` + `git log --oneline -15`.
