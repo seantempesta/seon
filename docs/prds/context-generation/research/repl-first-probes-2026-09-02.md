@@ -133,3 +133,30 @@ when the eval family is redesigned (48b).
   confirmation in 202 s; five platform tests each take 200–244 s
   (`test-support-test/a-canonical-database-…` 244 s). Slow is a bug: the
   platform tier's own duration is the next measurement.
+
+## 7. Since with reverse refs; render selection at the bytes (added later the same day)
+
+- `(seon.db/pull (seon.db/since 536870929) '[:seon.cluster.agent/id {:seon.cluster.message/_to […]}] [:seon.cluster.agent/id "root"])`
+  returns the message (newer than the basis); the same pull on
+  `(seon.db/since 536870931)` returns `nil` — nothing new. The
+  since-shaped re-run composes with the walk's reverse-ref selector
+  shape, 14 ms for three pulls. `seon.db/basis-t` has NO elided arity
+  (the agent must type `(seon.db/basis-t (seon.db/db))`) — the one
+  `seon.db` read without the elision convention; small discoverability
+  defect.
+- `seon.render/render-ai` on the pulled message, jvm mode under the
+  cluster's projection-state: family face selected, 4.9 ms first call,
+  3.5–4.0 ms repeats; output "From outside this cluster to root: …" —
+  a narration face (census cat. 3), the text the agent gets today.
+- An agent-namespace render function defined AT THE DOOR
+  (`my.agents.root/inbox-view`, contract `[:=> [:cat :seon.render/unit]
+  [:maybe :string]]`) was NOT selected with `:seon.render/namespace
+  'my.agents.root`: `render/candidates` reads
+  `sci.kernel/public-functions-in` from the ctx's PROGRAM SNAPSHOT and
+  `schema/function-accepts-in?` from the projection's
+  `function-contracts` — both program-row facts. A door def mints no
+  row, so it is invisible by construction; a real turn's contracted
+  `defn` settles as a row and would be found. Consistent with facts over
+  inference (§2.2): the render function has to be a FACT before the
+  generator may prefer it. Trial P-OWN-RENDER-WINS must therefore run
+  through a settled turn, never a door def.
