@@ -27,6 +27,7 @@
             [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [datahike.core :as datahike]
             [seon.db :as db]
             [seon.ai :as ai]
             [seon.cluster :as cluster]
@@ -38,7 +39,6 @@
             [seon.flow :as seon.flow]
             [seon.render :as render]
             [seon.render.web :as web]
-            [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
   (:import [java.util Date]))
 
@@ -172,34 +172,97 @@
   [db]
   (sort (db/q '[:find [?id ...] :where [?e :seon.cluster.agent/id ?id]] db)))
 
+(defn- planner-census
+  [database]
+  (let [run-id
+        (->> (db/q '[:find ?id ?opened
+                    :where
+                    [?run :seon.cluster.run/id ?id]
+                    [?run :seon.cluster.run/opened-at ?opened]
+                    [?run :seon.cluster.run/agent ?agent]
+                    [?agent :seon.cluster.agent/id "planner"]]
+                  database)
+             (sort-by (comp inst-ms second))
+             ffirst)
+        count-run-members
+        (fn [attribute]
+          (count
+           (db/q '[:find ?member
+                   :in $ ?run-id ?attribute
+                   :where
+                   [?run :seon.cluster.run/id ?run-id]
+                   [?member ?attribute ?run]]
+                 database run-id attribute)))
+        terminal-receipt-count
+        (count
+         (db/q '[:find ?receipt
+                 :in $ ?run-id
+                 :where
+                 [?run :seon.cluster.run/id ?run-id]
+                 [?receipt :seon.cluster.eval/run ?run]
+                 (or [?receipt :seon.cluster.eval/result-edn _]
+                     [?receipt :seon.cluster.eval/result-blob _]
+                     [?receipt :seon.cluster.eval/error _]
+                     [?receipt :seon.cluster.eval/interrupted-at _])]
+               database run-id))]
+    {:seon.gen.loop/run-id run-id
+     :seon.gen.loop/form-count
+     (count-run-members :seon.cluster.run.form/run)
+     :seon.gen.loop/receipt-count
+     (count-run-members :seon.cluster.eval/run)
+     :seon.gen.loop/terminal-receipt-count terminal-receipt-count}))
+
+(defn- complete-planner-census?
+  [expected-form-count census]
+  (and (some? (:seon.gen.loop/run-id census))
+       (= expected-form-count
+          (:seon.gen.loop/form-count census)
+          (:seon.gen.loop/receipt-count census)
+          (:seon.gen.loop/terminal-receipt-count census))))
+
 (defn- drive!
-  "Run each agent's own pass until nobody has work, or `limit` passes.
-  Production gives every agent its own turn proc; one thread asking each
-  agent's OWN derivation in turn drives the same code."
-  [cluster limit]
-  (let [connection (:seon.db/connection cluster)]
-    (loop [passes 0]
-      (when (< passes limit)
-        ;; a deterministic clock that still advances: run order is a
-        ;; fact this suite reads, and a wall clock makes two runs in the
-        ;; same millisecond order themselves at random
-        (let [at (Date. (+ (inst-ms now) (* 1000 (long passes))))
-              work (some (fn [agent-id]
-                           (when-let [orphan (work/interruption @connection
-                                                                agent-id)]
-                             (cluster.loop/settle-interruption!
-                              cluster (:seon.cluster.run/id orphan) at))
-                           (work/next-agent-work
-                            @connection
-                            {:seon.cluster.agent/id agent-id
-                             :seon.cluster.run/process process
-                             :seon.cluster.work/now at}))
-                         (agent-ids @connection))]
-          (when work
-            (cluster.loop/turn {:seon.cluster.loop/cluster cluster
-                                :seon.cluster.work/next work}
-                               at)
-            (recur (inc passes))))))))
+  "Drive agent passes through the planner's exact terminal receipt census."
+  [cluster limit expected-form-count]
+  (let [connection (:seon.db/connection cluster)
+        events (async/chan (async/sliding-buffer 1))
+        listener-key (random-uuid)]
+    (datahike/listen! connection listener-key #(async/put! events %))
+    (try
+      (loop [passes 0]
+        (when (< passes limit)
+          ;; a deterministic clock that still advances: run order is a
+          ;; fact this suite reads, and a wall clock makes two runs in the
+          ;; same millisecond order themselves at random
+          (let [at (Date. (+ (inst-ms now) (* 1000 (long passes))))
+                work (some (fn [agent-id]
+                             (when-let [orphan (work/interruption @connection
+                                                                  agent-id)]
+                               (cluster.loop/settle-interruption!
+                                cluster (:seon.cluster.run/id orphan) at))
+                             (work/next-agent-work
+                              @connection
+                              {:seon.cluster.agent/id agent-id
+                               :seon.cluster.run/process process
+                               :seon.cluster.work/now at}))
+                           (agent-ids @connection))]
+            (when work
+              (cluster.loop/turn {:seon.cluster.loop/cluster cluster
+                                  :seon.cluster.work/next work}
+                                 at)
+              (recur (inc passes))))))
+      (let [event
+            (test-support/await-event!
+             events
+             {:seon.gen.loop/event ::planner-terminal-census
+              :seon.gen.loop/expected-form-count expected-form-count
+              :seon.gen.loop/observed (planner-census @connection)}
+             #(complete-planner-census?
+               expected-form-count
+               (planner-census (:db-after %))))]
+        (:seon.gen.loop/run-id (planner-census (:db-after event))))
+      (finally
+        (datahike/unlisten! connection listener-key)
+        (async/close! events)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The staged attempt — failure is INJECTED, so the design is what is
@@ -282,58 +345,6 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Queries — every milestone is a fact
 ;;; ---------------------------------------------------------------------------
-
-(defn- planner-run
-  "The planner's first run after its complete form census commits.
-
-  A re-triggered planner attempts again, and asserting over \"the\"
-  planner run would quietly change subject when it does. Refuse the
-  fixture at this boundary when the frozen forms and their receipts do
-  not exist, before routing assertions can settle over absence."
-  [db expected-form-count]
-  (let [run-id
-        (->> (db/q '[:find ?id ?opened
-                    :where
-                    [?run :seon.cluster.run/id ?id]
-                    [?run :seon.cluster.run/opened-at ?opened]
-                    [?run :seon.cluster.run/agent ?agent]
-                    [?agent :seon.cluster.agent/id "planner"]]
-                  db)
-             (sort-by (comp inst-ms second))
-             ffirst)
-        form-count
-        (count (db/q '[:find ?form
-                       :in $ ?run-id
-                       :where
-                       [?run :seon.cluster.run/id ?run-id]
-                       [?form :seon.cluster.run.form/run ?run]]
-                     db run-id))
-        receipt-count
-        (count (db/q '[:find ?receipt
-                       :in $ ?run-id
-                       :where
-                       [?run :seon.cluster.run/id ?run-id]
-                       [?receipt :seon.cluster.eval/run ?run]]
-                     db run-id))]
-    (if (and (some? run-id)
-             (= expected-form-count form-count receipt-count))
-      run-id
-      (throw
-       (ex-info
-        "Generative loop fixture refused routing assertions: the planner attempt census did not commit."
-        (cond->
-         {:seon.gen.loop/expected-form-count expected-form-count
-          :seon.gen.loop/run-id run-id
-          :seon.gen.loop/form-count form-count
-          :seon.gen.loop/receipt-count receipt-count}
-          run-id
-          (assoc :seon.cluster.run/error
-                 (db/q '[:find ?error .
-                         :in $ ?run-id
-                         :where
-                         [?run :seon.cluster.run/id ?run-id]
-                         [?run :seon.cluster.run/error ?error]]
-                       db run-id))))))))
 
 (defn- form-namespaces
   "Ordinal → parse-time namespace, for the forms that carry one."
@@ -447,10 +458,9 @@
                      (str "Build the widget helpers: my.gen.alpha owns "
                           "the arithmetic and my.gen.beta owns the label.")
                      :seon.cluster.message/at now}])
-       (with-redefs [ai/complete staged-reply]
-         (drive! cluster 12))
-       (let [db @connection
-             run-id (planner-run db 7)]
+       (let [run-id (with-redefs [ai/complete staged-reply]
+                      (drive! cluster 12 7))
+             db @connection]
 
          (testing "the attempt froze one plan whose forms carry the
                    namespace each was WRITTEN under"
@@ -623,20 +633,20 @@
                      [:seon.cluster.agent/id "root"]
                      :seon.cluster.message/content "Count the primes."
                      :seon.cluster.message/at now}])
-       (with-redefs [ai/complete
-                     (fn [{prompt :seon.ai/prompt}]
-                       {:seon.ai/text
-                        (if (= "planner" (prompt-agent-id prompt))
-                          (str "(in-ns 'my.gen.alpha)\n"
-                               ;; fails: Math/sqrt is not in the base ctx
-                               "(def primes (Math/sqrt 4))\n"
-                               ;; evaluates fine, and its VALUE references
-                               ;; the var form 0 never bound
-                               "primes\n")
-                          "(my.run/wait \"nothing\")")})]
-         (drive! cluster 6))
-       (let [db @connection
-             run-id (planner-run db 3)
+       (let [run-id
+             (with-redefs [ai/complete
+                           (fn [{prompt :seon.ai/prompt}]
+                             {:seon.ai/text
+                              (if (= "planner" (prompt-agent-id prompt))
+                                (str "(in-ns 'my.gen.alpha)\n"
+                                     ;; fails: Math/sqrt is not in the base ctx
+                                     "(def primes (Math/sqrt 4))\n"
+                                     ;; evaluates fine, and its VALUE references
+                                     ;; the var form 0 never bound
+                                     "primes\n")
+                                "(my.run/wait \"nothing\")")})]
+               (drive! cluster 6 3))
+             db @connection
              state (states db run-id)]
          (is (= :routed (get state 1))
              "the failed def itself is red and routed")
@@ -664,16 +674,16 @@
                      :seon.cluster.message/at now}])
        ;; every owner is mute; only the planner ever answers, and it
        ;; answers by claiming it is done
-       (with-redefs [ai/complete
-                     (fn [{prompt :seon.ai/prompt}]
-                       {:seon.ai/text
-                        (if (= "planner" (prompt-agent-id prompt))
-                          (str program
-                               "(my.run/complete \"the program is built\")")
-                          "(my.run/wait \"saying nothing\")")})]
-         (drive! cluster 12))
-       (let [db @connection
-             run-id (planner-run db 7)]
+       (let [run-id
+             (with-redefs [ai/complete
+                           (fn [{prompt :seon.ai/prompt}]
+                             {:seon.ai/text
+                              (if (= "planner" (prompt-agent-id prompt))
+                                (str program
+                                     "(my.run/complete \"the program is built\")")
+                                "(my.run/wait \"saying nothing\")")})]
+               (drive! cluster 12 7))
+             db @connection]
          (is (= "the program is built"
                 (db/q '[:find ?content .
                        :where
