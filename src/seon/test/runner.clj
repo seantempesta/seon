@@ -1027,32 +1027,102 @@
         ((requiring-resolve 'seon.cluster/stop!) instance)))))
 
 (def ^:private persistent-results-branch :test-results)
+(def ^:private persistent-results-monitor (Object.))
+
+(defn- commit-persistent-results!
+  "Commit one bare-gate completion through the store-holding process."
+  [held-store run-result]
+  (locking persistent-results-monitor
+    (registry/branch! {:seon.store/store held-store
+                       :seon.cluster.registry/from source/current-branch
+                       :seon.store/branch persistent-results-branch})
+    (let [connection (store/open-branch! held-store persistent-results-branch)]
+      (try
+        (let [database (db/db connection)
+              projection (schema/projection-from-database database)
+              completion
+              {:seon.test.runner/results
+               (:seon.test.runner/results run-result)
+               :seon.test/run-basis-t (db/basis-t database)
+               :seon.test/run-at (:seon.test.run/at run-result)}]
+          (schema/call-with-projection
+           projection
+           #(commit-results! connection completion)))
+        (finally
+          (store/release-branch! connection))))))
+
+(defn- persistent-results-form
+  [run-result]
+  (pr-str
+   `(do
+      (require 'seon.cluster.registry
+               'seon.cluster.source
+               'seon.cluster.store
+               'seon.db
+               'seon.schema
+               'seon.test.runner)
+      (let [store#
+            (some :seon.store/store
+                  (vals @(var-get
+                          (ns-resolve 'seon.cluster
+                                      (symbol "running-instances")))))]
+        (if store#
+          (do
+            (seon.cluster.registry/branch!
+             {:seon.store/store store#
+              :seon.cluster.registry/from seon.cluster.source/current-branch
+              :seon.store/branch :test-results})
+            (let [connection#
+                  (seon.cluster.store/open-branch! store# :test-results)]
+              (try
+                (let [database# (seon.db/db connection#)
+                      projection#
+                      (seon.schema/projection-from-database database#)
+                      completion#
+                      {:seon.test.runner/results
+                       (:seon.test.runner/results ~run-result)
+                       :seon.test/run-basis-t (seon.db/basis-t database#)
+                       :seon.test/run-at (:seon.test.run/at ~run-result)}]
+                  (seon.schema/call-with-projection
+                   projection#
+                   #(seon.test.runner/commit-results!
+                     connection# completion#)))
+                (finally
+                  (seon.cluster.store/release-branch! connection#)))))
+          {:seon.error/kind
+           :seon.test.runner/live-store-unavailable
+           :seon.error/message
+           "The live process has no held operator store."})))))
 
 (defn- record-persistent-results!
-  "Commit one bare-gate completion to the operator-owned results branch."
-  [store-dir run-result]
-  (let [held-store (store/open-store! {:seon.store/dir store-dir})]
-    (try
-      (registry/branch! {:seon.store/store held-store
-                         :seon.cluster.registry/from source/current-branch
-                         :seon.store/branch persistent-results-branch})
-      (let [connection (store/open-branch! held-store
-                                           persistent-results-branch)]
+  "Commit one bare-gate completion through the authoritative store holder."
+  [operator-root run-result]
+  (let [{live? :seon.fresh-operator/live-process?
+         value :seon.fresh-operator/value}
+        ((requiring-resolve 'seon.fresh-operator/live-root-value!)
+         operator-root (persistent-results-form run-result))]
+    (if live?
+      value
+      (let [held-store
+            (store/open-store!
+             {:seon.store/dir (str (io/file operator-root "data" "store"))})]
         (try
-          (let [database (db/db connection)
-                projection (schema/projection-from-database database)
-                completion
-                {:seon.test.runner/results
-                 (:seon.test.runner/results run-result)
-                 :seon.test/run-basis-t (db/basis-t database)
-                 :seon.test/run-at (:seon.test.run/at run-result)}]
-            (schema/call-with-projection
-             projection
-             #(commit-results! connection completion)))
+          (commit-persistent-results! held-store run-result)
           (finally
-            (store/release-branch! connection))))
-      (finally
-        (store/release-store! held-store)))))
+            (store/release-store! held-store)))))))
+
+(defn- recording-failure
+  [record-fn]
+  (try
+    (let [result (record-fn)]
+      (when (:seon.error/kind result)
+        result))
+    (catch Throwable failure
+      {:seon.error/kind
+       (or (:seon.error/kind (ex-data failure))
+           ::persistent-results-recording-failed)
+       :seon.error/message
+       (or (ex-message failure) (.getName (class failure)))})))
 
 (defn- print-skipped!
   [skipped]
@@ -1783,6 +1853,45 @@
                    (when (::injected? failure) "[INJECTED FIXTURE]")
                    "kind=" (:seon.error/kind failure)))))))
 
+(defn- finish-run!
+  [{summary ::summary
+    task-results ::task-results
+    run-result ::run-result
+    skipped ::skipped
+    selection-mode ::selection-mode
+    git-sha ::git-sha
+    bulk ::bulk
+    record-results! ::record-results!
+    recording-label ::recording-label}]
+  (let [green? (zero? (+ (::fail-count summary) (::error-count summary)))
+        failures (->> (:seon.test.runner/results run-result)
+                      (filter #(pos? (+ (:seon.test/fail-count %)
+                                       (:seon.test/error-count %))))
+                      (map :seon.test/sym)
+                      sort)]
+    (print-final-tally! summary task-results)
+    (when-let [stopped (::stopped-after run-result)]
+      (println)
+      (println "bin/test: PLATFORM TIER RED —" (name stopped)
+               "moving-part regressions failed; the bulk tier did not run.")
+      (println "bin/test: fix the platform first; a broken platform"
+               "poisons every test that forks it."))
+    (when (seq failures)
+      (println "\nFailing tests:")
+      (doseq [test-symbol failures]
+        (println " -" test-symbol)))
+    (print-skipped! skipped)
+    (when (and green? (::digests bulk))
+      (record-green-basis! selection-mode git-sha (::digests bulk)))
+    (flush)
+    (when record-results!
+      (when-let [failure (recording-failure record-results!)]
+        (println (str "bin/test: " recording-label " NOT recorded:")
+                 (:seon.error/kind failure)
+                 (:seon.error/message failure))))
+    (flush)
+    (if green? 0 1)))
+
 (defn- run-parallel-stage!
   [progress manifest workers serial-worker tasks]
   (let [{::keys [resolved unresolved]} (split-resolved-tasks manifest tasks)]
@@ -1940,36 +2049,33 @@
                :seon.test.runner/results
                (into [] (mapcat ::task-results) task-results)
                ::stopped-after (when platform-red? :platform)}
-            _ (if-not (= "-" cluster-name)
-                (record! {:seon.test.runner/run-result run-result
-                          :seon.boot/cluster-name cluster-name
-                          :seon.boot/root root})
-                (when-let [store-dir
-                           (System/getProperty
-                            "seon.test.persistent-results-store-dir")]
-                  (record-persistent-results! store-dir run-result)))
-            green? (zero? (+ (::fail-count summary) (::error-count summary)))
-            failures (->> (:seon.test.runner/results run-result)
-                          (filter #(pos? (+ (:seon.test/fail-count %)
-                                           (:seon.test/error-count %))))
-                          (map :seon.test/sym)
-                          sort)]
-          (print-final-tally! summary task-results)
-          (when-let [stopped (::stopped-after run-result)]
-            (println)
-            (println "bin/test: PLATFORM TIER RED —" (name stopped)
-                     "moving-part regressions failed; the bulk tier did not run.")
-            (println "bin/test: fix the platform first; a broken platform"
-                     "poisons every test that forks it."))
-          (when (seq failures)
-            (println "\nFailing tests:")
-            (doseq [test-symbol failures]
-              (println " -" test-symbol)))
-          (print-skipped! skipped)
-          (when (and green? (::digests bulk))
-            (record-green-basis! selection-mode git-sha (::digests bulk)))
-          (flush)
-          (if green? 0 1)))
+              persistent-root
+              (System/getProperty "seon.test.persistent-results-root")
+              record-results!
+              (cond
+                (not= "-" cluster-name)
+                #(record! {:seon.test.runner/run-result run-result
+                           :seon.boot/cluster-name cluster-name
+                           :seon.boot/root root})
+
+                persistent-root
+                #(record-persistent-results! persistent-root run-result)
+
+                :else nil)
+              recording-label
+              (if (not= "-" cluster-name)
+                "result-cluster results"
+                "persistent results")]
+          (finish-run!
+           {::summary summary
+            ::task-results task-results
+            ::run-result run-result
+            ::skipped skipped
+            ::selection-mode selection-mode
+            ::git-sha git-sha
+            ::bulk bulk
+            ::record-results! record-results!
+            ::recording-label recording-label})))
       (finally
         (doseq [worker @workers*]
           (stop-worker! worker))

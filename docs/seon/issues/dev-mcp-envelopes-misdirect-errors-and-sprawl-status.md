@@ -244,3 +244,13 @@ the owning observation and preserving the existing additive top-level frame
 projection. The remaining open runtime-health output-contract case is not a
 diagnostic-construction member of N5; it remains here because it still owns
 this MCP surface.
+
+## Tool availability regression — 2026-09-02
+
+The gate-evidence lane began with `ctxprobe` advertised alive by
+`bin/seon status`, but its Codex session exposed neither
+`mcp__seon__runtime_status` nor `mcp__seon__eval_clj`. The required supported
+REPL surface was therefore unavailable before any implementation work. The
+lane reported the absence immediately and confined subsequent live probes to
+its own isolated operator root; it did not build a replacement MCP sender or
+touch the shared cluster.

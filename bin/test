@@ -237,12 +237,12 @@ if ! [[ "$dev_cache_digest" =~ ^[0-9a-f]{64}$ ]] ||
   exit 1
 fi
 
-persistent_results_store_dir=
+persistent_results_root=
 if [ "$explicit_selection" -eq 0 ] &&
    [ -z "$requested_mode" ] &&
    [ ${#changed_paths[@]} -eq 0 ] &&
    [ -z "$result_cluster" ]; then
-  persistent_results_store_dir="$source_root/data/store"
+  persistent_results_root="$source_root"
 fi
 
 # A suite is a complete isolated operator root and working directory. Fresh
@@ -494,9 +494,9 @@ coordinator_jvm_arguments=(
   "-J-Dseon.test.worker-parent=$worker_parent"
   "-J-Dseon.test.published-base=$shared_published_base"
 )
-if [ -n "$persistent_results_store_dir" ]; then
+if [ -n "$persistent_results_root" ]; then
   coordinator_jvm_arguments+=(
-    "-J-Dseon.test.persistent-results-store-dir=$persistent_results_store_dir"
+    "-J-Dseon.test.persistent-results-root=$persistent_results_root"
   )
 fi
 

@@ -486,6 +486,52 @@
       (is (= 1 (occurrences repeated-message
                             "the same refusal reached the reporter again"))))))
 
+(deftest persistent-recording-failure-cannot-mask-the-test-verdict
+  (doseq [[summary expected-exit]
+          [[#:seon.test.runner{:test-count 1
+                               :pass-count 1
+                               :fail-count 0
+                               :error-count 0}
+            0]
+           [#:seon.test.runner{:test-count 1
+                               :pass-count 0
+                               :fail-count 1
+                               :error-count 0}
+            1]]]
+    (let [exit* (atom nil)
+          output
+          (with-out-str
+            (reset!
+             exit*
+             (#'runner/finish-run!
+              {::runner/summary summary
+               ::runner/task-results []
+               ::runner/run-result
+               {:seon.test.runner/results []}
+               ::runner/skipped []
+               ::runner/selection-mode "explicit"
+               ::runner/git-sha git-sha
+               ::runner/bulk nil
+               ::runner/record-results!
+               #(throw
+                 (ex-info
+                  "the evidence sink is deliberately unavailable"
+                  {:seon.error/kind
+                   ::runner/injected-persistent-recording-failure}))
+               ::runner/recording-label "persistent results"})))]
+      (is (= expected-exit @exit*)
+          "only test failures and errors decide the process exit")
+      (is (str/includes? output "Ran 1 tests containing 1 assertions."))
+      (is (= 1 (occurrences output
+                            "bin/test: persistent results NOT recorded:")))
+      (is (str/includes?
+           output
+           ":seon.test.runner/injected-persistent-recording-failure"))
+      (is (< (str/index-of output "Ran 1 tests")
+             (str/index-of output
+                           "bin/test: persistent results NOT recorded:"))
+          "the complete tally is visible before persistence is attempted"))))
+
 (deftest result-recording-is-total-under-concurrent-test-retraction
   ;; The class this kills: the presence decision ran as a caller
   ;; pre-read, so a test row retracted between building the record

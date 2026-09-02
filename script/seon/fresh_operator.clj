@@ -1298,6 +1298,28 @@
           (:seon.fresh-operator/transport-advertisement %))
     truth)))
 
+(defn live-root-value!
+  "Evaluate one form in the process holding an operator root."
+  [root form]
+  (let [truth (cluster-truth
+               root {:seon.fresh-operator/read-offline-roster? false})
+        live-rows (filterv #(and (:seon.fresh-operator/operator-root? %)
+                                 (:seon.fresh-operator/process-alive? %))
+                           truth)]
+    (if-let [anchor (select-anchor truth)]
+      {:seon.fresh-operator/live-process? true
+       :seon.fresh-operator/value
+       (prepl-value! (:seon.fresh-operator/transport-advertisement anchor)
+                     form)}
+      (if (seq live-rows)
+        (fail!
+         "A live operator process holds the store but its prepl is unavailable."
+         {:seon.error/kind :seon.fresh-operator/live-prepl-unavailable
+          :seon.fresh-operator/root (.getCanonicalPath (io/file root))
+          :seon.fresh-operator/processes
+          (mapv :seon.fresh-operator/process live-rows)})
+        {:seon.fresh-operator/live-process? false}))))
+
 (defn- named-cluster-row
   [truth name]
   (or
