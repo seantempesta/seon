@@ -30,53 +30,52 @@ fails).
 
 ## 2. The idea to explore now: stop being clever — it's all queries
 
-The owner's proposal, stated in his words: **treat the whole thing as
+The owner's proposal, in his words: **treat the whole thing as
 database queries rendered through the render function.** The agent is
 competent at querying the database; so is the system. Context is a
 vector of `(query → rendered result)` pairs. When new data arrives we
-don't need cleverness — we generate **the optimal query to get the
-new data** and render it. Teaching is the same: the docstrings and
-schemas of the functions the queries use, rendered.
+don't need cleverness — we generate the query that gets the new data
+and render it. Teaching is the same: the docstrings and schemas of the
+functions the queries use, rendered.
 
-Why this is the right simplification, and how it sits on the rulings
-already sealed (47–55, in the [ledger](design-ideas-ledger-2026-08-13.md)):
+**Do not treat anything below as settled — the owner wants to think
+this through WITH the next agent. Bring the design space, not a
+design.** Points he raised, deliberately left open:
 
-- **It is the rulings, minus the last cleverness.** Forms-as-faces
-  (53) already said an entry is a call plus its result; backward
-  demand-driven generation (52b) already said entries exist because
-  something downstream demanded them; instance args (55) already said
-  the pull supplies the concrete identities and contracts say where
-  they plug in. "It's all queries" collapses these into one sentence:
-  *the generator's whole job is choosing a query and rendering its
-  result.* No reader-selection ladder, no suppression matching, no
-  expansion policy — a query either returns the data or it doesn't.
-- **"The optimal query" has a definition, not a heuristic.** For a
-  family with a declared reader it is that reader (`(inbox)`), chosen
-  collection-first; for a specific instance it is the reader with the
-  discovered identity plugged in (`(read "m-102")`); for new data it is
-  the diff over the printed prior basis (`(diff (inbox {:at t₁})
-  (inbox))`, ruling 20/52); for the world at opening it is `(help)` —
-  itself the render of a derived coverage set (52a). With no reader
-  declared, the optimal query is the floor identity pull — always
-  constructible, honest, ugly enough to motivate a reader.
-- **Results are data, rendered once.** The query's result is stored as
-  admitted EDN plus derived projections (48b); the render is a pure
-  face over that value (`(render data)`, single-arg, 53). Nothing
-  re-executes on regeneration except pure queries; anything whose
-  closure touches an external sink is replay-only (the missile rule,
-  54c) — the program graph's `:seon.fn/external-sink` fact decides.
-- **The agent and the system speak the same language.** Every context
-  line is a query the agent could type; every query the agent types
-  becomes a context line. The transcript is the agent's REPL history
-  *because it literally is* — settled evals, ordered by (basis,
-  ordinal), rendered.
+- **Functions must be designed for the query-always approach.** Family
+  readers like `(inbox)` may be LESS useful now; the shape he sketched
+  is a generic query plus a well-named, intuitive render function:
 
-The question for the new session is not "is this right" — the owner
-has converged on it — but **"what exactly is the query-choice rule,
-what does the graph need to store to make it total, and where does it
-break?"** Explore it against the steward scenario (54f): an agent whose
-purpose is to understand and maintain its namespace and help other
-agents and users.
+  ```clojure
+  ;; get all the messages
+  (seon.messages/render (pull … :seon.messages …))   ; exact spelling open
+  ;; later: get new messages
+  (seon.messages/render (diff …))
+  ```
+
+  where the render function is the *guide* — pretty-printing, sorting,
+  nice timestamps, showing what matters — and naming carries the
+  discoverability. Whether per-family readers survive at all, or only
+  the generic query + named render pair, is an OPEN QUESTION.
+- **Diffs have to work for everything.** Open alternatives to weigh
+  honestly, each with its consequences: (a) diff at the QUERY level —
+  the same query at two bases, with render functions that accept a
+  diff and explain it clearly; (b) diff at the OUTPUT level — diff the
+  rendered/returned result against the last time THIS agent called the
+  same thing; (c) some families needing a since-shaped query instead.
+  The stored-result projections (48b) and the existing `seon.db/diff`
+  helper are inputs to this decision, not the decision.
+- **How queries are spelled** for the agent matters as much as what
+  they return: the owner "forgets how we are doing this" for the pull
+  — that is itself a finding about discoverability. What does a
+  competent-but-new agent type first?
+
+What IS grounded already (use it, don't re-litigate it): results are
+stored data rendered once (53/48b); regeneration re-derives pure
+queries and replays anything effectful (54c, decided by the graph's
+external-sink facts); identity rows never retract (47); explanations
+speak the read vocabulary, never the writer's (54b); context stability
+is a property to prove (52), not a mechanism to maintain.
 
 ## 3. Trials and tribulations — what we learned the hard way
 
@@ -219,20 +218,22 @@ explicit go.
 
 ## 6. Questions for the exploration (do NOT rush these)
 
-1. **The query-choice rule, precisely.** Given a discovered group
-   (attribute + identities) and the registry, what is the total,
-   deterministic function to the ONE query? Draft it as a decision
-   table over: declared reader present? shape (collection/single)?
-   identity in hand? ambient inputs sufficient? — with the floor
-   identity pull as the base case.
+1. **What does "the query" look like, and who picks it?** Generic
+   pull + named render function, or per-family readers, or both?
+   Given a discovered group (attribute + identities) and the registry,
+   is there ONE total, deterministic choice — and what is the honest
+   base case when a family declares nothing? Draft the alternatives
+   side by side before drafting a rule.
 2. **History as queries.** The agent's own evals are already
    `(query → result)` pairs. Is every history entry re-renderable from
    its stored result without re-execution, including agent-authored
    effects? What does a stored result need (48b) for its RENDER to
    be re-derivable when a face changes?
-3. **The delta query.** For each family, is `(diff (q {:at t₁}) (q))`
-   really the optimal "new data" query, or does the family need a
-   since-shaped reader? What does the diff FACE look like (M13)?
+3. **The delta.** Query-level diff (same query, two bases, render
+   functions that accept and explain a diff), output-level diff
+   (against the agent's own last call), or since-shaped queries per
+   family? Which one works for EVERYTHING, and what does the rendered
+   diff look like so it is not soup (M13)?
 4. **Stability (P-STABLE-REGEN).** Regenerate twice at one basis →
    byte-equal; add one fact → old prefix byte-equal, new bytes appended
    only. Where can ordering ever be non-deterministic (ties, salience
