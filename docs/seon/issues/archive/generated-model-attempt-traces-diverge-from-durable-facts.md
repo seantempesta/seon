@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, ai, test, wave/ai-retry-evidence]
 ---
@@ -43,3 +43,21 @@ The model-attempt settlement derivation and its independent oracle in
 
 The fixed-seed property agrees with durable attempt facts for every generated
 partition and the complete turn namespace is green.
+
+## Resolution
+
+The durable attempt facts were correct. The property fixture's
+`::backup? false` scenario omitted backup attributes from a sparse config
+update, but omission inherits the shipped OpenRouter backup; it does not
+retract it. The loop therefore correctly failed over after the credential
+failure and recorded two attempts while the oracle expected one.
+
+The canonical turn fixture now explicitly sets the optional
+`:seon.config.ai.backup/model` decision to `seon.config/absent`. Scenarios that
+exercise failover continue to opt in through the existing backup helper, so
+the generated input and the database configuration describe the same world.
+
+Verified 2026-09-02 with
+`bin/test seon.cluster.turn-test`: 55 tests, 391 assertions, 0 failures,
+0 errors. The known concurrent preflight-sweep failure did not occur; this run
+needed no retry.

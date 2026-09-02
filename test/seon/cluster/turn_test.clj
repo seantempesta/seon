@@ -189,6 +189,9 @@
                       {:seon.config.run/max-episode-runs 100
                        :seon.config.ai/endpoint "http://127.0.0.1:1/v1"
                        :seon.config.ai/model "probe"
+                       ;; Most turn tests assume one target; failover tests
+                       ;; opt in explicitly through `configure-backup!`.
+                       :seon.config.ai.backup/model config/absent
                        :seon.config.ai/max-tokens 32
                        :seon.config.ai/api-key-variable "SEON_AI_TEST_KEY"
                        :seon.config.ai/timeout-ms 200
