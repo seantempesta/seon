@@ -777,6 +777,19 @@ numerically and a bare cross-citation is a defect to fix on sight.
     appear in explanations by construction: the family's reader is
     selected from the recipient's side regardless of who wrote.
 
+    **REOPENED (owner, 2026-08-29 late):** the reader-centric spelling
+    of 53–55 (`(face-sym <read-form>)`, collection-first `(inbox)`,
+    the selection ladder's remnants) is NOT settled. The owner's
+    current direction — "it's all database queries rendered through
+    the render function; functions designed for a query-always
+    approach; well-named render functions as the guide; diffs that
+    work for everything, at the query OR the output level" — is to be
+    explored deliberately with the next agent, unbiased. See
+    [context-as-queries-handoff-2026-08-29.md](context-as-queries-handoff-2026-08-29.md)
+    §2. What stays grounded: results as stored data (48b/53), the
+    missile rule (54c), identity permanence (47), read vocabulary over
+    writer (54b), stability as a property (52).
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
