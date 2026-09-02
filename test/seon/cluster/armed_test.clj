@@ -282,7 +282,6 @@
   (let [name "arming-window"
         root (str "tmp/armed-test/" name)
         primed (CountDownLatch. 1)
-        called (CountDownLatch. 1)
         next-agent-work work/next-agent-work
         arm! agent/arm!]
     (test-support/delete-recursively! root)
@@ -310,19 +309,28 @@
            entry))
        ai/complete
        (fn [_request]
-         (.countDown called)
          {:seon.ai/text "(my.run/complete \"answered\")"})]
       (let [instance (cluster/start! {:seon.boot/cluster-name name
                                       :seon.boot/root root})]
         (try
-          (test-support/await-event! called "boot-window model call")
-          (is (= "boot-window-message"
-                 (db/q '[:find ?message-id .
-                        :where
-                        [?run :seon.cluster.run/trigger ?message]
-                        [?message :seon.cluster.message/id ?message-id]]
-                      @(:seon.boot/cluster-connection instance)))
-              "the committed message opened a run without a later wake")
+          (let [run
+                (await-fact
+                 (:seon.boot/cluster-connection instance)
+                 (fn [database]
+                   (db/q
+                    '[:find (pull ?run
+                                  [:seon.cluster.run/id
+                                   {:seon.cluster.run/trigger
+                                    [:seon.cluster.message/id]}]) .
+                      :in $ ?message-id
+                      :where
+                      [?message :seon.cluster.message/id ?message-id]
+                      [?run :seon.cluster.run/trigger ?message]]
+                    database "boot-window-message")))]
+            (is (= "boot-window-message"
+                   (get-in run [:seon.cluster.run/trigger
+                                :seon.cluster.message/id]))
+                "the committed message opened a run without a later wake"))
           (finally
             (cluster/stop! instance)))))))
 
@@ -474,4 +482,9 @@
                    (:seon.error/process fact))
                 "the first fault is durable with cluster provenance"))
           (finally
+            ;; Flow reports a failed transition and retains the proc's
+            ;; pre-transition status (`:paused`). Restore the lifecycle that
+            ;; this test deliberately perturbed so cluster teardown can send
+            ;; its armer-quiescence request before stopping the graph.
+            (flow/resume (:seon.flow/graph instance))
             (cluster/stop! instance)))))))
