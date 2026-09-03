@@ -24,7 +24,7 @@
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.form :as schema.form])
-  (:import [datahike.db AsOfDB]
+  (:import [datahike.db AsOfDB DB]
            [datalog.parser.type BindScalar Constant FindColl FindRel FindScalar
             FindTuple Pattern Variable]))
 
@@ -468,12 +468,14 @@
    [:=> [:cat :seon.db/database-value] :seon.db/database-value]}
   [database]
   (loop [candidate database]
-    (if (satisfies? dbi/IHistory candidate)
-      (let [origin (dbi/-origin candidate)]
-        (if (identical? candidate origin)
-          candidate
-          (recur origin)))
-      candidate)))
+    (if (instance? DB candidate)
+      candidate
+      (if (satisfies? dbi/IHistory candidate)
+        (let [origin (dbi/-origin candidate)]
+          (if (identical? candidate origin)
+            candidate
+            (recur origin)))
+        candidate))))
 
 (defn identity-attributes
   "Installed `:db.unique/identity` attributes for one database value."
@@ -523,9 +525,13 @@
 
 (defn- edn-encoded?
   [declarations attribute]
-  (ask-declarations
-   declarations
-   #(schema.datahike/edn-encoded-attr-in? % attribute)))
+  (let [projection @declarations]
+    (schema/projection-cache-value
+     projection [::edn-encoded? attribute]
+     #(ask-declarations
+       declarations
+       (fn [supplied]
+         (schema.datahike/edn-encoded-attr-in? supplied attribute))))))
 
 (defn- decode-attribute-value
   [declarations attribute value]
@@ -715,7 +721,11 @@
   [request parsed-query]
   (let [arguments (:args request)
         input-bindings (query-input-bindings parsed-query arguments)
-        databases (query-source-databases (:query request) arguments)]
+        databases (query-source-databases (:query request) arguments)
+        schemas
+        (update-vals
+         databases
+         #(dbi/-schema (schema-database %)))]
     (some
      (fn [pattern]
        (let [attribute-node (nth (:pattern pattern) 1 nil)
@@ -723,13 +733,15 @@
                          (:value attribute-node)
                          (get input-bindings (:symbol attribute-node)))
              source-symbol (or (:symbol (:source pattern)) '$)
-             database (get databases source-symbol)]
-         (when (and database
+             database-schema (get schemas source-symbol)]
+         (when (and database-schema
                     (keyword? attribute)
-                    (nil? (get (dbi/-schema (schema-database database))
-                               attribute)))
-           (unknown-attribute-error 'seon.db/q database attribute
-                                    (parsed-pattern-value pattern)))))
+                    (nil? (get database-schema attribute)))
+           (unknown-attribute-error
+            'seon.db/q
+            (get databases source-symbol)
+            attribute
+            (parsed-pattern-value pattern)))))
      (query-patterns parsed-query))))
 
 (defn- query-variable-attributes
@@ -801,8 +813,13 @@
 
 (defn- decode-query-result
   [declarations normalized parsed-query result]
-  (let [attributes (query-find-attributes
-                    declarations parsed-query (:args normalized))
+  (let [arguments (:args normalized)
+        attributes
+        (if (every? db.utils/db? arguments)
+          (schema/projection-cache-value
+           @declarations [::query-find-attributes parsed-query]
+           #(query-find-attributes declarations parsed-query arguments))
+          (query-find-attributes declarations parsed-query arguments))
         find-clause (:qfind parsed-query)
         return-maps (:qreturnmaps parsed-query)
         decode-result

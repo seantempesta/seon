@@ -46,6 +46,83 @@
     [(namespace ?key) ?namespace]
     [(= ?namespace "my.message")]])
 
+(def ^:private schema-family-query
+  '[:find [?key ...]
+    :where
+    [?reference :seon.schema/key :seon.cluster.message/id]
+    [?schema :seon.schema/references ?reference]
+    [?schema :seon.db/attributes true]
+    [?schema :seon.schema/key ?key]])
+
+(def ^:private uncached-schema-family-query
+  '[:find [?key ...]
+    :in $ ?sample
+    :where
+    [?reference :seon.schema/key :seon.cluster.message/id]
+    [?schema :seon.schema/references ?reference]
+    [?schema :seon.db/attributes true]
+    [?schema :seon.schema/key ?key]])
+
+(def ^:private projection-carrier-symbols
+  '[*candidate-forms-overlay* *projection* *projection-state* *packaged-forms*])
+
+(defn- without-handed-projection
+  [thunk]
+  (with-bindings
+    (into {}
+          (map (fn [sym] [(ns-resolve 'seon.schema sym) nil]))
+          projection-carrier-symbols)
+    (thunk)))
+
+(defn- elapsed-nanos
+  [thunk]
+  (let [started (System/nanoTime)
+        value (thunk)]
+    {:seon.db-test/elapsed-nanos (- (System/nanoTime) started)
+     :seon.db-test/value value}))
+
+(deftest ten-unhanded-queries-stay-within-twice-raw-query-cost
+  (test-support/with-database
+   (fn [connection]
+     (without-handed-projection
+      (fn []
+        (let [database @connection
+              expected [:seon.cluster.message/message]
+              _ (db/q schema-family-query database)
+              raw
+              (mapv
+               (fn [sample]
+                 (elapsed-nanos
+                  #(d/q uncached-schema-family-query database sample)))
+               (range 10))
+              wrapped
+              (mapv
+               (fn [sample]
+                 (elapsed-nanos
+                  #(db/q uncached-schema-family-query database sample)))
+               (range 10 20))
+              raw-total (reduce + (map ::elapsed-nanos raw))
+              wrapped-total (reduce + (map ::elapsed-nanos wrapped))]
+          (is (every? #(= expected (::value %)) wrapped))
+          (is (<= wrapped-total (* 2 raw-total))
+              (str "ten seon.db/q calls took " wrapped-total
+                   " ns versus " raw-total " ns raw"))))))))
+
+(deftest handed-family-query-stays-below-five-milliseconds
+  (test-support/with-database
+   (fn [connection]
+     ;; The canonical fixture binds the same cluster-owned projection-state
+     ;; that seon.sci.eval binds around a door evaluation.
+     (db/q schema-family-query @connection)
+     (let [samples
+           (mapv (fn [_]
+                   (elapsed-nanos #(db/q schema-family-query @connection)))
+                 (range 10))]
+       (is (every? #(= [:seon.cluster.message/message] (::value %)) samples))
+       (is (every? #(< (::elapsed-nanos %) 5000000) samples)
+           (str "handed query samples in ns: "
+                (pr-str (mapv ::elapsed-nanos samples))))))))
+
 (def ^:private nonzero-source-query
   '[:find (count ?key) .
     :in ?wanted-namespace $
