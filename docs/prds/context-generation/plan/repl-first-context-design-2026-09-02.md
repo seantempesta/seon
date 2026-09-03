@@ -6,7 +6,7 @@ tags: [prd, agent, context, render, teaching, architecture]
 
 # REPL-first context — the converged design, for the owner's markup
 
-*STATUS 2026-09-03: this is the IMPLEMENTATION companion; the BEHAVIOR authority now being settled with the owner is [repl-first-behavior-2026-09-03.md](repl-first-behavior-2026-09-03.md) — revise this file against it once its ❓ are gone. Draft 2026-09-02 from the live dialogue and the
+*STATUS 2026-09-03 (evening): SUPERSEDED as implementation companion by [repl-first-one-platform-2026-09-03.md](repl-first-one-platform-2026-09-03.md) (ruling 59a: one platform — add/refactor/delete before any deletion); kept as the dated record of the 09-02 dialogue. Earlier status: this is the IMPLEMENTATION companion; the BEHAVIOR authority now being settled with the owner is [repl-first-behavior-2026-09-03.md](repl-first-behavior-2026-09-03.md) — revise this file against it once its ❓ are gone. Draft 2026-09-02 from the live dialogue and the
 [REPL-first probes](../research/repl-first-probes-2026-09-02.md). It
 CONSOLIDATES rulings 47–55 under the owner's reframe of 2026-09-02 and
 REPLACES the reader-centric spelling of 53–55 (reopened 2026-08-29).

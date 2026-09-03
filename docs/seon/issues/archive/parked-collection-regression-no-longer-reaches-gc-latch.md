@@ -10,9 +10,9 @@ tags: [issue, operator, test, wave/operator-lock-contention]
 ## Problem
 
 `seon.operator-test/parked-datahike-collection-yields-lock-and-retains-store-custody`
-no longer reaches the `d/gc-storage` replacement that announces its required
-`gc-entered` event. The test exhausts its declared event backstop before it can
-exercise either custody assertion.
+once failed to reach the transitive `d/gc-storage` replacement that announced
+its required `gc-entered` event. The test exhausted its declared event backstop
+before it could exercise either custody assertion.
 
 ## Evidence
 
@@ -25,10 +25,10 @@ latch event`; the first took 101,070 ms and the confirmation took 20,024 ms.
 The failing test was last authored in `732573ddb`. It replaces
 `datahike.api/gc-storage` at `test/seon/operator_test.clj:930-934`, while the
 collection future calls `seon.operator/collect!` at lines 935-940. The required
-latch is counted down only inside that replacement, so the absent event proves
-that the current collection path does not invoke the Var the regression
-controls. The exact reason that path and replacement no longer meet remains to
-be verified at the collection owner; absence of the event is not health.
+latch was counted down only inside that replacement, so the absent event proved
+that one invocation did not reach the transitive Var the regression controlled.
+It did not establish that the production collection path had moved; absence of
+the event is not health.
 
 The failure did not reproduce at `388cb321c`: before any edit, the same
 explicit gate ran 28 tests and 226 assertions with zero failures and zero
@@ -49,10 +49,10 @@ without weakening the real-store custody proof.
 
 ## Acceptance
 
-The explicit `seon.operator-test` gate observes the GC entrance, proves that
-root lifecycle custody is released while store custody remains held, settles
-the withheld completion, and reaches a zero-error total tally in both the main
-worker and isolated confirmation path.
+The explicit `seon.operator-test` gate observes the direct store-collection
+entrance, proves that root lifecycle custody is released while store custody
+remains held, settles the withheld completion, and reaches a zero-error total
+tally.
 
 ## Resolution
 

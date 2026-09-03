@@ -166,6 +166,25 @@ session that loses nothing, and the system is developed for FULL
 REGENERATION EVERY TURN first — incremental diffs (56b/B5) are a later
 wave. The behavior spec's B1/B3/B5/B8 carry it.
 
+## 2026-09-03 (evening) — rulings 58–59, the ONE-platform document
+
+Owner rulings 58 (help bootstraps generatively; cross-namespace render
+accretion with a single-query order; provenance on the result-handle
+line; full regeneration every turn first, diffs later) and 59 (NO
+DELETION before one design doc; floor-only provenance; `result/<id>`
+handles revived as real symbols; closest-then-newest) are in the ledger
+and the behavior spec (B1, B3, B5→later, B8, B13, G6). The one-platform
+document the owner required —
+[repl-first-one-platform-2026-09-03.md](repl-first-one-platform-2026-09-03.md):
+what survives, what we add (generator as generated evals, the
+render-selection query measured live, polymorphic doc/dir, smart fit,
+result handles via the def-restore seam, floor provenance), what we
+refactor in place (11 rows), what we delete (D1–D11, each with replacement
+and proof gate), six waves — is drafted for markup. Wave 1 (platform
+floor) is proposed to start now; nothing else before the behavior ❓
+list empties. Lanes running: `instrument-absent-args`,
+`parked-collection`.
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
