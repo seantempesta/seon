@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, runtime, schema, wave/instrumentation-error-data]
 ---
@@ -50,3 +50,23 @@ silently omit message history to evade it.
   the installed wrapper.
 - A fresh cluster with no active run serves a non-empty prospective prompt at
   `GET /agent/root/debug` without writing render-cost facts.
+
+## Resolution
+
+Superseded 2026-09-03 after reproducing on a freshly initialized and reforked
+`instrument-absent` cluster. Malli validated `[:cat [:maybe :string]]` against
+`[nil]`, a generic instrumented `[:maybe :string]` positional returned `nil`,
+and the installed `seon.context/message-custody` wrapper returned
+`:seon.context/history` for `(db nil "root" message-eid)`. Instrumentation does
+not drop `:maybe` or select another arity here.
+
+Tracing the real debug request showed the actual arguments were
+`{:run-id nil :agent-id nil :message-eid 31068}`. The string refusal was for
+the required agent ID, not the optional run ID. The remaining debug-page
+failure is tracked separately in
+`docs/seon/issues/prospective-debug-walk-omits-agent-id.md`; it belongs to the
+protected `seon.render.web` owner rather than this instrumentation lane.
+
+`bin/test seon.instrument-test seon.fs-test seon.context-test` ran 26 tests
+containing 178 assertions with 0 failures and 0 errors, including the generic
+optional-positional regression and the installed `message-custody` wrapper.

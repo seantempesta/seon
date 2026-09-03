@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, runtime, wave/no-crash]
 ---
@@ -37,3 +37,15 @@ shared implementation those arities enter.
 After `seon.instrument/apply!`, a two-argument recursive deletion removes an
 in-root directory, preserves a symlink target, and returns `nil`; the direct
 three-argument form retains its required bounded-progress options contract.
+
+## Resolution
+
+Resolved 2026-09-03. Both public arities now enter the private
+`delete-recursively-impl!` directly, so the two-argument arm never re-enters
+the wrapped public Var with an undeclared third argument. The direct
+three-argument arm still requires the bounded-progress options map.
+
+`bin/test seon.instrument-test seon.fs-test seon.context-test` ran 26 tests
+containing 178 assertions with 0 failures and 0 errors. A fresh reforked
+`instrument-absent` cluster then returned `nil` from the instrumented
+two-argument call, removed its owned root, and preserved the symlink target.

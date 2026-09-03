@@ -46,6 +46,79 @@
                     (.toMillis TimeUnit/NANOSECONDS
                                (- now started-nanos))))))))))
 
+(defn- delete-recursively-impl!
+  [root target progress! progress-backstop-ms]
+  (let [root-path (normalized-path root)
+        target-path (normalized-path target)
+        started-nanos (System/nanoTime)
+        report-progress!
+        (progress-reporter progress! progress-backstop-ms started-nanos)
+        ^longs counts (long-array 4)]
+    (when-not (.startsWith target-path root-path)
+      (throw
+       (ex-info
+        "Recursive deletion target is outside its explicit root."
+        {::root (str root-path)
+         ::target (str target-path)})))
+    (when (some #(some-> (attributes ^Path %) .isSymbolicLink)
+                (intermediate-paths root-path target-path))
+      (throw
+       (ex-info
+        "Recursive deletion target crosses an intermediate symlink."
+        {::root (str root-path)
+         ::target (str target-path)})))
+    (letfn [(under-root? [^Path candidate]
+              (.startsWith (.normalize (.toAbsolutePath candidate))
+                           root-path))
+            (delete-one! [^Path entry attribute]
+              (when-not (under-root? entry)
+                (throw
+                 (ex-info
+                  "Recursive deletion reached outside its explicit root."
+                  {::root (str root-path)
+                   ::target (str target-path)
+                   ::entry (str entry)})))
+              (when (Files/deleteIfExists entry)
+                (aset-long counts 0 (inc (aget counts 0)))
+                (aset-long
+                 counts
+                 (cond
+                   (.isSymbolicLink ^BasicFileAttributes attribute) 3
+                   (.isDirectory ^BasicFileAttributes attribute) 2
+                   :else 1)
+                 (inc
+                  (aget counts
+                        (cond
+                          (.isSymbolicLink
+                           ^BasicFileAttributes attribute) 3
+                          (.isDirectory
+                           ^BasicFileAttributes attribute) 2
+                          :else 1))))
+                (when report-progress!
+                  (report-progress!
+                   (if (.isDirectory ^BasicFileAttributes attribute)
+                     entry
+                     (.getParent entry))
+                   {::deleted (aget counts 0)
+                    ::files (aget counts 1)
+                    ::directories (aget counts 2)
+                    ::symlinks (aget counts 3)}))))
+            (walk! [^Path entry ^BasicFileAttributes attribute]
+              (try
+                (when (.isDirectory attribute)
+                  (with-open [children (Files/newDirectoryStream entry)]
+                    (run!
+                     (fn [^Path child]
+                       (when-let [child-attribute (attributes child)]
+                         (walk! child child-attribute)))
+                     (vec children))))
+                (delete-one! entry attribute)
+                (catch NoSuchFileException _
+                  nil)))]
+      (when-let [target-attribute (attributes target-path)]
+        (walk! target-path target-attribute)))
+    nil))
+
 (defn delete-recursively!
   "Delete a path beneath its explicit root without following symlinks.
 
@@ -78,76 +151,8 @@
         [::progress-backstop-ms [:int {:min 1}]]]]]
      :nil]]}
   ([root target]
-   (delete-recursively! root target nil))
+   (delete-recursively-impl! root target nil nil))
   ([root target {progress! ::progress!
                  progress-backstop-ms ::progress-backstop-ms}]
-   (let [root-path (normalized-path root)
-         target-path (normalized-path target)
-         started-nanos (System/nanoTime)
-         report-progress!
-         (progress-reporter progress! progress-backstop-ms started-nanos)
-         ^longs counts (long-array 4)]
-     (when-not (.startsWith target-path root-path)
-       (throw
-        (ex-info
-         "Recursive deletion target is outside its explicit root."
-         {::root (str root-path)
-          ::target (str target-path)})))
-     (when (some #(some-> (attributes ^Path %) .isSymbolicLink)
-                 (intermediate-paths root-path target-path))
-       (throw
-        (ex-info
-         "Recursive deletion target crosses an intermediate symlink."
-         {::root (str root-path)
-          ::target (str target-path)})))
-     (letfn [(under-root? [^Path candidate]
-               (.startsWith (.normalize (.toAbsolutePath candidate))
-                            root-path))
-             (delete-one! [^Path entry attribute]
-               (when-not (under-root? entry)
-                 (throw
-                  (ex-info
-                   "Recursive deletion reached outside its explicit root."
-                   {::root (str root-path)
-                    ::target (str target-path)
-                    ::entry (str entry)})))
-               (when (Files/deleteIfExists entry)
-                 (aset-long counts 0 (inc (aget counts 0)))
-                 (aset-long
-                  counts
-                  (cond
-                    (.isSymbolicLink ^BasicFileAttributes attribute) 3
-                    (.isDirectory ^BasicFileAttributes attribute) 2
-                    :else 1)
-                  (inc
-                   (aget counts
-                         (cond
-                           (.isSymbolicLink
-                            ^BasicFileAttributes attribute) 3
-                           (.isDirectory
-                            ^BasicFileAttributes attribute) 2
-                           :else 1))))
-                 (when report-progress!
-                   (report-progress!
-                    (if (.isDirectory ^BasicFileAttributes attribute)
-                      entry
-                      (.getParent entry))
-                    {::deleted (aget counts 0)
-                     ::files (aget counts 1)
-                     ::directories (aget counts 2)
-                     ::symlinks (aget counts 3)}))))
-             (walk! [^Path entry ^BasicFileAttributes attribute]
-               (try
-                 (when (.isDirectory attribute)
-                   (with-open [children (Files/newDirectoryStream entry)]
-                     (run!
-                      (fn [^Path child]
-                        (when-let [child-attribute (attributes child)]
-                          (walk! child child-attribute)))
-                      (vec children))))
-                 (delete-one! entry attribute)
-                 (catch NoSuchFileException _
-                   nil)))]
-       (when-let [target-attribute (attributes target-path)]
-         (walk! target-path target-attribute)))
-     nil)))
+   (delete-recursively-impl!
+    root target progress! progress-backstop-ms)))

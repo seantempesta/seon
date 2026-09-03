@@ -16,7 +16,8 @@
   `docs/seon/issues/archive/loop-open-transaction-violates-transact-schema.md`.
   That is precisely the class instrumentation exists to catch, so the
   suite reproduces the shape rather than inventing one."
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+  (:require [clojure.java.io :as io]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
             [malli.instrument :as mi]
             [seon.ai.tokens :as tokens]
@@ -28,10 +29,12 @@
             [seon.env :as env]
             [seon.error :as error]
             [seon.flow :as flow]
+            [seon.fs :as fs]
             [seon.instrument :as instrument]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support])
+  (:import [java.nio.file Files LinkOption]))
 
 (def ^:private function-schemas-state
   ;; Malli exposes collection as a process-global defonce atom but no exact
@@ -124,6 +127,11 @@
   [value]
   value)
 
+(defn ^{:malli/schema [:=> [:cat [:maybe :string]] [:maybe :string]]}
+  optional-positional
+  [value]
+  value)
+
 (defn ^{:malli/schema [:=> [:cat :int] :int]} prefix-contract
   [value]
   value)
@@ -139,6 +147,43 @@
 ;;; ---------------------------------------------------------------------------
 ;;; It catches, and it throws
 ;;; ---------------------------------------------------------------------------
+
+(deftest optional-positional-nil-is-valid-under-instrumentation
+  (instrumented!
+   (fn [_]
+     (is (nil? (optional-positional nil))
+         "a :maybe positional is validated as nil, not as its child schema"))))
+
+(deftest a-public-multi-arity-does-not-reenter-its-instrumented-var
+  (let [base (str "tmp/instrumented-fs-test/" (random-uuid))
+        root (io/file base "owned")
+        outside (io/file base "outside")
+        sentinel (io/file outside "nested/must-survive.txt")
+        link (io/file root "linked-elsewhere")
+        no-follow (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])]
+    (try
+      (.mkdirs root)
+      (.mkdirs (.getParentFile sentinel))
+      (spit sentinel "do not delete me")
+      (Files/createSymbolicLink
+       (.toPath link)
+       (.toAbsolutePath (.toPath outside))
+       (make-array java.nio.file.attribute.FileAttribute 0))
+      (instrumented!
+       (fn [_]
+         (is (nil? (fs/delete-recursively! (.getPath root) (.getPath root))))
+         (is (not (Files/exists (.toPath root) no-follow)))
+         (is (Files/exists (.toPath sentinel) no-follow)
+             "the instrumented two-arity still preserves symlink targets")
+         (let [failure
+               (try
+                 (fs/delete-recursively! base (.getPath outside) nil)
+                 (catch Exception thrown thrown))]
+           (is (= :seon.instrument/contract-violated
+                  (:seon.error/kind (ex-data failure)))
+               "the direct three-arity still requires its options map"))))
+      (finally
+        (fs/delete-recursively! base base)))))
 
 (deftest a-wrong-shaped-call-throws-a-flat-error-value
   (instrumented!
