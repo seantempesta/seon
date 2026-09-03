@@ -33,7 +33,10 @@ value that form returns, rendered by the best render function for that
 value (56a). What the agent learns, it learns by reading ordinary
 Clojure: `doc`, `dir`, pull, Datalog, and the render functions' own
 docstrings. The agent is encouraged to write its own render functions,
-which become its HTML panels too (56). No walls of text.
+which become its HTML panels too (56). No walls of text. And ONE
+PLATFORM: nothing here is built as a parallel path; the implementation
+companion names what is refactored, deleted, and added BEFORE anything is
+deleted (59a).
 
 ---
 
@@ -156,10 +159,10 @@ greatest required-key coverage wins (35) and equal coverage is a loud
 tie (43). THE WHOLE ORDER IS ONE QUERY over program-graph facts — the
 query and the facts it needs are designed in the implementation
 companion (§ render order), not here.
-❓ B3.4 Among OTHER agents' functions at the same coverage: newest
-settled wins, or most used (usage children, 51) wins? (Recommendation:
-most used, then newest — accretion should reward what agents actually
-call.)
+**Ruled 59d — closest, then newest.** Among other agents' functions at
+equal coverage, the one whose namespace is CLOSEST to the viewing agent
+wins (a namespace the agent requires is one hop; a namespace one of
+those requires is two; …), then the most recently settled.
 ❓ B3.3 Inline naming (rung a): the value carries `:seon.render/ai
 'some/fn` [REAL as the explicit-producer rung]. Keep as is?
 
@@ -602,36 +605,25 @@ preferred: it is found because its contracted `defn` settled as a
 program row, never because a def happened to exist in a context
 [REAL: probes §7].
 
-### G6. Render provenance — every printed value says what printed it (owner direction 2026-09-03)
+### G6. Render provenance — only where the floor decided (ruled 59b/59c)
 
-**Statement.** "No magic": there is ONE automatic rendering system — the
-P of the REPL — where a value becomes text for the agent's context or
-hiccup for the browser. Whatever it renders, it can say WHICH function
-rendered it, including the floor. That provenance is data the walk
-records with the entry (today `seon.render/render-cost-fact` records the
-shape key, profile, and token estimate per render but NOT the producer
-symbol [REAL, render.clj:357] — the one missing attribute), and the two
-projections display it in their own idiom. Candidate displays [P, for
-markup]:
+**Statement.** When the agent CALLS a render function, that is an ordinary
+function call: nothing is enveloped or recorded about it. When a value
+hits the PRINT FLOOR — the automatic P of the REPL for `/ai`, or the
+block renderer for `/html` — the floor says what rendered it, so nothing
+happens by magic from the agent's point of view. The place it says so is
+the ONE after-value line the agent already reads: the result handle
+(B13). No provenance fact is transacted per render; if the floor's choice
+is kept at all, it rides as metadata beside the stored eval result.
 
 ```clojure
-;; /ai — a trailing comment on the entry, the form is one paste away
 my.agents.root=> (seon.db/q '[…messages to root…])
 […rendered…]
-;; rendered by seon.cluster.message/render-ai — (doc seon.cluster.message/render-ai)
+;; result/k7f2  rendered-by seon.cluster.message/render-ai
 ```
 
-```html
-<!-- /html — a data attribute on the block; the UI shows it on hover/inspect -->
-<section data-block="…" data-rendered-by="seon.cluster.message/render-html">…</section>
-```
-
-❓ G.4 Approve the two displays? (Alternative for `/ai`: a first line
-`;; via seon.cluster.message/render-ai` before the value; alternative for
-`/html`: a visible footer link to the function's namespace page.)
-❓ G.5 The floor's provenance reads `seon.print/fit` (or the value face
-that applied) — show it too, or only non-floor renders? (Recommendation:
-show it too — "the default" was explicitly requested.)
+For `/html` the same field rides the block (`data-rendered-by`), taken
+from the same stored metadata — one decision, two displays.
 
 ❓ G.1 `dir` per required namespace at hop 1: for `seon.db` (31 names)
 and the toolkit namespaces this is compact; for a large first-party
@@ -653,6 +645,47 @@ namespace, its doc is its introduction.)
 
 ---
 
+## B13. Result handles — every value is a symbol the agent can use (ruled 59c)
+
+**Statement.** Every eval result — the agent's own and the system's
+generated entries — is followed by ONE line naming it: `;; result/<id>`.
+`result/<id>` is a REAL symbol in the agent's context: `(get-in
+result/k7f2 [0 :seon.cluster.message/content])` works with no re-query,
+`(count result/k7f2)`, `(inbox-view result/k7f2)`. The agent is
+encouraged to use them. The stored result (the eval's `result-edn` or
+blob) is the value; on resume the system determines whether that value is
+still available and serializable and shows the handle ONLY then — a
+value that cannot be recalled has no handle, never a dangling one. The
+same line carries the floor's provenance (G6) when the floor rendered
+the value.
+
+**Transcript:**
+
+```clojure
+my.agents.root=> (seon.db/q '[:find [(pull ?m [*]) ...] :where [?m :seon.cluster.message/to [:seon.cluster.agent/id "root"]]])
+[{:seon.cluster.message/id "bootstrap-task:root" …}]
+;; result/k7f2  rendered-by seon.cluster.message/render-ai
+my.agents.root=> (:seon.cluster.message/content (first result/k7f2))
+"Define a durable contracted function named largest …"
+;; result/m9q1
+```
+
+**Lesson from the first implementation (quarry, not code):** the handle
+rode the result line, self-evaluated to the stashed value, and the
+reader treated a bare `result/<id>` line as a form, not prose
+(`src-old/seon/repl/parse.cljc:437-452` at `9e44815f5`). The simplest
+mechanism now is decided in the implementation companion: bind the
+handles in the agent's SCI context at turn start from the eval facts (the
+seam that already restores the agent's defs), so the reader needs no
+special case.
+
+❓ B13.1 Handle spelling: `result/<short-id>` (the first implementation's
+noun; `result` as the namespace) — keep, or Clojure's own `*1`-style is
+insufficient because it names only the last three. (Recommendation:
+keep `result/<id>`; the id derived from the eval's identity.)
+
+---
+
 ## B12. What the agent never sees
 
 No hand-authored narration; no rendered text stored as authority; no
@@ -664,7 +697,7 @@ or a `;;` comment, except the intro.
 
 ## Open questions, collected
 
-B1.4 B1.5 · B2.1 · B3.3 B3.4 · B4.1 B4.2 · B5.1 B5.2 B5.3 · B6.1
-B6.2 B6.3 · B7.1 B7.2 · B8.3 · B9.1 · B10.1 · B11.1 · B10.2 · G.1 G.3 G.4 G.5 (G.2 answered: provenance is recorded and displayed, see G6). Each carries a
+B1.4 B1.5 · B2.1 · B3.3 · B4.1 B4.2 · B5.1 B5.2 B5.3 · B6.1
+B6.2 B6.3 · B7.1 B7.2 · B8.3 · B9.1 · B10.1 · B11.1 · B10.2 · G.1 G.3 B13.1 (G.2/G.4/G.5 answered by ruling 59b: floor-only provenance on the result-handle line). Each carries a
 recommendation; a settled behavior loses its ❓ in this file in the same
 turn it is ruled.

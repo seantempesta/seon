@@ -848,6 +848,31 @@ numerically and a bare cross-citation is a defect to fix on sight.
     generation is nailed; incremental diffs (56b) come later — B5 is
     demoted to a later wave.
 
+59. **One design before any deletion; floor-only provenance; result
+    handles are real symbols; distance-then-newest** (owner, 2026-09-03,
+    on the parallel-paths register): (a) NOTHING IS DELETED until ONE
+    design document explains, on one platform, what is refactored, what
+    is deleted, and what is added — "we keep building parallel systems
+    doing different things; I want ONE design done correctly"; the
+    register's three-deletion order is accepted as INPUT to that document,
+    not as authorization. Understand the eval-result persistence (results
+    saved, blobs, recall) before touching it. (b) Render provenance is
+    expressed ONLY when a value hits the print floor (`/ai` or `/html`) —
+    so the agent sees no magic; an explicit call to a render function is
+    just a function call and is neither enveloped nor recorded; if the
+    floor's provenance lands as metadata beside the stored eval result,
+    fine; never a provenance fact per function call. (c) The
+    `result/<id>` handle after a value is REVIVED as a REAL symbol the
+    agent can reference (`(get-in result/k7f2 […])`), encouraged; on
+    resume the system transparently determines whether the value is still
+    available and serializable and shows the handle only then; find the
+    SIMPLEST mechanism (SCI ctx binding vs reader) and remove every other
+    code path doing something different — src-old is dead, quarry its
+    lessons only (`src-old/seon/repl/parse.cljc:437-452`,
+    `src-old/seon/agent/ctx.cljc:670-735` at `9e44815f5`). (d) Among other
+    agents' render functions at equal coverage: CLOSEST namespace wins
+    (a required namespace is one hop, its requires two, …), then newest.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
