@@ -116,6 +116,40 @@ neither edits the generator. Hot reload of any render function changes
 the next regeneration; a redefinition that breaks its contract is a typed
 error value rendered where it happened (2.4), never a blank.
 
+**Pinned to known concepts (owner's ask, 2026-09-03), and PROVED IN THE
+REPL first** ([probes §9](../research/repl-first-probes-2026-09-02.md),
+script `research/scripts/recursive-render-probe-2026-09-03.clj`, ~60
+lines, run against the live cluster's real namespace row, inbox, and
+function rows):
+
+- **WHAT renders a value — an open printer.** Clojure's `print-method` /
+  `clojure.pprint` dispatch: a recursive printer where each method prints
+  its sub-parts by calling print again. Ours dispatches on the value's
+  schema FAMILY (derived from its identity attribute — proved: every
+  identity attribute names exactly one entity family) through the contract
+  query, and resolves specificity by rank and namespace distance where
+  Clojure uses `prefer-method`.
+- **WHAT wraps every render — Ring middleware.** Bounding (`seon.print/fit`),
+  provenance (the floor announces itself), error-as-value, and cost are
+  cross-cutting; each is `render-fn → render-fn`, composed once around the
+  selected function. Proved: `wrap-error`, `wrap-cost`, `wrap-provenance`
+  in the probe; a throwing face becomes a flat error value, never a blank.
+- **WHAT flows through the tree — an interceptor context map.** Profile,
+  remaining budget, depth, path, seen set, accumulated cost ride one ctx
+  map threaded through the recursion (Pedestal's shape), no dynamic vars.
+  Proved: per-node ms/chars accounted in the ctx across 7 nodes.
+- **The `/html` side — Hiccup components.** A component is a function of
+  data returning hiccup that calls child components: level 0 page layout →
+  level 1 entry block → level 2 value → floor, same selection, same
+  middleware.
+
+What Ring/interceptors do NOT model is the recursion itself — a pipeline
+is linear, a transcript is a tree — which is why the printer is the
+dispatch model and the pipeline is the wrapper model. Proved
+composability: swapping the viewing agent's message face changed one
+entry's value and nothing else; swapping another agent's entry layout
+changed every entry's shape and no value; 3.3 ms cold for the transcript.
+
 **What "render function" means (owner, 2026-09-03; ruling 60).** Any
 function whose INPUTS are satisfiable from the value being rendered —
 plus what call preparation can inject (the current database, the

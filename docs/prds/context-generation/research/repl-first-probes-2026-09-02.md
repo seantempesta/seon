@@ -184,3 +184,82 @@ when the eval family is redesigned (48b).
   namespace or a schema key). The polymorphic `doc` (ruling 56 preamble)
   replaces this dispatch with one over program-graph rows — lane
   `doc-polymorphic`.
+
+
+## 9. The recursive renderer, prototyped on real data (2026-09-03; script: `scripts/recursive-render-probe-2026-09-03.clj`)
+
+Loaded into the live `ctxprobe` JVM. Stand-ins are named in the script:
+a `faces` map plays the answer of the contract query (zero program rows
+declare `:seon.render/ai` as an output ref today), `pr-str` with print
+limits plays `seon.print/fit`. Everything else is real: the database, the
+three forms an agent could type, their live results.
+
+**Mechanism (≈60 lines):** `render` = select the most specific render
+function for the value (inline content/symbol → lowest registered rank →
+floor), wrap it in three Ring-style middlewares (`wrap-error`: a throwing
+face becomes a flat error value rendered by the floor; `wrap-cost`: per-node
+ms/chars accumulated into the threaded ctx map; `wrap-provenance`: the
+floor announces itself, explicit functions do not — ruling 59b), call it;
+the selected function calls `render` on its parts. Families are DERIVED
+from the value's identity attribute (`:seon.ns/name` → `:seon.ns/ns`,
+`:seon.fn/sym` → `:seon.fn/fn`, `:seon.cluster.message/id` →
+`:seon.cluster.message/message`, `:seon.cluster.eval/id` →
+`:seon.cluster.eval/receipt` — each identity attribute names exactly ONE
+entity family; the first draft guessed keys and fell to the floor, which
+is the lesson).
+
+**Three passes, one transcript value (3 entries):**
+- pass 1 — general faces only: the namespace and function-row entries
+  print through their faces; the message collection has no face and hits
+  the floor, which annotates itself (`;; rendered-by probe.render/floor`);
+- pass 2 — the viewing agent declares `inbox-view` (rank 2): ONLY the
+  inbox entry's value changes;
+- pass 3 — another agent's entry layout (rank 3) replaces the entry face:
+  every entry's SHAPE changes, no value face touched.
+
+Timing: pass 1 3.3 ms cold, pass 3 0.10 ms; per-node cost from the ctx:
+transcript 2.0 ms / 1,962 chars, the floor node 0.23 ms / 914 chars.
+
+**CS pinning (owner's question):** the recursion is Clojure's own printer
+model — `print-method`/`pprint` dispatch by type where each method calls
+print on sub-parts — with the dispatch table replaced by the contract
+QUERY over schema families (dispatch by data, not JVM type) and
+specificity by rank/distance instead of `prefer-method`. Ring handlers
+and Pedestal interceptors are the right model for the part of the problem
+that is NOT the tree: the cross-cutting behavior around each render call
+(bounding, provenance, error-as-value, cost) composes as middleware
+`(render-fn → render-fn)`, and the per-render context (profile, budget
+remaining, depth, path, seen set) threads through as an interceptor-style
+context map — no dynamic vars. So: printer dispatch for WHAT renders,
+Ring middleware for WHAT WRAPS every render, interceptor ctx for WHAT
+FLOWS through the tree; hiccup/Reagent components are the same shape on
+the `/html` side (a component is a function of data returning hiccup that
+calls child components).
+
+Output excerpt (pass 1 → pass 3, verbatim):
+
+```
+;;;; PASS 1 — general faces only; messages have no face → the floor
+my.agents.root=> (seon.db/pull (quote [:seon.ns/name #:seon.ns{:requires [:seon.ns/name]} #:seon.ns{:refers [:seon.ns.refer/local]}]) [:seon.ns/name (quote my.agents.root)])
+namespace my.agents.root
+  requires: my.message my.run seon.bootstrap seon.db
+  refers:   help dir doc
+;; result/a1
+
+my.agents.root=> (seon.db/q (quote [:find [(pull ?m [:seon.cluster.message/id :seon.cluster.message/at :seon.cluster.message/content]) ...] :where [?m :seon.cluster.message/to [:seon.cluster.agent/id "root"]]]))
+[#:seon.cluster.message{:id "bootstrap-task:root", :at #inst "2026-09-02T19:54:58.381-00:00", :content "Define a durable contracted function named largest that returns the row with the greatest :example/amount, or {} for empty input. Call it once, query its stored :seon.fn/spec, then complete with a short reply naming what you built and its contract."} #:seon.cluster.message{:id "maintenance-error/maintenance-receipt/[\"root/maintenance/reap-dead-roots\" #inst \"2026-09-03T02:15:00.000-00:00\"]-your-run", :at #inst "2026-09-03T02:15:00.712-00:00", :content "seon.fs/delete-recursively! violated its contract (invalid-input): invalid type (:seon.instrument/contract-violated). Inspect error maintenance-error/maintenance-receipt/[\"root/maintenance/reap-dead-roots\" #inst \"2026-09-03T02:15:00.000-00:00\"]; nothing was ret
+…
+;;;; PASS 3 — planner's entry face (rank 3) now shapes every entry; values untouched
+my.agents.root=> (seon.db/pull (quote [:seon.ns/name #:seon.ns{:requires [:seon.ns/name]} #:seon.ns{:refers [:seon.ns.refer/local]}]) [:seon.ns/name (quote my.agents.root)])
+⟹ namespace my.agents.root
+  requires: my.message my.run seon.bootstrap seon.db
+  refers:   help dir doc
+⟸ result/a1
+
+my.agents.root=> (seon.db/q (quote [:find [(pull ?m [:seon.cluster.message/id :seon.cluster.message/at :seon.cluster.message/content]) ...] :where [?m :seon.cluster.message/to [:seon.cluster.agent/id "root"]]]))
+⟹ Wed Sep 02 13:54:58 CST 2026  Define a durable contracted function named largest that retu…
+Wed Sep 02 20:15:
+…
+;;;; timing: pass1 3.288375 ms, pass3 0.100083 ms; identity attrs known: 40
+;;;; per-node cost (pass 1, from the threaded ctx): ({:producer probe.render/namespace-ai, :ms 0.32, :chars 102} {:producer probe.render/entry-ai, :ms 0.68, :chars 289} {:producer probe.render/floor, :ms 0.23, :chars 914} {:producer probe.render/entry-ai, :ms 0.41, :chars 1174} {:producer probe.render/functions-ai, :ms 0.49, :chars 305} {:producer probe.render/entry-ai, :ms 0.51, :chars 461} {:producer probe.render/transcript-ai, :ms 2.0, :chars 1962})
+```
