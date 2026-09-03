@@ -130,6 +130,42 @@ MCP door prints zero-character strings above the blob threshold (same
 issue). `runtime_status` fix landed but the live `ctxprobe` JVM serves
 pre-fix code until restart.
 
+## 2026-09-03 (late afternoon) — round 3 landed, round 4 launched, ruling 58
+
+**Landed:** `ee11cfa45`/`ba94d7b3c` analyze-form-row — a nil namespace pull
+now returns a typed `:seon.fn/namespace-unresolvable` error, never a
+partial row; the exact prose-prefixed defn settles at HEAD (real run-loop
+regression added; the historical cause on ctxprobe is attributed to that
+JVM's age, not the current path); `b136f574f` reap-nil-path — malformed
+claims are named refusals in the reap result (the nil was NOT a root path,
+see the new class below); `78cee3fea` debug-page-3 — debug requests carry
+the agent profile and the page renders the diagnostic. Research landed:
+[parallel-paths-register-2026-09-03.md](../research/parallel-paths-register-2026-09-03.md)
+(three semantic context assemblers, two prompt glue paths; the
+refactor/merge/delete register for the implementation phase).
+
+**New class found by two lanes independently — instrumented Vars refuse
+values their own declarations allow:** `seon.fs/delete-recursively!`'s
+2-arity re-enters the wrapped 3-arity with nil options → every 2-arg
+deletion refuses under instrumentation
+([issue](../../../seon/issues/delete-recursively-two-arity-refuses-under-instrumentation.md));
+`seon.context/message-custody` declares `[:maybe run-id]` and is refused
+nil → the history walk fails for any message when the agent has no
+current run — a context-generation blocker between runs
+([issue](../../../seon/issues/instrumentation-rejects-message-custodys-declared-absent-run.md)).
+Lane `instrument-absent-args` owns the class. Also: the operator
+parked-collection regression no longer reaches its GC latch
+([issue](../../../seon/issues/parked-collection-regression-no-longer-reaches-gc-latch.md),
+lane `parked-collection`); lanes are not given the Seon MCP tools
+([issue](../../../seon/issues/lane-toolset-omits-required-seon-mcp-tools.md)).
+
+**Ruling 58 (owner):** `(help)` bootstraps generatively; render functions
+accrete ACROSS agent namespaces with the whole order as one query; render
+provenance rides the existing after-value comment; compaction = a fresh
+session that loses nothing, and the system is developed for FULL
+REGENERATION EVERY TURN first — incremental diffs (56b/B5) are a later
+wave. The behavior spec's B1/B3/B5/B8 carry it.
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
