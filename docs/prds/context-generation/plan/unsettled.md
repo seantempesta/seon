@@ -185,6 +185,26 @@ floor) is proposed to start now; nothing else before the behavior ❓
 list empties. Lanes running: `instrument-absent-args`,
 `parked-collection`.
 
+## 2026-09-03 (night) — ruling 60, the document restructured for review, lanes quiet
+
+Owner ruling 60 (render function = any function whose inputs are
+satisfiable from the value + injectables and whose output is `/ai` string
+or `/html` hiccup; inline content or symbol allowed; handle ids derived;
+budget = config fact in TOKENS, 5k; NO CODING until the document
+convinces). The one-platform document now opens with the goal, what we
+have (register in one screen), and §0b TURTLES — the render-function
+dolls by family (layout → entry → value → floor), the transcript as a
+pull rendered, the no-hardcoding test. Landed: `5ec65c82c`
+instrument-absent-args (delete-recursively! arities share one
+implementation; the message-custody attribution was REFUTED — Malli
+honors `:maybe`; the debug page's real cause is a missing agent id,
+[issue](../../../seon/issues/prospective-debug-walk-omits-agent-id.md));
+`8a261c9c1`/`6e2fb68f7` parked-collection (production still collects;
+the regression now parks the direct seam; note: that lane amended the
+orchestrator's commit `d5889c194` → `f8bac9cd4`, content intact). No
+lanes running. Platform fixes continue only on code that stays (§4 of the
+one-platform doc names what does not).
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
