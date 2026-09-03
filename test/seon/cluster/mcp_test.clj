@@ -9,6 +9,7 @@
             [seon.db :as db]
             [seon.env :as env]
             [seon.operator.runtime :refer [running-instances]]
+            [seon.oversight :as oversight]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -292,6 +293,35 @@
           (is (< (utf8-size result) 1024))))
       (finally
         (swap! running-instances dissoc cluster-name)))))
+
+(deftest live-runtime-observation-hands-its-projection-to-flow-health
+  (let [cluster-name "mcp-runtime-projection-test"]
+    (support/with-database
+      {:seon.test-support/fresh-store? true}
+      (fn [connection]
+        (config/apply! {:seon.db/connection connection
+                        :seon.boot/cluster-name cluster-name})
+        (support/seed-cluster! connection cluster-name)
+        (swap! running-instances assoc cluster-name
+               (assoc (running-instance connection cluster-name)
+                      :seon.flow/graph ::graph))
+        (try
+          (with-redefs
+           [cluster/readiness
+            (fn [_] {:seon.boot/cluster-name cluster-name})
+            oversight/cluster-flow-status
+            (fn [database _]
+              (let [effective (config/effective database cluster-name)]
+                (if (:seon.error/kind effective)
+                  effective
+                  {:seon.oversight/plumbing []})))]
+            (let [result (cluster/mcp-runtime-observation cluster-name)]
+              (is (= :observed (:seon.dev.mcp/health result)))
+              (is (= {:seon.oversight/plumbing []}
+                     (:seon.dev.mcp/flow result)))
+              (is (not (contains? result :seon.error/kind)))))
+          (finally
+            (swap! running-instances dissoc cluster-name)))))))
 
 (deftest oversized-values-share-one-digest-across-storeless-and-stored-modes
   (let [cluster-name "mcp-value-test"

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, mcp, config, observability]
 ---
@@ -18,3 +18,15 @@ working pattern, cf. `src/seon/config.clj:453`). Effect: the status
 surface reports an error about ITSELF on every healthy cluster —
 noise that trains readers to ignore the runtime section, the
 absence-of-signal failure class in reverse.
+
+## Resolution — 2026-09-03
+
+`seon.cluster/mcp-runtime-observation` now hands the instance's
+`:seon.sci.eval/projection-state` around `oversight/cluster-flow-status`
+(the `mcp-effective` pattern); regression
+`live-runtime-observation-hands-its-projection-to-flow-health` in
+`test/seon/cluster/mcp_test.clj`. Diagnosed by lane `mcp-status-2/-3`
+(isolated live proof: valid observations in 21 ms), landed by the
+orchestrator; `bin/test seon.cluster.mcp-test` 12 tests / 56 assertions /
+0 failures. Live `runtime_status` re-verification is owed at the next
+cluster restart (the running `ctxprobe` JVM serves pre-fix code).

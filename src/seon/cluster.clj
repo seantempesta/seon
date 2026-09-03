@@ -493,6 +493,9 @@
   [cluster-name]
   (let [instance (mcp-instance cluster-name)
         connection (:seon.boot/cluster-connection instance)
+        projection-state
+        (get-in instance
+                [:seon.sci.eval/ctx :seon.sci.eval/projection-state])
         ready (when instance (readiness instance))
         problem-counts
         (into (sorted-map)
@@ -506,7 +509,9 @@
              (if connection :observed :unknown)
              :seon.dev.mcp/flow
              (if (and connection (:seon.flow/graph instance))
-               (oversight/cluster-flow-status @connection instance)
+               (schema/call-with-projection-state
+                projection-state
+                #(oversight/cluster-flow-status @connection instance))
                :unknown)
              :seon.dev.mcp/problem-counts problem-counts}
       readiness-face (assoc :seon.dev.mcp/readiness readiness-face))))
