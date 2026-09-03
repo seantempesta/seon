@@ -56,6 +56,50 @@ schema bodies and flatten arities
 ([issue](../../../seon/issues/doc-contract-lines-print-schema-bodies-and-flatten-arity-alternatives.md),
 now critical-path teaching work).
 
+## Session resumed (2026-09-02, evening) — lane round 1 outcome, round 2 launched
+
+**Landed (reviewed):** `3c162853f` armed-reds — both armed reds green; the
+fault WAS committed as a fact all along: core.async.flow retains a proc's
+pre-transition `:paused` status after a throwing transition
+(`reference-code/core.async/.../flow/impl.clj:282`), so the test wedged in
+teardown's armer-quiescence wait, not in the fact await; the boot-window
+test now awaits the run whose trigger is the boot-window message.
+`927229929` gen-loop — the fixture treated receipt-row presence after a
+fixed drive loop as settlement; it now awaits the exact terminal census
+through the bounded event boundary (production settlement is synchronous
+and atomic, `loop.clj:682`/`run.clj:1108`; a writer race was REFUTED).
+`fb3a61abe` gate-evidence — bare-gate evidence routes through the live
+store holder's advertised prepl (offline when no holder), the tally
+prints BEFORE persistence and the exit code derives from tests alone,
+recording failure is one loud typed line. `ab9559929` attempt-traces —
+the fixture's no-backup world made explicit; whether the seed is green at
+HEAD is UNVERIFIED (lane round 2). `612122fa6` issue: the preflight sweep
+race.
+
+**New blockers found by the lanes:** the evidence write through the live
+holder is REFUSED because instrumentation installs the SIBLING's contract
+on `seon.schema.datahike/resolve-datahike-form`
+([issue](../../../seon/issues/instrumentation-installs-sibling-contract-on-datahike-resolver.md),
+class/p1 — stale-green stays UNKNOWN until fixed); `bin/test`'s preflight
+sweep races concurrent invocations and aborts gates
+([issue](../../../seon/issues/bin-test-preflight-sweep-races-concurrent-invocations.md)).
+Diagnosed without landing: `runtime_status` (cluster.clj:509 lacks the
+projection; fix pattern = `mcp-effective`), `/agent/<id>/debug` (page
+renders only the message; suspected missing `:seon.render/profile`).
+
+**Round 2 lanes (launched ~21:30Z, tree quiet):** `mcp-status-3`,
+`debug-page-3`, `sibling-contract`, `sweep-race`, `db-projection`
+(the class/p1 per-call projection rebuild), `attempt-traces-3`. Exhaust:
+six returned lane roots swept; one orphan runner-exchange helper reaped;
+`tmp/test-runs` holds 1.0 GB of retained roots (holderless; sweep after
+the sweep-race lane lands).
+
+**Design:** the [REPL-first design draft](repl-first-context-design-2026-09-02.md)
+§9 carries four forks for the owner (faces as contracted functions vs the
+schema property; since-shaped delta vs revision diff; implicit printer vs
+an explicit agent-callable; identities on `[*]` ref leaves). Generator
+work starts only after his answers and the platform items above.
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
