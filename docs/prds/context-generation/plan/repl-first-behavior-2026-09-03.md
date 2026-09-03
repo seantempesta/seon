@@ -379,6 +379,183 @@ reverse edge; B1 (2) should use a nested selector.)
 
 ---
 
+## G. How the context is generated — the walk, spelled as forms
+
+**Statement (owner, 2026-09-03).** The context is generated from the
+agent's data and its graph neighbourhood, STRUCTURED AS FORMS that we
+evaluate to surface the data and to explain how we found it. It is a
+walk along the agent's entity: at every entity we visit we (1) find the
+render functions for what we are about to show, (2) `dir` the
+namespaces those functions and readers live in, (3) `doc` the functions
+the entry will use — so the agent is taught how to do the same thing
+before it sees the result — and (4) emit the data entry. New data is
+surfaced the same way, except that a query we already emitted earlier is
+shown as its DIFF against the basis we recorded, never as a second full
+copy.
+
+### G1. The walk — one hop at a time, both directions
+
+The root is the agent's namespace row `[:seon.ns/name my.agents.root]`.
+The installed schema says which attributes are refs and which are
+identities; every ref attribute is an edge, followed forward
+(`:seon.ns/requires`) and in reverse (`:seon.cluster.agent/_namespace`)
+[REAL: the walk's root-selector already enumerates both]. Distance is
+spent one hop per edge (default 2 [REAL]); a collection edge is one
+query for the whole collection (55). What the walk visits for root on a
+fresh cluster, in discovery order:
+
+| hop | edge followed | entity reached | shown as |
+|---|---|---|---|
+| 0 | — | ns row `my.agents.root` | `(doc *ns*)` |
+| 1 | `:seon.ns/requires` (fwd, 4 refs) | ns rows `my.message` `my.run` `seon.bootstrap` `seon.db` | `(dir my.message)` … — a namespace's entry IS its `dir` |
+| 1 | `:seon.cluster.agent/_namespace` (rev) | agent row `"root"` | folded into `(doc *ns*)` (owner agent line) |
+| 2 | `:seon.cluster.message/_to` (rev from agent) | the messages addressed to root | ONE `q` for the collection |
+| 2 | `:seon.cluster.run/_agent` (rev) | the open run + its trigger | one pull; the trigger message is the LAST entry |
+| 2 | error facts → agent (rev) [?] | errors routed to root | one `q`, only if any exist |
+
+### G2. What each visit emits — teaching first, then the entry
+
+For each data entry the walk is about to emit, it derives, in this
+order, and emits only what has not already appeared earlier in the
+transcript (B6: a name already shown or already used correctly by the
+agent demands nothing):
+
+1. **the reader spelling** — the form that surfaces the data; a pull
+   by lookup ref, or a `q` over the edge;
+2. **the render function** that will print the value (B3's most
+   specific), found from the value's family;
+3. **`dir`** of every namespace the entry references: the render
+   function's namespace, the reader family's namespace (`my.message`),
+   and `seon.db` for the query functions themselves;
+4. **`doc`** of every function the entry's form calls and of the render
+   function that printed it;
+5. **the entry** itself: `ns=> (form)` + the rendered value.
+
+Worked, for hop 2's message collection on a fresh cluster (root has no
+history, so every demand is unmet):
+
+```clojure
+;; 3. dir — the namespaces this entry references, once each in the transcript
+my.agents.root=> (dir seon.db)
+as-of basis-t … pull pull-many q … since transact!
+my.agents.root=> (dir my.message)
+decline inbox read send
+my.agents.root=> (dir seon.cluster.message)                        ; the family's own namespace: where the general render fn lives
+render-ai render-html …
+
+;; 4. doc — the functions the form calls, and the function that will render the value
+my.agents.root=> (doc seon.db/q)
+seon.db/q  ([query-or-database & arguments]) …
+my.agents.root=> (doc seon.cluster.message/render-ai)
+seon.cluster.message/render-ai  ([unit])  `:seon.render/ai` — one message, as the sentence it was. …
+
+;; 5. the entry
+my.agents.root=> (seon.db/q '[:find [(pull ?m [*]) ...]
+                              :where [?m :seon.cluster.message/to [:seon.cluster.agent/id "root"]]])
+[{:seon.cluster.message/id "bootstrap-task:root" … }]                ; printed by seon.cluster.message/render-ai
+```
+
+The agent has now been shown, before it ever needed them: the query
+namespace, the family's reader namespace, the exact query, and the
+function that turned the rows into what it read — and every one of those
+is a form it can type. Nothing else is said about them.
+
+### G3. The whole first screen, assembled
+
+Applying G2 to every hop of G1 and ordering by "teach before use, goal
+last" (52b) yields B1's screen. Concretely for root on the fresh cluster:
+
+```clojure
+;; intro (the one instruction)
+my.agents.root=> (dir seon.db)            ;; teaching demanded by the pulls below
+my.agents.root=> (doc seon.db/pull)
+my.agents.root=> (doc seon.db/q)
+my.agents.root=> (doc *ns*)               ;; hop 0 — who am I (uses pull; renders via the ns render fn)
+my.agents.root=> (dir my.message)         ;; hop 1 — each required namespace IS a dir
+my.agents.root=> (dir my.run)
+my.agents.root=> (dir seon.bootstrap)
+my.agents.root=> (dir seon.cluster.message) ;; demanded by the render fn of the next entry
+my.agents.root=> (doc seon.cluster.message/render-ai)
+my.agents.root=> (seon.db/q '[…messages to root…])            ;; hop 2 — the inbox, whole
+my.agents.root=> (doc seon.cluster.run/render-ai)             ;; demanded by the run entry
+my.agents.root=> (seon.db/pull '[:seon.cluster.run/id :seon.cluster.run/opened-at
+                                 {:seon.cluster.run/trigger [:seon.cluster.message/id]}]
+                                [:seon.cluster.run/id "bootstrap:root"])   ;; hop 2 — my open run
+my.agents.root=> (doc my.message/read)
+my.agents.root=> (my.message/read "bootstrap-task:root")       ;; the trigger, last
+```
+
+Every `dir`/`doc` line above exists because a LATER line demands it; a
+demand already satisfied is not repeated. If root later requires
+`my.plan`, the next screen gains `(dir my.plan)` and whatever its data
+demands — the context explains itself through the same walk.
+
+### G4. Turn N — new data arrives
+
+Each generated entry is an eval the system typed on the agent's behalf:
+its form, its basis, and its result are stored like the agent's own
+evals (53). At the next generation, for every discovery query the walk
+reaches again:
+
+- **previously emitted, answer unchanged** → nothing (no entry);
+- **previously emitted, answer changed** → ONE diff entry spelled
+  against the basis recorded on the earlier eval, rendered as additions
+  and deletions (B5); the earlier entry stays where it was;
+- **never emitted** (a ref that did not exist before — a first message
+  from a new agent, a first error) → a fresh entry, with its teaching
+  demands checked against everything already shown;
+- **effectful** (the form reaches an external sink) → the stored result
+  replays; never re-run (54c).
+
+Worked: a second message arrives from agent `planner` between turns 1
+and 3.
+
+```clojure
+;; the inbox query was emitted at basis 536870930 (turn 1). It has changed:
+my.agents.root=> (seon.db/diff 536870930                              ; [P] spelling per B5.1
+                   '[:find [(pull ?m [*]) ...]
+                     :where [?m :seon.cluster.message/to [:seon.cluster.agent/id "root"]]])
++ {:seon.cluster.message/id "planner-1" :seon.cluster.message/at #inst "…"
+   :seon.cluster.message/from [:seon.cluster.agent/id "planner"] :seon.cluster.message/content "…"}
+;; `planner` is a new name in the transcript → its demand is met BEFORE the diff:
+my.agents.root=> (doc my.agents.planner)                              ; [P] the other agent's namespace doc: purpose line + publics
+```
+
+Order within turn N: system entries (what changed while you were away)
+first, then the agent's own forms of that turn (B7.1), then the
+REPL-state line.
+
+### G5. The agent's own render function changes what the walk emits
+
+After the agent defines `inbox-view` (B3), the NEXT generation's message
+entry is printed by it, and its teaching demand changes accordingly:
+`(doc my.agents.root/inbox-view)` is already satisfied (the agent wrote
+it — its own correct use demands nothing), so the entry simply prints
+through the new function. A render function is a fact before it is
+preferred: it is found because its contracted `defn` settled as a
+program row, never because a def happened to exist in a context
+[REAL: probes §7].
+
+❓ G.1 `dir` per required namespace at hop 1: for `seon.db` (31 names)
+and the toolkit namespaces this is compact; for a large first-party
+namespace `dir` could be long. Cap by the render profile like any value,
+or show `dir` only for namespaces a later entry actually uses?
+(Recommendation: `dir` every REQUIRED namespace — the agent's own `ns`
+form is the declaration that it wants them — bounded by the profile
+with an elision value; other namespaces only on demand.)
+❓ G.2 The general render function's `doc` (e.g. `seon.cluster.message/render-ai`)
+appears before the entry it renders. Is that the right amount of
+"explain how we found it", or should the entry carry one trailing
+comment `;; rendered by seon.cluster.message/render-ai` instead of a
+full doc? (Recommendation: the trailing comment for rung (c) faces,
+the full `doc` only when the agent later errs on it — the doc is one
+form away.)
+❓ G.3 Other agents met through data (a `from` ref): `(doc my.agents.planner)`
+as the teaching entry — right unit? (Recommendation: yes; an agent IS a
+namespace, its doc is its introduction.)
+
+---
+
 ## B12. What the agent never sees
 
 No hand-authored narration; no rendered text stored as authority; no
@@ -391,6 +568,6 @@ or a `;;` comment, except the intro.
 ## Open questions, collected
 
 B1.1 B1.3 · B2.1 · B3.1 B3.2 B3.3 · B4.1 B4.2 · B5.1 B5.2 B5.3 · B6.1
-B6.2 B6.3 · B7.1 B7.2 · B8.1 B8.2 · B9.1 · B10.1 · B11.1. Each carries a
+B6.2 B6.3 · B7.1 B7.2 · B8.1 B8.2 · B9.1 · B10.1 · B11.1 · G.1 G.2 G.3. Each carries a
 recommendation; a settled behavior loses its ❓ in this file in the same
 turn it is ruled.
