@@ -30,6 +30,7 @@
             [seon.flow :as flow]
             [seon.instrument :as instrument]
             [seon.schema :as schema]
+            [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as test-support]))
 
 (def ^:private function-schemas-state
@@ -122,6 +123,14 @@
 (defn ^{:malli/schema [:=> [:cat :int] :int]} integer-inspector
   [value]
   value)
+
+(defn ^{:malli/schema [:=> [:cat :int] :int]} prefix-contract
+  [value]
+  value)
+
+(defn ^{:malli/schema [:=> [:cat :string :string] :string]} prefix-contract-in
+  [left right]
+  (str left right))
 
 (defn- many-invalid-values
   []
@@ -428,6 +437,31 @@
        (is (= (instrument/instrumented) (instrument/instrumented))
            "and the second pass wrapped no wrapper: malli unwraps to
             ::original before re-instrumenting")))))
+
+(deftest prefix-related-sibling-vars-keep-their-own-contracts
+  (instrumented!
+   (fn [_]
+     (let [database-form
+           [:symbol {:seon.db/identity true :seon.search/index :symbol}]]
+       (is (= database-form
+              (schema.datahike/resolve-datahike-form database-form))
+           "the observed one-argument resolver remains callable under the
+            operation's handed projection")
+       (is (= 7 (prefix-contract 7)))
+       (is (= "left-right" (prefix-contract-in "left-" "right")))
+       (doseq [[expected-function invoke]
+               [['seon.instrument-test/prefix-contract
+                 #(apply prefix-contract ["left" "right"])]
+                ['seon.instrument-test/prefix-contract-in
+                 #(apply prefix-contract-in [7])]]]
+         (let [failure (try (invoke) (catch Exception thrown thrown))]
+           (is (= :seon.instrument/contract-violated
+                  (:seon.error/kind (ex-data failure))))
+           (is (= expected-function
+                  (get-in (ex-data failure)
+                          [:seon.error/data
+                           :seon.error/diagnostic-operation]))
+               "each exact qualified Var symbol selects its own contract")))))))
 
 (deftest registration-failure-names-the-var-and-authored-contract
   (let [namespace-name 'n5.registration.probe
