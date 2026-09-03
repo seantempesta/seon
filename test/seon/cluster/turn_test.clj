@@ -311,6 +311,45 @@
                          :seon.cluster.work/next work}
                         (:seon.cluster.work/now request)))))))))
 
+(deftest a-prose-prefixed-contracted-defn-settles-and-doc-answers
+  (with-cluster
+    (fn [cluster]
+      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
+                           'seon.sci.eval/evaluate)
+            connection (:seon.db/connection cluster)
+            source
+            (str
+             "; The situation is clear - this cluster has stale function references that need a JVM restart to fix. The maintenance tasks are failing because the operator functions (`seon.operator/census-processes!`, `seon.operator/observe-footprint!`, etc.) have been removed from the published program graph but are still loaded in the JVM.\n\n"
+             "; This is a systemic issue that I can't fix from within the REPL - it requires someone to restart the JVM. Let me note this finding and see if I can do anything else productive.\n\n"
+             "; Actually, let me look at this from the bootstrap task perspective - I had a task to define a function called `largest`. Let me focus on that:\n\n"
+             "(defn largest\n"
+             "  \"Return the row with the greatest :example/amount, or {} for empty input.\"\n"
+             "  {:malli/schema [:=> [:cat [:sequential :map]] [:or :map]]}\n"
+             "  [rows]\n"
+             "  (if (empty? rows)\n"
+             "    {}\n"
+             "    (apply max-key #(or (:example/amount %) 0) rows)))\n"
+             "(doc my.agents.agent-a/largest)\n"
+             "(my.run/complete \"built largest\")")]
+        (with-redefs [ai/complete (fn [_] {:seon.ai/text source})]
+          (let [reports (drive! cluster 10)
+                row (db/pull @connection
+                             '[:seon.fn/sym :seon.fn/spec :seon.fn/doc]
+                             [:seon.fn/sym "my.agents.agent-a/largest"])
+                doc-output
+                (db/q '[:find ?output .
+                        :where
+                        [?receipt :seon.cluster.eval/ordinal 1]
+                        [?receipt :seon.cluster.eval/output ?output]]
+                      @connection)]
+            (is (= [:open :call :resume]
+                   (mapv :seon.cluster.work/situation reports)))
+            (is (= "[:=> [:cat [:sequential :map]] [:or :map]]"
+                   (:seon.fn/spec row)))
+            (is (= "Return the row with the greatest :example/amount, or {} for empty input."
+                   (:seon.fn/doc row)))
+            (is (str/includes? doc-output "my.agents.agent-a/largest"))))))))
+
 (defn- drive-agent!
   "Run one agent's passes until that agent is idle, or `limit` is reached."
   [cluster agent-id limit]

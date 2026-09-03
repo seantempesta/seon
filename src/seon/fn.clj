@@ -608,62 +608,79 @@
      [:source :seon.cluster.run.form/source]
      [:namespace-ref :seon.cluster.run.form/ns]
      [:program-row [:maybe :seon.program/row]]]
-    [:tuple
-     [:map
-      [:seon.fn/calls {:optional true} :seon.fn/calls]
-      [:seon.fn/keywords {:optional true} :seon.fn/keywords]
-      [:seon.test/subject {:optional true} :seon.test/subject]]
-     [:maybe :seon.program/row]]]}
+    [:or
+     [:tuple
+      [:map
+       [:seon.fn/calls {:optional true} :seon.fn/calls]
+       [:seon.fn/keywords {:optional true} :seon.fn/keywords]
+       [:seon.test/subject {:optional true} :seon.test/subject]]
+      [:maybe :seon.program/row]]
+     :seon.error/value]]}
   [database source namespace-ref program-row]
-  (let [namespace-name (:seon.ns/name
-                        (db/pull database [:seon.ns/name] namespace-ref))
-        {:seon.fn/keys [analysis first-source-row function-rows]}
-        (runtime-analysis database namespace-name source)
-        program-symbol (or (:seon.fn/sym program-row)
-                           (:seon.test/sym program-row))
-        first-party-functions
-        (cond-> (into #{} (map :seon.fn/sym) function-rows)
-          program-symbol (conj program-symbol))
-        submitted-analysis (source-analysis analysis first-source-row)
-        calls-by-caller
-        (call-targets-by-caller submitted-analysis
-                                first-party-functions
-                                first-party-functions)
-        used-keywords (keywords-by-holder submitted-analysis)
-        program-facts
-        (when program-symbol
-          (let [qualified (symbol program-symbol)
-                definition
-                (some #(when (= program-symbol
-                                (str (symbol (str (::analyzer/ns %))
-                                             (str (::analyzer/name %)))))
-                         %)
-                      (::analyzer/var-definitions submitted-analysis))
-                subject (or (:seon.test/subject program-row)
-                            (test-subject (::analyzer/meta definition)))]
+  (let [resolved-namespace (db/pull database [:seon.ns/name] namespace-ref)
+        namespace-name (:seon.ns/name resolved-namespace)]
+    (if-not namespace-name
+      ((requiring-resolve 'seon.error/diagnostic)
+       {:seon.error/kind ::namespace-unresolvable
+        :seon.error/message
+        (str "Cannot analyze the form because its namespace reference "
+             (pr-str namespace-ref) " does not resolve to :seon.ns/name.")
+        :seon.error/diagnostic-layer :program-analysis
+        :seon.error/diagnostic-operation 'seon.fn/analyze-form
+        :seon.error/diagnostic-member :namespace-ref
+        :seon.error/diagnostic-expected :seon.ns/name
+        :seon.error/diagnostic-offending namespace-ref
+        :seon.error/diagnostic-cause ::namespace-unresolvable
+        :seon.error/diagnostic-evidence
+        {:seon.fn/namespace-ref namespace-ref
+         :seon.fn/namespace-row resolved-namespace}})
+      (let [{:seon.fn/keys [analysis first-source-row function-rows]}
+            (runtime-analysis database namespace-name source)
+            program-symbol (or (:seon.fn/sym program-row)
+                               (:seon.test/sym program-row))
+            first-party-functions
+            (cond-> (into #{} (map :seon.fn/sym) function-rows)
+              program-symbol (conj program-symbol))
+            submitted-analysis (source-analysis analysis first-source-row)
+            calls-by-caller
+            (call-targets-by-caller submitted-analysis
+                                    first-party-functions
+                                    first-party-functions)
+            used-keywords (keywords-by-holder submitted-analysis)
+            program-facts
+            (when program-symbol
+              (let [qualified (symbol program-symbol)
+                    definition
+                    (some #(when (= program-symbol
+                                    (str (symbol (str (::analyzer/ns %))
+                                                 (str (::analyzer/name %)))))
+                             %)
+                          (::analyzer/var-definitions submitted-analysis))
+                    subject (or (:seon.test/subject program-row)
+                                (test-subject (::analyzer/meta definition)))]
+                (cond-> {}
+                  (::analyzer/macro definition)
+                  (assoc :seon.fn/macro? true)
+                  (seq (get calls-by-caller program-symbol))
+                  (assoc :seon.fn/calls
+                         (mapv (fn [target] [:seon.fn/sym target])
+                               (sort (get calls-by-caller program-symbol))))
+                  (keyword-values used-keywords qualified)
+                  (assoc :seon.fn/keywords
+                         (keyword-values used-keywords qualified))
+                  subject (assoc :seon.test/subject subject))))
+            form-facts
             (cond-> {}
-              (::analyzer/macro definition)
-              (assoc :seon.fn/macro? true)
-              (seq (get calls-by-caller program-symbol))
+              (seq (form-calls submitted-analysis first-party-functions))
               (assoc :seon.fn/calls
-                     (mapv (fn [target] [:seon.fn/sym target])
-                           (sort (get calls-by-caller program-symbol))))
-              (keyword-values used-keywords qualified)
+                     (form-calls submitted-analysis first-party-functions))
+              (seq (form-keywords submitted-analysis))
               (assoc :seon.fn/keywords
-                     (keyword-values used-keywords qualified))
-              subject (assoc :seon.test/subject subject))))
-        form-facts
-        (cond-> {}
-          (seq (form-calls submitted-analysis first-party-functions))
-          (assoc :seon.fn/calls
-                 (form-calls submitted-analysis first-party-functions))
-          (seq (form-keywords submitted-analysis))
-          (assoc :seon.fn/keywords
-                 (form-keywords submitted-analysis))
-          (:seon.test/subject program-facts)
-          (assoc :seon.test/subject (:seon.test/subject program-facts)))
-        merged-row (when program-row (merge program-row program-facts))]
-    [form-facts merged-row]))
+                     (form-keywords submitted-analysis))
+              (:seon.test/subject program-facts)
+              (assoc :seon.test/subject (:seon.test/subject program-facts)))
+            merged-row (when program-row (merge program-row program-facts))]
+        [form-facts merged-row]))))
 
 (def ^:private load-refusal-finding-types
   #{:syntax

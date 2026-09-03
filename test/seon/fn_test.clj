@@ -24,6 +24,30 @@
     (spit file source)
     file))
 
+(deftest analyze-form-refuses-an-unresolvable-namespace-reference
+  (test-support/with-database
+    (fn [connection]
+      (let [namespace-ref [:seon.ns/name 'sample.missing]
+            result
+            (seon.fn/analyze-form
+             @connection
+             "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)"
+             namespace-ref
+             {:seon.fn/sym "sample.missing/f"
+              :seon.fn/ns namespace-ref
+              :seon.fn/source
+              "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)"
+              :seon.fn/arglists "([x])"
+              :seon.fn/private? false
+              :seon.fn/spec "[:=> [:cat :int] :int]"
+              :seon.schema.admission/source :agent})]
+        (is (= :seon.fn/namespace-unresolvable
+               (:seon.error/kind result)))
+        (is (= namespace-ref
+               (get-in result
+                       [:seon.error/data
+                        :seon.error/diagnostic-offending])))))))
+
 (deftest progress-observation-cannot-change-index-transaction-shapes
   (let [commit-phase! (deref (ns-resolve 'seon.fn 'commit-index-phase!))
         transactions-with
