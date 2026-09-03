@@ -37,61 +37,52 @@ which become its HTML panels too (56). No walls of text.
 
 ---
 
-## B1. Arrival — the first screen of a brand-new agent
+## B1. Arrival — `(help)` bootstraps the screen (ruled 58a)
 
-**Statement.** A fresh agent's context contains, in this order: (1) the
-intro instruction; (2) *who am I* — its namespace; (3) *what points at
-me* — one entry per ref edge into its entity, collection-first; (4) the
-teaching entries the above demand, each placed BEFORE the entry that
-first uses the name; (5) the trigger (the message or task that woke it)
-LAST, nearest the reply. The screen is small by derivation: a new agent
-has one message and no history, so its context is a few entries.
+**Statement.** A fresh agent's context opens with `(help)`: not authored
+text but the GENERATED explanation of every core function the agent is
+about to see used — the root commands (`doc`, `dir`, `seon.db/pull`,
+`seon.db/q`, `my.run/complete`, …) and the render functions the walk
+selected — derived by indexing every symbol, var, and keyword the
+context walk and its renders produce, sorting them, and emitting the
+explanation in dependency order (names before use). Then the walk's
+entries follow (§G): who am I, what points at me, the trigger last.
+Different agents have different neighbourhoods, therefore different
+helps — by derivation, never by configuration. The intro instruction
+(46) survives only for what no `doc` can say: that the reply is forms
+evaluated in this namespace and how a run ends.
 
-**Transcript (root, a fresh cluster; `[P]` marks proposed spellings):**
+**Transcript (root, a fresh cluster; `[P]`):**
 
 ```clojure
-;; (1) the intro — the ONE authored instruction entity (46); seven sentences at most.
-
-;; (2) who am I
-my.agents.root=> (doc *ns*)                                            ; [P] polymorphic doc
-my.agents.root
-  requires: my.message my.run seon.bootstrap seon.db
-  refers:   help dir doc  (from seon.bootstrap)
-  owner agent: "root"   open run: "bootstrap:root"
-  publics: (none yet)
-
-;; (3) what points at me — collection-first, one form per edge
-my.agents.root=> (seon.db/q '[:find [(pull ?m [*]) ...]
-                              :where [?m :seon.cluster.message/to [:seon.cluster.agent/id "root"]]])
-[{:seon.cluster.message/id "bootstrap-task:root"
-  :seon.cluster.message/at #inst "2026-09-02T19:54:58.381-00:00"
-  :seon.cluster.message/content "Define a durable contracted function …"
-  :seon.cluster.message/to [:seon.cluster.agent/id "root"]}]         ; rendered by the message
-                                                                        ; collection's render fn (B3)
-
-;; (4) teaching demanded by the above appears BEFORE first use (B6):
-;;     (doc seon.db/q) (doc seon.db/pull) came before (3); (dir my.message) (dir my.run) before (5).
-
-;; (5) the trigger, last
-my.agents.root=> (my.message/read "bootstrap-task:root")
-{…the one message, whole…}
+my.agents.root=> (help)
+;; Everything below is a REPL session typed on your behalf. Re-run any form.
+;; Root commands used in this session (dependency order):
+seon.db/q      ([query & args]) …one line…       → :seon.schema/value | :seon.error/value
+seon.db/pull   ([selector eid] …)                → the pulled entity | :seon.error/value
+dir            (dir ns)   the public names of a namespace
+doc            (doc x)    explain a function, namespace, schema, test, value, or a list of them
+my.message/read (read id)                       → :seon.cluster.message/message
+my.run/complete (complete reply)                → ends this run
+;; Renders used below: seon.cluster.message/render-ai (messages)
+…
+my.agents.root=> (doc *ns*)                    ; who am I
+…
+my.agents.root=> (seon.db/q '[…messages to root…])
+…
+my.agents.root=> (my.message/read "bootstrap-task:root")   ; the trigger, last
 ```
 
-**Teaches:** that everything on screen is a query it can re-run; that
-its neighbourhood is reached by refs; the two query spellings it will
-use forever (pull by lookup ref, `q` with a reverse edge).
+**Teaches:** every name before its use; that help is itself a form; that
+the session is re-runnable.
 
-❓ B1.1 Is `(doc *ns*)` the right "who am I" entry, or the plain pull
-`(seon.db/pull '[…] [:seon.ns/name 'my.agents.root])` rendered by a
-namespace render function? (Recommendation: `(doc *ns*)` — it is the
-same thing the agent will type for any other namespace.)
-❓ B1.2 The trigger last: keep the run's trigger as the final entry
-(today's tail-recency proof: 2/2 forms in the ablation) — settled unless
-you object.
-❓ B1.3 How much of the intro survives? Proposed: what a REPL is here,
-that replies are forms evaluated in the namespace, that a contracted
-`defn` is permanent, how to finish a run — and nothing that a `doc` can
-say instead.
+❓ B1.4 `(help)` today calls `seon.bootstrap/situation` (authored
+situation prose, census 1.2). Under 58a it is REPLACED by the generated
+explanation — confirm deletion of the situation face in the same wave.
+❓ B1.5 One line per root command in help (name, arglists, first
+docstring line, output) vs the full `(doc …)` for each? (Recommendation:
+one line each in help; full doc appears only where a later entry demands
+more — an error, or a name used with the wrong arity.)
 
 ---
 
@@ -155,13 +146,20 @@ my.agents.root=> (inbox-view (seon.db/q '[:find [(pull ?m [*]) ...] :where …])
 makes a function part of the system; that the same function (with an
 `/html` twin) is its UI panel (B10).
 
-❓ B3.1 Specificity between (b) and (c) when the agent's function fits a
-SUPERTYPE (e.g. accepts any entity) — does a specific schema face beat a
-generic agent function? Proposed: within a rung, greatest required-key
-coverage wins (35); across rungs, the rung wins.
-❓ B3.2 Does an agent's render function apply to OTHER agents' views of
-the same data? Proposed: no — rung (b) is the viewing agent's namespace;
-(c) is shared.
+**Ruled 58b — accretion across namespaces.** A render function written by
+ANOTHER agent for a family is preferred in a viewing agent's context
+whenever the viewing agent has no more specific definition of its own;
+an agent that dislikes it defines its own. The order is therefore:
+inline on the value → the viewing agent's own namespace → any other
+agent namespace → the family's general face → the floor; within a rung,
+greatest required-key coverage wins (35) and equal coverage is a loud
+tie (43). THE WHOLE ORDER IS ONE QUERY over program-graph facts — the
+query and the facts it needs are designed in the implementation
+companion (§ render order), not here.
+❓ B3.4 Among OTHER agents' functions at the same coverage: newest
+settled wins, or most used (usage children, 51) wins? (Recommendation:
+most used, then newest — accretion should reward what agents actually
+call.)
 ❓ B3.3 Inline naming (rung a): the value carries `:seon.render/ai
 'some/fn` [REAL as the explicit-producer rung]. Keep as is?
 
@@ -218,7 +216,11 @@ already a config fact.)
 
 ---
 
-## B5. What is new — a diff against the basis the agent saw (56b; probed 2026-09-03)
+## B5. What is new — a diff against the basis the agent saw (56b; probed 2026-09-03) — LATER WAVE by ruling 58d
+
+*Ruling 58d: the system is developed FIRST for full regeneration every
+turn (B8 = every turn); this section's diff entries are the later
+incremental wave. The evidence stays here so that wave starts grounded.*
 
 **Statement.** At turn N the agent sees, for each discovery query whose
 answer changed, ONE entry spelled against the basis it saw last, whose
@@ -358,23 +360,26 @@ Proposed: yes, as `;;` comments, exactly as it wrote them [REAL today].
 
 ---
 
-## B8. Compaction — when the context is too big (ruled: compaction over evals)
+## B8. Compaction — a fresh session that loses nothing (ruled 58d)
 
-**Statement.** When the context exceeds the model's budget, the agent's
-context evals are retracted/superseded and the context regenerates from
-the current facts: the same B1 arrival shape at the current basis, then
-only what still matters — its namespace's current publics, the current
-neighbourhood, the open run and its trigger, unresolved errors — with a
-single line stating that compaction happened at basis t. Effect results
-survive (they replay); defs survive (they are facts).
+**Statement.** A compaction IS a fresh session: the context regenerates
+whole from the facts — the agent's namespace, its evals (form + stored
+result, every one), its messages, runs, errors, the neighbourhood — at
+the current basis, through the same walk as B1. Nothing the agent did is
+lost, because everything it did is a fact and the walk renders facts.
+THE SYSTEM IS DEVELOPED FOR COMPACTION ON EVERY TURN: every turn's
+context is a full regeneration (52), correct even when provider caching
+is poor, so context generation is nailed before any incremental delta
+work (B5) begins. Budget pressure is met by the walk's own bounding
+(B4 per value) and, when the whole still exceeds the model budget, by
+the agent's OLDEST evals rendering as their elision values with requery
+forms — never by dropping facts.
 
-❓ B8.1 Does the agent see WHAT was compacted (a count of superseded
-entries and the requery form for each family), or only that it
-happened? (Recommendation: one line: `;; compacted at t 536870999: 41
-earlier entries superseded; (seon.db/history) reaches them`.)
-❓ B8.2 Who triggers compaction — the budget check only, or may the
-agent ask for it? (Proposed: both; the agent's form is `(my.run/compact)`
-[P] — name open.)
+❓ B8.3 Under every-turn regeneration, does the agent see any marker that
+the screen was regenerated (a basis line at the end is already REAL)?
+(Recommendation: only the REPL-state line — a regenerated screen that is
+byte-identical to the previous one needs no announcement; P-STABLE-REGEN
+makes that the normal case.)
 
 ---
 
@@ -659,7 +664,7 @@ or a `;;` comment, except the intro.
 
 ## Open questions, collected
 
-B1.1 B1.3 · B2.1 · B3.1 B3.2 B3.3 · B4.1 B4.2 · B5.1 B5.2 B5.3 · B6.1
-B6.2 B6.3 · B7.1 B7.2 · B8.1 B8.2 · B9.1 · B10.1 · B11.1 · B10.2 · G.1 G.3 G.4 G.5 (G.2 answered: provenance is recorded and displayed, see G6). Each carries a
+B1.4 B1.5 · B2.1 · B3.3 B3.4 · B4.1 B4.2 · B5.1 B5.2 B5.3 · B6.1
+B6.2 B6.3 · B7.1 B7.2 · B8.3 · B9.1 · B10.1 · B11.1 · B10.2 · G.1 G.3 G.4 G.5 (G.2 answered: provenance is recorded and displayed, see G6). Each carries a
 recommendation; a settled behavior loses its ❓ in this file in the same
 turn it is ruled.

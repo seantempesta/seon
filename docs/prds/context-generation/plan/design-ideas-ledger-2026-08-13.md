@@ -826,6 +826,28 @@ numerically and a bare cross-citation is a defect to fix on sight.
     §B10, §G. Phase rule: behaviors first, implementation talk only
     after every ❓ in that file is gone.
 
+58. **Help bootstraps; renders accrete across namespaces; full
+    regeneration first** (owner, 2026-09-03, question round on the
+    behavior spec): (a) `(help)` BOOTSTRAPS the whole context: it
+    explains every core function the agent is about to see, and it is
+    GENERATIVE — index every symbol, var, and keyword the context walk
+    and its renders produce, sort them, and derive both the optimal
+    order of the generated forms and the help that explains those root
+    commands; different agents get different helps (extends 52a).
+    (b) Cross-namespace reuse: a render function written by ANOTHER
+    agent for a family IS preferred in a viewing agent's context when
+    that agent has no more specific definition of its own — the system
+    grows by accretion and no agent starts at zero; the whole rendering
+    order must be derivable by ONE rule-based query (the orchestrator
+    designs the query and the facts it needs). (c) Render provenance
+    rides the EXISTING after-the-value comment (the result handle
+    comment) — add "rendered by <fn>" there; one mechanism, verified,
+    never a second. (d) Compaction = a fresh session with NO lost
+    context; the system is DEVELOPED FOR compaction-on-every-turn first
+    (full regeneration each turn, even with poor caching) so context
+    generation is nailed; incremental diffs (56b) come later — B5 is
+    demoted to a later wave.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
