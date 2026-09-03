@@ -58,9 +58,10 @@
 
   The walk reads each entry's basic attributes once with `NOFOLLOW_LINKS`,
   treats every symlink as a leaf, and checks every entry against the same
-  explicit root before deleting it. The optional callback receives
-  rate-bounded progress after each declared backstop interval. This is the one
-  recursive-deletion owner for fresh source and test cleanup."
+  explicit root before deleting it. A path removed by a concurrent deletion is
+  already complete for this walk. The optional callback receives rate-bounded
+  progress after each declared backstop interval. This is the one recursive-
+  deletion owner for fresh source and test cleanup."
   {:malli/schema
    [:function
     [:=>
@@ -136,14 +137,17 @@
                      ::directories (aget counts 2)
                      ::symlinks (aget counts 3)}))))
              (walk! [^Path entry ^BasicFileAttributes attribute]
-               (when (.isDirectory attribute)
-                 (with-open [children (Files/newDirectoryStream entry)]
-                   (run!
-                    (fn [^Path child]
-                      (when-let [child-attribute (attributes child)]
-                        (walk! child child-attribute)))
-                    (vec children))))
-               (delete-one! entry attribute))]
+               (try
+                 (when (.isDirectory attribute)
+                   (with-open [children (Files/newDirectoryStream entry)]
+                     (run!
+                      (fn [^Path child]
+                        (when-let [child-attribute (attributes child)]
+                          (walk! child child-attribute)))
+                      (vec children))))
+                 (delete-one! entry attribute)
+                 (catch NoSuchFileException _
+                   nil)))]
        (when-let [target-attribute (attributes target-path)]
          (walk! target-path target-attribute)))
      nil)))

@@ -1,8 +1,8 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
-tags: [issue, test, runner, tooling, pre-read]
+tags: [issue, test, runner, tooling]
 ---
 
 # `bin/test`'s preflight sweep races concurrent invocations and aborts the gate
@@ -42,3 +42,28 @@ Both are the pre-read law (AGENTS.md §2): the sweep acts on a judgment
    no-follow guarantee stays; the symlinked-sentinel regression stays).
 3. One regression per claim; two `bin/test` invocations started
    together on one tree both reach their tallies.
+
+## Resolution
+
+Resolved 2026-09-03. `bin/test` writes the complete pid ownership record as
+the first act after `mktemp`; the preflight sweep leaves a root with no
+readable pid outside retention policy for a 30-second creation grace and
+continues to exclude every live pid. Candidate observation also treats a root
+removed by a concurrent sweep as absent.
+
+`seon.fs/delete-recursively!` now treats `NoSuchFileException` at any recursive
+entry as successful completion for that path while retaining the lexical-root,
+intermediate-symlink, and `NOFOLLOW_LINKS` checks.
+
+Recurring evidence:
+
+- `seon.fs-test/concurrent-deletions-treat-a-vanished-path-as-success`
+  schedules two deletions at the attribute-read/directory-open seam.
+- `seon.test-runner-test/a-fresh-run-root-is-claimed-before-population-and-sweep`
+  proves the claim precedes population and fresh unclaimed roots survive.
+- `seon.test-runner-test/concurrent-bin-test-invocations-both-reach-their-tallies`
+  runs two real `bin/test seon.fs-test` processes against one retained-root
+  parent; each reached `3 tests / 14 assertions / 0 failures / 0 errors`.
+
+Gate: `bin/test seon.fs-test seon.test-runner-test` — 28 tests, 240
+assertions, 0 failures, 0 errors.

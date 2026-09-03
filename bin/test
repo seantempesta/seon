@@ -263,44 +263,61 @@ bb --config "$source_root/bb.edn" -e '
   (require (quote [clojure.java.io :as io])
            (quote [babashka.process :as process])
            (quote [seon.fs :as fs]))
-  (import (quote [java.nio.file Files LinkOption])
+  (import (quote [java.io FileNotFoundException])
+          (quote [java.nio.file Files LinkOption NoSuchFileException])
           (quote [java.time Duration Instant]))
   (let [run-parent (first *command-line-args*)
         no-follow (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])
         pid-of (fn [root]
-                 (let [record (io/file root "test-run.txt")]
-                   (when (.isFile record)
-                     (with-open [reader (io/reader record)]
-                       (let [tokens (java.util.StringTokenizer.
-                                     (or (.readLine reader) ""))]
-                         (loop []
-                           (when (.hasMoreTokens tokens)
-                             (let [token (.nextToken tokens)]
-                               (if (.startsWith token "pid=")
-                                 (try
-                                   (Long/parseLong (.substring token 4))
-                                   (catch NumberFormatException _ nil))
-                                 (recur))))))))))
-        active? (fn [root]
-                  (when-let [pid (pid-of root)]
-                    (zero?
-                     (:exit
-                      (process/shell
-                       {:continue true :out :string :err :string}
-                       "/bin/kill" "-0" (str pid))))))
+                 (try
+                   (let [record (io/file root "test-run.txt")]
+                     (when (.isFile record)
+                       (with-open [reader (io/reader record)]
+                         (let [tokens (java.util.StringTokenizer.
+                                       (or (.readLine reader) ""))]
+                           (loop []
+                             (when (.hasMoreTokens tokens)
+                               (let [token (.nextToken tokens)]
+                                 (if (.startsWith token "pid=")
+                                   (try
+                                     (Long/parseLong (.substring token 4))
+                                     (catch NumberFormatException _ nil))
+                                   (recur)))))))))
+                   (catch FileNotFoundException _ nil)
+                   (catch NoSuchFileException _ nil)))
+        active-pid? (fn [pid]
+                      (zero?
+                       (:exit
+                        (process/shell
+                         {:continue true :out :string :err :string}
+                         "/bin/kill" "-0" (str pid)))))
         modified-at (fn [root]
-                      (.toInstant
-                       (Files/getLastModifiedTime (.toPath root) no-follow)))
-        cutoff (.minus (Instant/now) (Duration/ofHours 24))
+                      (try
+                        (.toInstant
+                         (Files/getLastModifiedTime (.toPath root) no-follow))
+                        (catch NoSuchFileException _ nil)))
+        ;; A directory with no readable claim stays outside sweep policy long
+        ;; enough for its creating shell to return from mktemp and publish the
+        ;; claim. A dead claimed pid is immediately eligible for retention.
+        now (Instant/now)
+        claim-cutoff (.minus now (Duration/ofSeconds 30))
+        cutoff (.minus now (Duration/ofHours 24))
         candidates (->> (.listFiles (io/file run-parent))
                         (filter (fn [entry]
                                   (let [path (.toPath entry)]
                                     (and (.startsWith (.getName entry) "run.")
                                          (Files/isDirectory path no-follow)))))
-                        (map (fn [root]
-                               {:root root
-                                :modified-at (modified-at root)
-                                :active? (boolean (active? root))})))
+                        (keep (fn [root]
+                                (when-let [observed-at (modified-at root)]
+                                  (let [pid (pid-of root)]
+                                    (when-not (and (nil? pid)
+                                                   (.isAfter observed-at
+                                                             claim-cutoff))
+                                      {:root root
+                                       :modified-at observed-at
+                                       :active? (boolean
+                                                 (and pid
+                                                      (active-pid? pid)))}))))))
         inactive (sort-by :modified-at #(compare %2 %1)
                           (remove :active? candidates))]
     (doseq [[rank {:keys [root modified-at]}] (map-indexed vector inactive)
@@ -312,7 +329,16 @@ bb --config "$source_root/bb.edn" -e '
                  (.getPath root)))))
   nil' "$run_parent"
 
+process_start=$(ps -p "$$" -o lstart= | sed 's/^[[:space:]]*//')
+suite_start=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 run_root=$(mktemp -d "$run_parent/run.XXXXXX")
+printf 'pid=%s process-start=%s suite-start=%s git=%s dev-cache-digest=%s selection=%s\n' \
+  "$$" \
+  "$process_start" \
+  "$suite_start" \
+  "$git_sha" \
+  "$dev_cache_digest" \
+  "$selection" >"$run_root/test-run.txt"
 
 populate_checkout_root() {
   local target_root=$1 entry
@@ -361,14 +387,6 @@ shared_published_base="$run_root/shared-published-base"
 if [ -z "$result_root" ]; then
   result_root="$run_root/data/clusters"
 fi
-
-printf 'pid=%s process-start=%s suite-start=%s git=%s dev-cache-digest=%s selection=%s\n' \
-  "$$" \
-  "$(ps -p "$$" -o lstart= | sed 's/^[[:space:]]*//')" \
-  "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
-  "$git_sha" \
-  "$dev_cache_digest" \
-  "$selection" >"$run_root/test-run.txt"
 
 suite_pid=
 runner_reap_backstop_seconds=10

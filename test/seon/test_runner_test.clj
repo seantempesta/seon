@@ -73,6 +73,16 @@
     (spit fake-getconf "#!/usr/bin/env bash\necho 2\n")
     (is (.setExecutable fake-getconf true false))))
 
+(defn- stop-process-tree!
+  [^Process process]
+  (when (.isAlive process)
+    (with-open [child-handles (.descendants (.toHandle process))]
+      (run! #(.destroyForcibly ^java.lang.ProcessHandle %)
+            (reverse (vec (iterator-seq (.iterator child-handles))))))
+    (.destroyForcibly process)
+    (.get (.onExit (.toHandle process))
+          test-support/event-backstop-seconds TimeUnit/SECONDS)))
+
 (def ^:private fake-dev-cache-prologue
   (str
    "if [ \"${1-}\" = \"-T:dev-cache\" ]; then\n"
@@ -1157,5 +1167,171 @@
         (is (empty? (vec (.listFiles run-parent)))
             "a successful structural probe leaves no retained run root"))
       (finally
+        (when (.exists fixture-root)
+          (test-support/delete-recursively! fixture-root))))))
+
+(deftest a-fresh-run-root-is-claimed-before-population-and-sweep
+  (let [fixture-root
+        (io/file project-root "tmp" "test-runner-root-claim"
+                 (str (random-uuid)))
+        fake-bin (io/file fixture-root "bin")
+        fake-clojure (io/file fake-bin "clojure")
+        fake-cp (io/file fake-bin "cp")
+        run-parent (io/file fixture-root "runs")
+        cache-path (io/file fixture-root "cache" fake-cache-digest)
+        claim-observation (io/file fixture-root "claim-observation.txt")
+        process (atom nil)
+        unclaimed-roots
+        (mapv #(io/file run-parent (str "run.unclaimed-" %)) (range 4))
+        fake-runner
+        (str "#!/usr/bin/env bash\n"
+             "set -euo pipefail\n"
+             fake-dev-cache-prologue
+             "exit 0\n")
+        observing-cp
+        (str
+         "#!/usr/bin/env bash\n"
+         "set -euo pipefail\n"
+         "for root in \"$SEON_TEST_RUN_PARENT\"/run.*; do\n"
+         "  if [ -f \"$root/test-run.txt\" ]; then\n"
+         "    /bin/cp \"$root/test-run.txt\" \"$SEON_FAKE_CLAIM_OBSERVATION\"\n"
+         "    break\n"
+         "  fi\n"
+         "done\n"
+         "exec /bin/cp \"$@\"\n")]
+    (try
+      (.mkdirs fake-bin)
+      (.mkdirs run-parent)
+      (.mkdirs cache-path)
+      (doseq [[ordinal root] (map-indexed vector unclaimed-roots)]
+        (.mkdirs root)
+        (is (.setLastModified root
+                              (- (System/currentTimeMillis)
+                                 (* 1000 (inc ordinal))))))
+      (install-single-worker-getconf! fake-bin)
+      (spit fake-clojure fake-runner)
+      (spit fake-cp observing-cp)
+      (is (.setExecutable fake-clojure true false))
+      (is (.setExecutable fake-cp true false))
+      (let [builder
+            (doto
+             (ProcessBuilder.
+              ^java.util.List
+              [(str (io/file project-root "bin" "test")) "seon.fs-test"])
+              (.directory project-root)
+              (.redirectErrorStream true))
+            environment (.environment builder)
+            _ (.put environment "SEON_TEST_RUN_PARENT"
+                    (.getCanonicalPath run-parent))
+            _ (.put environment "SEON_FAKE_CACHE_DIGEST" fake-cache-digest)
+            _ (.put environment "SEON_FAKE_CACHE_PATH"
+                    (.getCanonicalPath cache-path))
+            _ (.put environment "SEON_FAKE_CLAIM_OBSERVATION"
+                    (.getCanonicalPath claim-observation))
+            _ (.put environment "PATH"
+                    (str (.getCanonicalPath fake-bin)
+                         java.io.File/pathSeparator
+                         (System/getenv "PATH")))
+            launched (.start builder)
+            _ (reset! process launched)
+            output-future (future (slurp (.getInputStream launched)))
+            completed?
+            (.waitFor launched
+                      (* 3 test-support/event-backstop-seconds)
+                      TimeUnit/SECONDS)
+            _ (when-not completed? (stop-process-tree! launched))
+            output (deref output-future
+                          (* 1000 test-support/event-backstop-seconds)
+                          ::output-backstop)]
+        (is completed? (pr-str output))
+        (is (string? output) (pr-str output))
+        (is (zero? (.exitValue launched)) output)
+        (is (= (set (map #(.getCanonicalPath ^java.io.File %)
+                         unclaimed-roots))
+               (set (map #(.getCanonicalPath ^java.io.File %)
+                         (.listFiles run-parent))))
+            "fresh roots without claims remain outside sweep policy")
+        (let [claim (slurp claim-observation)]
+          (is (str/starts-with? claim "pid=") claim)
+          (is (str/includes? claim "process-start=") claim)
+          (is (str/includes? claim "suite-start=") claim)))
+      (finally
+        (when-let [launched @process]
+          (stop-process-tree! launched))
+        (when (.exists fixture-root)
+          (test-support/delete-recursively! fixture-root))))))
+
+(deftest concurrent-bin-test-invocations-both-reach-their-tallies
+  (let [fixture-root
+        (io/file project-root "tmp" "test-runner-concurrent-gates"
+                 (str (random-uuid)))
+        fake-bin (io/file fixture-root "bin")
+        run-parent (io/file fixture-root "runs")
+        old-at (- (System/currentTimeMillis) (* 2 24 60 60 1000))
+        processes (atom [])]
+    (try
+      (.mkdirs fake-bin)
+      (.mkdirs run-parent)
+      (install-single-worker-getconf! fake-bin)
+      (dotimes [root-ordinal 4]
+        (let [root (io/file run-parent (str "run.stale-" root-ordinal))]
+          (.mkdirs root)
+          (spit (io/file root "test-run.txt") "pid=999999999\n")
+          (dotimes [directory-ordinal 100]
+            (let [directory (io/file root (str directory-ordinal))]
+              (.mkdirs directory)
+              (spit (io/file directory "evidence") "retained")))
+          (is (.setLastModified root old-at))))
+      (let [start!
+            (fn []
+              (let [builder
+                    (doto
+                     (ProcessBuilder.
+                      ^java.util.List
+                      [(str (io/file project-root "bin" "test"))
+                       "seon.fs-test"])
+                      (.directory project-root)
+                      (.redirectErrorStream true))
+                    environment (.environment builder)]
+                (.put environment "SEON_TEST_RUN_PARENT"
+                      (.getCanonicalPath run-parent))
+                (.put environment "PATH"
+                      (str (.getCanonicalPath fake-bin)
+                           java.io.File/pathSeparator
+                           (System/getenv "PATH")))
+                (.start builder)))
+            launched [(start!) (start!)]
+            _ (reset! processes launched)
+            outputs (mapv #(future (slurp (.getInputStream ^Process %)))
+                          launched)
+            completions
+            (mapv #(future
+                     (.waitFor ^Process %
+                               (* 12 test-support/event-backstop-seconds)
+                               TimeUnit/SECONDS))
+                  launched)
+            completed
+            (mapv #(deref %
+                          (* 13 1000 test-support/event-backstop-seconds)
+                          false)
+                  completions)]
+        (doseq [[process complete?] (map vector launched completed)]
+          (when-not complete?
+            (stop-process-tree! process)))
+        (let [captured
+              (mapv #(deref %
+                            (* 1000 test-support/event-backstop-seconds)
+                            ::output-backstop)
+                    outputs)]
+          (is (every? true? completed) (pr-str captured))
+          (doseq [[process output] (map vector launched captured)]
+            (is (string? output) (pr-str output))
+            (is (zero? (.exitValue ^Process process)) output)
+            (is (and (str/includes? output "\nRan ")
+                     (str/includes? output " tests containing "))
+                output)
+            (is (str/includes? output "0 failures, 0 errors.") output))))
+      (finally
+        (run! stop-process-tree! @processes)
         (when (.exists fixture-root)
           (test-support/delete-recursively! fixture-root))))))

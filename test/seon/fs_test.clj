@@ -5,7 +5,8 @@
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [seon.fs :as fs])
-  (:import [java.nio.file Files LinkOption]))
+  (:import [java.nio.file Files LinkOption Path]
+           [java.util.concurrent CountDownLatch TimeUnit]))
 
 (def ^:private no-follow
   (into-array LinkOption [LinkOption/NOFOLLOW_LINKS]))
@@ -74,4 +75,56 @@
                 (:seon.fs/deleted last-progress)))
         (is (pos? (:seon.fs/elapsed-ms last-progress))))
       (finally
+        (fs/delete-recursively! base base)))))
+
+(deftest concurrent-deletions-treat-a-vanished-path-as-success
+  (let [base (str "tmp/fs-concurrent-test/" (random-uuid))
+        root (io/file base "owned")
+        child (io/file root "child")
+        child-path (.normalize (.toAbsolutePath (.toPath child)))
+        first-thread (atom nil)
+        child-observed (CountDownLatch. 1)
+        release-first (CountDownLatch. 1)
+        original-attributes @#'seon.fs/attributes]
+    (try
+      (.mkdirs child)
+      (with-redefs-fn
+        {#'seon.fs/attributes
+         (fn [^Path path]
+           (let [attribute (original-attributes path)]
+             (when (and attribute
+                        (identical? (Thread/currentThread) @first-thread)
+                        (= child-path path))
+               (.countDown child-observed)
+               (when-not (.await release-first 10 TimeUnit/SECONDS)
+                 (throw (ex-info "The competing deletion did not finish."
+                                 {:seon.fs/path (str path)}))))
+             attribute))}
+        (fn []
+          (let [first-deletion
+                (future
+                  (reset! first-thread (Thread/currentThread))
+                  (try
+                    (fs/delete-recursively! base (.getPath root))
+                    :deleted
+                    (catch Throwable failure failure)))]
+            (is (.await child-observed 10 TimeUnit/SECONDS)
+                "the first walk must observe the child before it vanishes")
+            (let [second-deletion
+                  (future
+                    (try
+                      (fs/delete-recursively! base (.getPath root))
+                      :deleted
+                      (catch Throwable failure failure)))
+                  second-result
+                  (deref second-deletion 10000 ::deletion-backstop)]
+              (.countDown release-first)
+              (is (= :deleted second-result)
+                  (pr-str second-result))
+              (let [first-result
+                    (deref first-deletion 10000 ::deletion-backstop)]
+                (is (= :deleted first-result)
+                    (pr-str first-result)))))))
+      (finally
+        (.countDown release-first)
         (fs/delete-recursively! base base)))))
