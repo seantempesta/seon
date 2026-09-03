@@ -1,6 +1,7 @@
 (ns seon.operator-test
   "The in-JVM operator surface stays a thin, error-valued delegation."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.edn :as edn]
+            [clojure.test :refer [deftest is testing]]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [datahike.api :as d]
@@ -15,7 +16,7 @@
             [seon.operator.runtime :as runtime]
             [seon.operator.state :as operator.state]
             [seon.test-support :as test-support])
-  (:import [java.util.concurrent CountDownLatch]))
+  (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
 (defn- caught
   [f]
@@ -360,6 +361,78 @@
                  (into #{} (map :seon.operator.claim/root)
                        (:seon.operator.reap/roots result))))
           (is (false? (.exists (io/file abandoned-root "data" "clusters"))))))
+      (finally
+        (when (.isAlive owner) (.destroyForcibly owner))
+        (test-support/delete-recursively! repository-root)))))
+
+(deftest reaper-counts-a-root-claim-without-a-root-as-a-refusal
+  (let [repository-root (owned-root)
+        caller-root (str (io/file repository-root "caller"))
+        dead-root (str (io/file repository-root "dead-ephemeral"))
+        malformed-root (str (io/file repository-root "malformed"))
+        owner (.start (ProcessBuilder. ^java.util.List ["/bin/sleep" "60"]))]
+    (try
+      (let [owner-identity
+            {:seon.boot/pid (.pid owner)
+             :seon.boot/start-instant
+             (operator.state/process-start-instant (.pid owner))}
+            _ (operator/claim-root!
+               {:seon.operator/repository-root repository-root
+                :seon.operator/managed-root dead-root
+                :seon.operator/ephemeral-owner owner-identity})
+            malformed-claim
+            (operator/claim-root!
+             {:seon.operator/repository-root repository-root
+              :seon.operator/managed-root malformed-root
+              :seon.operator/ephemeral-owner owner-identity})
+            claim-path
+            (operator.state/root-claim-path repository-root malformed-root)]
+        (.mkdirs (io/file dead-root "data" "clusters" "proof"))
+        (.mkdirs (io/file malformed-root "data" "clusters" "proof"))
+        (spit (str claim-path)
+              (pr-str
+               (dissoc (edn/read-string (slurp (str claim-path)))
+                       :seon.operator.claim/root)))
+        (.destroyForcibly owner)
+        (is (.waitFor owner 1 TimeUnit/SECONDS)
+            "the ephemeral owner reaches its exact terminal event")
+        (let [now (java.util.Date.)
+              result
+              (operator/reap-dead-roots!
+               {:seon.schedule.task/id "root/maintenance/reap-dead-roots"
+                :seon.schedule.fire/id
+                (pr-str ["root/maintenance/reap-dead-roots" now])
+                :seon.cluster.agent/id "root"
+                :seon.fn/sym "seon.operator/reap-dead-roots!"
+                :seon.schedule.fire/nominal-at now
+                :seon.schedule.fire/observed-at now
+                :seon.boot/cluster-name "operator-test"
+                :seon.operator/repository-root repository-root
+                :seon.operator/managed-root caller-root
+                :seon.boot/log-dir
+                (str (io/file caller-root "data" "clusters"
+                              "operator-test" "logs"))
+                :seon.config.operator/event-silence-backstop-ms 1000})
+              refusal (first (:seon.operator.reap/refused result))]
+          (is (nil? (:seon.error/kind result))
+              "a readable incomplete reap is a maintenance result")
+          (is (false? (:seon.operator.reap/complete? result)))
+          (is (false?
+               (:seon.operator.process-census/complete?
+                (:seon.operator.reap/census result))))
+          (is (= [(:seon.operator.claim/id malformed-claim)]
+                 (mapv :seon.operator.claim/id
+                       (:seon.operator.reap/refused result))))
+          (is (= :seon.operator.reap/unreadable-claim
+                 (:seon.operator.reap/reason refusal)))
+          (is (= :seon.operator.claim/malformed-record
+                 (:seon.operator.claim/invalid-cause refusal)))
+          (is (= (str claim-path) (:seon.operator.claim/path refusal)))
+          (is (= #{(.getCanonicalPath (io/file dead-root))}
+                 (into #{} (map :seon.operator.claim/root)
+                       (:seon.operator.reap/roots result))))
+          (is (false? (.exists (io/file dead-root "data" "clusters"))))
+          (is (.exists (io/file malformed-root "data" "clusters")))))
       (finally
         (when (.isAlive owner) (.destroyForcibly owner))
         (test-support/delete-recursively! repository-root)))))

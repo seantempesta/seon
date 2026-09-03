@@ -343,6 +343,34 @@
    :seon.operator.reap/reason reason
    :seon.error/message message})
 
+(defn- claim-error-id
+  [claim-error]
+  (let [path (:seon.operator.claim/path claim-error)
+        filename (.getName (io/file path))
+        suffix ".edn"
+        encoded-id (if (str/ends-with? filename suffix)
+                     (subs filename 0 (- (count filename) (count suffix)))
+                     filename)]
+    (try
+      (java.util.UUID/fromString encoded-id)
+      (catch IllegalArgumentException _
+        (java.util.UUID/nameUUIDFromBytes
+         (.getBytes ^String (str path)
+                    java.nio.charset.StandardCharsets/UTF_8))))))
+
+(defn- claim-error-refusal
+  [claim-error]
+  (cond->
+   {:seon.operator.claim/id (claim-error-id claim-error)
+    :seon.operator.reap/reason :seon.operator.reap/unreadable-claim
+    :seon.error/message (:seon.error/message claim-error)
+    :seon.operator.claim/path (:seon.operator.claim/path claim-error)
+    :seon.operator.claim/invalid-cause
+    (:seon.operator.claim/invalid-cause claim-error)}
+    (:seon.operator.claim/root claim-error)
+    (assoc :seon.operator.claim/root
+           (:seon.operator.claim/root claim-error))))
+
 (defn reap-dead-roots!
   "Stop and remove explicitly ephemeral roots whose exact creator is dead."
   {:malli/schema
@@ -375,6 +403,9 @@
              (filter #(and (:seon.operator.claim/reap-on-owner-exit? %)
                            (not (:seon.operator.claim/destroyed-at %)))
                      claims)
+             claim-refusals
+             (mapv claim-error-refusal
+                   (:seon.operator.state/claim-errors observed))
              initial
              (reduce
               (fn [result claim]
@@ -443,7 +474,8 @@
                    :seon.operator.cleanup/reclaimed-bytes
                    (:seon.operator.cleanup/removed-file-bytes cleanup)}))
               cleanup-ready)
-             refused (into (:refused initial) newly-refused)
+             blocking-refused (into (:refused initial) newly-refused)
+             refused (into claim-refusals blocking-refused)
              result
              {:seon.operator.reap/observed-at (java.util.Date.)
               :seon.operator.reap/census census
@@ -456,12 +488,7 @@
               :seon.operator.reap/reclaimed-bytes
               (reduce + 0 (map :seon.operator.cleanup/reclaimed-bytes roots))
               :seon.operator.reap/complete? (empty? refused)}]
-         (when (seq (:seon.operator.state/claim-errors observed))
-           (throw
-            (ex-info "The reaper cannot read every external claim."
-                     {:seon.error/kind :seon.operator/reap-incomplete
-                      :seon.operator.reap/result result :seon.operator/reap-incomplete true})))
-         (when (seq refused)
+         (when (seq blocking-refused)
            (throw
             (ex-info "One or more ephemeral roots were refused."
                      {:seon.error/kind :seon.operator/reap-incomplete
