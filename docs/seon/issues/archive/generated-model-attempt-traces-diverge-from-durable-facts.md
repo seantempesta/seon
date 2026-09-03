@@ -61,3 +61,9 @@ Verified 2026-09-02 with
 `bin/test seon.cluster.turn-test`: 55 tests, 391 assertions, 0 failures,
 0 errors. The known concurrent preflight-sweep failure did not occur; this run
 needed no retry.
+
+Reverified 2026-09-03 at HEAD in a raw JVM REPL with the exact shrunk scenario
+and seed `202607280402`: `expected-attempt-trace` derived one failed primary
+attempt and `generated-turn-agrees-with-durable-facts?` returned `true`. The
+complete namespace gate again reported 55 tests, 391 assertions, 0 failures,
+and 0 errors, with no sweep retry required.
