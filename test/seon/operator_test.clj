@@ -4,8 +4,6 @@
             [clojure.test :refer [deftest is testing]]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [datahike.api :as d]
-            [datahike.tools :as datahike.tools]
             [malli.instrument :as mi]
             [seon.cluster :as cluster]
             [seon.cluster.registry :as registry]
@@ -924,21 +922,26 @@
   (let [repository-root (owned-root)
         managed-root (.getCanonicalPath
                       (io/file repository-root "managed"))
-        gc-entered (CountDownLatch. 1)
-        blocked-completion (datahike.tools/throwable-promise)]
+        collection-entered (CountDownLatch. 1)
+        release-collection (CountDownLatch. 1)
+        collect-calls (atom 0)]
     (try
       (with-redefs
-       [d/gc-storage
-        (fn [& _]
-          (.countDown gc-entered)
-          blocked-completion)]
+       [registry/collect!
+        (fn [_ _]
+          (when (= 1 (swap! collect-calls inc))
+            (.countDown collection-entered)
+            (test-support/await-event! release-collection
+                                       :release-parked-collection))
+          0)]
         (let [collection
               (future
                 (operator/collect!
                  {:seon.operator/repository-root repository-root
                   :seon.operator/managed-root managed-root
                   :seon.config.operator/event-silence-backstop-ms 100}))]
-          (test-support/await-event! gc-entered :datahike-gc-wait-entered)
+          (test-support/await-event! collection-entered
+                                     :store-collection-entered)
           (is (thrown? Exception
                        (store/open-store!
                         {:seon.store/dir
@@ -952,12 +955,14 @@
                    :seon.operator.lock/acquisition-timeout-ms 1000
                    :seon.operator.lock/hold-timeout-ms 1000}
                   (constantly :lifecycle-acquired)))
-              "the parked GC does not retain root lifecycle custody")
-          (blocked-completion [])
+              "the parked collection does not retain root lifecycle custody")
+          (.countDown release-collection)
           (let [result
                 (test-support/await-event! collection
                                            :settled-collection-result)]
             (is (true? (:seon.operator.collect/complete? result)))
+            (is (= 2 @collect-calls)
+                "the collection and its verification pass use one owner seam")
             (let [reopened
                   (store/open-store!
                    {:seon.store/dir
@@ -966,6 +971,7 @@
                   "terminal collection releases owned operation-store custody")
               (store/release-store! reopened)))))
       (finally
+        (.countDown release-collection)
         (test-support/delete-recursively! repository-root)))))
 
 (deftest collection-dry-run-returns-the-bounded-physical-inventory
