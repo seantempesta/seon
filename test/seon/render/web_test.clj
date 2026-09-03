@@ -36,6 +36,7 @@
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.wake :as wake]
             [seon.config :as config]
+            [seon.context :as seon.context]
             [seon.db :as db]
             [seon.flow :as flow]
             [seon.oversight :as oversight]
@@ -537,6 +538,68 @@
             (is (str/includes? body "prospective help"))
             (is (not (str/includes? body
                                     "No recorded context capture exists")))))))))
+
+(deftest a-fresh-cluster-debug-page-renders-a-prospective-prompt
+  (with-server
+    (fn [connection server _context]
+      (db/transact!
+       connection
+       [(assoc (config/defaults)
+               :seon.config/cluster "web-test")
+        {:seon.cluster.message/id "fresh-cluster-task"
+         :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+         :seon.cluster.message/content "inspect the fresh cluster"
+         :seon.cluster.message/at (java.util.Date. 1788460800000)}
+        {:seon.cluster.run/id "fresh-cluster-run"
+         :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+         :seon.cluster.run/trigger
+         [:seon.cluster.message/id "fresh-cluster-task"]
+         :seon.cluster.run/opened-at (java.util.Date. 1788460801000)
+         :seon.cluster.run/process process}
+        {:seon.cluster.agent/id agent-id
+         :seon.cluster.agent/run [:seon.cluster.run/id "fresh-cluster-run"]}])
+      (let [message-custody seon.context/message-custody
+            observed-run-ids (atom [])]
+        (with-redefs [seon.context/message-custody
+                      (fn [database run-id rendered-agent-id message-eid]
+                        (swap! observed-run-ids conj run-id)
+                        (message-custody database run-id rendered-agent-id
+                                         message-eid))]
+          (let [response (fetch server "/agent/root/debug")
+                body (.body response)]
+            (is (= 200 (.statusCode response)))
+            (is (str/includes? body
+                               "seon-debug-context-status\">prospective"))
+            (is (not (str/includes? body "<pre></pre>"))
+                "the real walk contributes at least one byte to the prompt")
+            (is (= #{"fresh-cluster-run"} (set @observed-run-ids))
+                "history classifies messages against the agent's current run")
+            (is (not (str/includes?
+                      body
+                      "The prospective agent context is unavailable.")))))))))
+
+(deftest an-unavailable-prospective-context-renders-its-diagnostic-data
+  (with-server
+    (fn [_connection server _context]
+      (with-redefs [render.walk/history
+                    (fn [_request]
+                      (throw (RuntimeException.
+                              "injected prospective failure")))]
+        (let [response (fetch server "/agent/root/debug")
+              body (.body response)]
+          (is (= 200 (.statusCode response)))
+          (is (str/includes? body
+                             "seon-debug-context-status\">unavailable"))
+          (doseq [field [":seon.error/kind"
+                         ":seon.error/diagnostic-member"
+                         ":seon.error/diagnostic-cause"
+                         ":seon.error/diagnostic-expected"]]
+            (is (str/includes? body field)
+                (str "the unavailable result renders " field)))
+          (is (str/includes? body
+                             ":seon.render.web/prospective-context-unavailable"))
+          (is (str/includes? body "injected prospective failure"))
+          (is (str/includes? body ":seon.cluster.prompt/text")))))))
 
 (deftest debug-pages-distinguish-held-live-and-dead-runs
   (with-server

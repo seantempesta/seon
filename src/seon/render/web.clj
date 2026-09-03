@@ -545,7 +545,15 @@
 
 (defn- prospective-prompt
   [db connection agent-id caps render-context]
-  (let [request
+  (let [run-id
+        (db/q '[:find ?run-id .
+                :in $ ?agent-id
+                :where
+                [?agent :seon.cluster.agent/id ?agent-id]
+                [?agent :seon.cluster.agent/run ?run]
+                [?run :seon.cluster.run/id ?run-id]]
+              db agent-id)
+        request
         (assoc (walk-request db caps agent-id :seon.render/ai
                              connection render-context)
                :seon.render.walk/lookup
@@ -556,8 +564,16 @@
             [acquisition _entry] (acquire-root request call-id)
             entries
             (render.walk/history
-             (assoc request
-                    :seon.render.walk/root-acquisition acquisition))]
+             (cond-> (assoc request
+                            :seon.render.walk/root-acquisition acquisition)
+               run-id
+               (assoc :seon.cluster.run/id run-id)
+
+               ;; The run identifies its current trigger for history ordering;
+               ;; debug remains a read-only observation and records no render
+               ;; cost against that run.
+               run-id
+               (dissoc :seon.db/connection)))]
         {:seon.render.debug/prompt
          (str/join "\n\n" (map :seon.render.history/bytes entries))
          :seon.render.debug/prompt-kind :prospective
@@ -585,14 +601,29 @@
 
 (defn- debug-ai-html
   [agent-id prompt-result]
-  (let [element-id (str "debug-ai-" agent-id)]
+  (let [element-id (str "debug-ai-" agent-id)
+        failure (:seon.error/value prompt-result)
+        diagnostic (:seon.error/data failure)]
     (hiccup/->string
      [:section {:id element-id
                 :class "seon-debug-body seon-debug-body-ai"}
       [:span {:class "seon-debug-context-status"}
        (name (:seon.render.debug/prompt-kind prompt-result))]
-      [:pre (or (:seon.render.debug/prompt prompt-result)
-                (:seon.error/message (:seon.error/value prompt-result)))]])))
+      (if-some [prompt (:seon.render.debug/prompt prompt-result)]
+        [:pre prompt]
+        (into
+         [:dl {:class "seon-debug-diagnostic"}]
+         (map (fn [[attribute value]]
+                [:div
+                 [:dt [:code (pr-str attribute)]]
+                 [:dd [:code (pr-str value)]]]))
+         [[:seon.error/kind (:seon.error/kind failure)]
+          [:seon.error/diagnostic-member
+           (:seon.error/diagnostic-member diagnostic)]
+          [:seon.error/diagnostic-cause
+           (:seon.error/diagnostic-cause diagnostic)]
+          [:seon.error/diagnostic-expected
+           (:seon.error/diagnostic-expected diagnostic)]]))])))
 
 (defn- debug-html-id
   [agent-id]
@@ -609,7 +640,7 @@
              "Loading the current HTML projection…"]]))))
 
 (defn- debug-page-result
-  [db connection agent-id root-agent-id caps handle]
+  [db connection agent-id root-agent-id caps profile handle]
   (let [live-processes
         (when-some [process (:seon.cluster.run/process handle)] #{process})
         page-request
@@ -617,6 +648,7 @@
                  :seon.cluster.agent/id agent-id
                  :seon.render.web/root-agent-id root-agent-id
                  :seon.sci.admit/caps caps
+                 :seon.render/profile profile
                  :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
                  :seon.config.eval/time-limit-ms
                  (:seon.config.eval/time-limit-ms handle)
@@ -640,7 +672,8 @@
         page (dissoc (:seon.render.web/page result) stream-strip-id)
         ai-id (str "debug-ai-" agent-id)
         html-id (debug-html-id agent-id)
-        prompt-result (debug-prompt db connection agent-id caps handle)]
+        prompt-result (debug-prompt db connection agent-id caps
+                                    (assoc handle :seon.render/profile profile))]
     (cond->
      (assoc result :seon.render.web/page
             {ai-id (debug-ai-html agent-id prompt-result)
@@ -911,7 +944,7 @@
       (when derive-all?
         (debug-page-result database connection agent-id
                            (:seon.render.web/root-agent-id state)
-                           caps handle))
+                           caps profile handle))
       (let [retained (get-in state [::calls registration-key] {})
             candidates (candidate-call-ids retained database)
             call-id (root-call-id :seon.render/html registration-key)
@@ -974,7 +1007,7 @@
                               (when (pos? (long tabs)) registration-key)))
                       @registration)
         profile (or (::profile state)
-                    (when (some string? watched)
+                    (when (seq watched)
                       (render/agent-render-profile
                        (config/effective database
                                          (:seon.cluster/name handle)))))
@@ -1792,8 +1825,16 @@
     caps :seon.sci.admit/caps
     :as service}
    agent-id]
-  (let [prompt-result (debug-prompt @connection connection agent-id
-                                    caps service)]
+  (let [db @connection
+        projection (sci.kernel/context-projection
+                    (:seon.sci.eval/ctx service))
+        effective (schema/call-with-projection
+                   projection
+                   #(config/effective db (current-cluster-name db)))
+        render-context
+        (assoc service :seon.render/profile
+               (render/agent-render-profile effective))
+        prompt-result (debug-prompt db connection agent-id caps render-context)]
     {:status 200
      :headers {"content-type" "text/html; charset=utf-8"}
      :body
