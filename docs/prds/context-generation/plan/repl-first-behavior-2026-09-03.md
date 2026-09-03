@@ -107,10 +107,13 @@ noise; ONE final REPL-state line carries the current basis and time
 
 ## B3. Render functions — ordinary functions, most specific wins (56a)
 
-**Statement.** A render function is an ordinary contracted function
-whose input schema is the data's schema and whose output schema is
-`:seon.render/ai` (text) or `:seon.render/html` (hiccup). Declaring one
-makes it eligible. When a value is printed, the most specific eligible
+**Statement (ruling 60).** A render function is ANY function whose inputs
+are satisfiable from the value being rendered plus what call preparation
+injects (the current database, the environment), and whose output is
+`:seon.render/ai` (MUST be a string) or `:seon.render/html` (MUST be
+hiccup). Declaring one makes it eligible; a function needing anything
+else is not a candidate. A value may also carry its render inline, as
+content or as a function symbol. When a value is printed, the most specific eligible
 function renders it: (a) a render function the DATA itself names
 (inline) beats (b) a function in the AGENT'S OWN namespace that accepts
 the value, which beats (c) the GENERAL render function the data's schema

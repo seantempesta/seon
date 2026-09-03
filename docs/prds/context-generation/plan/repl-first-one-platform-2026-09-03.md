@@ -18,7 +18,115 @@ which becomes history when this one is accepted. LEGEND: [REAL] exists at
 HEAD and stays; [REFACTOR] exists and changes in place; [ADD] new; [DELETE]
 goes, with its replacement and the proof that gates the deletion.*
 
-## 0. The platform in one paragraph
+## 0. The goal (owner's words, 2026-09-02/03)
+
+The agent is dropped into a Clojure REPL in its own namespace. Its context
+is generated from its data and its graph neighbourhood, structured as
+FORMS we evaluate to surface the data and to explain how we found it; the
+values print through the best render function, which agents write and
+share; teaching is `doc`/`dir` walked back from what those forms used;
+`(help)` bootstraps it all, generated. The same generation through
+`:seon.render/html` IS the entire system UI. Every agent's context differs
+because its neighbourhood differs. Every turn regenerates the whole thing
+from facts; compaction is a fresh session that loses nothing. NOTHING is
+hardcoded: "the agent's entire context should be nested russian dolls of
+render functions being called, producing a coherent transcript of evals
+and results; the same with the html — something at a high level to do
+layout and sub render functions to render the individual values and
+context blocks." ONE design, one platform, no parallel systems.
+
+## 0a. What we have today (the register, in one screen)
+
+Verified at HEAD by the [parallel-paths register](../research/parallel-paths-register-2026-09-03.md)
+(file:line for every claim) and the [probes](../research/repl-first-probes-2026-09-02.md):
+
+- **Three semantic context assemblers** (`seon.bootstrap` generated
+  opening, `seon.render.walk/history`, `seon.render.transcript`) wrapped
+  by **two glue paths** (`web/context-pass`, `cluster.prompt`) plus a
+  debug reassembly; the prompt is a string join of per-entry bytes;
+  `cluster.prompt` shrinks graph distance to fit a budget.
+- **Six places decide visible omission** (`seon.print/fit`, profile knobs,
+  `render.ns`'s ladder, transcript tail-of-6 + summaries, distance shrink,
+  conditional MCP fitting); only one emits canonical elision values; the
+  measured fit ladder halves strings to ZERO first.
+- **Three namespace descriptions** (acquisition-time `doc` map,
+  `render.ns` face, `my.run` face); `doc` answers only function symbols.
+- **Faces are schema PROPERTIES** (364 `:seon.render/ai`, 285 of them one
+  error face) with contracts on a generic render unit; ZERO functions are
+  discoverable as renderers by contract query; agent-namespace candidates
+  are found by a Malli scan per render.
+- **Diff**: `seon.db/diff` (Var-only) + a count-only face; `membership-diff`
+  and vendored `editscript` with no production caller; read-evidence
+  stores every read's full result again (223 KB for six evals).
+- **No result handles**; render provenance is known at selection and
+  discarded before the context is assembled; 34 hardcoded opening/
+  narration sites (census 2026-08-28).
+- **What is right**: eval facts with result EDN/blob and read-evidence
+  revisions; schema-derived root selection; the four-rung producer
+  chain's shape; `seon.print` elision values; the exact prompt capture;
+  the def-restore seam; the web delta packages; `seon.db/since`/`as-of`.
+
+## 0b. Turtles all the way down — the composition, concretely
+
+**One recursive function.** `render` takes a VALUE and a projection
+(`/ai` or `/html`), selects the most specific render function for that
+value by the query of §2.2, calls it, and the function calls `render` on
+its parts. The base case is the floor (`seon.print/fit`), itself a
+nameable render function. There is no other way text or hiccup is made.
+
+**The context is a value, and it is a query result.** The generator (§2.1)
+produces DATA only: it evaluates its forms and settles them as evals.
+The transcript value is then a PULL over the agent's evals — its own runs'
+and the generation run's — ordered by the generator (help, self, edges,
+teaching before use, history by basis, trigger last). So the whole
+context is literally `(render (pull <transcript-selector> agent) :seon.render/ai)`
+and the whole page is the same call with `:seon.render/html` — "it's all
+queries rendered through the render function", at the top level too.
+
+**The dolls, by family** (each level is a family in the schema registry
+with a GENERAL render function on its schema — the rung-(c) default — that
+any agent may out-specify in its own namespace by writing a function
+with the same input and output):
+
+| level | family (value) | `/ai` general render function does | `/html` twin does | an agent overrides it by |
+|---|---|---|---|---|
+| 0 layout | the transcript: `{agent, basis, entries [...]}` | joins `(render entry)` for each entry with blank lines; appends the REPL-state line (basis, time) | the page: header, the entry list as blocks, the right-column panels (agent render fns with `/html` twins) | a fn in its ns taking the transcript → its whole screen/page layout changes |
+| 1 entry | one eval: `{ns, form, result, basis, handle, rendered-by}` | prints `ns=> form`, then `(render result)`, then `;; result/<id> rendered-by <fn>` | a block: form, `(render result :html)`, the handle chip | a fn taking an eval → its own entry style |
+| 2 value | the result's family (message collection, fn row, ns doc data, help data, diff value, error value …) | the family's function, or the agent's, or another agent's (§2.2 order) | its `/html` twin | the normal case — `inbox-view` |
+| 3 leaf | anything unclaimed | `seon.print/fit` with the profile: shape first, strings last, one requery form per elision | the same node as hiccup | never — the floor is total and the same for everyone |
+
+Teaching entries are the same shape: `(doc x)` is an eval whose RESULT is
+doc data (a value of the doc-data family) rendered at level 2 by the
+doc-data render function; `(dir ns)` likewise; `(help)` is an eval whose
+result is the coverage set, rendered by ITS render function. The intro
+instruction is a value of the instruction family whose render function
+returns its text. So the test for "turtles all the way down" is one
+question — *is there any byte in the context that was not produced by a
+render function selected by the query?* — and the answer is no. The
+generator never concatenates text; the layout function does, and it is
+replaceable.
+
+**Why this is not fragile:** the levels are schema families (data), the
+default render functions are ordinary contracted `defn`s (facts in the
+graph), selection is one query over contracts, and the generator only
+decides WHICH FORMS TO EVALUATE and IN WHAT ORDER — derived from the
+schema's ref edges and the demand closure, never from a list. Adding a
+family adds a doll; adding a render function changes one doll's face;
+neither edits the generator. Hot reload of any render function changes
+the next regeneration; a redefinition that breaks its contract is a typed
+error value rendered where it happened (2.4), never a blank.
+
+**What "render function" means (owner, 2026-09-03; ruling 60).** Any
+function whose INPUTS are satisfiable from the value being rendered —
+plus what call preparation can inject (the current database, the
+environment) — and whose OUTPUT is `:seon.render/ai` (MUST be a string)
+or `:seon.render/html` (MUST be hiccup). Separate functions for the two
+projections are normal. A function that also requires something we do not
+have is not a candidate. More than one candidate is a SORT (§2.2). A value
+may also carry the render directly — `{:seon.render/ai "text"}` or
+`{:seon.render/ai 'my.ns/fn}` — the inline rung.
+
+## 0c. The platform in one paragraph
 
 One walk from the agent's namespace row, spelled as forms, evaluated, and
 SETTLED AS EVALS — the same eval family the agent's own forms already
@@ -120,6 +228,7 @@ hops of `my.agents.root` in 16 ms cold / 0.07 ms warm):
  [?fam :seon.schema/key ?family]
  [?fn :seon.fn/arities ?a]
  [?a :seon.fn.arity/input-refs ?fam]
+ (inputs-satisfiable ?a ?fam)           ; every other input ref of ?a is injectable (db, env) — a rule over :seon.fn.arity/input-refs
  [?a :seon.fn.arity/output-refs ?out] [?out :seon.schema/key ?projection]
  [?fn :seon.fn/ns ?ns]
  (rank ?viewer ?ns ?rank ?hop)            ; 1 = viewer's own ns, 2 = another agent's ns at hop N, 3 = the family's own ns
@@ -257,14 +366,22 @@ Nothing creates a `-v2` namespace or a second registry; each wave lands
 in the owner named above and deletes what it replaces in the same
 refactor (2.5 of AGENTS.md).
 
-## 7. Open to the owner
+## 7. Settled and open
 
-1. The contract shape for render functions — `[:=> [:cat <family>]
-   :seon.render/ai]` with `:seon.render/ai` narrowed to `:string` (its
-   symbol-valued use as a schema PROPERTY stays a property, not an output
-   type). Confirm.
-2. Result handle id: derived from the eval identity (deterministic,
-   re-derivable on resume) — confirm over a random symbol.
-3. Default per-value token budget (B4.1): 5k?
-4. Wave 1 may start now (it is platform work under "reds first"); waves
-   2+ wait for the behavior ❓ list to empty. Confirm.
+Settled (owner, 2026-09-03): the render-function definition above (60);
+result-handle ids DERIVED from the eval identity; the per-value budget is a
+CONFIG FACT in TOKENS, 5k to start; NO CODING — not even wave 1 — until
+this document convinces the owner; platform bug fixes continue only where
+the code is staying (never polish what §4 deletes).
+
+Open:
+1. The transcript family's identity and selector (§0b level 0): a pull
+   over `:seon.cluster.eval` rows of the agent's runs plus the generation
+   run, ordered by the generator — confirm that the generation run is an
+   ordinary run whose evals are the system's entries (53), so the
+   transcript IS a query.
+2. Whether the intro instruction survives as a level-2 value (an
+   instruction-family entry rendered by its face) or dissolves into
+   `(help)` entirely (58a).
+3. The remaining ❓ of the behavior spec (its foot lists them, each with a
+   recommendation).

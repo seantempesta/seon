@@ -873,6 +873,23 @@ numerically and a bare cross-citation is a defect to fix on sight.
     agents' render functions at equal coverage: CLOSEST namespace wins
     (a required namespace is one hop, its requires two, …), then newest.
 
+60. **What a render function is; tokens, not characters; no coding until
+    the design convinces** (owner, 2026-09-03): a render function is ANY
+    function whose inputs are satisfiable from the value being rendered
+    plus what call preparation can inject (the current database, the
+    environment), and whose output is `:seon.render/ai` (MUST return a
+    string) or `:seon.render/html` (MUST return hiccup); separate
+    functions per projection are normal; a function needing anything else
+    is not a candidate; several candidates are a SORT — the whole
+    selection is one database query. A value may carry the render inline
+    as content or as a function symbol. Result-handle ids derive from the
+    eval identity. The per-value print budget is a CONFIG FACT in TOKENS
+    (5k to start) — never characters, anywhere the owner reads. NO
+    IMPLEMENTATION until the one-platform document shows the goal, what
+    exists, what is kept/changed/deleted, and convinces the owner that the
+    context is nested render functions with nothing hardcoded; platform
+    bug fixes continue only on code that stays.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
