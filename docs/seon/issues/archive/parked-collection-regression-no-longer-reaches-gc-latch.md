@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, operator, test, wave/operator-lock-contention]
 ---
@@ -30,6 +30,17 @@ that the current collection path does not invoke the Var the regression
 controls. The exact reason that path and replacement no longer meet remains to
 be verified at the collection owner; absence of the event is not health.
 
+The failure did not reproduce at `388cb321c`: before any edit, the same
+explicit gate ran 28 tests and 226 assertions with zero failures and zero
+errors, and this regression completed in 84 ms. No collection owner changed
+between the issue commit `b136f574f` and that proof. An isolated live JVM probe
+also confirmed both current links: `seon.operator/collect!` reaches
+`collect-store!`, whose two passes call `seon.cluster.registry/collect!`, and
+that registry owner still calls `datahike.api/gc-storage` at
+`src/seon/cluster/registry.clj:503-531`. The earlier absent event therefore did
+not prove that production stopped collecting; its transient cause is not
+reproducible and remains unattributed.
+
 ## Owner
 
 The `seon.operator/collect!` → store-collection boundary and its parked-custody
@@ -42,3 +53,20 @@ The explicit `seon.operator-test` gate observes the GC entrance, proves that
 root lifecycle custody is released while store custody remains held, settles
 the withheld completion, and reaches a zero-error total tally in both the main
 worker and isolated confirmation path.
+
+## Resolution
+
+Commit `8a261c9c1` makes the regression control the direct owner seam that
+`collect-store!` invokes: `seon.cluster.registry/collect!`. The first call
+announces its latch event and parks until released; the test then proves that
+the real operation-store flock still refuses a second open while the root
+lifecycle lock is available. After release, it requires exactly two registry
+collection calls, covering the primary and verification passes, and proves
+that terminal collection releases store custody. This removes the unused
+transitive Datahike replacement without changing the production collection
+path.
+
+`bin/test seon.operator-test` after the change ran 28 tests and 227 assertions
+with zero failures and zero errors. The parked regression completed in 99 ms;
+the successful isolated root was removed by the gate. The acceptance behavior
+is satisfied at the operator-owned collection boundary.
