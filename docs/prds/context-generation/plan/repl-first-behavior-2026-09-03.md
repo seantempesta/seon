@@ -350,16 +350,34 @@ where it happened; the open run's state is the reminder.)
 
 ---
 
-## B10. HTML — the same render functions are the UI
+## B10. HTML — the same walk through `:seon.render/html` IS the system UI (ruled, owner 2026-09-03)
 
-**Statement.** A render function with an `/html` twin (input the same
-schema, output `:seon.render/html`) is automatically a panel on the
-agent's page; the agent's transcript page is the `/html` projection of
-the same entries; nothing is authored twice (mandate 2026-08-14; ui.md).
+**Statement.** There is one generation (§G) and two projections of it.
+`:seon.render/ai` produces the agent's context; `:seon.render/html`
+produces THE ENTIRE SYSTEM UI — every page is the `/html` rendering of
+the same entries the same walk emits for the same root: an agent's page
+is its context in hiccup; a namespace page is `(doc ns)` in hiccup; a
+value's chip is its render function's `/html` twin. Nothing in the UI is
+authored separately from the context, and nothing in either is
+hardcoded: no fixed page layout that names families, no curated block
+list, no template per entity kind. Every agent's context — and therefore
+every agent's page — is DIFFERENT because its neighbourhood is
+different, and that is the intended behavior, not a problem to
+normalize. Turtles all the way down: a render function is data the graph
+knows (a contracted `defn`), its selection is a query, its output is a
+value the walk renders, and the page that shows it is itself an entry.
 
-❓ B10.1 Does an agent's `/ai` function without an `/html` twin get a
-generated `/html` (the text in a `<pre>`), or nothing? (Recommendation:
-the text, so every custom view is visible in the UI immediately.)
+**Consequence for the agent.** Writing an `/ai` render function changes
+how it reads its data; writing the `/html` twin changes how the world
+sees it — same contract shape, same specificity rules (B3), same walk.
+
+❓ B10.1 An `/ai` function without an `/html` twin: generate its
+`/html` as the text in a `<pre>` (recommended — every custom view is
+visible in the UI at once), or nothing until the twin exists?
+❓ B10.2 The root page `/` (the tile system view, ui.md): under this
+ruling it is the walk rooted at the CLUSTER entity, rendered `/html` —
+one live card per agent because the cluster→agents edge is a collection
+edge. Confirm that `/` is simply another root, not a special page.
 
 ---
 
@@ -568,6 +586,6 @@ or a `;;` comment, except the intro.
 ## Open questions, collected
 
 B1.1 B1.3 · B2.1 · B3.1 B3.2 B3.3 · B4.1 B4.2 · B5.1 B5.2 B5.3 · B6.1
-B6.2 B6.3 · B7.1 B7.2 · B8.1 B8.2 · B9.1 · B10.1 · B11.1 · G.1 G.2 G.3. Each carries a
+B6.2 B6.3 · B7.1 B7.2 · B8.1 B8.2 · B9.1 · B10.1 · B11.1 · B10.2 · G.1 G.2 G.3. Each carries a
 recommendation; a settled behavior loses its ❓ in this file in the same
 turn it is ruled.

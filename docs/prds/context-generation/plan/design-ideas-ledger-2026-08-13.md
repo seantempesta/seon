@@ -807,6 +807,25 @@ numerically and a bare cross-citation is a defect to fix on sight.
     and tailor every tool) is ruling 56's preamble and supersedes the
     reader-centric spelling of 53–55.
 
+57. **One generation, two projections; nothing hardcoded; turtles all
+    the way down** (owner, 2026-09-03): the context walk rendered
+    through `:seon.render/html` IS the entire system UI — every page is
+    the `/html` projection of the same entries the walk emits for that
+    root; the agent's context is the `/ai` projection. No authored page
+    layouts, block lists, or per-kind templates anywhere. Every agent's
+    context and page differ because their neighbourhoods differ — the
+    intended behavior. Render functions are contracted `defn`s (facts),
+    their selection is a query, their output is a value the walk
+    renders, the page showing it is itself an entry. The generation is
+    spelled as forms that are evaluated to surface the data AND to
+    explain how it was found: `dir` of every namespace an entry
+    references and `doc` of the functions it calls and of the render
+    function that prints it come BEFORE the entry; a previously emitted
+    query is shown as its diff against the recorded basis. Behavior
+    authority: [repl-first-behavior-2026-09-03.md](repl-first-behavior-2026-09-03.md)
+    §B10, §G. Phase rule: behaviors first, implementation talk only
+    after every ❓ in that file is gone.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
