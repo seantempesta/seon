@@ -99,6 +99,37 @@ schema property; since-shaped delta vs revision diff; implicit printer vs
 an explicit agent-callable; identities on `[*]` ref leaves). Generator
 work starts only after his answers and the platform items above.
 
+## 2026-09-03 (afternoon) — round 2 outcome, round 3, the behavior spec
+
+**Landed:** `1b22034b6` sweep-race (claim-before-sweepable + vanished path
+= success); `768c6a0e0` db-projection (projection cached by exact
+committed identity: wrapper 0.220 → 0.048 ms; issue stays open only for
+the literal 2× ratio — owner decision on a decoded-result cache);
+`8fa146805` sibling-contract REFUTED (the 1-arg resolver's body calls the
+2-arg sibling, which truthfully names itself; the real defect is the
+projectionless naked call — owned by
+`malli-form-predicate-resolves-the-declaration-population-itself`);
+`98b6175be` attempt-traces closed (fixture-side, seed proof recorded);
+`1ecd7054e` mcp-status landed by the orchestrator from lane -3's draft
+(issue archived). Still running: `debug-page-3`, `parallel-paths-census`
+(research: the refactor/merge/delete register the owner asked for),
+`analyze-form-row` (BLOCKER: root's contracted defn never settled —
+analyze-form returned `{:seon.ns/name nil}`; root burned a 44-form paid
+run), `reap-nil-path`.
+
+**Behavior spec:** [repl-first-behavior-2026-09-03.md](repl-first-behavior-2026-09-03.md)
+now carries §G (the walk as forms), B4 with the MEASURED fit ladder
+(strings halve to zero first — the dumb clipping), B5 with real diff
+bytes and the `since` lookup-ref trap, G6 render provenance (cost fact
+lacks the producer symbol). Rulings 56–57 sealed. Open ❓ listed at its
+foot; the owner rules them, then implementation talk begins.
+
+**Tool defects this round:** `get_value` elides large strings with no
+paging ([issue](../../../seon/issues/mcp-get-value-elides-large-strings-with-no-way-to-page-them.md));
+MCP door prints zero-character strings above the blob threshold (same
+issue). `runtime_status` fix landed but the live `ctxprobe` JVM serves
+pre-fix code until restart.
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
