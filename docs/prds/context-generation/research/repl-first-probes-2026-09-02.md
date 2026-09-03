@@ -160,3 +160,27 @@ when the eval family is redesigned (48b).
   inference (§2.2): the render function has to be a FACT before the
   generator may prefer it. Trial P-OWN-RENDER-WINS must therefore run
   through a settled turn, never a door def.
+
+## 8. Pull grammar and doc/dir internals (2026-09-03, after ruling 56)
+
+- Nested, recursive, and reverse pulls all work as Datahike's parser
+  defines them (`reference-code/datalog-parser/src/datalog/parser/pull.cljc`:
+  map-spec entries `{:attr [...]}`, recursion limits `{:attr N}` /
+  `{:attr ...}`, reverse attrs `:ns/_attr`, `[:attr :limit N :default v]`
+  option lists): `(seon.db/pull '[:seon.ns/name {:seon.ns/requires 2}]
+  [:seon.ns/name 'my.agents.root])` returned requires-of-requires two
+  levels deep; `{:seon.cluster.message/_to [...]}` on the agent row
+  returned its messages; 287 ms door-side for three pulls. The teaching
+  examples ruled in 56(d) are therefore ordinary Datahike pull specs — no
+  Seon extension needed.
+- The door's print floor under `:seon.render.profile/agent` elided the
+  4-element `:seon.ns/requires` collection to 2 children ("… 2 more
+  children of 4; requery by …") — the collection width the agent sees by
+  default is tiny; measured against the config below (§8a).
+- `doc`/`dir` are SCI MACRO vars (`src/seon/sci/eval.clj:1105-1160`) built
+  once per program population from `program-documentation` — a map keyed
+  by fn-symbol STRING → doc, arglists, contract lines; anything not a
+  function symbol falls back to `clojure.repl/doc` (returns nil for a
+  namespace or a schema key). The polymorphic `doc` (ruling 56 preamble)
+  replaces this dispatch with one over program-graph rows — lane
+  `doc-polymorphic`.
