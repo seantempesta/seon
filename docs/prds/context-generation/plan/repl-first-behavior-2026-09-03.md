@@ -167,76 +167,119 @@ the same data? Proposed: no — rung (b) is the viewing agent's namespace;
 
 ---
 
-## B4. The print floor — every value, bounded, honest (56c)
+## B4. The print floor — a smart printer with a real budget (owner direction 2026-09-03)
 
 **Statement.** Any value returned to the REPL or to the UI that no render
-function claims is printed by the floor: readable EDN, namespaced keys
-intact, strings quoted (round-trippable), collections bounded by the
-agent's render profile with an elision value naming the omitted count
-and how to requery — never a bare truncation, never `[clipped]`
-[REAL: seon.print + elision values; the profile's collection width
-today shows 2 of 4 `requires`, see ❓].
+function claims is printed by the floor. The owner's requirement: a
+REASONABLE BUDGET per value (order of 5k tokens by default — a config
+fact, not a constant) and a SMART printer: when the budget will be
+exceeded it does not dumbly clip; it shows the SHAPE (the keys, the
+collection sizes, the nesting) plus SOME of the data so the agent
+understands what is there, and every omission is an elision value
+carrying the requery form to dive into that part.
 
-**Transcript:**
+**What the floor does today [REAL, `seon.print/fit`, print.cljc ~900-935]:**
+the fit loop halves the STRING limit first, down to ZERO, then halves
+`max-children` (32 → 16 → 8 → 4 → 2), then decrements depth. Observed at
+the door on a 116-row query result: every string printed as
+`""… 36 more characters of 36` (zero characters of a 36-character string),
+every collection at every level showed 2 children, and each cut printed a
+full `requery by [:seon.blob/digest …] at path […] offset … with
+:seon.render.profile/agent` line — more elision text than data. This is
+the dumb clipping the owner means; it destroys exactly the information
+(names, first lines) an agent needs to decide where to dig.
+
+**Proposed ladder [P]:** (1) cut BREADTH first — keep the first N children
+of every collection, N shrinking per level (deeper collections lose
+first); (2) then DEPTH — replace subtrees past the depth limit by their
+shape summary (`{…7 keys}` / `[…116 items]`); (3) strings LAST and never
+below one line (~80 chars, then `…`); (4) ONE requery form per elided
+subtree, printed as a form the agent can paste, not a sentence.
+Measured, not assumed: the ladder is chosen by a probe over real values
+(a 116-fn-row query, a namespace row, a message collection) at the
+default budget, reading the bytes.
+
+**Transcript (target shape) [P]:**
 
 ```clojure
-my.agents.root=> (seon.db/pull '[:seon.ns/name {:seon.ns/requires [:seon.ns/name]}] [:seon.ns/name 'my.agents.root])
-#:seon.ns{:name my.agents.root,
-          :requires [#:seon.ns{:name my.message} #:seon.ns{:name my.run}
-                     … 2 more of 4; requery by [:seon.blob/digest "63d4…"] at path [1] offset 2]}
+my.agents.root=> (seon.db/q '[:find [(pull ?f [*]) ...] :where [?f :seon.fn/ns ?n] [?n :seon.ns/name seon.db]])
+[#:seon.fn{:sym seon.db/as-of, :doc "Database value as of a basis transaction …", :arglists "([time-point] [database time-point])", :arities […2 items], :ns [:seon.ns/name seon.db], …8 keys}
+ #:seon.fn{:sym seon.db/basis-t, :doc "The basis transaction of a database value.", …}
+ #:seon.fn{:sym seon.db/db, …}
+ … 113 more of 116 — (seon.db/q '[…] :offset 3)]
 ```
 
-❓ B4.1 The default collection width the agent sees. Today's door output
-elided 4 requires to 2 — too small to read a namespace's requires. What
-is the right default: full up to the eval result cap (8,192), with the
-PROFILE only bounding total tokens? (Recommendation: bound by tokens at
-the whole-entry level, never by a per-collection count of 2.)
-❓ B4.2 The elision line's shape: is `… 2 more of 4; requery by …` the
-face, or should it print the requery FORM the agent can paste?
-(Recommendation: print the form.)
+❓ B4.1 Default budget per value: 5k tokens? And is it per VALUE (each
+entry) with the context total bounded by compaction (B8)? (Recommendation:
+yes to both; the per-value budget is `:seon.config.render.agent/token-budget`,
+already a config fact.)
+❓ B4.2 The requery spelling in an elision: a pasteable FORM
+(recommended) vs today's sentence with a blob digest.
 
 ---
 
-## B5. What is new — since a basis, as a diff (56b)
+## B5. What is new — a diff against the basis the agent saw (56b; probed 2026-09-03)
 
 **Statement.** At turn N the agent sees, for each discovery query whose
 answer changed, ONE entry spelled against the basis it saw last, whose
-value is the diff: additions and deletions, both, rendered by the
+value is the diff — additions and deletions, both — rendered by the
 family's render function. The initial value (B1) is shown once; later
 entries are diffs. Unchanged queries produce no entry. The agent can
-type the same spelling itself to ask "what changed since t".
+type the same spelling to ask "what changed since t".
 
-**Transcript [P — the spelling is the open question]:**
+**How the agent knows "now" [REAL]:** `(seon.db/basis-t (seon.db/db))`
+→ `536871155`; the REPL-state line at the end of every context carries
+the current basis; every diff entry carries both bases.
+
+**Probed on the live cluster [REAL bytes, 2026-09-03]** — root's inbox
+was first shown at basis 536870930; a maintenance error message arrived
+at 02:15Z:
 
 ```clojure
-;; turn 1 showed the inbox at basis 536870930. Turn 3:
-my.agents.root=> (seon.db/diff 536870930 '[:find [(pull ?m [*]) ...]
-                                          :where [?m :seon.cluster.message/to [:seon.cluster.agent/id "root"]]])
-+ {:seon.cluster.message/id "m-2" :seon.cluster.message/at #inst "…" :seon.cluster.message/from [:seon.cluster.agent/id "planner"] :seon.cluster.message/content "…"}
-- {:seon.cluster.message/id "bootstrap-task:root" …}          ; only if it was retracted
+my.agents.root=> (seon.db/diff 536870930 #'my.message/inbox "root")
+{:seon.db.diff/added   [#:my.message{:id "maintenance-error/maintenance-receipt/[\"root/maintenance/reap-dead-roots\" …]-your-run"
+                                     :at #inst "2026-09-03T02:15:00.712-00:00"
+                                     :content "seon.fs/delete-recursively! violated its contract (invalid-input): invalid type. …"}]
+ :seon.db.diff/removed []
+ :seon.db.diff/changed []
+ :seon.db/basis-t 536870930
+ :seon.db/current-basis-t 536871156
+ :seon.db.diff/requery-id (seon.db/diff 536870930 (var my.message/inbox) "root")}
 ```
 
-Effects fire once (54c): an entry whose form reaches an external sink
-(a send, a shell call, a web fetch) is never re-run for a diff; its
-stored result replays verbatim.
+The DATA is right: one addition, no removals, both bases, a requery
+form. Its `/ai` face today (`render-diff-ai`) prints only counts and
+"full data elided" — the M13 soup; under B3 the FAMILY's render function
+renders the diff value (`+` one line per added message, `-` per removed,
+`~` per changed with the changed attributes).
 
-❓ B5.1 The spelling. `seon.db/diff` exists today for a function Var
-(`(seon.db/diff basis #'f & args)`) and would extend to a query/pull
-form as the pure read; the owner asked for "the since syntax". Options:
-(i) `(seon.db/diff <basis> <query-or-pull-or-var> …)` — one function,
-additions and deletions, the basis explicit (recommended); (ii)
-`(seon.db/q <query> (seon.db/since <basis>))` — Datomic's own spelling,
-but it shows assertions only (retractions invisible) so it cannot honor
-"always both"; (iii) both: `since` for what the agent types casually,
-`diff` for the generated entries.
-❓ B5.2 A changed entity (same identity, different attribute values):
-show as `~ id {attr old → new}` or as `-` then `+`? (Recommendation:
-`~` with the changed attributes only — `seon.db/diff` already computes
-`:changed-attributes`.)
-❓ B5.3 Do diff entries accumulate forever in the transcript, or does the
-NEXT regeneration fold older diffs into a fresh initial value at a newer
-basis? Ties to B8 (compaction). Proposed: they accumulate until
-compaction; compaction re-shows the initial value at the compaction basis.
+**The `since` view is a trap, measured:** the same query against
+`(seon.db/since 536870930)` FAILED — `Nothing found for entity id
+[:seon.cluster.agent/id "root"]` — because a since view contains only
+datoms newer than the basis, so the agent's own identity datom (older) is
+invisible and every lookup ref in the query breaks. `since` is fine for
+"is there anything newer at all"; it is wrong for "what changed in what I
+saw". The diff spelling — the same pure read at the recorded basis and
+now — is therefore the generated entry's form (56b's "diff under the
+hood"), and `since` stays what Datahike makes it: a tool the agent may
+type, with `(doc seon.db/since)` saying exactly this.
+
+**Spelling [P, extends the REAL `seon.db/diff`]:** `(seon.db/diff <basis>
+<var-or-query-or-pull> & args)` — today it accepts a program Var plus
+args and refuses effectful Vars by the external-sink facts (54c); it
+extends to a Datalog query or pull form as the pure read so a generated
+`q` entry and its later diff entry share one spelling.
+
+Effects fire once (54c): an entry whose form reaches an external sink
+replays its stored result and is never re-run for a diff.
+
+❓ B5.2 Changed entities: `~ id {attr old → new}` (recommended; the diff
+already computes `:changed-attributes`) or `-` then `+`.
+❓ B5.3 Diff entries accumulate until compaction; compaction re-shows the
+initial value at the compaction basis (recommended) — confirm.
+❓ B5.4 Cost: the probe's diff took 626 ms at the door (two reads plus the
+projection); the projection cache landed since (`768c6a0e0`); re-measure
+before the ladder is frozen.
 
 ---
 
@@ -554,6 +597,37 @@ preferred: it is found because its contracted `defn` settled as a
 program row, never because a def happened to exist in a context
 [REAL: probes §7].
 
+### G6. Render provenance — every printed value says what printed it (owner direction 2026-09-03)
+
+**Statement.** "No magic": there is ONE automatic rendering system — the
+P of the REPL — where a value becomes text for the agent's context or
+hiccup for the browser. Whatever it renders, it can say WHICH function
+rendered it, including the floor. That provenance is data the walk
+records with the entry (today `seon.render/render-cost-fact` records the
+shape key, profile, and token estimate per render but NOT the producer
+symbol [REAL, render.clj:357] — the one missing attribute), and the two
+projections display it in their own idiom. Candidate displays [P, for
+markup]:
+
+```clojure
+;; /ai — a trailing comment on the entry, the form is one paste away
+my.agents.root=> (seon.db/q '[…messages to root…])
+[…rendered…]
+;; rendered by seon.cluster.message/render-ai — (doc seon.cluster.message/render-ai)
+```
+
+```html
+<!-- /html — a data attribute on the block; the UI shows it on hover/inspect -->
+<section data-block="…" data-rendered-by="seon.cluster.message/render-html">…</section>
+```
+
+❓ G.4 Approve the two displays? (Alternative for `/ai`: a first line
+`;; via seon.cluster.message/render-ai` before the value; alternative for
+`/html`: a visible footer link to the function's namespace page.)
+❓ G.5 The floor's provenance reads `seon.print/fit` (or the value face
+that applied) — show it too, or only non-floor renders? (Recommendation:
+show it too — "the default" was explicitly requested.)
+
 ❓ G.1 `dir` per required namespace at hop 1: for `seon.db` (31 names)
 and the toolkit namespaces this is compact; for a large first-party
 namespace `dir` could be long. Cap by the render profile like any value,
@@ -586,6 +660,6 @@ or a `;;` comment, except the intro.
 ## Open questions, collected
 
 B1.1 B1.3 · B2.1 · B3.1 B3.2 B3.3 · B4.1 B4.2 · B5.1 B5.2 B5.3 · B6.1
-B6.2 B6.3 · B7.1 B7.2 · B8.1 B8.2 · B9.1 · B10.1 · B11.1 · B10.2 · G.1 G.2 G.3. Each carries a
+B6.2 B6.3 · B7.1 B7.2 · B8.1 B8.2 · B9.1 · B10.1 · B11.1 · B10.2 · G.1 G.3 G.4 G.5 (G.2 answered: provenance is recorded and displayed, see G6). Each carries a
 recommendation; a settled behavior loses its ❓ in this file in the same
 turn it is ruled.
