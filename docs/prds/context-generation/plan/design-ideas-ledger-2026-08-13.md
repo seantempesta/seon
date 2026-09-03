@@ -790,6 +790,23 @@ numerically and a bare cross-citation is a defect to fix on sight.
     missile rule (54c), identity permanence (47), read vocabulary over
     writer (54b), stability as a property (52).
 
+56. **REPL-first context — the four forks ruled** (owner, 2026-09-02):
+    (a) render functions are ordinary functions, eligible by
+    declaration; specificity order = inline on the value → the agent's
+    own namespace → the schema's general face (the property stays as the
+    fallback rung) → floor; (b) the delta is the `since` spelling with a
+    diff under the hood that ALWAYS shows additions and deletions —
+    history = initial value rendered, then diffs against the last shown
+    basis; (c) rendering is invoked by calling the render function on
+    the data, and the print floor (REPL and UI) looks up the most
+    specific renderer; (d) pulls are nested/recursive per Datahike's own
+    pull grammar, taught correctly — no `[*]` magic. Recorded in the
+    [design draft §9](repl-first-context-design-2026-09-02.md). The
+    reframe itself (agent dropped into its REPL; data + best render fn +
+    doc/dir teaching; `doc` polymorphic over anything and lists; we own
+    and tailor every tool) is ruling 56's preamble and supersedes the
+    reader-centric spelling of 53–55.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced

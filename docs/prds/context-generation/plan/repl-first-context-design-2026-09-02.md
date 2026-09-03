@@ -246,14 +246,39 @@ the schema reference graph (3,655 edges); the bridge's usage children
    namespace is selected over the family's; a second fitting function
    is a loud tie.
 
-## 9. Open forks for the owner
+## 9. RULED (owner, 2026-09-02 evening; ledger ruling 56)
 
-1. Faces: dissolve the schema PROPERTY into contracted functions
-   (recommended: one mechanism), or keep the property as an override.
-2. Delta: (a) since-shaped re-run (recommended) vs (b) revision-driven
-   identity diff.
-3. The printer: implicit only (every result printed by the chain,
-   recommended) vs also an explicit agent-callable.
-4. `seon.db/pull '[*]` carrying identities on ref leaves for the
-   agent's own pulls: yes (recommended, Datomic semantics preserved) or
-   leave bare `:db/id`.
+The four forks below were answered by the owner in conversation (his first
+answers were lost with a harness process exit; re-asked and re-answered
+the same evening — this section is the durable record):
+
+1. **Render functions are just functions; declaring one makes it
+   eligible.** Selection order, most specific first: (a) ANY data may
+   expressly specify its render function (inline on the value); (b) a
+   render function declared in the AGENT'S OWN namespace whose contract
+   accepts the data; (c) the schema's metadata naming a GENERAL render
+   function — the fallback when nothing more specific exists (the
+   `:seon.render/ai` property STAYS as this rung; the "dissolve the
+   property" recommendation is rejected); (d) the floor. Ties loud.
+2. **Delta = the `since` spelling with a DIFF under the hood, always
+   showing both additions and deletions.** The agent's REPL history
+   shows the initial value (pull + render) and later entries are diffs
+   named against the basis. Because Datahike's `since` view alone hides
+   retractions, "under the hood" means: the same pure read evaluated
+   as-of the shown basis and at the current basis, identity-diffed
+   (`seon.db/diff` [REAL] is this mechanism for Vars; it extends to a
+   query/pull form as the pure read), and the render function for the
+   family renders the diff value with `+`/`-` entries. The spelling the
+   agent sees names the basis it saw last.
+3. **Rendering is invoked by calling the render function on the data.**
+   Plus the PRINT FLOOR: any value returned to the REPL or to the UI
+   looks up the best (most specific) renderer by the order in (1). No
+   separate generic "render" callable is introduced.
+4. **Pulls are nested and recursive — teach them right.** No magic on
+   `[*]`: the generated queries and the teaching examples use Datahike's
+   own nested selectors and recursive pull specs (`{:attr [...]}`,
+   `{:attr ...}`/`{:attr N}`) so every ref carries the attributes the
+   agent needs; where a first query must gather the refs before naming
+   them in explicit recursive pulls, the generated examples do exactly
+   that. Verify each idiom against `reference-code/datahike/src/datahike/pull_api.cljc`
+   before it appears in a teaching example.
