@@ -94,8 +94,7 @@ six returned lane roots swept; one orphan runner-exchange helper reaped;
 `tmp/test-runs` holds 1.0 GB of retained roots (holderless; sweep after
 the sweep-race lane lands).
 
-**Design:** the [REPL-first design draft](repl-first-context-design-2026-09-02.md)
-§9 carries four forks for the owner (faces as contracted functions vs the
+**Design (2026-09-03):** the owner ruled the four forks (ledger 56) and set the phase rule — BEHAVIORS FIRST: [repl-first-behavior-2026-09-03.md](repl-first-behavior-2026-09-03.md) is the behavior spec under markup (B1–B12, 19 ❓ each with a recommendation); implementation talk only after every ❓ is gone. The `doc-polymorphic` lane was stopped for that reason (resume when B6 settles). Earlier text: the [design draft](repl-first-context-design-2026-09-02.md) §9 carried four forks for the owner (faces as contracted functions vs the
 schema property; since-shaped delta vs revision diff; implicit printer vs
 an explicit agent-callable; identities on `[*]` ref leaves). Generator
 work starts only after his answers and the platform items above.
