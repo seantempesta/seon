@@ -931,6 +931,23 @@ numerically and a bare cross-citation is a defect to fix on sight.
     Verified at HEAD: `seon.schema/register!` exists but no agent-facing
     schema declaration does — the one gap this ruling opens.
 
+63. **Data-first corollaries** (owner, 2026-09-04): (a) a message is a
+    fact — sending is `seon.db/transact!` of a message row; the write
+    door stamps provenance and the wake delivers (the returned-value
+    protocol of `my.message/send` retires); (b) an on-the-fly calculation
+    stays a form in history (referenceable by its `result/<id>`) and
+    becomes a function ONLY when it becomes a surface (a render function)
+    or is reused enough to name and contract; (c) when a value hits the
+    floor and is CLIPPED, the elision carries a WARNING line telling the
+    agent the output was clipped and that a render function for that
+    family gets it the data in the shape it wants — data-derived, one
+    line; (d) the storage itself is refactored first — names, keys, and
+    namespaces of the families the context renders get smarter
+    (research lane `context-data-census`), and the agent gets simple
+    spellings to write to its own record and to store/retrieve its own
+    data; the schema-declaration spelling is the open question (three
+    concrete spellings in behavior B15).
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced

@@ -213,7 +213,12 @@ my.agents.root=> (seon.db/q '[:find [(pull ?f [*]) ...] :where [?f :seon.fn/ns ?
  … 113 more of 116 — (seon.db/q '[…] :offset 3)]
 ```
 
-❓ B4.1 Default budget per value: 5k tokens? And is it per VALUE (each
+**Ruled 63c — the clipping WARNING.** When the floor clips, the elision
+line says so and points at the fix: `;; clipped: 3 of 116 — a render
+function for :seon.fn/fn shows it the way you want`, derived from the
+family of the clipped value; shown only when clipping happened.
+
+❓ B4.1 Default budget per value: 5k tokens? (ruled 60: 5k, a config fact in tokens) And is it per VALUE (each
 entry) with the context total bounded by compaction (B8)? (Recommendation:
 yes to both; the per-value budget is `:seon.config.render.agent/token-budget`,
 already a config fact.)
@@ -715,7 +720,7 @@ declared phrase is a second thing to maintain.)
 
 ---
 
-## B15. Data first — schemas, facts, queries; functions only for surfaces (ruled 62)
+## B15. Data first — schemas, facts, queries; functions only for surfaces (ruled 62/63)
 
 **Statement.** The agent's ordinary work is data work: declare what it
 stores (a schema), assert and retract facts (`seon.db/transact!` with
@@ -723,28 +728,72 @@ identity upsert, retraction, `:db.fn/call` transitions), and read and
 compute over them (`q`, `pull`, aggregates, ordinary Clojure over the
 result). None of that needs a function. A function is written for exactly
 two reasons: a SURFACE for the user (a render function, `/ai` or `/html`)
-or a calculation reused enough to name and contract. The context teaches
-transacting as naturally as querying — an intent comment and the form:
+or a calculation reused enough to name and contract (63b). A message is a
+fact; sending is a transact (63a). Data-shaped `my.*` surfaces dissolve
+into these demonstrations, keeping their render functions as the model
+of what agents write; effect-shaped ones stay functions.
+
+**Worked example — "how would that look" (owner's ask), one session of
+a temp agent in `my.agents.root`; `::k` is Clojure's own auto-resolved
+keyword, so every key lands in the agent's namespace without typing it:**
 
 ```clojure
-;; remember this for later
-my.agents.root=> (seon.db/transact! [{:my.note/id "largest-contract" :my.note/content "largest returns {} for empty input"}])
-{:db-after … :tx-data […]}
-;; result/e5
-;; how many messages per sender, on the fly
-my.agents.root=> (seon.db/q '[:find ?from (count ?m) :where [?m :seon.cluster.message/to [:seon.cluster.agent/id "root"]] [?m :seon.cluster.message/from ?f] [?f :seon.cluster.agent/id ?from]])
-#{["planner" 2] ["reviewer" 1]}
-;; result/f6
+;; what I store: an expense — ONE fact declares the family; the system derives the
+;; attribute rows from the map's entries and installs them on commit   [spelling ❓ B15.1]
+my.agents.root=> (seon.db/transact!
+                   [#:seon.schema{:key ::expense
+                                  :form [:map {:seon.db/attributes true}
+                                         [::id [:string {:seon.db/identity true}]]
+                                         [::amount [:int {:min 0}]]
+                                         [::at :inst]
+                                         [::note {:optional true} :string]]}])
+{:tx-data […] :db-after …}
+;; result/g1
+
+;; two expenses — a map literal in my namespace; identity upserts
+my.agents.root=> (seon.db/transact! [#::{:id "lunch-0904" :amount 1450 :at #inst "2026-09-04T12:10:00Z"}
+                                     #::{:id "cab-0904"   :amount 2860 :at #inst "2026-09-04T18:02:00Z" :note "airport"}])
+{:tx-data […]}
+;; result/g2
+
+;; total so far — a calculation, no function
+my.agents.root=> (seon.db/q '[:find (sum ?a) . :where [_ ::amount ?a]])
+4310
+;; result/g3
+
+;; all of them, newest first
+my.agents.root=> (->> (seon.db/q '[:find [(pull ?e [*]) ...] :where [?e ::id]])
+                      (sort-by ::at #(compare %2 %1)))
+[{:my.agents.root/id "cab-0904" :my.agents.root/amount 2860 :my.agents.root/at #inst "…" :my.agents.root/note "airport"}
+ {:my.agents.root/id "lunch-0904" :my.agents.root/amount 1450 :my.agents.root/at #inst "…"}]
+;; result/g4  rendered-by seon.print/fit
+;; clipped: 0 of 2 — when this grows, a render function for :my.agents.root/expense shows it the way you want   [63c, shown only when clipping happens]
+
+;; the user wants to see it — NOW a function, and only now
+my.agents.root=> (defn expenses-view
+  "Newest first: date, amount in dollars, note."
+  {:malli/schema [:=> [:cat [:sequential ::expense]] :seon.render/ai]}
+  [rows]
+  (clojure.string/join "\n" (for [r (sort-by ::at #(compare %2 %1) rows)]
+                               (format "%s  $%.2f  %s" (::at r) (/ (::amount r) 100.0) (or (::note r) "")))))
+#'my.agents.root/expenses-view
+;; from the next turn on, every expense collection prints through it — and with an /html twin it is a panel on root's page
 ```
 
-Data-shaped `my.*` surfaces dissolve into these demonstrations (their
-render functions survive as the model of what agents write); effect-shaped
-ones stay functions (they cross the effect door).
+Every line is one of four idioms — declare, transact, query, render —
+and the agent learned the first three from its own arrival screen.
 
-❓ B15.1 Agent-declared schemas: transact schema FACTS directly (schema is
-data, the system installs it) vs a demonstrated `(seon.schema/register! …)`
-call. ❓ B15.2 `send` as a transact of a message fact (the run loop
-delivers on the wake) vs today's returned value the loop interprets.
+❓ B15.1 The schema spelling. Three concrete options, same example:
+(A) attribute rows one by one (`#:seon.schema{:key ::amount :form …}`
+× 4 then the map) — pure facts, verbose; (B) ONE schema fact whose map
+form carries inline entry schemas, the system deriving and installing
+the attribute rows on commit through a Datahike transition
+(`:db.fn/call`) — pure facts, one form (recommended, shown above);
+(C) `(seon.schema/declare! ::expense [:map …])` — a function door,
+one form, but a second idiom beside `transact!`.
+❓ B15.2 Mark-read: a `:seon.cluster.message/read-at` fact the agent
+transacts (recommended — data, sortable, queryable) vs no such fact
+(the transcript position implies it).
 
 ---
 

@@ -214,6 +214,30 @@ my.agents.root=> (seon.db/diff 536870930 '[:find [(pull ?m [:seon.cluster.messag
 ;; result/d4  rendered-by my.agents.root/inbox-view
 ```
 
+## 5a. THE DATA — what the walk pulls out and renders (owner's question, 2026-09-04)
+
+Derived from the edge counts in §1 and the families' schema files; the
+"agent writes" column is ruling 62/63; smells are inputs to the
+`context-data-census` research lane.
+
+| family (identity) | what the walk shows | sort key | agent writes? | smell to fix first |
+|---|---|---|---|---|
+| namespace `:seon.ns/name` | requires, refers, owner agent, publics (`:seon.fn/ns` reverse) | — | its `ns` form (require) | — |
+| function `:seon.fn/sym` | name, first doc line, arities in/out (`doc`) | — | a contracted `defn` | `sym` is a string (retype ruled 47) |
+| **transcript** = form `:seon.cluster.run.form/id` (source, ordinal, author, ns) + result `:seon.cluster.eval/id` (result-edn/blob, error, at, read-evidence) | every entry: the parser-saved form + its result, `result/<id>` | run → ordinal; `eval/at` | its forms (by evaluating) | TWO families for one entry, joined by run+ordinal; family key named `receipt`; result bytes duplicated in read-evidence — merge candidate |
+| message `:seon.cluster.message/id` | to, from, content, at, about, caused-by | `at` (inst ✓) | YES: transact to send (63a); `read-at` (❓ B15.2) | `to`/`from` are refs, `render-ai` narrates; no read-at |
+| run `:seon.cluster.run/id` | the open run, its trigger, opened-at, disposition | `opened-at` | `complete`/`wait` as a fact? (B9/B15 follow-up) | custody attrs are system-only (correct) |
+| the agent's defs `:seon.def/id` | restored scratch defs, atoms | ordinal | implicitly, by `def` | — |
+| note `:my.note/id` | content, about | — (no `at`!) | YES: transact | no datetime; `agent` ref duplicates provenance the tx-meta already stamps |
+| plan item `:my.plan.item/id` | label, after, children, about, completions | — | YES: transact | large derived surface (`ready`, `blocked`, diffs) — derive, don't store |
+| error `:seon.error/id` | kind, message, at, run, signature | `at` | never (system) | `data-edn` is a print-node string (36 KB observed) |
+| maintenance request / schedule task | count + newest per agent | `at` | never (root's portfolio) | 50 requests per agent → collection-first or the context drowns |
+| program-graph rows mentioned by any form | `doc`/`dir` data | — | — | — |
+
+The census lane proposes the smarter names and shapes (merges, renames,
+missing datetimes) as EDN sketches with the exact forms the agent would
+then type.
+
 ## 5. How to keep improving this file
 
 Re-run the edge query (§1) at the current basis and replace the counts;
