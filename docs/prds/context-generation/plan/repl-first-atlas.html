@@ -134,7 +134,7 @@
       </div>
       <div class="player" id="player">
         <div class="player-head">
-          <span class="eyebrow">Step through a session · reads glow, writes appear, pops retract</span>
+          <span class="eyebrow">Step through the session, starting at (help) · the graph becomes the dependency graph: what each form references, and why it was known</span>
           <div class="player-controls">
             <button id="stepPrev" aria-label="Previous step">◀</button>
             <span id="stepPos" class="counts mono">0 / 0</span>
@@ -351,49 +351,82 @@ const MODEL = {
       out: "+ 2026-09-03T18:40:11Z  planner  Can you review largest before I depend on it?\n;; result/f6  rendered-by my.agents.root/inbox-view",
       lens: "the SAME function that printed the inbox prints the delta", teach: "planner is a new name → (doc my.agents.planner) before it" }
   ],
-  // A session, step by step. reads: families/edges that glow; writes: instance nodes that appear
-  // under the record (op add) or leave it (op retract); diff: what the agent sees change.
-  steps: [
-    { title: "turn 1 · arrival: who am I", intent: "who am I, what do I require",
-      form: "(seon.db/pull '[:seon.ns/name {:seon.ns/requires [:seon.ns/name]}] [:seon.ns/name 'my.agents.root])",
-      out: "namespace my.agents.root\n  requires: my.message my.run seon.bootstrap seon.db\n;; result/a1",
-      reads: ["agent", "ns"], writes: [{ id: "ev-a1", label: "eval a1\n(pull ns)", parent: "agent", via: "evals", fam: "eval" }] },
-    { title: "turn 1 · what points at me", intent: "messages addressed to root",
-      form: "(seon.db/q '[:find [(pull ?m […]) ...] :where [?m :seon.cluster.message/to [:seon.cluster.agent/id \"root\"]]])",
-      out: "2026-09-02T19:54:58Z  outside  Define a durable contracted function named largest …\n;; result/b2  rendered-by seon.cluster.message/render-ai\n;; clipped: 0 of 1",
-      reads: ["agent", "message"], writes: [{ id: "ev-b2", label: "eval b2\n(q inbox)", parent: "agent", via: "evals", fam: "eval" }, { id: "msg-boot", label: "msg bootstrap-task", parent: "agent", via: "inbox", fam: "message", preexisting: true }] },
-    { title: "turn 1 · the trigger, last", intent: "the message that woke me",
+  // THE SESSION — literally what the agent sees and runs, in order, starting with (help).
+  // Each step lists what it REFERENCES (entities, attributes, values, names) and, for every
+  // reference, WHY IT WAS KNOWN: the fact or the earlier step that made it available
+  // (working backwards = explainability). kinds: fn | attr | entity | value | schema | step
+  session: [
+    { id: "s1", title: "(help) — the generated bootstrap (ruling 58a)",
+      form: "(help)",
+      out: ";; Root commands used in this session, dependency order:\nseon.db/q     ([query & args])   Datalog over the current database value\nseon.db/pull  ([selector eid])   pull one entity; refs carry their identity attribute\nseon.db/transact! ([tx-data])    assert or retract facts\nseon.db/diff  ([basis read])     what changed since a basis (+ added − removed)\ndoc dir                          explain / list — anything the program graph knows\nmy.run/complete ([reply])        ends this run\n;; Your neighbourhood: 4 required namespaces, 3 messages, 1 open run, 4 errors, 50 maintenance requests",
+      refs: [
+        { id: "fn:seon.db/q", kind: "fn", label: "seon.db/q", because: ["fact:ctx-bindings"], why: "every name the SCI ctx can resolve has a program row (ruling 47); help enumerates the ones the walk's forms use" },
+        { id: "fn:seon.db/pull", kind: "fn", label: "seon.db/pull", because: ["fact:ctx-bindings"], why: "same" },
+        { id: "fn:seon.db/transact!", kind: "fn", label: "seon.db/transact!", because: ["fact:ctx-bindings"], why: "same" },
+        { id: "fn:seon.db/diff", kind: "fn", label: "seon.db/diff", because: ["fact:ctx-bindings"], why: "same" },
+        { id: "fn:doc", kind: "fn", label: "doc / dir", because: ["fact:ctx-bindings"], why: "injected REPL bindings — rows too" },
+        { id: "fact:ctx-bindings", kind: "schema", label: "program rows of every\nctx-resolvable name", because: ["fact:index"], why: "seon.fn/index! + the injected bindings (ruling 47)" },
+        { id: "fact:index", kind: "schema", label: ":current-src program index\n(forked into this cluster)", because: [], why: "bin/seon init → publish! → fork (Atlas §Where code is indexed)" },
+        { id: "fact:ref-attrs", kind: "schema", label: "installed schema:\nref attributes around the agent", because: ["fact:index"], why: "walk/root-selector enumerates every :db.type/ref attribute forward and reverse — THIS is how we know what data is there before reading any of it" },
+        { id: "ent:agent", kind: "entity", label: "[:seon.agent/id \"root\"]", because: ["fact:run"], why: "the run being generated for carries the agent" },
+        { id: "fact:run", kind: "schema", label: "the open run\n(custody fact)", because: [], why: "the run loop hands the generator its run" }
+      ] },
+    { id: "s2", title: "(dir seon.db) — teaching demanded by the next pull",
+      form: "(dir seon.db)", out: "as-of basis-t … pull pull-many q … since transact!\n;; result/a1",
+      refs: [ { id: "ent:ns-seon.db", kind: "entity", label: "[:seon.ns/name seon.db]", because: ["fn:seon.db/pull", "fact:index"], why: "help named seon.db/pull; its namespace row exists in the index" } ] },
+    { id: "s3", title: "(doc seon.db/pull)",
+      form: "(doc seon.db/pull)", out: "seon.db/pull  ([selector eid] …)  arity 3: database, selector, entity-id → the pulled entity | error\n;; result/a2",
+      refs: [ { id: "attr:seon.fn/spec", kind: "attr", label: ":seon.fn/spec\n(the contract fact)", because: ["fn:seon.db/pull"], why: "doc reads the fn row's arities and spec; the same fact instrumentation wraps" } ] },
+    { id: "s4", title: "who am I — the first data pull",
+      form: "(seon.db/pull '[:seon.ns/name {:seon.ns/requires [:seon.ns/name]} {:seon.ns/refers [:seon.ns.refer/local]}]\n              [:seon.ns/name 'my.agents.root])",
+      out: "namespace my.agents.root\n  requires: my.message my.run seon.bootstrap seon.db\n  refers:   help dir doc\n;; result/a3",
+      refs: [
+        { id: "attr:seon.agent/namespace", kind: "attr", label: ":seon.agent/namespace", because: ["fact:ref-attrs", "ent:agent"], why: "a forward ref attribute on the agent entity → the pull follows it" },
+        { id: "ent:ns-root", kind: "entity", label: "[:seon.ns/name my.agents.root]", because: ["attr:seon.agent/namespace"], why: "the value of that ref" },
+        { id: "attr:seon.ns/requires", kind: "attr", label: ":seon.ns/requires", because: ["fact:ref-attrs", "ent:ns-root"], why: "a forward ref attribute on the namespace row → nested selector" },
+        { id: "val:requires", kind: "value", label: "my.message my.run\nseon.bootstrap seon.db", because: ["attr:seon.ns/requires"], why: "the pulled values — the next dirs are demanded by THESE" }
+      ] },
+    { id: "s5", title: "(dir my.message) — demanded by the requires value",
+      form: "(dir my.message)", out: "decline inbox read send\n;; result/a4",
+      refs: [ { id: "ent:ns-my.message", kind: "entity", label: "[:seon.ns/name my.message]", because: ["val:requires"], why: "named by the previous result; its row is in the index" } ] },
+    { id: "s6", title: "what points at me — messages",
+      form: "(seon.db/q '[:find [(pull ?m [:seon.cluster.message/id :seon.cluster.message/at :seon.cluster.message/content]) ...]\n             :where [?m :seon.cluster.message/to [:seon.cluster.agent/id \"root\"]]])",
+      out: "2026-09-02T19:54:58Z  outside  Define a durable contracted function named largest …\n2026-09-03T02:15:00Z  outside  seon.fs/delete-recursively! violated its contract …\n;; result/b1  rendered-by seon.cluster.message/render-ai",
+      refs: [
+        { id: "attr:seon.cluster.message/to", kind: "attr", label: ":seon.cluster.message/to\n(reverse: 3 datoms point at root)", because: ["fact:ref-attrs", "ent:agent"], why: "a ref attribute whose datoms have the agent's eid as VALUE → a reverse edge → one q for the collection" },
+        { id: "schema:message", kind: "schema", label: ":seon.cluster.message/message\n(family; its general render fn)", because: ["attr:seon.cluster.message/to"], why: "the entity family that references this attribute — the pull selector's attributes and the render function come from it" },
+        { id: "val:msg-boot", kind: "value", label: "\"bootstrap-task:root\"", because: ["attr:seon.cluster.message/to"], why: "a pulled identity value — a lookup ref the agent can dig into" },
+        { id: "val:msg-maint", kind: "value", label: "\"maintenance-error/…\"", because: ["attr:seon.cluster.message/to"], why: "same" }
+      ] },
+    { id: "s7", title: "the trigger, last (B1) — dig into one value",
       form: "(seon.db/pull '[*] [:seon.cluster.message/id \"bootstrap-task:root\"])",
-      out: "{:seon.cluster.message/content \"Define a durable contracted function named largest …\"}\n;; result/c3", reads: ["msg-boot"], writes: [{ id: "ev-c3", label: "eval c3", parent: "agent", via: "evals", fam: "eval" }] },
-    { title: "turn 1 · the agent writes code", intent: "define largest (a contracted defn settles as a program row)",
+      out: "{:seon.cluster.message/content \"Define a durable contracted function named largest …\" …}\n;; result/b2",
+      refs: [ { id: "val:task", kind: "value", label: "content: \"Define a durable\ncontracted function named largest…\"", because: ["val:msg-boot", "fact:run"], why: "the run's trigger IS this message; its content is the goal (52b: the goal is the seed)" } ] },
+    { id: "s8", title: "the agent acts — a contracted defn (settles as a program row)",
       form: "(defn largest {:malli/schema [:=> [:cat [:sequential :map]] :map]} [rows] (or (last (sort-by :example/amount rows)) {}))",
-      out: "#'my.agents.root/largest\n;; result/d4", reads: ["ns"], writes: [{ id: "fn-largest", label: "fn my.agents.root/largest", parent: "ns", via: "fns", fam: "fn" }, { id: "ev-d4", label: "eval d4\n(defn largest)", parent: "agent", via: "evals", fam: "eval" }],
-      diff: "+ program row :seon.fn/sym my.agents.root/largest — (doc largest) answers from now on" },
-    { title: "turn 1 · the agent writes data", intent: "remember why largest returns {} for empty input",
-      form: "(seon.db/transact! [{:my.note/id \"largest-empty\" :my.note/content \"{} for empty input, per the task\" :my.note/about [:seon.fn/sym \"my.agents.root/largest\"]}])",
-      out: "{:tx-data [4 datoms]}\n;; result/e5", reads: [], writes: [{ id: "note-1", label: "note largest-empty", parent: "agent", via: "notes", fam: "note" }],
-      diff: "+ 1 note under root's record (about → fn largest)" },
-    { title: "turn 1 · the agent sends", intent: "tell planner it is done",
+      out: "#'my.agents.root/largest\n;; result/c1",
+      refs: [ { id: "fn:largest", kind: "fn", label: "my.agents.root/largest\n(NEW row, settled)", because: ["val:task", "fn:doc"], why: "demanded by the task; (doc largest) answers from now on — the agent's own use satisfies future demands (52b)" } ] },
+    { id: "s9", title: "the agent writes data — a note about it",
+      form: "(seon.db/transact! [{:my.note/id \"largest-empty\" :my.note/content \"{} for empty input\" :my.note/about [:seon.fn/sym \"my.agents.root/largest\"]}])",
+      out: "{:tx-data [4 datoms]}\n;; result/c2",
+      refs: [ { id: "ent:note", kind: "entity", label: "[:my.note/id \"largest-empty\"]\n(NEW, about → largest)", because: ["fn:seon.db/transact!", "fn:largest"], why: "help taught transact!; the note points at the row the agent just made" } ] },
+    { id: "s10", title: "the agent sends — a message is a fact (63a)",
       form: "(seon.db/transact! [{:seon.cluster.message/id \"root-1\" :seon.cluster.message/to [:seon.agent/id \"planner\"] :seon.cluster.message/content \"largest is defined and noted\"}])",
-      out: "{:tx-data [5 datoms]}\n;; result/f6", reads: ["agent-planner"], writes: [{ id: "agent-planner", label: "agent planner", parent: null, fam: "agent", preexisting: true }, { id: "msg-root-1", label: "msg root-1", parent: "agent-planner", via: "inbox", fam: "message" }],
-      diff: "the message lands in PLANNER's inbox; root keeps only its eval f6 (ruling 65)" },
-    { title: "turn 1 · pop the trigger", intent: "done with the task message — pop it",
+      out: "{:tx-data [5 datoms]}\n;; result/c3",
+      refs: [ { id: "ent:msg-root-1", kind: "entity", label: "[:seon.cluster.message/id \"root-1\"]\n(NEW; lands in planner's record)", because: ["schema:message", "fn:seon.db/transact!"], why: "the family's attributes were learned from the inbox pull; the same shape writes" } ] },
+    { id: "s11", title: "pop the trigger (65) — done with it",
       form: "(seon.db/transact! [[:db/retract [:seon.agent/id \"root\"] :seon.agent/inbox [:seon.cluster.message/id \"bootstrap-task:root\"]]])",
-      out: "{:tx-data [1 retraction]}\n;; result/g7", reads: [], writes: [{ id: "msg-boot", op: "retract" }],
-      diff: "− bootstrap-task leaves root's inbox; (seon.db/history) still has it" },
-    { title: "between turns · the watch fires", intent: "(system) planner replies; a commit touches :seon.agent/inbox of root",
-      form: ";; wake/route! → offer! wake → the generator finds eval b2's read-evidence stale",
-      out: "(no agent form — the listener carries no payload; the woken pass derives)", reads: ["agent"], writes: [{ id: "msg-planner-1", label: "msg planner-1", parent: "agent", via: "inbox", fam: "message" }],
-      diff: "+ 1 message in root's inbox (written by planner's turn)" },
-    { title: "turn 2 · the diff form", intent: "new messages since t 536870930",
+      out: "{:tx-data [1 retraction]}\n;; result/c4",
+      refs: [ { id: "val:msg-boot", kind: "value", retract: true, because: [], why: "removed from the working set; (seon.db/history) still has it" } ] },
+    { id: "s12", title: "between turns — the watch fires (B14)",
+      form: ";; system: planner's turn wrote into root's inbox; wake/route! offered a wake; eval b1's read-evidence is stale",
+      out: "(no agent form — the woken pass derives from facts)",
+      refs: [ { id: "val:msg-planner-1", kind: "value", label: "\"planner-1\" (NEW in inbox)", because: ["attr:seon.cluster.message/to"], why: "a commit touched an attribute in eval b1's read-evidence → that query is stale" },
+              { id: "fact:evidence-b1", kind: "schema", label: "eval b1 read-evidence\n(attributes + revisions)", because: ["attr:seon.cluster.message/to"], why: "settled with the eval at step 6 — the watch's interest is a fact, not a subscription" } ] },
+    { id: "s13", title: "turn 2 — the diff form (56b/61)",
       form: "(seon.db/diff 536870930 '[:find [(pull ?m […]) ...] :where [?m :seon.cluster.message/to [:seon.cluster.agent/id \"root\"]]])",
-      out: "+ 2026-09-03T18:40:11Z  planner  Can you review largest before I depend on it?\n− (bootstrap-task popped)\n;; result/h8  rendered-by seon.cluster.message/render-ai",
-      reads: ["msg-planner-1", "ev-b2"], writes: [{ id: "ev-h8", label: "eval h8\n(diff inbox)", parent: "agent", via: "evals", fam: "eval" }],
-      diff: "one entry: + planner-1, − bootstrap-task — both bases on the row; the same render fn prints it" },
-    { title: "turn 2 · the agent owns its view", intent: "print my inbox the way I want",
-      form: "(defn inbox-view {:malli/schema [:=> [:cat [:sequential :seon.cluster.message/message]] :seon.render/ai]} [ms] …)",
-      out: "#'my.agents.root/inbox-view\n;; result/i9", reads: ["ns"], writes: [{ id: "fn-inbox-view", label: "fn inbox-view\n(render fn)", parent: "ns", via: "fns", fam: "fn" }, { id: "ev-i9", label: "eval i9", parent: "agent", via: "evals", fam: "eval" }],
-      diff: "from the next regeneration every inbox entry prints through inbox-view (rung b); its /html twin is a panel" }
+      out: "+ 2026-09-03T18:40:11Z  planner  Can you review largest before I depend on it?\n− bootstrap-task:root (popped)\n;; result/d1  rendered-by seon.cluster.message/render-ai",
+      refs: [ { id: "val:diff", kind: "value", label: "+ planner-1\n− bootstrap-task", because: ["fact:evidence-b1", "fn:seon.db/diff", "val:msg-planner-1"], why: "the same read at the recorded basis and now; rendered by the same function as step 6" } ] }
   ],
   idioms: [
     { when: "I hold an entity (a lookup ref) and want its attributes and what it points at", idiom: "pull, nested selector", form: "(seon.db/pull '[:seon.ns/name {:seon.ns/requires [:seon.ns/name]} {:seon.ns/refers [:seon.ns.refer/local]}] [:seon.ns/name 'my.agents.root])", grammar: "map-spec entry {:attr [subselector]}; the identity attribute on every ref leaf" },
@@ -481,7 +514,7 @@ function drawGraph() {
     ]
   });
   relayout();
-  cy.on("tap", "node", ev => inspect(familyById[ev.target.id()]));
+  cy.on("tap", "node", ev => { const d = ev.target.data(); if (playerMode) { document.getElementById("inspector").innerHTML = `<div class="key">${ev.target.hasClass("step") ? "step" : "reference"}</div><h3 class="mono">${escapeHtml(String(d.label))}</h3><p>${escapeHtml(d.why || "")}</p><div class="teach">known because → ${ev.target.outgoers("edge.because").targets().map(n => n.data("label")).join(" · ") || "an axiom (the index, the run)"}</div>`; } else { inspect(familyById[d.id]); } });
   cy.on("tap", "edge", ev => inspectEdge(ev.target.data()));
   inspect(familyById.agent);
 }
@@ -533,8 +566,8 @@ function show(view) {
   try { localStorage.setItem("atlas-view", view); } catch (e) {}
 }
 document.querySelectorAll("nav button[data-view]").forEach(b => b.addEventListener("click", () => show(b.dataset.view)));
-document.getElementById("showTarget").addEventListener("click", () => { mode = "target"; toggleMode(); });
-document.getElementById("showCurrent").addEventListener("click", () => { mode = "current"; toggleMode(); });
+document.getElementById("showTarget").addEventListener("click", () => { mode = "target"; resetSteps(); toggleMode(); });
+document.getElementById("showCurrent").addEventListener("click", () => { mode = "current"; resetSteps(); toggleMode(); });
 document.getElementById("relayout").addEventListener("click", relayout);
 function toggleMode() {
   document.getElementById("showTarget").setAttribute("aria-pressed", mode === "target");
@@ -542,53 +575,64 @@ function toggleMode() {
   cy.elements().remove(); cy.add(elements()); relayout();
 }
 // ---------------------------------------------------------------------------
-// The session player: instance nodes appear under the record, reads glow, pops retract.
+// The session player: a DEPENDENCY graph that grows as the agent steps.
+// step boxes → the things they reference; each reference → what made it known (dashed "because").
 // ---------------------------------------------------------------------------
-let stepIndex = -1, playing = null;
+let stepIndex = -1, playing = null, playerMode = false;
 const stepLog = [];
+const kindColor = { fn: "fn", attr: "schema", entity: "agent", value: "message", schema: "eval", step: "run" };
 function styleSteps() {
   cy.style()
-    .selector(".read").style({ "border-color": "#3b82c4", "border-width": 3, "line-color": "#3b82c4", "target-arrow-color": "#3b82c4", width: 3 })
-    .selector(".written").style({ "border-color": tok("--ok"), "border-width": 3, "line-color": tok("--ok"), "target-arrow-color": tok("--ok") })
-    .selector(".instance").style({ "font-size": 10, "border-style": "solid", opacity: 1 })
-    .selector(".gone").style({ opacity: 0.25, "border-style": "dashed" })
+    .selector(".dep").style({ "font-size": 10, shape: "round-rectangle", width: "label", height: "label", padding: "8px", "text-wrap": "wrap", "text-max-width": 170 })
+    .selector(".dep.step").style({ "font-weight": "bold", "border-width": 2, "border-color": tok("--accent") })
+    .selector("edge.references").style({ "line-color": tok("--accent"), "target-arrow-color": tok("--accent"), width: 2, label: "" })
+    .selector("edge.because").style({ "line-style": "dashed", "line-color": tok("--ink-3"), "target-arrow-color": tok("--ink-3"), width: 1.2, label: "known because", "font-size": 8 })
+    .selector(".hot").style({ "border-color": "#3b82c4", "border-width": 3 })
+    .selector(".gone").style({ opacity: 0.3, "border-style": "dashed" })
     .update();
 }
-function ensureInstance(w) {
-  if (cy.getElementById(w.id).length) return cy.getElementById(w.id);
-  const fam = familyById[w.fam];
-  const anchor = w.parent ? cy.getElementById(w.parent) : cy.getElementById("agent");
-  const p = anchor.position();
-  const n = cy.add({ group: "nodes", data: { id: w.id, label: w.label, level: 9, bg: swatch(fam) }, classes: "instance", position: { x: p.x + (Math.random() * 160 - 80), y: p.y + 110 + Math.random() * 60 } });
-  if (w.parent) cy.add({ group: "edges", data: { id: "ie-" + w.id, source: w.parent, target: w.id, label: w.via ? ":seon.agent/" + w.via : "", kind: w.via ? "component" : "ref" }, classes: "instance" });
-  return n;
+function depLayout() { const l = cy.layout({ name: "breadthfirst", directed: true, roots: cy.nodes(".dep.step").length ? "#s1" : undefined, spacingFactor: 1.1, padding: 24, animate: false, fit: false }); l.one("layoutstop", () => cy.fit(cy.nodes(), 30)); l.run(); }
+function enterPlayer() {
+  if (playerMode) return; playerMode = true;
+  cy.elements().remove();
+  document.getElementById("cy").setAttribute("aria-label", "Dependency graph of the session: steps, what they reference, and why each reference was known");
 }
-function applyStep(i, forward) {
-  cy.elements().removeClass("read written");
-  const s = MODEL.steps[i];
-  s.reads.forEach(id => { const el = cy.getElementById(id); if (el.length) el.addClass("read"); });
-  s.writes.forEach(w => {
-    if (w.op === "retract") { const el = cy.getElementById(w.id); el.addClass("gone"); cy.getElementById("ie-" + w.id).addClass("gone"); return; }
-    const n = ensureInstance(w);
-    if (!w.preexisting) { n.addClass("written"); cy.getElementById("ie-" + w.id).addClass("written"); }
+function leavePlayer() { if (!playerMode) return; playerMode = false; cy.elements().remove(); cy.add(elements()); relayout(); }
+function addRef(r, stepId) {
+  if (r.retract) { const n = cy.getElementById(r.id); n.addClass("gone"); return; }
+  if (!cy.getElementById(r.id).length) cy.add({ group: "nodes", data: { id: r.id, label: r.label, bg: tok("--" + kindColor[r.kind]), why: r.why }, classes: "dep " + r.kind });
+  const n = cy.getElementById(r.id); n.addClass("hot");
+  if (!cy.getElementById(stepId + "->" + r.id).length) cy.add({ group: "edges", data: { id: stepId + "->" + r.id, source: stepId, target: r.id, label: "" }, classes: "references" });
+  (r.because || []).forEach(b => {
+    if (!cy.getElementById(b).length) { const known = MODEL.session.flatMap(x => x.refs).find(x => x.id === b); if (known) addRef(known, stepId); }
+    if (cy.getElementById(b).length && !cy.getElementById(r.id + "<-" + b).length) cy.add({ group: "edges", data: { id: r.id + "<-" + b, source: r.id, target: b, label: "" }, classes: "because" });
   });
-  document.getElementById("stepCard").innerHTML = `<h4>${s.title}</h4>
-    <pre class="form"><span class="c">;; ${escapeHtml(s.intent)}</span>\n<span class="p">my.agents.root=></span> ${escapeHtml(s.form)}</pre>
+}
+function applyStep(i) {
+  enterPlayer();
+  cy.elements().removeClass("hot");
+  const s = MODEL.session[i];
+  if (!cy.getElementById(s.id).length) cy.add({ group: "nodes", data: { id: s.id, label: (i + 1) + " · " + s.title.split(" — ")[0], bg: tok("--run"), why: s.title }, classes: "dep step" });
+  cy.getElementById(s.id).addClass("hot");
+  s.refs.forEach(r => addRef(r, s.id));
+  depLayout();
+  document.getElementById("stepCard").innerHTML = `<h4>${escapeHtml(s.title)}</h4>
+    <pre class="form"><span class="p">my.agents.root=></span> ${escapeHtml(s.form)}</pre>
     <pre class="form">${escapeHtml(s.out)}</pre>
-    <div class="rw">${s.reads.length ? `<span class="r">reads: ${s.reads.join(", ")}</span>` : ""}${s.writes.filter(w => !w.preexisting).length ? `<span class="w">writes: ${s.writes.filter(w => !w.preexisting).map(w => (w.op === "retract" ? "− " : "+ ") + w.id).join(", ")}</span>` : ""}${s.diff ? `<span class="d">Δ ${escapeHtml(s.diff)}</span>` : ""}</div>`;
-  stepLog.length = i; stepLog.push(`;; ${s.intent}\nmy.agents.root=> ${s.form}\n${s.out}`);
+    <div class="eyebrow" style="margin-top:8px">references — and why each was known (click a node for the full reason)</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:4px">${s.refs.map(r => `<tr><td class="mono" style="padding:3px 6px 3px 0;vertical-align:top;white-space:nowrap">${r.retract ? "− " : ""}${escapeHtml((r.label || r.id).replace(/\n/g, " "))}</td><td style="padding:3px 0;color:var(--ink-2)">${escapeHtml(r.why || "")}${(r.because || []).length ? ` <span class="mono" style="color:var(--ink-3)">← ${r.because.join(", ")}</span>` : ""}</td></tr>`).join("")}</table>`;
+  stepLog.length = i; stepLog.push(`my.agents.root=> ${s.form}\n${s.out}`);
   document.getElementById("stepLog").innerHTML = stepLog.map((t, k) => `<div class="${k < i ? "old" : ""}">${escapeHtml(t)}</div>`).join("\n");
-  document.getElementById("stepPos").textContent = `${i + 1} / ${MODEL.steps.length}`;
+  document.getElementById("stepPos").textContent = `${i + 1} / ${MODEL.session.length}`;
   document.getElementById("stepLog").scrollTop = 1e6;
 }
 function resetSteps() {
-  stepIndex = -1; stepLog.length = 0;
-  cy.elements(".instance").remove(); cy.elements().removeClass("read written gone");
-  document.getElementById("stepCard").innerHTML = `<h4>Press ▶ to start</h4><div class="teach">Each step is one form the agent (or the system, on its behalf) evaluated. Blue = read, green = written, faded = popped.</div>`;
-  document.getElementById("stepLog").innerHTML = ""; document.getElementById("stepPos").textContent = `0 / ${MODEL.steps.length}`;
+  stepIndex = -1; stepLog.length = 0; leavePlayer();
+  document.getElementById("stepCard").innerHTML = `<h4>Press ▶ — step 1 is (help)</h4><div class="teach">Each step is literally the next form the agent sees or runs. The graph becomes the DEPENDENCY graph: solid arrows = "this step references", dashed arrows = "known because". Work backwards along the dashed arrows to see how we knew the data was there.</div>`;
+  document.getElementById("stepLog").innerHTML = ""; document.getElementById("stepPos").textContent = `0 / ${MODEL.session.length}`;
 }
-function next() { if (stepIndex + 1 >= MODEL.steps.length) { stopPlay(); return; } stepIndex++; applyStep(stepIndex, true); }
-function prev() { if (stepIndex <= 0) { resetSteps(); return; } const target = stepIndex - 1; resetSteps(); for (let k = 0; k <= target; k++) { stepIndex = k; applyStep(k, true); } }
+function next() { if (stepIndex + 1 >= MODEL.session.length) { stopPlay(); return; } stepIndex++; applyStep(stepIndex); }
+function prev() { if (stepIndex <= 0) { resetSteps(); return; } const target = stepIndex - 1; stepIndex = -1; stepLog.length = 0; leavePlayer(); for (let k = 0; k <= target; k++) { stepIndex = k; applyStep(k); } }
 function stopPlay() { if (playing) clearInterval(playing); playing = null; document.getElementById("stepPlay").setAttribute("aria-pressed", "false"); document.getElementById("stepPlay").textContent = "Play"; }
 document.getElementById("stepNext").addEventListener("click", next);
 document.getElementById("stepPrev").addEventListener("click", prev);
@@ -596,7 +640,7 @@ document.getElementById("stepReset").addEventListener("click", resetSteps);
 document.getElementById("stepPlay").addEventListener("click", () => {
   if (playing) { stopPlay(); return; }
   document.getElementById("stepPlay").setAttribute("aria-pressed", "true"); document.getElementById("stepPlay").textContent = "Pause";
-  next(); playing = setInterval(next, 2600);
+  next(); playing = setInterval(next, 3000);
 });
 
 legend(); drawGraph(); styleSteps(); resetSteps(); drawWalk(); drawIdioms(); drawDecisions();
