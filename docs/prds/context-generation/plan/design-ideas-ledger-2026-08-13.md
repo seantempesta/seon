@@ -997,8 +997,10 @@ numerically and a bare cross-citation is a defect to fix on sight.
     `:seon.db/receipt` (an installed ref attribute) from `*receipt*`
     bound during an agent eval (`sci/eval.clj:2029`) plus
     `:seon.db/process`; on `ctxprobe` only `:seon.db/process` appears on
-    any transaction because no agent has written data there — the stamp
-    is proven by test or it is not proven. The atlas session is rewritten
+    any transaction because no agent has written data there; the stamp IS
+    proven by `test/seon/receipt_write_carrier_test.clj` (`[?tx
+    :seon.db/receipt ?receipt]`). `:seon.db/user` is not stamped by
+    `transact!` today (census §3) — the data-first writer boundary adds it. The atlas session is rewritten
     as this story (a calendar steward, 12 steps).
 
 ## Parked explicitly (owner said not yet / needs design first)

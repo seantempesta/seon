@@ -411,10 +411,10 @@ const MODEL = {
       refs: [ { id: "val:result-b1", kind: "value", label: "result/b1 (the week's rows)", because: ["val:week-view"], why: "the previous result is a real symbol (B13) — ordinary Clojure over it, nothing to define" } ] },
     { id: "s8", title: "the agent writes data — with provenance",
       form: "(seon.db/transact! [#:acme.calendar{:event-id \"evt-2026-09-05-focus\" :title \"focus block\" :start #inst \"2026-09-05T13:00Z\" :end #inst \"2026-09-05T15:00Z\" :calendar [:acme.calendar/calendar-id \"work\"]}])",
-      out: "{:tx-data [6 datoms] :tx-meta {:seon.db/process \"…\" :seon.db/eval [:seon.cluster.eval/id \"…b3\"]}}\n;; result/b3\n;; VERIFY: at HEAD only :seon.db/process is stamped on this cluster's transactions; the eval stamp (42c) exists as code but no datom proves it — issue filed",
+      out: "{:tx-data [6 datoms] :tx-meta {:seon.db/process \"…\" :seon.db/eval [:seon.cluster.eval/id \"…b3\"]}}\n;; result/b3\n;; VERIFIED at HEAD: an agent's transact! stamps :seon.db/receipt (the eval) + :seon.db/process on the transaction entity — proven by test/seon/receipt_write_carrier_test.clj; ctxprobe shows only :seon.db/process because no agent has written data there yet",
       refs: [
         { id: "ent:focus", kind: "entity", label: "[:acme.calendar/event-id\n\"evt-2026-09-05-focus\"] (NEW)", because: ["attr:event-attrs", "fn:root-commands"], why: "the same map shape the doc showed; identity → upsert" },
-        { id: "fact:tx-meta", kind: "schema", label: "tx-meta: process + eval\n(who wrote this datom)", because: ["fact:run"], why: "provenance on the transaction entity — 'what function/agent made this datom' is a join (42c) — MUST be verified at HEAD" }
+        { id: "fact:tx-meta", kind: "schema", label: "tx-meta: process + eval\n(who wrote this datom)", because: ["fact:run"], why: "provenance on the transaction entity — 'what agent/eval made this datom' is a join (42c); proven by receipt_write_carrier_test; :seon.db/user is NOT stamped today (census §3)" }
       ] },
     { id: "s9", title: "the page — the same functions, /html",
       form: ";; not a form the agent types: the page is the walk rendered through :seon.render/html",
