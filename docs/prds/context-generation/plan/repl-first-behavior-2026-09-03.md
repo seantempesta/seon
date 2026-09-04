@@ -225,8 +225,10 @@ already a config fact.)
 ## B5. What is new — a diff against the basis the agent saw (56b; probed 2026-09-03) — LATER WAVE by ruling 58d
 
 *Ruling 58d: the system is developed FIRST for full regeneration every
-turn (B8 = every turn); this section's diff entries are the later
-incremental wave. The evidence stays here so that wave starts grounded.*
+turn (B8 = every turn). Ruling 61 (2026-09-04) makes the WATCH (B14) the
+driver of these diff entries — event-driven, one diff form per stale
+query — so this section's mechanism is settled; its timing stays the
+later wave. The evidence stays here so that wave starts grounded.*
 
 **Statement.** At turn N the agent sees, for each discovery query whose
 answer changed, ONE entry spelled against the basis it saw last, whose
@@ -686,6 +688,30 @@ special case.
 noun; `result` as the namespace) — keep, or Clojure's own `*1`-style is
 insufficient because it names only the last three. (Recommendation:
 keep `result/<id>`; the id derived from the eval's identity.)
+
+---
+
+## B14. The watch — new data arrives as one diff form (ruled 61)
+
+**Statement.** The agent never polls and never registers callbacks
+(ruling 41: listeners are system-side). Every generated discovery query is
+settled as an eval carrying its read-evidence (the attributes it depends
+on, with revisions). Datahike's `listen!`, through the one routing
+listener `seon.cluster.wake/route!`, wakes the agent's generator
+payload-free when a commit touches those attributes; the woken pass asks
+the facts which settled queries went stale and settles ONE diff form per
+stale query, spelled against the basis the agent saw, rendered by the
+SAME render function that printed the initial value. Under full
+regeneration (58d) the diff eval is a fact and reappears identically.
+Custom reader functions (`inbox`, `latest-messages`, `mark-read`, …) are
+not the surface: the intent comment plus the generated form is.
+See [the visual](repl-first-visual-2026-09-04.md) §3.
+
+❓ B14.1 The intent comment's derivation from the attribute name and
+direction (`:seon.cluster.message/to` reversed → "messages addressed to
+root") — approve the rule, or should the schema carry a declared
+intent phrase per attribute? (Recommendation: derive from the name; a
+declared phrase is a second thing to maintain.)
 
 ---
 

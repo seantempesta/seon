@@ -890,6 +890,28 @@ numerically and a bare cross-citation is a defect to fix on sight.
     context is nested render functions with nothing hardcoded; platform
     bug fixes continue only on code that stays.
 
+61. **Generated queries, not reader functions; the watch is the delta; one
+    visual** (owner, 2026-09-04): the program pivots AWAY from custom
+    agent-facing reader/mutator functions (`(inbox)`, `(latest-messages)`,
+    `(mark-read)` and their kind) TOWARD generating the exact query or
+    transaction form for each intent and demonstrating it naturally — an
+    intent comment (`;; messages addressed to root`) above a real
+    `seon.db/q`/`pull`/`transact!` form. The forms are reverse-engineered
+    from the installed schema's ref edges around the agent's entity
+    (forward → pull with nested selector; reverse → `q` over the
+    attribute, collection-first) and the intent comment derives from the
+    attribute's name and direction. New data arrives through the WATCH:
+    Datahike `listen!` wrapped by `seon.cluster.wake/route!` (payload-free,
+    never throws, never parks, system-side per ruling 41), with per-query
+    interest from the settled eval's read-evidence revisions; the woken
+    pass settles ONE diff form for each stale query and the SAME render
+    function that printed the initial value prints the delta — render
+    functions keep the agent's context focused on exactly what it chose
+    to see. The reusable design language (GRAPH → WALK → TRANSCRIPT, with
+    the watch as a loop) lives in
+    [repl-first-visual-2026-09-04.md](repl-first-visual-2026-09-04.md);
+    it is improved in place, never forked.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
