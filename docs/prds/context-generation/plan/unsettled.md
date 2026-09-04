@@ -236,6 +236,26 @@ Everything draws from the `MODEL` object at the top of the file; the open
 mark is a committed script that regenerates its edges from the live
 schema. The markdown visual stays as the printable twin.
 
+## 2026-09-04 (night) — the condensed design and the second opinion
+
+The owner could not follow the trail and asked for a second opinion. THE
+ENTRY DOCUMENT for the design question is now
+[agent-centric-design-2026-09-04.md](agent-centric-design-2026-09-04.md):
+the goals in his words, the data model built AROUND the agent (an agent
+entity owning inbox/evals/defs/notes/plan/data as component collections;
+NO cluster-level message family — a message lives in one inbox and is
+popped; the sender keeps its eval; system facts point at the agent), how
+the context generates from it, the evidence table, the unknowns, and the
+orchestrator's own errors (chief among them: keeping
+`seon.cluster.message` in every draft). Lane `second-opinion` (Codex, no
+session context) critiques it into
+`research/second-opinion-2026-09-04.md`, re-running the probe scripts on
+its own scratch cluster. The atlas and the one-platform §0e still carry
+the old family names until the design is agreed. Ruling 66 (help =
+record summary via render fns + processing fns by contract) is in the
+ledger; tx provenance is test-proven (`receipt_write_carrier_test`); the
+`:seon.db/user` stamp is the gap.
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
