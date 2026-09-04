@@ -219,6 +219,23 @@ watch as a loop — is
 [repl-first-visual-2026-09-04.md](repl-first-visual-2026-09-04.md);
 behavior B14 added. Still NO CODING toward the design (ruling 60).
 
+## 2026-09-04 (evening) — the Atlas
+
+The owner asked for ONE guiding, iterable visualization instead of temp
+diagrams: [repl-first-atlas.html](repl-first-atlas.html) — a single
+data-driven page (Cytoscape.js entity graph + native mermaid), published
+as an artifact and republished to the same link on every edit. Five
+views: the data model (target vs HEAD, click a family for attributes,
+writers, render fn, generated forms) with a SESSION PLAYER that steps
+through forms showing reads (blue), writes (instances appear under the
+record), pops (retract), and diffs; the walk → forms → transcript;
+the query language (when q, pull, pull-in-q, aggregates, recursion,
+diff, since, history, transact, retract, schema declaration — real forms
++ the Datahike grammar each relies on); the watch; where code is indexed.
+Everything draws from the `MODEL` object at the top of the file; the open
+mark is a committed script that regenerates its edges from the live
+schema. The markdown visual stays as the printable twin.
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**

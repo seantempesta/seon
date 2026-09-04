@@ -1,0 +1,605 @@
+<title>Seon Context Atlas</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.4/cytoscape.min.js"></script>
+<style>
+  :root {
+    --ground: #f3f5f7; --panel: #ffffff; --ink: #1b2430; --ink-2: #4a5563; --ink-3: #8a94a3;
+    --line: #d8dee6; --accent: #0f766e; --accent-ink: #ffffff; --prompt: #0f766e;
+    --ns: #cfe0f2; --agent: #f2d9b3; --message: #cfe9d1; --eval: #e6e8ec; --run: #e3dbf3;
+    --error: #f5d0d0; --schema: #efe5c6; --fn: #d6e8e3; --system: #e9e2d4;
+    --ok: #2f7d4f; --warn: #b7791f; --open: #b3403a;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #131920; --panel: #1b232c; --ink: #e6e9ee; --ink-2: #b4bcc8; --ink-3: #7d8795;
+      --line: #2e3945; --accent: #5fd0c4; --accent-ink: #0d1a18; --prompt: #5fd0c4;
+      --ns: #2b4460; --agent: #5c4726; --message: #2c4d31; --eval: #323944; --run: #443a5c;
+      --error: #5c2c2c; --schema: #4f4527; --fn: #294742; --system: #3f3a30;
+      --ok: #6fcf97; --warn: #e0b35c; --open: #ef7f78;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #131920; --panel: #1b232c; --ink: #e6e9ee; --ink-2: #b4bcc8; --ink-3: #7d8795;
+    --line: #2e3945; --accent: #5fd0c4; --accent-ink: #0d1a18; --prompt: #5fd0c4;
+    --ns: #2b4460; --agent: #5c4726; --message: #2c4d31; --eval: #323944; --run: #443a5c;
+    --error: #5c2c2c; --schema: #4f4527; --fn: #294742; --system: #3f3a30;
+    --ok: #6fcf97; --warn: #e0b35c; --open: #ef7f78;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.45; }
+  a { color: var(--accent); }
+  code, pre, .mono { font-family: var(--mono); font-size: 12.5px; }
+  .app { display: grid; grid-template-columns: 208px 1fr; min-height: 100vh; }
+  nav { border-right: 1px solid var(--line); padding: 18px 14px; display: flex; flex-direction: column; gap: 4px; background: var(--panel); }
+  nav h1 { font-size: 15px; font-weight: 600; margin: 0 0 2px 6px; letter-spacing: .01em; }
+  nav .sub { color: var(--ink-3); font-size: 11.5px; margin: 0 0 14px 6px; }
+  nav button { text-align: left; background: none; border: 0; padding: 8px 10px; border-radius: 6px; color: var(--ink-2); font: inherit; cursor: pointer; }
+  nav button:hover { background: var(--ground); color: var(--ink); }
+  nav button[aria-current="page"] { background: var(--accent); color: var(--accent-ink); font-weight: 500; }
+  nav button:focus-visible, .tab:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  nav .foot { margin-top: auto; color: var(--ink-3); font-size: 11px; padding: 0 6px; }
+  main { padding: 22px 26px 40px; min-width: 0; }
+  main > section { display: none; }
+  main > section[data-active] { display: block; }
+  h2 { font-size: 20px; font-weight: 600; margin: 0 0 4px; text-wrap: balance; }
+  .lede { color: var(--ink-2); max-width: 68ch; margin: 0 0 18px; }
+  .eyebrow { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 0 0 14px; font-size: 12px; color: var(--ink-2); }
+  .legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -2px; border: 1px solid var(--line); background: var(--sw); }
+  .model { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; }
+  #cy { height: 620px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+  .inspector { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 14px 16px; overflow: auto; max-height: 620px; }
+  .inspector h3 { margin: 0 0 6px; font-size: 15px; }
+  .inspector .key { color: var(--ink-3); font-size: 11.5px; }
+  .inspector table { border-collapse: collapse; width: 100%; margin: 8px 0 12px; font-size: 12.5px; }
+  .inspector td { padding: 4px 6px 4px 0; vertical-align: top; border-bottom: 1px solid var(--line); }
+  .inspector td:first-child { color: var(--ink-2); white-space: nowrap; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 500; border: 1px solid var(--line); }
+  .pill.ruled { color: var(--ok); border-color: currentColor; }
+  .pill.open { color: var(--open); border-color: currentColor; }
+  .pill.recommended { color: var(--warn); border-color: currentColor; }
+  .pill.current { color: var(--ink-2); }
+  .cols { display: grid; grid-template-columns: 1fr 1.3fr 1.3fr; gap: 14px; align-items: start; }
+  .col h3 { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 8px; font-weight: 500; }
+  .step { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 10px 12px; margin-bottom: 10px; transition: border-color .12s; }
+  .step[data-hot] { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
+  .step .n { font-family: var(--mono); color: var(--ink-3); font-size: 11px; margin-right: 6px; }
+  .step .edge { font-family: var(--mono); font-size: 12px; }
+  .step .fam { display: inline-block; padding: 0 6px; border-radius: 4px; font-size: 11px; margin-left: 6px; }
+  pre.form { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; background: var(--ground); border-radius: 6px; padding: 8px 10px; }
+  pre.form .c { color: var(--ink-3); }
+  pre.form .p { color: var(--prompt); font-weight: 500; }
+  .lens { font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+  .lens b { color: var(--ink); font-weight: 500; }
+  .teach { font-size: 12px; color: var(--ink-3); margin-top: 4px; }
+  .diagram { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px; overflow-x: auto; }
+  pre.mermaid { margin: 0; font-family: var(--mono); }
+  .notes { max-width: 72ch; color: var(--ink-2); }
+  .notes li { margin-bottom: 6px; }
+  table.decisions { border-collapse: collapse; width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  table.decisions th, table.decisions td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 13px; }
+  table.decisions th { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; }
+  table.decisions td:first-child { font-family: var(--mono); white-space: nowrap; color: var(--ink-2); }
+  .toolbar { display: flex; gap: 8px; align-items: center; margin: 0 0 10px; flex-wrap: wrap; }
+  .toolbar button { font: inherit; font-size: 12.5px; padding: 5px 10px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; cursor: pointer; }
+  .toolbar button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  .counts { font-variant-numeric: tabular-nums; }
+  .player { margin-top: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px 14px; }
+  .player-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+  .player-controls { display: flex; gap: 6px; align-items: center; }
+  .player-controls button { font: inherit; font-size: 12.5px; padding: 4px 10px; border: 1px solid var(--line); background: var(--ground); color: var(--ink); border-radius: 6px; cursor: pointer; }
+  .player-controls button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  .player-body { display: grid; grid-template-columns: 1.2fr 1fr; gap: 14px; }
+  .step-card h4 { margin: 0 0 6px; font-size: 14px; }
+  .step-card .rw { display: flex; gap: 14px; flex-wrap: wrap; margin: 8px 0 0; font-size: 12px; }
+  .step-card .rw span { padding: 2px 8px; border-radius: 4px; border: 1px solid var(--line); }
+  .step-card .rw .r { border-color: #3b82c4; color: #3b82c4; }
+  .step-card .rw .w { border-color: var(--ok); color: var(--ok); }
+  .step-card .rw .d { border-color: var(--open); color: var(--open); }
+  .step-log { background: var(--ground); border-radius: 6px; padding: 8px 10px; max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+  .step-log .old { color: var(--ink-3); }
+  @media (max-width: 1000px) { .player-body { grid-template-columns: 1fr; } .app { grid-template-columns: 1fr; } nav { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--line); } nav .foot { display: none; } .model, .cols { grid-template-columns: 1fr; } #cy { height: 480px; } }
+  @media (prefers-reduced-motion: reduce) { .step { transition: none; } }
+</style>
+
+<div class="app">
+  <nav aria-label="Views">
+    <h1>Seon Context Atlas</h1>
+    <p class="sub">one model, five views · edit the data, not the drawing</p>
+    <button data-view="model" aria-current="page">Data model</button>
+    <button data-view="walk">The walk → forms → transcript</button>
+    <button data-view="query">Query language: q, pull, diff</button>
+    <button data-view="watch">The watch</button>
+    <button data-view="index">Where code is indexed</button>
+    <button data-view="decisions">Decisions &amp; open marks</button>
+    <div class="foot">Source of truth: the <code>MODEL</code> object at the top of <code>repl-first-atlas.html</code>. Counts are from cluster ctxprobe at basis 536871167.</div>
+  </nav>
+
+  <main>
+    <section id="model" data-active>
+      <p class="eyebrow">Target data model · rulings 62–65</p>
+      <h2>The agent is its own entity and owns its record</h2>
+      <p class="lede">Click a family to see its attributes, who writes it, the render function that prints it, and the forms the walk generates for it. Solid arrows are refs; thick arrows are component collections the agent owns; dashed arrows are system facts pointing at the agent. Toggle to the current model to see what exists at HEAD.</p>
+      <div class="toolbar">
+        <button id="showTarget" aria-pressed="true">Target model</button>
+        <button id="showCurrent" aria-pressed="false">Current model (HEAD)</button>
+        <button id="relayout">Re-layout</button>
+      </div>
+      <div class="legend" id="legend"></div>
+      <div class="model">
+        <div id="cy" role="img" aria-label="Entity graph of the agent's record and the program index"></div>
+        <aside class="inspector" id="inspector"></aside>
+      </div>
+      <div class="player" id="player">
+        <div class="player-head">
+          <span class="eyebrow">Step through a session · reads glow, writes appear, pops retract</span>
+          <div class="player-controls">
+            <button id="stepPrev" aria-label="Previous step">◀</button>
+            <span id="stepPos" class="counts mono">0 / 0</span>
+            <button id="stepNext" aria-label="Next step">▶</button>
+            <button id="stepPlay" aria-pressed="false">Play</button>
+            <button id="stepReset">Reset</button>
+          </div>
+        </div>
+        <div class="player-body">
+          <div id="stepCard" class="step-card"></div>
+          <div id="stepLog" class="step-log mono"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="walk">
+      <p class="eyebrow">Generation · §G of the behavior spec</p>
+      <h2>Edges become forms, forms become the transcript</h2>
+      <p class="lede">Hover any row: the edge that produced it, the form the agent could type, and what it reads like after the most specific render function printed it. Teaching entries are emitted before the first entry that needs them.</p>
+      <div class="cols">
+        <div class="col" id="colGraph"><h3>Graph — the edge followed</h3></div>
+        <div class="col" id="colWalk"><h3>Walk — the generated form</h3></div>
+        <div class="col" id="colTranscript"><h3>Transcript — as the agent reads it</h3></div>
+      </div>
+    </section>
+
+    <section id="query">
+      <p class="eyebrow">Datahike's own grammar · reference-code/datalog-parser/src/datalog/parser/pull.cljc · datahike/query.cljc</p>
+      <h2>One rule decides q versus pull, and the agent learns it from its own screen</h2>
+      <p class="lede">The walk never chooses by taste. A forward ref edge from an entity you already hold is a <code>pull</code> with a nested selector. A reverse edge, a collection, or an aggregate is a <code>q</code>, usually with <code>pull</code> inside <code>:find</code> so rows come back whole. "What changed" is the same read at two bases through <code>diff</code>. Every generated entry is one of these, so the agent sees each idiom used on its own data before it needs it.</p>
+      <table class="decisions" id="idiomsTable"><thead><tr><th>when</th><th>idiom</th><th>the form (real)</th><th>grammar it relies on</th></tr></thead><tbody></tbody></table>
+      <ul class="notes" style="margin-top:14px">
+        <li><b>Selectors carry identities.</b> A generated selector puts the identity attribute on every ref leaf (<code>{:seon.ns/requires [:seon.ns/name]}</code>), so every handle in the transcript is a lookup ref the agent can pull next. A bare <code>[*]</code> hands back <code>{:db/id N}</code> and teaches nothing; the walk never emits it.</li>
+        <li><b>Collection-first.</b> One <code>q</code> explains all N (or counts them); instance pulls are dig-ins the agent types. Fifty maintenance requests are a count and a newest timestamp, not fifty rows.</li>
+        <li><b>Recursion is Datahike's.</b> <code>{:seon.ns/requires 2}</code> walks two levels; <code>{:attr ...}</code> is unbounded; <code>:ns/_attr</code> reverses. Verified live 2026-09-03.</li>
+        <li><b>since is a trap for "what changed in what I saw".</b> A since view holds only newer datoms, so lookup refs to older entities fail inside it (measured). <code>diff</code> reads at both bases; <code>since</code> stays a tool for "is anything newer at all".</li>
+        <li><b>Writes are the same shape.</b> A map with an identity attribute upserts; <code>[:db/retract e a v]</code> pops; <code>[:db.fn/call f …]</code> is a transition function for writes that must decide at the writer.</li>
+      </ul>
+    </section>
+
+    <section id="watch">
+      <p class="eyebrow">Delta · rulings 58d and 61 · behavior B14</p>
+      <h2>Nothing polls: a commit wakes the generator, which settles one diff form</h2>
+      <p class="lede">Confirmed at HEAD: Datahike <code>listen!</code> wrapped once by <code>seon.cluster.wake/route!</code> (payload-free, never throws, never parks). Per-query interest already comes from the settled eval's read-evidence attributes.</p>
+      <div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant W as Datahike writer
+  participant L as wake/route! (listen!)
+  participant G as generator (woken pass)
+  participant R as render (query-selected fn)
+  participant A as agent context
+  Note over G,A: turn 1 — initial discovery
+  G->>G: walk the agent's edges → forms (teaching first)
+  G->>W: evaluate + settle each as an eval (form, result, basis 536870930, read-evidence)
+  G->>R: render each result (family → most specific fn)
+  R-->>A: my.agents.root=> (seon.db/q '[…messages…]) … [3 messages] ;; result/b2
+  Note over W,A: between turns — a planner message commits
+  W->>L: tx-report (:seon.cluster.message/to root …)
+  L-->>G: offer! wake (payload-free; sliding-1)
+  G->>G: which settled queries are stale? read-evidence revisions ∩ changed attrs
+  G->>W: settle the diff eval (seon.db/diff 536870930 '[…same query…]) → +1 message
+  G->>R: render the diff value (the same lens: inbox-view sees + and −)
+  R-->>A: ;; new messages since t 536870930 … + planner-1 ;; result/d4
+  Note over G,A: every turn is a FULL regeneration (58d) — the diff eval is a fact and reappears exactly
+</pre>
+      </div>
+      <ul class="notes">
+        <li>The listener does no work: no query, no derivation, no commit (measured: a throwing listener hangs the writer; an 800 ms listener made <code>transact</code> take 804 ms).</li>
+        <li>"Stale" is a comparison of stored revisions against the commit's changed attributes, never a guess.</li>
+        <li>The diff is one form the agent could type; both bases are on the entry; the agent learns "what changed" once.</li>
+      </ul>
+    </section>
+
+    <section id="index">
+      <p class="eyebrow">Verified at HEAD · seon.fn/index! · seon.cluster.source/publish! · seon.sci.eval/acquire!</p>
+      <h2>Where code is indexed and how an agent's context loads from the database</h2>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  SRC["src/ test/ resources/seon/schemas/ (files)"] -->|"bin/seon init"| IDX["seon.fn/index! — clj-kondo analysis → program rows on a scratch branch (:seon.ns :seon.fn :seon.fn.arity :seon.test :seon.schema)"]
+  IDX -->|"seon.cluster.source/publish!"| CUR[(":current-src — one non-executing published commit")]
+  CUR -->|"bin/seon start: fork the exact commit"| CLB[("cluster branch — sovereign until reforked")]
+  CLB -->|"seon.sci.eval/acquire!"| CTX["base SCI ctx built FROM THE DATABASE: namespace sources · contracts wrapped from :seon.fn/spec · doc/dir from rows · declared classes"]
+  CTX -->|"per run: sci/fork + the agent's defs restored from :seon.def"| TURN["the agent's turn ctx (+ result/id bindings from its evals)"]
+  TURN -->|"settlement writes facts"| CLB
+  EDIT["file edit"] -->|"edit hook: kondo → same-identity upserts"| CUR
+  CLB -->|"generator: walk → forms → evals → render"| OUT["the agent's context (/ai) · the page (/html)"]
+</pre>
+      </div>
+      <ul class="notes">
+        <li>Yes, the SCI context loads from the database: <code>acquire!</code> (sci/eval.clj:1267) builds it from namespace source facts and program rows; contracts wrap from the <code>:seon.fn/spec</code> fact; the agent's defs restore from <code>:seon.def</code> rows.</li>
+        <li>Schemas are facts: the Malli form on a schema row is the database declaration; identity, ref, component and cardinality derive from it (schema/datahike.clj:221-262); an agent-declared schema settles through the run loop with accretion allowed and breaking redefinition refused (run.clj:1436-1460).</li>
+        <li>Existing clusters keep their forked program until destructively reforked; the edit hook only republishes <code>:current-src</code>.</li>
+      </ul>
+    </section>
+
+    <section id="decisions">
+      <p class="eyebrow">Ledger rulings 56–65 · behavior spec ❓</p>
+      <h2>What is ruled, what is recommended, what is still open</h2>
+      <p class="lede">The atlas is only as honest as this table. A row moves from open to ruled in the same beat the owner rules it.</p>
+      <table class="decisions" id="decisionsTable"><thead><tr><th>id</th><th>decision</th><th>status</th></tr></thead><tbody></tbody></table>
+    </section>
+  </main>
+</div>
+
+<script>
+// ============================================================================
+// THE MODEL — the only thing to edit. Everything below draws from it.
+// Counts: cluster ctxprobe, basis 536871167 (2026-09-03). Rulings: ledger 56–65.
+// ============================================================================
+const MODEL = {
+  families: [
+    { id: "agent", key: ":seon.agent/agent", identity: ":seon.agent/id", color: "agent", level: 0,
+      attrs: ["id", "namespace → ns (the code index; many agents per ns)", "forked-from → agent", "inbox ⟶ message (component)", "evals ⟶ eval (component)", "defs ⟶ def (component)", "notes ⟶ note (component)", "plan ⟶ plan-item (component)"],
+      writes: "the system creates it; the agent writes into its owned collections", render: "(doc *ns*)-shaped record view (agent ns rung b, else general)",
+      current: "today: :seon.cluster.agent/id, /namespace, /run, /cluster — the record is scattered across 65 reverse refs" },
+    { id: "ns", key: ":seon.ns/ns", identity: ":seon.ns/name", color: "ns", level: 1,
+      attrs: ["name (symbol)", "requires → ns ×4 on root", "refers", "source", "fns ⟵ :seon.fn/ns (reverse)"],
+      writes: "its ns form (require); publication indexes the rest", render: "seon.render.ns face → becomes (doc ns) data", current: "same at HEAD" },
+    { id: "fn", key: ":seon.fn/fn", identity: ":seon.fn/sym (string today → symbol, ruling 47)", color: "fn", level: 2,
+      attrs: ["sym", "doc", "arities ⟶ arity (component: input-refs, output-refs, arguments in order)", "spec (the contract; instrumentation wraps from it)", "usages → fn (after the bridge)", "external-sink"],
+      writes: "a contracted defn (settles as a row)", render: "(doc f): ordered args with schema keys, output alternatives", current: "4,033 rows incl. core name-only; arglists ugly in doc (issue filed)" },
+    { id: "arity", key: ":seon.fn.arity", identity: "component of fn", color: "fn", level: 3,
+      attrs: ["order", "input-refs → schema", "output-refs → schema", "arguments (ordered, per-argument schema)"],
+      writes: "derived at indexing", render: "inside (doc f)", current: "render functions are found HERE: input-refs ⊇ {family, injectables}, output-refs = :seon.render/ai | /html — zero rows match today (faces take a render unit)" },
+    { id: "schema", key: ":seon.schema/*", identity: ":seon.schema/key", color: "schema", level: 3,
+      attrs: ["key", "form (the Malli form — identity/ref/component/cardinality derive from it)", "references → schema (3,655 edges)", "faces: :seon.render/ai, /html (the general rung)"],
+      writes: "YES — one schema fact declares a family (spelling B15.1); settlement installs attributes", render: "(doc :key): compact form, faces, readers/writers, an example row", current: "2,362 rows; 364 face declarations, 285 = one error face" },
+    { id: "eval", key: ":seon.cluster.eval (ONE family, ruled 64)", identity: ":seon.cluster.eval/id", color: "eval", level: 1,
+      attrs: ["run → run", "ordinal", "author (agent | system)", "source (the parser-saved form)", "started-at", "result-edn | result-blob", "error → error", "read-basis-t", "read-evidence (component: the watch's interest)", "rendered-by (only when the floor rendered it)"],
+      writes: "by evaluating (settlement writes it)", render: "the entry face: ns=> form, (render result), ;; result/<id>", current: "TWO families today: :seon.cluster.run.form (source) + :seon.cluster.eval 'receipt' (result), joined by run+ordinal — merge is ruled" },
+    { id: "message", key: ":seon.cluster.message/message", identity: ":seon.cluster.message/id", color: "message", level: 1,
+      attrs: ["content", "at (inst ✓)", "from → agent", "about → any", "caused-by → message"],
+      writes: "YES — sending is a transact into the recipient's inbox (63a); handling POPS it (one retract; history keeps it)", render: "seon.cluster.message face (narrates today) → the agent's inbox-view", current: "addressed shared entity with :to ref; 3 on root; no pop, no read-at (owner: pop, not read-at)" },
+    { id: "run", key: ":seon.cluster.run/run", identity: ":seon.cluster.run/id", color: "run", level: 2,
+      attrs: ["agent → agent", "trigger → message | eval", "opened-at", "closed-at", "process (custody — absence is the honest representation)", "evals ⟵ eval/run (reverse)"],
+      writes: "never — the run loop owns it", render: "run face (narrates today)", current: "3 on root; 44 forms / 6 evals on the latest" },
+    { id: "def", key: ":seon.def/def", identity: ":seon.def/id (opaque: agent+ns+name)", color: "eval", level: 2,
+      attrs: ["agent → agent", "ns → ns", "name", "value-edn | blob", "atom?", "unrestorable-reason"],
+      writes: "implicitly, by def/defn; settlement persists", render: "restored into the SCI ctx; listed by (doc *ns*)", current: "id repeats identity parts (census §4)" },
+    { id: "note", key: ":my.note/note", identity: ":my.note/id", color: "message", level: 2,
+      attrs: ["content", "about → any", "at: from the identity datom's tx instant (derived, not stored)"],
+      writes: "YES — transact", render: "note face → the agent's own", current: "agent ref duplicates tx provenance; no datetime attr (derive from tx)" },
+    { id: "plan", key: ":my.plan.item/item", identity: ":my.plan.item/id", color: "message", level: 2,
+      attrs: ["title", "parent → item", "needs → item", "subjects ⟶ subject (component, ordered, entity → any)", "completed-at (absence = open)"],
+      writes: "YES — transact; complete = one :db/add", render: "plan faces ×3 today → one", current: ":about stores symbol/keyword TOKENS resolved on every read (census §3)" },
+    { id: "error", key: ":seon.error/error", identity: ":seon.error/id", color: "error", level: 2,
+      attrs: ["agent → agent", "run → run", "kind", "message", "at", "signature", "data (print-node string, 36 KB observed)"],
+      writes: "never — the fault committer", render: "error face (285 declarations of one)", current: "also writes a duplicate explanation MESSAGE (census §6) — B14 makes it unnecessary" },
+    { id: "system", key: "schedule task · fire · maintenance request/receipt · capture", identity: "various", color: "system", level: 3,
+      attrs: ["task/owner → agent (5 on root)", "request/agent → agent (50 on root!)", "capture/run → run"],
+      writes: "never (root's maintenance portfolio; captures are receipts of external crossings)", render: "count + newest per agent — collection-first or the context drowns", current: "50 requests per agent is the 'repetition owns the context' class" }
+  ],
+  // kind: component (agent owns), ref (forward), reverse (system fact points at agent), requires
+  edges: [
+    { from: "agent", to: "ns", attr: ":seon.agent/namespace", kind: "ref", count: 1 },
+    { from: "agent", to: "agent", attr: ":seon.agent/forked-from", kind: "ref", count: 0, target: true },
+    { from: "agent", to: "eval", attr: ":seon.agent/evals", kind: "component", count: 6, target: true },
+    { from: "agent", to: "message", attr: ":seon.agent/inbox", kind: "component", count: 3, target: true },
+    { from: "agent", to: "def", attr: ":seon.agent/defs", kind: "component", count: 0, target: true },
+    { from: "agent", to: "note", attr: ":seon.agent/notes", kind: "component", count: 0, target: true },
+    { from: "agent", to: "plan", attr: ":seon.agent/plan", kind: "component", count: 0, target: true },
+    { from: "run", to: "agent", attr: ":seon.cluster.run/agent", kind: "reverse", count: 3 },
+    { from: "run", to: "message", attr: ":seon.cluster.run/trigger", kind: "ref", count: 1 },
+    { from: "error", to: "agent", attr: ":seon.error/agent", kind: "reverse", count: 4 },
+    { from: "system", to: "agent", attr: ":seon.maintenance.request/agent · :seon.schedule.task/owner", kind: "reverse", count: 55 },
+    { from: "eval", to: "run", attr: ":seon.cluster.eval/run", kind: "ref", count: 6 },
+    { from: "eval", to: "error", attr: ":seon.cluster.eval/error", kind: "ref", count: 1 },
+    { from: "message", to: "agent", attr: ":seon.cluster.message/from", kind: "ref", count: 0 },
+    { from: "ns", to: "ns", attr: ":seon.ns/requires", kind: "requires", count: 4 },
+    { from: "fn", to: "ns", attr: ":seon.fn/ns", kind: "ref", count: 4033 },
+    { from: "fn", to: "arity", attr: ":seon.fn/arities", kind: "component", count: 1 },
+    { from: "arity", to: "schema", attr: ":seon.fn.arity/input-refs · output-refs", kind: "ref", count: 1 },
+    { from: "schema", to: "schema", attr: ":seon.schema/references", kind: "ref", count: 3655 },
+    { from: "fn", to: "fn", attr: ":seon.fn/usages (bridge, ruling 50)", kind: "ref", count: 4481, target: true },
+    // current-only edges (HEAD)
+    { from: "message", to: "agent", attr: ":seon.cluster.message/to", kind: "reverse", count: 3, current: true },
+    { from: "run", to: "ns", attr: ":seon.cluster.run/starting-ns", kind: "ref", count: 2, current: true },
+    { from: "eval", to: "ns", attr: ":seon.cluster.eval/ns · :seon.cluster.run.form/ns", kind: "ref", count: 71, current: true },
+    { from: "agent", to: "run", attr: ":seon.cluster.agent/run", kind: "ref", count: 1, current: true },
+    { from: "def", to: "ns", attr: ":seon.def/ns", kind: "ref", count: 0, current: true }
+  ],
+  walk: [
+    { edge: "hop 0 · [:seon.ns/name my.agents.root] + :seon.ns/requires ×4 + :seon.ns/refers ×3", fam: "ns",
+      intent: "who am I, what do I require",
+      form: "(seon.db/pull '[:seon.ns/name {:seon.ns/requires [:seon.ns/name]} {:seon.ns/refers [:seon.ns.refer/local]}]\n              [:seon.ns/name 'my.agents.root])",
+      out: "namespace my.agents.root\n  requires: my.message my.run seon.bootstrap seon.db\n  refers:   help dir doc\n;; result/a1",
+      lens: "(doc *ns*) data → the seon.ns/ns face", teach: "demands before it: (dir seon.db) (doc seon.db/pull)" },
+    { edge: "hop 2 · :seon.agent/inbox (component) — today :seon.cluster.message/_to ×3", fam: "message",
+      intent: "messages addressed to root",
+      form: "(seon.db/q '[:find [(pull ?m [:seon.cluster.message/id :seon.cluster.message/at :seon.cluster.message/content]) ...]\n             :where [?m :seon.cluster.message/to [:seon.cluster.agent/id \"root\"]]])",
+      out: "2026-09-02T19:54:58Z  outside  Define a durable contracted function named largest …\n2026-09-03T02:15:00Z  outside  seon.fs/delete-recursively! violated its contract …\n;; result/b2  rendered-by my.agents.root/inbox-view",
+      lens: "my.agents.root/inbox-view (the agent's own, rung b) — else the seon.cluster.message face", teach: "demands: (dir my.message) (doc seon.db/q)" },
+    { edge: "hop 2 · :seon.maintenance.request/_agent ×50 (collection-first: count, not rows)", fam: "system",
+      intent: "maintenance requests for root (count, newest)",
+      form: "(seon.db/q '[:find (count ?r) (max ?at)\n             :where [?r :seon.maintenance.request/agent [:seon.cluster.agent/id \"root\"]]\n                    [?r :seon.maintenance.request/at ?at]])",
+      out: "[50 #inst \"2026-09-03T02:15:00.000-00:00\"]\n;; result/c3  rendered-by seon.print/fit",
+      lens: "the floor (a 2-tuple) — announces itself", teach: "nothing new" },
+    { edge: "hop 2 · :seon.cluster.run/_agent ×3 → :seon.cluster.run/trigger", fam: "run",
+      intent: "my open run and what woke it",
+      form: "(seon.db/pull '[:seon.cluster.run/id :seon.cluster.run/opened-at {:seon.cluster.run/trigger [:seon.cluster.message/id]}]\n              [:seon.cluster.run/id \"…\"])",
+      out: "run … opened 2026-09-03T02:15:00Z, trigger \"maintenance-error/…\"\n;; result/d4  rendered-by seon.cluster.run/render-ai",
+      lens: "the run face (narrates today → data)", teach: "demands: (doc seon.cluster.run/render-ai) — or a trailing comment (G.2)" },
+    { edge: "the trigger, LAST (B1)", fam: "message",
+      intent: "the message that woke me",
+      form: "(my.message/read \"bootstrap-task:root\")   ; today — under ruling 61: (seon.db/pull '[*] [:seon.cluster.message/id \"bootstrap-task:root\"])",
+      out: "{…the one message, whole…}\n;; result/e5",
+      lens: "the message face", teach: "—" },
+    { edge: "turn 3 · the watch fired (B14)", fam: "eval",
+      intent: "new messages since t 536870930",
+      form: "(seon.db/diff 536870930 '[:find [(pull ?m [:seon.cluster.message/id :seon.cluster.message/at :seon.cluster.message/content]) ...]\n                          :where [?m :seon.cluster.message/to [:seon.cluster.agent/id \"root\"]]])",
+      out: "+ 2026-09-03T18:40:11Z  planner  Can you review largest before I depend on it?\n;; result/f6  rendered-by my.agents.root/inbox-view",
+      lens: "the SAME function that printed the inbox prints the delta", teach: "planner is a new name → (doc my.agents.planner) before it" }
+  ],
+  // A session, step by step. reads: families/edges that glow; writes: instance nodes that appear
+  // under the record (op add) or leave it (op retract); diff: what the agent sees change.
+  steps: [
+    { title: "turn 1 · arrival: who am I", intent: "who am I, what do I require",
+      form: "(seon.db/pull '[:seon.ns/name {:seon.ns/requires [:seon.ns/name]}] [:seon.ns/name 'my.agents.root])",
+      out: "namespace my.agents.root\n  requires: my.message my.run seon.bootstrap seon.db\n;; result/a1",
+      reads: ["agent", "ns"], writes: [{ id: "ev-a1", label: "eval a1\n(pull ns)", parent: "agent", via: "evals", fam: "eval" }] },
+    { title: "turn 1 · what points at me", intent: "messages addressed to root",
+      form: "(seon.db/q '[:find [(pull ?m […]) ...] :where [?m :seon.cluster.message/to [:seon.cluster.agent/id \"root\"]]])",
+      out: "2026-09-02T19:54:58Z  outside  Define a durable contracted function named largest …\n;; result/b2  rendered-by seon.cluster.message/render-ai\n;; clipped: 0 of 1",
+      reads: ["agent", "message"], writes: [{ id: "ev-b2", label: "eval b2\n(q inbox)", parent: "agent", via: "evals", fam: "eval" }, { id: "msg-boot", label: "msg bootstrap-task", parent: "agent", via: "inbox", fam: "message", preexisting: true }] },
+    { title: "turn 1 · the trigger, last", intent: "the message that woke me",
+      form: "(seon.db/pull '[*] [:seon.cluster.message/id \"bootstrap-task:root\"])",
+      out: "{:seon.cluster.message/content \"Define a durable contracted function named largest …\"}\n;; result/c3", reads: ["msg-boot"], writes: [{ id: "ev-c3", label: "eval c3", parent: "agent", via: "evals", fam: "eval" }] },
+    { title: "turn 1 · the agent writes code", intent: "define largest (a contracted defn settles as a program row)",
+      form: "(defn largest {:malli/schema [:=> [:cat [:sequential :map]] :map]} [rows] (or (last (sort-by :example/amount rows)) {}))",
+      out: "#'my.agents.root/largest\n;; result/d4", reads: ["ns"], writes: [{ id: "fn-largest", label: "fn my.agents.root/largest", parent: "ns", via: "fns", fam: "fn" }, { id: "ev-d4", label: "eval d4\n(defn largest)", parent: "agent", via: "evals", fam: "eval" }],
+      diff: "+ program row :seon.fn/sym my.agents.root/largest — (doc largest) answers from now on" },
+    { title: "turn 1 · the agent writes data", intent: "remember why largest returns {} for empty input",
+      form: "(seon.db/transact! [{:my.note/id \"largest-empty\" :my.note/content \"{} for empty input, per the task\" :my.note/about [:seon.fn/sym \"my.agents.root/largest\"]}])",
+      out: "{:tx-data [4 datoms]}\n;; result/e5", reads: [], writes: [{ id: "note-1", label: "note largest-empty", parent: "agent", via: "notes", fam: "note" }],
+      diff: "+ 1 note under root's record (about → fn largest)" },
+    { title: "turn 1 · the agent sends", intent: "tell planner it is done",
+      form: "(seon.db/transact! [{:seon.cluster.message/id \"root-1\" :seon.cluster.message/to [:seon.agent/id \"planner\"] :seon.cluster.message/content \"largest is defined and noted\"}])",
+      out: "{:tx-data [5 datoms]}\n;; result/f6", reads: ["agent-planner"], writes: [{ id: "agent-planner", label: "agent planner", parent: null, fam: "agent", preexisting: true }, { id: "msg-root-1", label: "msg root-1", parent: "agent-planner", via: "inbox", fam: "message" }],
+      diff: "the message lands in PLANNER's inbox; root keeps only its eval f6 (ruling 65)" },
+    { title: "turn 1 · pop the trigger", intent: "done with the task message — pop it",
+      form: "(seon.db/transact! [[:db/retract [:seon.agent/id \"root\"] :seon.agent/inbox [:seon.cluster.message/id \"bootstrap-task:root\"]]])",
+      out: "{:tx-data [1 retraction]}\n;; result/g7", reads: [], writes: [{ id: "msg-boot", op: "retract" }],
+      diff: "− bootstrap-task leaves root's inbox; (seon.db/history) still has it" },
+    { title: "between turns · the watch fires", intent: "(system) planner replies; a commit touches :seon.agent/inbox of root",
+      form: ";; wake/route! → offer! wake → the generator finds eval b2's read-evidence stale",
+      out: "(no agent form — the listener carries no payload; the woken pass derives)", reads: ["agent"], writes: [{ id: "msg-planner-1", label: "msg planner-1", parent: "agent", via: "inbox", fam: "message" }],
+      diff: "+ 1 message in root's inbox (written by planner's turn)" },
+    { title: "turn 2 · the diff form", intent: "new messages since t 536870930",
+      form: "(seon.db/diff 536870930 '[:find [(pull ?m […]) ...] :where [?m :seon.cluster.message/to [:seon.cluster.agent/id \"root\"]]])",
+      out: "+ 2026-09-03T18:40:11Z  planner  Can you review largest before I depend on it?\n− (bootstrap-task popped)\n;; result/h8  rendered-by seon.cluster.message/render-ai",
+      reads: ["msg-planner-1", "ev-b2"], writes: [{ id: "ev-h8", label: "eval h8\n(diff inbox)", parent: "agent", via: "evals", fam: "eval" }],
+      diff: "one entry: + planner-1, − bootstrap-task — both bases on the row; the same render fn prints it" },
+    { title: "turn 2 · the agent owns its view", intent: "print my inbox the way I want",
+      form: "(defn inbox-view {:malli/schema [:=> [:cat [:sequential :seon.cluster.message/message]] :seon.render/ai]} [ms] …)",
+      out: "#'my.agents.root/inbox-view\n;; result/i9", reads: ["ns"], writes: [{ id: "fn-inbox-view", label: "fn inbox-view\n(render fn)", parent: "ns", via: "fns", fam: "fn" }, { id: "ev-i9", label: "eval i9", parent: "agent", via: "evals", fam: "eval" }],
+      diff: "from the next regeneration every inbox entry prints through inbox-view (rung b); its /html twin is a panel" }
+  ],
+  idioms: [
+    { when: "I hold an entity (a lookup ref) and want its attributes and what it points at", idiom: "pull, nested selector", form: "(seon.db/pull '[:seon.ns/name {:seon.ns/requires [:seon.ns/name]} {:seon.ns/refers [:seon.ns.refer/local]}] [:seon.ns/name 'my.agents.root])", grammar: "map-spec entry {:attr [subselector]}; the identity attribute on every ref leaf" },
+    { when: "I want what points AT me (a reverse edge), all of it", idiom: "q with pull in :find (collection)", form: "(seon.db/q '[:find [(pull ?m [:seon.cluster.message/id :seon.cluster.message/at :seon.cluster.message/content]) ...] :where [?m :seon.cluster.message/to [:seon.cluster.agent/id \"root\"]]])", grammar: ":find [x ...] returns a collection; lookup refs in :where; pull as a find function" },
+    { when: "the same reverse edge, but from an entity I already hold", idiom: "pull with a reverse attribute", form: "(seon.db/pull '[:seon.agent/id {:seon.cluster.message/_to [:seon.cluster.message/id :seon.cluster.message/at]}] [:seon.agent/id \"root\"])", grammar: "reverse attr :ns/_attr inside a selector (verified live)" },
+    { when: "how many, the newest, the total — without rows", idiom: "q with aggregates", form: "(seon.db/q '[:find (count ?r) (max ?at) :where [?r :seon.maintenance.request/agent [:seon.cluster.agent/id \"root\"]] [?r :seon.maintenance.request/at ?at]])", grammar: "aggregate find functions count/max/min/sum/avg; :find (f ?x) . returns a scalar" },
+    { when: "two levels of requires, then stop", idiom: "pull with a recursion limit", form: "(seon.db/pull '[:seon.ns/name {:seon.ns/requires 2}] [:seon.ns/name 'my.agents.root])", grammar: "{:attr N} bounded recursion; {:attr ...} unbounded (verified live)" },
+    { when: "which functions in a namespace, newest definition first", idiom: "q joining the transaction", form: "(seon.db/q '[:find ?sym ?doc ?at :where [?f :seon.fn/ns [:seon.ns/name 'seon.db]] [?f :seon.fn/sym ?sym ?tx] [?tx :db/txInstant ?at] [(get-else $ ?f :seon.fn/doc \"\") ?doc]])", grammar: "the 4th datom position binds the tx; :db/txInstant is free recency; get-else for optional attrs" },
+    { when: "what changed in a read I already saw", idiom: "diff at the recorded basis", form: "(seon.db/diff 536870930 '[:find [(pull ?m […]) ...] :where [?m :seon.cluster.message/to [:seon.cluster.agent/id \"root\"]]])", grammar: "the same pure read as-of the basis and now, identity-keyed: + added − removed ~ changed" },
+    { when: "is anything newer at all since t", idiom: "q over a since view", form: "(seon.db/q '[:find (count ?m) . :where [?m :seon.cluster.message/id]] (seon.db/since 536870930))", grammar: "since holds only newer datoms — no lookup refs to older entities inside it" },
+    { when: "what did I write, ever", idiom: "q over history with provenance", form: "(seon.db/q '[:find ?id ?at :where [?m :seon.cluster.message/id ?id ?tx true] [?tx :seon.db/user \"root\"] [?tx :db/txInstant ?at]] (seon.db/history))", grammar: "history keeps retracted facts; the 5th position is added?; tx-meta carries who wrote" },
+    { when: "store something", idiom: "transact! a map with an identity", form: "(seon.db/transact! [#::{:id \"lunch-0904\" :amount 1450 :at #inst \"2026-09-04T12:10:00Z\"}])", grammar: "identity attribute → upsert; ::k auto-resolves to my namespace; absent = no key" },
+    { when: "pop something from my record", idiom: "transact! a retraction", form: "(seon.db/transact! [[:db/retract [:seon.agent/id \"root\"] :seon.agent/inbox [:seon.cluster.message/id \"bootstrap-task:root\"]]])", grammar: "[:db/retract e a v]; history keeps the datom" },
+    { when: "declare what I store", idiom: "transact! a schema fact", form: "(seon.db/transact! [#:seon.schema{:key ::expense :form [:map {:seon.db/attributes true} [::id [:string {:seon.db/identity true}]] [::amount [:int {:min 0}]] [::at :inst]]}])", grammar: "the Malli form is the database declaration; identity/ref/component/cardinality derive from it (B15.1 spelling)" }
+  ],
+  decisions: [
+    { id: "56", text: "Render functions: inline on the value → the agent's own ns → the schema's general face → floor; delta = since-with-diff showing + and −; rendering invoked by calling the fn, plus the print floor; pulls are nested/recursive per Datahike's grammar.", status: "ruled" },
+    { id: "57", text: "One generation, two projections: the /html walk IS the whole UI; nothing hardcoded; turtles all the way down.", status: "ruled" },
+    { id: "58", text: "(help) bootstraps generatively; render fns accrete across namespaces with a single-query order; provenance on the result-handle line; FULL REGENERATION EVERY TURN first, diffs later.", status: "ruled" },
+    { id: "59", text: "No deletion before the one-platform doc; floor-only provenance; result/<id> revived as a real symbol; closest namespace then newest breaks ties.", status: "ruled" },
+    { id: "60", text: "A render function = any fn whose inputs are satisfiable from the value (+ injectable db/env) and whose output is /ai (string) or /html (hiccup); 5k-token per-value budget as a CONFIG FACT; no coding until the design convinces.", status: "ruled" },
+    { id: "61", text: "No custom reader functions (inbox, latest-messages, mark-read): generated queries with derived intent comments; the watch (wake/route! over listen!) is the delta; this atlas is the one visual.", status: "ruled" },
+    { id: "62", text: "Data first: the agent's work is schemas, facts, queries; functions only for user surfaces or reused calculations.", status: "ruled" },
+    { id: "63", text: "send = transact a message fact; calculations become functions only when a surface/reused; a clipping WARNING points at writing a render fn; storage names/shapes get smarter first.", status: "ruled" },
+    { id: "64", text: "ONE eval family (form + result in one row); no read-at — messages are POPPED; the record shape is priced in the one-platform doc §0e.", status: "ruled" },
+    { id: "65", text: "The agent is its own entity (many per namespace, forkable, ref to the code index); 'root' = the root agent only; messages move INTO the agent and pop; a sender keeps only its eval.", status: "ruled" },
+    { id: "B15.1", text: "Schema spelling: one schema fact whose map form carries inline entry schemas, attribute rows derived and installed at settlement (accretion at run.clj:1436-1460) — vs attribute facts one by one — vs a declare! function.", status: "recommended" },
+    { id: "B14.1", text: "Intent comments derive from the attribute's name and direction (recommended) vs a declared phrase per attribute.", status: "recommended" },
+    { id: "B13.1", text: "Handle spelling result/<id>, id derived from the eval identity.", status: "ruled" },
+    { id: "G.1", text: "(dir …) for every namespace the agent requires, bounded by the profile; others only on demand.", status: "recommended" },
+    { id: "G.3", text: "Another agent met through data gets (doc my.agents.<id>) as its introduction.", status: "recommended" },
+    { id: "B4.2", text: "The requery spelling inside an elision is a pasteable FORM, not a sentence with a blob digest.", status: "recommended" },
+    { id: "B6.1–6.3", text: "doc output is dense data (approve); schema doc shows readers AND writers labelled; a test as demonstration = one reaching test's source, bounded.", status: "recommended" },
+    { id: "B7.1", text: "Within a turn: system entries (what changed while you were away) first, then the agent's own forms.", status: "recommended" },
+    { id: "B10.1–10.2", text: "An /ai fn without an /html twin renders as text in a <pre>; the root page / is the walk rooted at the CLUSTER entity, not a special page.", status: "recommended" },
+    { id: "atlas", text: "This atlas's edge counts are typed by hand from the 2026-09-03 probe; next: a committed script regenerates MODEL.edges from the live schema so the drawing can never drift from the facts.", status: "open" },
+    { id: "retype", text: "The census's option 1 (coherent destructive retype, ~18 schema files, reset never migrate) is the priced way to land the target model — start only after the atlas convinces.", status: "open" }
+  ]
+};
+
+// ============================================================================
+// Drawing — nothing below knows a family by name.
+// ============================================================================
+const css = getComputedStyle(document.documentElement);
+const tok = (name) => css.getPropertyValue(name).trim();
+const familyById = Object.fromEntries(MODEL.families.map(f => [f.id, f]));
+const swatch = (f) => tok("--" + f.color);
+
+function legend() {
+  const seen = new Map();
+  for (const f of MODEL.families) if (!seen.has(f.color)) seen.set(f.color, f);
+  const el = document.getElementById("legend");
+  el.innerHTML = "";
+  for (const [color, f] of seen) {
+    const s = document.createElement("span");
+    s.style.setProperty("--sw", tok("--" + color));
+    s.textContent = { ns: "namespace / program index", agent: "agent", message: "agent-written data", eval: "evals · defs", run: "runs", error: "errors", schema: "schemas", fn: "functions", system: "system facts" }[color] || color;
+    el.appendChild(s);
+  }
+}
+
+let mode = "target";
+let cy;
+function elements() {
+  const nodes = MODEL.families.map(f => ({ data: { id: f.id, label: f.key.split(" ")[0], level: f.level, bg: swatch(f) } }));
+  const edges = MODEL.edges
+    .filter(e => mode === "target" ? !e.current : !e.target)
+    .map((e, i) => ({ data: { id: "e" + i, source: e.from, target: e.to, label: e.attr + (e.count ? " ×" + e.count : ""), kind: e.kind } }));
+  return [...nodes, ...edges];
+}
+function layout() { return { name: "concentric", concentric: n => 4 - n.data("level"), levelWidth: () => 1, minNodeSpacing: 60, padding: 24, animate: false, fit: false }; }
+function relayout() { const l = cy.layout(layout()); l.one("layoutstop", () => cy.fit(cy.nodes(), 40)); l.run(); }
+function drawGraph() {
+  const ink = tok("--ink"), ink3 = tok("--ink-3"), line = tok("--line"), accent = tok("--accent"), panel = tok("--panel");
+  cy = cytoscape({
+    container: document.getElementById("cy"), elements: elements(), layout: { name: "preset" }, wheelSensitivity: 0.2, minZoom: 0.3, maxZoom: 3,
+    style: [
+      { selector: "node", style: { "background-color": "data(bg)", "border-color": line, "border-width": 1, label: "data(label)", "font-family": "IBM Plex Mono, monospace", "font-size": 11, color: ink, "text-valign": "center", "text-halign": "center", "text-wrap": "wrap", "text-max-width": 120, shape: "round-rectangle", width: "label", height: "label", padding: "10px" } },
+      { selector: "node:selected", style: { "border-color": accent, "border-width": 3 } },
+      { selector: "edge", style: { width: 1.5, "line-color": ink3, "target-arrow-color": ink3, "target-arrow-shape": "triangle", "curve-style": "bezier", label: "data(label)", "font-family": "IBM Plex Mono, monospace", "font-size": 9, color: ink3, "text-rotation": "autorotate", "text-background-color": panel, "text-background-opacity": 0.9, "text-background-padding": 2, "arrow-scale": 0.9 } },
+      { selector: "edge[kind = 'component']", style: { width: 4, "line-color": accent, "target-arrow-color": accent, color: ink } },
+      { selector: "edge[kind = 'reverse']", style: { "line-style": "dashed" } },
+      { selector: "edge[kind = 'requires']", style: { "line-style": "dotted" } },
+      { selector: "edge:selected", style: { "line-color": accent, "target-arrow-color": accent, width: 3 } }
+    ]
+  });
+  relayout();
+  cy.on("tap", "node", ev => inspect(familyById[ev.target.id()]));
+  cy.on("tap", "edge", ev => inspectEdge(ev.target.data()));
+  inspect(familyById.agent);
+}
+function pill(status) { return `<span class="pill ${status}">${status}</span>`; }
+function inspect(f) {
+  const forms = MODEL.walk.filter(w => w.fam === f.id);
+  document.getElementById("inspector").innerHTML = `
+    <div class="key">${f.key}</div><h3>${f.id}</h3>
+    <table>
+      <tr><td>identity</td><td class="mono">${f.identity}</td></tr>
+      <tr><td>attributes</td><td>${f.attrs.map(a => `<div class="mono">${a}</div>`).join("")}</td></tr>
+      <tr><td>agent writes?</td><td>${f.writes}</td></tr>
+      <tr><td>rendered by</td><td>${f.render}</td></tr>
+      <tr><td>at HEAD</td><td>${pill("current")} ${f.current}</td></tr>
+    </table>
+    ${forms.length ? `<div class="eyebrow">forms the walk generates for it</div>` + forms.map(w => `<pre class="form"><span class="c">;; ${w.intent}</span>\n<span class="p">my.agents.root=></span> ${escapeHtml(w.form)}</pre>`).join("") : `<div class="teach">no generated form yet — the walk reaches it through another family</div>`}`;
+}
+function inspectEdge(d) {
+  document.getElementById("inspector").innerHTML = `<div class="key">edge</div><h3 class="mono">${d.label}</h3>
+    <table><tr><td>from</td><td>${d.source}</td></tr><tr><td>to</td><td>${d.target}</td></tr><tr><td>kind</td><td>${d.kind}${d.kind === "component" ? " — the agent owns these; retracting the agent retracts them; pop = one retract, history keeps it" : d.kind === "reverse" ? " — a system fact pointing at the agent; the walk reads it as one collection query" : ""}</td></tr></table>`;
+}
+function escapeHtml(s) { return s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+
+function drawWalk() {
+  const g = document.getElementById("colGraph"), w = document.getElementById("colWalk"), t = document.getElementById("colTranscript");
+  MODEL.walk.forEach((s, i) => {
+    const fam = familyById[s.fam];
+    const mk = (html) => { const d = document.createElement("div"); d.className = "step"; d.dataset.i = i; d.innerHTML = html; return d; };
+    g.appendChild(mk(`<span class="n">${i + 1}</span><span class="edge">${s.edge}</span><span class="fam" style="background:${swatch(fam)}">${fam.id}</span>`));
+    w.appendChild(mk(`<span class="n">${i + 1}</span><pre class="form"><span class="c">;; ${s.intent}</span>\n<span class="p">my.agents.root=></span> ${escapeHtml(s.form)}</pre><div class="teach">${s.teach}</div>`));
+    t.appendChild(mk(`<span class="n">${i + 1}</span><pre class="form">${escapeHtml(s.out)}</pre><div class="lens">◐ <b>${s.lens}</b></div>`));
+  });
+  document.querySelectorAll(".step").forEach(el => {
+    el.addEventListener("mouseenter", () => document.querySelectorAll(`.step[data-i="${el.dataset.i}"]`).forEach(x => x.setAttribute("data-hot", "")));
+    el.addEventListener("mouseleave", () => document.querySelectorAll(`.step[data-i="${el.dataset.i}"]`).forEach(x => x.removeAttribute("data-hot")));
+  });
+}
+function drawIdioms() {
+  document.querySelector("#idiomsTable tbody").innerHTML = MODEL.idioms.map(d => `<tr><td style="font-family:var(--sans);white-space:normal;color:var(--ink)">${d.when}</td><td class="mono">${d.idiom}</td><td><pre class="form" style="margin:0">${escapeHtml(d.form)}</pre></td><td style="color:var(--ink-2)">${d.grammar}</td></tr>`).join("");
+}
+function drawDecisions() {
+  const tb = document.querySelector("#decisionsTable tbody");
+  tb.innerHTML = MODEL.decisions.map(d => `<tr><td>${d.id}</td><td>${d.text}</td><td>${pill(d.status)}</td></tr>`).join("");
+}
+function show(view) {
+  document.querySelectorAll("main > section").forEach(s => s.toggleAttribute("data-active", s.id === view));
+  document.querySelectorAll("nav button[data-view]").forEach(b => b.toggleAttribute("aria-current", b.dataset.view === view) || (b.dataset.view === view ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")));
+  if (view === "model" && cy) cy.resize();
+  try { localStorage.setItem("atlas-view", view); } catch (e) {}
+}
+document.querySelectorAll("nav button[data-view]").forEach(b => b.addEventListener("click", () => show(b.dataset.view)));
+document.getElementById("showTarget").addEventListener("click", () => { mode = "target"; toggleMode(); });
+document.getElementById("showCurrent").addEventListener("click", () => { mode = "current"; toggleMode(); });
+document.getElementById("relayout").addEventListener("click", relayout);
+function toggleMode() {
+  document.getElementById("showTarget").setAttribute("aria-pressed", mode === "target");
+  document.getElementById("showCurrent").setAttribute("aria-pressed", mode === "current");
+  cy.elements().remove(); cy.add(elements()); relayout();
+}
+// ---------------------------------------------------------------------------
+// The session player: instance nodes appear under the record, reads glow, pops retract.
+// ---------------------------------------------------------------------------
+let stepIndex = -1, playing = null;
+const stepLog = [];
+function styleSteps() {
+  cy.style()
+    .selector(".read").style({ "border-color": "#3b82c4", "border-width": 3, "line-color": "#3b82c4", "target-arrow-color": "#3b82c4", width: 3 })
+    .selector(".written").style({ "border-color": tok("--ok"), "border-width": 3, "line-color": tok("--ok"), "target-arrow-color": tok("--ok") })
+    .selector(".instance").style({ "font-size": 10, "border-style": "solid", opacity: 1 })
+    .selector(".gone").style({ opacity: 0.25, "border-style": "dashed" })
+    .update();
+}
+function ensureInstance(w) {
+  if (cy.getElementById(w.id).length) return cy.getElementById(w.id);
+  const fam = familyById[w.fam];
+  const anchor = w.parent ? cy.getElementById(w.parent) : cy.getElementById("agent");
+  const p = anchor.position();
+  const n = cy.add({ group: "nodes", data: { id: w.id, label: w.label, level: 9, bg: swatch(fam) }, classes: "instance", position: { x: p.x + (Math.random() * 160 - 80), y: p.y + 110 + Math.random() * 60 } });
+  if (w.parent) cy.add({ group: "edges", data: { id: "ie-" + w.id, source: w.parent, target: w.id, label: w.via ? ":seon.agent/" + w.via : "", kind: w.via ? "component" : "ref" }, classes: "instance" });
+  return n;
+}
+function applyStep(i, forward) {
+  cy.elements().removeClass("read written");
+  const s = MODEL.steps[i];
+  s.reads.forEach(id => { const el = cy.getElementById(id); if (el.length) el.addClass("read"); });
+  s.writes.forEach(w => {
+    if (w.op === "retract") { const el = cy.getElementById(w.id); el.addClass("gone"); cy.getElementById("ie-" + w.id).addClass("gone"); return; }
+    const n = ensureInstance(w);
+    if (!w.preexisting) { n.addClass("written"); cy.getElementById("ie-" + w.id).addClass("written"); }
+  });
+  document.getElementById("stepCard").innerHTML = `<h4>${s.title}</h4>
+    <pre class="form"><span class="c">;; ${escapeHtml(s.intent)}</span>\n<span class="p">my.agents.root=></span> ${escapeHtml(s.form)}</pre>
+    <pre class="form">${escapeHtml(s.out)}</pre>
+    <div class="rw">${s.reads.length ? `<span class="r">reads: ${s.reads.join(", ")}</span>` : ""}${s.writes.filter(w => !w.preexisting).length ? `<span class="w">writes: ${s.writes.filter(w => !w.preexisting).map(w => (w.op === "retract" ? "− " : "+ ") + w.id).join(", ")}</span>` : ""}${s.diff ? `<span class="d">Δ ${escapeHtml(s.diff)}</span>` : ""}</div>`;
+  stepLog.length = i; stepLog.push(`;; ${s.intent}\nmy.agents.root=> ${s.form}\n${s.out}`);
+  document.getElementById("stepLog").innerHTML = stepLog.map((t, k) => `<div class="${k < i ? "old" : ""}">${escapeHtml(t)}</div>`).join("\n");
+  document.getElementById("stepPos").textContent = `${i + 1} / ${MODEL.steps.length}`;
+  document.getElementById("stepLog").scrollTop = 1e6;
+}
+function resetSteps() {
+  stepIndex = -1; stepLog.length = 0;
+  cy.elements(".instance").remove(); cy.elements().removeClass("read written gone");
+  document.getElementById("stepCard").innerHTML = `<h4>Press ▶ to start</h4><div class="teach">Each step is one form the agent (or the system, on its behalf) evaluated. Blue = read, green = written, faded = popped.</div>`;
+  document.getElementById("stepLog").innerHTML = ""; document.getElementById("stepPos").textContent = `0 / ${MODEL.steps.length}`;
+}
+function next() { if (stepIndex + 1 >= MODEL.steps.length) { stopPlay(); return; } stepIndex++; applyStep(stepIndex, true); }
+function prev() { if (stepIndex <= 0) { resetSteps(); return; } const target = stepIndex - 1; resetSteps(); for (let k = 0; k <= target; k++) { stepIndex = k; applyStep(k, true); } }
+function stopPlay() { if (playing) clearInterval(playing); playing = null; document.getElementById("stepPlay").setAttribute("aria-pressed", "false"); document.getElementById("stepPlay").textContent = "Play"; }
+document.getElementById("stepNext").addEventListener("click", next);
+document.getElementById("stepPrev").addEventListener("click", prev);
+document.getElementById("stepReset").addEventListener("click", resetSteps);
+document.getElementById("stepPlay").addEventListener("click", () => {
+  if (playing) { stopPlay(); return; }
+  document.getElementById("stepPlay").setAttribute("aria-pressed", "true"); document.getElementById("stepPlay").textContent = "Pause";
+  next(); playing = setInterval(next, 2600);
+});
+
+legend(); drawGraph(); styleSteps(); resetSteps(); drawWalk(); drawIdioms(); drawDecisions();
+let initial = "model"; try { initial = localStorage.getItem("atlas-view") || "model"; } catch (e) {}
+show(initial);
+</script>
