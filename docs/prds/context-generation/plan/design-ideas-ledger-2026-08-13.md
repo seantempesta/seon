@@ -912,6 +912,25 @@ numerically and a bare cross-citation is a defect to fix on sight.
     [repl-first-visual-2026-09-04.md](repl-first-visual-2026-09-04.md);
     it is improved in place, never forked.
 
+62. **Data first: the agent's work is schemas, facts, and queries; functions
+    only for the user's surfaces** (owner, 2026-09-04): couple the agent
+    tightly to the database and make add/remove/update so easy that
+    changing data directly is always the better move than writing a
+    function; agents write functions only when building surfaces for the
+    user (render functions) or when a calculation is reused. The focus
+    moves to SCHEMAS — what data we store, modify, and compute over — and
+    to on-the-fly calculation in the REPL (Datalog aggregates, pull,
+    ordinary Clojure over results) without formal functions. Consequence
+    (the orchestrator's reading, for markup): the data-shaped `my.*`
+    surfaces (`my.note` add!/forget!/notes, `my.plan` add!/complete!/
+    plan!/ready, `my.message` inbox/read/send/decline, `my.run`
+    wait/complete) are demonstrated `seon.db/transact!`/`q`/`pull` forms
+    over their fact families, keeping only their render functions; the
+    effect-shaped surfaces (`my.fs`, `my.shell`, `my.web`, `my.edit`,
+    `my.background`) stay functions because they cross the effect door.
+    Verified at HEAD: `seon.schema/register!` exists but no agent-facing
+    schema declaration does — the one gap this ruling opens.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced

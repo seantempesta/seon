@@ -715,6 +715,39 @@ declared phrase is a second thing to maintain.)
 
 ---
 
+## B15. Data first — schemas, facts, queries; functions only for surfaces (ruled 62)
+
+**Statement.** The agent's ordinary work is data work: declare what it
+stores (a schema), assert and retract facts (`seon.db/transact!` with
+identity upsert, retraction, `:db.fn/call` transitions), and read and
+compute over them (`q`, `pull`, aggregates, ordinary Clojure over the
+result). None of that needs a function. A function is written for exactly
+two reasons: a SURFACE for the user (a render function, `/ai` or `/html`)
+or a calculation reused enough to name and contract. The context teaches
+transacting as naturally as querying — an intent comment and the form:
+
+```clojure
+;; remember this for later
+my.agents.root=> (seon.db/transact! [{:my.note/id "largest-contract" :my.note/content "largest returns {} for empty input"}])
+{:db-after … :tx-data […]}
+;; result/e5
+;; how many messages per sender, on the fly
+my.agents.root=> (seon.db/q '[:find ?from (count ?m) :where [?m :seon.cluster.message/to [:seon.cluster.agent/id "root"]] [?m :seon.cluster.message/from ?f] [?f :seon.cluster.agent/id ?from]])
+#{["planner" 2] ["reviewer" 1]}
+;; result/f6
+```
+
+Data-shaped `my.*` surfaces dissolve into these demonstrations (their
+render functions survive as the model of what agents write); effect-shaped
+ones stay functions (they cross the effect door).
+
+❓ B15.1 Agent-declared schemas: transact schema FACTS directly (schema is
+data, the system installs it) vs a demonstrated `(seon.schema/register! …)`
+call. ❓ B15.2 `send` as a transact of a message fact (the run loop
+delivers on the wake) vs today's returned value the loop interprets.
+
+---
+
 ## B12. What the agent never sees
 
 No hand-authored narration; no rendered text stored as authority; no
