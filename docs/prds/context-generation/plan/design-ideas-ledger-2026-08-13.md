@@ -948,6 +948,25 @@ numerically and a bare cross-citation is a defect to fix on sight.
     data; the schema-declaration spelling is the open question (three
     concrete spellings in behavior B15).
 
+64. **One eval family; no read-at; the record shape is the question**
+    (owner, 2026-09-04): the transcript becomes ONE family — the
+    parser-saved form and its result in one eval row (source, ns,
+    ordinal, at, result, error, read-evidence); `run.form` merges into it
+    (retype + reset). Messages get NO `read-at` fact: the owner wants a
+    message POPPED into the REPL — removed from the agent's working set
+    as it is handled, retained in history (Datahike keeps history) so
+    counts remain derivable — and asks what the point of a shared
+    `seon.cluster.message` entity is; the graph shape around the agent
+    (where facts live, how nodes connect) is priced in the one-platform
+    document §0e (three shapes; shape 2 — the agent's record as the root
+    with owned component collections — recommended). The owner's reading
+    of the schema machinery is confirmed and written down (§0d): commit
+    facts for schema + database details, everything else derives —
+    projection from rows, Datahike attributes from Malli forms,
+    instrumentation from `:seon.fn/spec` facts; agent-declared schemas
+    already settle through the run loop with accretion allowed and
+    breaking redefinition refused.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced

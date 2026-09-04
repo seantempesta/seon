@@ -174,6 +174,107 @@ is the `/html` projection of the same evals. Every turn regenerates the
 whole context from facts (52, 58d); caching is a property, not a
 mechanism. Nothing else assembles, selects, summarizes, or clips.
 
+## 0d. How schemas, attributes, and instrumentation already derive from facts (owner's question, 2026-09-04)
+
+Yes — the database is the authority and everything else derives; the
+agent commits facts for the schema and for the database details
+(identity, ref, component, cardinality), and nothing is registered
+anywhere else. The chain at HEAD, verified:
+
+1. **Schema rows are facts.** A schema is one row: `:seon.schema/key`,
+   `:seon.schema/form` (the Malli form, EDN-encoded), derived
+   `:seon.schema/references` and `:seon.schema/shape`, plus the map-level
+   properties (`:seon.db/attributes true`, faces). 2,362 rows on
+   `ctxprobe`. Boot loads the EDN files under `resources/seon/schemas/`
+   into the same rows; a fresh cluster forks them with its program
+   commit.
+2. **The projection (Malli registry) derives from the rows** —
+   `seon.schema/projection-from-database` (now cached by exact committed
+   identity, `768c6a0e0`): the projection is the value the schema rows
+   denote, never a second registry.
+3. **Datahike attributes derive from the Malli forms** —
+   `seon.schema.datahike/malli->datahike-attr-in` (`datahike.clj:221-262`):
+   `:seon.db/identity true` → `:db.unique/identity`; `:seon.db/ref` →
+   `:db.type/ref`; `:seon.db/component true` → `:db/isComponent`;
+   `[:set …]` → cardinality-many; the value type from the form's head.
+   No attribute is declared twice: the Malli form IS the database
+   declaration.
+4. **An agent's schema declaration settles like any other program row.**
+   The run loop's settlement recognizes a row whose identity is
+   `:seon.schema/key` (`run.clj:1436-1460`, source `:agent`): a NEW key
+   installs its required attributes in the same settlement transaction;
+   a REDEFINITION is diffed against the current projection and REFUSED
+   when current data uses the changed attributes ("Schema change refused:
+   current data uses …", `run.clj:1160`) — accretion allowed, breakage
+   refused, by construction.
+5. **Instrumentation reads contracts from facts.** A public function's
+   contract is the `:seon.fn/spec` fact on its program row; the agent's
+   turn ctx wraps the SCI Var with it against the projection
+   (`seon.sci.eval/install-function-contract!` → `instrument/wrap-interpreted`,
+   `sci/eval.clj:591-602`); the JVM side applies the same rule at boot
+   (`seon.instrument/apply!`: every loaded public var carrying
+   `:malli/schema`, no lists). Cost measured: ~130–180 ns per instrumented
+   call.
+
+So the spelling question (B15.1) is only about the FORM the agent types;
+the machinery underneath is already "commit the facts, the rest derives".
+Option B (one schema fact with inline entry forms) needs one accretion at
+step 4: derive the attribute rows from a map form's inline entries instead
+of requiring each entry's key to be registered first.
+
+## 0e. The agent's record — where facts live and how the graph connects (owner's question, 2026-09-04)
+
+The owner's target: an agent runs things mostly by writing queries,
+pulls, transacts, and schema accretions. The question is what the graph
+around the agent should look like so that stays true. Three shapes, priced
+honestly against Datahike's own semantics (history is kept —
+`:seon.config.db/keep-history?` — so a retracted fact stays queryable
+through `(seon.db/history)`/`as-of`; a component ref cascades on
+`:db/retractEntity`, `reference-code/datahike/src/datahike/db/transaction.cljc:833`):
+
+**Shape 1 — today: addressed shared entities.** A message is its own
+entity with `:to`/`:from` refs; the inbox is a reverse-ref query; "done
+with it" needs a fact (`read-at`) or nothing. Pros: one family for all
+messages, cross-agent analytics are direct, senders and recipients share
+one row. Cons: the agent's record is SCATTERED across families that point
+at it (messages, runs, errors, requests, tasks — 65 reverse refs on root
+today), every "what is mine" is a different reverse query, and
+"consumed" has no representation, which is exactly the owner's
+complaint.
+
+**Shape 2 — the agent's record as the root, owned things as component
+collections (recommended).** The agent entity (which IS its namespace
+row, 39/40) owns what belongs to it through component refs:
+`::inbox` (messages addressed to it), `::evals` (its transcript, the one
+merged eval family, 63/64), `::notes`, `::plan`, `::defs`, `::errors`.
+Delivery MOVES the message into the recipient's inbox (one transact by
+the sender: the message map inside the recipient's `::inbox`); "pop" is
+`[:db/retract [:seon.ns/name my.agents.root] ::inbox msg]` — the row is
+gone from the record and retained in history, so "who messages me most"
+is a count over `(seon.db/history)`. Pros: ONE pull shows the whole
+record (`(seon.db/pull '[* {::inbox […]} {::evals […]}] [:seon.ns/name …])`
+— the walk's root query becomes trivial and the visual's §1 collapses to
+one entity with component edges); "mine" is ownership, not a reverse
+walk; pop is Datahike's own retract; accretion = add a component
+attribute to the agent's family. Cons: cross-agent analytics walk
+reverse component refs (cheap, still one query); a message in flight
+belongs to the recipient only (the sender sees it through history or
+its own `::sent` component — a second write); the merged eval family and
+the record shape are a RETYPE + RESET of several families (never
+migrate — ruled disposable); component cascade means retracting the
+agent retracts its record (which is right).
+
+**Shape 3 — everything is an eval.** A message IS an entry in the
+recipient's transcript (the trigger form + the message value). Pros: one
+family, one pull, the transcript literally is the record. Cons: conflates
+data the agent may query later (messages, notes) with history; "pop"
+means editing history; analytics over messages become analytics over
+evals with a family filter.
+
+The census lane (`context-data-census`, running) prices shape 2's EDN
+for every family the walk renders and the exact forms an agent would
+type against it.
+
 ## 1. What SURVIVES as authority [REAL] — the platform we build on
 
 | authority | why it is the owner | register row |
