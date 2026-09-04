@@ -287,14 +287,14 @@ returns one.
 
 | claim | evidence |
 |---|---|
-| A recursive renderer (select by family → call; each face calls render on its parts) with Ring-style middleware for bounding/provenance/errors and a threaded ctx | prototyped on the live cluster, 3 passes, 3.3 ms; swapping one face changed only its entries (`research/scripts/recursive-render-probe-2026-09-03.clj`) |
-| A value's family derives from its identity attribute (every identity attribute names exactly one entity family) | queried live, 0.1 ms raw |
-| Namespace distance for "closest other agent wins" is one Datalog query with rules | 54 namespaces within 3 hops of root, 16 ms cold / 0.07 warm |
-| Schemas → Datahike attributes → instrumentation all derive from facts; an agent-declared schema settles through the run loop with accretion allowed and breaking redefinition refused | `schema/datahike.clj:221-262`, `run.clj:1436-1460`, `sci/eval.clj:591-602` |
+| A recursive renderer (select by family → call; each face calls render on its parts) with Ring-style middleware for bounding/provenance/errors and a threaded ctx | prototyped on the live cluster, 3 passes; swapping one face changed only its entries (`research/scripts/recursive-render-probe-2026-09-03.clj`). **Second opinion:** the mechanism holds; the 3.3 ms was 22.8 ms cold on a fresh cluster, and the probe uses STAND-INS for the contract query and the print floor — it proves composition, not production selection or bounded help. |
+| A value's family derives from its identity attribute | **REFUTED as stated** by the second opinion: on a fresh cluster 40 identity attributes gave 41 identity→family pairs over 38 attributes — `:seon.cluster.agent/id` maps to three entity schemas, `:seon.test/sym` to two, two identities to none. My probe checked singleton cardinality only for the three hand-picked identities. The derivation needs a rule for zero, one, and several families and for maps carrying several identities. |
+| Namespace distance for "closest other agent wins" is one Datalog query with rules | reproduced by the reviewer: 55 rows, 19.4 ms cold / 0.59 ms warm — the shape holds; the numbers are not invariants |
+| Schemas → Datahike attributes → instrumentation all derive from facts; an agent-declared schema settles through the run loop with accretion allowed and breaking redefinition refused | `schema/datahike.clj:221-262`; the refusal is at `run.clj:1134-1165` (invoked `:1422-1424`), settlement at `:1436-1460`; `sci/eval.clj:591-602` installs a wrapper from a supplied row — the chain holds, my line citations overclaimed. The sketched `:error :map` attribute is NOT mappable by the schema bridge (`schema/datahike.clj:50-61,112-174`). |
 | The watch primitive and per-query interest exist | `wake.clj:168-256`, read-evidence revisions, `:seon.render.web/interest` |
 | `diff` at a recorded basis shows additions and deletions; a `since` view cannot (lookup refs to older entities fail inside it) | both measured live |
-| Recursive and reverse pulls work as Datahike documents them | measured live |
-| Transactions carry the eval and process stamps | `receipt_write_carrier_test` |
+| Recursive and reverse pulls work as Datahike documents them | measured live — but a positional pull silently returns at most 1,000 children per attribute (Datahike default, `pull_api.cljc:16,304-324`; the reviewer's 10,000-child probe returned 1,000 with no omission marker). "The record is one pull" is false for large records without an explicit bounded collection contract. |
+| Transactions carry provenance stamps | **Corrected by the second opinion:** `receipt_write_carrier_test` proves `:seon.db/receipt` + caller-supplied `:seon.db/user`, not eval + process. Keep user and process; add the eval/receipt ref when one exists. An eval is a causal identity, not the authorizing human or agent. |
 | The query cost problem was the wrapper, not Datahike | `seon.db/q` 2.4 s → 0.048 ms after the projection cache landed |
 
 ## 5. What is UNCLEAR or UNPROVEN
@@ -333,7 +333,34 @@ returns one.
    error ANALYTICS ("which function errs most") become queries over
    messages `:about` a function plus the eval's `:error` map — plausible,
    unmeasured.
-10. **The retype is large**: ~18 schema files, the run loop, wake,
+10. **From the second opinion — the questions I had not asked** (each
+    blocking): atomic turn state (what one transaction claims a message,
+    assigns a turn, records custody, and later one terminal disposition —
+    the eval sketch has no disposition attribute, so a crash before the
+    first eval leaves no fact about the open turn); interrupted-form
+    evidence (a form that performed an effect and died before settlement);
+    pop atomicity and wake behavior (is the trigger popped with the terminal
+    disposition? what stops an open inbox edge waking the agent repeatedly?);
+    bounded collection semantics (order, page, basis, count, omission for
+    >1,000 rows); component ownership enforcement (Datahike admits one child
+    under two owners and cascades on retractEntity — measured); family
+    ambiguity (zero/one/several families per identity — measured false as a
+    singleton); render purity, cycles, and versioning (no seen-set in the
+    prototype; external-sink exclusion; today's renderer vs the original
+    basis); a queryable error shape (`:map` is unmappable); definition and
+    namespace conflicts (two agents per namespace collide on same-named
+    defs; HEAD enforces one owner — `agent_namespace_test.clj:53-71`);
+    complete teaching evidence before the full-parse bridge (a reader walk
+    cannot resolve aliases, refers, macros, or names emitted by rendered
+    values).
+11. **Error VALUES the target must represent** (from the second opinion,
+    none yet in the model): ambiguous/no family, no collection renderer,
+    tied render candidates, renderer cycle, renderer effect refusal,
+    pull-page elision, trigger already claimed, turn already open, stale
+    process takeover, interrupted-before-first-eval, duplicate
+    `[agent turn ordinal]`, invalid fork inheritance,
+    result/error/blob exclusivity refusal.
+12. **The retype is large**: ~18 schema files, the run loop, wake,
    message delivery, the transcript renderers, plus every test fixture.
    Reset, never migrate. It cannot be done in pieces that leave two
    mechanisms alive.
@@ -355,12 +382,19 @@ returns one.
    agent had written data there (none had; the stamp is test-proven).
 7. Described the present in a document meant to describe the target
    (the first version of this §2); rewritten the same night.
-8. Produced too many documents. This one replaces the reading order for
+8. Overstated evidence: a 3.3 ms figure from a warm run; "every identity
+   attribute names exactly one family" from three hand-picked identities;
+   "eval + process stamps" where the test proves receipt + user; line
+   citations that pointed near, not at, the refusal.
+9. Wrote "several agents may steward one namespace" as if it were free;
+   HEAD enforces one owner and the program index identifies functions by
+   namespace-qualified symbol — two stewards collide on same-named defs.
+10. Produced too many documents. This one replaces the reading order for
    the design question; the others are evidence.
 
 ## 7. What to KEEP, CHANGE, DELETE (pointer, not a second register)
 
-The [parallel-paths register](../research/parallel-paths-register-2026-09-04.md)
+The [parallel-paths register](../research/parallel-paths-register-2026-09-03.md)
 and the [one-platform document](repl-first-one-platform-2026-09-03.md)
 §1–§4 hold the file:line evidence. In one line each: keep the eval facts,
 blob tier, schema-derived root selection, `seon.print/fit` (refactored),
@@ -377,3 +411,64 @@ when its replacement is live and proven.
 
 Generate `(help)` for one real agent with one real owned family on a
 scratch cluster and READ IT. Nothing else proves or refutes §1–§5 faster.
+
+## 9. The second opinion — verdict and the three decisions (2026-09-04)
+
+The independent review ([second-opinion-2026-09-04.md](../research/second-opinion-2026-09-04.md),
+Codex, no context from the design sessions, every cited claim verified at
+the bytes and the probes re-run on its own scratch cluster) says: **the
+target is not ready to implement.** Its verdict, in its words: the
+document "is faithful about the experience the owner wants and unfaithful
+about what that experience forces the database to own."
+
+The decisive findings:
+- **Deleting the run/receipt authority is the most likely reason the
+  design fails.** It collapses four independent facts — process custody,
+  message claim, turn identity and terminal disposition, form/effect
+  interruption — into `:process` plus the presence of eval rows, and reads
+  the absence of an eval as "no open turn" in exactly the crash window
+  where no eval could have been written.
+- **Component ownership is lifecycle, not nesting.** Datahike admits one
+  child under two owners and cascade-deletes it when either owner is
+  retracted (measured). "Pop" has two incompatible readings. The agent is
+  a good QUERY ROOT, not a universal component owner.
+- **One pull is not complete**: a positional pull silently returns at most
+  1,000 children per attribute; the token budget after the pull cannot
+  see the missing 9,000.
+- **Addressed messages (HEAD) are better than inbox-owned ones** for
+  "who sent what to whom" after handling and for outside senders; the
+  inbox can still be the agent-rooted VIEW.
+- **Recursive rendering is necessary and insufficient**: `(help)` over
+  10,000 rows needs database-side counts and bounded collection
+  descriptors chosen by SOME function — an assembler, however data-driven;
+  and "never authored" is false — the honest claim is "all presentation
+  bytes are owned by named, contracted render functions, except the one
+  declared introduction."
+
+The three decisions the owner must make before any production code
+(reviewer's recommendation first in each):
+1. **View versus ownership** — the agent is the root of a derived
+   query/view; keep addressed messages and semantic domain refs; use
+   components only where a one-owner cascade lifecycle is proved; keep one
+   namespace per agent until agent-scoped definition identity and a
+   co-steward conflict policy exist. Gives up: "the whole record is one
+   physical tree."
+2. **Turn authority** — keep a minimal run plus receipt/eval custody
+   authority while unifying run-form and eval settlement into one eval
+   row; delete the run only if a crash falsifier proves an equally atomic
+   replacement. Gives up: "five families" as a metric.
+3. **Bounded context contract** — define a collection descriptor (family,
+   count, stable order, basis, bounded page, requery identity), the generic
+   no-summary fallback, and limit P-TEACH-BEFORE-USE to forms with settled
+   usage facts until the full-parse bridge lands. Gives up: "one pull
+   renders everything."
+
+**Build first (the reviewer's pick, which I accept over my §8):** a
+transaction-only crash falsifier in a scratch database with the target
+schema — `begin-turn`, `settle-eval`, `close-turn` — cut at (a) after
+message arrival before the first eval, (b) after an effect begins before
+settlement, (c) after the last eval before pop; from facts alone recover
+exactly one trigger, owner, turn, interrupted form, and disposition, with
+takeover as one transaction. If that needs a run/receipt entity, the
+largest destructive premise is falsified before any renderer exists.
+Then, and only then, generate and read `(help)` for one real agent.

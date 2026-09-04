@@ -256,6 +256,23 @@ record summary via render fns + processing fns by contract) is in the
 ledger; tx provenance is test-proven (`receipt_write_carrier_test`); the
 `:seon.db/user` stamp is the gap.
 
+## 2026-09-04 (late night) — the second opinion landed: NOT READY
+
+[second-opinion-2026-09-04.md](../research/second-opinion-2026-09-04.md)
+(Codex, no session context, claims verified at the bytes, probes re-run
+on its own root): the agent-centric target is faithful to the wanted
+EXPERIENCE and wrong about what it forces the database to own. Refuted:
+"every identity attribute names one family" (41 pairs / 38 attrs); "one
+pull is the record" (Datahike pulls ≤1,000 children per attribute
+silently); "eval + process stamps" (the test proves receipt + user);
+components as universal ownership (one child under two owners, cascade
+measured); several agents per namespace (HEAD enforces one owner).
+Most likely failure: deleting the run/receipt authority. Three owner
+decisions before code (view vs ownership; turn authority; bounded
+collection contract) and the first build = a transaction-only crash
+falsifier, not `(help)`. The design doc's §4–§6 carry the corrections and
+§9 the verdict. Lanes quiet.
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
