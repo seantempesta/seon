@@ -967,6 +967,23 @@ numerically and a bare cross-citation is a defect to fix on sight.
     already settle through the run loop with accretion allowed and
     breaking redefinition refused.
 
+65. **The agent is its own entity; its record is what it owns** (owner,
+    2026-09-04): several agents may work one namespace, so an agent has
+    its own entity with a ref to the programmatic index of its code (the
+    namespace row); an agent can be forked and then has its own defs;
+    agents create as many entities and refs as they want. "Root" is
+    reserved for the root agent — never a synonym for "the agent's
+    entity". Messages MOVE to the agent (delivered into its record) and
+    are POPPED as handled — no `read-at`; history keeps them so counts
+    stay derivable. A sender keeps only its own eval (the form and its
+    result — the data it wrote). The owner asked for the data-model
+    VISUALIZATION rather than more questions: it is the
+    [visual](repl-first-visual-2026-09-04.md) §6 (target entity model)
+    and §7 (where code is indexed and how the SCI ctx loads from the
+    database, verified at HEAD); the
+    [data-model census](../research/context-data-model-census-2026-09-04.md)
+    prices the retype (option 1, ~18 schema files, reset never migrate).
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced

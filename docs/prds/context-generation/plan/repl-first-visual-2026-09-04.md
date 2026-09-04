@@ -214,6 +214,116 @@ my.agents.root=> (seon.db/diff 536870930 '[:find [(pull ?m [:seon.cluster.messag
 ;; result/d4  rendered-by my.agents.root/inbox-view
 ```
 
+## 6. THE DATA MODEL — the agent's entity, its record, and the program index (target; owner rulings 62–65)
+
+**Decisions drawn here** (each a ruling or a marked recommendation the
+owner can strike): an AGENT is its own entity, never the namespace —
+several agents may work one namespace, an agent can be FORKED with its
+own defs, and it holds a REF to the programmatic index of its code (the
+namespace row and, through it, every function, arity, contract, and
+call edge). "Root" below means only the root agent. The agent OWNS its
+record as component collections: its transcript (ONE eval family —
+source + result in one row, ruled 64), its inbox (messages are delivered
+INTO the recipient's inbox and POPPED as the agent handles them — one
+retract; history keeps them, so counts derive from `(seon.db/history)`;
+no `read-at` fact, owner), its defs, notes, plan items. A sender keeps
+nothing but its own eval — the form it evaluated and the result, which
+is the data it wrote. Everything else the agent creates is an ordinary
+entity with whatever refs it declares (accretion). System facts (runs,
+errors, captures, schedule fires) POINT at the agent; the agent never
+writes them.
+
+```mermaid
+erDiagram
+  CLUSTER ||--o{ AGENT : "has"
+  AGENT }o--|| NAMESPACE : "agent/namespace (the code index; many agents per ns)"
+  AGENT |o--o{ AGENT : "forked-from (own defs)"
+  AGENT ||--o{ EVAL : "agent/evals — component: THE transcript (source+result, one row)"
+  AGENT ||--o{ MESSAGE : "agent/inbox — component: delivered in, popped by retract"
+  AGENT ||--o{ DEF : "agent/defs — component: restored into its SCI ctx"
+  AGENT ||--o{ NOTE : "agent/notes — component"
+  AGENT ||--o{ PLAN_ITEM : "agent/plan — component; item/about → any entity"
+  RUN }o--|| AGENT : "run/agent (custody; process); run/trigger → message | eval"
+  ERROR }o--|| AGENT : "error/agent (system-written)"
+  NAMESPACE ||--o{ FN : "fn/ns (program index)"
+  FN ||--o{ ARITY : "fn/arities — component: input-refs, output-refs (render fns are found here)"
+  FN }o--o{ FN : "usages (calls) — after the bridge"
+  NAMESPACE }o--o{ NAMESPACE : "ns/requires"
+  SCHEMA ||--o{ SCHEMA : "schema/references"
+  EVAL }o--|| RUN : "eval/run"
+  EVAL }o--o| ERROR : "eval/error"
+  MESSAGE }o--o| AGENT : "message/from (history answers who sends most)"
+  MESSAGE }o--o| ANY : "message/about"
+  SCHEMA {
+    keyword key PK "the Malli form is the database declaration"
+    string form "identity, ref, component, cardinality derive from it"
+  }
+  EVAL {
+    string id PK
+    int ordinal
+    string source "the parser-saved form"
+    string result_edn "or result blob"
+    inst started_at
+    basis read_basis "read-evidence: the watch's interest"
+  }
+  MESSAGE {
+    string id PK
+    string content
+    inst at
+  }
+  AGENT {
+    string id PK
+  }
+```
+
+**What this buys the generator (§2/§3):** the whole record is ONE pull —
+`(seon.db/pull '[:seon.agent/id {:seon.agent/inbox […]} {:seon.agent/evals […]} {:seon.agent/namespace [:seon.ns/name {:seon.fn/_ns […]}]}] [:seon.agent/id "root"])`
+— and every "mine" is ownership, not a reverse walk; the system's facts
+about the agent (runs, errors) stay one reverse query each; pop, note,
+plan, send are one `transact!` each with an intent comment; "who
+messages me most" is one query over history. Compare §1: 65 reverse
+refs on root today become five component edges plus two reverse ones.
+
+**Where the census disagrees, and why the owner's ruling stands:** the
+[data-model census](../research/context-data-model-census-2026-09-04.md)
+proposes a `read-at` fact and keeps messages as shared addressed entities
+(its §3); the owner ruled POP (a message is removed from the working set
+as it is handled, history retains it). Both agree on the one eval family
+(its §1), refs over tokens for plan subjects (its §3), def identity (its
+§4), and errors that point rather than copy (its §6). The census's option
+1 (coherent destructive retype, ~18 schema files, reset never migrate)
+is the priced way to land this model.
+
+## 7. WHERE EVERYTHING IS INDEXED — source → program index → the agent's SCI ctx (verified at HEAD)
+
+```mermaid
+flowchart LR
+  SRC["src/ test/ resources/seon/schemas/<br/>(files)"] -->|"bin/seon init"| IDX["seon.fn/index!<br/>clj-kondo analysis → program rows on a scratch branch<br/>(:seon.ns :seon.fn :seon.fn.arity :seon.test :seon.schema)"]
+  IDX -->|"seon.cluster.source/publish!"| CUR[(":current-src branch<br/>one non-executing published commit")]
+  CUR -->|"bin/seon start: fork the exact commit"| CLB[("cluster branch<br/>sovereign until reforked")]
+  CLB -->|"seon.sci.eval/acquire!"| CTX["base SCI ctx built FROM THE DATABASE:<br/>namespace sources · contracts wrapped from :seon.fn/spec<br/>doc/dir from rows · declared classes"]
+  CTX -->|"per run: sci/fork + agent defs restored from :seon.def"| TURN["the agent's turn ctx<br/>(+ result/<id> bindings from its evals — B13)"]
+  TURN -->|"settlement writes facts"| CLB
+  CLB -.->|"evals · defs · schema rows (accretion) · messages · notes · plan"| CLB
+  EDIT["file edit"] -->|"edit hook: kondo → same-identity upserts"| CUR
+  CLB -->|"generator: walk → forms → evals → render"| CTXT["the agent's context /ai<br/>the page /html"]
+```
+
+Answers to the owner's questions, from the seams: **Are we loading the SCI
+context from the database?** Yes — `seon.sci.eval/acquire!`
+(`sci/eval.clj:1267`) builds the base ctx from namespace source facts and
+program rows, wraps contracts from `:seon.fn/spec` facts, installs `doc`/`dir`
+from rows, and restores the agent's defs from `:seon.def` rows
+(`def-value`, `install-root-row!`); a turn is a `sci/fork` of it. **Where
+and how is the code indexed?** `seon.fn/index!` (`fn.clj:1785`) runs
+clj-kondo over the tree and populates a scratch branch with program rows;
+`seon.cluster.source/publish!` (`source.clj:240`) seals it as the
+`:current-src` commit; a cluster forks that exact commit at start
+(`registry/cluster-branch`); the edit hook publishes same-identity
+upserts for changed files; existing clusters stay on their forked program
+until destructively reforked. The full-parse bridge (ruling 50) widens
+what index! stores (usages, keyword sites) without changing this flow.
+
 ## 5a. THE DATA — what the walk pulls out and renders (owner's question, 2026-09-04)
 
 Derived from the edge counts in §1 and the families' schema files; the
