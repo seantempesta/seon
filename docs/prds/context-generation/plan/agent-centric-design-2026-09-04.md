@@ -7,10 +7,12 @@ tags: [prd, agent, context, render, data-model, architecture]
 # The agent-centric design — one document, honest
 
 *2026-09-04. Written because the owner could not follow the trail of
-rulings, probes, and diagrams, and asked for a second opinion. This is
-the condensed statement of what he wants as I understand it, what we
-have evidence will work, what is unclear, and what I got wrong. It
-supersedes the spelling of every earlier draft where they disagree. A
+rulings, probes, and diagrams, and asked for a second opinion. THIS
+DESCRIBES THE TARGET SYSTEM, NOT HEAD: the data is rearranged around the
+agent and simplified wherever a family can be an attribute, a message, or
+an agent-declared schema instead. Where today's shape is mentioned it is
+only to say what the target replaces. It supersedes every earlier draft
+where they disagree. A
 reviewer with no context from this session critiques it in
 [second-opinion-2026-09-04.md](../research/second-opinion-2026-09-04.md).*
 
@@ -41,77 +43,111 @@ reviewer with no context from this session critiques it in
 9. ONE platform. No parallel systems. Nothing deleted before the design
    is agreed; no coding before it convinces.
 
-## 2. The data model — built AROUND the agent
+## 2. The TARGET data model — five families, all around the agent
 
-The agent entity is the center of everything it can see or do. What it
-owns hangs off it as component collections under its own attribute
-namespace. What it uses (code, the cluster) it references. What the
-system knows about it (runs, errors, schedule) points at it. There is no
-cluster-level message family: a message lives in exactly one agent's
-inbox.
+The core knows five things. Everything else is an attribute on one of
+them, a message in an inbox, or a family the agent declares for itself.
 
-```clojure
-;; THE AGENT — its own entity; several may work one namespace; forkable
-#:seon.agent
-{:id          [:string {:seon.db/identity true}]
- :namespace   :seon.db/ref                      ; → the code index (a :seon.ns row)
- :forked-from :seon.db/ref                      ; → agent
- :inbox       [:set {:seon.db/component true} :seon.db/ref]   ; → agent.message
- :evals       [:set {:seon.db/component true} :seon.db/ref]   ; → agent.eval  (THE transcript)
- :defs        [:set {:seon.db/component true} :seon.db/ref]   ; → agent.def
- :notes       [:set {:seon.db/component true} :seon.db/ref]   ; → agent.note
- :plan        [:set {:seon.db/component true} :seon.db/ref]   ; → agent.plan-item
- :data        [:set {:seon.db/component true} :seon.db/ref]}  ; → anything the agent stores for itself or its user
-
-;; A MESSAGE lives in ONE inbox. Sending = transact it into the recipient's :seon.agent/inbox.
-;; Handling = pop it (one retract; history keeps it). The sender keeps only its eval.
-#:seon.agent.message
-{:id :string-identity :content :string :at :inst :from :seon.db/ref :about :seon.db/ref :caused-by :seon.db/ref}
-
-;; ONE eval family: the parser-saved form and its result in one row (ruled 64).
-#:seon.agent.eval
-{:id :string-identity :ordinal :int :source :string :started-at :inst
- :result-edn :string :result-blob :seon.blob/digest :error :seon.db/ref
- :read-basis-t :seon.db/basis-t :read-evidence [:vector {:seon.db/component true} :seon.db/ref]
- :rendered-by :symbol}                          ; only when the floor rendered it
-
-;; the agent's own defs, notes, plan items — same shape of ownership
-#:seon.agent.def  {:id :string-identity :ns :seon.db/ref :name :symbol :value-edn :string :blob :seon.blob/digest :atom? :boolean}
-#:seon.agent.note {:id :string-identity :content :string :about :seon.db/ref}
-#:seon.agent.plan-item {:id :string-identity :title :string :parent :seon.db/ref :needs [:set :seon.db/ref] :subjects [:vector {:seon.db/component true} :seon.db/ref] :completed-at :inst}
-
-;; SYSTEM facts point AT the agent; the agent never writes them
-#:seon.run   {:id … :agent :seon.db/ref :trigger :seon.db/ref :opened-at :inst :closed-at :inst :process …}
-#:seon.error {:id … :agent :seon.db/ref :run :seon.db/ref :kind :keyword :message :string :at :inst}
-
-;; the cluster is a container, the program index is shared and referenced
-#:seon.cluster {:name … :agents [:set :seon.db/ref]}
+```
+                         ┌──────────────────────────┐
+   program index ◀──ref──│          AGENT           │──ref──▶ forked-from agent
+ (ns · fn · arity ·      │  id · namespace · process│
+  schema rows, shared)   └────────────┬─────────────┘
+                     owns (component collections)
+          ┌──────────────┬────────────┴───────────────┐
+          ▼              ▼                            ▼
+      INBOX           EVALS                          DATA
+   messages from    the transcript: every form     whatever the agent stores —
+   agents, users,   it ran + result + the defs     its own declared families
+   AND the system   it produced + what it read     (notes, plans, a user's calendar…)
 ```
 
-What the agent's record IS, therefore: `(seon.db/pull '[* {:seon.agent/inbox [*]}
-{:seon.agent/evals [*]} {:seon.agent/notes [*]} {:seon.agent/data [*]}
-{:seon.agent/namespace [:seon.ns/name {:seon.fn/_ns [:seon.fn/sym :seon.fn/doc]}]}]
-[:seon.agent/id "cal-steward"])` — one pull. The only reverse queries
-left are the system's facts about the agent (its runs, its errors, its
-scheduled tasks).
+```clojure
+;; 1. THE AGENT — the center. Several may steward one namespace; forks are agents.
+#:seon.agent
+{:id          [:string {:seon.db/identity true}]
+ :namespace   :seon.db/ref                  ; → the :seon.ns row it works (the code index is shared)
+ :forked-from :seon.db/ref                  ; → agent
+ :process     :string                       ; CUSTODY: which process is running it now; absent = idle
+                                            ;   (replaces the run entity's custody)
+ :inbox       [:set {:seon.db/component true} :seon.db/ref]   ; → message
+ :evals       [:set {:seon.db/component true} :seon.db/ref]   ; → eval
+ :data        [:set {:seon.db/component true} :seon.db/ref]}  ; → any entity the agent stores
 
-User data (a calendar) is the agent's data: the agent declares the
-family in its namespace (`:acme.calendar/event …`), stores rows, and
-attaches them under `:seon.agent/data` so they are part of its record —
-or references them from its own families; both are one transact.
+;; 2. A MESSAGE — the ONE arrival channel. From another agent, from a human, or from the SYSTEM
+;;    (an error about this agent, a scheduled task's result, a maintenance notice — all messages).
+;;    It lives in exactly one inbox; handling POPS it (retract; history keeps it).
+#:seon.agent.message
+{:id      [:string {:seon.db/identity true}]
+ :content :string
+ :at      :inst
+ :from    :seon.db/ref        ; → agent (absent = outside: a human or the system)
+ :about   :seon.db/ref        ; → anything
+ :reply-to :seon.db/ref}      ; → message
+;; replaces: seon.cluster.message, seon.error entities pointing at agents, maintenance requests,
+;;           the run's trigger — the trigger IS the popped message the turn began on
 
-Provenance rides the transaction, not the entity: `transact!` already
-stamps `:seon.db/receipt` (the eval) and `:seon.db/process` on the
-transaction entity (proven by `receipt_write_carrier_test`); the
-data-first writer boundary adds `:seon.db/user`. "Who wrote this" is a
-join, so no family carries an `agent` attribute for provenance — only
-ownership refs.
+;; 3. AN EVAL — the transcript row: what the agent ran, what came back, what it defined, what it read.
+;;    Turns are a grouping ATTRIBUTE, not an entity. Provenance is the eval: every fact written
+;;    by this form is stamped with it on the transaction.
+#:seon.agent.eval
+{:id        [:string {:seon.db/identity true}]
+ :turn      [:int {:min 0}]                 ; which turn (replaces the run entity)
+ :ordinal   [:int {:min 0}]                 ; position in the turn
+ :trigger   :seon.db/ref                    ; → the message this turn began on (first eval of a turn)
+ :source    :string                         ; the form as parsed
+ :at        :inst
+ :result    :string                         ; EDN, or…
+ :result-blob :seon.blob/digest             ; …the blob when large
+ :error     :map                            ; the flat error value, if the form failed (no error entity)
+ :defines   [:set {:seon.db/component true} :seon.db/ref]   ; → def: name + value the form defined
+ :reads     [:vector {:seon.db/component true} :seon.db/ref] ; the read-evidence: attributes + revisions (the watch's interest)
+ :prompt    :seon.blob/digest               ; if this eval was a model call: the exact bytes sent (replaces captures)
+ :rendered-by :symbol}                      ; only when the floor rendered the result
+#:seon.agent.def {:name :symbol :value :string :blob :seon.blob/digest :atom? :boolean}
+;; the agent's live defs = for each name, the newest eval that defines it — a query, no def family
+
+;; 4. SCHEMAS — facts the agent (or boot) asserts; the Malli form IS the database declaration.
+#:seon.schema {:key :qualified-keyword-identity :form :string}
+
+;; 5. THE PROGRAM INDEX — shared, referenced: :seon.ns (name, requires) · :seon.fn (sym, doc, arities)
+;;    · :seon.fn.arity (inputs, outputs — render and processing functions are FOUND here by contract)
+
+;; a cluster is a set of agents on one database branch — a container, nothing more
+#:seon.cluster {:name :string-identity :agents [:set :seon.db/ref]}
+```
+
+**What this rearranges away** (each was a family at HEAD): runs (→
+`:turn`/`:trigger` on evals + `:process` on the agent), receipts and run
+forms (→ one eval), defs (→ `:defines` on the eval that made them), error
+entities and maintenance requests (→ system messages in the inbox), prompt
+captures (→ `:prompt` on the eval that called the model), `my.note` and
+`my.plan` as core families (→ agent-declared data families shipped as
+examples), the cluster-level message family (→ the inbox). Twelve families
+become five plus whatever the agent declares.
+
+**What the agent's record IS:** one pull —
+`(seon.db/pull '[* {:seon.agent/inbox [*]} {:seon.agent/evals [*]} {:seon.agent/data [*]}
+{:seon.agent/namespace [:seon.ns/name {:seon.fn/_ns [:seon.fn/sym :seon.fn/doc]}]}] [:seon.agent/id "cal-steward"])`.
+Nothing points at the agent from outside except other agents' `:from`
+refs and the cluster's `:agents` set.
+
+**User data** (a calendar) is agent data: the agent declares
+`:acme.calendar/event` in its namespace, transacts rows, and attaches
+them under `:seon.agent/data`. Their summary and per-entity faces are
+render functions in that namespace; their processing functions are found
+by contract.
+
+**Provenance** is the transaction stamp: `:seon.db/eval` (which form
+wrote this) and `:seon.db/process`. A human's writes arrive as messages
+or as evals of the UI's agent, so there is no separate user stamp to
+invent.
 
 ## 3. How the context is generated from that model
 
-1. **The record is one pull** (§2). The walk adds one reverse query per
-   system family pointing at the agent (runs, errors, schedule) —
-   collection-first, counts before rows.
+1. **The record is one pull** (§2). Nothing else points at the agent, so
+   there is no second query; collections render collection-first (counts
+   and the newest before rows).
 2. **`(help)` renders the record**: for every owned collection, the
    family's collection render function summarizes it (count, span,
    newest, its own notion of what matters) and names its per-entity face;
@@ -124,10 +160,10 @@ ownership refs.
 4. **Entries** are `ns=> form`, the value rendered by the most specific
    render function (the query of §4.3), then `;; result/<id>` and, only
    when the floor printed it, `rendered-by <fn>`.
-5. **The trigger last** (the newest message / the run's trigger).
-6. **The watch**: each generated query is an eval with read-evidence;
-   Datahike `listen!` through `wake/route!` wakes the generator when a
-   commit touches those attributes; the woken pass settles ONE diff form
+5. **The trigger last** — the message this turn began on (popped from the inbox when the turn ends).
+6. **The watch**: each generated query is an eval with `:reads`;
+   Datahike `listen!` (the one system listener) wakes the agent when a
+   commit touches those attributes or adds to its inbox; the woken pass settles ONE diff form
    per stale query, rendered by the same function. Every turn is a full
    regeneration; the diff eval is a fact and reappears.
 7. **The page** is the same walk through `/html`.
@@ -173,7 +209,16 @@ ownership refs.
 7. **Component cascade**: retracting an agent retracts its record. Right
    by design; the fork semantics (`forked-from` with copied defs) are
    unspecified — does a fork copy evals or reference them?
-8. **The retype is large**: ~18 schema files, the run loop, wake,
+8. **Turns without a run entity**: custody on the agent and `:turn` on
+   evals must still give the crash model what it needs (a dead process's
+   turn is recoverable from evals whose `:turn` has no closing eval) —
+   this is a claim, not yet a proof.
+9. **The inbox as the one arrival channel** means system errors are
+   messages: the fault committer writes a message, not an error entity;
+   error ANALYTICS ("which function errs most") become queries over
+   messages `:about` a function plus the eval's `:error` map — plausible,
+   unmeasured.
+10. **The retype is large**: ~18 schema files, the run loop, wake,
    message delivery, the transcript renderers, plus every test fixture.
    Reset, never migrate. It cannot be done in pieces that leave two
    mechanisms alive.
@@ -193,7 +238,9 @@ ownership refs.
    as the general rung.
 6. Reported "no tx-meta on this cluster" before checking whether any
    agent had written data there (none had; the stamp is test-proven).
-7. Produced too many documents. This one replaces the reading order for
+7. Described the present in a document meant to describe the target
+   (the first version of this §2); rewritten the same night.
+8. Produced too many documents. This one replaces the reading order for
    the design question; the others are evidence.
 
 ## 7. What to KEEP, CHANGE, DELETE (pointer, not a second register)
