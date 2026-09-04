@@ -205,6 +205,20 @@ orchestrator's commit `d5889c194` → `f8bac9cd4`, content intact). No
 lanes running. Platform fixes continue only on code that stays (§4 of the
 one-platform doc names what does not).
 
+## 2026-09-04 — ruling 61, the visual
+
+Owner: pivot away from custom reader functions toward generated,
+demonstrated queries (intent comment + real form); the WATCH is the delta
+driver. Verified at HEAD: Datahike `listen!` wrapped once by
+`seon.cluster.wake/route!` (payload-free, never throws/parks; ruling 41
+keeps listeners system-side) and per-query interest already derived from
+read-evidence attributes (`:seon.render.web/interest`). The reusable
+design language — GRAPH (live edge counts) → WALK (generated forms with
+derived intent comments) → TRANSCRIPT (rendered, `result/<id>`), the
+watch as a loop — is
+[repl-first-visual-2026-09-04.md](repl-first-visual-2026-09-04.md);
+behavior B14 added. Still NO CODING toward the design (ruling 60).
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
