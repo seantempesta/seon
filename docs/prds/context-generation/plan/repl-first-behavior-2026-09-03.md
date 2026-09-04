@@ -40,52 +40,40 @@ deleted (59a).
 
 ---
 
-## B1. Arrival — `(help)` bootstraps the screen (ruled 58a)
+## B1. Arrival — `(help)` summarizes the record and names what can process it (ruled 58a, 66)
 
 **Statement.** A fresh agent's context opens with `(help)`: not authored
-text but the GENERATED explanation of every core function the agent is
-about to see used — the root commands (`doc`, `dir`, `seon.db/pull`,
-`seon.db/q`, `my.run/complete`, …) and the render functions the walk
-selected — derived by indexing every symbol, var, and keyword the
-context walk and its renders produce, sorting them, and emitting the
-explanation in dependency order (names before use). Then the walk's
-entries follow (§G): who am I, what points at me, the trigger last.
-Different agents have different neighbourhoods, therefore different
-helps — by derivation, never by configuration. The intro instruction
-(46) survives only for what no `doc` can say: that the reply is forms
-evaluated in this namespace and how a run ends.
+text but the RENDERED SUMMARY OF ITS RECORD — every family the record
+owns, each summarized by that family's collection render function
+(count, span, newest, the family's own notion of "what matters"), with
+its per-entity face named so the agent knows how one row will read — and
+its connections (the namespace it works, the open run, the newest
+message). Then the FUNCTIONS THAT CAN PROCESS that data, found by
+contract (an arity whose input refs include the family), and the root
+commands the session's forms use. Then the walk's entries (§G), the
+trigger last. Different records, different helps — by derivation.
 
-**Transcript (root, a fresh cluster; `[P]`):**
+**Transcript (a calendar steward, from the atlas session):**
 
 ```clojure
-my.agents.root=> (help)
-;; Everything below is a REPL session typed on your behalf. Re-run any form.
-;; Root commands used in this session (dependency order):
-seon.db/q      ([query & args]) …one line…       → :seon.schema/value | :seon.error/value
-seon.db/pull   ([selector eid] …)                → the pulled entity | :seon.error/value
-dir            (dir ns)   the public names of a namespace
-doc            (doc x)    explain a function, namespace, schema, test, value, or a list of them
-my.message/read (read id)                       → :seon.cluster.message/message
-my.run/complete (complete reply)                → ends this run
-;; Renders used below: seon.cluster.message/render-ai (messages)
-…
-my.agents.root=> (doc *ns*)                    ; who am I
-…
-my.agents.root=> (seon.db/q '[…messages to root…])
-…
-my.agents.root=> (my.message/read "bootstrap-task:root")   ; the trigger, last
+my.agents.cal-steward=> (help)
+;; Your record — [:seon.agent/id "cal-steward"] on namespace acme.calendar
+;; 128 events (:acme.calendar/event) across 3 calendars, 2026-06-01 → 2026-12-20; next: 2026-09-05 09:00 standup
+;;   ↳ rendered by acme.calendar/events-summary — per event: acme.calendar/event-ai
+;; 2 messages — newest: 2026-09-04 17:40 from outside "what does my week look like?"
+;; 1 open run — trigger: that message
+;; Functions that take :acme.calendar/event data (by contract):
+;;   acme.calendar/week ([calendar start])  acme.calendar/free-slots ([events start end])  acme.calendar/conflicts ([events])
+;; Root commands: seon.db/q seon.db/pull seon.db/transact! seon.db/diff doc dir my.run/complete
 ```
 
-**Teaches:** every name before its use; that help is itself a form; that
-the session is re-runnable.
+**Teaches:** what data exists, how it reads at both scales, what can act
+on it, and the four idioms — before any of them is used.
 
-❓ B1.4 `(help)` today calls `seon.bootstrap/situation` (authored
-situation prose, census 1.2). Under 58a it is REPLACED by the generated
-explanation — confirm deletion of the situation face in the same wave.
-❓ B1.5 One line per root command in help (name, arglists, first
-docstring line, output) vs the full `(doc …)` for each? (Recommendation:
-one line each in help; full doc appears only where a later entry demands
-more — an error, or a name used with the wrong arity.)
+❓ B1.6 The summary line per family is the family's collection render
+function's job (recommended: the summary IS a render function, so an
+agent improves its own help by writing a better summary function) vs a
+generic count/span floor for families without one.
 
 ---
 
@@ -808,7 +796,7 @@ or a `;;` comment, except the intro.
 
 ## Open questions, collected
 
-B1.4 B1.5 · B2.1 · B3.3 · B4.1 B4.2 · B5.1 B5.2 B5.3 · B6.1
+B1.4 B1.5 B1.6 · B2.1 · B3.3 · B4.1 B4.2 · B5.1 B5.2 B5.3 · B6.1
 B6.2 B6.3 · B7.1 B7.2 · B8.3 · B9.1 · B10.1 · B11.1 · B10.2 · G.1 G.3 B13.1 (G.2/G.4/G.5 answered by ruling 59b: floor-only provenance on the result-handle line). Each carries a
 recommendation; a settled behavior loses its ❓ in this file in the same
 turn it is ruled.

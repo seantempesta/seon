@@ -134,7 +134,7 @@
       </div>
       <div class="player" id="player">
         <div class="player-head">
-          <span class="eyebrow">Step through the session, starting at (help) · the graph becomes the dependency graph: what each form references, and why it was known</span>
+          <span class="eyebrow">Step through the session, starting at (help) · a calendar steward · the graph becomes the dependency graph: what each form references, and why it was known</span>
           <div class="player-controls">
             <button id="stepPrev" aria-label="Previous step">◀</button>
             <span id="stepPos" class="counts mono">0 / 0</span>
@@ -351,82 +351,88 @@ const MODEL = {
       out: "+ 2026-09-03T18:40:11Z  planner  Can you review largest before I depend on it?\n;; result/f6  rendered-by my.agents.root/inbox-view",
       lens: "the SAME function that printed the inbox prints the delta", teach: "planner is a new name → (doc my.agents.planner) before it" }
   ],
-  // THE SESSION — literally what the agent sees and runs, in order, starting with (help).
-  // Each step lists what it REFERENCES (entities, attributes, values, names) and, for every
-  // reference, WHY IT WAS KNOWN: the fact or the earlier step that made it available
-  // (working backwards = explainability). kinds: fn | attr | entity | value | schema | step
+  // THE SESSION — a data-first story (owner, 2026-09-04): an agent stewarding a user's calendar.
+  // (help) SUMMARIZES THE DATA on the agent's record through the families' render functions
+  // (whole-collection summary + per-entity face, /ai and /html) and names the functions that can
+  // PROCESS that data (found by contract query: input-refs ⊇ the family). Every step lists what it
+  // references and why it was known. kinds: fn | attr | entity | value | schema
   session: [
-    { id: "s1", title: "(help) — the generated bootstrap (ruling 58a)",
+    { id: "s1", title: "(help) — what is on my record, rendered, and what can process it",
       form: "(help)",
-      out: ";; Root commands used in this session, dependency order:\nseon.db/q     ([query & args])   Datalog over the current database value\nseon.db/pull  ([selector eid])   pull one entity; refs carry their identity attribute\nseon.db/transact! ([tx-data])    assert or retract facts\nseon.db/diff  ([basis read])     what changed since a basis (+ added − removed)\ndoc dir                          explain / list — anything the program graph knows\nmy.run/complete ([reply])        ends this run\n;; Your neighbourhood: 4 required namespaces, 3 messages, 1 open run, 4 errors, 50 maintenance requests",
+      out: ";; Your record — [:seon.agent/id \"cal-steward\"] on namespace acme.calendar\n;; 128 events (:acme.calendar/event) across 3 calendars, 2026-06-01 → 2026-12-20; next: 2026-09-05 09:00 standup (work)\n;;   ↳ rendered by acme.calendar/events-summary — per event: acme.calendar/event-ai\n;; 2 messages (:seon.cluster.message) — newest: 2026-09-04 17:40 from outside \"what does my week look like?\"\n;; 1 open run — trigger: that message\n;; Functions that take :acme.calendar/event data (by contract):\n;;   acme.calendar/week        ([calendar start])   → the events of one week, rendered\n;;   acme.calendar/free-slots  ([events start end]) → open intervals\n;;   acme.calendar/conflicts   ([events])           → overlapping pairs\n;; Root commands: seon.db/q seon.db/pull seon.db/transact! seon.db/diff doc dir my.run/complete",
       refs: [
-        { id: "fn:seon.db/q", kind: "fn", label: "seon.db/q", because: ["fact:ctx-bindings"], why: "every name the SCI ctx can resolve has a program row (ruling 47); help enumerates the ones the walk's forms use" },
-        { id: "fn:seon.db/pull", kind: "fn", label: "seon.db/pull", because: ["fact:ctx-bindings"], why: "same" },
-        { id: "fn:seon.db/transact!", kind: "fn", label: "seon.db/transact!", because: ["fact:ctx-bindings"], why: "same" },
-        { id: "fn:seon.db/diff", kind: "fn", label: "seon.db/diff", because: ["fact:ctx-bindings"], why: "same" },
-        { id: "fn:doc", kind: "fn", label: "doc / dir", because: ["fact:ctx-bindings"], why: "injected REPL bindings — rows too" },
-        { id: "fact:ctx-bindings", kind: "schema", label: "program rows of every\nctx-resolvable name", because: ["fact:index"], why: "seon.fn/index! + the injected bindings (ruling 47)" },
-        { id: "fact:index", kind: "schema", label: ":current-src program index\n(forked into this cluster)", because: [], why: "bin/seon init → publish! → fork (Atlas §Where code is indexed)" },
-        { id: "fact:ref-attrs", kind: "schema", label: "installed schema:\nref attributes around the agent", because: ["fact:index"], why: "walk/root-selector enumerates every :db.type/ref attribute forward and reverse — THIS is how we know what data is there before reading any of it" },
-        { id: "ent:agent", kind: "entity", label: "[:seon.agent/id \"root\"]", because: ["fact:run"], why: "the run being generated for carries the agent" },
-        { id: "fact:run", kind: "schema", label: "the open run\n(custody fact)", because: [], why: "the run loop hands the generator its run" }
+        { id: "ent:agent", kind: "entity", label: "[:seon.agent/id \"cal-steward\"]", because: ["fact:run"], why: "the open run names the agent; the record is one pull from here" },
+        { id: "fact:run", kind: "schema", label: "the open run (custody fact)", because: [], why: "axiom: the run loop hands the generator its run" },
+        { id: "attr:seon.agent/data", kind: "attr", label: ":seon.agent/data\n(component collections the record owns)", because: ["fact:ref-attrs", "ent:agent"], why: "the installed schema's component ref attributes on the agent entity — how we know what the record HOLDS before reading it" },
+        { id: "fact:ref-attrs", kind: "schema", label: "installed schema: ref + component\nattributes around the agent", because: ["fact:index"], why: "walk/root-selector enumerates them; every family the record owns is found here" },
+        { id: "fact:index", kind: "schema", label: ":current-src program index\n(forked into this cluster)", because: [], why: "axiom: bin/seon init → publish! → fork" },
+        { id: "schema:event", kind: "schema", label: ":acme.calendar/event\n(family: identity event-id; start end title calendar)", because: ["attr:seon.agent/data"], why: "the family of the entities under the record's data — derived from their identity attribute" },
+        { id: "val:events-summary", kind: "value", label: "128 events · 3 calendars\n2026-06-01 → 2026-12-20", because: ["schema:event", "fn:events-summary"], why: "the collection's render function computed it (count, min/max start, next)" },
+        { id: "fn:events-summary", kind: "fn", label: "acme.calendar/events-summary\n(render fn: [:sequential event] → /ai, /html twin)", because: ["schema:event", "fact:index"], why: "selected by the query: input-refs ⊇ {event collection}, output-refs = :seon.render/ai; the general rung on the family" },
+        { id: "fn:event-ai", kind: "fn", label: "acme.calendar/event-ai\n(render fn per event, + event-html)", because: ["schema:event", "fact:index"], why: "same query, single-of family" },
+        { id: "schema:message", kind: "schema", label: ":seon.cluster.message\n(2 in the inbox)", because: ["attr:seon.agent/data"], why: "another owned collection" },
+        { id: "val:trigger", kind: "value", label: "\"what does my week look like?\"", because: ["schema:message", "fact:run"], why: "the newest message; the run's trigger — the goal (52b)" },
+        { id: "fn:week", kind: "fn", label: "acme.calendar/week\n([calendar start] → events, rendered)", because: ["schema:event", "fact:index"], why: "PROCESSING fn found by contract: an arity whose input-refs include the event family — help lists these so the agent knows what can act on its data" },
+        { id: "fn:free-slots", kind: "fn", label: "acme.calendar/free-slots", because: ["schema:event", "fact:index"], why: "same query" },
+        { id: "fn:conflicts", kind: "fn", label: "acme.calendar/conflicts", because: ["schema:event", "fact:index"], why: "same query" },
+        { id: "fn:root-commands", kind: "fn", label: "seon.db/q pull transact! diff · doc dir", because: ["fact:ctx-bindings"], why: "every ctx-resolvable name has a row (47); these are the ones the generated forms use" },
+        { id: "fact:ctx-bindings", kind: "schema", label: "program rows of every\nctx-resolvable name", because: ["fact:index"], why: "ruling 47" }
       ] },
-    { id: "s2", title: "(dir seon.db) — teaching demanded by the next pull",
-      form: "(dir seon.db)", out: "as-of basis-t … pull pull-many q … since transact!\n;; result/a1",
-      refs: [ { id: "ent:ns-seon.db", kind: "entity", label: "[:seon.ns/name seon.db]", because: ["fn:seon.db/pull", "fact:index"], why: "help named seon.db/pull; its namespace row exists in the index" } ] },
-    { id: "s3", title: "(doc seon.db/pull)",
-      form: "(doc seon.db/pull)", out: "seon.db/pull  ([selector eid] …)  arity 3: database, selector, entity-id → the pulled entity | error\n;; result/a2",
-      refs: [ { id: "attr:seon.fn/spec", kind: "attr", label: ":seon.fn/spec\n(the contract fact)", because: ["fn:seon.db/pull"], why: "doc reads the fn row's arities and spec; the same fact instrumentation wraps" } ] },
-    { id: "s4", title: "who am I — the first data pull",
-      form: "(seon.db/pull '[:seon.ns/name {:seon.ns/requires [:seon.ns/name]} {:seon.ns/refers [:seon.ns.refer/local]}]\n              [:seon.ns/name 'my.agents.root])",
-      out: "namespace my.agents.root\n  requires: my.message my.run seon.bootstrap seon.db\n  refers:   help dir doc\n;; result/a3",
+    { id: "s2", title: "(doc :acme.calendar/event) — the family, its faces, its readers and writers",
+      form: "(doc :acme.calendar/event)",
+      out: ":acme.calendar/event  [:map [:acme.calendar/event-id (identity)] [:acme.calendar/title :string] [:acme.calendar/start :inst] [:acme.calendar/end :inst] [:acme.calendar/calendar → calendar] [:acme.calendar/attendees [:set → agent]]]\n  renders:   acme.calendar/event-ai · event-html (single) · events-summary · events-html (collection)\n  processed by: acme.calendar/week · free-slots · conflicts\n  written by: acme.calendar/sync (system) · you (transact!)\n  example:   {:acme.calendar/event-id \"evt-2026-09-05-standup\" :title \"standup\" :start #inst \"2026-09-05T09:00Z\" …}\n;; result/a1",
       refs: [
-        { id: "attr:seon.agent/namespace", kind: "attr", label: ":seon.agent/namespace", because: ["fact:ref-attrs", "ent:agent"], why: "a forward ref attribute on the agent entity → the pull follows it" },
-        { id: "ent:ns-root", kind: "entity", label: "[:seon.ns/name my.agents.root]", because: ["attr:seon.agent/namespace"], why: "the value of that ref" },
-        { id: "attr:seon.ns/requires", kind: "attr", label: ":seon.ns/requires", because: ["fact:ref-attrs", "ent:ns-root"], why: "a forward ref attribute on the namespace row → nested selector" },
-        { id: "val:requires", kind: "value", label: "my.message my.run\nseon.bootstrap seon.db", because: ["attr:seon.ns/requires"], why: "the pulled values — the next dirs are demanded by THESE" }
+        { id: "attr:event-attrs", kind: "attr", label: "event-id · title · start · end\n· calendar · attendees", because: ["schema:event"], why: "the schema row's form — the Malli map IS the database declaration (identity, refs, cardinality derive from it)" },
+        { id: "val:example-event", kind: "value", label: "\"evt-2026-09-05-standup\"", because: ["schema:event"], why: "one real row pulled as the example" },
+        { id: "fn:sync", kind: "fn", label: "acme.calendar/sync (system writer)", because: ["schema:event", "fact:index"], why: "found by contract: output-refs include the family — the writers" }
       ] },
-    { id: "s5", title: "(dir my.message) — demanded by the requires value",
-      form: "(dir my.message)", out: "decline inbox read send\n;; result/a4",
-      refs: [ { id: "ent:ns-my.message", kind: "entity", label: "[:seon.ns/name my.message]", because: ["val:requires"], why: "named by the previous result; its row is in the index" } ] },
-    { id: "s6", title: "what points at me — messages",
-      form: "(seon.db/q '[:find [(pull ?m [:seon.cluster.message/id :seon.cluster.message/at :seon.cluster.message/content]) ...]\n             :where [?m :seon.cluster.message/to [:seon.cluster.agent/id \"root\"]]])",
-      out: "2026-09-02T19:54:58Z  outside  Define a durable contracted function named largest …\n2026-09-03T02:15:00Z  outside  seon.fs/delete-recursively! violated its contract …\n;; result/b1  rendered-by seon.cluster.message/render-ai",
+    { id: "s3", title: "the whole collection, rendered by its summary function",
+      form: "(seon.db/q '[:find [(pull ?e [*]) ...] :where [?e :acme.calendar/event-id]])",
+      out: "3 calendars: work 71 · family 39 · travel 18   (128 events, 2026-06-01 → 2026-12-20)\nthis week (2026-09-01 → 09-07): 14 events, 21.5 h; 2 conflicts (Tue 14:00, Thu 10:00)\nnext: 2026-09-05 09:00 standup (work, 30 min)\n;; result/a2  rendered-by acme.calendar/events-summary",
       refs: [
-        { id: "attr:seon.cluster.message/to", kind: "attr", label: ":seon.cluster.message/to\n(reverse: 3 datoms point at root)", because: ["fact:ref-attrs", "ent:agent"], why: "a ref attribute whose datoms have the agent's eid as VALUE → a reverse edge → one q for the collection" },
-        { id: "schema:message", kind: "schema", label: ":seon.cluster.message/message\n(family; its general render fn)", because: ["attr:seon.cluster.message/to"], why: "the entity family that references this attribute — the pull selector's attributes and the render function come from it" },
-        { id: "val:msg-boot", kind: "value", label: "\"bootstrap-task:root\"", because: ["attr:seon.cluster.message/to"], why: "a pulled identity value — a lookup ref the agent can dig into" },
-        { id: "val:msg-maint", kind: "value", label: "\"maintenance-error/…\"", because: ["attr:seon.cluster.message/to"], why: "same" }
+        { id: "attr:acme.calendar/event-id", kind: "attr", label: ":acme.calendar/event-id", because: ["attr:event-attrs"], why: "the identity attribute → the collection query keys on it" },
+        { id: "val:week-summary", kind: "value", label: "this week: 14 events, 21.5 h, 2 conflicts", because: ["fn:events-summary", "val:events-summary"], why: "the summary function derives it from the rows — a calculation inside a render function, no separate function needed" }
       ] },
-    { id: "s7", title: "the trigger, last (B1) — dig into one value",
-      form: "(seon.db/pull '[*] [:seon.cluster.message/id \"bootstrap-task:root\"])",
-      out: "{:seon.cluster.message/content \"Define a durable contracted function named largest …\" …}\n;; result/b2",
-      refs: [ { id: "val:task", kind: "value", label: "content: \"Define a durable\ncontracted function named largest…\"", because: ["val:msg-boot", "fact:run"], why: "the run's trigger IS this message; its content is the goal (52b: the goal is the seed)" } ] },
-    { id: "s8", title: "the agent acts — a contracted defn (settles as a program row)",
-      form: "(defn largest {:malli/schema [:=> [:cat [:sequential :map]] :map]} [rows] (or (last (sort-by :example/amount rows)) {}))",
-      out: "#'my.agents.root/largest\n;; result/c1",
-      refs: [ { id: "fn:largest", kind: "fn", label: "my.agents.root/largest\n(NEW row, settled)", because: ["val:task", "fn:doc"], why: "demanded by the task; (doc largest) answers from now on — the agent's own use satisfies future demands (52b)" } ] },
-    { id: "s9", title: "the agent writes data — a note about it",
-      form: "(seon.db/transact! [{:my.note/id \"largest-empty\" :my.note/content \"{} for empty input\" :my.note/about [:seon.fn/sym \"my.agents.root/largest\"]}])",
-      out: "{:tx-data [4 datoms]}\n;; result/c2",
-      refs: [ { id: "ent:note", kind: "entity", label: "[:my.note/id \"largest-empty\"]\n(NEW, about → largest)", because: ["fn:seon.db/transact!", "fn:largest"], why: "help taught transact!; the note points at the row the agent just made" } ] },
-    { id: "s10", title: "the agent sends — a message is a fact (63a)",
-      form: "(seon.db/transact! [{:seon.cluster.message/id \"root-1\" :seon.cluster.message/to [:seon.agent/id \"planner\"] :seon.cluster.message/content \"largest is defined and noted\"}])",
-      out: "{:tx-data [5 datoms]}\n;; result/c3",
-      refs: [ { id: "ent:msg-root-1", kind: "entity", label: "[:seon.cluster.message/id \"root-1\"]\n(NEW; lands in planner's record)", because: ["schema:message", "fn:seon.db/transact!"], why: "the family's attributes were learned from the inbox pull; the same shape writes" } ] },
-    { id: "s11", title: "pop the trigger (65) — done with it",
-      form: "(seon.db/transact! [[:db/retract [:seon.agent/id \"root\"] :seon.agent/inbox [:seon.cluster.message/id \"bootstrap-task:root\"]]])",
-      out: "{:tx-data [1 retraction]}\n;; result/c4",
-      refs: [ { id: "val:msg-boot", kind: "value", retract: true, because: [], why: "removed from the working set; (seon.db/history) still has it" } ] },
-    { id: "s12", title: "between turns — the watch fires (B14)",
-      form: ";; system: planner's turn wrote into root's inbox; wake/route! offered a wake; eval b1's read-evidence is stale",
+    { id: "s4", title: "one entity, rendered by its own face — the same face the page uses",
+      form: "(seon.db/pull '[*] [:acme.calendar/event-id \"evt-2026-09-05-standup\"])",
+      out: "Fri 2026-09-05 09:00–09:30  standup  (work)  attendees: 4  location: room 2\n;; result/a3  rendered-by acme.calendar/event-ai   — the /html twin event-html is the card on your page",
+      refs: [ { id: "ent:standup", kind: "entity", label: "[:acme.calendar/event-id\n\"evt-2026-09-05-standup\"]", because: ["val:example-event", "fn:event-ai"], why: "the identity value from the doc/summary; rendered by the single-of face; html twin renders the same row on the page" } ] },
+    { id: "s5", title: "the trigger, last — the user's question",
+      form: "(seon.db/pull '[*] [:seon.cluster.message/id \"user-2026-09-04-1740\"])",
+      out: "{:seon.cluster.message/content \"what does my week look like?\" :seon.cluster.message/at #inst \"2026-09-04T17:40Z\"}\n;; result/a4",
+      refs: [ { id: "ent:trigger", kind: "entity", label: "[:seon.cluster.message/id\n\"user-2026-09-04-1740\"]", because: ["val:trigger"], why: "the identity of the newest message named in help" } ] },
+    { id: "s6", title: "the agent answers with a PROCESSING function help named",
+      form: "(acme.calendar/week [:acme.calendar/calendar-id \"work\"] #inst \"2026-09-01\")",
+      out: "Mon 09-01  09:00 standup · 13:00 1:1 with Ana\nTue 09-02  09:00 standup · 14:00 design review ⚠ overlaps 14:30 vendor call\nWed 09-03  09:00 standup\nThu 09-04  09:00 standup · 10:00 budget ⚠ overlaps 10:30 hiring sync\nFri 09-05  09:00 standup · 15:00 retro\n;; result/b1  rendered-by acme.calendar/events-html? no — by acme.calendar/week's own /ai output (it IS a render fn: input events, output :seon.render/ai)",
+      refs: [ { id: "val:week-view", kind: "value", label: "the week, 14 events, 2 ⚠", because: ["fn:week", "val:events-summary"], why: "help named the function; its contract takes the family; it renders as it computes" } ] },
+    { id: "s7", title: "a calculation on the fly — no function",
+      form: "(->> result/b1 (filter #(clojure.string/includes? (:acme.calendar/title %) \"standup\")) count)",
+      out: "5\n;; result/b2",
+      refs: [ { id: "val:result-b1", kind: "value", label: "result/b1 (the week's rows)", because: ["val:week-view"], why: "the previous result is a real symbol (B13) — ordinary Clojure over it, nothing to define" } ] },
+    { id: "s8", title: "the agent writes data — with provenance",
+      form: "(seon.db/transact! [#:acme.calendar{:event-id \"evt-2026-09-05-focus\" :title \"focus block\" :start #inst \"2026-09-05T13:00Z\" :end #inst \"2026-09-05T15:00Z\" :calendar [:acme.calendar/calendar-id \"work\"]}])",
+      out: "{:tx-data [6 datoms] :tx-meta {:seon.db/process \"…\" :seon.db/eval [:seon.cluster.eval/id \"…b3\"]}}\n;; result/b3\n;; VERIFY: at HEAD only :seon.db/process is stamped on this cluster's transactions; the eval stamp (42c) exists as code but no datom proves it — issue filed",
+      refs: [
+        { id: "ent:focus", kind: "entity", label: "[:acme.calendar/event-id\n\"evt-2026-09-05-focus\"] (NEW)", because: ["attr:event-attrs", "fn:root-commands"], why: "the same map shape the doc showed; identity → upsert" },
+        { id: "fact:tx-meta", kind: "schema", label: "tx-meta: process + eval\n(who wrote this datom)", because: ["fact:run"], why: "provenance on the transaction entity — 'what function/agent made this datom' is a join (42c) — MUST be verified at HEAD" }
+      ] },
+    { id: "s9", title: "the page — the same functions, /html",
+      form: ";; not a form the agent types: the page is the walk rendered through :seon.render/html",
+      out: "/agent/cal-steward: the record summary card (events-html) · this week's event cards (event-html ×14) · the transcript · the open run\n;; every card is the /html twin of a face used above; no layout is authored",
+      refs: [ { id: "fn:events-html", kind: "fn", label: "acme.calendar/events-html\n· event-html (twins)", because: ["fn:events-summary", "fn:event-ai"], why: "same input contract, output :seon.render/html — found by the same query (57)" } ] },
+    { id: "s10", title: "reply",
+      form: "(my.run/complete \"Your work week: 14 events, 21.5 h, two overlaps (Tue 14:00, Thu 10:00). I added a 2 h focus block Friday 13:00.\")",
+      out: ";; run closed\n;; result/b4",
+      refs: [ { id: "fn:complete", kind: "fn", label: "my.run/complete", because: ["fn:root-commands"], why: "named in help; ends the run" } ] },
+    { id: "s11", title: "between turns — the calendar syncs; the watch fires",
+      form: ";; system: acme.calendar/sync wrote 3 events; eval a2's read-evidence (attributes: event-id, start, …) is stale",
       out: "(no agent form — the woken pass derives from facts)",
-      refs: [ { id: "val:msg-planner-1", kind: "value", label: "\"planner-1\" (NEW in inbox)", because: ["attr:seon.cluster.message/to"], why: "a commit touched an attribute in eval b1's read-evidence → that query is stale" },
-              { id: "fact:evidence-b1", kind: "schema", label: "eval b1 read-evidence\n(attributes + revisions)", because: ["attr:seon.cluster.message/to"], why: "settled with the eval at step 6 — the watch's interest is a fact, not a subscription" } ] },
-    { id: "s13", title: "turn 2 — the diff form (56b/61)",
-      form: "(seon.db/diff 536870930 '[:find [(pull ?m […]) ...] :where [?m :seon.cluster.message/to [:seon.cluster.agent/id \"root\"]]])",
-      out: "+ 2026-09-03T18:40:11Z  planner  Can you review largest before I depend on it?\n− bootstrap-task:root (popped)\n;; result/d1  rendered-by seon.cluster.message/render-ai",
-      refs: [ { id: "val:diff", kind: "value", label: "+ planner-1\n− bootstrap-task", because: ["fact:evidence-b1", "fn:seon.db/diff", "val:msg-planner-1"], why: "the same read at the recorded basis and now; rendered by the same function as step 6" } ] }
+      refs: [ { id: "fact:evidence-a2", kind: "schema", label: "eval a2 read-evidence\n(attributes + revisions)", because: ["attr:acme.calendar/event-id"], why: "settled with the eval at step 3; the watch's interest is a fact" },
+              { id: "val:new-events", kind: "value", label: "+3 events (sync)", because: ["fn:sync", "attr:acme.calendar/event-id"], why: "written by the system writer; a commit touched the attributes eval a2 depends on" } ] },
+    { id: "s12", title: "turn 2 — what changed, rendered by the same summary function",
+      form: "(seon.db/diff 536871200 '[:find [(pull ?e [*]) ...] :where [?e :acme.calendar/event-id]])",
+      out: "+ 2026-09-08 11:00 dentist (family, 1 h)\n+ 2026-09-09 16:00 flight SFO→BOS (travel)\n+ 2026-09-12 09:00 offsite (work, all day) ⚠ overlaps standup\n;; result/c1  rendered-by acme.calendar/events-summary (its diff arm: + − ~)",
+      refs: [ { id: "val:diff", kind: "value", label: "+3 events, 1 new conflict", because: ["fact:evidence-a2", "val:new-events", "fn:events-summary"], why: "the same read at the recorded basis and now; the family's render function renders the diff value" } ] }
   ],
   idioms: [
     { when: "I hold an entity (a lookup ref) and want its attributes and what it points at", idiom: "pull, nested selector", form: "(seon.db/pull '[:seon.ns/name {:seon.ns/requires [:seon.ns/name]} {:seon.ns/refers [:seon.ns.refer/local]}] [:seon.ns/name 'my.agents.root])", grammar: "map-spec entry {:attr [subselector]}; the identity attribute on every ref leaf" },

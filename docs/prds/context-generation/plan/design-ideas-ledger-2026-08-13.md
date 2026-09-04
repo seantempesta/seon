@@ -984,6 +984,23 @@ numerically and a bare cross-citation is a defect to fix on sight.
     [data-model census](../research/context-data-model-census-2026-09-04.md)
     prices the retype (option 1, ~18 schema files, reset never migrate).
 
+66. **`(help)` is the data summary; processing functions are found by
+    contract; render functions explain data at every scale** (owner,
+    2026-09-04): the story must be data-first and coherent — `(help)`
+    summarizes what is ON THE AGENT'S RECORD and its connections
+    (rendered through the families' render functions: a whole-collection
+    summary AND a per-entity face, both `/ai` and `/html` — a user's
+    calendar as a whole and each event), and names the FUNCTIONS THAT
+    CAN PROCESS that data (found by the contract query: an arity whose
+    input refs include the family). Provenance check ordered: confirm
+    agents' writes carry tx-meta. Verified 2026-09-04: `transact!` stamps
+    `:seon.db/receipt` (an installed ref attribute) from `*receipt*`
+    bound during an agent eval (`sci/eval.clj:2029`) plus
+    `:seon.db/process`; on `ctxprobe` only `:seon.db/process` appears on
+    any transaction because no agent has written data there — the stamp
+    is proven by test or it is not proven. The atlas session is rewritten
+    as this story (a calendar steward, 12 steps).
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
