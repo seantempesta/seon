@@ -137,8 +137,10 @@ same looked-up functions, with the ordering produced by live code.
    `[?x A E]` with counts (the ref set comes from the installed schema, as
    `walk/root-selector` derives it today; counts from datoms). A collection
    edge expands to a bounded, ordered page on click.
-2. **Entity schemas** a value satisfies: the registered attribute-bearing
-   maps whose required attributes are present — zero, one, or several.
+2. **Entity schemas** a value may belong to, in two grades shown
+   separately: CANDIDATE matches (the registered attribute-bearing maps
+   whose required attributes are present) and VALIDATED matches (the value
+   actually validates against the schema) — zero, one, or several of each.
 3. **Render candidates**, two ways on the same value: (a) today's real
    selection (`seon.render/producer`: explicit → the viewing namespace's
    publics by contract fit → the schema-declared face → the floor);
@@ -216,10 +218,10 @@ agent id production omits — absence green in the fixture).
 
 | wave | lands | accepted when |
 |---|---|---|
-| **1A · the observation contract** (pure, no UI) | `neighbourhood-page`: a total, bounded VALUE from an explicit database value, lookup ref, basis, stable order, page size, and continuation — subject-present evidence; every current datom with its transaction identity (cardinality-many: each assertion); direct, inbound, and cardinality-many refs counted independently by database-side aggregates (never materialize-then-take); one bounded page; typed refusals for missing, ambiguous (several identities / several entity schemas), and stale-basis subjects | proved against NON-EMPTY synthetic facts in the canonical fixture (≥1 direct, ≥1 inbound, ≥1 cardinality-many ref; a deliberately oversized value producing a real elision whose next page has no duplicates or omissions) and on one isolated live cluster against the fresh root agent; counts equal an independent Datalog count; latency recorded as p50/p95 for named entities at a named datom count, query only |
+| **1A · the observation contract** (pure, no UI) | `neighbourhood-page`: a total, bounded VALUE from an explicit database value, lookup ref, basis, stable order, page size, and continuation — subject-present evidence; every current datom with its transaction identity (cardinality-many: each assertion); direct, inbound, and cardinality-many refs counted independently by database-side aggregates (never materialize-then-take); one bounded page; typed refusals for missing and stale-basis subjects; several identities or several matching entity schemas are OBSERVED and shown as such (choosing one is a render decision, wave 2, and is refused there only when a render needs exactly one) | proved against NON-EMPTY synthetic facts in the canonical fixture (≥1 direct, ≥1 inbound, ≥1 cardinality-many ref; a deliberately oversized value producing a real elision whose next page has no duplicates or omissions) and on one isolated live cluster against the fresh root agent; counts equal an independent Datalog count; latency recorded as p50/p95 for named entities at a named datom count, query only |
 | **1B · the graph** | the debug page renders that value as the inspector table and the Cytoscape graph; Cytoscape delivered as a LOCALLY VENDORED asset served by the existing static route (no network dependency); an explicit graph lifecycle (destroy/recreate on morph); an ordinary commit refreshes the open feed | on the fresh root agent the graph shows the same counts as 1A's value; a `</script>`-bearing string value renders safely; ten SSE morphs leave one live graph instance; the atlas's hand-typed model is retired |
 | **2 · candidates and outputs** | a `candidate-explanation` value in `seon.render` (the ordered candidate set with each rejection's reason — today's selection and the proposed ranking, side by side; `producer`/`candidates` are `defn-` by convention, which here restricts nothing — they become the contracted public entry when the page needs them) and a read-only diagnostic render boundary that runs one candidate through the real kernel and fit profile WITHOUT transacting render-cost facts and REFUSING effectful candidates | fixtures independently establish, on named note and message identities with source transactions: one winner, one deterministic tie, the floor, a throwing producer (flat error shown), one external-sink exclusion; the expected symbols are asserted before their outputs; datom count unchanged after a diagnostic run |
-| **3 · the three projections** | one shared ENTRY value (intent, form, result, selected producer, tokens, prerequisite edges, basis) produced by the render owners; a named SCI-description owner in `seon.sci.eval` deriving requires, newest defs, readable handles, and wrappers WITHOUT mutating a ctx; the layout function; the page and the prompt derived from the same entries; the current prospective prompt beside them, both labelled with their basis | ≥3 named entries with a real prerequisite edge; editing the layout function and refreshing changes the order while the entry identities and content digests are unchanged; per-entry token contributions sum to the calibrated estimate of the assembled prompt including separators (the existing `history-contributions` equality); the two prompts show their bases |
+| **3 · the three projections** | the SHARED BOUNDARY between the three (tested, not assumed — a lane's reading rightly notes SCI bindings, prompt text, and hiccup may share facts and composition without an identical intermediate entry): the lab shows for each entry what the three consumers actually need in common; then one ENTRY value (intent, form, result, selected producer, tokens, prerequisite edges, basis) produced by the render owners; a named SCI-description owner in `seon.sci.eval` deriving requires, newest defs, readable handles, and wrappers WITHOUT mutating a ctx; the layout function; the page and the prompt derived from the same entries; the current prospective prompt beside them, both labelled with their basis | ≥3 named entries with a real prerequisite edge; editing the layout function and refreshing changes the order while the entry identities and content digests are unchanged; per-entry token contributions sum to the calibrated estimate of the assembled prompt including separators (the existing `history-contributions` equality); the two prompts show their bases |
 | **4 · branches and experiments** | the connection owner, the compatibility fence, same-origin fork/compare POSTs, "copy as decision"; one storage-shape experiment carried end to end from a separate worktree | baseline asserts the new attribute ABSENT; the experiment asserts exact subject, attribute, value, and commit ids on both sides and a non-empty difference; each render reports its branch and basis; the full cycle (publish → refork → start → browser shows the new commit and basis) is MEASURED end to end and recorded — at HEAD publication + start is 71.9 s (measured 2026-09-05), so the 15 s figure is a platform TARGET, not this wave's acceptance |
 
 Sequential lanes: the precondition fix; 1A; 1B; 2; 3; 4. Files: the
@@ -281,5 +283,18 @@ names.
 
 ## 11. Open
 
-The steward agent's id (any ordinary id; home `my.agents.<id>`, stewards
-`my.note`); when the precondition lane and 1A start — the owner's call.
+The first agent's id (its namespace is `my.note`; nothing else about it is
+special); when the precondition lane and 1A start — the owner's call.
+
+**Design question the lab must answer, not assume (raised by a lane's
+reading, 2026-09-05):** what does a `result/<id>` handle denote when the
+generated form wraps a query in a render function — the rendered TEXT (the
+form's actual return) or the DATA the query produced? The design doc's §3
+says "wrap the query in the render function, by name"; its §B13 says the
+handle is real data the agent can `get-in`. Both cannot hold for one form.
+The lab exposes the raw query value and the rendered output separately for
+the same entry so the owner can see both and choose: (a) the form is the
+query, the handle is data, and the printer applies the render function
+whose name appears on the handle line; or (b) the form is the wrapped call,
+the handle is text, and the data is one more handle. Recorded here as
+open; the design doc carries the same mark.

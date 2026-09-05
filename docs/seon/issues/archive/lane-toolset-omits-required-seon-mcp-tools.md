@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, mcp, wave/dev-mcp]
 ---
@@ -41,3 +41,15 @@ the Babashka boot. Lanes launched after this change should see
 `mcp__seon__runtime_status`, `eval_clj`, and `get_value`; the next lane
 summary that reports them available resolves this note, and one that still
 reports them missing reopens it with the Codex-side error.
+
+## Resolved — 2026-09-05
+
+A Codex lane launched after the config change reported live MCP
+connectivity from inside the lane: explicit `runtime_status` for
+`ctxprobe` returned observations and JVM-mode `eval_clj` of `(+ 1 2)`
+returned 3 in 2 ms (`docs/seon/issues/…prd-mixes-observation-with-unsettled-design.md`,
+"Live orientation evidence"). The declaration lives in
+`~/.codex/config.toml` `[mcp_servers.seon]` (a user-level file, not the
+repository) — a fresh machine needs the same four lines; recorded in
+`docs/seon/reference/driving-codex-agents.md` is the right home if one
+does not exist yet.

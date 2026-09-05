@@ -520,3 +520,14 @@ its home, where its defs live) and may STEWARD other namespaces
 which resolves the reviewer's one-owner objection without collisions: defs
 land in each agent's home, stewardship is a ref). §2.1 carries both
 attributes.
+
+**Open (2026-09-05, from a lane's reading of §3 against B13):** a form
+that wraps a query in a render function returns TEXT, so its `result/<id>`
+would denote text — but B13 promises the handle is DATA the agent can
+`get-in`. Two consistent options: (a) the generated form IS the query, the
+handle is its data, and the print floor applies the chosen render function
+whose name appears on the handle line (`;; result/b2 rendered-by
+inbox-view`); (b) the form is the wrapped call, the handle is text, and the
+data is a second handle. The lab shows both for the same entry; the owner
+chooses. Until then §3's "wrapped in the render function" and B13 are both
+marked provisional.
