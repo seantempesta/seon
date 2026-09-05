@@ -173,7 +173,9 @@ directory once, then publishes and forces the mutable head last. Implementing
 that causal barrier inside Seon would duplicate the storage authority, so it
 is not part of this repair.
 
-Integration note: `test/seon/cluster/store_test.clj:88` mirrors the former
+Integration note: `test/seon/cluster/store_test.clj:85` mirrors the former
 exact `{:diff-buf-size 256}` creation map. That test is outside this lane's
 owned paths and must accrete `:branching-factor 4096` before the full suite;
-the focused `seon.fn-test` regression above owns the repair in this slice.
+the focused `seon.fn-test` regression above owns the repair in this slice. A
+direct `bin/test seon.cluster.store-test` confirmed this one stale expectation:
+17 tests, 62 assertions, 1 reproducible failure and 0 errors.
