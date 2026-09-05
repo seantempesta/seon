@@ -299,12 +299,78 @@ the SSE path if browser automation drops the connection.
   history bypasses full provider prompt assembly. Keep captured/prospective
   prompt comparison visible but outside the data-selection-result assertion;
   provider parity belongs to milestone 4.
-- **The Datastar skill's target section is stale.** It says revisioned packages
-  and keyframes are unbuilt, while current source implements them at
-  `src/seon/render/web.clj:680-755,988-1072,1431-1573`. This task owns only this
-  research note, so the skill or issue record still needs its owning follow-up.
-- **Live verification was unavailable during this read-only inspection.** The
-  Seon MCP runtime tools were not exposed to this agent. `bin/seon status`
-  waited on a foreign `init --changed test/seon/cluster/turn_test.clj` lifecycle
-  lock held by pid 50300 and returned no status before its command bound. I did
-  not bypass the operator or touch that process.
+- **The Datastar skill was stale and was repaired with the implementation.**
+  `.agents/skills/datastar-web-ui/SKILL.md` now describes canonical debug as
+  read-only entity/render inspection and grounds it in the existing package,
+  retained-call, and SSE mechanisms.
+
+## Implementation evidence, 2026-09-05
+
+The implemented slice stayed inside the existing route, render-call, floor,
+retained-call, package and SSE owners. The canonical namespace debug GET does
+not create an agent or facts. Its request identifies viewer, arbitrary subject,
+output, explicit observation/pull bounds and opaque cursors. The primary stored
+value uses the existing floor with structural projection enabled; ordered
+selection evidence, actual output and bounded raw datoms remain separately
+inspectable. Prompt comparison is explicit rather than part of initial paint.
+
+A same-open-tab live proof observed a committed `:seon.ns/doc` marker appear at
+the new database basis and disappear after its restoring transaction, without a
+browser reload. The first attempt also exposed and fixed a real compatibility
+failure: a retained registration created before the cursor field existed passed
+nil to `seon.render.data/at` and stopped the render pass. The page now derives
+the canonical root cursor when the request omits one.
+
+Debug acquisition now occupies an ordinary retained-call entry with database
+read evidence, so an unchanged database value reuses it. Evaluation changes use
+a separate sliding-1 input on the same render proc. That input invokes the same
+render pass with retained-call invalidation, covering both the bounded debug
+observation and selected output; a database wake cannot replace this code-change
+signal. The durable regression interleaves a database wake after each of two
+evaluation markers and requires all three visible phases (initial plus both
+updates).
+
+The existing live database feed test passed independently during development.
+The exact unchanged-database acquisition regression, the final combined gate
+and a fresh-topology reset remain integration work because adding the required
+render proc input changes graph topology. Every render-step fixture now carries
+the separate channel. The focused evaluation-wake regression passed through
+`seon.test.runner/run-var!`: 80 assertions, zero failures and zero errors. It
+painted the initial phase plus two evaluation changes, placing an ordinary
+database wake behind each evaluation signal.
+
+### Integration checkpoint after the shared reset
+
+The shared operator and MCP health query both report no running cluster at
+this checkpoint. `bin/seon status` reports 0.71 GiB at the root and 619 GiB
+usable. The other session owns the shared reset; no fresh browser or topology
+proof is claimed. The required channel fixtures and focused interleaved
+evaluation/database-wake regression are complete.
+
+The prerequisite fault-storage gate is red: `bin/test seon.error-test
+seon.cluster.fault-storage-test` recorded 34 tests, 224 assertions, six failures
+and zero errors in `tmp/test-runs/run.7Lwok8`. Its file-backed trial stored 500
+faults with a maximum inline evidence length of 658, but grew from 56,381,169
+to 147,575,152 bytes. The 91,193,983-byte growth does not satisfy the storage
+issue's acceptance criterion. Investigation must distinguish retained data,
+index rewrite cost and reclaimable objects before changing that criterion.
+One test also incorrectly demanded an uncapped 3.6 MB payload from an
+admission-capped projection and printed that payload on failure; fixing that
+fixture does not resolve the measured storage growth.
+
+The ordered-form/evaluation audit is a separate prerequisite simplification:
+the current start records are written for an entire reply before execution,
+so their presence does not prove execution began. The audit is checking result
+settlement, interruption, curation and effect references before removing the
+duplicate entity. Its evidence lives in
+[the form/evaluation audit](form-evaluation-storage-audit-2026-09-05.md).
+
+The subsequent focused checks used the existing
+`seon.test.runner/run-var!` capture path: generated-system prefix settlement
+returned 81 passes, zero failures and zero errors; runtime evaluation markers
+interleaved with database wakes returned 80 passes, zero failures and zero
+errors. Every current render-step fixture now supplies its required evaluation
+channel. These are focused proofs, not a combined gate or a fresh running
+browser proof. Both checks also encountered a pre-body source-span indexing
+error on an earlier attempt; that evidence is recorded in the existing
+[shared-edit publication issue](../../../seon/issues/bin-test-shared-base-compiles-other-lanes-half-edits.md).

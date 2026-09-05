@@ -378,6 +378,10 @@ branch, branch head, transaction report.
 Use the actual operation or value when speaking and writing: SCI context,
 SCI evaluation, JVM REPL, agent turn, effect execution, Datahike branch,
 database value, and boot sequence. Do not use a metaphor as their common name.
+Use **evaluation** and **result** in prose, not "receipt". Existing identifiers
+containing that spelling remain literal code references until the form and
+evaluation storage refactor replaces them; their existence does not justify
+separate entities or duplicated attributes.
 In particular, the legacy MCP mode string `door` is an API spelling, not a
 concept: explain it as **SCI evaluation mode**. Preserve literal tool arguments,
 identifiers and historical quotations where accuracy requires them, but do not
