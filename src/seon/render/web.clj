@@ -904,6 +904,21 @@
                  ::pull-max-work
                  ::pull-max-results])])
 
+(defn- refresh-retained-read-evidence
+  [database retained]
+  (mapv (fn [previous current]
+          (assoc previous :datahike.read/revision
+                 (:datahike.read/revision current)))
+        retained
+        (db/read-evidence
+         (mapv (fn [evidence]
+                 {:seon.db/db database
+                  :seon.db/source-argument-position
+                  (:seon.db/source-argument-position evidence)
+                  :datahike.read/dependency-plan
+                  (:datahike.read/dependency-plan evidence)})
+               retained))))
+
 (defn- acquire-debug-data
   [database debug-request retained-calls]
   (let [call-id (debug-data-call-id debug-request)
@@ -971,7 +986,8 @@
                ::acquisition-ms
                (/ (double (- (System/nanoTime) started)) 1000000.0)})))
         entry (if reusable?
-                previous
+                (update previous :seon.render.call/read-evidence
+                        #(refresh-retained-read-evidence database %))
                 {:seon.render.call/static-evidence static-evidence
                  :seon.render.call/read-evidence
                  (db/read-evidence @captured

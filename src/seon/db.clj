@@ -227,11 +227,15 @@
 
 (defn- stable-read-result
   [result]
-  (walk/postwalk (fn [value]
-                   (if (map? value)
-                     (dissoc value :seon.db/db)
-                     value))
-                 result))
+  (let [replayable? (volatile! true)
+        stable
+        (walk/prewalk
+         (fn [value]
+           (if (or (db.utils/db? value) (connector/connection? value))
+             (do (vreset! replayable? false) ::opaque-read-value)
+             value))
+         result)]
+    [@replayable? stable]))
 
 (defn- append-query-evidence!
   [request response result]
@@ -385,6 +389,10 @@
                source-position :seon.db/source-argument-position
                plan :datahike.read/dependency-plan
                :as entry}]
+           (let [[replayable? stable-result]
+                 (when (and (:seon.db/retain-read-results? options)
+                            (find entry :seon.db/read-result))
+                   (stable-read-result (:seon.db/read-result entry)))]
            (cond->
             {:seon.db/source-argument-position source-position
              :datahike.read/dependency-plan plan
@@ -393,10 +401,8 @@
              (:seon.db/read-request entry)
              (assoc :seon.db/read-request (:seon.db/read-request entry))
 
-             (and (:seon.db/retain-read-results? options)
-                  (find entry :seon.db/read-result))
-             (assoc :seon.db/read-result
-                    (stable-read-result (:seon.db/read-result entry)))))
+             replayable?
+             (assoc :seon.db/read-result stable-result))))
          captured)))
 
 (declare decode-index-page decode-query-result decode-pull-result read-declarations)
@@ -467,9 +473,11 @@
            (when (and (find evidence :seon.db/read-request)
                       (find evidence :seon.db/read-result))
              (try
-               (= (:seon.db/read-result evidence)
-                  (stable-read-result
-                   (replay-read database (:seon.db/read-request evidence))))
+               (let [[replayable? result]
+                     (stable-read-result
+                      (replay-read database (:seon.db/read-request evidence)))]
+                 (and replayable?
+                      (= (:seon.db/read-result evidence) result)))
                (catch Throwable _ false)))))
      retained)))
 

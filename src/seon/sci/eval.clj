@@ -1747,7 +1747,11 @@
              (sort-by (juxt :seon.def/ordinal :seon.def/key))
              vec)
         entries (mapv #(def-entry connection %) rows)
-        notices (transient [])]
+        notices (transient [])
+        assigned-namespace (agent-namespace db agent-id)]
+    (when (and assigned-namespace
+               (not (sci/find-ns ctx assigned-namespace)))
+      (sci/add-namespace! ctx assigned-namespace {}))
     (doseq [[row value] entries]
       (let [[namespace-name intern-name] (def-target row value)]
         (when-not (sci/find-ns ctx namespace-name)

@@ -1095,6 +1095,46 @@
                      [read-doc multi-doc uncontracted-doc giant-doc]))
             "doc returns the same acquired facts it prints")))))
 
+(deftest a-turn-fork-registers-an-empty-assigned-agent-namespace
+  (test-support/with-database
+    (fn [connection]
+      (let [agent-id "empty-namespace-agent"
+            namespace-name 'fixture.empty-agent
+            _ (db/transact!
+               connection
+               [{:seon.cluster.agent/id agent-id
+                 :seon.cluster.agent/namespace
+                 {:seon.ns/name namespace-name}}])
+            base (eval/build-base-ctx)
+            _ (eval/acquire! {:seon.sci.eval/ctx base
+                              :seon.db/db @connection})
+            fork-result
+            (eval/fork-for-turn
+             {:seon.sci.eval/ctx base
+              :seon.db/db @connection
+              :seon.db/connection connection
+              :seon.cluster.agent/id agent-id})
+            turn-ctx (:seon.sci.eval/ctx fork-result)
+            evaluation
+            (eval/evaluate
+             {:seon.sci.eval/ctx turn-ctx
+              :seon.cluster.agent/id agent-id
+              :seon.cluster.run.form/ns [:seon.ns/name namespace-name]
+              :seon.cluster.run.form/source "(dir fixture.empty-agent)"
+              :seon.sci.admit/caps caps
+              :seon.sci.eval/time-limit-ms 2000
+              :seon.config/on-core-error :panic})]
+        (is (nil? (sci/find-ns base namespace-name))
+            "the acquired base remains program-only")
+        (is (some? (sci/find-ns turn-ctx namespace-name))
+            "the turn fork contains its assigned namespace without defs")
+        (is (contains? evaluation :seon.sci.admit/value))
+        (is (nil? (:seon.sci.admit/value evaluation))
+            "Clojure's empty dir completes with nil")
+        (is (not (contains? evaluation :seon.cluster.eval/output))
+            "an empty directory prints no output")
+        (is (nil? (:seon.cluster.eval/error evaluation)))))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The armed boundary — time is the only limit
 ;;; ---------------------------------------------------------------------------

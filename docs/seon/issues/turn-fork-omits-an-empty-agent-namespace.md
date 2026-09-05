@@ -79,3 +79,16 @@ derived through `seon.sci.eval/agent-namespace`, when that namespace is empty.
   context.
 - A fresh root bootstrap records a successful terminal evaluation for its
   own namespace directory form.
+
+## Implementation checkpoint
+
+`seon.sci.eval/fork-for-turn` now derives the agent's assigned namespace with
+the existing `agent-namespace` query and registers it in the new fork before
+restoring definitions. The focused regression uses an agent with zero stored
+definitions, evaluates `(dir fixture.empty-agent)` through the real turn fork,
+and proves that it returns nil with no printed output or evaluation error while
+the acquired base still lacks that agent-only namespace. It passed on
+2026-09-05 as 1 selected test with 78 assertions and no failures or errors.
+
+The issue remains open until a fresh-cluster proof confirms that
+`bootstrap:root`'s own namespace directory form settles successfully.
