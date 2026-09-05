@@ -289,6 +289,20 @@ Written into the design doc §2–§3 with the inventory of what every agent
 cares about (§3.1) and root (§3.2); §9 records how this answers the
 reviewer's three decisions. Still no code; the crash falsifier is first.
 
+## 2026-09-05 (later) — three projections of one record
+
+Design doc §3.3: the transcript is a projection of the agent's data
+(comments, forms, results by execution time) with THREE consumers and
+formats — the SCI environment (installers: require, install-def,
+bind-result, wrap-contract; dependency order), the completion prompt
+(`/ai` functions; the layout order; teaching pre-requisites as a demand
+DAG), the page (`/html` functions; header · transcript blocks with
+highlighted source, markdown prose, handle chips · panels = any function
+returning hiccup over the agent's data, requested by evaluating it). One
+composition rule; pre-requisites derived per consumer; compaction touches
+no fact. Atlas v4 adds the "Three projections" view (raw datum → entity
+and links → the function and order each projection gives it).
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
