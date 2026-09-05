@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, operator, performance, wave/boot-velocity]
 ---
@@ -32,7 +32,7 @@ afterward showed that `current-src` had nevertheless advanced from commit
 that exact new head succeeded and its MCP surface served the changed code.
 
 The earlier instance of this class was archived as
-[`init-publication-silent-beyond-backstop.md`](archive/init-publication-silent-beyond-backstop.md).
+[`init-publication-silent-beyond-backstop.md`](init-publication-silent-beyond-backstop.md).
 Its progress milestones do not cover the currently observed interval between
 the compiled population report and terminal publication.
 
@@ -51,3 +51,30 @@ publication boundary.
   bounded backstop.
 - The regression proves that a reported init failure cannot later reveal a
   newly committed `current-src` head.
+
+## Resolution
+
+Resolved by consequence of `e8d218690`, which changed the creation-time
+persistent-set branching factor from 512 to 4,096. The same 208k-datom
+population then required 357 durable index writes instead of 3,029, reducing
+the measured population commit from 26.025 s to 4.870 s. No operator/backstop
+mechanism changed: healthy publication no longer stays silent long enough to
+cross the existing 30 s boundary.
+
+Confirmed on 2026-09-05 after `ab813db44`:
+
+- `bin/test seon.dev.fresh-operator-test` ran 34 tests containing 219
+  assertions with 0 failures and 0 errors. The formerly failing
+  `live-init-reloads-schema-runtime-and-moved-predicate-owners-before-admission`
+  completed in 95.588 s without a silence refusal; the independent
+  `prepl-response-silence-still-trips-the-backstop` negative control also
+  passed.
+- A cold
+  `bin/seon --root /Users/sean/src/seon/tmp/lane-store-config-root init`
+  completed and published `current-src` in 38.85 s real (73.48 s user,
+  4.20 s sys). The total operation remains longer than 30 s, but observable
+  phase and population progress reset the per-event backstop throughout; no
+  silent interval fired it.
+
+The broader cold-init cost remains tracked by
+[`complete-publication-takes-seventy-seconds.md`](../complete-publication-takes-seventy-seconds.md).

@@ -188,9 +188,26 @@ directory once, then publishes and forces the mutable head last. Implementing
 that causal barrier inside Seon would duplicate the storage authority, so it
 is not part of this repair.
 
-Integration note: `test/seon/cluster/store_test.clj:85` mirrors the former
-exact `{:diff-buf-size 256}` creation map. That test is outside this lane's
-owned paths and must accrete `:branching-factor 4096` before the full suite;
-the focused `seon.fn-test` regression above owns the repair in this slice. A
-direct `bin/test seon.cluster.store-test` confirmed this one stale expectation:
-17 tests, 62 assertions, 1 reproducible failure and 0 errors.
+Integration note before confirmation: `test/seon/cluster/store_test.clj:85`
+mirrored the former exact `{:diff-buf-size 256}` creation map. A direct
+`bin/test seon.cluster.store-test` confirmed this one stale expectation: 17
+tests, 62 assertions, 1 reproducible failure and 0 errors.
+
+## Integration confirmation, 2026-09-05
+
+Commit `ab813db44` removed the test's numeric index-configuration mirror. The
+store regression now derives the complete expected `:index-config` from
+`seon.cluster.store/datahike-configuration` and proves that a fresh Datahike
+store persists that exact declaration. `bin/test seon.cluster.store-test`
+passed 17 tests / 62 assertions / 0 failures / 0 errors.
+
+The downstream operator confirmation also passed:
+`bin/test seon.dev.fresh-operator-test` ran 34 tests / 219 assertions / 0
+failures / 0 errors, including the live-init case that had previously crossed
+the 30 s prepl silence backstop. A separate cold
+`bin/seon --root /Users/sean/src/seon/tmp/lane-store-config-root init`
+completed in 38.85 s real (73.48 s user, 4.20 s sys), with observable progress
+through the full publication and no backstop refusal. The silence-backstop
+blocker is therefore resolved by consequence of the faster population commit;
+this issue remains open because 38.85 s is still far above the ten-second
+publication target.
