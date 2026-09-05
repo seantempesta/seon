@@ -392,6 +392,20 @@ Also to fix: Codex lanes are not given the Seon MCP server (Claude
 launches `bin/mcp-server` via `.mcp.json`; `~/.codex/config.toml` has no
 `[mcp_servers.seon]`).
 
+## 2026-09-05 (night, later) — status-face collided; relaunch after init-speed
+
+`status-face` stopped without committing: `init-speed` (granted
+`fresh_operator.clj` "for the init command's own steps" — the
+orchestrator's ownership mistake) edited the same file mid-lane. Its
+uncommitted work sits in the tree (fresh_operator.clj, runner.clj, the two
+test files): one aggregate loud UNKNOWN line by default, bounded
+per-namespace summaries with evidence, details behind `status --verbose`,
+and a real finding — bare `bin/test` hard-wires persistent evidence to the
+checkout root despite `SEON_TEST_RESULT_ROOT`, so the isolated stale-green
+proof was impossible without their routing fix. Relaunch as
+`status-face-2` once `init-speed` has committed its `fresh_operator.clj`
+hunks; the proof of stale-green live is still owed.
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
