@@ -233,6 +233,47 @@ continues independently; only a concrete dependency blocks an affected step.
 
 ## 6. What to measure and preserve
 
+### Experiment loop and ordering — proposal following owner feedback
+
+The lab is the upgraded agent debug view. Its central action is rerunning a
+reproducible experiment after changing ordinary functions or Malli schemas.
+Hold subject, viewer, database value, program/projection identity and output
+budget fixed when comparing discovery/rendering functions. Show actual changed
+inputs when comparing storage schemas; that is a different experiment.
+
+Compare bounded walk-first rendering, selection-before-expansion, and recursive
+rendering with shared reads. Measure acquisition, validation, selection,
+invocation, fit, context tokens and browser layout separately, with cold/warm
+results and failures visible. A faster result that omitted the required plan,
+an unresolved prerequisite, or missing measurements is not a successful result.
+Time-to-edit-to-visible-result is also a measured cost.
+
+The stored entity graph does not require a total order. Derive prerequisites
+between generated forms; choose an ordered vector consistent with those edges.
+Independent entries may follow the parent function's authored order, with a
+stable identity tie-break where needed. Preserve actual effectful execution
+order. Graph layout never determines execution or presentation order.
+
+Distinguish executable prerequisites (resolved Vars, aliases and earlier result
+bindings) from teaching prerequisites (which functions, attributes or concepts
+the selected output explains). Clojure analysis supplies the former; functions
+must express the latter. A symbol mentioned as quoted data can warrant an
+explanation without being an executable dependency. Do not equate every symbol
+found by tree-seq with a free Var or every transitive call edge with something
+the reader needs taught. Definitions may be mutually dependent; group their
+explanations or report an unsatisfied prerequisite rather than silently dropping
+the remaining context. Existing ordered-episode is an experimental baseline,
+not authority for these semantics.
+
+Cytoscape.js supports the required attributed directed graphs, selection,
+incremental batches and replaceable layouts. The atlas currently loads 3.30.4
+from a CDN and builds elements from hand-authored MODEL data; it does not prove
+live observation or performance. Pin the chosen asset locally during
+implementation. Use graph views for stored refs and generated-form/call
+dependencies, alongside the ordered transcript and cost table. Preserve graph
+instances across Datastar updates and measure layout separately from backend
+work. No extra charting library is required for the initial comparison table.
+
 Record database and program identities independently. Hot-reloaded Var evidence
 must say so; a file edit does not update an existing cluster's program rows.
 For source-change proof, name the publication and cluster fork actually used.

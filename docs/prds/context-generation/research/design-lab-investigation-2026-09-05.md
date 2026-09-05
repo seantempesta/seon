@@ -274,3 +274,58 @@ Documentation verification: path-scoped git diff --check passed. The issue-index
 checker still reports six missing schedule rows and two scheduled non-open
 notes outside this research slice; none names the new findings. No broad issue
 triage or correctness-suite run was attempted during the design discussion.
+
+## Fast experiments and dependency ordering — followup, 2026-09-05
+
+MCP runtime_status and eval_clj answered after the shared process changed to
+pid 94171, start 19:02:38Z. Health was observed with four errored receipts; this
+is connectivity evidence, not proof those errors are fixed. A pure JVM form
+confirmed ordinary let binding/evaluation and that quoting a form returns its
+symbols as data without invoking the named function. No cluster facts or shared
+SCI definitions were changed. No performance comparison was attempted.
+
+Existing fast-loop seams, verified by the render-selection research agent:
+
+- src/seon/schema.clj:2491 projection-with-schema and :2631
+  projection-with-function-contract derive experimental projections.
+- src/seon/sci/eval.clj:2235 fork-candidate-ctx uses fork-for-turn; :2246
+  evaluate-candidate evaluates function candidates with contracts/tests without
+  promoting them. Accrete render comparison here; do not introduce a second
+  candidate installer. Keep its ctx and projection together.
+- src/seon/sci/eval.clj:716 install-row! consumes committed declaration facts;
+  src/seon/cluster/loop.clj:1683 installs settled declarations into the base and
+  current turn contexts. This adoption path does not require process restart.
+- Host Var reload does not establish that a SCI Var, acquired function snapshot
+  and schema projection changed together. Source publication/refork remains a
+  distinct experiment from an ephemeral candidate or settled agent definition.
+- reference-code/sci/src/sci/core.cljc:345 documents fork behavior; external
+  effects are not rolled back. reference-code/malli/src/malli/core.cljc:2627
+  supports reusing compiled validators.
+
+src/seon/render/walk.clj:642 form-symbols currently tree-walks symbols and uses
+namespace/dotted spelling; :656 ordered-episode treats explained symbols and
+introduced subjects as readiness. This is an existing baseline to compare, not
+a compiler dependency analysis. Quoted symbols, lexical bindings, aliases and
+macro expansion make structural occurrence different from executable dependency.
+Teaching a quoted function name may still be desirable: record that decision
+separately rather than treating it as unresolved execution.
+
+Primary language grounding: [Clojure evaluation](https://clojure.org/reference/evaluation),
+[special forms](https://clojure.org/reference/special_forms), and local
+reference-code/clojure/src/clj/clojure/core.clj:2790 declare, :6705 letfn.
+Proposed ordering: ordinary generated forms with prerequisite references, then
+an ordered vector consistent with those references; parent-authored order for
+independent siblings. Discovery/render recursion can return prerequisites along
+with output. Report blocked dependencies/cycles explicitly. No general scheduler
+or new expression language is implied.
+
+Visualization grounding: [Cytoscape API](https://js.cytoscape.org/) supports
+attributed graphs, compound nodes, batch updates and layout extensions;
+[its layout guidance](https://blog.js.cytoscape.org/2020/05/11/layouts/) separates
+node positioning from graph selection and warns about large-graph visual noise.
+The local atlas loads Cytoscape 3.30.4 at line 3 and constructs elements from
+MODEL at :548; :558 creates the instance. Thus the library fits the intended
+interaction, but neither live data integration nor scale is proven. Keep
+backend ordering independent of visual coordinates, and measure browser layout
+separately. The upgraded debug view should show an ordered transcript and cost
+table beside selectable entity/ref and generated-form dependency graphs.
