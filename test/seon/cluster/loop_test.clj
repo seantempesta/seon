@@ -1359,7 +1359,8 @@
   (test-support/with-database
    (fn [connection]
       (db/transact! connection
-                  [{:seon.cluster.agent/id "agent-a"}
+                  [{:seon.ns/name 'user}
+                   {:seon.cluster.agent/id "agent-a"}
                    {:seon.cluster.message/id "m-1"
                     :seon.cluster.message/to [:seon.cluster.agent/id "agent-a"]
                     :seon.cluster.message/content "go"
@@ -1388,7 +1389,8 @@
                    {:seon.cluster.run.form/id (str "f-" ordinal)
                     :seon.cluster.run.form/run [:seon.cluster.run/id "run-1"]
                     :seon.cluster.run.form/ordinal ordinal
-                    :seon.cluster.run.form/source "(+ 1 1)"})
+                    :seon.cluster.run.form/source "(+ 1 1)"
+                    :seon.cluster.run.form/ns [:seon.ns/name 'user]})
                  (range 2)))
 
       (seq receipts)
