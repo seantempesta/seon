@@ -1,300 +1,268 @@
 ---
 type: prd
 status: draft
-tags: [prd, agent, context, render, tooling, visualization, data-model]
+tags: [prd, agent, context, render, tooling, data-model]
 ---
 
-# The Design Lab — the debug page becomes a live model of an agent's data and its three projections
+# The Design Lab — inspect data, renderer selection, and generated context
 
-*PRD, 2026-09-05, rewritten whole after the owner's rulings (the earlier
-version accreted rulings as appendices and contradicted itself). Reviewers:
-read this as ONE document; where it disagrees with any earlier draft,
-this wins.*
+*Revised proposal, 2026-09-05, following the owner's clarification and an
+independent source/browser/REPL investigation. This is a plan for review and
+iteration, not a declaration that the final context design is settled.
+[Evidence and dependency ledger](../research/design-lab-investigation-2026-09-05.md).
+Earlier versions remain in Git history.*
 
-## 0. Why
+## 1. What we are trying to make possible
 
-We are about to redesign how an agent's context is stored and rendered —
-for three consumers that today have three different mechanisms: the SCI
-environment the agent's forms run in, the text sent to the completion
-endpoint, and the HTML the user sees. The design documents make claims
-about which data should sit on which entity, which function should render
-which value, and in what order; an independent review found several of
-those claims false when checked against the real database. We will not
-find the rest by writing more documents. We find them by LOOKING AT THE
-REAL DATA with the REAL FUNCTIONS applied to it, changing the schema or a
-function, and looking again — fast, repeatedly, with the designing agent
-and the owner in the same loop. The lab exists to shake the bugs out of
-the design before a line of production code is committed to it, and to
-let us try storage shapes and render functions until the best system for
-all three projections is found by evidence.
+Every namespace can have an agent responsible for improving it. The agent sees
+the database from its own perspective: its code, data, messages, plans, callers,
+failures, and the needs of other agents and users. Good defaults bootstrap that
+perspective. The agent can then write queries and render functions in its
+namespace to change what it sees and how it is presented.
 
-**What "best" means, and when the lab is done.** The lab's terminal
-deliverable is a CHOSEN storage model plus three TOTAL projection
-contracts (an SCI description, a prompt entry, a page block — each a
-value with a Malli schema), with every rejected alternative and the
-decisive measurement recorded in the design document. A question closes
-when the owner records the decision there with the lab's evidence
-(entity, basis, branch, bytes, numbers) beside it; the lab has no other
-closing authority. "Best" is decided by: fewer mechanisms for the same
-three outputs; every byte owned by a named function; bounded work at the
-real population; the crash model recoverable from facts alone.
+Context should look and behave like a Clojure REPL: explanatory comments,
+actual forms, actual results, and usable ways to investigate further. HTML is
+another rendering of the same underlying data. Root needs summaries of other
+agents, not copies of all their contexts. The agent responsible for my.plan
+needs implementation and usage evidence; an agent using my.plan needs its plans
+and enough functional understanding to use them.
 
-## 1. What it is, in one sentence
+The lab makes these choices visible. Select a viewing agent and an entity,
+inspect the stored datoms and refs, see the applicable functions and preference
+order, run a candidate, and see its output in context. Change a function and
+repeat. This is ordinary Datahike data and Malli-contracted Clojure functions,
+executed through the existing SCI owners.
 
-Not a separate system: the existing debug pages at the three levels the
-whole system operates on — global (`/`, the cluster), namespace
-(`/ns/{namespace}/debug`), and agent/function (`/agent/{id}/debug`) —
-grown into a live, clickable model of what is there: its REAL attributes and connections as a graph; for any
-node, the render functions that could apply and their actual output on
-that data; and the agent's context assembled three ways — the SCI
-bindings, the completion prompt, the page — from the same facts by the
-same looked-up functions, with the ordering produced by live code.
+**Latest owner clarification:** the starting point may be ANY entity. The
+existing walk and renderer discovery are not assumed correct. Compare recursive
+function composition, Ring middleware, Pedestal interceptors and graph resolvers
+before selecting the traversal mechanism. This PRD's implementation sequence
+is provisional until that design pitch is discussed; retaining infrastructure
+does not require retaining the current walk or dispatch algorithm.
 
-## 2. Ruled by the owner (2026-09-05) — the constraints this design obeys
+my.note is only an optional small specimen. Nothing in discovery, selection,
+layout, or acceptance may depend on that namespace's name.
 
-1. **No new infrastructure, no new names.** The lab is a cluster, run by
-   the existing operator (`bin/seon --root <root> start|reset`); its
-   details live where every cluster's do (`data/clusters/<name>/`). The
-   lab is the EXISTING debug page (`/agent/{id}/debug`, owned by
-   `seon.render.web` and `seon.render.route`), served by the existing web
-   server in the same process as the real render functions. No `/lab`
-   route, no `seon.dev.lab` namespace, no `bin/seon lab`. This ruling means
-   exactly that — no lab-SPECIFIC route, namespace, or command — and does
-   not forbid production ACCRETIONS the lab needs (a stewardship
-   attribute on the agent schema, a public candidate-explanation value in
-   `seon.render`, a same-origin POST for branch actions), each landing in
-   its real owner with a contract.
-2. **Everything real.** Every function the lab shows or runs is a program
-   row: system functions indexed by `bin/seon init` and hot-reloaded on
-   edit; an agent's own functions defined in real, settled turns. No
-   door-mode shortcuts. The data is datoms in the lab cluster's branch.
-3. **Fresh environments, cheaply.** The lab cluster is disposable; what
-   persists is the definition of what gets loaded — kept as real Clojure
-   in the tree so the designing agent edits it, resets the cluster with
-   the existing operator, and the page refreshes into the new world.
-   Trying a new storage shape is a code branch IN A SEPARATE WORKTREE
-   (branch switches on the shared tree need coordination): add or retype
-   attributes (retype + reset is ruled), change the writers and readers,
-   reset, look. Seed facts (the steward agent, its stewardship edge, seed
-   messages, plan items) are SOURCE-INITIALIZATION rows replayed by the
-   existing initialization path on every reset — not hand transactions —
-   so a reset loses nothing that was defined.
-4. **Visualize the context that WILL be sent; do not run it.** The prompt
-   view shows the generated bytes with tokens and provenance per entry. It
-   reuses the debug page's existing prospective-prompt machinery. Paid
-   model calls are out of scope.
-5. **Ordering is algorithmic, live, and local to each projection.** The
-   agent's context is ordered logically — definitions and discovery before
-   use — by the layout function that produces it; the page is ordered by
-   layout (regions, then time). Each is a contracted `defn`; edit it, hot
-   reload, refresh. No manual drag.
-6. **Do not overcomplicate the model to start.** No stewardship attribute
-   now: the first world is simply an agent whose namespace is `my.note`
-   (the existing creation path assigns a namespace at creation). The
-   agent/namespace independence (an agent's own home namespace, several
-   agents per namespace) stays in the design document as a later
-   accretion, tried in the lab when the basics are seen.
-7. **The first world is Seon's own code:** `my.note` — small, with its own
-   schema, render functions, tests, and a fact family agents write; its
-   data already exists in the program graph. Everything the lab shows for
-   it must also work at the namespace level (`/ns/my.note/debug`) and the
-   global level (`/`), because those are the same machinery.
-8. **Graph depth: one hop, expand on click.**
-9. **Vocabulary:** "entity schema" = the registered attribute-bearing
-   `:map` schema a stored entity satisfies, found from its identity
-   attribute. ("Family" is retired.)
+## 2. Scope and decisions already supplied by the owner
 
-## 3. The page
+- Use the existing operator, cluster, debug routes, Clojure render owners and
+  Datastar delivery. No lab-specific namespace, command, route, or registry.
+- Keep actual storage visible: entity ids, fully namespaced attributes, values,
+  outgoing and incoming refs, and assertion transaction provenance.
+- Defaults render connected data automatically. An applicable renderer in the
+  viewing agent's namespace is preferred over general renderers.
+- Explicitly selected renderers and renderers from other namespaces must be
+  visible in the preference order. Fine-grained tie rules remain experiments.
+- Agents may customize queries as well as render functions.
+- The current Web UI is not a design requirement. Retain useful mechanisms,
+  redesign its information hierarchy and layout.
+- Work with real program rows and data. Agent-authored functions used as proof
+  must have settled through the existing turn path; no shared door-context defs.
+- First graph expansion is one hop, with further expansion on demand. Context
+  traversal depth is a separate explicit input; a depth config may follow.
+- No paid model calls for inspection. A generated-form proof can use
+  system-authored forms through the existing execution path.
+- Inspect root, other agents, and namespaces with the same observation
+  functions. A cluster has no invented global SCI environment.
+- Keep decisions and reproducible experiment definitions in tracked source;
+  clusters remain disposable. Do not refactor the agent/run storage model just
+  to build an inspector.
 
-```
-┌ /agent/{id}/debug — cluster · branch (main | experiment-N) · basis t · entity picker (identity attr + value) ┐
-├────────────────────────────┬───────────────────────────────────────────────────────────────────────────┤
-│ GRAPH (Cytoscape.js)       │ INSPECTOR for the clicked node                                              │
-│ nodes = entities,          │ • every attribute, fully namespaced, actual value (large → elision value    │
-│   labelled by identity     │   with a requery form); the transaction instant per attribute               │
-│ edges = ref attributes,    │ • the entity schema(s) it satisfies — 0, 1, or several, shown as found      │
-│   solid out · dashed in ·  │ • RENDER CANDIDATES for /ai and /html: today's real selection AND the        │
-│   :attr ×N                 │   proposed contract query's ranking, side by side; [run] any → real bytes   │
-│ one hop; click a           │ • PROCESSING CANDIDATES: functions whose contracts accept this entity        │
-│   collection edge → page   │   schema and are not renderers                                              │
-├────────────────────────────┴───────────────────────────────────────────────────────────────────────────┤
-│ THE THREE PROJECTIONS of the picked agent (tabs; all from the same facts)                               │
-│  SCI env   the bindings that would be installed — requires, defs (newest defining eval per name),       │
-│            result handles (readable?), contract wrappers — in dependency order; nothing executed        │
-│  Prompt    the entries in the order the live layout function produces: intent · form · rendered value · │
-│            handle · tokens · which function rendered; pre-requisite doc/dir entries inserted; beside    │
-│            it, what the CURRENT system would send (the existing prospective prompt)                     │
-│  Page      header · transcript blocks · panels — rendered HTML from the same entries                     │
-├────────────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ BRANCH (wave 4): [fork] [compare] — same-origin POSTs, one connection owner   DECISIONS → the design doc │
-└────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-```
+## 3. The first useful page
 
-## 4. What the page computes — every box a named, contracted function over datoms
+The page should answer one connected question without sending the user through
+several unrelated dumps:
 
-1. **Neighbourhood** of entity E, one hop: E's attributes and values; for
-   every installed ref attribute A, the out-edges `[E A ?v]` and in-edges
-   `[?x A E]` with counts (the ref set comes from the installed schema, as
-   `walk/root-selector` derives it today; counts from datoms). A collection
-   edge expands to a bounded, ordered page on click.
-2. **Entity schemas** a value may belong to, in two grades shown
-   separately: CANDIDATE matches (the registered attribute-bearing maps
-   whose required attributes are present) and VALIDATED matches (the value
-   actually validates against the schema) — zero, one, or several of each.
-3. **Render candidates**, two ways on the same value: (a) today's real
-   selection (`seon.render/producer`: explicit → the viewing namespace's
-   publics by contract fit → the schema-declared face → the floor);
-   (b) the proposed selection (arities whose input refs are covered by the
-   value's entity schema plus injectables and whose output is `/ai` or
-   `/html`, ranked: the viewing agent's home namespace, other agents by
-   namespace distance, the schema's general face, the floor; coverage,
-   then recency; ties shown). Where (a) and (b) differ is a finding.
-4. **Run a candidate** on the real value under the real render profile and
-   print floor: the `/ai` bytes, the `/html` rendered, the time, the
-   elision values produced; a candidate that throws shows the flat error.
-5. **Processing candidates**: arities whose input refs include the entity
-   schema and whose output is not a render projection.
-6. **SCI projection**: from the agent's home namespace and evals — the
-   requires; the newest defining eval per name; each result handle and
-   whether its value is readable; the contract wrappers; in dependency
-   order. Displayed, not executed.
-7. **Prompt projection**: the entries the design would generate — one per
-   discovered connection, the query wrapped in the chosen render function
-   by name, an intent comment derived from the attribute — plus the
-   pre-requisite `doc`/`dir` entries from the demand DAG and the agent's
-   own evals; ordered by the live layout function; assembled to bytes with
-   a token estimate per entry; beside it, the current system's prospective
-   prompt for the same agent (the debug page's existing code path).
-8. **Page projection**: the same entries through `/html`: the header, the
-   transcript blocks (intent as caption, syntax-highlighted source, the
-   value's `/html` face, the handle chip, prose comments as markdown), and
-   panels — any `/html` candidate the owner adds — rendered live.
-9. **Branches** (wave 4): fork the lab cluster's head into a side branch
-   through a same-origin POST; a ONE-OWNER connection registry acquires and
-   releases branch connections (Datahike refuses a second open of the same
-   branch); every render names the branch, source commit, and basis it read;
-   a compatibility fence refuses rendering a branch whose program commit
-   differs from the running ctx's. Two-column compare with the cluster
-   branch for the same entity.
-10. **Decisions are recorded in the tracked design document, not on the
-    disposable cluster.** The page offers a "copy as decision" button that
-    produces the evidence block (entity, branch, basis, bytes, numbers) to
-    paste into the design document's decision record; nothing about a
-    decision lives only in the lab cluster.
+> Where is this value stored, why am I seeing it, which functions can render it,
+> why did this one win, and what changes when another one is used?
 
-## 5. The world the lab loads first
+The persistent header shows the viewing agent/namespace, selected subject,
+database branch and basis, and observed program identity. Subject and viewer
+are independent: changing viewer must not silently change the selected entity.
 
-An agent whose namespace is `my.note`, created through the existing
-creation path (`seon.cluster.agent`, which assigns a namespace at
-creation; the namespace page already creates an agent for a namespace on
-first access, `web.clj:1752-1769`); seeded with two messages from root and
-one plan item as source-initialization rows. Its data is real and already present: `my.note`'s
-functions, arities, contracts, tests, schema, and any note facts. As the
-design matures the same steward gets the steward-scenario functions
-(ruling 54f) defined in real turns, and other worlds are added as further
-agents, not further files.
+The main area has three coordinated parts:
 
-## 6. Waves and acceptance (each read at the bytes on the lab cluster; NO criterion may pass on absent data)
+| Part | Contents |
+|---|---|
+| Data and connections | Compact datom table; identity assertions; ref attributes and bounded endpoint pages; graph/table toggle once graph support lands. |
+| Render functions | AI/HTML selector; ordered candidate rows; function and arity; input/output schemas; supplied arguments; why accepted, rejected, preferred, or tied; selected function source. |
+| Results | Raw query result alongside actual rendered output. Later, select its location in the assembled prompt or HTML page. |
 
-**Three levels, one machinery.** Every observation value and every
-projection is computed for a ROOT that may be the cluster (global), a
-namespace, or an agent; the three debug pages are the same functions on
-three roots. A wave is not accepted until it works on all three.
+Clicking an attribute/ref follows that actual connection. Clicking a function
+shows its stored definition and contract. Selecting a candidate previews its
+output without silently making it the new permanent preference. Editing and
+settling a renderer in the viewing namespace demonstrates persistent preference.
 
-**Cross-wave negative criteria** (from the review): the debug prompt's
-status is never `unavailable` on a fresh cluster; every selected entity,
-branch, and candidate is asserted PRESENT before anything about it is
-asserted; every render names its basis and source commit; a normal
-database commit refreshes an already-open debug feed; read-only GETs add no
-datoms and no render-cost facts; candidate execution performs no external
-effect (excluded by the program graph's `:seon.fn/external-sink` and
-`:seon.fn/projection-boundary` facts before invocation).
+Use readable text, sufficient contrast, resizable areas and deliberate
+disclosure. Datoms and Clojure source use monospace. Avoid a scroll box for every
+value, giant unbroken schema listings, and the existing one-primary/all-others-
+in-a-narrow-column arrangement. Keep exact values/source reachable; disclosure
+is not data deletion. Retain browser-local selection, scroll and graph position
+across ordinary updates.
 
-**Precondition (platform, code that stays):**
-[prospective-debug-walk-omits-agent-id](../../../seon/issues/prospective-debug-walk-omits-agent-id.md)
-is fixed and its regression asserts a non-`unavailable` prospective prompt
-through the PRODUCTION request shape (the current fixture supplies the
-agent id production omits — absence green in the fixture).
+The existing prompt remains available as comparison evidence. A historical
+capture and a newly computed preview are separate labelled values; neither
+silently substitutes for the other.
 
-| wave | lands | accepted when |
+## 4. Data and functions at each boundary
+
+### Stored facts
+
+Reuse existing agent/namespace refs, domain attributes, function/arity/contract
+rows, eval results, schema rows and transaction provenance. The lab initially
+adds no stored inspector state, candidate roster, graph edges, or duplicate
+domain records. Function definitions are stored through the existing program
+publication/settlement path.
+
+The same entity may carry several identities and satisfy several Malli schemas.
+Show them. Do not force an entity kind or select one identity merely to draw it.
+
+### Observation
+
+A contracted function receives one explicit immutable database value and subject
+lookup. It returns a bounded ordinary-data page of actual E/A/V/tx assertions,
+identity assertions, selected ref endpoints, continuation, and snapshot identity.
+Implementation belongs with existing data observation under seon.render.data;
+bounded raw index consumption, if needed, belongs inside seon.db.
+
+Reuse EAVT for outgoing assertions and AVET for incoming refs; do not store
+reverse edges. Decode through the existing seon.db owner. Distinguish physical
+stored representation from decoded value where an attribute stores EDN.
+
+Do not implement paging by taking after seon.db/datoms: it currently realizes
+the whole match. Use index continuation or a proven resource-bounded query;
+consume before decoding/collecting. Continuations carry their snapshot and
+selected index prefix; a stale cursor returns an explicit diagnostic.
+
+Initially show bounded pages and honest 'more available' evidence. Exact counts
+are separately requested and bounded. A database-side count is not automatically
+cheap. Distinguish exact total, known lower bound, no refs, missing subject, and
+unavailable observation.
+
+Schema candidate discovery and actual validation are separate observations.
+Reuse projection-scoped validators. A partial page is not the full entity:
+unacquired required data means validation has not been established, not that the
+entity fails the schema.
+
+### Candidate explanation and invocation
+
+Expose one contracted explanation from seon.render and make selection use that
+same decision. Reuse existing call-static-evidence and retained-call evidence.
+The UI must not recreate the selection algorithm.
+
+Every candidate identifies ONE arity whose actual supplied inputs and requested
+output are compatible. Input-ref facts narrow discovery; Malli establishes
+compatibility. Inspect both supplied inputs and any defaults from the environment.
+
+Proposed preference to test:
+
+1. Explicit renderer on the value, then explicit renderer in the request.
+2. Compatible functions in the viewing agent's namespace.
+3. Compatible functions in other namespaces, ranked by a declared relationship
+   distance that the page explains.
+4. Schema-declared default.
+5. Structural floor.
+
+This order extends current code; it is not a claim about HEAD. The lab must
+show current behavior before applying the proposal. Distance means traversing
+named program/database refs, never splitting namespace strings. Which refs and
+direction define distance, and how specificity and definition recency settle
+ties, must be visible experimental inputs. Use immutable publication/transaction
+evidence for recency, not wall-clock time or unordered collection iteration.
+
+Carry the viewing perspective through nested render calls. A parent renderer
+can explicitly invoke a child renderer; if it requests generic rendering for a
+child, the same preference rules apply. A selected renderer's final output is
+terminal, avoiding re-selection of its already rendered text/Hiccup.
+
+Run candidates through existing SCI invocation, call preparation, time bound,
+admission and print fit. Show thrown/refused output as evidence. Rendering cost
+recording must not make diagnostic reads write facts.
+
+The old PRD used external-sink/projection-boundary tags as a purity guarantee;
+those tags describe output crossings and do not provide that guarantee. Do not
+enable arbitrary candidate execution labelled read-only until the actual
+execution boundary enforces it and a deliberate effect attempt proves it.
+Inspection and source-reviewed pure experiments can proceed first. SCI fork
+alone does not undo external effects.
+
+### Forms, results, prompt, HTML, SCI
+
+For every generated observation, expose the actual query/form, raw result,
+selected renderer and output, explanatory comment, prerequisite facts, basis,
+and destination. These are ordinary values passed between functions; do not
+persist every intermediate merely because the inspector displays it.
+
+A displayed REPL result must come from executing that displayed form. If the
+form is a query, its result handle denotes its data and rendering is shown
+separately. If the form calls a renderer around the query, its actual return is
+rendered text/Hiccup; it cannot simultaneously be a handle to the query data.
+Demonstrate both honestly, then choose with the owner.
+
+The prompt and page may share the values they need; do not impose identical
+intermediate entries on SCI bindings. Inspect SCI requires/aliases, defs, result
+bindings and contracts through the existing seon.sci.eval/kernel owners. A
+read-only description is distinct from installing bindings in a fork.
+
+## 5. Proposed implementation sequence
+
+First discuss the graph/function composition pitch in the investigation's
+final section. Then use the sequence below for evidence, revising owners if the
+chosen traversal dissolves the current walk. Only this section sequences this PRD. Each step ends with an owner-visible
+demonstration before expanding scope. Necessary bounded contracts and focused
+regressions belong inside each step, not a long invisible infrastructure phase.
+
+| Step | Deliverable and owners | Acceptance |
 |---|---|---|
-| **1A · the observation contract** (pure, no UI) | `neighbourhood-page`: a total, bounded VALUE from an explicit database value, lookup ref, basis, stable order, page size, and continuation — subject-present evidence; every current datom with its transaction identity (cardinality-many: each assertion); direct, inbound, and cardinality-many refs counted independently by database-side aggregates (never materialize-then-take); one bounded page; typed refusals for missing and stale-basis subjects; several identities or several matching entity schemas are OBSERVED and shown as such (choosing one is a render decision, wave 2, and is refused there only when a render needs exactly one) | proved against NON-EMPTY synthetic facts in the canonical fixture (≥1 direct, ≥1 inbound, ≥1 cardinality-many ref; a deliberately oversized value producing a real elision whose next page has no duplicates or omissions) and on one isolated live cluster against the fresh root agent; counts equal an independent Datalog count; latency recorded as p50/p95 for named entities at a named datom count, query only |
-| **1B · the graph** | the debug page renders that value as the inspector table and the Cytoscape graph; Cytoscape delivered as a LOCALLY VENDORED asset served by the existing static route (no network dependency); an explicit graph lifecycle (destroy/recreate on morph); an ordinary commit refreshes the open feed | on the fresh root agent the graph shows the same counts as 1A's value; a `</script>`-bearing string value renders safely; ten SSE morphs leave one live graph instance; the atlas's hand-typed model is retired |
-| **2 · candidates and outputs** | a `candidate-explanation` value in `seon.render` (the ordered candidate set with each rejection's reason — today's selection and the proposed ranking, side by side; `producer`/`candidates` are `defn-` by convention, which here restricts nothing — they become the contracted public entry when the page needs them) and a read-only diagnostic render boundary that runs one candidate through the real kernel and fit profile WITHOUT transacting render-cost facts and REFUSING effectful candidates | fixtures independently establish, on named note and message identities with source transactions: one winner, one deterministic tie, the floor, a throwing producer (flat error shown), one external-sink exclusion; the expected symbols are asserted before their outputs; datom count unchanged after a diagnostic run |
-| **3 · the three projections** | the SHARED BOUNDARY between the three (tested, not assumed — a lane's reading rightly notes SCI bindings, prompt text, and hiccup may share facts and composition without an identical intermediate entry): the lab shows for each entry what the three consumers actually need in common; then one ENTRY value (intent, form, result, selected producer, tokens, prerequisite edges, basis) produced by the render owners; a named SCI-description owner in `seon.sci.eval` deriving requires, newest defs, readable handles, and wrappers WITHOUT mutating a ctx; the layout function; the page and the prompt derived from the same entries; the current prospective prompt beside them, both labelled with their basis | ≥3 named entries with a real prerequisite edge; editing the layout function and refreshing changes the order while the entry identities and content digests are unchanged; per-entry token contributions sum to the calibrated estimate of the assembled prompt including separators (the existing `history-contributions` equality); the two prompts show their bases |
-| **4 · branches and experiments** | the connection owner, the compatibility fence, same-origin fork/compare POSTs, "copy as decision"; one storage-shape experiment carried end to end from a separate worktree | baseline asserts the new attribute ABSENT; the experiment asserts exact subject, attribute, value, and commit ids on both sides and a non-empty difference; each render reports its branch and basis; the full cycle (publish → refork → start → browser shows the new commit and basis) is MEASURED end to end and recorded — at HEAD publication + start is 71.9 s (measured 2026-09-05), so the 15 s figure is a platform TARGET, not this wave's acceptance |
+| 1. Inspect one value end to end | seon.db/seon.render.data bounded datom/ref observation; seon.render selection explanation; web debug page with coordinated data, candidates and actual output for existing source-reviewed renderers. Reuse current snapshot/delta delivery. | Same entity inspected from two viewing agents; actual current selection explained; non-empty refs and values asserted; inputs/results readable; missing entity explicit; normal inspection adds no facts. A namespace with no agent is inspectable without creating one. |
+| 2. Demonstrate renderer preference | Repair same-arity checks and carry viewing namespace through direct and nested selection; install a real compatible renderer in one agent's namespace through the normal turn path; test explicit, local, distant, schema and floor behavior. | Same stored value, two viewers, direct and nested rendering; local definition changes only the intended perspective; explicit preview works; changing/removing override reveals the next candidate. Ties and failures are visible. No copied data or special namespace dispatch. |
+| 3. Add graph navigation and scale proof | Locally pinned Cytoscape asset, existing static route, graph fed by the exact observation used by the table; safe lifecycle and state preservation; separately bounded counts. | Incoming/outgoing refs and page continuations agree with datoms; large values have working requery; low/high-degree entities measured; deep page does not scan all earlier pages; ten updates retain one graph and selection; a script-closing string stays text. |
+| 4. Construct and inspect context | Evolve existing generated-form/history owners; comments, executed forms, results and teaching prerequisites; editable layout functions; assembled prompt and HTML with per-entry selection and token evidence; SCI description. | Non-empty plan data shown to its user, root, and the namespace's responsible agent with different views. Queries/source/contracts/usage/failures derive from facts. At least three executed forms and a real dependency; aliases resolve in the actual fork. Layout edit changes order; the prompt can be traced to real results; prospective/captured bases are clear. |
+| 5. Storage experiments and consolidation | Existing operator/registry publication and isolated worktrees/roots; branch compare only when needed; measured reset-to-page cycle; record chosen design and delete replaced mechanisms in place. | One schema/data-shape experiment before/after with real changed datoms, source identity and output evidence; crash proof before moving run/custody facts; recurring correctness and live UI proof before replacement paths are removed. |
 
-Sequential lanes: the precondition fix; 1A; 1B; 2; 3; 4. Files: the
-observation contract in the render owner it belongs to (not
-`seon.render.web`); the candidate explanation and diagnostic boundary in
-`seon.render`; the SCI description in `seon.sci.eval`; the page in
-`seon.render.web` + `seon.render.route`; tests beside each owner.
+Step 1 must include real output, not stop at drawing a graph. Step 2 is the
+central proof of the owner's intended customization. We can use my.note to
+establish a small value, but must also exercise a different schema and the same
+plan from different viewers. Reproducible seed definitions belong in existing
+source initialization, not a renderer's hard-coded namespace list.
 
-## 7. The questions the lab exists to answer (from the design documents)
+The prospective-prompt defect from the prior PRD is no longer assumed to block
+observation: the live page now emits a prospective prompt. Generated forms and
+provider parity still need proof in step 4. The other agent's platform work
+continues independently; only a concrete dependency blocks an affected step.
 
-Which entity schemas real values actually satisfy. Whether the proposed
-selection picks what today's selection picks, and where it differs. What
-the floor really prints for each real value, and what a good render
-function changes. How many tokens a generated prompt costs at the real
-population and where they go. Whether "one hop, one query per connection"
-yields the whole record honestly for a steward with thousands of program
-rows. Whether turn plumbing as agent attributes reads back correctly after
-a simulated crash (a branch with the process retracted). Which of the
-design's attribute names are wrong when typed against the real graph. And
-the reviewer's three decisions — view versus ownership, turn authority,
-bounded collections — each with evidence instead of argument.
+## 6. What to measure and preserve
 
-## 8. Risks, stated
+Record database and program identities independently. Hot-reloaded Var evidence
+must say so; a file edit does not update an existing cluster's program rows.
+For source-change proof, name the publication and cluster fork actually used.
 
-- Growing the debug page instead of a fresh page means every wave must
-  keep the current debug output working (it is the comparison baseline).
-- The proposed selection query depends on faces carrying the new contract
-  shape; until some do, side (b) will often be empty — that emptiness is
-  itself a finding, shown as such, never as an error.
-- Reset is 71.9 s at HEAD (publication 60.6 s + start 11.3 s, measured); the
-  loop the lab exists for is slow until publication is faster — a platform
-  issue, tracked, not a lab knob.
-- Program/database split-brain when rendering a branch through a ctx
-  acquired for another commit — the compatibility fence is mandatory.
-- Effectful diagnostic execution — excluded by graph facts before the run.
-- Observation perturbing the experiment — read-only request shapes and a
-  before/after datom check on every diagnostic route.
-- A retained debug page registers interest in ALL changes today; several
-  open graphs recompute on unrelated activity — the load measure must
-  include delivery, not one page render.
+Measure acquisition, schema checks, selection, invocation, fit, assembly and
+browser delivery separately. Report cold/warm timings, subject degree, datom
+population, returned work/weight, and p50/p95 where repeated measurements exist.
+Compare page one and deep continuation; count separately from page acquisition.
+The prior 71.9-second publication/start number is dated evidence, not a current
+benchmark or an acceptance target.
 
-## 9. Out of scope
+Retain existing revisioned packages, gap keyframes, sliding buffers and http-kit
+drain-or-close behavior. The skill prose calling these unbuilt is stale.
+Graph cleanup must use Datastar's actual supported lifecycle; data-init does
+not automatically retain a returned cleanup callback.
 
-Paid model runs; a second renderer or assembler; any production data
-model change (those happen on code branches the lab then looks at); any
-lab-only file format.
+No read-only page or feed creates an agent, records render costs, or publishes
+diagnostic artifacts. Verify exact basis/datom changes in an isolated cluster
+rather than treating 'no exception' as success. Do not hide failed schema
+validation, missing source identity or missing subject as an empty healthy view.
 
-## 10. Reviewed
+## 7. Choices for review
 
-[design-lab-prd-review-2026-09-05.md](../research/design-lab-prd-review-2026-09-05.md)
-(independent, 2026-09-05): "do not start wave 1 from this PRD yet" —
-the missing boundary between bounded observation data and presentation.
-This revision adopts its recommendation (wave 1 split into 1A/1B), its
-contradiction list, its acceptance strengthening, its risks, and its
-measured timings. Verdict after the revision, in its words: 1A is safe to
-start once the prospective-prompt precondition is green; waves 2–4 need
-their named public contracts before implementation — which this revision
-names.
+| Approach | Guarantee | Cost / what we give up |
+|---|---|---|
+| **Recommended: the sequence above, starting with one complete inspection loop** | The owner can inspect actual data and selection early, then test customization before context refactoring. | Full graph, arbitrary candidate execution and branch UI arrive later; first output uses existing reviewed functions. |
+| Original PRD order: all observation machinery, then graph, then selection | Broad graph coverage before changing selection. | More work before the owner can test the central renderer preference; higher chance the inspector grows around an untested choice. |
+| Build the complete context/SCI/UI replacement first | Can test the full intended experience together once complete. | Largest cross-owner change and slowest feedback; storage, selection and layout defects become harder to distinguish. |
 
-## 11. Open
-
-The first agent's id (its namespace is `my.note`; nothing else about it is
-special); when the precondition lane and 1A start — the owner's call.
-
-**Design question the lab must answer, not assume (raised by a lane's
-reading, 2026-09-05):** what does a `result/<id>` handle denote when the
-generated form wraps a query in a render function — the rendered TEXT (the
-form's actual return) or the DATA the query produced? The design doc's §3
-says "wrap the query in the render function, by name"; its §B13 says the
-handle is real data the agent can `get-in`. Both cannot hold for one form.
-The lab exposes the raw query value and the rendered output separately for
-the same entry so the owner can see both and choose: (a) the form is the
-query, the handle is data, and the printer applies the render function
-whose name appears on the handle line; or (b) the form is the wrapped call,
-the handle is text, and the data is one more handle. Recorded here as
-open; the design doc carries the same mark.
+No new owner decision is needed to restate the goal. The next useful review is
+of a concrete step-1 screen and step-2 preference experiment. Distance/tie rules,
+raw-result handle behavior and the common projection boundary are decided with
+those outputs visible, not by treating historical prose as binding.

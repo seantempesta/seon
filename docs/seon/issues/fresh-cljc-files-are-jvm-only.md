@@ -9,6 +9,13 @@ tags: [issue, runtime, sci, wave/fresh-portability]
 
 ## Problem
 
+Additional stale guidance observed 2026-09-05: datastar-web-ui/SKILL.md and its
+references/design-principles.md still mark revisioned packages and reconnect
+keyframes TARGET, but src/seon/render/web.clj:680-759,1431-1575 implements them.
+The same skill's older line citations and per-tab-diff description must be
+reverified before use. See the dated design-lab investigation for actual source
+and dependency evidence; no delivery mechanism should be rebuilt from that prose.
+
 The initial audit found four fresh `.cljc` namespaces with unconditional JVM
 code. The current 21-file audit found a broader false-claim class: eleven more
 namespaces unconditionally loaded JVM-only `.clj` owners, usually

@@ -74,6 +74,10 @@ See `README.md` for the convention.
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Explain lab assumptions with real evidence](design-lab-prd-mixes-observation-with-unsettled-design.md) | friction | agent context |
+| [Check renderer input and output on one arity](render-candidate-checks-mix-different-arities.md) | friction | agent context |
+| [Carry the viewing namespace through rendering](render-selection-loses-the-viewing-namespace.md) | friction | agent context |
+| [Give namespace and debug content a usable layout](namespace-layout-confines-most-content-to-scroll-boxes.md) | friction | agent context |
 | [A stale dev-dependency cache serves wrong classes silently](stale-dev-dependency-cache-serves-wrong-classes-silently.md) | friction | boot-velocity wave |
 | [Fix edit-hook kondo false positives on seon.db dynamic vars](edit-hook-kondo-false-positives-on-seon-db-dynamic-vars.md) | friction | dev-tooling-face-hygiene wave |
 | [Accept cluster-ctx delegating arities under instrumentation](cluster-ctx-delegating-arities-refused-under-instrumentation.md) | friction | sci-eval-context-owner wave |

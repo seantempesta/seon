@@ -54,6 +54,13 @@ was reset, no agent turn executed, and no base-system repair attempted here.
 
 ## Owner and acceptance
 
+Update, 2026-09-05 later: the revised PRD corrected the multiple-schema refusal,
+candidate-versus-validated distinction, and first-world namespace inconsistency.
+Raw result handles and projection composition remain design experiments.
+The owner clarified that any entity may be the start and the current walk and
+renderer discovery are also open to replacement. The latest comparison/pitch is
+recorded in the [investigation](../../prds/context-generation/research/design-lab-investigation-2026-09-05.md).
+
 The design-lab PRD owns these clarifications. Resolve its contradictory first
 world and schema-observation behavior; distinguish candidate schema matches
 from validated matches; demonstrate raw value versus projection and result
