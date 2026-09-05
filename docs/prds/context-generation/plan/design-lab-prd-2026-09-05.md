@@ -206,6 +206,40 @@ read-only description is distinct from installing bindings in a fork.
 
 ## 5. Proposed implementation sequence
 
+### Visual overview
+
+```mermaid
+flowchart TD
+  P["0 · Verify execution, isolation and baseline costs"]
+  I["1 · Inspect real data → selected renderer → output"]
+  E["2 · Edit functions and schemas → rerun → compare"]
+  G["3 · Navigate graph and inspect measured work"]
+  C["4 · Generate complete context and compare designs"]
+  R["Review actual output with Sean"]
+  A["5 · Adopt the demonstrated design and delete replaced code"]
+  P --> E
+  I --> E
+  E --> G --> C --> R
+  R -->|Revise| E
+  R -->|Selected design passes proofs| A
+```
+
+Status at this planning checkpoint (2026-09-05): source research and defect
+inventory are recorded; prerequisite fixes and proofs are not complete. The
+performance/turn-batch work is in flight in another session. Step 1's observation
+and layout can proceed independently, but candidate execution depends on step 0.
+This is a dependency plan, not a calendar estimate or authorization to start
+unassigned implementation lanes. The step table below owns deliverables and
+acceptance. Each demonstration records what passed, what failed and the next
+owner decision; status never advances solely because code was written.
+
+At step 4, compare bounded traversal before rendering, renderer-directed
+expansion and recursive rendering with shared reads under the same inputs and
+required-content checks. Examine ordering, omission, edit-to-result latency,
+query/render costs and prompt tokens with the owner. Adopt changes into the
+existing functions as evidence accumulates. Step 5 removes the remaining
+superseded mechanisms after broader namespace and restart/scale proofs.
+
 ### Prerequisites for trustworthy experiments
 
 These are checks on the existing system, not a prerequisite to settle the new
