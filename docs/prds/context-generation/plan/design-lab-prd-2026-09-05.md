@@ -206,6 +206,57 @@ read-only description is distinct from installing bindings in a fork.
 
 ## 5. Proposed implementation sequence
 
+### Prerequisites for trustworthy experiments
+
+These are checks on the existing system, not a prerequisite to settle the new
+discovery/ordering design. The turn-batch owners are editing the execution and
+settlement files as of 2026-09-05; assess the completed change, not a mixed
+working tree. Read-only observation/layout work can proceed meanwhile.
+
+Before executing/comparing alternative functions:
+
+- Prove real turn execution: ordered dependent forms share real result bindings;
+  raw replies (including prose-only) and actual returned values/errors settle
+  through the completed batching path. A crash leaves honest interrupted facts
+  and does not replay effects. Reuse that lane's regression and live evidence.
+- Prove receiving-context coherence and candidate isolation: correct branch,
+  namespace, projection, defaults and agent defs; changed/rejected candidate
+  leaves parent Vars, program caches and projection unchanged. Reuse cluster,
+  turn and candidate owners; sharing found in the audit must be addressed before
+  candidate previews run against a parent we intend to preserve.
+- Prove contract selection on one arity: the input-accepting arity must also
+  declare the requested output, with call preparation included. Fix the known
+  cross-arity false positive before treating candidates as valid comparisons.
+- Establish a reproducible timing baseline through the real execution path:
+  fixed nonempty fixture, source/program identity, cold/warm runs, eval versus
+  preparation/analysis/database/settlement/render costs, transaction counts,
+  output size and errors. Include a no-op repeat and a changed input; report
+  unavailable measurements explicitly. A trivial MCP arithmetic timing alone
+  cannot establish turn performance.
+
+Before claiming the first complete lab experiment works (part of implementation,
+not a separate infrastructure phase):
+
+- Prove output truth: displayed form returns the displayed raw value; formatting
+  is labelled separately; generated-but-unexecuted forms are not history. Debug
+  and real prompt assembly share the relevant computation and identify captures
+  versus prospective output. Comparing equivalent inputs yields the same
+  provider-bound bytes without a paid model call.
+- Prove edits take effect: same entity, two viewing agents, direct and nested
+  values; change a local renderer/schema, rerun, revert. Show actual selected
+  function/arity and changed output; unchanged agent remains unaffected. Repeat
+  with retained calls enabled and bypassed to expose stale experimental inputs.
+- Use one nonempty fixture with a shared ref, a cycle and a high-degree subject.
+  Verify bounded acquisition, explicit missing subjects/prerequisites, requery
+  for omitted data, and no inspection-only writes. These check honesty and
+  termination without choosing the winning traversal or teaching order.
+
+Not prerequisites: final graph traversal, distance/tie rules, perfect UI,
+universal semantic teaching order, a new branch manager, or clearing unrelated
+repository failures. Those are experiments or separate work. Readiness requires
+the relevant existing gates and the concrete live proofs above, not a claim
+that all historical tests are green.
+
 First discuss the graph/function composition pitch in the investigation's
 final section. Then use the sequence below for evidence, revising owners if the
 chosen traversal dissolves the current walk. Only this section sequences this PRD. Each step ends with an owner-visible
