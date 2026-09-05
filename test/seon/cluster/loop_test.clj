@@ -60,6 +60,35 @@
   [function-name]
   (deref (ns-resolve 'seon.cluster.loop function-name)))
 
+(defn- private-run-fn
+  [function-name]
+  (deref (ns-resolve 'seon.cluster.run function-name)))
+
+(deftest read-evidence-settlement-reuses-the-outer-transaction-codec
+  (let [evidence
+        (mapv (fn [ordinal]
+                {:seon.db/source-argument-position ordinal
+                 :datahike.read/dependency-plan {:ordinal ordinal}
+                 :datahike.read/revision {:basis ordinal}})
+              (range 1024))
+        started (System/nanoTime)
+        tx-data
+        (with-redefs [schema/projection-from-database
+                      (fn [& _]
+                        (throw
+                         (ex-info "read evidence rebuilt the projection" {})))]
+          ((private-run-fn 'receipt-read-evidence-tx)
+           {:db/id 42
+            :seon.cluster.eval/id "run-1-receipt-0"}
+           {:seon.cluster.eval/read-evidence evidence}))
+        elapsed-ms (/ (- (System/nanoTime) started) 1000000.0)
+        rows (:seon.cluster.eval/read-evidence (first tx-data))]
+    (is (= 1024 (count rows)))
+    (is (= "seon.cluster.eval/read-evidence/run-1-receipt-0/1023"
+           (:db/id (last rows))))
+    (is (< elapsed-ms 200.0)
+        (str "read-evidence transaction projection took " elapsed-ms " ms"))))
+
 (deftest attempt-evidence-prefers-completion-and-falls-back-to-error-data
   (let [project (private-loop-fn 'attempt-evidence)]
     (is (= {:seon.ai.model/last-latency-ms 42
