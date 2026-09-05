@@ -136,6 +136,79 @@ refs like everything else. There is no generic `:seon.agent/data` bag:
 the reviewer was right that it duplicates the domain's own ownership and
 supplies no order.
 
+### 2.4b Usage and error facts — how an author learns their function is being used, and misused (owner, 2026-09-05 night)
+
+Two attributes on the eval row, both written in the one settlement
+transaction, both captured at seams that already exist:
+
+```clojure
+#:seon.agent.eval
+{:called      [:set :seon.db/ref]   ; program rows this eval ACTUALLY called (dynamic, exact)
+ :failed-call :seon.db/ref}         ; the program row whose call produced :error-kind/:error-message
+```
+
+- **`:called`** comes from the `:call-preparation-hook`, which SCI already
+  fires on every direct Var call in the cluster
+  (`src/seon/call_preparation.clj` `hook`; it already computes the callee
+  identity string). Recording is one set-conj per call into an accumulator
+  carried on the turn fork's ctx — the same shape as the read-evidence
+  sink, but ctx-carried (values carry their world). Nothing static, no
+  reparse: an edge means "this eval ran your function". Static edges stay
+  where they are correct and cheap — on DEFINITIONS, from the one kondo
+  batch over the turn's defining forms (§3.4, ruling 67 correction).
+- **`:failed-call`** is the last callee the hook saw before the flat
+  `:seon.error` value was produced. A Malli contract violation already
+  names the function and the offending argument in its value; the ref
+  makes "who is failing when they call my function" a join instead of a
+  text search.
+
+Cost: the accumulator is bounded by the number of DISTINCT callees per
+eval (a set), so a 10,000-iteration loop over three functions writes
+three refs. Calls inside compiled (host) functions are not seen — the
+boundary Var is, which is the fact we want.
+
+What it answers, one hop each (all reverse-ref lookups on indexed refs):
+
+```clojure
+;; who ran my function, ever / since my last basis
+[?eval :seon.agent.eval/called [:seon.fn/sym "acme.calendar/free-slots"]] [?eval :seon.agent.eval/agent ?who]
+;; every failure while calling something in a namespace I steward, since t
+[?me :seon.agent/stewards ?ns] [?fn :seon.fn/ns ?ns] [?eval :seon.agent.eval/failed-call ?fn]   ; over (since db t)
+;; error hotspots: failures per function, joined to calls per function
+;; dead weight: functions no eval ever called and no test reaches
+```
+
+### 2.4c The steward's wake — root and namespace stewards learn about problems without a notifier
+
+No new mechanism. Three things that already exist compose:
+
+1. **The fact.** The failing eval settles with `:failed-call` → the
+   function → its namespace → (reverse) the agents whose `:namespace` or
+   `:stewards` is that namespace, and root. Nothing is written TO the
+   steward; stewardship can change later and the derivation follows.
+2. **The wake.** `seon.cluster.wake/route!` (`src/seon/cluster/wake.clj`)
+   already routes per committed datom by attribute (`:message/to` →
+   mailbox). It gains one case: an `:failed-call` datom derives its
+   concerned agents by the two-hop lookup above against `db-after` and
+   offers each a payload-free wake. Failures are rare, so the lookup's
+   cost is irrelevant; the wake still says only "look".
+3. **The context.** The woken steward's own context generation (§3) runs
+   as always: its discovery finds the failed evals in the namespaces it
+   stewards since its `:context-basis` (the watch IS the delta, ruling
+   61), proposes the form wrapped in the eval-error render function, and
+   that render function follows the refs INTO the other agent's record:
+   the failing form's source, the offending argument from the contract
+   violation, the error, the few evals of that agent's turn that led up
+   to it (bounded, by ordinal), and the message form to reply with. Root
+   sees the same facts grouped by namespace on `/`; the namespace page
+   shows them as an errors card in `/html`; the erroring agent sees its
+   own error as it always did. Three surfaces, one fact, one set of render
+   functions — the same functions the steward can call by hand or replace.
+
+The stewarding agent then has exactly what it needs to fix the bug or make
+the function easier to use: the contract, the misuse, the tests that reach
+the function (§2.3), and a message channel to the agent that hit it.
+
 ### 2.5 The full picture
 
 ```

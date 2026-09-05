@@ -567,6 +567,28 @@ no trip); `store_test` derives the index config from the declaration
 (`ab813db44`, `770de4c8b`). The other session keeps committing lab PRD work
 (`ffdd7a308`).
 
+## 2026-09-05 (day 2, late night) — indexing settled; usage and error facts
+
+Owner rulings in dialogue: (1) only DEFINITIONS index (function, test,
+schema, agent def); their facts come from the var after evaluation, the
+Malli form, and ONE kondo batch per turn over the defining forms with the
+real `ns` form and no stub prelude (verified: ~10 ms; a let-bound `map` is
+not recorded; a qualified ref to a namespace absent from the `ns` form IS
+dropped, so the ns form must require every namespace the source mentions).
+Ordinary forms record nothing static. (2) Owner wants every downstream
+question answerable (callers, tests reaching, schemas to explain, usage by
+other agents, errors while using a function, hotspots, dead weight) and
+stewards/root woken on problems with the erroring agent's context pulled
+in → design §2.4b (`:called`, `:failed-call` on the eval row from the
+call-preparation hook) and §2.4c (the steward's wake: one `route!` case +
+the existing watch + render fns following refs). Lane `turn-batch`
+resumed twice: once for the indexing correction, once refuting its
+"another lane's change" attribution (runner.clj:1057 auto-gensym is HEAD
+code; the reader test asserted form-equality Clojure never promised).
+Follow-up for the lane once its gate is green: §2.4b's two attributes +
+hook accumulator in the settlement tx. bin/codex-agent resume now names
+the model (`4a683cd6b`).
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
