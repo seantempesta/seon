@@ -1003,6 +1003,22 @@ numerically and a bare cross-citation is a defect to fix on sight.
     `transact!` today (census §3) — the data-first writer boundary adds it. The atlas session is rewritten
     as this story (a calendar steward, 12 steps).
 
+67. **The turn loop is batched** (owner, 2026-09-05, on the ~2 s
+    per-form bookkeeping — "an algorithmic failure; there is no reason for
+    all of this"): an agent writes several forms in one reply; the loop
+    evaluates them all quickly, a form that cannot be read or evaluated
+    becomes a flat error result and the rest still run (the parser never
+    crashes the turn), results are REAL runtime symbols (`result/<id>`
+    bound in the turn's SCI fork so later forms can use earlier results),
+    and the results are written in ONE transaction at the end — never a
+    transaction per form, never duplicated result bytes. The orchestrator's
+    reading, for the lane: one intent transaction when the reply arrives
+    (raw reply + one eval row per parsed form — the crash evidence, and the
+    durable home for prose-only replies) and one settlement transaction
+    for the whole turn; analysis only for defining forms, batched; render
+    once per turn. This is the moment ruling 64's one-eval-row-per-form
+    falls out of the loop's own shape.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced

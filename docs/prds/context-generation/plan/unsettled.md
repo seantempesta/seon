@@ -549,6 +549,24 @@ reset and `default` restarted on HEAD (all of today's fixes live at
 http://127.0.0.1:7994). The other session committed its PRD rewrite
 (`c965333cf`); this orchestrator has not read it yet.
 
+## 2026-09-05 (day 2, night) — ruling 67: batch the turn
+
+The owner called the per-form bookkeeping an algorithmic failure and ruled
+the shape: evaluate every form of a reply quickly (fixup on failure; the
+parser never crashes the turn), bind results as real `result/<id>`
+symbols in the fork, write the results in ONE transaction. Lane
+`turn-batch` (relaunch of `per-form-overhead`, stopped after its brief):
+intent tx at reply arrival (raw reply + eval rows with source — durable
+prose-only replies included), evaluation in memory with handle binding,
+one kondo batch for defining forms, one settlement tx (values not print
+nodes; read-evidence = plans + revisions, no stored read-result), render
+once; crash falsifier as the regression. Confirmed today by lane
+`store-config-expectation`: the silence-backstop blocker is gone by
+consequence (`seon.dev.fresh-operator-test` 34 / 219 / 0; fresh init 38.9 s,
+no trip); `store_test` derives the index config from the declaration
+(`ab813db44`, `770de4c8b`). The other session keeps committing lab PRD work
+(`ffdd7a308`).
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
