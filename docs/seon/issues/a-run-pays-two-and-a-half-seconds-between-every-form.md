@@ -52,6 +52,52 @@ attributes the door's own 110–130 ms to two transactions (open + settle), a
 `config/effective`, and two admissions per request; the remaining ~2.3 s per
 form is unattributed and is the number worth chasing first.
 
+### 2026-09-05 attribution and partial repair
+
+An isolated `velocity` cluster drove one scripted six-form reply. The terminal
+`my.run/complete` form hit a separate admission refusal, so the comparable
+sample is the five preceding ordinary forms. Nanotime measurements around the
+settlement path attributed their cost as follows (ranges are the observed five
+forms on a loaded, concurrently used development machine):
+
+| Phase | Before `4e68150f5` | After / disposition |
+|---|---:|---|
+| SCI evaluation | 47--60 ms | unchanged |
+| cached-prelude lookup | 2--3 ms | unchanged; the cache is reached |
+| `seon.fn/analyze-form` | 228--311 ms | unchanged; clj-kondo still reparses the synthesized source |
+| receipt transaction's second schema-projection build | 360--550 ms | removed |
+| complete settle call | 414--629 ms | live post-fix remeasurement still required |
+| following render | 0.9--1.9 ms | not dominant |
+| `config/effective` | 0.5--1.4 ms | not dominant |
+
+The redundant projection was at
+`src/seon/cluster/run.clj:1596`: `receipt-read-evidence-tx` rebuilt the
+complete projection inside Datahike's transaction function even though the
+outer database transaction codec already carries that projection and encodes
+transaction-function output at `src/seon/schema/datahike.clj:467-502`.
+Commit `4e68150f5` now returns ordinary transaction data to that one codec.
+
+The recurring regression
+`seon.cluster.loop-test/read-evidence-settlement-reuses-the-outer-transaction-codec`
+fails if settlement re-enters `projection-from-database`; on the clean focused
+gate it projected 1,024 evidence rows in 1 ms. The same gate also exposed and
+repaired a stale crash-walk fixture whose planned forms omitted their required
+namespace ref and identity.
+
+Proof at current HEAD:
+
+```text
+bin/test seon.cluster.loop-test seon.cluster.turn-test
+Ran 80 tests containing 500 assertions.
+0 failures, 0 errors.
+```
+
+A same-drive post-fix measurement remains unavailable in the relaunch session:
+the Seon MCP status/eval tools were not exposed, and the repository rules
+forbid substituting a hand-rolled prepl client. The issue therefore remains
+open; removing one 360--550 ms duplicate phase is material but does not prove
+the under-200-ms per-form target.
+
 ## Expected
 
 A form that does 130 ms of work does not cost 2.4 s of run. The first task
@@ -60,9 +106,16 @@ is attribution, not optimisation: instrument one run's per-form path so the
 transaction, re-derivation, listener wake) rather than inferred from receipt
 gaps.
 
+## Owner
+
+`seon.cluster.run` owns settlement transaction construction;
+`seon.fn/analyze-form` owns the remaining measured per-form analysis floor.
+
 ## Acceptance
 
 - One run's per-form cost is attributed to named phases with measurements,
   recorded in the owning PRD's `research/`.
 - The dominant phase is fixed at its owner, and the same five-form drive is
   re-measured to show the change.
+- Per-form loop overhead is below 200 ms, or the remaining irreducible floor is
+  measured and written here with its dependency boundary.
