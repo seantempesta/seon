@@ -433,6 +433,14 @@
                        :seon.config/effective :any]
                   :string]}
   [cluster-name bootstrap-effective value]
+  ;; A host eval can redefine Vars shared by every cohosted cluster. This
+  ;; distinct input invalidates retained render calls; a newest-database wake
+  ;; cannot displace the code-change signal in its own sliding buffer.
+  (doseq [instance (vals @running-instances)
+          :let [view (:seon.render.web/view instance)]
+          :when (:seon.render.web/runtime-eval-channel view)]
+    (async/offer! (:seon.render.web/runtime-eval-channel view)
+                  :seon.render.web/runtime-eval))
   (admit/canonical-edn
    (if (consume-mcp-projection!)
      (mcp-project cluster-name bootstrap-effective value)
@@ -2092,23 +2100,35 @@
           agent-id (:seon.cluster.agent/id source-fault)
           run-id (when agent-id (tagged-run db agent-id process))
           dropped-count (::flow/dropped-fault-count source-fault)
+          threshold (:seon.config.eval.result/blob-threshold dials)
+          request
+          (cond-> {:seon.error/source source-fault
+                   :seon.error/id (str (random-uuid))
+                   :seon.error/at (java.util.Date.)
+                   :seon.error/process process
+                   :seon.sci.admit/caps caps
+                   :seon.error/basis-t (db/basis-t db)
+                   :seon.config.error/recurrence-limit
+                   (:seon.config.error/recurrence-limit dials)}
+            (:seon.config.error/escalate-to dials)
+            (assoc :seon.config.error/escalate-to
+                   (:seon.config.error/escalate-to dials))
+            run-id (assoc :seon.cluster.run/id run-id)
+            agent-id (assoc :seon.cluster.agent/id agent-id))
+          prepared (error/prepare (assoc request :seon.error/inline-limit threshold))
+          staged (when (or (> (:seon.error/data-size (:seon.error/fact prepared))
+                             threshold)
+                           (not= (:seon.error/data-content prepared)
+                                 (:seon.error/data-edn (:seon.error/fact prepared))))
+                   (blob/stage! connection (:seon.error/data-content prepared)))
+          prepared-fact (cond-> (:seon.error/fact prepared)
+                          staged (assoc :seon.error/data-blob
+                                        (:seon.blob/digest staged)))
           transaction-data
           (cond->
            (error/commit-tx
             db
-            (cond-> {:seon.error/source source-fault
-                     :seon.error/id (str (random-uuid))
-                     :seon.error/at (java.util.Date.)
-                     :seon.error/process process
-                     :seon.sci.admit/caps caps
-                     :seon.error/basis-t (db/basis-t db)
-                     :seon.config.error/recurrence-limit
-                     (:seon.config.error/recurrence-limit dials)}
-              (:seon.config.error/escalate-to dials)
-              (assoc :seon.config.error/escalate-to
-                     (:seon.config.error/escalate-to dials))
-              run-id (assoc :seon.cluster.run/id run-id)
-              agent-id (assoc :seon.cluster.agent/id agent-id)))
+            (assoc request :seon.error/fact prepared-fact))
             (pos-int? dropped-count)
             (update 0 assoc
                     :seon.error/dropped-fault-count dropped-count
@@ -2119,7 +2139,9 @@
           previously-reported?
           (previously-reported-fault-signature? db signature)]
       (try
-        (let [result (db/transact! connection transaction-data)]
+        (let [result (blob/with-publication!
+                      connection (if staged [staged] [])
+                      #(db/transact! connection transaction-data))]
           [fact (if (db/database-value? (:db-after result))
                   ::flow/committed
                   result)
@@ -2306,11 +2328,13 @@
         ;; registration the feed writes, and the proc's own orderly-stop
         ;; completion — all process-local, all free to lose
         render-channel (async/chan (async/sliding-buffer 1))
+        runtime-eval-channel (async/chan (async/sliding-buffer 1))
         search-channel (async/chan (async/sliding-buffer 1))
         pages-channel (async/chan (async/sliding-buffer 1))
         latest-packages (atom {})
         render-interest (atom :all)
         view {:seon.render.web/render-channel render-channel
+              :seon.render.web/runtime-eval-channel runtime-eval-channel
               :seon.render/context-channel context-channel
               :seon.render.web/pages-channel pages-channel
               :seon.render.web/registration (atom {})
@@ -2512,6 +2536,7 @@
   ;; close and falls out of the loop
   (when-let [view (:seon.render.web/view instance)]
     (async/close! (:seon.render.web/render-channel view))
+    (async/close! (:seon.render.web/runtime-eval-channel view))
     (async/close! (:seon.render.web/pages-channel view)))
   nil)
 
