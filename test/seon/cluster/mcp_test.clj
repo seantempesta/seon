@@ -10,6 +10,7 @@
             [seon.env :as env]
             [seon.operator.runtime :refer [running-instances]]
             [seon.oversight :as oversight]
+            [seon.print :as print]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -48,6 +49,16 @@
     (assoc admitted
            :seon.cluster.eval/ns [:seon.ns/name 'user]
            :seon.sci.eval/ending-ns 'user)))
+
+(defn- observed-query-shape
+  []
+  (let [text (apply str (repeat 36 \x))]
+    (mapv (fn [row]
+            (into {:db/id row}
+                  (map (fn [field]
+                         [(keyword "seon.fn" (str "field-" field)) text]))
+                  (range 7)))
+          (range 116))))
 
 (deftest mcp-config-reads-receive-the-running-cluster-projection
   (let [cluster-name "mcp-projection-test"
@@ -141,6 +152,23 @@
         "windowing retains the complete artifact digest")
     (is (= (count artifact-content) (:seon.blob/size result))
         "windowing retains the complete artifact size")))
+
+(deftest ordinary-mcp-results-always-use-the-explicit-mcp-profile
+  (let [cluster-name "mcp-unconditional-fit-test"
+        effective (assoc (config/defaults)
+                         :seon.config.eval.result/blob-threshold 1000000)
+        text (apply str (repeat 36 \x))
+        result (projected cluster-name effective
+                          (door-evaluation effective
+                                           (observed-query-shape)))
+        face (:seon.dev.mcp/value result)
+        rendered (:seon.dev.mcp/text face)]
+    (is (str/includes? rendered (pr-str text))
+        "the observed 36-character strings remain readable")
+    (is (str/includes? rendered ":seon.render.profile/mcp")
+        "the below-blob-threshold result still carries the MCP fit profile")
+    (is (false? (:seon.dev.mcp/windowed? result))
+        "presentation fitting does not invent a durable artifact")))
 
 (deftest door-artifact-size-ignores-evaluation-envelope-bulk
   (let [cluster-name "mcp-small-door-value-test"
@@ -237,9 +265,11 @@
             (is (true? (:seon.dev.mcp/windowed? oversized-result)))
             (is (string? (:seon.blob/digest oversized-result)))
             (is (true? (:seon.dev.mcp/retrievable? oversized-result)))
-            (is (= oversized-message
+            (is (= (subs oversized-message 0 72)
                    (:seon.render.value/window retained-message))
-                "a genuinely oversized message remains available by digest"))
+                "a genuinely oversized message remains pageable by digest")
+            (is (= (count oversized-message)
+                   (:seon.render.value/total retained-message))))
           (finally
             (swap! running-instances dissoc cluster-name)))))))
 
@@ -353,6 +383,42 @@
                    (:seon.render.value/window drilled)))
             (is (= 9000 (:seon.render.value/offset past-end)))
             (is (= 2000 (:seon.render.value/total past-end)))
+            (is (true? (:seon.render.value/beyond-end? past-end))))
+          (finally
+            (swap! running-instances dissoc cluster-name)))))))
+
+(deftest stored-strings-page-by-character-offset
+  (let [cluster-name "mcp-string-page-test"
+        effective (config/defaults)
+        value (apply str (take 4975 (cycle "abcdefghijklmnopqrstuvwxyz")))
+        page-size (:seon.print/width (print/default-options))]
+    (support/with-database
+      {:seon.test-support/fresh-store? true}
+      (fn [connection]
+        (config/apply! {:seon.db/connection connection
+                        :seon.boot/cluster-name cluster-name})
+        (support/seed-cluster! connection cluster-name)
+        (swap! running-instances assoc cluster-name
+               (running-instance connection cluster-name))
+        (try
+          (let [stored (projected cluster-name effective value)
+                digest (:seon.blob/digest stored)
+                first-page (cluster/mcp-get-value cluster-name digest [] 0)
+                next-page
+                (cluster/mcp-get-value cluster-name digest [] page-size)
+                past-end
+                (cluster/mcp-get-value cluster-name digest [] (count value))]
+            (is (= (subs value 0 page-size)
+                   (:seon.render.value/window first-page)))
+            (is (= (subs value page-size (* 2 page-size))
+                   (:seon.render.value/window next-page)))
+            (is (= page-size (:seon.render.value/shown first-page)))
+            (is (= (count value) (:seon.render.value/total first-page)))
+            (is (seq (:seon.render.value/window first-page))
+                "a non-empty stored string has a non-empty first window")
+            (is (= (subs value (dec (count value)))
+                   (:seon.render.value/window past-end))
+                "a past-end page of a non-empty string remains non-empty")
             (is (true? (:seon.render.value/beyond-end? past-end))))
           (finally
             (swap! running-instances dissoc cluster-name)))))))

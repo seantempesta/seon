@@ -374,18 +374,19 @@
             oversized? (> (count content) threshold)
             artifact-backed? oversized?
             print-node (:seon.sci.admit/print-node artifact)
-            projected-node (if oversized?
-                             (print/fit
-                              print-node
-                              (cond-> (render/agent-render-profile effective)
-                                connection
-                                (assoc :seon.print/requery-id
-                                       [:seon.blob/digest content-digest])
+            profile
+            (cond-> (assoc (render/agent-render-profile effective)
+                           :seon.render.profile/id :seon.render.profile/mcp)
+              (and artifact-backed? connection)
+              (assoc :seon.print/requery-id
+                     [:seon.blob/digest content-digest])
 
-                                (nil? connection)
-                                (assoc :seon.print/requery-refusal
-                                       "the cluster has no database connection")))
-                             print-node)
+              (not (and artifact-backed? connection))
+              (assoc :seon.print/requery-refusal
+                     (if artifact-backed?
+                       "the cluster has no database connection"
+                       "the value has no durable MCP artifact")))
+            projected-node (print/fit print-node profile)
             staged (when (and artifact-backed? connection)
                      (blob/stage! connection content))
             stored-digest
@@ -473,9 +474,29 @@
         (if (:seon.error/kind effective)
           effective
           (if (contains? found :seon.render.data/value)
-            (render.value/window
-             (:seon.render.data/value found) offset
-             (:seon.render.value/max-collection effective))
+            (let [value (:seon.render.data/value found)
+                  collection-size
+                  (:seon.render.value/max-collection effective)]
+              (if (string? value)
+                (let [total (count value)
+                      offset (max 0 offset)
+                      available
+                      (max collection-size
+                           (:seon.print/width (print/default-options)))
+                      start (if (pos? total)
+                              (min offset (dec total))
+                              0)
+                      end (min total (+ start available))
+                      window (subs value start end)]
+                  {:seon.render.value/window window
+                   :seon.render.value/steps []
+                   :seon.render.value/offset offset
+                   :seon.render.value/shown (count window)
+                   :seon.render.value/total total
+                   :seon.render.value/beyond-end?
+                   (and (pos? total) (>= offset total))
+                   :seon.render.value/more? (< end total)})
+                (render.value/window value offset collection-size)))
             found)))
       {:seon.error/kind :seon.dev.mcp/value-not-found
        :seon.dev.mcp/value-not-found content-digest

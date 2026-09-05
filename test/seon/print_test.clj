@@ -50,6 +50,16 @@
                   :seon.sci.admit/caps admission-caps
                   :seon.config/on-core-error :record}))))
 
+(defn- observed-query-shape
+  []
+  (let [text (apply str (repeat 36 \x))]
+    (mapv (fn [row]
+            (into {:db/id row}
+                  (map (fn [field]
+                         [(keyword "seon.fn" (str "field-" field)) text]))
+                  (range 7)))
+          (range 116))))
+
 (deftest print-nodes-expose-symbols-and-entity-identities-without-shape-rules
   (let [node (admitted-node
               {:frontier/symbol 'my.run/complete
@@ -270,6 +280,32 @@
         (is (= (:seon.render.data/total fitted)
                (+ (:seon.render.data/next-offset fitted)
                   (:seon.print/omitted fitted))))))))
+
+(deftest fit-cuts-breadth-before-windowing-one-line-strings
+  (let [text (apply str (repeat 36 \x))
+        line-width (:seon.print/width (print/default-options))
+        profile (render/agent-render-profile
+                 (test-support/effective-config))
+        fitted
+        (print/fit
+         (admitted-node (observed-query-shape))
+         profile)
+        long-string-fit
+        (print/fit
+         (admitted-node (apply str (repeat (* 2 line-width) \y)))
+         (assoc profile :seon.render.profile/token-budget 1))
+        emitted
+        (print/emit-text
+         fitted
+         (assoc (print/default-options)
+                :seon.print/length nil
+                :seon.print/level nil))]
+    (is (str/includes? emitted (pr-str text))
+        "a one-line string remains readable before structural breadth")
+    (is (< (count (:seon.print/items fitted)) 116)
+        "the 116-row result pays its token budget by cutting breadth")
+    (is (= line-width (:seon.render.data/next-offset long-string-fit))
+        "a long string never fits below the printer's one-line width")))
 
 (deftest tagged-envelope-never-collides-with-authored-print-keywords
   (let [value {:seon.print/face :seon.print/elided

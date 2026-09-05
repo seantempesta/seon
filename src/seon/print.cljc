@@ -917,8 +917,9 @@
   (let [budget (:seon.render.profile/token-budget profile)
         initial-children (:seon.render.profile/max-children profile)
         initial-depth (:seon.render.profile/max-depth profile)
-        initial-strings (tokens/estimate-chars budget)
-        options (assoc (default-options) ::length nil ::level nil)]
+        options (assoc (default-options) ::length nil ::level nil)
+        string-floor (max 1 (::width options))
+        initial-strings (max string-floor (tokens/estimate-chars budget))]
     (loop [child-limit initial-children
            depth-limit initial-depth
            string-limit initial-strings]
@@ -931,14 +932,15 @@
           (<= (tokens/estimate (emit-text candidate options)) budget)
           candidate
 
-          (pos? string-limit)
-          (recur child-limit depth-limit (quot string-limit 2))
-
           (pos? child-limit)
-          (recur (quot child-limit 2) depth-limit 0)
+          (recur (quot child-limit 2) depth-limit string-limit)
 
           (pos? depth-limit)
-          (recur 0 (dec depth-limit) 0)
+          (recur child-limit (dec depth-limit) string-limit)
+
+          (> string-limit string-floor)
+          (recur child-limit depth-limit
+                 (max string-floor (quot string-limit 2)))
 
           :else candidate)))))
 
