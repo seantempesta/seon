@@ -93,7 +93,7 @@ SSE that `seon.render.web` already runs.
 │           actual prompt for the same agent (the capture)                                       │
 │  Page:    header · transcript blocks · panels — rendered HTML in an iframe from the same data  │
 ├───────────────────────────────────────────────────────────────────────────────────────────────┤
-│ EXPERIMENT: [fork branch] [transact EDN…] [compare with main]   DECISION LOG: [append note]   │
+│ ENV: [reset from load definition] [fork branch] [compare with main]   DECISION LOG: [append note] │
 └───────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -126,16 +126,21 @@ SSE that `seon.render.web` already runs.
 7. **Scenario: prompt** — the entries the design would generate
    (discovery per connection, wrapped in the chosen render function,
    intent comment derived from the attribute), the pre-requisite `doc`/`dir`
-   entries from the demand DAG, the agent's own evals; an ORDER the owner
-   can drag; the assembled bytes and token estimate; side by side with the
-   agent's ACTUAL last captured prompt.
+   entries from the demand DAG, the agent's own evals; the ORDER produced by
+   the live ordering function (a contracted `defn`; edit it, hot reload,
+   refresh); the assembled bytes and token estimate per entry; beside it,
+   what the CURRENT system would send for the same agent (the debug
+   page's prospective prompt) — so the two can be read together.
 8. **Scenario: page** — the same entries through `/html`: header block,
    transcript blocks, panels (any `/html` candidate the owner clicks
    "add as panel"); rendered live.
-9. **Experiment branch** — `branch!` from the current head; a text area
-   accepting EDN (schema rows and data rows) transacted into the branch;
-   the whole page re-computed against the branch; a two-column compare
-   with main for the same entity (attributes, candidates, scenario bytes).
+9. **Environment and experiments** — the lab cluster is built from the
+   LOAD DEFINITION (a real namespace: schemas, rows, domain functions);
+   `reset` reforks it from current source and runs the load; `branch!`
+   forks the head for a side experiment; the whole page re-computes
+   against the selected branch; a two-column compare with main for the
+   same entity (attributes, candidates, scenario bytes). The load
+   definition is edited by the designing agent between resets.
 10. **Decision log** — one EDN row per note {at, branch, entity, note},
     stored on the lab's own branch, rendered as a list, exportable to the
     design document's §9.
@@ -151,14 +156,16 @@ SSE that `seon.render.web` already runs.
   selection AND the proposed query's ranking; "run" prints the `/ai` and
   `/html` outputs of each candidate on that message; the floor's output
   is shown and labelled; a candidate that throws shows the flat error.
-- **W3 — scenarios.** For root: the SCI bindings list; the prompt
-  assembled in the default order with pre-requisites inserted, token
-  count, and a diff against the last real capture; the page rendered. The
-  owner can reorder entries and see the prompt change.
-- **W4 — experiments.** Fork a branch, transact a proposed
-  `:seon.agent/*` schema and three rows, and see the graph, candidates,
-  and scenarios re-computed on the branch beside main; the decision log
-  accepts and lists a note.
+- **W3 — scenarios.** For the lab agent: the SCI bindings list; the
+  prompt assembled by the live ordering function with pre-requisites
+  inserted and tokens per entry, beside the current system's prospective
+  prompt for the same agent; the page rendered. Editing the ordering
+  function and refreshing changes the order; nothing else does.
+- **W4 — environments.** Edit the load definition (a new attribute on the
+  agent schema and three rows), `reset`, refresh: the graph, candidates,
+  and scenarios show the new world in under 15 s end to end; fork a branch
+  for a side experiment and compare it with main; the decision log accepts
+  and lists a note.
 
 ## 7. What it must reveal (the questions it exists to answer)
 
@@ -174,8 +181,12 @@ against real attributes.
 ## 8. Waves, lanes, and what is reused
 
 One dev namespace under `src/seon/dev/lab.clj` (dev-only route; excluded
-from agent contexts by not being required by any agent namespace) plus
-`resources/seon/lab/` for the page's inline script; no changes to
+from agent contexts by not being required by any agent namespace), the
+LOAD DEFINITION namespace(s) under `src/seon/dev/lab/world/…` (the seed
+world's schemas, rows, and domain functions — real, indexed, hot-reloaded),
+the ORDERING function beside them, plus `resources/seon/lab/` for the
+page's inline script; the prompt scenario reuses `seon.render.web`'s debug
+machinery rather than duplicating it; no changes to
 production namespaces; tests under `test/seon/dev/lab_test.clj` for the
 pure derivations (neighbourhood, candidates, scenario assembly) against
 the canonical database fixture. Four lanes, one per wave, sequential (each
@@ -183,13 +194,33 @@ wave's page is the next wave's substrate). Cytoscape.js pinned from
 cdnjs as the atlas does. The atlas's hand-typed `MODEL` is retired when W1
 lands: the lab IS the visualization, over real data.
 
-## 9. Open to the owner
+## 9. Ruled by the owner (2026-09-05) and open
 
-1. Dev-only route in the existing web server (recommended: one process,
-   one database, the real render functions in the real ctx) vs a separate
-   JVM/tool.
-2. Experiments on branches of the scratch cluster (recommended) vs a
-   second scratch cluster per experiment.
-3. Whether W3's "today's actual prompt" comparison is in scope for the
-   first cut (recommended yes — it is the falsifier for "the generated
-   context is better").
+**Ruled:**
+1. A dev-only route in the EXISTING web server — one process, one
+   database, the real render functions in the real ctx.
+2. **Fresh environments from a LOAD DEFINITION, reset cheaply.** The lab
+   cluster is disposable; what persists is the definition of what gets
+   loaded into it — schemas, rows, the domain's namespaces and functions —
+   kept as code in the tree so the designing agent edits it, resets the
+   env (refork from current source + load), and the dev page just
+   refreshes. The data model is designed interactively and the definition
+   is what "sticks around". The more real the loaded world, the better.
+3. **Everything real.** Functions the lab shows are program rows: the
+   domain's render and processing functions live in real namespaces in the
+   tree (indexed by `bin/seon init`, hot-reloaded on edit); an agent's own
+   functions arrive through real settled turns. No door-mode shortcuts.
+4. **Visualize the context that WILL be sent, not runs.** The prompt
+   scenario shows the generated context as bytes with per-entry tokens and
+   provenance; it borrows the existing debug machinery
+   (`seon.render.web` `debug-prompt`/`prospective-prompt`, the render
+   proc's retained entries, `:seon.context.capture` reads) rather than
+   building a second assembler. Paid runs are out of scope for the lab.
+5. **Ordering is algorithmic and live.** The prompt's order comes from a
+   real ordering FUNCTION (a `defn` in the tree with a contract) that the
+   designing agent edits; hot reload changes it and the dev page shows the
+   new order on refresh. No manual drag, no saved manual orders.
+
+**Still open:** see the questions asked alongside this revision (load
+definition format; reset command; the seed world; the fate of
+`/agent/{id}/debug`).
