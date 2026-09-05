@@ -590,6 +590,26 @@
         (instrument/remove!)
         (ns-unmap *ns* var-name)))))
 
+(deftest applying-without-a-handed-projection-refuses-before-collection
+  (let [collected? (atom false)
+        result
+        (schema/call-with-projection-state
+         (atom nil)
+         (fn []
+           (with-redefs-fn
+            {#'schema/handed-projection (fn [] nil)
+             #'instrument/collect-contracts!
+             (fn [_]
+               (reset! collected? true)
+               [])}
+            (fn []
+              (instrument/apply!
+               {:seon.config/on-core-error :panic})))))]
+    (is (= :seon.instrument/missing-projection
+           (:seon.error/kind result)))
+    (is (false? @collected?)
+        "a missing projection must refuse before Malli collects contracts")))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The dial
 ;;; ---------------------------------------------------------------------------

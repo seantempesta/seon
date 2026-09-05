@@ -170,8 +170,23 @@ changes only the edited code. The planner repair used this sequence
 
 When the edited host Var is a contracted Seon public function, re-evaluating
 its `defn` also replaces the Malli wrapper. Run `seon.instrument/apply!` after
-loading the definition and before repeating the probe; the operation is
-idempotent (`src/seon/instrument.clj:571-624`).
+loading the definition and before repeating the probe. The call must receive
+the handed schema projection; in a cluster probe use the projection state and
+pass the projection explicitly:
+
+```clojure
+(schema/call-with-projection-state
+ projection-state
+ (fn []
+   (let [projection (schema/handed-projection)]
+     (seon.instrument/apply!
+      {:seon.config/on-core-error :panic
+       :seon.schema/projection projection}))))
+```
+
+A bare `apply!` refuses before collecting contracts when no projection is
+handed, avoiding a resource reread (`src/seon/instrument.clj:539-622`).
+The operation is idempotent.
 
 For a running flow proc whose step function is stored as a Var, re-evaluating
 the `defn` updates the next step without rebuilding topology

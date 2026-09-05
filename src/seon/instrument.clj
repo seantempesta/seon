@@ -89,6 +89,7 @@
             [seon.effect :as effect]
             [seon.env :as env]
             [seon.error :as error]
+            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]))
 
@@ -562,8 +563,11 @@
   {:malli/schema
    [:=> [:cat :seon.instrument/request]
     [:or :seon.instrument/applied :seon.error/value]]}
-  [{mode :seon.config/on-core-error caps :seon.sci.admit/caps}]
-  (if-not (#{:panic :record} mode)
+  [{mode :seon.config/on-core-error
+    caps :seon.sci.admit/caps
+    supplied-projection :seon.schema/projection}]
+  (cond
+    (not (#{:panic :record} mode))
     (let [bounded-caps (evidence-caps (or caps contract-evidence-caps))]
       (error/diagnostic
        {:seon.error/kind ::invalid-mode
@@ -578,24 +582,44 @@
         :seon.error/diagnostic-cause ::invalid-mode
         :seon.error/diagnostic-evidence
         {:seon.instrument/accepted-modes [:panic :record]}}))
-    (let [registered (count (collect-contracts! caps))]
-      (case mode
-        :panic
-        (do (mi/instrument! {:scope #{:input :output}
-                             :report (throwing-report caps)})
-            (let [count-now (count (instrumented))]
-              (when (zero? count-now)
-                (binding [*out* *err*]
-                  (println "seon.instrument: :panic instrumented ZERO vars —"
-                           "that is a bug, not a quiet success")
-                  (flush)))
-              {:seon.instrument/registered registered
-               :seon.instrument/instrumented count-now}))
 
-        :record
-        (do (mi/unstrument!)
-            {:seon.instrument/registered registered
-             :seon.instrument/instrumented (count (instrumented))})))))
+    :else
+    (let [projection (or supplied-projection (schema/handed-projection))]
+      (if-not projection
+        (error/diagnostic
+         {:seon.error/kind ::missing-projection
+          :seon.error/message
+          "Instrumentation requires a handed schema projection."
+          :seon.error/diagnostic-layer :instrumentation
+          :seon.error/diagnostic-operation 'seon.instrument/apply!
+          :seon.error/diagnostic-member :seon.schema/projection
+          :seon.error/diagnostic-expected :seon.schema/projection
+          :seon.error/diagnostic-offending :seon.instrument/missing-projection
+          :seon.error/diagnostic-cause ::missing-projection
+          :seon.error/diagnostic-evidence nil})
+        (schema/call-with-projection
+         projection
+         (fn []
+           (let [registered (count (collect-contracts! caps))]
+             (case mode
+               :panic
+               (do
+                 (mi/instrument! {:scope #{:input :output}
+                                  :report (throwing-report caps)})
+                 (let [count-now (count (instrumented))]
+                   (when (zero? count-now)
+                     (binding [*out* *err*]
+                       (println "seon.instrument: :panic instrumented ZERO vars —"
+                                "that is a bug, not a quiet success")
+                       (flush)))
+                   {:seon.instrument/registered registered
+                    :seon.instrument/instrumented count-now}))
+
+               :record
+               (do
+                 (mi/unstrument!)
+                 {:seon.instrument/registered registered
+                  :seon.instrument/instrumented (count (instrumented))})))))))))
 
 (defn remove!
   "Strip every instrumentation wrapper. EMERGENCY RECOVERY ONLY.
