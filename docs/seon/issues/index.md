@@ -75,6 +75,7 @@ See `README.md` for the convention.
 | Issue | Severity | Lane |
 |-------|----------|------|
 | [Explain lab assumptions with real evidence](design-lab-prd-mixes-observation-with-unsettled-design.md) | friction | agent context |
+| [Keep candidate program metadata independent of its parent](candidate-context-shares-parent-program-metadata.md) | friction | agent context; coordinate with turn batching |
 | [Check renderer input and output on one arity](render-candidate-checks-mix-different-arities.md) | friction | agent context |
 | [Carry the viewing namespace through rendering](render-selection-loses-the-viewing-namespace.md) | friction | agent context |
 | [Give namespace and debug content a usable layout](namespace-layout-confines-most-content-to-scroll-boxes.md) | friction | agent context |

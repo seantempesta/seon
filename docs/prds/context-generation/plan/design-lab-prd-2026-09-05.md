@@ -237,9 +237,29 @@ continues independently; only a concrete dependency blocks an affected step.
 
 The lab is the upgraded agent debug view. Its central action is rerunning a
 reproducible experiment after changing ordinary functions or Malli schemas.
+It exposes and improves the real cluster/agent execution and rendering owners;
+it does not have its own SCI setup, session interpreter, settlement path or
+context assembler. The forthcoming reply-batching changes determine the real
+result bindings and settlement boundary used by experiments, too.
 Hold subject, viewer, database value, program/projection identity and output
 budget fixed when comparing discovery/rendering functions. Show actual changed
 inputs when comparing storage schemas; that is a different experiment.
+
+The earlier suggestion that evaluate-candidate already provides an isolated
+complete-context preview was too strong. A followup audit found that its
+fork retains shared Seon program-cache and environment/projection references,
+and its returned ctx omits the evaluation-local agent scope and restoration
+notices. Reuse and correct the existing owners; do not wire this path to a
+shared live cluster as though complete preview parity were established.
+
+Datahike branching, cluster-context forking and per-agent turn forking have
+different jobs. Reuse the existing operator/registry and cluster acquisition
+for an experiment with a different executable database program. A read-only
+database comparison can use immutable database values. Replacing only the db
+argument while retaining another program's SCI ctx/environment does not prove
+coherence. The existing debug prospective prompt also bypasses part of the
+real prompt path; the upgraded view must expose that path, not preserve the
+divergence under a new name.
 
 Compare bounded walk-first rendering, selection-before-expansion, and recursive
 rendering with shared reads. Measure acquisition, validation, selection,

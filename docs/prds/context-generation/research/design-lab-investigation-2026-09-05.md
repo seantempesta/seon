@@ -329,3 +329,82 @@ interaction, but neither live data integration nor scale is proven. Keep
 backend ordering independent of visual coordinates, and measure browser layout
 separately. The upgraded debug view should show an ordered transcript and cost
 table beside selectable entity/ref and generated-form dependency graphs.
+
+## Reuse audit — improve the real system from inside, 2026-09-05
+
+Owner clarification: experiments improve Seon's existing execution and render
+paths. The debug view is their control/observation surface. A candidate helper
+existing is not evidence that a complete preview is ready. The performance
+agents' in-flight reply batching (working-edge ruling 67) owns result bindings
+and settlement; this research changes no runtime code and freezes none of that
+older lifecycle into the lab.
+
+### Existing owners worth reusing
+
+| Boundary | Existing code | Experiment integration |
+|---|---|---|
+| Store and branches | seon.cluster.store/open-store!, open-branch!, release-branch!; registry/branch!, ensure-cluster!, reset-cluster! | Reuse actual branch ownership and operator lifecycle for executable storage experiments. |
+| Published program acquisition | cluster/source-base! (:1428) returns commit, db, projection, activation closure and acquired ctx together | Keep the coherent program inputs together; never create another source scanner or SCI program loader. |
+| Receiving cluster | sci.eval/fork-cluster-ctx (:1654) establishes independent caches, connection custody, projection and call preparation; cluster boot constructs its environment | A new data branch is not a new SCI program merely because its db is passed to a function. Acquire divergent programs through the existing cluster mechanism. |
+| Agent turn | sci.eval/fork-for-turn (:1537); env/scope; evaluate (:1923) | Restore selected agent defs and notices, real namespace and defaults; use the normal reader, time bound, admission and eval evidence. |
+| Program changes | sci.eval/install-row! consumes committed rows; cluster.loop installs settled definitions into base/current turn | Adopt through real settlement, including forthcoming batched replies, rather than a debug-only installation path. |
+| Malli | schema/projection-with-schema, projection-with-function-contract, projection-scoped validators | Reuse compiled projections and contract admission. An experimental projection changes interpretation, not persisted datoms. |
+| Rendering and reuse | render/render-call; SCI kernel invocation; Datahike read evidence; render.web retained calls | Expose actual selected function, argument, program declaration, reads and output. Improve selection/invalidation in these owners rather than explaining a second algorithm in JS. |
+| Agent prompt | render/acquire-context! → render.web/context-pass → walk/history → cluster.prompt/prompt → context/capture-tx | Show the actual generated/evaluated data and prompt bytes. Preserve provider budget evidence and ordered contributions; prospective output must not silently substitute for a capture. |
+| Browser delivery | render.web revision packages, keyframes, bounded feeds and Datastar morphs | Upgrade debug layout and interaction on existing delivery; graph coordinates are browser display state. |
+| Measurements | sci.kernel record/unarmed-record, db/read-evidence, render retained-call evidence, prompt contribution/token reports | Use existing evidence before adding missing stage timing. Separate interpretation, bookkeeping, acquisition, rendering and delivery. |
+
+### Correcting the candidate proposal
+
+The earlier fast-loop section describes useful existing functions but overstates
+isolation. sci/fork only replaces :env. fork-for-turn retains Seon's
+program-snapshot, installed-functions and environment/projection state references.
+install-candidate-function! subsequently writes those shared references.
+evaluate scopes a fresh local environment for its call, but evaluate-candidate
+returns the earlier fork; fork-candidate-ctx also discards defs-notices. An
+isolated SCI Var test does not establish metadata independence or agent-default
+parity for a subsequent renderer invocation. Correct these existing owners
+before treating candidate evaluation as a complete agent-context preview.
+
+Live, non-mutating observation via the checked-in
+[ownership probe](scripts/design-lab-context-ownership-2026-09-05.clj):
+default pid 94171; db basis 536871006; commit
+6a9c6e08-a91c-5cfe-802f-a6f6d8d53bf4. The ctx's environment existed; its connection
+was identical to the operator connection and its projection was identical to
+kernel/context-projection. A plain SCI fork had a distinct SCI :env and retained
+all three present Seon state references by identity. This proves sharing,
+not an executed candidate corruption: no candidate was installed and none of
+those references was mutated. MCP reported 5 ms for this diagnostic, not a turn
+benchmark. The probe's initial local binding named key was renamed carrier-key
+after the hook's shadowed-var warning.
+
+### Preview parity still needs work
+
+web/prospective-prompt directly acquires a root and joins walk/history bytes
+(:546), whereas the real prompt uses the render proc's retained history plus
+cluster.prompt's budgeting and contribution calculation. debug-prompt prefers
+any latest capture (:590), which also prevents a fresh edit from necessarily
+being visible there. Reuse the real computation with explicit observation
+inputs; do not manufacture a held run to satisfy a preview or send a model call
+to inspect the result.
+
+context-pass retains entries keyed by agent and has an unchanged-read early
+return. Alternate function/projection/profile requests need a test that proves
+they actually reach computation rather than returning previous entries. This
+is a required experimental-input invalidation proof, not a measured defect
+attribution to the in-flight performance work.
+
+The reuse inventory is source-grounded; readiness remains unproved until the
+finished turn path demonstrates the same agent namespace, restored defs and
+notices, default arguments, result bindings, selected renderer and output in
+both execution and inspection. A changed function/schema must alter the actual
+next result; reverting it must recover baseline; another agent/cluster must
+remain unaffected. Existing registry, sibling-cluster, defs-restoration,
+candidate-gate and prompt tests are the starting points, not a new test runner.
+
+Useful current regressions identified by the research lanes: registry_test:193
+exact source branching, :216 independent writes; sci/eval_test:306 receiving
+database and defs, :335 independent lazy program state, :461/:489 Var versus
+host reload; sci/defs_test:220 restoration and :364 process-death proof;
+test/accretion_test:211 candidate gate (currently checks parent SCI roots, not
+all Seon state). No suite was rerun during this read-only integration audit.
