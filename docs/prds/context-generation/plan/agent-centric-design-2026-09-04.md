@@ -43,245 +43,198 @@ reviewer with no context from this session critiques it in
 9. ONE platform. No parallel systems. Nothing deleted before the design
    is agreed; no coding before it convinces.
 
-## 2. The TARGET data model — five families, all around the agent
+## 2. The TARGET data model — a graph around the agent, nothing hidden
 
-The core knows five things. Everything else is an attribute on one of
-them, a message in an inbox, or a family the agent declares for itself.
+**The perspective.** A graph database has no tables. An entity is an open
+bag of attributes; any attribute may sit on any entity; a ref connects
+two entities and can be read from either end. "Where does this data
+live" is therefore a modeling choice about WHICH ENTITY CARRIES THE
+ATTRIBUTE, and the answer here is: everything that is about running an
+agent is carried by the agent entity or by entities that reference it,
+and nothing is hidden behind a family that has to be joined to find out
+whose it is. The agent's context is then not a pull of a tree but a
+DISCOVERY: read the agent entity's own attributes, follow every ref out,
+follow every ref in, and you have found all the data there is to render.
 
-```
-                         ┌──────────────────────────┐
-   program index ◀──ref──│          AGENT           │──ref──▶ forked-from agent
- (ns · fn · arity ·      │  id · namespace · process│
-  schema rows, shared)   └────────────┬─────────────┘
-                     owns (component collections)
-          ┌──────────────┬────────────┴───────────────┐
-          ▼              ▼                            ▼
-      INBOX           EVALS                          DATA
-   messages from    the transcript: every form     whatever the agent stores —
-   agents, users,   it ran + result + the defs     its own declared families
-   AND the system   it produced + what it read     (notes, plans, a user's calendar…)
-```
+### 2.1 What the agent entity itself carries (its plumbing, as attributes)
 
 ```clojure
-;; 1. THE AGENT — the center. Several may steward one namespace; forks are agents.
+;; the agent — one entity; its running state is ITS attributes, not a separate run family
 #:seon.agent
-{:id          [:string {:seon.db/identity true}]
- :namespace   :seon.db/ref                  ; → the :seon.ns row it works (the code index is shared)
- :forked-from :seon.db/ref                  ; → agent
- :process     :string                       ; CUSTODY: which process is running it now; absent = idle
-                                            ;   (replaces the run entity's custody)
- :inbox       [:set {:seon.db/component true} :seon.db/ref]   ; → message
- :evals       [:set {:seon.db/component true} :seon.db/ref]   ; → eval
- :data        [:set {:seon.db/component true} :seon.db/ref]}  ; → any entity the agent stores
-
-;; 2. A MESSAGE — the ONE arrival channel. From another agent, from a human, or from the SYSTEM
-;;    (an error about this agent, a scheduled task's result, a maintenance notice — all messages).
-;;    It lives in exactly one inbox; handling POPS it (retract; history keeps it).
-#:seon.agent.message
-{:id      [:string {:seon.db/identity true}]
- :content :string
- :at      :inst
- :from    :seon.db/ref        ; → agent (absent = outside: a human or the system)
- :about   :seon.db/ref        ; → anything
- :reply-to :seon.db/ref}      ; → message
-;; replaces: seon.cluster.message, seon.error entities pointing at agents, maintenance requests,
-;;           the run's trigger — the trigger IS the popped message the turn began on
-
-;; 3. AN EVAL — the transcript row: what the agent ran, what came back, what it defined, what it read. (§3.1 is the exact shape.)
-;;    Turns are a grouping ATTRIBUTE, not an entity. Provenance is the eval: every fact written
-;;    by this form is stamped with it on the transaction.
-#:seon.agent.eval
-{:id        [:string {:seon.db/identity true}]
- :turn      [:int {:min 0}]                 ; which turn (replaces the run entity)
- :ordinal   [:int {:min 0}]                 ; position in the turn
- :trigger   :seon.db/ref                    ; → the message this turn began on (first eval of a turn)
- :source    :string                         ; the form as parsed
- :at        :inst
- :result    :string                         ; EDN, or…
- :result-blob :seon.blob/digest             ; …the blob when large
- :error     :map                            ; the flat error value, if the form failed (no error entity)
- :defines   [:set {:seon.db/component true} :seon.db/ref]   ; → def: name + value the form defined
- :reads     [:vector {:seon.db/component true} :seon.db/ref] ; the read-evidence: attributes + revisions (the watch's interest)
- :prompt    :seon.blob/digest               ; if this eval was a model call: the exact bytes sent (replaces captures)
- :rendered-by :symbol}                      ; only when the floor rendered the result
-#:seon.agent.def {:name :symbol :value :string :blob :seon.blob/digest :atom? :boolean}
-;; the agent's live defs = for each name, the newest eval that defines it — a query, no def family
-
-;; 4. SCHEMAS — facts the agent (or boot) asserts; the Malli form IS the database declaration.
-#:seon.schema {:key :qualified-keyword-identity :form :string}
-
-;; 5. THE PROGRAM INDEX — shared, referenced: :seon.ns (name, requires) · :seon.fn (sym, doc, arities)
-;;    · :seon.fn.arity (inputs, outputs — render and processing functions are FOUND here by contract)
-
-;; a cluster is a set of agents on one database branch — a container, nothing more
-#:seon.cluster {:name :string-identity :agents [:set :seon.db/ref]}
+{:id            [:string {:seon.db/identity true}]
+ :namespace     :seon.db/ref              ; → the :seon.ns row it stewards (referenced, not owned)
+ :forked-from   :seon.db/ref              ; → agent
+ :cluster       :seon.db/ref              ; → the cluster it runs in (referenced)
+ ;; the turn, as facts on the agent: begin-turn asserts them in ONE transaction, close-turn retracts/advances them
+ :turn          [:int {:min 0}]           ; the turn number it is on
+ :process       :string                   ; custody: which process holds it now; ABSENT = idle (the crash-honest representation)
+ :trigger       :seon.db/ref              ; → the message this turn is answering; absent = no open turn
+ :turn-opened-at :inst
+ :last-turn-closed-at :inst
+ :context-basis :seon.db/basis-t}         ; the database basis the current context was generated at
 ```
 
-**What this rearranges away** (each was a family at HEAD): runs (→
-`:turn`/`:trigger` on evals + `:process` on the agent), receipts and run
-forms (→ one eval), defs (→ `:defines` on the eval that made them), error
-entities and maintenance requests (→ system messages in the inbox), prompt
-captures (→ `:prompt` on the eval that called the model), `my.note` and
-`my.plan` as core families (→ agent-declared data families shipped as
-examples), the cluster-level message family (→ the inbox). Twelve families
-become five plus whatever the agent declares.
+A crash is readable from these alone: `:process` names a dead process and
+`:trigger` is present → a claimed turn that never finished; whether any
+form ran is the presence of evals with that `:turn` (below); an eval with
+`:started-at` and no `:settled-at` is the interrupted form. Takeover is
+one transaction on the agent entity: retract the dead `:process`, assert
+the live one. This is the reviewer's decision 2 answered with attributes
+instead of a run entity — a claim the crash falsifier (§9) must prove.
 
-**What the agent's record IS:** one pull —
-`(seon.db/pull '[* {:seon.agent/inbox [*]} {:seon.agent/evals [*]} {:seon.agent/data [*]}
-{:seon.agent/namespace [:seon.ns/name {:seon.fn/_ns [:seon.fn/sym :seon.fn/doc]}]}] [:seon.agent/id "cal-steward"])`.
-Nothing points at the agent from outside except other agents' `:from`
-refs and the cluster's `:agents` set.
-
-**User data** (a calendar) is agent data: the agent declares
-`:acme.calendar/event` in its namespace, transacts rows, and attaches
-them under `:seon.agent/data`. Their summary and per-entity faces are
-render functions in that namespace; their processing functions are found
-by contract.
-
-**Provenance** is the transaction stamp: `:seon.db/eval` (which form
-wrote this) and `:seon.db/process`. A human's writes arrive as messages
-or as evals of the UI's agent, so there is no separate user stamp to
-invent.
-
-## 3. How the context is built — for the AI and for the human — from data and looked-up render functions only
-
-**The whole context is one expression.** For the AI:
-`(render (pull agent-record) :seon.render/ai)`. For the human:
-`(render (pull agent-record) :seon.render/html)`. Same pull, same
-lookup, two lenses. There is no assembler, no template, no transcript
-builder: `render` is one recursive function that, for any value, looks
-up the most specific render function for that value's family and calls
-it; that function calls `render` on its parts; the base case is the
-floor. Cross-cutting behavior (budget, provenance, error-as-value) is
-middleware around every call.
-
-**The lookup, precisely.** Given a value `v` and a projection `P`:
-1. *family* — if `v` carries `:seon.render/ai` (content or a symbol), use
-   it; else if `v` is a map with an identity attribute, its family is the
-   entity schema that references that attribute (one query; every
-   identity attribute names exactly one family); if `v` is a sequential
-   of such maps, its family is `[:coll F]`; else the floor.
-2. *candidates* — one query over the program index: arities whose input
-   refs are covered by `{F} ∪ {injectables}` and whose output ref is `P`.
-3. *order* — the viewing agent's own namespace, then other agents'
-   namespaces by distance from the viewer's (a rule over `:seon.ns/requires`),
-   then the family's general face (the schema property), then the floor;
-   within a rung, more required-key coverage wins, then newest; a
-   remaining tie is loud.
-4. *call* — wrap the chosen function in the middleware (fit to the
-   profile's token budget, announce provenance if it is the floor,
-   errors become flat values) and call it with `v` and the ctx.
-
-**The dolls, for both lenses.** The agent's family has a general render
-function pair — THAT is the layout: for `/ai` it emits `(help)`'s
-summary first, then each eval in `[turn ordinal]` order, then the
-REPL-state line; for `/html` it emits the page: the record summary card,
-the inbox, the transcript as blocks, one panel per data collection. It
-never formats a value itself; it calls `render` on the inbox (→ the
-message collection face), on each eval (→ the eval face), on each data
-collection (→ that family's summary face), on the namespace (→ `(doc ns)`
-data). The eval face prints `ns=> source`, calls `render` on the stored
-result, and appends `;; result/<id>` plus `rendered-by` when the floor
-printed it. A calendar event renders through `acme.calendar/event-ai` in
-the transcript and through `event-html` on the page because the two are
-found by the same lookup with a different `P`. An agent that writes
-`inbox-view` changes both projections of its inbox at once.
-
-**Where the bytes come from — every byte, no exceptions:** the agent face
-(layout), the eval face (entry grammar), a family face or the agent's own
-render function (values), `(doc …)`/`(dir …)` data rendered by their
-faces (teaching), the floor (`seon.print/fit`, a nameable function).
-Nothing is concatenated outside a render function; nothing is stored as
-rendered text.
-
-### 3.1 The eval model — optimal for querying, extending, and regenerating
-
-The transcript is the agent's evals, nothing else. Three requirements
-decide the shape: it must be ONE query to read in order; adding a form
-must be ONE transact; regenerating (every turn, and compaction) must
-re-render from stored VALUES so a better render function improves old
-entries too.
+### 2.2 What references the agent (found by reverse refs — the graph's own index)
 
 ```clojure
+;; an eval — the agent's transcript row; it POINTS AT its agent
 #:seon.agent.eval
-{:id            [:string {:seon.db/identity true}]   ; "<agent>/<turn>/<ordinal>" — deterministic, so result/<id> is derivable
- :turn          [:int {:min 0}]                       ; grouping attribute; no turn entity
- :ordinal       [:int {:min 0}]                       ; order within the turn → the transcript order is [turn ordinal]
- :at            :inst
- :author        [:enum :agent :system]                ; the agent typed it, or the generator did on its behalf (help, discovery, diff)
- :trigger       :seon.db/ref                          ; on the turn's first eval: the inbox message this turn began on
- :source        :string                               ; the form as parsed (the parser-saved text)
- :result        :string                               ; THE VALUE, as EDN — admitted and bounded WITH ELISION VALUES, never a print node
- :result-blob   :seon.blob/digest                     ; the complete value when :result is a bounded projection of it
- :result-family [:set :qualified-keyword]             ; derived at settlement: the families the result's identities belong to (48b)
- :error         :map                                  ; the flat error value when the form failed
- :defines       [:set {:seon.db/component true} :seon.db/ref]   ; → {name value|blob atom?} — the defs this form produced
- :reads         [:vector {:seon.db/component true} :seon.db/ref] ; attributes + revisions the form read (the watch's interest)
- :effects       [:set :qualified-keyword]             ; external sinks the form reached (derived from the program graph) → replay-only on regeneration
- :prompt        :seon.blob/digest                     ; on the turn's first eval: the exact bytes sent to the model
- :rendered-by   :symbol}                              ; only when the floor rendered the result
+{:id :string-identity  :agent :seon.db/ref  :turn :int  :ordinal :int  :author [:enum :agent :system]
+ :source :string  :started-at :inst  :settled-at :inst
+ :result :string  :result-blob :seon.blob/digest  :result-family [:set :qualified-keyword]
+ :error-kind :keyword  :error-message :string  :error-data :string     ; flat, indexed fields — not a :map
+ :defines [:set {:seon.db/component true} :seon.db/ref]               ; component: a def has exactly one defining eval
+ :reads   [:vector {:seon.db/component true} :seon.db/ref]             ; component: read-evidence belongs to one eval
+ :effects [:set :qualified-keyword]  :prompt :seon.blob/digest  :rendered-by :symbol}
+
+;; a message — one entity, attached to BOTH ends by refs; nothing is hidden in an inbox
+#:seon.message
+{:id :string-identity  :to :seon.db/ref  :from :seon.db/ref  :content :string  :at :inst
+ :about :seon.db/ref  :reply-to :seon.db/ref
+ :handled-by :seon.db/ref}          ; → the eval/turn that dealt with it; ABSENT = unhandled (derive, don't store a boolean)
+
+;; a fault the system recorded ABOUT the agent (a core fault, not an agent mistake) points at it too
+#:seon.fault {:id … :agent :seon.db/ref :eval :seon.db/ref :kind :keyword :message :string :at :inst}
 ```
 
-Why each choice:
-- **component of the agent** — one pull returns the record with its
-  transcript; retracting the agent retracts its history; nothing else
-  points at evals.
-- **`[turn ordinal]` as data, no run entity** — the transcript at turn N
-  is `(sort-by (juxt :turn :ordinal) evals)` filtered to `turn ≤ N`;
-  "extend with one form" is one new row with the next ordinal; custody
-  lives on the agent (`:process`), a dead process's open turn is the turn
-  whose last eval has no closing disposition — recoverable from evals
-  alone.
-- **the result is a VALUE** — at HEAD `result-edn` is a print node
-  (verified: `#:seon.print{:face :seon.print/map …}`), i.e. the OLD face
-  frozen forever. Storing the admitted value (bounded, with elision values
-  that carry a requery form; the complete value in the blob) is what
-  makes regeneration honest: the current best render function prints old
-  results; `(get-in result/t3-7 […])` works on real data; compaction can
-  render an old eval as its handle plus one line without losing anything.
-- **`:result-family` derived at settlement** — the render lookup does
-  not have to re-read the value to know its face; "which evals returned
-  events" is `[?e :seon.agent.eval/result-family :acme.calendar/event]`;
-  already-satisfied teaching demands are a query, not string matching.
-- **`:author`** — the generator's entries (help, discovery, diff) are
-  evals too; the AI's transcript and the human's page show them the same
-  way, and every turn's regeneration is the same pull.
-- **`:reads` + `:effects`** — the watch and the missile rule are facts on
-  the row: stale = a commit touched an attribute in `:reads`; a form with
-  `:effects` replays its stored result and is never re-run.
-- **`:defines` on the eval** — the agent's live defs are "for each name,
-  the newest defining eval": a query, no def family, and a fork that
-  copies evals copies its defs.
+Why refs in, not components out: the reviewer measured that a component
+child can sit under two owners and is cascade-deleted with either, and
+that a positional pull silently stops at 1,000 children. Reverse refs
+have neither problem — `[?e :seon.agent.eval/agent ?agent]` is exact,
+countable, pageable, and readable from either end. Components are kept
+ONLY where one owner is a fact of life (a def belongs to the eval that
+made it; read-evidence belongs to its eval). "Information hiding" is
+gone: a message is queryable by sender, recipient, subject, and handler
+without any join to an owner; the agent's "inbox" is just the view
+`[?m :seon.message/to ?agent] (not [?m :seon.message/handled-by _])`.
 
-**The three operations, as queries and transacts:**
+### 2.3 What the agent references but does not own
 
-```clojure
-;; read the transcript for regeneration (every turn) — ONE pull, ordered by the layout face
-(seon.db/pull '[{:seon.agent/evals [:seon.agent.eval/turn :seon.agent.eval/ordinal :seon.agent.eval/source :seon.agent.eval/result :seon.agent.eval/error :seon.agent.eval/rendered-by]}]
-              [:seon.agent/id "cal-steward"])
-;; extend: the agent (or the generator) ran one more form — ONE transact, the parser's row + settlement's result
-(seon.db/transact! [{:seon.agent.eval/id "cal-steward/3/7" :seon.agent.eval/turn 3 :seon.agent.eval/ordinal 7 :seon.agent.eval/author :agent
-                     :seon.agent.eval/source "(acme.calendar/week …)" :seon.agent.eval/result "[…]" :seon.agent.eval/result-family #{:acme.calendar/event}
-                     :seon.agent.eval/at #inst "…"}
-                    [:db/add [:seon.agent/id "cal-steward"] :seon.agent/evals [:seon.agent.eval/id "cal-steward/3/7"]]])
-;; compaction = the same pull, rendered under the budget: the layout face shows the newest evals whole and
-;; older ones as their handle + one line (an elision value with the requery form) — no fact changes, nothing is lost
-;; which evals returned calendar events (already-satisfied demand, analytics)
-(seon.db/q '[:find ?id :where [?e :seon.agent.eval/result-family :acme.calendar/event] [?e :seon.agent.eval/id ?id]])
-;; the agent's live defs
-(seon.db/q '[:find ?name (max ?turn) :where [?e :seon.agent.eval/defines ?d] [?d :seon.agent.def/name ?name] [?e :seon.agent.eval/turn ?turn]])
+The namespace row and through it the program index (functions, arities,
+contracts, tests, usages); the cluster; other agents (through messages'
+`:from`/`:to` and `:forked-from`); the schema rows of every family it
+touches. These are read, never copied.
+
+### 2.4 The agent's own data — any entity, any attributes
+
+An agent declares families in its namespace and transacts rows. Its data
+is connected to it the way any domain connects: by refs the domain
+already needs — an event's `:acme.calendar/calendar` → a calendar whose
+`:acme.calendar/steward` → the agent; a note's `:about` → anything; a
+plan item's `:agent` → the agent. Discovery finds them through reverse
+refs like everything else. There is no generic `:seon.agent/data` bag:
+the reviewer was right that it duplicates the domain's own ownership and
+supplies no order.
+
+### 2.5 The full picture
+
+```
+   program index (ns · fn · arity · schema · test) ◀── :namespace ── AGENT ── :cluster ──▶ cluster ──▶ agents…
+                                                                     ▲ ▲ ▲ ▲
+                     evals (:agent) · messages (:to / :from) · faults (:agent) · domain rows (their own refs) · plan/notes (:agent)
+   plumbing ON the agent: :turn :process :trigger :turn-opened-at :context-basis
 ```
 
-### 3.2 The sequence of one turn, as data flow
+## 3. How the context is built — discover, propose forms, order, execute, render
 
-inbox message arrives (a fact) → the wake → the generator pulls the record
-→ renders `/ai` (help summary, teaching, evals, trigger last) → the model
-replies with forms → the parser transacts one eval row per form (source,
-turn, ordinal) → evaluation settles each row (result value, family,
-reads, effects, defines) → the last form pops the trigger → the page
-re-renders `/html` from the same record. The next turn starts from the
-same pull. Nothing in this sequence is a string until a render function
-returns one.
+Not one pull. Five phases, each a function of the database value, each
+with nothing hidden:
+
+1. **Discover.** Read the agent entity. Its scalar attributes are its
+   plumbing (who am I, what turn, what woke me). Its ref attributes lead
+   out (namespace → code; cluster → the world). The installed schema says
+   which attributes are refs; for each ref attribute a query finds what
+   POINTS AT the agent (`[?x ?attr ?agent]`) — evals, messages, faults,
+   plan items, domain rows through their own chains. Every connection
+   comes back as a COLLECTION DESCRIPTOR, not rows: the attribute, the
+   count, the newest instant, a stable order, and a bounded page — all
+   from database-side aggregates, so 10,000 events cost a count, not a
+   pull.
+2. **Propose forms.** For each discovered connection the generator writes
+   the form the agent could type: an intent comment derived from the
+   attribute's name and direction, and the query WRAPPED IN THE RENDER
+   FUNCTION it chose — explicitly, in the form:
+   ```clojure
+   ;; messages to me, unhandled, newest first
+   (seon.message/inbox-view (seon.db/q '[:find [(pull ?m [*]) ...] :where [?m :seon.message/to [:seon.agent/id "cal-steward"]] (not [?m :seon.message/handled-by _])]))
+   ;; my calendar, as a whole
+   (acme.calendar/events-summary (seon.db/q '[:find [(pull ?e [*]) ...] :where [?e :acme.calendar/calendar ?c] [?c :acme.calendar/steward [:seon.agent/id "cal-steward"]]]))
+   ```
+   The render function is chosen by the contract query (input covered by
+   the collection's family, output `:seon.render/ai`; the agent's own
+   namespace first, then by distance, then the family's general face);
+   its NAME is in the form, so there is no magic: the agent sees which
+   function rendered, can call it itself, and can write a better one. A
+   connection with no fitting function gets the generic collection
+   summary (identity attribute, count, newest, sample, requery) — never a
+   blank. Teaching forms are proposed the same way: every name a proposed
+   form uses that the agent has not yet used correctly gets its
+   `(doc …)`/`(dir …)`.
+3. **Order.** The graph is unordered; the transcript is not. The order is
+   a function over the proposed forms' metadata: plumbing first (who am
+   I), then teaching before the forms that need it (dependencies before
+   dependents — a topological sort on the names each form mentions), then
+   connections grouped by kind (my code, my data, my messages, my history)
+   and within a group newest first, the trigger last. The order function
+   is itself the agent family's layout render function — replaceable per
+   agent like any face.
+4. **Execute — in parallel.** Every proposed form is independent: evaluate
+   them concurrently, settle each as an eval (`:author :system`, source,
+   result value, result-family, reads, effects). The agent's own earlier
+   evals are not re-executed; they are read.
+5. **Render.** The transcript is the ordered evals rendered: for each,
+   `ns=> source`, the result printed by the render function the form
+   names (already applied — the result IS the rendered value for wrapped
+   forms; unwrapped results print through the floor), then
+   `;; result/<id>`. The page is the same ordered evals rendered through
+   `/html`. Compaction is the same five phases at the current basis with
+   a token budget applied in phase 3 by the layout function (oldest
+   history as handles + one line).
+
+So the transcript is exactly what the owner said: information discovery
+(`doc`, `dir`), queries wrapped in render functions so they read well,
+and the agent's own forms — nothing else.
+
+### 3.1 What every agent wants to know (the discovery inventory)
+
+Derived from the agent's attributes and connections, in the order phase 3
+emits them:
+
+| about | source on the graph | rendered by |
+|---|---|---|
+| who am I, what turn, what woke me | the agent entity's own attributes | the agent face (one block) |
+| my code | `:namespace` → publics, contracts, tests reaching them | `(doc *ns*)` data |
+| what can process my data | contract query over arities whose inputs include my families | one line per function in help |
+| my messages, unhandled first | reverse `:seon.message/to`, minus handled | `inbox-view` (family face or my own) |
+| my data, as a whole and by entity | reverse refs through my families' own ownership chains | each family's summary face; per-entity faces on demand |
+| my history | reverse `:seon.agent.eval/agent`, ordered `[turn ordinal]` | the eval face |
+| my defs | the newest defining eval per name | `(dir *ns*)` |
+| what went wrong | evals with `:error-kind`; faults pointing at me | the error face, where it happened |
+| what changed since my last context | `:context-basis` vs now: `seon.db/diff` of each discovery query | the same face that showed the original |
+| the world I touch | required namespaces; agents I message; the cluster | `(dir ns)`; agent summaries |
+| how to finish | `my.run/complete` / the reply form | one line in help |
+
+### 3.2 Root — the same discovery, a different projection
+
+Root's connections include the cluster's agents. Root must know what its
+agents are doing without regenerating their contexts. That is a RENDER
+FUNCTION, not new data: `seon.agent/agents-summary` takes the agent
+collection and prints one line per agent from facts already on each
+agent entity — id, turn, process alive or dead, `:turn-opened-at`,
+unhandled message count, evals with errors this turn, last settled eval
+instant — and a drill-in form `(seon.agent/summary [:seon.agent/id
+"planner"])` for one agent's plumbing, last five evals, and unhandled
+messages. Root's help therefore lists processing functions over agents
+(fork, message, take over, reassign a namespace) beside its own data.
+The projection is the render function; the data is the same graph.
 
 ## 4. What we have EVIDENCE will work
 
@@ -412,7 +365,7 @@ when its replacement is live and proven.
 Generate `(help)` for one real agent with one real owned family on a
 scratch cluster and READ IT. Nothing else proves or refutes §1–§5 faster.
 
-## 9. The second opinion — verdict and the three decisions (2026-09-04)
+## 9. The second opinion — verdict and the three decisions (2026-09-04; §2–§3 rewritten 2026-09-05 in response)
 
 The independent review ([second-opinion-2026-09-04.md](../research/second-opinion-2026-09-04.md),
 Codex, no context from the design sessions, every cited claim verified at
@@ -472,3 +425,19 @@ exactly one trigger, owner, turn, interrupted form, and disposition, with
 takeover as one transaction. If that needs a run/receipt entity, the
 largest destructive premise is falsified before any renderer exists.
 Then, and only then, generate and read `(help)` for one real agent.
+
+**Response to the three decisions (2026-09-05, the owner's graph perspective):**
+1. *View versus ownership* — taken as the reviewer advised, in graph
+   terms: the agent is the root of DISCOVERY over an open graph; messages,
+   evals, faults, and domain rows point AT the agent by refs and are
+   queryable from either end; components only for defs and read-evidence;
+   no generic data bag; one namespace per agent. Nothing is hidden.
+2. *Turn authority* — the turn's facts (`:turn`, `:process`, `:trigger`,
+   `:turn-opened-at`) live ON the agent entity and evals carry
+   `:started-at`/`:settled-at`; this claims atomic begin/close/takeover as
+   single transactions on one entity and must pass the crash falsifier
+   before a run entity is declared unnecessary.
+3. *Bounded context contract* — discovery returns collection descriptors
+   (count, newest, order, bounded page, requery) from database-side
+   aggregates; the render function decides the view; teaching-before-use
+   is limited to names the reader can resolve until the bridge lands.
